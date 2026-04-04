@@ -1,0 +1,192 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "SpotFX: Start",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python main.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "SpotFX: Re-detect Marks (Dopamine)",
+      "type": "shell",
+      "command": "curl.exe -s -X POST \"http://localhost:8000/api/audio-shape/redetect?uri=spotify%3Atrack%3A7vFKcXQ39f74XNrZmXADIT\" | .venv\\Scripts\\python -m json.tool",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "SpotFX: Install Dependencies",
+      "type": "shell",
+      "command": ".venv\\Scripts\\pip install -r requirements.txt",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Install Dependencies",
+      "type": "shell",
+      "command": ".venv\\Scripts\\pip install torch --index-url https://download.pytorch.org/whl/cpu && .venv\\Scripts\\pip install matplotlib",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Export Training Data",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.export_training_data",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Visualize Song",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.visualize --list",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Visualize Song 3",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.visualize --song 3",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Train MLP",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.train --model mlp --epochs 50",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Evaluate Model",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.evaluate --model mlp",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Train Transformer",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.train --model transformer --epochs 150 --lr 0.001 --batch-size 8 --chunk-size 128 --jitter 0.02",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Train Transformer (no aug)",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.train --model transformer --epochs 100 --lr 0.001 --no-chunking --jitter 0.0",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: List Latin Songs",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.list_songs",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "NN: Evaluate Transformer",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python -m nn.evaluate --model transformer",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

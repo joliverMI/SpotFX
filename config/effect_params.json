@@ -1,0 +1,87 @@
+{
+  "categories": {
+    "Matrix":  { "virtuals": ["crystal-mapper"],                           "effects": ["radial","noise","concentric","equalizer2d","blender"] },
+    "Strips":  { "virtuals": ["strip-effect","radial-dummy"],              "effects": ["melt","power"] },
+    "Singles": { "virtuals": ["single-color-effect"],                      "effects": ["power"] }
+  },
+  "effects": {
+    "power": {
+      "params": {
+        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1 },
+        "background_color":      { "label":"BG Color",             "type":"color",  "smooth":true },
+        "sparks_color":          { "label":"Accent Color",         "type":"color",  "smooth":true },
+        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1 },
+        "blur":                  { "label":"Blur",                 "type":"numeric","smooth":true, "min":0,"max":10 },
+        "bass_decay_rate":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":1 },
+        "sparks_decay_rate":     { "label":"Sparks Decay Rate",    "type":"numeric","smooth":true, "min":0,"max":1 },
+        "flip":                  { "label":"Flip",                 "type":"toggle", "smooth":false },
+        "gradient_roll":         { "label":"Gradient Roll",        "type":"numeric","smooth":false,"min":1,"max":10 },
+        "gradient":              { "label":"Gradient",             "type":"gradient","smooth":true }
+      }
+    },
+    "melt": {
+      "params": {
+        "bg_color":      { "label":"BG Color",          "type":"color",  "smooth":true },
+        "brightness":    { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1 },
+        "gradient_roll": { "label":"Gradient Roll",     "type":"numeric","smooth":false,"min":1,"max":10 },
+        "flip":          { "label":"Flip",              "type":"toggle", "smooth":false },
+        "blur":          { "label":"Blur",              "type":"numeric","smooth":true, "min":0,"max":10 },
+        "speed":         { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":1 },
+        "reactivity":    { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":1 },
+        "gradient":      { "label":"Gradient",          "type":"gradient","smooth":true }
+      }
+    },
+    "noise": {
+      "params": {
+        "gradient":   { "label":"Gradient",          "type":"gradient","smooth":true },
+        "brightness": { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1 },
+        "multiplier": { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":4 },
+        "speed":      { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":5 },
+        "zoom":       { "label":"Zoom",              "type":"numeric","smooth":true, "min":0,"max":5 }
+      }
+    },
+    "concentric": {
+      "params": {
+        "gradient":         { "label":"Gradient",          "type":"gradient","smooth":true },
+        "brightness":       { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1 },
+        "power_multiplier": { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":1 },
+        "speed":            { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":1 },
+        "gradient_scale":   { "label":"Zoom",              "type":"numeric","smooth":true, "min":0,"max":5 },
+        "invert":           { "label":"Flip",              "type":"toggle", "smooth":false },
+        "idle_speed":       { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":1 },
+        "center_smoothing": { "label":"Blur",              "type":"numeric","smooth":true, "min":0,"max":5 }
+      }
+    },
+    "equalizer2d": {
+      "params": {
+        "bg_color":              { "label":"BG Color",             "type":"color",  "smooth":true },
+        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1 },
+        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1 },
+        "peak_color":            { "label":"Accent Color",         "type":"color",  "smooth":true },
+        "gradient_roll":         { "label":"Gradient Roll",        "type":"numeric","smooth":false,"min":1,"max":10 },
+        "ring":                  { "label":"Flip",                 "type":"toggle", "smooth":true },
+        "spin_multiplier":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":5 },
+        "spin":                  { "label":"Spin",                 "type":"toggle", "smooth":false }
+      }
+    },
+    "radial": {
+      "params": {
+        "polygon":   { "label":"Polygon",  "type":"toggle",  "smooth":false },
+        "spin":      { "label":"Speed",    "type":"numeric", "smooth":false, "min":0,"max":1,
+                       "magnitude_only":true, "note":"target_value is magnitude; sign preserved from current value" },
+        "spin_sign": { "label":"Flip",     "type":"toggle",  "smooth":false,
+                       "maps_to":"spin",   "sign_control":true,
+                       "note":"On=positive spin, Off=negative spin, Toggle=negate sign" },
+        "twist":     { "label":"Twist",    "type":"numeric", "smooth":true,  "min":0,"max":10, "flip_sign":true },
+        "star":      { "label":"Star",     "type":"numeric", "smooth":true,  "min":-1,"max":1, "flip_sign":true },
+        "edges":     { "label":"Edges",    "type":"integer", "smooth":false, "min":0,"max":8 },
+        "x_offset":     { "label":"X Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true },
+        "y_offset":     { "label":"Y Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true },
+        "offset_polar": { "label":"Polar Offset", "type":"polar",  "smooth":true, "maps_x":"x_offset","maps_y":"y_offset" },
+        "move_xy":      { "label":"Move by XY",    "type":"move_xy",    "smooth":true },
+        "move_polar":   { "label":"Move by Polar", "type":"move_polar", "smooth":true }
+      }
+    },
+    "blender": {}
+  }
+}

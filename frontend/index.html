@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpotFX</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .trigger-list-wrap { max-height: 280px; overflow-y: auto; scroll-behavior: auto; }
+    .trigger-list-wrap::-webkit-scrollbar { width: 4px; }
+    .trigger-list-wrap::-webkit-scrollbar-track { background: transparent; }
+    .trigger-list-wrap::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+    .trigger-list-wrap::-webkit-scrollbar-thumb:hover { background: #666; }
+    .trigger-row.trigger-past  { opacity: 0.38; transition: opacity 0.4s; }
+    .trigger-row.trigger-current { border-left: 3px solid rgba(255,215,0,0.7);
+                                    padding-left: 5px; background: rgba(255,215,0,0.07); }
+    .trigger-action { font-size: 11px; color: var(--text-muted); font-family: monospace;
+                      min-width: 90px; overflow: hidden;
+                      text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+    #np-canvas-wrap { margin-top: 8px; }
+    #np-canvas { width: 100%; height: 120px; display: block; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <nav>
+    <span class="logo">SpotFX</span>
+    <a href="/" class="active">Now Playing</a>
+    <a href="/builder.html">Profile Builder</a>
+    <a href="/events.html">Events</a>
+    <a href="/playlist.html">Playlist</a>
+    <a href="/settings.html">Settings</a>
+    <a href="/ai_triggers.html">AI Triggers</a>
+    <a href="/triggerless.html">Triggerless</a>
+    <div id="ws-status"><div id="ws-dot"></div> Live</div>
+  </nav>
+
+  <main>
+    <!-- ── Auth banner (hidden when authenticated) ─────────────────────── -->
+    <div id="auth-banner" class="card" style="display:none;border-color:#e74c3c;background:#1a0a0a;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:20px;">🔑</span>
+        <div>
+          <div style="font-weight:600;margin-bottom:4px;">Spotify not connected</div>
+          <div style="font-size:13px;color:var(--text-muted);">
+            <a href="/api/spotify/login" style="color:#1db954;font-weight:600;">Click here to authorize Spotify →</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Now Playing ──────────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-title">Now Playing</div>
+      <div id="track-info">
+        <div>
+          <div id="track-title">—</div>
+          <div id="track-artist"></div>
+          <div id="track-genre" style="font-size:11px;color:var(--text-muted);margin-top:2px;"></div>
+          <div id="track-device"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Controls ────────────────────────────────────────────────────── -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <button id="pause-btn">⏸ Pause Triggers</button>
+        <button id="dinner-party-btn" style="font-size:11px;padding:3px 10px;" title="Dinner Party: ignore song triggers, use automatic ambient lighting">Dinner Party: Off</button>
+        <button id="ai-toggle-btn" style="font-size:11px;padding:3px 10px;" title="Use unreviewed AI suggestion set triggers for the current song">AI Triggers: Off</button>
+        <span id="ai-indicator" style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;display:none;"></span>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+          <span id="trigger-flash"></span>
+          <span id="countdown"></span>
+        </div>
+      </div>
+      <!-- Next trigger preview — always occupies space to prevent vertical jumping -->
+      <div id="next-action-row" style="visibility:hidden;margin-top:8px;min-height:22px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--text-muted);">Next:</span>
+        <span id="next-event-name" style="font-size:12px;font-weight:600;"></span>
+        <span id="next-action-arrow" style="font-size:11px;color:var(--text-muted);">▸</span>
+        <span id="next-action-label" style="font-size:12px;color:var(--text-muted);font-family:monospace;"></span>
+        <button id="reroll-btn" style="font-size:11px;padding:2px 8px;margin-left:4px;" title="Pick a different action">🎲 Re-roll</button>
+      </div>
+    </div>
+
+    <!-- ── Timeline ────────────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-title">Song Timeline</div>
+      <div class="timeline-wrap">
+        <div class="timeline-bar" id="timeline-bar">
+          <div class="timeline-progress" id="timeline-progress" style="width:0%"></div>
+          <!-- trigger markers injected here by JS -->
+        </div>
+      </div>
+      <div class="timeline-times">
+        <span id="time-current">0:00</span>
+        <span id="time-remaining"></span>
+        <span id="time-total">0:00</span>
+      </div>
+    </div>
+
+    <!-- ── Audio Shape (expandable) ─────────────────────────────────────── -->
+    <div class="card" style="padding:10px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="shape-toggle-btn" class="btn" style="font-size:12px;padding:4px 12px;"
+                onclick="toggleShapeCanvas()">▲ Audio Shape</button>
+        <span id="shape-np-status" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+      <div id="np-canvas-wrap" style="display:;">
+        <canvas id="np-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- ── Trigger List ─────────────────────────────────────────────────── -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div class="card-title" style="margin:0;">Triggers</div>
+        <button id="list-follow-btn" class="btn btn-accent"
+                style="font-size:11px;padding:2px 10px;">Follow</button>
+      </div>
+      <div class="trigger-list-wrap" id="trigger-list-wrap">
+        <div id="trigger-list">
+          <div style="color:var(--text-muted);font-size:13px;">No profile loaded.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Status bar ───────────────────────────────────────────────────── -->
+    <div style="font-size:11px;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+      <span>LedFX RTT: <span id="ledfx-rtt">—</span> ms</span>
+      <span>Offset: <span id="effective-offset">—</span> ms</span>
+      <span>Service: <span id="service-status" class="badge badge-green">Active</span></span>
+      <span style="margin-left:auto;cursor:pointer;user-select:none;opacity:0.5;" onclick="toggleDebug()">[debug]</span>
+    </div>
+
+    <!-- ── Sync Debug Panel ──────────────────────────────────────────────── -->
+    <div id="debug-panel" style="display:none;font-size:12px;color:var(--text-muted);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;">
+      <div style="font-weight:600;color:var(--text);margin-bottom:8px;">Sync Debug <span style="font-weight:400;font-size:11px;">(D to toggle)</span></div>
+      <div style="display:grid;grid-template-columns:auto auto auto;gap:4px 16px;margin-bottom:10px;">
+        <span>Buffer</span><span id="dbg-buffer">—</span><span style="opacity:0.5;">ms (manual setting)</span>
+        <span>RTT</span><span id="dbg-rtt">—</span><span style="opacity:0.5;">ms (LedFX network)</span>
+        <span>Shape</span><span id="dbg-shape">—</span><span id="dbg-shape-quality" style="opacity:0.5;">ms (per-song capture)</span>
+        <span style="font-weight:600;color:var(--text);">Total offset</span><span id="dbg-total" style="font-weight:600;color:var(--text);">—</span><span style="opacity:0.5;">ms → positive = fires earlier</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <span style="opacity:0.7;">Live nudge:</span>
+        <button onclick="nudgeBuffer(-50)" style="font-size:11px;padding:2px 8px;">−50 ms</button>
+        <span id="dbg-buffer-live" style="font-weight:600;min-width:60px;text-align:center;">—</span>
+        <button onclick="nudgeBuffer(+50)" style="font-size:11px;padding:2px 8px;">+50 ms</button>
+        <span style="opacity:0.5;font-size:11px;">[ / ] keys</span>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+        <span style="opacity:0.7;">Last trigger:</span>
+        <span id="dbg-last-trigger" style="margin-left:8px;">—</span>
+        <div id="dbg-last-fire" style="margin-top:4px;font-family:monospace;font-size:11px;opacity:0.8;"></div>
+        <div style="margin-top:4px;">Poll age: <span id="dbg-poll-age">—</span> ms</div>
+      </div>
+      <div id="dbg-cal" style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px;display:none;">
+        <span style="opacity:0.7;">Calibration:</span>
+        <span id="dbg-cal-status" style="margin-left:8px;font-style:italic;"></span>
+        <div id="dbg-cal-windows" style="margin-top:4px;font-family:monospace;font-size:11px;opacity:0.8;white-space:pre;"></div>
+        <div id="dbg-cal-final" style="margin-top:4px;font-family:monospace;font-size:11px;font-weight:600;"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { connectWS, onMessage, fmtMs, fmtCountdown, flashTrigger, markActiveNav, GET, POST, PATCH, showToast } from '/static/js/app.js';
+import { createShapeCanvas } from '/static/js/shape_canvas.js';
+
+markActiveNav();
+connectWS();
+
+// Check auth status on load
+(async () => {
+  try {
+    const s = await fetch('/api/spotify/auth-status').then(r => r.json());
+    document.getElementById('auth-banner').style.display = s.authenticated ? 'none' : '';
+  } catch { /* ignore */ }
+})();
+
+// ── State ──────────────────────────────────────────────────────────────────
+let track = null;
+let profile = null;   // { triggers: [{id, timestamp_ms, event_id, color, name}] }
+let events = {};      // event_id -> event
+let paused = false;
+let onTargetDevice = false;
+let nextPreview = null;  // { trigger_id, event_name, event_color, action_label, locked }
+let useAiTriggers = false;
+let dinnerPartyMode = false;
+let _timing = {};         // latest timing info from WS state
+let _lastFireInfo = null; // { event_name, scheduled_ms, fired_at_ms, effective_offset_ms }
+let _debugVisible = false;
+let _lastPollTime = 0;    // Date.now() when last state message arrived
+let _currentBuffer = 0;   // local copy for nudge
+let _calState = null;     // xcorr calibration state { uri, windows, windowResults, final }
+
+// ── Trigger list follow state ───────────────────────────────────────────────
+let _lastFiredIdx    = -1;   // index in sorted trigger array of last-fired trigger
+let _listFollows     = true; // auto-scroll list after trigger fires
+let _listScrollTimer = null;
+let _isAutoScrolling = false;
+let _resolvedActions = {};        // trigger_id → action_label (shown in trigger list after fire)
+let _pendingPreviewLabels = {};   // trigger_id → action_label cached as previews arrive
+
+// ── Audio shape canvas (now playing) ───────────────────────────────────────
+let _npCanvas       = null;
+let _npShapeVisible = true;
+let _npShapeLoaded  = false;
+let _npLoopId       = null;
+let appSettings     = null;
+GET('/settings').then(s => { appSettings = s; }).catch(() => {});
+
+// ── WebSocket handlers ─────────────────────────────────────────────────────
+onMessage('state', msg => {
+  paused = msg.paused;
+  onTargetDevice = msg.on_target_device ?? false;
+  document.getElementById('ledfx-rtt').textContent = msg.ledfx_rtt_ms;
+  _lastPollTime = Date.now();
+  if (msg.timing && Object.keys(msg.timing).length) {
+    _timing = msg.timing;
+    _currentBuffer = _timing.buffer_ms ?? _currentBuffer;
+    document.getElementById('effective-offset').textContent = _timing.effective_offset_ms ?? '—';
+    updateDebugPanel();
+    updateNpShapeStatus();
+  }
+
+  const prevUseAi = useAiTriggers;
+  useAiTriggers = msg.use_unreviewed_ai_triggers ?? false;
+  updateAiToggleBtn();
+
+  const prevDp = dinnerPartyMode;
+  dinnerPartyMode = msg.dinner_party_mode ?? false;
+  updateDinnerPartyBtn();
+
+  // Update track FIRST so badge and renderTrack use fresh data
+  if (msg.track) {
+    const changed = !track || track.spotify_uri !== msg.track.spotify_uri;
+    if (changed) { _calState = null; updateCalPanel(); }
+    track = msg.track;
+    updatePauseBtn();
+    updateServiceBadge();
+    renderTrack();
+    // Reload profile if track changed, AI toggle changed, or dinner party toggled
+    if (changed || prevUseAi !== useAiTriggers || prevDp !== dinnerPartyMode) loadProfile();
+  } else {
+    track = null;
+    updatePauseBtn();
+    updateServiceBadge();
+    renderNoTrack();
+  }
+});
+
+onMessage('trigger_fired', msg => {
+  flashTrigger(msg.color || '#FFD700');
+  // Highlight the row
+  const row = document.querySelector(`.trigger-row[data-id="${msg.trigger_id}"]`);
+  if (row) {
+    row.style.background = 'rgba(255,215,0,0.15)';
+    setTimeout(() => row.style.background = '', 600);
+  }
+  // Store fire info for debug panel
+  if (msg.scheduled_ms !== undefined) {
+    _lastFireInfo = {
+      event_name:          msg.event_name,
+      scheduled_ms:        msg.scheduled_ms,
+      fired_at_ms:         msg.fired_at_ms,
+      effective_offset_ms: msg.effective_offset_ms,
+    };
+    updateDebugPanel();
+  }
+  // Capture resolved action label from cached preview (nextPreview may already point to next trigger)
+  const storedLabel = _pendingPreviewLabels[msg.trigger_id];
+  if (storedLabel) {
+    _resolvedActions[msg.trigger_id] = storedLabel;
+    delete _pendingPreviewLabels[msg.trigger_id];
+    const actionEl = document.querySelector(`.trigger-row[data-id="${msg.trigger_id}"] .trigger-action`);
+    if (actionEl) actionEl.textContent = storedLabel;
+  }
+  // Clear preview if it still matches this trigger (may already be on next)
+  if (nextPreview?.trigger_id === msg.trigger_id) {
+    nextPreview = null;
+    updatePreviewRow();
+  }
+  // ── Update list fade position ────────────────────────────────────────
+  if (profile?.triggers?.length) {
+    const sorted = [...profile.triggers].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    const idx = sorted.findIndex(t => t.id === msg.trigger_id);
+    if (idx >= 0 && idx !== _lastFiredIdx) {
+      _lastFiredIdx = idx;
+      // Update fade classes in-place (no full re-render)
+      const wrap = document.getElementById('trigger-list-wrap');
+      wrap.querySelectorAll('.trigger-row').forEach(r => {
+        const gidx = parseInt(r.dataset.gidx ?? '-1');
+        r.classList.toggle('trigger-past',    gidx < idx);
+        r.classList.toggle('trigger-current', gidx === idx);
+      });
+      if (_listFollows) {
+        clearTimeout(_listScrollTimer);
+        _listScrollTimer = setTimeout(scrollListToAnchor, 1000);
+      }
+    }
+  }
+});
+
+// ── Calibration (xcorr) messages ───────────────────────────────────────────
+onMessage('xcorr_start', msg => {
+  _calState = { uri: msg.uri, windows: msg.windows, windowResults: {}, final: null,
+                verification: msg.verification };
+  updateCalPanel();
+});
+
+onMessage('xcorr_window', msg => {
+  if (_npCanvas && msg.uri === track?.spotify_uri && msg.applied) {
+    const offset = msg.winner === 'new' ? msg.new_offset_ms : msg.old_offset_ms;
+    _npCanvas.setOffset(offset);
+  }
+  if (_calState && _calState.uri === msg.uri) {
+    _calState.windowResults[`${msg.win_start}-${msg.win_end}`] = msg;
+    updateCalPanel();
+  }
+});
+
+onMessage('xcorr_final', msg => {
+  if (_npCanvas && msg.uri === track?.spotify_uri) {
+    _npCanvas.setOffset(msg.offset_ms);
+  }
+  if (_calState && _calState.uri === msg.uri) {
+    _calState.final = msg;
+    updateCalPanel();
+    // Auto-clear after 60 s
+    setTimeout(() => { if (_calState?.uri === msg.uri) { _calState = null; updateCalPanel(); } }, 60000);
+  }
+});
+
+function updateCalPanel() {
+  const panel = document.getElementById('dbg-cal');
+  if (!_calState) { panel.style.display = 'none'; return; }
+  if (_debugVisible) panel.style.display = '';
+
+  const statusEl = document.getElementById('dbg-cal-status');
+  if (_calState.final) {
+    statusEl.textContent = _calState.final.saved ? 'done ✓' : 'done (user-verified, not saved)';
+    statusEl.style.color = _calState.final.saved ? '' : 'var(--text-muted)';
+  } else {
+    statusEl.textContent = 'active…';
+    statusEl.style.color = '';
+  }
+
+  const sign = v => (v != null ? ((v >= 0 ? '+' : '') + v) : '?');
+  const lines = (_calState.windows || []).map((w) => {
+    const [s, e] = w;
+    const preDiff = w[2] != null ? w[2].toFixed(2) : null;
+    const r = _calState.windowResults[`${s}-${e}`];
+    const label = `${(s/1000).toFixed(0)}–${(e/1000).toFixed(0)}s`;
+    if (!r) return `  ${label.padEnd(9)}  diff=${preDiff ?? '?'}  pending`;
+    if (r.failed) return `  ${label.padEnd(9)}  diff=${preDiff ?? '?'}  no signal`;
+    const d = r.difficulty != null ? r.difficulty.toFixed(2) : '?';
+    const newPart = r.new_offset_ms != null
+      ? `NEW ${sign(r.new_offset_ms).padStart(5)}ms  r=${r.new_r?.toFixed(2)}  Q=${r.new_quality?.toFixed(2)}`
+      : `NEW  (none)`;
+    const oldPart = `OLD ${sign(r.old_offset_ms).padStart(5)}ms  r=${r.old_r?.toFixed(2)}  Q=${r.old_quality?.toFixed(2)}`;
+    const winner = r.winner === 'new' ? '← NEW' : '← OLD';
+    const applied = r.applied ? '  ★' : '';
+    return `  ${label.padEnd(9)}  diff=${d}  ${newPart}    ${oldPart}    ${winner}${applied}`;
+  });
+  document.getElementById('dbg-cal-windows').textContent = lines.join('\n');
+
+  const finalEl = document.getElementById('dbg-cal-final');
+  if (_calState.final) {
+    const f = _calState.final;
+    const q = f.quality_score != null ? `  Q=${f.quality_score.toFixed(2)}` : '';
+    const d = f.difficulty != null ? `  diff=${f.difficulty.toFixed(2)}` : '';
+    const savedNote = f.saved ? '  ← saved to Shape' : '  (not saved — user verified)';
+    let deviation = '';
+    if (f.prev_offset_ms != null) {
+      const delta = f.offset_ms - f.prev_offset_ms;
+      const abs_d = Math.abs(delta);
+      const color = abs_d < 50 ? '#4caf50' : abs_d < 150 ? '#ff9800' : '#f44336';
+      deviation = `  <span style="color:${color}">Δ ${delta >= 0 ? '+' : ''}${delta}ms</span>`;
+    }
+    finalEl.innerHTML = `  Final: ${sign(f.offset_ms)} ms${q}${d}  (${f.n_measurements} window${f.n_measurements !== 1 ? 's' : ''})${savedNote}${deviation}`;
+  } else {
+    finalEl.textContent = '';
+  }
+}
+
+onMessage('trigger_preview', msg => {
+  nextPreview = msg;
+  // Cache the label by trigger_id so it survives even when nextPreview moves to the next trigger
+  if (msg.action_label) _pendingPreviewLabels[msg.trigger_id] = msg.action_label;
+  updatePreviewRow();
+});
+
+onMessage('trigger_preview_clear', () => {
+  nextPreview = null;
+  updatePreviewRow();
+});
+
+onMessage('auto_generate_started', msg => {
+  showToast(`Generating AI triggers for ${msg.artist} — ${msg.title}…`, 'info');
+});
+onMessage('auto_generate_complete', msg => {
+  showToast(`AI triggers ready: ${msg.count} suggestions for ${msg.artist} — ${msg.title}`, 'success');
+});
+onMessage('auto_generate_failed', msg => {
+  showToast(`Auto-gen failed for ${msg.title}: ${msg.error}`, 'error');
+});
+
+
+function updatePreviewRow() {
+  const row    = document.getElementById('next-action-row');
+  const evName = document.getElementById('next-event-name');
+  const arrow  = document.getElementById('next-action-arrow');
+  const label  = document.getElementById('next-action-label');
+  const btn    = document.getElementById('reroll-btn');
+  if (!nextPreview) {
+    row.style.visibility = 'hidden';
+    return;
+  }
+  row.style.visibility = 'visible';
+  evName.textContent = nextPreview.event_name;
+  evName.style.color = nextPreview.event_color || 'var(--text)';
+  if (nextPreview.action_label) {
+    arrow.style.display = '';
+    label.style.display = '';
+    label.textContent = nextPreview.action_label;
+  } else {
+    arrow.style.display = 'none';
+    label.style.display = 'none';
+  }
+  const locked = nextPreview.locked;
+  btn.disabled = locked;
+  btn.style.opacity = locked ? '0.4' : '1';
+  btn.title = locked ? 'Locked — < 5s to fire' : 'Pick a different action';
+}
+
+// ── Render helpers ─────────────────────────────────────────────────────────
+function renderTrack() {
+  document.getElementById('track-title').textContent = track.title;
+  const artist = track.artist.length > 40 ? track.artist.slice(0, 40) + '…' : track.artist;
+  document.getElementById('track-artist').textContent = artist;
+  document.getElementById('track-genre').textContent = (track.genres || []).join(' · ');
+  const chipClass = onTargetDevice ? 'badge badge-green' : 'badge badge-red';
+  document.getElementById('track-device').innerHTML = track.device_name
+    ? `<span class="${chipClass}" style="font-size:10px;padding:1px 7px;">▶ on ${track.device_name}</span>`
+    : '';
+  document.getElementById('time-total').textContent = fmtMs(track.duration_ms);
+}
+
+function renderNoTrack() {
+  document.getElementById('track-title').textContent = '—';
+  document.getElementById('track-artist').textContent = '';
+  document.getElementById('track-genre').textContent = '';
+  document.getElementById('track-device').textContent = '';
+  document.getElementById('timeline-progress').style.width = '0%';
+  document.getElementById('time-current').textContent = '0:00';
+  document.getElementById('time-remaining').textContent = '';
+  document.getElementById('time-total').textContent = '0:00';
+  document.getElementById('trigger-list').innerHTML =
+    '<div style="color:var(--text-muted);font-size:13px;">Nothing playing.</div>';
+}
+
+function updatePauseBtn() {
+  const btn = document.getElementById('pause-btn');
+  btn.textContent = paused ? '▶ Resume Triggers' : '⏸ Pause Triggers';
+  btn.classList.toggle('paused', paused);
+}
+
+function updateDinnerPartyBtn() {
+  const btn = document.getElementById('dinner-party-btn');
+  if (!btn) return;
+  btn.textContent = dinnerPartyMode ? 'Dinner Party: On' : 'Dinner Party: Off';
+  btn.style.background = dinnerPartyMode ? 'rgba(156,39,176,0.2)' : '';
+  btn.style.color = dinnerPartyMode ? '#ce93d8' : '';
+  btn.style.border = dinnerPartyMode ? '1px solid #ce93d8' : '';
+}
+
+function updateAiIndicator() {
+  const el = document.getElementById('ai-indicator');
+  if (!profile) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  if (profile._usingAiTriggers) {
+    el.textContent = 'AI (Live)';
+    el.style.background = 'rgba(255,152,0,0.15)';
+    el.style.color = '#ff9800';
+    el.style.border = '1px solid #ff9800';
+  } else if (profile.ai_generated) {
+    el.textContent = 'AI Generated';
+    el.style.background = 'rgba(0,188,212,0.15)';
+    el.style.color = '#00bcd4';
+    el.style.border = '1px solid #00bcd4';
+  } else {
+    el.textContent = 'Manual';
+    el.style.background = 'rgba(136,136,136,0.1)';
+    el.style.color = '#888';
+    el.style.border = '1px solid #555';
+  }
+}
+
+function updateAiToggleBtn() {
+  const btn = document.getElementById('ai-toggle-btn');
+  if (!btn) return;
+  btn.textContent = useAiTriggers ? 'AI Triggers: On' : 'AI Triggers: Off';
+  btn.style.background = useAiTriggers ? 'rgba(255,152,0,0.2)' : '';
+  btn.style.color = useAiTriggers ? '#ff9800' : '';
+  btn.style.border = useAiTriggers ? '1px solid #ff9800' : '';
+}
+
+function updateServiceBadge() {
+  const el = document.getElementById('service-status');
+  if (paused) {
+    el.textContent = 'Paused';
+    el.className = 'badge badge-yellow';
+  } else if (!track || !track.is_playing) {
+    el.textContent = 'Idle';
+    el.className = 'badge badge-gray';
+  } else if (!onTargetDevice) {
+    el.textContent = `Wrong Device: ${track.device_name || '?'}`;
+    el.className = 'badge badge-red';
+  } else if (dinnerPartyMode) {
+    el.textContent = 'Dinner Party';
+    el.className = 'badge badge-yellow';
+  } else {
+    el.textContent = 'Active';
+    el.className = 'badge badge-green';
+  }
+}
+
+// ── Load profile ───────────────────────────────────────────────────────────
+async function loadProfile() {
+  if (!track) return;
+  try {
+    // Fetch profile and events in parallel
+    const [data, evList] = await Promise.all([
+      GET(`/profiles/by-uri?uri=${encodeURIComponent(track.spotify_uri)}`),
+      GET('/events').catch(() => []),
+    ]);
+    // Build lookup map
+    events = {};
+    for (const ev of evList) events[ev.id] = ev;
+    // Enrich triggers with event name/color
+    for (const t of data.triggers || []) {
+      const ev = events[t.event_id];
+      if (ev) { t.name = ev.name; t.color = t.color || ev.color; }
+    }
+    profile = data;
+
+    // When AI toggle is on, substitute triggers from saved suggestion set
+    if (useAiTriggers) {
+      const trackId = track.spotify_uri.split(':').pop();
+      const sug = await GET(`/ai-suggestions/${trackId}`).catch(() => null);
+      if (sug?.suggestions?.length) {
+        profile.triggers = sug.suggestions.map(s => {
+          const ev = events[s.event_id];
+          return {
+            id:           `ai_${s.event_id}_${s.timestamp_ms}`,
+            timestamp_ms: s.timestamp_ms,
+            event_id:     s.event_id,
+            name:         ev?.name || s.event_name || s.event_id,
+            color:        ev?.color || '#00bcd4',
+            labels:       s.labels || [],
+          };
+        });
+        profile._usingAiTriggers = true;
+      }
+    }
+
+    // Check for synthetic triggerless triggers from the engine
+    const tlTriggers = await GET('/control/active-triggers').catch(() => []);
+    if (tlTriggers.length) {
+      profile.triggers = tlTriggers.map(t => {
+        const ev = events[t.event_id];
+        return {
+          ...t,
+          name:  ev?.name || t.event_id,
+          color: ev?.color || '#9c27b0',
+        };
+      });
+      profile._usingTriggerless = true;
+    }
+  } catch {
+    profile = null;
+  }
+  _lastFiredIdx = -1;
+  _resolvedActions = {};
+  _pendingPreviewLabels = {};
+  _listFollows  = true;
+  updateListFollowBtn();
+  nextPreview = null;
+  updatePreviewRow();
+  renderTriggerMarkers();
+  renderTriggerList();
+  updateAiIndicator();
+  // Reload audio shape if canvas is open
+  if (_npShapeVisible) loadNpShape(track?.spotify_uri);
+}
+
+// ── Timeline interpolation ─────────────────────────────────────────────────
+let _lastProgressMs = 0;
+let _lastUpdateTime = 0;
+
+function getInterpolatedProgress() {
+  if (!track) return 0;
+  const elapsed = (Date.now() - _lastUpdateTime);
+  return Math.min(_lastProgressMs + (track.is_playing ? elapsed : 0), track.duration_ms);
+}
+
+onMessage('state', msg => {
+  if (msg.track) {
+    _lastProgressMs = msg.track.progress_ms;
+    _lastUpdateTime = Date.now();
+  }
+});
+
+function renderTriggerMarkers() {
+  const bar = document.getElementById('timeline-bar');
+  // Remove old markers
+  bar.querySelectorAll('.trigger-marker').forEach(m => m.remove());
+  if (!profile || !track) return;
+
+  profile.triggers.forEach(t => {
+    const pct = (t.timestamp_ms / track.duration_ms) * 100;
+    const m = document.createElement('div');
+    m.className = 'trigger-marker';
+    m.style.left = pct + '%';
+    m.style.background = t.color || '#FFD700';
+    m.title = `${t.name || t.event_id} @ ${fmtMs(t.timestamp_ms)}`;
+    m.dataset.id = t.id;
+    bar.appendChild(m);
+  });
+}
+
+// ── DISPLAY LABEL RESOLUTION ─────────────────────────────────────────────────
+// Priority order (edit this function to change what's shown in the trigger list):
+//   1. Sequence with exactly 2 single steps → "Step1 → Step2"  (needs resolved_action in WS)
+//   2. LedFX scene action resolved          → scene name        (needs resolved_action in WS)
+//   3. Other sequence                       → sequence name
+//   4. Default                              → event name
+// NOTE: Items 1–2 require resolved_action from trigger_fired WS message (not yet added).
+function resolveDisplayLabel(trigger) {
+  // TODO: when resolved_action is available from trigger_fired WS:
+  //   const ra = trigger.resolved_action;
+  //   if (ra?.type === 'two_step') return `${ra.step1} → ${ra.step2}`;
+  //   if (ra?.type === 'scene')    return ra.scene_name;
+  return trigger.name || trigger.event_id;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderTriggerList() {
+  const list = document.getElementById('trigger-list');
+  if (!profile?.triggers?.length) {
+    list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No triggers in this profile.</div>';
+    return;
+  }
+  const sorted = [...profile.triggers].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+  list.innerHTML = sorted.map((t, idx) => {
+    const isPast    = _lastFiredIdx >= 0 && idx < _lastFiredIdx;
+    const isCurrent = _lastFiredIdx >= 0 && idx === _lastFiredIdx;
+    const cls = isPast ? ' trigger-past' : isCurrent ? ' trigger-current' : '';
+    const actionLabel = _resolvedActions[t.id] || '';
+    return `<div class="trigger-row${cls}" data-id="${t.id}" data-gidx="${idx}">
+      <div class="trigger-color-dot" style="background:${t.color || '#888'}"></div>
+      <span class="trigger-ts">${fmtMs(t.timestamp_ms)}</span>
+      <span class="trigger-name">${resolveDisplayLabel(t)}</span>
+      <span class="trigger-action">${actionLabel}</span>
+      <span class="trigger-labels">${(t.labels || []).join(', ')}</span>
+    </div>`;
+  }).join('');
+}
+
+function scrollListToAnchor() {
+  _listScrollTimer = null;
+  if (_lastFiredIdx < 0) return;
+  const wrap = document.getElementById('trigger-list-wrap');
+  const anchor = wrap.querySelector(`.trigger-row[data-gidx="${_lastFiredIdx}"]`);
+  if (!anchor) return;
+  _isAutoScrolling = true;
+  // Use getBoundingClientRect to get position relative to scroll container
+  const wrapRect   = wrap.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  const relativeTop = anchorRect.top - wrapRect.top + wrap.scrollTop;
+  const rowH = anchor.offsetHeight || 36;
+  // Show 3 past triggers above the current one
+  wrap.scrollTop = Math.max(0, relativeTop - rowH * 3);
+  requestAnimationFrame(() => { _isAutoScrolling = false; });
+}
+
+function updateListFollowBtn() {
+  const btn = document.getElementById('list-follow-btn');
+  if (!btn) return;
+  btn.classList.toggle('btn-accent', _listFollows);
+}
+
+document.getElementById('list-follow-btn').addEventListener('click', () => {
+  _listFollows = true;
+  updateListFollowBtn();
+  scrollListToAnchor();
+});
+
+document.getElementById('trigger-list-wrap').addEventListener('scroll', () => {
+  if (_isAutoScrolling) return;
+  _listFollows = false;
+  updateListFollowBtn();
+}, { passive: true });
+
+// ── Audio shape canvas ─────────────────────────────────────────────────────
+function updateNpShapeStatus() {
+  const el = document.getElementById('shape-np-status');
+  if (!el) return;
+  const offset = _timing.shape_offset_ms;
+  if (offset == null) return;
+  const sign = offset >= 0 ? '+' : '';
+  const q = _timing.shape_offset_quality;
+  const qStr = (q && q > 0) ? `  Q=${q.toFixed(2)}` : '';
+  el.textContent = `${sign}${offset}ms${qStr}`;
+}
+
+window.toggleShapeCanvas = function() {
+  _npShapeVisible = !_npShapeVisible;
+  document.getElementById('np-canvas-wrap').style.display = _npShapeVisible ? '' : 'none';
+  document.getElementById('shape-toggle-btn').textContent = _npShapeVisible ? '▲ Audio Shape' : '▼ Audio Shape';
+  if (_npShapeVisible && track) {
+    loadNpShape(track.spotify_uri);
+  } else {
+    _stopNpLoop();
+  }
+};
+
+async function loadNpShape(uri) {
+  if (!uri) return;
+  _npShapeLoaded = false;
+  document.getElementById('shape-np-status').textContent = 'Loading…';
+  if (!_npCanvas) {
+    _npCanvas = createShapeCanvas(document.getElementById('np-canvas'));
+  }
+  try {
+    const [meta, data] = await Promise.all([
+      GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`),
+      GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`),
+    ]);
+    const avgWindow = appSettings?.shape_average_window_ms ?? 500;
+    _npCanvas.setData(data, meta, avgWindow);
+    _npCanvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);
+    _npCanvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
+    _npCanvas.setOffset(meta?.timestamp_offset_ms ?? 0);
+    // Apply saved scales from settings
+    const sc = _npCanvas.scales;
+    sc.total = appSettings?.shape_scale_total   ?? 1;
+    sc.bass  = appSettings?.shape_scale_bass    ?? 1;
+    sc.mid   = appSettings?.shape_scale_mid     ?? 1;
+    sc.high  = appSettings?.shape_scale_high    ?? 1;
+    _npCanvas.scaleOverall = appSettings?.shape_scale_overall ?? 1;
+    // Try loading librosa overlay
+    try {
+      const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
+      _npCanvas.setLibrosaMarkers(la);
+    } catch { _npCanvas.setLibrosaMarkers(null); }
+    _npShapeLoaded = true;
+    updateNpShapeStatus();
+    _startNpLoop();
+  } catch {
+    document.getElementById('shape-np-status').textContent = 'No audio shape for this song';
+  }
+}
+
+// ── Audio shape canvas 25ms loop ───────────────────────────────────────────
+function _stopNpLoop() {
+  if (_npLoopId) { clearInterval(_npLoopId); _npLoopId = null; }
+}
+function _startNpLoop() {
+  _stopNpLoop();
+  _npLoopId = setInterval(() => {
+    if (!_npShapeLoaded || !_npCanvas || !track) return;
+    const progress = getInterpolatedProgress();
+    const latency  = appSettings?.audio_latency_ms ?? 0;
+    const futureMs = (appSettings?.builder_future_buffer_s ?? 5) * 1000;
+    const windowMs = (appSettings?.builder_zoom_window_s  ?? 20) * 1000;
+    const zEnd   = Math.min(track.duration_ms, progress + futureMs);
+    const zStart = Math.max(0, zEnd - windowMs);
+    _npCanvas.setZoom(zStart, zEnd);
+    if (profile) _npCanvas.setProfile(profile, Object.values(events));
+    _npCanvas.setPlayhead(progress - latency);
+    _npCanvas.draw();
+  }, 25);
+}
+
+// ── Animation loop (250 ms visual update) ──────────────────────────────────
+function tick() {
+  if (!track) return;
+  const progress = getInterpolatedProgress();
+
+  const pct = (progress / track.duration_ms) * 100;
+  document.getElementById('timeline-progress').style.width = Math.min(pct, 100) + '%';
+  document.getElementById('time-current').textContent = fmtMs(progress);
+  document.getElementById('time-remaining').textContent = '-' + fmtMs(track.duration_ms - progress);
+
+  // Poll age in debug panel
+  if (_debugVisible && _lastPollTime) {
+    document.getElementById('dbg-poll-age').textContent = Math.round(Date.now() - _lastPollTime);
+  }
+
+  // Countdown to next trigger
+  if (profile && profile.triggers.length) {
+    const upcoming = profile.triggers
+      .filter(t => t.timestamp_ms > progress)
+      .sort((a, b) => a.timestamp_ms - b.timestamp_ms)[0];
+
+    if (upcoming) {
+      const remaining = upcoming.timestamp_ms - progress;
+      document.getElementById('countdown').textContent = fmtCountdown(remaining);
+
+      // Highlight next trigger row
+      document.querySelectorAll('.trigger-row').forEach(r => r.classList.remove('next'));
+      const row = document.querySelector(`.trigger-row[data-id="${upcoming.id}"]`);
+      if (row) row.classList.add('next');
+
+      // Sync re-roll lock state client-side (in case WS lock broadcast is slightly late)
+      if (nextPreview && nextPreview.trigger_id === upcoming.id) {
+        const locked = remaining < 5000;
+        if (locked !== nextPreview.locked) {
+          nextPreview.locked = locked;
+          updatePreviewRow();
+        }
+      }
+    } else {
+      document.getElementById('countdown').textContent = '';
+    }
+  }
+}
+
+setInterval(tick, 250);
+
+// ── Pause button ───────────────────────────────────────────────────────────
+document.getElementById('pause-btn').addEventListener('click', async () => {
+  await POST(paused ? '/control/resume' : '/control/pause');
+});
+
+// ── Dinner Party toggle ────────────────────────────────────────────────────
+document.getElementById('dinner-party-btn').addEventListener('click', async () => {
+  await POST(`/control/dinner-party?enabled=${!dinnerPartyMode}`);
+});
+
+// ── AI Triggers toggle ─────────────────────────────────────────────────────
+document.getElementById('ai-toggle-btn').addEventListener('click', async () => {
+  await POST(`/control/use-ai-triggers?enabled=${!useAiTriggers}`);
+  // Backend broadcasts state update which triggers loadProfile via WS handler
+});
+
+// ── Debug panel ────────────────────────────────────────────────────────────
+window.toggleDebug = function() {
+  _debugVisible = !_debugVisible;
+  document.getElementById('debug-panel').style.display = _debugVisible ? '' : 'none';
+  updateDebugPanel();
+  updateCalPanel();
+};
+
+function updateDebugPanel() {
+  if (!_debugVisible) return;
+  document.getElementById('dbg-buffer').textContent = _timing.buffer_ms ?? '—';
+  document.getElementById('dbg-rtt').textContent    = _timing.ledfx_rtt_ms ?? '—';
+  document.getElementById('dbg-shape').textContent  = _timing.shape_offset_ms ?? '—';
+  const q = _timing.shape_offset_quality;
+  document.getElementById('dbg-shape-quality').textContent =
+    (q != null && q > 0) ? `ms  Q=${q.toFixed(2)} (per-song capture)` : 'ms (per-song capture)';
+  document.getElementById('dbg-total').textContent  = _timing.effective_offset_ms ?? '—';
+  document.getElementById('dbg-buffer-live').textContent =
+    (_currentBuffer !== undefined ? _currentBuffer + ' ms' : '—');
+
+  if (_lastFireInfo) {
+    const { event_name, scheduled_ms, fired_at_ms } = _lastFireInfo;
+    const delta = fired_at_ms - scheduled_ms;
+    const sign  = delta >= 0 ? '+' : '';
+    document.getElementById('dbg-last-trigger').textContent = event_name || '(unknown)';
+    document.getElementById('dbg-last-fire').textContent =
+      `sched: ${fmtMs(scheduled_ms)}  fired@: ${fmtMs(fired_at_ms)}  Δ: ${sign}${delta} ms`;
+  }
+}
+
+// ── Live nudge ([ and ] keys) ──────────────────────────────────────────────
+window.nudgeBuffer = async function(delta) {
+  _currentBuffer += delta;
+  try {
+    await PATCH('/settings', { ledfx_trigger_buffer_ms: _currentBuffer });
+    const eff = _currentBuffer + (_timing.ledfx_rtt_ms ?? 0) + (_timing.shape_offset_ms ?? 0);
+    showToast(`Buffer: ${_currentBuffer} ms  →  Effective: ${eff} ms`, 'info');
+    updateDebugPanel();
+  } catch (e) {
+    showToast('Nudge failed', 'error');
+    _currentBuffer -= delta; // revert
+  }
+};
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === '[' || e.key === '{') { e.preventDefault(); nudgeBuffer(-50); }
+  if (e.key === ']' || e.key === '}') { e.preventDefault(); nudgeBuffer(+50); }
+  if (e.key === 'd' || e.key === 'D') toggleDebug();
+});
+
+// ── Re-roll button ──────────────────────────────────────────────────────────
+document.getElementById('reroll-btn').addEventListener('click', async () => {
+  if (!nextPreview || nextPreview.locked) return;
+  await POST(`/control/reroll?trigger_id=${encodeURIComponent(nextPreview.trigger_id)}`);
+  // Backend broadcasts updated trigger_preview; no local state change needed.
+});
+
+</script>
+</body>
+</html>

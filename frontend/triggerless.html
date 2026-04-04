@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpotFX — Triggerless Play</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .tl-layout { display: flex; gap: 16px; }
+    .tl-list   { width: 260px; flex-shrink: 0; }
+    .tl-editor { flex: 1; min-width: 0; }
+    .tl-list-items { max-height: 70vh; overflow-y: auto; }
+    .tl-row {
+      padding: 8px 10px; cursor: pointer; border-radius: 6px;
+      border: 1px solid transparent; margin-bottom: 4px;
+    }
+    .tl-row:hover { background: var(--surface2); }
+    .tl-row.active { border-color: var(--accent); background: var(--surface2); }
+    .tl-row .name { font-weight: 600; font-size: 14px; }
+    .tl-row .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .tl-row .default-badge {
+      font-size: 10px; background: rgba(29,185,84,0.15); color: var(--accent);
+      padding: 1px 6px; border-radius: 8px; margin-left: 6px;
+    }
+    .field-group { margin-bottom: 14px; }
+    .field-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .field-group input[type="text"],
+    .field-group input[type="number"] {
+      width: 100%; padding: 6px 8px; font-size: 13px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+    }
+    .field-group input[type="number"] { width: 100px; }
+    .event-field { display: flex; align-items: flex-start; gap: 10px; }
+    .event-field .ss-wrap { flex: 1; }
+    .event-field .interval-input { width: 90px; }
+    .btn-bar { display: flex; gap: 8px; margin-top: 16px; }
+    .ss-filter {
+      font-size: 12px; padding: 4px 6px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 100%;
+    }
+    .ss-select { width: 100%; padding: 4px; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+    @media (max-width: 600px) {
+      .tl-layout { flex-direction: column; }
+      .tl-list { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <nav>
+    <span class="logo">SpotFX</span>
+    <a href="/">Now Playing</a>
+    <a href="/builder.html">Profile Builder</a>
+    <a href="/events.html">Events</a>
+    <a href="/playlist.html">Playlist</a>
+    <a href="/settings.html">Settings</a>
+    <a href="/ai_triggers.html">AI Triggers</a>
+    <a href="/triggerless.html">Triggerless</a>
+    <div id="ws-status"><div id="ws-dot"></div> Live</div>
+  </nav>
+
+  <main>
+    <h2 style="margin-bottom:12px;">Triggerless Play</h2>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+      Configure automatic lighting for songs without triggers. Profiles are matched by genre; the default profile is used as fallback.
+    </p>
+
+    <div class="tl-layout">
+      <!-- List panel -->
+      <div class="tl-list card">
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <input type="text" id="search" placeholder="Search…" style="flex:1;padding:4px 8px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+          <button class="btn btn-accent btn-sm" id="new-btn">+ New</button>
+        </div>
+        <div class="tl-list-items" id="list"></div>
+      </div>
+
+      <!-- Editor panel -->
+      <div class="tl-editor card" id="editor" style="display:none;">
+        <div class="field-group">
+          <label>Name</label>
+          <input type="text" id="ed-name">
+        </div>
+        <div class="field-group">
+          <label>Genres (comma-separated)</label>
+          <input type="text" id="ed-genres" placeholder="rock, indie, alt-rock">
+        </div>
+        <div class="field-group">
+          <label style="display:inline-flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="ed-default"> Default profile (fallback when no genre match)
+          </label>
+        </div>
+
+        <hr style="border-color:var(--border);margin:14px 0;">
+
+        <div class="field-group">
+          <label>Song Start Event</label>
+          <div id="ed-start-event"></div>
+        </div>
+
+        <div class="field-group">
+          <label>Song End Event</label>
+          <div class="event-field">
+            <div class="ss-wrap" id="ed-end-event"></div>
+            <div>
+              <label style="font-size:11px;">Pre-fire (ms)</label>
+              <input type="number" id="ed-end-prefire" class="interval-input" value="5000" min="0" step="500">
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>Standard Scene Event</label>
+          <div class="event-field">
+            <div class="ss-wrap" id="ed-scene-event"></div>
+            <div>
+              <label style="font-size:11px;">Interval (sec)</label>
+              <input type="number" id="ed-scene-interval" class="interval-input" value="30" min="1" step="1">
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>Flare Event <span style="color:var(--text-muted);font-size:11px;">(optional)</span></label>
+          <div class="event-field">
+            <div class="ss-wrap" id="ed-flare-event"></div>
+            <div>
+              <label style="font-size:11px;">Interval (sec)</label>
+              <input type="number" id="ed-flare-interval" class="interval-input" value="15" min="1" step="1">
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-bar">
+          <button class="btn btn-accent" id="save-btn">Save</button>
+          <button class="btn" id="dup-btn">Duplicate</button>
+          <button class="btn btn-danger" id="del-btn">Delete</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { connectWS, markActiveNav, GET, POST, DEL, showToast, uuid } from '/static/js/app.js';
+markActiveNav();
+connectWS();
+
+let profiles = [];
+let events = [];
+let selected = null;  // currently selected TriggerlessProfile
+
+// ── Searchable select helper ──────────────────────────────────────────────
+
+function buildSearchSelect(container, opts, selectedValue, allowNone = false) {
+  if (allowNone) opts = [{ value: '', label: '— None —' }, ...opts];
+  const filter = document.createElement('input');
+  filter.type = 'text';
+  filter.className = 'ss-filter';
+  filter.placeholder = 'Filter events…';
+
+  const select = document.createElement('select');
+  select.className = 'ss-select';
+
+  function render(q = '') {
+    const ql = q.toLowerCase();
+    const filtered = ql ? opts.filter(o => o.label.toLowerCase().includes(ql)) : opts;
+    const cur = select.value;
+    select.innerHTML = filtered.map(o =>
+      `<option value="${o.value}"${o.value === cur ? ' selected' : ''}>${o.label}</option>`
+    ).join('');
+    if (!select.value && filtered.length) select.value = filtered[0].value;
+  }
+
+  filter.addEventListener('input', () => render(filter.value));
+  container.innerHTML = '';
+  container.appendChild(filter);
+  container.appendChild(select);
+  render();
+
+  // Set initial value
+  if (selectedValue !== undefined && selectedValue !== null) {
+    select.value = selectedValue;
+    if (!select.value && opts.length) select.value = opts[0].value;
+  }
+  return select;
+}
+
+function eventOpts() {
+  return events.map(ev => ({
+    value: ev.id,
+    label: ev.name + (ev.labels?.length ? ' [' + ev.labels.join(', ') + ']' : ''),
+  }));
+}
+
+// ── Load data ─────────────────────────────────────────────────────────────
+
+async function loadData() {
+  [profiles, events] = await Promise.all([GET('/triggerless'), GET('/events')]);
+  renderList();
+}
+
+// ── List rendering ────────────────────────────────────────────────────────
+
+function renderList() {
+  const q = (document.getElementById('search').value || '').toLowerCase();
+  const el = document.getElementById('list');
+  const filtered = q ? profiles.filter(p =>
+    p.name.toLowerCase().includes(q) || p.genres.some(g => g.toLowerCase().includes(q))
+  ) : profiles;
+
+  el.innerHTML = filtered.map(p => `
+    <div class="tl-row${selected && selected.id === p.id ? ' active' : ''}" data-id="${p.id}">
+      <div class="name">${p.name || '(unnamed)'}${p.is_default ? '<span class="default-badge">DEFAULT</span>' : ''}</div>
+      <div class="meta">${p.genres.length ? p.genres.join(', ') : 'No genres'}</div>
+    </div>
+  `).join('') || '<div style="color:var(--text-muted);padding:8px;font-size:13px;">No profiles yet</div>';
+
+  el.querySelectorAll('.tl-row').forEach(row => {
+    row.addEventListener('click', () => selectProfile(row.dataset.id));
+  });
+}
+
+// ── Select / Edit ─────────────────────────────────────────────────────────
+
+function selectProfile(id) {
+  selected = profiles.find(p => p.id === id) || null;
+  if (!selected) { document.getElementById('editor').style.display = 'none'; return; }
+  renderList();
+  const ed = document.getElementById('editor');
+  ed.style.display = '';
+
+  document.getElementById('ed-name').value = selected.name;
+  document.getElementById('ed-genres').value = (selected.genres || []).join(', ');
+  document.getElementById('ed-default').checked = selected.is_default;
+  document.getElementById('ed-end-prefire').value = selected.end_pre_fire_ms;
+  document.getElementById('ed-scene-interval').value = selected.scene_change_interval_s;
+  document.getElementById('ed-flare-interval').value = selected.flare_interval_s;
+
+  const opts = eventOpts();
+  buildSearchSelect(document.getElementById('ed-start-event'), opts, selected.start_event_id, true);
+  buildSearchSelect(document.getElementById('ed-end-event'), opts, selected.end_event_id, true);
+  buildSearchSelect(document.getElementById('ed-scene-event'), opts, selected.scene_event_id, true);
+  buildSearchSelect(document.getElementById('ed-flare-event'), opts, selected.flare_event_id || '', true);
+}
+
+function readEditor() {
+  return {
+    id: selected.id,
+    name: document.getElementById('ed-name').value.trim(),
+    genres: document.getElementById('ed-genres').value.split(',').map(s => s.trim()).filter(Boolean),
+    is_default: document.getElementById('ed-default').checked,
+    start_event_id: document.getElementById('ed-start-event').querySelector('select')?.value || '',
+    end_event_id: document.getElementById('ed-end-event').querySelector('select')?.value || '',
+    end_pre_fire_ms: parseInt(document.getElementById('ed-end-prefire').value) || 5000,
+    scene_event_id: document.getElementById('ed-scene-event').querySelector('select')?.value || '',
+    scene_change_interval_s: parseInt(document.getElementById('ed-scene-interval').value) || 30,
+    flare_event_id: document.getElementById('ed-flare-event').querySelector('select')?.value || null,
+    flare_interval_s: parseInt(document.getElementById('ed-flare-interval').value) || 15,
+  };
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────
+
+document.getElementById('save-btn').addEventListener('click', async () => {
+  if (!selected) return;
+  try {
+    const data = readEditor();
+    await POST('/triggerless', data);
+    showToast('Profile saved', 'success');
+    await loadData();
+    selectProfile(data.id);
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+    console.error(e);
+  }
+});
+
+document.getElementById('del-btn').addEventListener('click', async () => {
+  if (!selected || !confirm(`Delete "${selected.name}"?`)) return;
+  await DEL(`/triggerless/${selected.id}`);
+  selected = null;
+  document.getElementById('editor').style.display = 'none';
+  showToast('Profile deleted', 'success');
+  await loadData();
+});
+
+document.getElementById('dup-btn').addEventListener('click', async () => {
+  if (!selected) return;
+  const data = readEditor();
+  data.id = uuid();
+  data.name = data.name + ' (copy)';
+  data.is_default = false;
+  await POST('/triggerless', data);
+  showToast('Profile duplicated', 'success');
+  await loadData();
+  selectProfile(data.id);
+});
+
+document.getElementById('new-btn').addEventListener('click', async () => {
+  try {
+    const id = uuid();
+    const data = {
+      id, name: 'New Profile', genres: [], is_default: false,
+      start_event_id: '', end_event_id: '', end_pre_fire_ms: 5000,
+      scene_event_id: '', scene_change_interval_s: 30,
+      flare_event_id: null, flare_interval_s: 15,
+    };
+    await POST('/triggerless', data);
+    showToast('Profile created', 'success');
+    await loadData();
+    selectProfile(id);
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+    console.error(e);
+  }
+});
+
+document.getElementById('search').addEventListener('input', renderList);
+
+// ── Init ──────────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>

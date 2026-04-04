@@ -1,0 +1,270 @@
+/* ── SpotFX — Global Styles ────────────────────────────────────────────────── */
+:root {
+  --bg:         #0d0d0d;
+  --surface:    #1a1a1a;
+  --surface2:   #242424;
+  --border:     #333;
+  --accent:     #1db954;   /* Spotify green */
+  --accent2:    #ffd700;   /* trigger yellow */
+  --text:       #e8e8e8;
+  --text-muted: #888;
+  --danger:     #e74c3c;
+  --radius:     8px;
+  --font:       'Inter', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  min-height: 100vh;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px;
+  flex-wrap: wrap;
+}
+
+nav .logo {
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--accent);
+  margin-right: 12px;
+}
+
+nav a {
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+nav a:hover, nav a.active {
+  background: var(--surface2);
+  color: var(--text);
+  text-decoration: none;
+}
+
+main { flex: 1; padding: 16px; max-width: 900px; margin: 0 auto; width: 100%; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+button, .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+button:hover, .btn:hover { background: #2e2e2e; border-color: #555; }
+.btn-accent { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+.btn-accent:hover { background: #17a845; border-color: #17a845; }
+.btn-danger { border-color: var(--danger); color: var(--danger); }
+.btn-danger:hover { background: #2a1010; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* ── Track info ───────────────────────────────────────────────────────────── */
+#track-info { display: flex; align-items: center; gap: 14px; }
+#track-art {
+  width: 56px; height: 56px;
+  border-radius: 6px;
+  background: var(--surface2);
+  flex-shrink: 0;
+  object-fit: cover;
+}
+#track-title { font-size: 17px; font-weight: 600; line-height: 1.2; }
+#track-artist { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+#track-device { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+/* ── Timeline ────────────────────────────────────────────────────────────── */
+.timeline-wrap {
+  position: relative;
+  margin-bottom: 6px;
+}
+
+.timeline-bar {
+  position: relative;
+  height: 8px;
+  background: var(--surface2);
+  border-radius: 4px;
+  overflow: visible;
+  cursor: default;
+}
+
+.timeline-progress {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: width 0.25s linear;
+}
+
+/* Trigger markers on timeline */
+.trigger-marker {
+  position: absolute;
+  top: -6px;
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+.trigger-marker:hover { opacity: 0.7; }
+.trigger-marker.drag-delete { background: #f44336 !important; opacity: 0.45; transform: translateX(-50%) scaleY(1.4); }
+
+.timeline-times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ── Countdown / trigger flash ───────────────────────────────────────────── */
+#countdown {
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent2);
+  letter-spacing: -0.02em;
+  min-height: 40px;
+}
+
+#trigger-flash {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  border: 2px solid var(--border);
+  transition: background 0.05s, box-shadow 0.05s;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+#trigger-flash.active {
+  background: var(--accent2);
+  box-shadow: 0 0 10px var(--accent2);
+}
+
+/* ── Status badges ───────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge-green { background: #0e3a1f; color: var(--accent); }
+.badge-yellow { background: #3a2e00; color: var(--accent2); }
+.badge-red { background: #3a0e0e; color: var(--danger); }
+.badge-gray { background: var(--surface2); color: var(--text-muted); }
+
+/* ── Pause button ────────────────────────────────────────────────────────── */
+#pause-btn.paused { border-color: var(--accent2); color: var(--accent2); }
+
+/* ── Connection indicator ────────────────────────────────────────────────── */
+#ws-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+#ws-dot { width: 7px; height: 7px; border-radius: 50%; background: #555; }
+#ws-dot.connected { background: var(--accent); }
+
+/* ── Audio shape canvas ──────────────────────────────────────────────────── */
+#audio-shape-canvas {
+  width: 100%;
+  height: 80px;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  display: block;
+}
+
+/* ── Trigger list ────────────────────────────────────────────────────────── */
+.trigger-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.trigger-row:hover { background: var(--surface2); }
+.trigger-row.next { border-left: 3px solid var(--accent2); padding-left: 7px; }
+.trigger-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.trigger-ts { font-variant-numeric: tabular-nums; color: var(--text-muted); min-width: 60px; }
+.trigger-name { flex: 1; }
+.trigger-labels { font-size: 11px; color: var(--text-muted); }
+
+/* ── Form elements ───────────────────────────────────────────────────────── */
+input, select, textarea {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: var(--font);
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+.field { margin-bottom: 12px; }
+
+/* ── Responsive / mobile ─────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  main { padding: 10px; }
+  nav { padding: 8px 10px; }
+  #countdown { font-size: 22px; }
+}

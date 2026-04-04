@@ -1,0 +1,17 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-dotenv>=1.0.0
+spotipy>=2.24.0
+httpx>=0.27.0          # async HTTP for LedFX / HA calls
+websockets>=12.0
+sounddevice>=0.4.7     # audio capture (Windows / Linux / Pi)
+numpy>=1.26.0          # audio analysis
+scipy>=1.13.0          # signal processing for audio shape
+aiofiles>=23.2.1       # async file I/O
+pydantic>=2.7.0        # data models (FastAPI uses this)
+pydantic-settings>=2.3.0  # settings from .env
+python-multipart>=0.0.9   # form data support
+anthropic>=0.40.0         # Claude API for AI trigger generation
+redis<7                   # spotipy dep; redis 7.x has Python 3.14 ABC metaclass bug
+librosa>=0.11.0           # musical feature extraction
+soundfile>=0.13.0         # WAV read/write

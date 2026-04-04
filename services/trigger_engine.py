@@ -1,0 +1,1411 @@
+"""
+SpotFX — Music Event Trigger Engine.
+
+Watches the interpolated playback position and fires MusicTriggers at the
+right moment, accounting for:
+  - audio_latency_ms  (external, configured in settings)
+  - ledfx_trigger_buffer_ms  (user buffer; positive = fire earlier)
+  - state.ledfx_rtt_ms  (measured LedFX round-trip time)
+  - AudioShapeMeta.timestamp_offset_ms  (capture timing correction; cached per song)
+
+Algorithm:
+  Every TICK_MS, compute the "effective now" in song-ms, then check whether
+  any trigger's timestamp_ms falls in the window [last_tick, now).
+  Each trigger is fired at most once per playback of that song.
+"""
+from __future__ import annotations
+import asyncio
+import colorsys
+import logging
+import random
+import re
+import time
+from typing import Optional
+
+from config import settings
+from models.state import state
+from models.song_profile import SongProfile, MusicTrigger
+from models.music_event import MusicEvent, Action
+from services.profile_manager import get_event
+from services.audio_analyzer import load_audio_shape_meta, load_beats_for_uri, load_tempo_for_uri
+from services.websocket_manager import ws_manager
+from api import ledfx_client
+
+logger = logging.getLogger(__name__)
+
+TICK_MS = 50  # engine resolution — 50 ms tick
+
+
+class TriggerEngine:
+    """
+    Runs a loop that fires triggers against the current song profile.
+    Instantiate one and call run().
+    """
+
+    def __init__(self):
+        self._profile: Optional[SongProfile] = None
+        self._fired: set[str] = set()          # trigger ids fired this playback
+        self._pre_fired: set[str] = set()      # trigger ids whose pre-commands have fired
+        self._pre_ramp_fired: set[str] = set() # trigger ids whose brightness ramp has started
+        self._last_uri: str = ""
+        self._last_progress_ms: int = 0
+        # Track last called action per event id to avoid immediate repeat
+        self._last_action: dict[str, str] = {}  # event_id -> action index/key
+        self._shape_offset_ms: int = 0       # cached from AudioShapeMeta.timestamp_offset_ms
+        self._shape_offset_quality: float = 0.0  # cached quality score (r × difficulty)
+        # Pre-selection state for trigger preview
+        self._preselected: dict[str, Action] = {}           # trigger_id → pre-selected action (single events)
+        self._preselected_steps: dict[str, list] = {}       # trigger_id → [Optional[Action], ...] (sequence steps)
+        self._preselected_trigger_id: Optional[str] = None  # id of the currently-previewed trigger
+        self._preview_locked: bool = False                  # True after we sent locked=True
+        # AI suggestion set triggers (cached per song, used when use_unreviewed_ai_triggers is on)
+        self._ai_triggers: Optional[list[MusicTrigger]] = None
+        # Triggerless play: synthetic triggers generated at song load
+        self._triggerless_triggers: Optional[list[MusicTrigger]] = None
+        # Ramp task registry — tracked so they can be cancelled on song change
+        self._ramp_tasks: set[asyncio.Task] = set()
+
+    def _spawn_ramp(self, coro) -> asyncio.Task:
+        """Create a tracked ramp task. All ramp tasks should use this instead of create_task."""
+        task = asyncio.create_task(coro)
+        self._ramp_tasks.add(task)
+        task.add_done_callback(self._ramp_tasks.discard)
+        return task
+
+    def load_profile(self, profile: SongProfile) -> None:
+        self._profile = profile
+        if profile.spotify_uri != self._last_uri:
+            for task in list(self._ramp_tasks):
+                task.cancel()
+            self._ramp_tasks.clear()
+            self._fired.clear()
+            self._pre_fired.clear()
+            self._pre_ramp_fired.clear()
+            self._last_action.clear()
+            self._preselected.clear()
+            self._preselected_steps.clear()
+            self._preselected_trigger_id = None
+            self._preview_locked = False
+            self._last_uri = profile.spotify_uri
+            meta = load_audio_shape_meta(profile.spotify_uri)
+            self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
+            self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            # Cache AI suggestion set as MusicTrigger list for this song
+            from services.suggestion_store import load_suggestion_set
+            track_id = profile.spotify_uri.split(":")[-1]
+            sug_set = load_suggestion_set(track_id)
+            if sug_set and sug_set.suggestions:
+                self._ai_triggers = [
+                    MusicTrigger(
+                        id=f"ai_{s.event_id}_{s.timestamp_ms}",
+                        timestamp_ms=s.timestamp_ms,
+                        event_id=s.event_id,
+                        labels=s.labels,
+                    )
+                    for s in sug_set.suggestions
+                ]
+            else:
+                self._ai_triggers = None
+            # Generate synthetic triggerless triggers if needed
+            if self._should_use_triggerless():
+                tp = self._resolve_triggerless_profile()
+                if tp:
+                    self._triggerless_triggers = self._generate_triggerless_triggers(
+                        tp, profile.duration_ms
+                    )
+                    logger.info("Triggerless: generated %d synthetic triggers from '%s'",
+                                len(self._triggerless_triggers), tp.name)
+                else:
+                    self._triggerless_triggers = None
+            else:
+                self._triggerless_triggers = None
+
+    def refresh_triggerless(self) -> None:
+        """Re-evaluate triggerless state for the current song (e.g. after dinner party toggle)."""
+        if not self._profile:
+            return
+
+        if state.dinner_party_mode:
+            # Turning ON: generate synthetic triggers
+            tp = self._resolve_triggerless_profile()
+            if tp:
+                self._triggerless_triggers = self._generate_triggerless_triggers(
+                    tp, self._profile.duration_ms
+                )
+                self._fired = {tid for tid in self._fired if not tid.startswith("tl_")}
+                logger.info("Triggerless: refreshed %d synthetic triggers from '%s'",
+                            len(self._triggerless_triggers), tp.name)
+            else:
+                self._triggerless_triggers = None
+        else:
+            # Turning OFF
+            enabled_triggers = sorted(
+                [t for t in self._profile.triggers if t.enabled],
+                key=lambda t: t.timestamp_ms,
+            )
+            if enabled_triggers:
+                # Song has real triggers: switch to normal mode and fire Song Start immediately.
+                # Pre-mark every trigger in the past + next 10 song-seconds as fired so
+                # the main loop doesn't fire them all at once.
+                self._triggerless_triggers = None
+                song_start = enabled_triggers[0]
+                now_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+                cutoff_ms = now_ms + 10_000
+                skip_ids = {
+                    t.id for t in self._profile.triggers
+                    if t.id != song_start.id and t.timestamp_ms <= cutoff_ms
+                }
+                self._fired.update(skip_ids)
+                self._pre_fired.update(skip_ids)
+                self._pre_ramp_fired.update(skip_ids)
+                self._fired.add(song_start.id)
+                logger.info(
+                    "Dinner Party off: firing Song Start trigger %s; suppressing %d triggers within 10s window",
+                    song_start.id, len(skip_ids),
+                )
+                import asyncio as _asyncio
+                _asyncio.create_task(self.fire_event_now(song_start.event_id, song_start.labels))
+            else:
+                # No real triggers: let Dinner Party synthetic triggers finish this song
+                logger.info(
+                    "Dinner Party off: no profile triggers — completing song with existing synthetic triggers"
+                )
+                # _triggerless_triggers unchanged; next song won't use Dinner Party
+                # because state.dinner_party_mode is already False
+
+    def _get_active_triggers(self) -> list[MusicTrigger]:
+        """Return the trigger list to use: triggerless synthetic, AI suggestion set, or profile triggers."""
+        if self._triggerless_triggers is not None:
+            return self._triggerless_triggers
+        if state.use_unreviewed_ai_triggers and self._ai_triggers:
+            return self._ai_triggers
+        return self._profile.triggers if self._profile else []
+
+    # ── Triggerless play helpers ────────────────────────────────────────────
+
+    def _should_use_triggerless(self) -> bool:
+        """Check if triggerless mode should be active for the current song."""
+        if state.dinner_party_mode:
+            return True
+        # Profile with zero enabled triggers
+        triggers = self._get_active_triggers()
+        return len([t for t in triggers if t.enabled]) == 0
+
+    def _resolve_triggerless_profile(self):
+        """Find the right triggerless profile for the current context."""
+        from services.profile_manager import find_triggerless_for_genres, list_triggerless_profiles
+        if state.dinner_party_mode:
+            for p in list_triggerless_profiles():
+                if p.name.lower().strip() == "dinner party":
+                    logger.info("Triggerless: resolved Dinner Party profile '%s'", p.name)
+                    return p
+            logger.warning("Triggerless: Dinner Party mode ON but no profile named 'Dinner Party' found")
+            return None
+        genres = []
+        if state.current_track:
+            genres = state.current_track.genres or []
+        if not genres and self._profile:
+            genres = self._profile.artist_genre or []
+        result = find_triggerless_for_genres(genres)
+        logger.info("Triggerless: resolved genre profile '%s' for genres %s",
+                     result.name if result else None, genres)
+        return result
+
+    def _generate_triggerless_triggers(self, tp, duration_ms: int) -> list[MusicTrigger]:
+        """Generate synthetic MusicTrigger objects from a TriggerlessProfile."""
+        triggers: list[MusicTrigger] = []
+        end_cutoff = duration_ms - tp.end_pre_fire_ms if tp.end_event_id else duration_ms
+
+        # 1. Start event at 0ms
+        if tp.start_event_id:
+            triggers.append(MusicTrigger(
+                id="tl_start_0", timestamp_ms=0,
+                event_id=tp.start_event_id, labels=["triggerless", "start"],
+            ))
+
+        # 2. Scene events at regular intervals (first fire after one full interval)
+        scene_timestamps: set[int] = set()
+        if tp.scene_event_id and tp.scene_change_interval_s > 0:
+            interval_ms = tp.scene_change_interval_s * 1000
+            t = interval_ms
+            while t < end_cutoff:
+                scene_timestamps.add(t)
+                triggers.append(MusicTrigger(
+                    id=f"tl_scene_{t}", timestamp_ms=t,
+                    event_id=tp.scene_event_id, labels=["triggerless", "scene"],
+                ))
+                t += interval_ms
+
+        # 3. Flare events (skip timestamps that coincide with scene events)
+        if tp.flare_event_id and tp.flare_interval_s > 0:
+            flare_interval_ms = tp.flare_interval_s * 1000
+            t = flare_interval_ms
+            while t < end_cutoff:
+                if t not in scene_timestamps:
+                    triggers.append(MusicTrigger(
+                        id=f"tl_flare_{t}", timestamp_ms=t,
+                        event_id=tp.flare_event_id, labels=["triggerless", "flare"],
+                    ))
+                t += flare_interval_ms
+
+        # 4. End event
+        if tp.end_event_id and duration_ms > tp.end_pre_fire_ms:
+            triggers.append(MusicTrigger(
+                id=f"tl_end_{end_cutoff}", timestamp_ms=end_cutoff,
+                event_id=tp.end_event_id, labels=["triggerless", "end"],
+            ))
+
+        triggers.sort(key=lambda t: t.timestamp_ms)
+        return triggers
+
+    # ── Shape offset ─────────────────────────────────────────────────────────
+
+    def reload_shape_offset(self, uri: str) -> None:
+        """Hot-reload timestamp_offset_ms for the currently playing song."""
+        if self._last_uri == uri:
+            meta = load_audio_shape_meta(uri)
+            self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
+            self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            logger.info(
+                "Shape offset reloaded: %+dms Q=%.2f for %s",
+                self._shape_offset_ms, self._shape_offset_quality, uri,
+            )
+
+    def _effective_offset_ms(self) -> int:
+        """
+        Total ms to subtract from the song timestamp when deciding to fire.
+        Positive result means we fire triggers earlier.
+        """
+        return (
+            settings.ledfx_trigger_buffer_ms
+            + int(state.ledfx_rtt_ms)
+            + self._shape_offset_ms
+        )
+
+    @staticmethod
+    def _resolve_step_actions(step) -> list:
+        """Return the effective action list for a step (multi-action or single)."""
+        if step.actions:
+            return list(step.actions)
+        if step.action is not None:
+            return [step.action]
+        return []
+
+    def _select_action(self, event: MusicEvent, labels: list[str]) -> Optional[Action]:
+        """
+        Pick an action from event.actions respecting label filters and weights.
+        De-weights the last-used action to avoid consecutive repeats.
+        """
+        if not event.actions:
+            return None
+
+        pos_labels = [l.lower() for l in labels if not l.startswith("-")]
+        neg_labels = [l[1:].lower() for l in labels if l.startswith("-")]
+
+        # Candidates are (original_index, action) pairs so identical actions are distinct
+        candidates: list[tuple[int, Action]] = []
+        for i, action in enumerate(event.actions):
+            action_labels_lower = [l.lower() for l in action.labels]
+            # Positive filter: if any pos labels given, action must match at least one
+            if pos_labels and not any(pl in action_labels_lower for pl in pos_labels):
+                continue
+            # Negative filter
+            if any(nl in action_labels_lower for nl in neg_labels):
+                continue
+            # Weight-0 actions are label-only: skip them unless a positive label matched
+            if action.weight == 0 and not pos_labels:
+                continue
+            candidates.append((i, action))
+
+        if not candidates:
+            # Fall back to all actions (ignore labels) and log low-level alert
+            logger.info("No actions matched labels %s for event '%s'; ignoring filter.", labels, event.name)
+            candidates = list(enumerate(event.actions))
+
+        if not candidates:
+            return None
+
+        # Zero out the weight of the last-fired action (by index) to avoid consecutive repeats
+        last_idx = self._last_action.get(event.id)  # int index or None
+        weights = [0.0 if i == last_idx else a.weight for i, a in candidates]
+
+        # If all weights are 0 (last-action de-weight or weight-0 label-only actions), allow repeat
+        if sum(weights) == 0:
+            weights = [a.weight for _, a in candidates]
+        # Still zero (all candidates are weight-0 label-only) — use uniform weights
+        if sum(weights) == 0:
+            weights = [1.0] * len(candidates)
+
+        chosen_i, selected = random.choices(candidates, weights=weights, k=1)[0]
+        self._last_action[event.id] = chosen_i
+        return selected
+
+    def _describe_action(self, action: Action, _depth: int = 0) -> str:
+        """Return a short human-readable label for a pre-selected action."""
+        if action.type == "ledfx_scene":
+            return action.scene_id
+        elif action.type == "ledfx_ambient":
+            parts = [action.color] if action.color else []
+            if action.brightness is not None:
+                parts.append(f"{int(action.brightness * 100)}% bright")
+            return "Ambient " + (", ".join(parts) if parts else "–")
+        elif action.type == "ledfx_ambient_color":
+            return "Complementary color"
+        elif action.type == "ledfx_reverse":
+            return "Reverse"
+        elif action.type == "ledfx_global_brightness":
+            return f"Brightness {int(action.brightness * 100)}%"
+        elif action.type == "ledfx_global_transition":
+            return f"Transition {action.transition_time}s"
+        elif action.type == "event_ref":
+            if _depth < 3:
+                sub = get_event(action.event_id)
+                if sub and sub.event_type == "single":
+                    resolved = self._select_action(sub, [])
+                    if resolved:
+                        return f"→ {self._describe_action(resolved, _depth + 1)}"
+                elif sub:
+                    return f"→ {sub.name}"
+            return "→ (event ref)"
+        return action.type
+
+    def _preselect_sequence_steps(
+        self, event: MusicEvent, trigger_labels: list[str]
+    ) -> tuple[list, str]:
+        """
+        For a sequence event, pre-select one action per event-type step.
+        Returns (step_actions_list, action_label_string).
+        step_actions_list[i] is the pre-selected Action for step i (None if not applicable).
+        """
+        step_actions: list = []
+        label_parts: list[str] = []
+        for step in event.sequence_steps:
+            if step.step_type == "event" and step.event_id:
+                sub_event = get_event(step.event_id)
+                if sub_event and sub_event.event_type == "single":
+                    merged = trigger_labels + (step.labels or [])
+                    action = self._select_action(sub_event, merged)
+                    step_actions.append(action)
+                    label_parts.append(self._describe_action(action) if action else "?")
+                else:
+                    step_actions.append(None)
+                    if sub_event:
+                        label_parts.append(sub_event.name)
+            elif step.step_type == "action" and step.action:
+                step_actions.append(None)  # deterministic, no need to store
+                label_parts.append(self._describe_action(step.action))
+            else:
+                step_actions.append(None)
+        return step_actions, " → ".join(label_parts)
+
+    async def fire_event_now(self, event_id: str, labels: list[str] | None = None) -> bool:
+        """
+        Directly fire a MusicEvent by id, bypassing song-position checks.
+        Used by the test/fire endpoint in the UI. Returns True on success.
+
+        For single events: applies pre-brightness (ramp awaited) and pre-transition,
+        waits the configured lead time, then fires the main action.
+        """
+        event = get_event(event_id)
+        if event is None:
+            logger.warning("fire_event_now: unknown event %s", event_id)
+            return False
+        if event.event_type == "single":
+            await self._apply_pre_commands(event, list(labels or []))
+            lead_ms = max(
+                settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
+                settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
+            )
+            if lead_ms > 0:
+                await asyncio.sleep(lead_ms / 1000)
+            action = self._select_action(event, labels or [])
+            if action is None:
+                return False
+            await self._execute_action(action, labels or [])
+        elif event.event_type == "sequence":
+            await self._execute_sequence(event, labels or [])
+        elif event.event_type == "beat_sequence":
+            # Test fire: use current song position or 0; fallback beats used if no librosa data
+            trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+            await self._execute_beat_sequence(event, trigger_ms, labels or [], step1_prefired=False)
+        return True
+
+    async def _fire_trigger(
+        self, trigger: MusicTrigger, fired_at_ms: int = 0, effective_offset_ms: int = 0
+    ) -> None:
+        """Resolve and execute the action(s) for a trigger."""
+        if state.paused:
+            logger.debug("Trigger %s skipped (service paused).", trigger.id)
+            return
+
+        event = get_event(trigger.event_id)
+        if event is None:
+            logger.warning("Trigger %s references unknown event %s.", trigger.id, trigger.event_id)
+            return
+
+        if event.event_type == "single":
+            # Use pre-selected action if available, else fall back to selecting now
+            action = self._preselected.pop(trigger.id, None) or self._select_action(event, trigger.labels)
+            if action is None:
+                return
+            await self._execute_action(action, trigger.labels)
+
+        elif event.event_type == "sequence":
+            pre_steps = self._preselected_steps.pop(trigger.id, None)
+            await self._execute_sequence(event, trigger.labels, pre_steps=pre_steps)
+
+        elif event.event_type == "beat_sequence":
+            step1_prefired = trigger.id in self._pre_fired
+            asyncio.create_task(
+                self._execute_beat_sequence(event, trigger.timestamp_ms, trigger.labels, step1_prefired)
+            )
+
+        # Broadcast trigger fired (flash animation + clear preview on client)
+        asyncio.create_task(
+            ws_manager.broadcast_trigger_fired(
+                trigger.id, event.name, event.color,
+                scheduled_ms=trigger.timestamp_ms,
+                fired_at_ms=fired_at_ms,
+                effective_offset_ms=effective_offset_ms,
+            )
+        )
+
+    async def _fire_pre_commands(self, event: MusicEvent, trigger_id: str, labels: list[str] | None = None) -> None:
+        """Fire global brightness/transition ahead of a single event's main action."""
+        ov = self._parse_label_overrides(labels or [])
+        if not ov.get("skip_brightness") and event.pre_brightness_enabled and trigger_id not in self._pre_ramp_fired:
+            value = ov.get("brightness_value", event.pre_brightness_value)
+            await ledfx_client.set_config({"global_brightness": value})
+        if not ov.get("skip_transition") and event.pre_transition_enabled:
+            value = ov.get("transition_value", event.pre_transition_value)
+            cfg = {"transition_time": value}
+            for vid in ["single-color-effect", "crystal-mapper", "strip-effect"]:
+                await ledfx_client.set_virtual_config(vid, cfg)
+
+    async def _execute_action(self, action: Action, labels: list[str] | None = None, await_ramps: bool = False) -> None:
+        """Dispatch a single action."""
+        if action.type == "event_ref":
+            sub = get_event(action.event_id)
+            if sub is None:
+                logger.warning("event_ref: unknown event %s", action.event_id)
+                return
+            if sub.event_type == "sequence":
+                await self._execute_sequence(sub, labels or [])
+            elif sub.event_type == "beat_sequence":
+                trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+                await self._execute_beat_sequence(sub, trigger_ms, labels or [], step1_prefired=False)
+            else:
+                sub_action = self._select_action(sub, labels or [])
+                if sub_action:
+                    await self._execute_action(sub_action, labels, await_ramps=await_ramps)
+            return
+
+        if action.type == "ledfx_scene":
+            await ledfx_client.trigger_scene(action.scene_id)
+
+        elif action.type == "ledfx_ambient":
+            # Build effect config patch from non-None fields
+            patch: dict = {}
+            if action.color:
+                patch["gradient"] = action.color
+                patch["background_color"] = action.color
+                patch["sparks_color"] = action.color
+            if action.brightness is not None:
+                patch["brightness"] = action.brightness
+            if action.blur is not None:
+                patch["blur"] = action.blur
+            if action.bass_decay_rate is not None:
+                patch["bass_decay_rate"] = action.bass_decay_rate
+            if action.background_brightness is not None:
+                patch["background_brightness"] = action.background_brightness
+            if patch:
+                await ledfx_client.set_virtual_effect("single-color-effect", "power", patch)
+            if action.max_brightness is not None:
+                await ledfx_client.set_virtual_config(
+                    "single-color-effect", {"max_brightness": action.max_brightness}
+                )
+
+        elif action.type == "ledfx_ambient_color":
+            # Read cached color — fall back to live GET if cache is empty
+            virtual = state.ledfx_virtual_cache.get("single-color-effect", {})
+            if not virtual:
+                live = await ledfx_client.get_virtual("single-color-effect")
+                if live:
+                    virtual = live.get("single-color-effect", live)
+                    state.ledfx_virtual_cache["single-color-effect"] = virtual
+                    logger.info("ledfx_ambient_color: cache was empty, fetched live virtual state")
+            effect_type = virtual.get("effect", {}).get("type", "")
+            if effect_type.lower() != "power":
+                logger.warning(
+                    "ledfx_ambient_color skipped — single-color-effect is running '%s', not 'power'",
+                    effect_type,
+                )
+                return
+            effect_cfg = virtual.get("effect", {}).get("config", {})
+            raw = effect_cfg.get("gradient") or effect_cfg.get("background_color", "#ffffff")
+            m = re.search(r'#([0-9a-fA-F]{6})', raw)
+            if not m:
+                logger.warning("ledfx_ambient_color: no hex color in cached value '%s'", raw)
+                return
+            h = m.group(0)
+            r, g, b = int(h[1:3], 16) / 255, int(h[3:5], 16) / 255, int(h[5:7], 16) / 255
+            hue, s, v = colorsys.rgb_to_hsv(r, g, b)
+            r2, g2, b2 = colorsys.hsv_to_rgb((hue + 0.5) % 1.0, s, v)
+            comp = f"#{int(r2 * 255):02x}{int(g2 * 255):02x}{int(b2 * 255):02x}"
+            await ledfx_client.set_virtual_effect(
+                "single-color-effect", "power",
+                {"gradient": comp, "background_color": comp, "sparks_color": comp},
+            )
+            # Update cache immediately so a back-to-back firing reads the new color
+            cached = state.ledfx_virtual_cache.get("single-color-effect", {})
+            cfg = cached.get("effect", {}).get("config")
+            if cfg is not None:
+                cfg["gradient"] = comp
+                cfg["background_color"] = comp
+                cfg["sparks_color"] = comp
+
+        elif action.type == "ledfx_reverse":
+            # Crystal-Mapper: negate spin (radial) or flip invert (concentric)
+            # Cache is normalized: poll_virtual_states stores the virtual data directly
+            cm = state.ledfx_virtual_cache.get("crystal-mapper", {})
+            cm_effect = cm.get("effect", {})
+            cm_type = cm_effect.get("type")
+            cm_cfg = cm_effect.get("config", {})
+            if cm_type == "radial" and "spin" in cm_cfg:
+                await ledfx_client.set_virtual_effect(
+                    "crystal-mapper", cm_type, {"spin": -cm_cfg["spin"]}
+                )
+                cm_cfg["spin"] = -cm_cfg["spin"]
+            elif cm_type == "concentric" and "invert" in cm_cfg:
+                await ledfx_client.set_virtual_effect(
+                    "crystal-mapper", cm_type, {"invert": not cm_cfg["invert"]}
+                )
+                cm_cfg["invert"] = not cm_cfg["invert"]
+
+            # Strip Effect: toggle flip if using power effect (no-ops if virtual absent)
+            se = state.ledfx_virtual_cache.get("strip-effect", {})
+            se_effect = se.get("effect", {})
+            se_type = se_effect.get("type")
+            se_cfg = se_effect.get("config", {})
+            if se_type == "power" and "flip" in se_cfg:
+                await ledfx_client.set_virtual_effect(
+                    "strip-effect", se_type, {"flip": not se_cfg["flip"]}
+                )
+                se_cfg["flip"] = not se_cfg["flip"]
+
+        elif action.type == "ledfx_global_brightness":
+            ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+            if ramp_ms > 0:
+                if await_ramps:
+                    await ledfx_client.ramp_brightness(action.brightness, ramp_ms)
+                else:
+                    self._spawn_ramp(ledfx_client.ramp_brightness(action.brightness, ramp_ms))
+            else:
+                await ledfx_client.set_config({"global_brightness": action.brightness})
+
+        elif action.type == "ledfx_global_transition":
+            cfg: dict = {"transition_time": action.transition_time}
+            if action.transition_mode:
+                cfg["transition_mode"] = action.transition_mode
+            for vid in ["single-color-effect", "crystal-mapper", "strip-effect"]:
+                await ledfx_client.set_virtual_config(vid, cfg)
+
+        elif action.type == "ledfx_effect_param":
+            from services.effect_params import get_virtuals_for_category, resolve_params, get_all_virtual_ids, get_param_meta
+            if action.virtual_id:
+                virtuals = [action.virtual_id]
+            elif action.category:
+                virtuals = get_virtuals_for_category(action.category)
+            else:
+                virtuals = get_all_virtual_ids()
+            ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+            instant_coros = []
+            polar_changes: dict = {}  # vid → (angle, radius, effect_type)
+            for vid in virtuals:
+                cached = ledfx_client.get_virtual_cache(vid)
+                if not cached:
+                    # Live fallback when cache is empty (e.g. first fire after startup)
+                    live_data = await ledfx_client.get_virtual(vid)
+                    if live_data:
+                        cached = live_data.get(vid, live_data)
+                        state.ledfx_virtual_cache[vid] = cached
+                if not cached:
+                    continue
+                effect_type = cached.get("effect", {}).get("type")
+                if not effect_type:
+                    continue
+                effect_cfg = cached.get("effect", {}).get("config", {})
+                patch: dict = {}
+                for change in action.params:
+                    for pname in resolve_params(effect_type, change.param_label):
+                        meta = get_param_meta(effect_type, pname)
+                        if meta and meta.get("type") == "polar":
+                            # Defer to polar ramp; store per-virtual, don't add to patch
+                            if change.polar_angle is not None and change.polar_radius is not None:
+                                polar_changes[vid] = (change.polar_angle, change.polar_radius, effect_type)
+                            continue
+                        elif meta and meta.get("type") in ("color", "gradient"):
+                            if change.string_value is not None:
+                                patch[pname] = change.string_value
+                        elif meta and meta.get("sign_control"):
+                            # Virtual param: maps_to holds the real LedFX param; control sign only
+                            actual_pname = meta["maps_to"]
+                            current = ledfx_client.get_cached_param(vid, actual_pname) or 0.0
+                            ta = change.toggle_action
+                            if ta == "on":
+                                new_val = abs(current)
+                            elif ta == "off":
+                                new_val = -abs(current)
+                            else:  # "toggle" or None
+                                new_val = -current
+                            patch[actual_pname] = round(new_val, 4)
+                        elif meta and meta.get("type") == "toggle":
+                            ta = change.toggle_action
+                            if ta == "on":
+                                patch[pname] = True
+                            elif ta == "off":
+                                patch[pname] = False
+                            else:  # "toggle" or None
+                                patch[pname] = not effect_cfg.get(pname, False)
+                        elif meta and meta.get("magnitude_only"):
+                            # Preserve sign of current value, only change magnitude
+                            current = ledfx_client.get_cached_param(vid, pname) or 0.0
+                            sign = -1 if current < 0 else 1
+                            patch[pname] = round(sign * abs(change.target_value), 4)
+                        elif meta and meta.get("scale_offset") and change.flip_sign:
+                            # X/Y offset flip: work in frontend -1..1 space, then convert to LedFX 0..1
+                            _cl = ledfx_client.get_cached_param(vid, pname)
+                            cur_l = _cl if _cl is not None else 0.5
+                            cur_f = (cur_l - 0.5) * 2  # → frontend -1..1
+                            new_sign = 1 if cur_f < 0 else -1
+                            mag = abs(change.target_value) if change.target_value != 0 else abs(cur_f)
+                            patch[pname] = round((new_sign * mag) / 2 + 0.5, 4)
+                        elif meta and meta.get("scale_offset"):
+                            # X/Y offset normal: target_value is in frontend -1..1, convert to LedFX 0..1
+                            patch[pname] = round(change.target_value / 2 + 0.5, 4)
+                        elif meta and meta.get("flip_sign") and change.flip_sign:
+                            # twist/star etc.: flip sign in native LedFX space
+                            current = ledfx_client.get_cached_param(vid, pname) or 0.0
+                            new_sign = 1 if current < 0 else -1
+                            mag = abs(change.target_value) if change.target_value != 0 else abs(current)
+                            patch[pname] = round(new_sign * mag, 4)
+                        elif meta and meta.get("type") == "move_xy":
+                            # Relative move in XY: add delta to current position, clamp -1..1
+                            dx = change.move_x or 0.0
+                            dy = change.move_y or 0.0
+                            _cxl = ledfx_client.get_cached_param(vid, "x_offset")
+                            _cyl = ledfx_client.get_cached_param(vid, "y_offset")
+                            cur_xl = _cxl if _cxl is not None else 0.5
+                            cur_yl = _cyl if _cyl is not None else 0.5
+                            new_xf = max(-1, min(1, (cur_xl - 0.5) * 2 + dx))
+                            new_yf = max(-1, min(1, (cur_yl - 0.5) * 2 + dy))
+                            patch["x_offset"] = round(new_xf / 2 + 0.5, 4)
+                            patch["y_offset"] = round(new_yf / 2 + 0.5, 4)
+                        elif meta and meta.get("type") == "move_polar":
+                            # Relative move in polar: add deltas to current angle/radius
+                            import math as _math
+                            da = change.move_angle or 0.0
+                            dr = change.move_radius or 0.0
+                            _cxl = ledfx_client.get_cached_param(vid, "x_offset")
+                            _cyl = ledfx_client.get_cached_param(vid, "y_offset")
+                            cur_xl = _cxl if _cxl is not None else 0.5
+                            cur_yl = _cyl if _cyl is not None else 0.5
+                            cx = (cur_xl - 0.5) * 2
+                            cy = (cur_yl - 0.5) * 2
+                            cur_r = _math.sqrt(cx ** 2 + cy ** 2)
+                            cur_a = _math.degrees(_math.atan2(cx, cy))
+                            polar_changes[vid] = (cur_a + da, max(0, min(1, cur_r + dr)), effect_type)
+                            continue
+                        else:
+                            patch[pname] = change.target_value
+                if not patch:
+                    continue
+                # Booleans fire instantly; strings split into instant vs ramp by smooth flag; numerics can ramp
+                bool_patch = {k: v for k, v in patch.items() if isinstance(v, bool)}
+                str_patch  = {k: v for k, v in patch.items() if isinstance(v, str)}
+                num_patch  = {k: v for k, v in patch.items() if not isinstance(v, (bool, str))}
+                # Split strings: smooth=True + ramp_ms>0 → gradient ramp; else instant
+                instant_str: dict = {}
+                ramp_str: dict = {}
+                for k, v in str_patch.items():
+                    pmeta = get_param_meta(effect_type, k)
+                    if pmeta and pmeta.get("smooth") and ramp_ms > 0:
+                        ramp_str[k] = v
+                    else:
+                        instant_str[k] = v
+                if bool_patch or instant_str:
+                    instant_coros.append(ledfx_client.set_virtual_effect(vid, effect_type, {**bool_patch, **instant_str}))
+                    # Update cache immediately — instant, so no ramp reads these before they land
+                    effect_cfg.update({**bool_patch, **instant_str})
+                if num_patch:
+                    if ramp_ms > 0:
+                        if await_ramps:
+                            await ledfx_client.ramp_effect_params(vid, effect_type, num_patch, ramp_ms)
+                            # Update cache AFTER the ramp so the next step's ramp_effect_params
+                            # reads the correct post-ramp start value (not the pre-ramp value).
+                            # Revert snapshot was taken before the sequence, so it's unaffected.
+                            effect_cfg.update(num_patch)
+                        else:
+                            self._spawn_ramp(
+                                ledfx_client.ramp_effect_params(vid, effect_type, num_patch, ramp_ms)
+                            )
+                    else:
+                        instant_coros.append(ledfx_client.set_virtual_effect(vid, effect_type, num_patch))
+                        effect_cfg.update(num_patch)
+                if ramp_str:
+                    if await_ramps:
+                        await ledfx_client.ramp_gradient_params(vid, effect_type, ramp_str, ramp_ms)
+                    else:
+                        self._spawn_ramp(
+                            ledfx_client.ramp_gradient_params(vid, effect_type, ramp_str, ramp_ms)
+                        )
+            if instant_coros:
+                await asyncio.gather(*instant_coros)
+            # Dispatch polar offset ramps (x_offset + y_offset interpolated in polar space)
+            if polar_changes:
+                import math as _math
+                polar_instant_coros = []
+                for _vid, (_angle, _radius, _etype) in polar_changes.items():
+                    if ramp_ms > 0:
+                        coro = ledfx_client.ramp_polar_offset(_vid, _etype, _angle, _radius, ramp_ms)
+                        if await_ramps:
+                            await coro
+                        else:
+                            self._spawn_ramp(coro)
+                    else:
+                        _ar = _math.radians(_angle)
+                        _xl = round(_math.sin(_ar) * _radius / 2 + 0.5, 4)
+                        _yl = round(_math.cos(_ar) * _radius / 2 + 0.5, 4)
+                        polar_instant_coros.append(
+                            ledfx_client.set_virtual_effect(_vid, _etype, {"x_offset": _xl, "y_offset": _yl})
+                        )
+                if polar_instant_coros:
+                    await asyncio.gather(*polar_instant_coros)
+
+        else:
+            logger.warning("Unknown action type: %s", action.type)
+
+    async def _snapshot_for_revert(self, event: MusicEvent) -> dict:
+        """
+        Snapshot only the specific LedFX param values this sequence will change.
+
+        Snapshot format:
+          {
+            "global_brightness": float,
+            "virtual_effects":  {vid: {"type": str, "params": {pname: value}}},
+            "virtual_configs":  {vid: {key: value}},
+          }
+        """
+        from api import ledfx_client as _lc
+        from services.effect_params import resolve_params, get_param_meta, get_virtuals_for_category
+
+        snapshot: dict = {}
+
+        def _snap_effect(vid: str, param_names: list[str]) -> None:
+            cached = state.ledfx_virtual_cache.get(vid, {})
+            etype = cached.get("effect", {}).get("type")
+            econfig = cached.get("effect", {}).get("config", {})
+            if not etype:
+                return
+            ve = snapshot.setdefault("virtual_effects", {})
+            vsnap = ve.setdefault(vid, {"type": etype, "params": {}})
+            for p in param_names:
+                if p in econfig and p not in vsnap["params"]:
+                    vsnap["params"][p] = econfig[p]
+
+        def _snap_vconfig(vid: str, keys: list[str]) -> None:
+            vcfg = state.ledfx_virtual_cache.get(vid, {}).get("config", {})
+            vc = snapshot.setdefault("virtual_configs", {})
+            entry = vc.setdefault(vid, {})
+            for k in keys:
+                if k in vcfg and k not in entry:
+                    entry[k] = vcfg[k]
+
+        steps_to_check = (
+            event.beat_sequence_steps if event.event_type == "beat_sequence"
+            else event.sequence_steps
+        )
+        for step in steps_to_check:
+            if step.step_type != "action":
+                continue
+            all_actions = self._resolve_step_actions(step)
+            if not all_actions:
+                continue
+            for action in all_actions:
+                if action.type == "ledfx_global_brightness":
+                    snapshot.setdefault("global_brightness", _lc._current_brightness)
+
+                elif action.type == "ledfx_ambient":
+                    if action.color is not None:
+                        _snap_effect("single-color-effect",
+                                     ["gradient", "background_color", "sparks_color"])
+                    for field, pname in [
+                        ("brightness",            "brightness"),
+                        ("blur",                  "blur"),
+                        ("bass_decay_rate",        "bass_decay_rate"),
+                        ("background_brightness",  "background_brightness"),
+                    ]:
+                        if getattr(action, field) is not None:
+                            _snap_effect("single-color-effect", [pname])
+                    if action.max_brightness is not None:
+                        _snap_vconfig("single-color-effect", ["max_brightness"])
+
+                elif action.type == "ledfx_ambient_color":
+                    _snap_effect("single-color-effect",
+                                 ["gradient", "background_color", "sparks_color"])
+
+                elif action.type == "ledfx_reverse":
+                    cm = state.ledfx_virtual_cache.get("crystal-mapper", {})
+                    cm_type = cm.get("effect", {}).get("type")
+                    if cm_type == "radial":
+                        _snap_effect("crystal-mapper", ["spin"])
+                    elif cm_type == "concentric":
+                        _snap_effect("crystal-mapper", ["invert"])
+                    _snap_effect("strip-effect", ["flip"])
+
+                elif action.type == "ledfx_global_transition":
+                    for vid in _lc.POLLED_VIRTUALS:
+                        _snap_vconfig(vid, ["transition_time", "transition_mode"])
+
+                elif action.type == "ledfx_effect_param":
+                    if action.virtual_id:
+                        virtuals = [action.virtual_id]
+                    elif action.category:
+                        virtuals = get_virtuals_for_category(action.category)
+                    else:
+                        virtuals = list(_lc.POLLED_VIRTUALS)
+                    for vid in virtuals:
+                        cached = state.ledfx_virtual_cache.get(vid, {})
+                        effect_type = cached.get("effect", {}).get("type")
+                        if not effect_type:
+                            continue
+                        pnames: list[str] = []
+                        for change in action.params:
+                            for pname in resolve_params(effect_type, change.param_label):
+                                meta = get_param_meta(effect_type, pname)
+                                actual = meta["maps_to"] if (meta and meta.get("sign_control")) else pname
+                                pnames.append(actual)
+                        if pnames:
+                            _snap_effect(vid, pnames)
+
+        return snapshot
+
+    async def _restore_from_snapshot(self, snapshot: dict, revert_cfg) -> None:
+        """Restore previously snapshotted LedFX state (targeted params only)."""
+        from api import ledfx_client as _lc
+
+        t_ms = revert_cfg.transition_ms
+
+        if "global_brightness" in snapshot:
+            target = snapshot["global_brightness"]
+            if t_ms > 0:
+                self._spawn_ramp(_lc.ramp_brightness(target, t_ms))
+            else:
+                await _lc.set_config({"global_brightness": target})
+
+        for vid, vsnap in snapshot.get("virtual_effects", {}).items():
+            etype = vsnap["type"]
+            params = vsnap["params"]
+            if not params:
+                continue
+            numeric     = {k: v for k, v in params.items() if isinstance(v, (int, float))}
+            non_numeric = {k: v for k, v in params.items() if not isinstance(v, (int, float))}
+            if non_numeric:
+                await _lc.set_virtual_effect(vid, etype, non_numeric)
+            if numeric and t_ms > 0:
+                # Refresh cache so ramp_effect_params starts from the post-sequence values
+                fresh = await _lc.get_virtual(vid)
+                if fresh:
+                    state.ledfx_virtual_cache[vid] = fresh.get(vid, fresh)
+                self._spawn_ramp(_lc.ramp_effect_params(vid, etype, numeric, t_ms))
+            elif numeric:
+                await _lc.set_virtual_effect(vid, etype, numeric)
+
+        for vid, vcfg in snapshot.get("virtual_configs", {}).items():
+            if vcfg:
+                await _lc.set_virtual_config(vid, vcfg)
+
+        logger.info("Revert applied")
+
+    @staticmethod
+    def _parse_label_overrides(labels: list[str]) -> dict:
+        """Extract special label overrides from the labels list."""
+        ov: dict = {}
+        for l in labels:
+            if l == "-brightness":
+                ov["skip_brightness"] = True
+            elif l == "-transition":
+                ov["skip_transition"] = True
+            elif l.startswith("=brightness:"):
+                try: ov["brightness_value"] = float(l.split(":", 1)[1])
+                except ValueError: pass
+            elif l.startswith("=transition:"):
+                try: ov["transition_value"] = float(l.split(":", 1)[1])
+                except ValueError: pass
+            elif l.startswith("=ramp:"):
+                try: ov["ramp_ms"] = int(l.split(":", 1)[1])
+                except ValueError: pass
+        return ov
+
+    async def _apply_pre_commands(self, event: MusicEvent, labels: list[str] | None = None) -> None:
+        """Apply pre-brightness and pre-transition before a sequence or single event fires.
+        Special labels: -brightness/-transition skip; =brightness:/=transition:/=ramp: override.
+        = overrides are consumed (removed from labels) after use so nested events use their own values.
+        """
+        ov = self._parse_label_overrides(labels or [])
+        if not ov.get("skip_brightness") and event.pre_brightness_enabled:
+            value = ov.get("brightness_value", event.pre_brightness_value)
+            ramp_ms = ov.get("ramp_ms",
+                             event.pre_brightness_ramp_ms if event.pre_brightness_ramp_ms is not None
+                             else settings.smooth_ramp_ms)
+            if ramp_ms > 0:
+                await ledfx_client.ramp_brightness(value, ramp_ms)
+            else:
+                await ledfx_client.set_config({"global_brightness": value})
+            # Consume = overrides so they don't fire again in nested events
+            if labels:
+                labels[:] = [l for l in labels
+                             if not l.startswith("=brightness:") and not l.startswith("=ramp:")]
+        if not ov.get("skip_transition") and event.pre_transition_enabled:
+            value = ov.get("transition_value", event.pre_transition_value)
+            cfg = {"transition_time": value}
+            for vid in ["single-color-effect", "crystal-mapper", "strip-effect"]:
+                await ledfx_client.set_virtual_config(vid, cfg)
+            if labels:
+                labels[:] = [l for l in labels if not l.startswith("=transition:")]
+
+    async def _execute_sequence(
+        self, event: MusicEvent, labels: list[str], pre_steps: list | None = None
+    ) -> None:
+        """Execute a sequence of steps, then optionally revert LedFX state."""
+        # Snapshot BEFORE pre-commands so revert restores the true pre-event state
+        revert = event.revert
+        snapshot: dict = {}
+        if revert and revert.enabled:
+            snapshot = await self._snapshot_for_revert(event)
+        await self._apply_pre_commands(event, labels)
+
+        for step_idx, step in enumerate(event.sequence_steps):
+            if step.delay_ms > 0:
+                await asyncio.sleep(step.delay_ms / 1000)
+            if step.step_type == "action":
+                resolved = self._resolve_step_actions(step)
+                if resolved:
+                    await asyncio.gather(*(
+                        self._execute_action(a, labels, await_ramps=True)
+                        for a in resolved
+                    ))
+            elif step.step_type == "event" and step.event_id:
+                sub_event = get_event(step.event_id)
+                if sub_event is None:
+                    continue
+                # Apply step-level label filter (merge with caller labels)
+                merged_labels = labels + step.labels
+                if sub_event.event_type == "sequence":
+                    await self._execute_sequence(sub_event, merged_labels)
+                elif sub_event.event_type == "beat_sequence":
+                    trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+                    await self._execute_beat_sequence(sub_event, trigger_ms, merged_labels, step1_prefired=False)
+                else:
+                    # Use pre-selected action if available (matches what was previewed)
+                    pre = pre_steps[step_idx] if pre_steps and step_idx < len(pre_steps) else None
+                    action = pre or self._select_action(sub_event, merged_labels)
+                    if action:
+                        await self._execute_action(action, merged_labels, await_ramps=True)
+
+        if revert and revert.enabled and snapshot:
+            if revert.delay_ms > 0:
+                await asyncio.sleep(revert.delay_ms / 1000)
+            await self._restore_from_snapshot(snapshot, revert)
+
+    async def _execute_beat_sequence(
+        self,
+        event: MusicEvent,
+        trigger_ms: int,
+        labels: list[str],
+        step1_prefired: bool,
+    ) -> None:
+        """Execute a beat-timed sequence of steps."""
+        import copy as _copy
+
+        # Load beat timestamps
+        uri = state.current_track.spotify_uri if state.current_track else ""
+        beats_raw = load_beats_for_uri(uri) if uri else None
+        tempo_bpm = load_tempo_for_uri(uri) if uri else None
+        beat_interval_ms = round(60000 / tempo_bpm) if tempo_bpm else 500
+
+        if beats_raw is None:
+            fallback = event.beat_sequence_fallback
+            if fallback == "skip":
+                logger.warning("Beat sequence '%s': no beat data for %s — skipping", event.name, uri)
+                return
+            logger.info("Beat sequence '%s': no beat data — using %.1f BPM fallback",
+                        event.name, tempo_bpm or 120)
+            beats_raw = [{"ms": trigger_ms + i * beat_interval_ms} for i in range(200)]
+        else:
+            beats_raw = list(beats_raw)  # mutable copy so we can extend on overflow
+
+        # Find trigger beat index (closest beat to trigger_ms, shifted by per-event offset)
+        anchor_ms = trigger_ms + event.beat_sequence_start_offset_ms
+        trigger_beat_idx = min(range(len(beats_raw)), key=lambda i: abs(beats_raw[i]["ms"] - anchor_ms))
+
+        # Pre-compute timeline with ramp compression
+        # timeline entry: (step | None, fire_time_ms, actual_ramp_ms, beat_idx, is_revert)
+        timeline: list[tuple] = []
+        current_beat = trigger_beat_idx
+        prev_fire_time: float = float("-inf")
+        prev_ramp_ms = 0
+
+        for i, step in enumerate(event.beat_sequence_steps):
+            if i > 0:
+                current_beat += 1 + step.delay_beats
+            while current_beat >= len(beats_raw):
+                beats_raw.append({"ms": beats_raw[-1]["ms"] + beat_interval_ms})
+
+            beat_ms = beats_raw[current_beat]["ms"]
+            resolved = self._resolve_step_actions(step) if step.step_type == "action" else []
+            ramp_ms = 0
+            if resolved:
+                # Use the longest ramp among all actions for compression purposes
+                ramp_ms = max(
+                    (getattr(a, "ramp_ms", None) or settings.smooth_ramp_ms)
+                    for a in resolved
+                )
+
+            raw_fire = (beat_ms - ramp_ms) if (step.pre_ramp and ramp_ms > 0) else beat_ms
+
+            # Ramp compression: ensure this step starts after previous action fully completes
+            earliest = prev_fire_time + prev_ramp_ms + 100
+            if raw_fire < earliest:
+                fire_time = earliest
+                actual_ramp = max(0, beat_ms - int(earliest))
+            else:
+                fire_time = raw_fire
+                actual_ramp = ramp_ms
+
+            timeline.append((step, fire_time, actual_ramp, current_beat, False))
+            prev_fire_time = fire_time
+            prev_ramp_ms = actual_ramp
+
+        # Revert entry
+        revert = event.beat_revert
+        if revert and revert.enabled and timeline:
+            last_beat = current_beat
+            revert_beat = last_beat + 1 + revert.delay_beats
+            while revert_beat >= len(beats_raw):
+                beats_raw.append({"ms": beats_raw[-1]["ms"] + beat_interval_ms})
+            rbeat_ms = beats_raw[revert_beat]["ms"]
+            raw_fire = (rbeat_ms - revert.transition_ms) if (revert.pre_ramp and revert.transition_ms > 0) else rbeat_ms
+            earliest = prev_fire_time + prev_ramp_ms + 100
+            revert_fire_time = max(raw_fire, earliest)
+            timeline.append((None, revert_fire_time, revert.transition_ms, revert_beat, True))
+
+        # Snapshot BEFORE pre-commands so revert restores the true pre-event state.
+        # Refresh cache first so snapshot reflects actual LedFX state, not stale poll data.
+        snapshot: dict = {}
+        if revert and revert.enabled:
+            for _vid in ledfx_client.POLLED_VIRTUALS:
+                _fresh = await ledfx_client.get_virtual(_vid)
+                if _fresh:
+                    state.ledfx_virtual_cache[_vid] = _fresh.get(_vid, _fresh)
+            snapshot = await self._snapshot_for_revert(event)
+        await self._apply_pre_commands(event, labels)
+
+        # Execute timeline — use monotonic clock for relative inter-step delays.
+        # This keeps beat spacing correct even when the trigger fires late (e.g. negative
+        # trigger_buffer_ms) and all absolute beat positions are already in the past.
+        import time as _time
+        timeline_origin = int(timeline[0][1]) if timeline else 0  # fire_time of step 0
+        exec_start = _time.monotonic()
+
+        for i, (step, fire_time, actual_ramp, _beat_idx, is_revert) in enumerate(timeline):
+            # Step 1 (i==0) may have been pre-fired as a pre-ramp command
+            if i == 0 and step1_prefired:
+                continue
+
+            # Wait until this step's offset (from step-0's beat) has elapsed since exec_start
+            step_offset_ms = int(fire_time) - timeline_origin
+            elapsed_ms = (_time.monotonic() - exec_start) * 1000
+            wait_ms = step_offset_ms - elapsed_ms
+            if wait_ms > 0:
+                await asyncio.sleep(wait_ms / 1000)
+
+            if is_revert:
+                if snapshot:
+                    await self._restore_from_snapshot(snapshot, revert)
+            elif step is not None:
+                if step.step_type == "action":
+                    resolved = self._resolve_step_actions(step)
+                    dispatch = []
+                    for action in resolved:
+                        # Apply compressed ramp if needed
+                        stored_ramp = getattr(action, "ramp_ms", None)
+                        effective_ramp = stored_ramp if stored_ramp is not None else settings.smooth_ramp_ms
+                        if actual_ramp != effective_ramp and hasattr(action, "ramp_ms"):
+                            action = action.model_copy(update={"ramp_ms": actual_ramp})
+                        dispatch.append(action)
+                    if dispatch:
+                        await asyncio.gather(*(
+                            self._execute_action(a, labels, await_ramps=False)
+                            for a in dispatch
+                        ))
+                elif step.step_type == "event" and step.event_id:
+                    sub_event = get_event(step.event_id)
+                    if sub_event:
+                        merged_labels = labels + (step.labels or [])
+                        if sub_event.event_type == "sequence":
+                            await self._execute_sequence(sub_event, merged_labels)
+                        elif sub_event.event_type == "beat_sequence":
+                            trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+                            await self._execute_beat_sequence(sub_event, trigger_ms, merged_labels, step1_prefired=False)
+                        else:
+                            sub_action = self._select_action(sub_event, merged_labels)
+                            if sub_action:
+                                await self._execute_action(sub_action, merged_labels, await_ramps=False)
+
+    async def run(self) -> None:
+        """Main trigger loop — runs forever."""
+        logger.info("Trigger engine started (tick=%dms).", TICK_MS)
+        while True:
+            await asyncio.sleep(TICK_MS / 1000)
+
+            if not state.current_track or not state.current_track.is_playing:
+                continue
+            if not state.on_target_device:
+                continue
+            if self._profile is None or self._profile.spotify_uri != state.current_track.spotify_uri:
+                continue
+
+            now_ms = state.current_track.interpolated_progress_ms()
+
+            # ── Detect seek-back or song restart ──────────────────────────
+            if now_ms < self._last_progress_ms - 10000:
+                # Progress jumped backward significantly — re-enable triggers ahead of new position
+                re_enabled = {tid for tid in self._fired if any(
+                    t.id == tid and t.timestamp_ms > now_ms
+                    for t in self._get_active_triggers()
+                )}
+                if re_enabled:
+                    self._fired -= re_enabled
+                    self._pre_fired -= re_enabled
+                    self._pre_ramp_fired -= re_enabled
+                    for tid in re_enabled:
+                        self._preselected.pop(tid, None)
+                        self._preselected_steps.pop(tid, None)
+                    self._preselected_trigger_id = None
+                    self._preview_locked = False
+                    logger.info("Seek-back detected (%dms → %dms): re-enabled %d triggers",
+                                self._last_progress_ms, now_ms, len(re_enabled))
+            self._last_progress_ms = now_ms
+
+            offset = self._effective_offset_ms()
+            effective_now = now_ms + offset  # look ahead by offset
+
+            # Keep live timing info in shared state for WS broadcast
+            state.timing = {
+                "effective_offset_ms":   offset,
+                "shape_offset_ms":       self._shape_offset_ms,
+                "shape_offset_quality":  self._shape_offset_quality,
+                "ledfx_rtt_ms":          int(state.ledfx_rtt_ms),
+                "buffer_ms":             settings.ledfx_trigger_buffer_ms,
+            }
+
+            # ── Pre-select next trigger action for preview ────────────────────
+            next_t = next(
+                (t for t in sorted(self._get_active_triggers(), key=lambda x: x.timestamp_ms)
+                 if t.enabled and t.id not in self._fired and t.timestamp_ms > now_ms),
+                None,
+            )
+            if next_t is None:
+                if self._preselected_trigger_id is not None:
+                    self._preselected_trigger_id = None
+                    self._preview_locked = False
+                    asyncio.create_task(ws_manager.broadcast({"type": "trigger_preview_clear"}))
+            else:
+                ms_until = next_t.timestamp_ms - now_ms
+                locked   = ms_until < 5000
+
+                if next_t.id != self._preselected_trigger_id:
+                    self._preselected_trigger_id = next_t.id
+                    self._preview_locked = False
+                    event = get_event(next_t.event_id)
+                    if event and event.event_type == "single":
+                        action = self._select_action(event, next_t.labels)
+                        if action:
+                            self._preselected[next_t.id] = action
+                            asyncio.create_task(ws_manager.broadcast({
+                                "type":         "trigger_preview",
+                                "trigger_id":   next_t.id,
+                                "event_name":   event.name,
+                                "event_color":  event.color,
+                                "action_label": self._describe_action(action),
+                                "locked":       False,
+                            }))
+                    elif event and event.event_type == "sequence":
+                        step_actions, action_label = self._preselect_sequence_steps(
+                            event, next_t.labels
+                        )
+                        self._preselected_steps[next_t.id] = step_actions
+                        asyncio.create_task(ws_manager.broadcast({
+                            "type":         "trigger_preview",
+                            "trigger_id":   next_t.id,
+                            "event_name":   event.name,
+                            "event_color":  event.color,
+                            "action_label": action_label or None,
+                            "locked":       False,
+                        }))
+                    elif event and event.event_type == "beat_sequence":
+                        n = len(event.beat_sequence_steps)
+                        asyncio.create_task(ws_manager.broadcast({
+                            "type":         "trigger_preview",
+                            "trigger_id":   next_t.id,
+                            "event_name":   event.name,
+                            "event_color":  event.color,
+                            "action_label": f"{n} beat step{'s' if n != 1 else ''}",
+                            "locked":       False,
+                        }))
+                    elif event:
+                        asyncio.create_task(ws_manager.broadcast({
+                            "type":         "trigger_preview",
+                            "trigger_id":   next_t.id,
+                            "event_name":   event.name,
+                            "event_color":  event.color,
+                            "action_label": None,
+                            "locked":       False,
+                        }))
+
+                elif locked and not self._preview_locked:
+                    self._preview_locked = True
+                    event = get_event(next_t.event_id)
+                    if event and event.event_type == "single":
+                        action = self._preselected.get(next_t.id)
+                        action_label = self._describe_action(action) if action else None
+                    elif event and event.event_type == "sequence":
+                        steps = self._preselected_steps.get(next_t.id)
+                        if steps:
+                            parts = []
+                            for idx, step in enumerate(event.sequence_steps):
+                                pre = steps[idx] if idx < len(steps) else None
+                                if pre:
+                                    parts.append(self._describe_action(pre))
+                                elif step.step_type == "event" and step.event_id:
+                                    sub = get_event(step.event_id)
+                                    if sub:
+                                        parts.append(sub.name)
+                                elif step.step_type == "action" and step.action:
+                                    parts.append(self._describe_action(step.action))
+                            action_label = " → ".join(parts) or None
+                        else:
+                            action_label = None
+                    else:
+                        action_label = None
+                    asyncio.create_task(ws_manager.broadcast({
+                        "type":         "trigger_preview",
+                        "trigger_id":   next_t.id,
+                        "event_name":   event.name if event else "",
+                        "event_color":  event.color if event else "#888",
+                        "action_label": action_label,
+                        "locked":       True,
+                    }))
+            # ─────────────────────────────────────────────────────────────────
+
+            if not state.paused:
+                # Brightness ramp look-ahead — starts ramp at T - lead_ms - ramp_ms
+                # Skip in dinner party mode (DP scenes handle their own brightness)
+                if not state.dinner_party_mode:
+                    for trigger in self._get_active_triggers():
+                        if not trigger.enabled or trigger.id in self._fired or trigger.id in self._pre_ramp_fired:
+                            continue
+                        event = get_event(trigger.event_id)
+                        if not event or event.event_type != "single" or not event.pre_brightness_enabled:
+                            continue
+                        ramp_ms = event.pre_brightness_ramp_ms if event.pre_brightness_ramp_ms is not None \
+                                  else settings.smooth_ramp_ms
+                        if ramp_ms <= 0:
+                            continue
+                        lead_ms = settings.pre_brightness_lead_ms
+                        if trigger.timestamp_ms - lead_ms - ramp_ms <= effective_now:
+                            self._pre_ramp_fired.add(trigger.id)
+                            self._spawn_ramp(ledfx_client.ramp_brightness(event.pre_brightness_value, ramp_ms))
+
+                    # Beat sequence Step 1 pre-ramp look-ahead
+                    for trigger in self._get_active_triggers():
+                        if not trigger.enabled or trigger.id in self._fired or trigger.id in self._pre_fired:
+                            continue
+                        event = get_event(trigger.event_id)
+                        if not event or event.event_type != "beat_sequence":
+                            continue
+                        steps = event.beat_sequence_steps
+                        if not steps:
+                            continue
+                        step0 = steps[0]
+                        if not step0.pre_ramp or step0.step_type != "action" or step0.action is None:
+                            continue
+                        ramp_ms = getattr(step0.action, "ramp_ms", None)
+                        if ramp_ms is None:
+                            ramp_ms = settings.smooth_ramp_ms
+                        if ramp_ms <= 0:
+                            continue
+                        if trigger.timestamp_ms - ramp_ms <= effective_now:
+                            self._pre_fired.add(trigger.id)
+                            asyncio.create_task(self._execute_action(step0.action, trigger.labels, await_ramps=False))
+
+                    # Pre-command look-ahead: fire brightness/transition lead_ms before main trigger
+                    for trigger in self._get_active_triggers():
+                        if not trigger.enabled or trigger.id in self._fired or trigger.id in self._pre_fired:
+                            continue
+                        event = get_event(trigger.event_id)
+                        if not event or event.event_type != "single":
+                            continue
+                        lead_ms = max(
+                            settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
+                            settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
+                        )
+                        if lead_ms > 0 and trigger.timestamp_ms - lead_ms <= effective_now:
+                            self._pre_fired.add(trigger.id)
+                            asyncio.create_task(self._fire_pre_commands(event, trigger.id, trigger.labels))
+
+                # Main trigger firing loop (always runs — DP scenes fire here)
+                for trigger in self._get_active_triggers():
+                    if not trigger.enabled:
+                        continue
+                    if trigger.id in self._fired:
+                        continue
+                    if trigger.timestamp_ms <= effective_now:
+                        self._fired.add(trigger.id)
+                        logger.info(
+                            "Firing trigger %s at song position ~%dms (event=%s)",
+                            trigger.id, now_ms, trigger.event_id,
+                        )
+                        asyncio.create_task(self._fire_trigger(
+                            trigger, fired_at_ms=now_ms, effective_offset_ms=offset
+                        ))
+
+    async def reroll(self, trigger_id: str) -> bool:
+        """Re-roll the pre-selected action for trigger_id. Rejected if < 5s away."""
+        if self._preselected_trigger_id != trigger_id:
+            return False
+        if not state.current_track or self._profile is None:
+            return False
+        trigger = next((t for t in self._get_active_triggers() if t.id == trigger_id), None)
+        if not trigger:
+            return False
+        ms_until = trigger.timestamp_ms - state.current_track.interpolated_progress_ms()
+        if ms_until < 5000:
+            return False
+        event = get_event(trigger.event_id)
+        if not event or event.event_type != "single":
+            return False
+        action = self._select_action(event, trigger.labels)
+        if not action:
+            return False
+        self._preselected[trigger_id] = action
+        await ws_manager.broadcast({
+            "type":         "trigger_preview",
+            "trigger_id":   trigger_id,
+            "event_name":   event.name,
+            "event_color":  event.color,
+            "action_label": self._describe_action(action),
+            "locked":       False,
+        })
+        return True

@@ -1,0 +1,2690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpotFX — AI Triggers</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    /* ── Collapsible profile section ───────────────────────────────────── */
+    #profile-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+      flex-wrap: wrap;
+    }
+    #profile-header .card-title { margin: 0; }
+    #profile-summary { font-size: 13px; color: var(--text-muted); flex: 1; display: none; }
+    #profile-collapse-arrow { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+    #profile-body { margin-top: 12px; }
+
+    /* Profile body: two-col chips row */
+    .profile-chips-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    @media (max-width: 640px) { .profile-chips-row { grid-template-columns: 1fr; } }
+
+    /* ── Chips ──────────────────────────────────────────────────────────── */
+    .training-chips, .target-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+      min-height: 28px;
+    }
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 3px 10px 3px 8px;
+      font-size: 12px;
+    }
+    .chip .chip-x { cursor: pointer; color: var(--text-muted); font-size: 14px; line-height: 1; margin-left: 2px; }
+    .chip .chip-x:hover { color: var(--text); }
+    .chip .chip-count { font-size: 10px; color: var(--text-muted); }
+
+    /* ── Song picker modal ──────────────────────────────────────────────── */
+    #picker-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    #picker-overlay.open { display: flex; }
+    #picker-box {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; width: min(460px, 95vw); padding: 16px;
+    }
+    #picker-search {
+      width: 100%; box-sizing: border-box; margin-bottom: 10px;
+      padding: 6px 10px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); font-size: 14px;
+    }
+    #picker-list { max-height: 320px; overflow-y: auto; }
+    .picker-row { padding: 8px 10px; cursor: pointer; border-radius: 4px; font-size: 13px; }
+    .picker-row:hover { background: var(--surface); }
+    .picker-row .pr-sub { font-size: 11px; color: var(--text-muted); }
+    .picker-row.disabled { opacity: .4; cursor: default; }
+
+    /* ── Canvas + zoom bar ──────────────────────────────────────────────── */
+    .audio-wrap { position: relative; }
+    #shape-canvas { background: var(--surface2); border-radius: var(--radius); display: block; width: 100%; }
+    #shape-resize-handle {
+      height: 6px; cursor: ns-resize; background: var(--surface2);
+      border-radius: 0 0 var(--radius) var(--radius);
+      border-top: 1px solid var(--border); margin-top: 2px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #shape-resize-handle::after { content:''; width:32px; height:2px; border-radius:1px; background:var(--border); }
+    .zoom-handle {
+      position: absolute; top: 0; bottom: 0; width: 8px; transform: translateX(-50%);
+      background: rgba(255,255,255,0.85); border-radius: 2px; cursor: ew-resize;
+      z-index: 6; user-select: none; touch-action: none;
+    }
+    #zoom-handle-center {
+      position: absolute; top: 2px; bottom: 2px; width: 24px; transform: translateX(-50%);
+      background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 3px; cursor: grab; z-index: 5; user-select: none; touch-action: none;
+    }
+    #zoom-handle-center:active { cursor: grabbing; }
+    #zoom-region {
+      position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 4;
+      background: rgba(255,255,255,0.1);
+      border-left: 1px solid rgba(255,255,255,0.3); border-right: 1px solid rgba(255,255,255,0.3);
+    }
+    .shape-filter-btn {
+      padding: 3px 8px; font-size: 11px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface2);
+      color: var(--text-muted); cursor: pointer; user-select: none;
+    }
+    .shape-filter-btn.active { color: #fff; }
+    .librosa-filter-btn {
+      padding: 3px 8px; font-size: 11px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface2);
+      color: var(--text-muted); cursor: pointer; user-select: none;
+    }
+    .librosa-filter-btn.active { color: #fff; }
+
+    /* ── Suggestion rows ────────────────────────────────────────────────── */
+    .suggestion-row {
+      border: 1px solid var(--border); border-left: 3px solid var(--border);
+      border-radius: 6px; padding: 10px 12px; margin-bottom: 8px;
+      transition: border-color .15s, opacity .15s;
+    }
+    .suggestion-row.approved { border-left-color: #4caf50; border-color: #4caf50; }
+    .suggestion-row.rejected { border-left-color: #ef5350; border-color: #ef5350; opacity: .55; }
+    .suggestion-row.modified:not(.approved):not(.rejected) { border-left-color: #ff9800; }
+
+    .sug-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .sug-badge {
+      font-size: 10px; font-weight: 700; padding: 1px 5px;
+      border-radius: 8px; white-space: nowrap;
+    }
+    .sug-badge.manual   { background: #1565c0; color: #fff; }
+    .sug-badge.modified { background: #e65100; color: #fff; }
+
+    .sug-ts-input {
+      font-size: 14px; font-weight: 600; min-width: 60px; width: 70px;
+      background: transparent; border: none; border-bottom: 1px dashed transparent;
+      color: var(--text); font-family: inherit; padding: 0; cursor: text;
+    }
+    .sug-ts-input:hover, .sug-ts-input:focus { border-bottom-color: var(--text-muted); outline: none; }
+    .sug-event select {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); font-size: 12px; padding: 2px 6px;
+    }
+    .conf-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; min-width: 60px; }
+    .conf-fill { height: 100%; border-radius: 3px; }
+    .sug-pct { font-size: 11px; color: var(--text-muted); min-width: 32px; }
+    .sug-reasoning { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+
+    .sug-labels { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+    .sug-labels label { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+    .sug-labels input {
+      flex: 1; font-size: 11px; background: transparent; border: none;
+      border-bottom: 1px dashed transparent; color: var(--text); font-family: inherit; padding: 0;
+    }
+    .sug-labels input:hover, .sug-labels input:focus { border-bottom-color: var(--text-muted); outline: none; }
+
+    .sug-comment-wrap { margin-top: 5px; }
+    .sug-comment-toggle { font-size: 10px; color: var(--text-muted); cursor: pointer; user-select: none; }
+    .sug-comment-toggle:hover { color: var(--text); }
+    .sug-comment {
+      display: none; width: 100%; box-sizing: border-box; margin-top: 4px;
+      font-size: 11px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 3px; color: var(--text); font-family: inherit;
+      padding: 4px 6px; resize: vertical; min-height: 40px;
+    }
+    .sug-comment.open { display: block; }
+    .sug-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+    .btn-approve { background: #2e7d32; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+    .btn-approve:hover { background: #388e3c; }
+    .btn-reject  { background: transparent; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+    .btn-reject:hover { color: var(--text); }
+
+    /* ── Misc ───────────────────────────────────────────────────────────── */
+    textarea#vibe-desc {
+      width: 100%; box-sizing: border-box; height: 60px; resize: vertical;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text); font-size: 13px; padding: 8px; font-family: inherit;
+    }
+    .lp-run-btn .lp-fill {
+      position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+      background: rgba(255,255,255,0.18); pointer-events: none;
+    }
+    .lp-run-btn.lp-pressing .lp-fill {
+      width: 100%; transition: width 500ms linear;
+    }
+    #gen-progress { display: none; margin-top: 10px; }
+    #gen-progress-bar-track { background: var(--surface); border-radius: 3px; height: 5px; overflow: hidden; margin: 5px 0; }
+    #gen-bar { height: 100%; background: #7c4dff; border-radius: 3px; width: 0%; transition: width 0.4s ease; }
+    #gen-log { font-size: 11px; color: var(--text-muted); line-height: 1.6; max-height: 80px; overflow-y: auto; }
+    #error-msg { display: none; color: #ef5350; font-size: 13px; margin-top: 8px; }
+
+    .profile-row { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    .profile-row select {
+      flex: 1; min-width: 120px; padding: 5px 8px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 13px;
+    }
+    .song-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .song-nav .nav-counter { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+    #analyze-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    #analyze-overlay.open { display: flex; }
+    #analyze-box {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; width: min(560px, 95vw); padding: 20px;
+    }
+    #analyze-result {
+      width: 100%; box-sizing: border-box; height: 120px; resize: vertical;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text); font-size: 13px; padding: 8px; font-family: inherit; margin: 12px 0;
+    }
+
+    #manual-add-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    #manual-add-overlay.open { display: flex; }
+
+    /* ── Scrollable suggestion list ─────────────────────────────────────── */
+    #sug-list {
+      overflow-y: auto;
+      max-height: 45vh;
+      min-height: 80px;
+      padding-right: 4px;
+    }
+
+    /* ── Suggestion highlight (canvas ↔ row link) ───────────────────────── */
+    .suggestion-row.canvas-highlight {
+      outline: 2px solid rgba(255,255,255,0.4);
+      background: rgba(255,255,255,0.04);
+    }
+    .sug-top { cursor: pointer; }
+
+    /* ── Scale drag visual ───────────────────────────────────────────────── */
+    .shape-filter-btn.scaling { outline: 2px solid #fff; }
+
+    /* ── Load Saved filter tabs ──────────────────────────────────────────── */
+    .ls-tab {
+      font-size: 12px; padding: 3px 10px; border-radius: 12px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text-muted); cursor: pointer;
+    }
+    .ls-tab-active { background: #7c4dff; color: #fff; border-color: transparent; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <nav>
+    <span class="logo">SpotFX</span>
+    <a href="/">Now Playing</a>
+    <a href="/builder.html">Profile Builder</a>
+    <a href="/events.html">Events</a>
+    <a href="/playlist.html">Playlist</a>
+    <a href="/settings.html">Settings</a>
+    <a href="/ai_triggers.html" class="active">AI Triggers</a>
+    <a href="/triggerless.html">Triggerless</a>
+    <div id="ws-status"><div id="ws-dot"></div> Live</div>
+  </nav>
+
+  <main>
+
+    <!-- ── Section A: Collapsible Training Profile ─────────────────────── -->
+    <div class="card">
+      <div id="profile-header" onclick="toggleProfile()">
+        <div class="card-title" style="margin:0;">Training Profile</div>
+        <span id="profile-summary"></span>
+        <button id="generate-btn" class="btn btn-accent" style="font-size:12px;padding:4px 12px;margin-left:auto;"
+          onclick="generateAll(); event.stopPropagation()">▶ Generate All</button>
+        <span id="profile-collapse-arrow">▼</span>
+      </div>
+
+      <div id="profile-body">
+        <!-- Profile selector + name -->
+        <div class="profile-row" style="margin-top:12px;">
+          <select id="profile-select" onchange="loadProfile()">
+            <option value="">— new profile —</option>
+          </select>
+          <input id="profile-name" type="text" placeholder="Profile name"
+            style="flex:1;min-width:120px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;">
+          <button class="btn btn-accent" style="font-size:12px;padding:4px 10px;" onclick="saveProfile()">Save</button>
+          <button class="btn" style="font-size:12px;padding:4px 10px;" onclick="newProfile()">New</button>
+          <button class="btn" style="font-size:12px;padding:4px 10px;" onclick="duplicateProfile()" title="Copy this profile with a new name">Duplicate</button>
+          <button class="btn btn-danger" style="font-size:12px;padding:4px 10px;" onclick="deleteProfile()">Delete</button>
+          <button class="btn" style="font-size:12px;padding:4px 10px;" onclick="openManageProfiles()" title="Search and delete training profiles">⋯</button>
+          <button id="analysis-btn" class="btn" style="font-size:12px;padding:4px 10px;" onclick="toggleAnalysis()" title="Enable audio capture for new songs (required for Auto Analyze)">Capture Shape: Off</button>
+          <button id="auto-gen-btn" class="btn" style="font-size:12px;padding:4px 10px;" onclick="toggleAutoGen()" title="Auto-generate AI triggers after each shape capture">Auto Analyze: Off</button>
+        </div>
+
+        <!-- Description -->
+        <div style="margin-bottom:10px;">
+          <label style="font-size:11px;color:var(--text-muted);">Prompt / vibe description</label>
+          <textarea id="vibe-desc" placeholder="e.g. High-energy EDM rave drops, lots of bass, strobe-worthy moments"></textarea>
+        </div>
+
+        <div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:10px;">
+          <div style="flex:1;">
+            <label style="font-size:11px;color:var(--text-muted);">Genre tags (comma-separated)</label>
+            <input id="profile-genres" type="text" placeholder="e.g. edm, dubstep, bass music"
+              style="width:100%;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;box-sizing:border-box;">
+          </div>
+          <label style="font-size:12px;white-space:nowrap;cursor:pointer;display:flex;align-items:center;gap:5px;padding-bottom:6px;">
+            <input id="profile-default" type="checkbox"> Default profile
+          </label>
+        </div>
+
+        <!-- Profile notes -->
+        <div style="margin-bottom:10px;">
+          <label style="font-size:11px;color:var(--text-muted);">Profile Notes</label>
+          <textarea id="tp-notes" placeholder="Running notes about this profile — how it behaves, what to tweak, song observations…"
+            style="width:100%;box-sizing:border-box;height:56px;resize:vertical;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;padding:5px 8px;"></textarea>
+        </div>
+
+        <!-- Embedded trigger tuning -->
+        <details style="margin-bottom:10px;">
+          <summary style="font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;">⚙ Embedded Trigger Settings</summary>
+          <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Min Trigger Spacing</label>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <input id="tp-min-spacing" type="number" value="4" min="1" step="1"
+                  style="width:60px;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;">
+                <span style="font-size:11px;color:var(--text-muted);">beats</span>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Min Scene Change Spacing</label>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <input id="tp-scene-spacing" type="number" value="16" min="1" step="1"
+                  style="width:60px;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;">
+                <span style="font-size:11px;color:var(--text-muted);">beats</span>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Lull Event</label>
+              <select id="tp-lull-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Fires at the first quiet beat before a drop (start of the gap). Empty = skip.">
+                <option value="">(none)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Bass Drop Event</label>
+              <select id="tp-drop-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Fires at the re-entry beat after the gap (bass comes back in). Empty = skip.">
+                <option value="">(none)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Charge Event</label>
+              <select id="tp-charge-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Fires at peak energy/onset before each lull — the climax of the buildup. Empty = skip.">
+                <option value="">(none)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Quiet Section Event</label>
+              <select id="tp-quiet-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Fires at the start of extended quiet sections (breakdown, bridge). Gradual entry required. Empty = skip.">
+                <option value="">(none)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Scene Fill Event</label>
+              <select id="tp-scene-fill-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Used for beat start and standard fill (energy uptick / harmonic / downbeat). Empty = skip.">
+                <option value="">(none)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Fill Min Spacing (beats)</label>
+              <input id="tp-fill-min-spacing" type="number" min="1" value="48"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Minimum beats between any two standard scene fill triggers. Higher = less dense fill.">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Song Start Event</label>
+              <select id="tp-start-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;">
+                <option value="">(none)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Beat Start Event</label>
+              <select id="tp-beat-start-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Event fired at the first significant bass entry. If empty, falls back to Scene Fill Event.">
+                <option value="">(none — use scene fill)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Song End Event</label>
+              <select id="tp-end-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;">
+                <option value="">(none)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Flare Event</label>
+              <select id="tp-flare-event"
+                style="width:100%;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;"
+                title="Event placed at harmonic moments throughout the song. Empty = skip flare stage.">
+                <option value="">(none — skip flares)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">Flare Max Gap</label>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <input id="tp-flare-max-gap" type="number" value="32" min="4" step="4"
+                  style="width:70px;padding:4px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;"
+                  title="Maximum beats between flares in low-energy sections. High-energy sections use scene spacing instead.">
+                <span style="font-size:11px;color:var(--text-muted);">beats (low-energy max)</span>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Training songs + Target songs (two columns) -->
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <span style="font-size:11px;color:var(--text-muted);">Song lists cached at page load.</span>
+          <button class="btn" id="reload-songs-btn" style="font-size:11px;padding:2px 8px;" onclick="reloadSongLists()">↺ Reload Songs</button>
+        </div>
+        <div class="profile-chips-row">
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <!-- AI + Embedded Training -->
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:4px;">AI + Embedded Training
+                <span style="font-weight:normal;">(sent to Claude AND used for KNN)</span>
+              </div>
+              <div class="training-chips" id="training-chips">
+                <span id="no-training" style="font-size:12px;color:var(--text-muted);">No songs added</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+                <button class="btn" style="font-size:12px;padding:3px 10px;" onclick="openPicker('training')">+ Add</button>
+                <button class="btn" style="font-size:12px;padding:3px 10px;" onclick="addMatchingVerified('training')" title="Add verified songs whose genres match this profile">+ Matching</button>
+              </div>
+            </div>
+            <!-- Embedded Only Training -->
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:4px;">Embedded Only Training
+                <span style="font-weight:normal;">(KNN only — not sent to Claude)</span>
+              </div>
+              <div class="training-chips" id="embedded-chips">
+                <span id="no-embedded" style="font-size:12px;color:var(--text-muted);">No songs added</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+                <button class="btn" style="font-size:12px;padding:3px 10px;" onclick="openPicker('embedded')">+ Add</button>
+                <button class="btn" style="font-size:12px;padding:3px 10px;" onclick="addMatchingVerified('embedded')" title="Add verified songs whose genres match this profile">+ Matching</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:4px;">Target Songs
+              <span style="font-weight:normal;">(need audio shape)</span>
+            </div>
+            <div class="target-chips" id="target-chips">
+              <span id="no-target" style="font-size:12px;color:var(--text-muted);">No target songs added</span>
+            </div>
+            <button class="btn" style="margin-top:8px;font-size:12px;padding:3px 10px;" onclick="openPicker('target')">+ Add</button>
+            <span style="position:relative;display:inline-block;">
+              <button class="btn" style="margin-top:8px;font-size:12px;padding:3px 10px;" onclick="openLoadSaved()">↓ Load Saved</button>
+              <span id="pending-review-badge" style="display:none;position:absolute;top:-6px;right:-8px;background:#e65100;color:#fff;border-radius:10px;font-size:10px;padding:1px 5px;pointer-events:none;"></span>
+            </span>
+          </div>
+        </div>
+
+        <div id="gen-progress">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span id="gen-status" style="font-size:13px;color:var(--text-muted);"></span>
+            <span id="gen-cost-live" style="font-size:11px;color:var(--text-muted);"></span>
+          </div>
+          <div id="gen-progress-bar-track"><div id="gen-bar"></div></div>
+          <div id="gen-log"></div>
+        </div>
+        <div id="error-msg" style="margin-top:6px;"></div>
+      </div>
+    </div>
+
+    <!-- ── Section B: Full-width Review Panel ──────────────────────────── -->
+    <div class="card audio-wrap" id="review-panel" style="display:none;margin-top:12px;">
+
+      <!-- Song nav + filter buttons -->
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn" style="font-size:12px;padding:4px 10px;" onclick="navSong(-1)">← Prev</button>
+        <span class="nav-counter" id="nav-counter">1 / 1</span>
+        <button class="btn" style="font-size:12px;padding:4px 10px;" onclick="navSong(1)">Next →</button>
+        <span id="sug-title" style="font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+        <span id="sug-cost" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
+        <button class="btn" style="font-size:11px;padding:3px 9px;" onclick="openManualAdd()">+ Add Trigger</button>
+        <div style="width:1px;height:18px;background:var(--border);margin:0 2px;"></div>
+        <button class="shape-filter-btn active" data-layer="total" style="background:#555;">Total</button>
+        <button class="shape-filter-btn active" data-layer="bass"  style="background:rgba(46,204,113,0.6);">Bass</button>
+        <button class="shape-filter-btn active" data-layer="mid"   style="background:rgba(230,126,34,0.6);">Mids</button>
+        <button class="shape-filter-btn active" data-layer="high"  style="background:rgba(52,152,219,0.6);">Highs</button>
+        <button class="shape-filter-btn active" data-layer="marks">Marks</button>
+      </div>
+
+      <!-- Librosa filter row (hidden until analysis loaded) -->
+      <div id="librosa-filter-row" style="display:none;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--text-muted);">Librosa:</span>
+        <button class="librosa-filter-btn active" data-lf="sections" style="background:rgba(68,136,255,0.5);">Sections</button>
+        <button class="librosa-filter-btn active" data-lf="beats"    style="background:rgba(255,255,255,0.2);">Beats</button>
+        <button class="librosa-filter-btn active" data-lf="onsets"   style="background:rgba(255,136,0,0.5);">Onsets</button>
+        <button class="librosa-filter-btn active" data-lf="harmonic" style="background:rgba(204,102,255,0.5);">Harmonic</button>
+        <button class="librosa-filter-btn active" data-lf="bass"    style="background:rgba(68,221,136,0.5);">Bass</button>
+        <span id="librosa-summary" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
+      </div>
+
+      <!-- Canvas -->
+      <canvas id="shape-canvas" style="height:140px;"></canvas>
+      <div id="shape-resize-handle" title="Drag to resize"></div>
+
+      <!-- Zoom timeline bar -->
+      <div class="timeline-wrap" style="margin-top:8px;">
+        <div class="timeline-bar" id="timeline-bar">
+          <div id="zoom-region"></div>
+          <div id="zoom-handle-center"></div>
+          <div id="zoom-handle-start" class="zoom-handle"></div>
+          <div id="zoom-handle-end"   class="zoom-handle"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+        <button class="btn-sm" onclick="zoomFull()">Full Song</button>
+        <button class="btn-sm" id="btn-follow">Follow</button>
+        <button class="btn-sm" id="btn-librosa-analyze" title="Load librosa analysis overlay">Librosa</button>
+        <span style="font-size:11px;color:var(--text-muted);" id="shape-status"></span>
+      </div>
+
+      <!-- Song feedback + action buttons -->
+      <div style="margin:12px 0 8px;">
+        <label style="font-size:11px;color:var(--text-muted);">Song feedback (sent to Analyze Learning)</label>
+        <textarea id="song-comment" rows="2"
+          placeholder="e.g. All bass drops were right, intro trigger fired too early…"
+          style="width:100%;box-sizing:border-box;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;padding:5px 7px;resize:vertical;"
+          oninput="saveSongComment()"></textarea>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+        <button class="btn" style="font-size:12px;padding:5px 12px;" onclick="approveHighConf()">✓ Approve ≥80%</button>
+        <button class="btn" style="font-size:12px;padding:5px 12px;background:#2e7d32;" onclick="applyApproved()">Apply Approved</button>
+        <button class="btn" id="save-btn" style="font-size:12px;padding:5px 12px;" onclick="saveCurrent()">Save</button>
+        <button class="btn" id="analyze-btn"     style="font-size:12px;padding:5px 12px;display:none;" onclick="analyzeLearning([currentUri()])">Analyze This Song</button>
+        <button class="btn" id="analyze-all-btn" style="font-size:12px;padding:5px 12px;display:none;" onclick="analyzeLearning(selectedTargetUris)">Analyze All</button>
+      </div>
+
+      <!-- Post-apply strip -->
+      <div id="post-apply-strip" style="display:none;border:1px solid #2e7d32;border-radius:5px;padding:8px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span id="post-apply-msg" style="color:#4caf50;font-size:13px;flex:1;min-width:0;"></span>
+          <button class="btn btn-accent" id="add-training-btn" style="font-size:11px;padding:3px 10px;white-space:nowrap;" onclick="saveAsTraining()">+ Add to Training</button>
+        </div>
+      </div>
+
+      <!-- Suggestion list -->
+      <div id="sug-list"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Manage Training Profiles modal -->
+<div id="manage-profiles-overlay" onclick="if(event.target===this)closeManageProfiles()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;width:min(480px,95vw);padding:16px;max-height:80vh;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span style="font-weight:600;">Training Profiles</span>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button onclick="backfillGenres()" style="font-size:11px;padding:3px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);cursor:pointer;" title="Fetch genres from Spotify for all captured shapes">Backfill Genres</button>
+        <span style="cursor:pointer;color:var(--text-muted);" onclick="closeManageProfiles()">✕</span>
+      </div>
+    </div>
+    <input id="manage-profiles-search" type="text" placeholder="Search…" oninput="renderManageProfilesList()"
+      style="width:100%;box-sizing:border-box;margin-bottom:10px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px;">
+    <div id="manage-profiles-list" style="overflow-y:auto;flex:1;"></div>
+  </div>
+</div>
+
+<!-- Song picker modal -->
+<div id="picker-overlay" onclick="if(event.target===this)closePicker()">
+  <div id="picker-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span style="font-weight:600;" id="picker-title">Select Song</span>
+      <span style="cursor:pointer;color:var(--text-muted);" onclick="closePicker()">✕</span>
+    </div>
+    <div id="picker-matches-row" style="display:none;margin-bottom:8px;">
+      <button id="picker-matches-btn" class="btn" style="font-size:12px;padding:3px 10px;"
+        onclick="togglePickerMatches()">Matches: Off</button>
+    </div>
+    <input id="picker-search" type="text" placeholder="Search…" oninput="renderPickerList()">
+    <div id="picker-list"></div>
+  </div>
+</div>
+
+<!-- Manual Add Trigger modal -->
+<div id="manual-add-overlay" onclick="if(event.target===this)closeManualAdd()">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;width:min(380px,95vw);padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span style="font-weight:600;">Add Trigger Manually</span>
+      <span style="cursor:pointer;color:var(--text-muted);" onclick="closeManualAdd()">✕</span>
+    </div>
+    <div class="field">
+      <label style="font-size:12px;color:var(--text-muted);">Timestamp (m:ss.t)</label>
+      <input id="manual-ts" type="text" placeholder="0:00.0" style="width:100%;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;box-sizing:border-box;">
+    </div>
+    <div class="field" style="margin-top:8px;">
+      <label style="font-size:12px;color:var(--text-muted);">Music Event</label>
+      <div id="manual-event-container"></div>
+    </div>
+    <div class="field" style="margin-top:8px;">
+      <label style="font-size:12px;color:var(--text-muted);">Labels (comma-separated)</label>
+      <input id="manual-labels" type="text" placeholder="e.g. blue, strobe" style="width:100%;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;box-sizing:border-box;">
+    </div>
+    <div class="field" style="margin-top:8px;">
+      <label style="font-size:12px;color:var(--text-muted);">Why did you add this? (helps Analyze Learning)</label>
+      <textarea id="manual-comment" rows="2" placeholder="e.g. Clear bass drop the AI missed" style="width:100%;box-sizing:border-box;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;padding:5px 7px;resize:vertical;"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn btn-accent" onclick="confirmManualAdd()">Add</button>
+      <button class="btn" onclick="closeManualAdd()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Load Saved Suggestions modal -->
+<div id="load-saved-overlay" onclick="if(event.target===this)closeLoadSaved()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;width:min(520px,95vw);padding:16px;max-height:85vh;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span style="font-weight:600;">Load Saved Suggestions</span>
+      <span style="cursor:pointer;color:var(--text-muted);" onclick="closeLoadSaved()">✕</span>
+    </div>
+    <div id="load-saved-tabs" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+      <button class="ls-tab ls-tab-active" data-filter="all"         onclick="setSavedFilter('all')">All</button>
+      <button class="ls-tab"              data-filter="not-applied" onclick="setSavedFilter('not-applied')">Not Applied</button>
+      <button class="ls-tab"              data-filter="unreviewed"  onclick="setSavedFilter('unreviewed')">Unreviewed</button>
+      <button class="ls-tab"              data-filter="reviewed"    onclick="setSavedFilter('reviewed')">Reviewed</button>
+      <button class="ls-tab"              data-filter="applied"     onclick="setSavedFilter('applied')">Applied</button>
+    </div>
+    <button id="review-next-btn" onclick="reviewNextUnreviewed()"
+      style="display:none;width:100%;margin-bottom:10px;padding:5px;font-size:12px;background:var(--surface);
+             border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;">
+      Review Next Unreviewed →
+    </button>
+    <input id="load-saved-search" type="text" placeholder="Search…" oninput="renderLoadSavedList()"
+      style="width:100%;box-sizing:border-box;margin-bottom:10px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px;">
+    <div id="load-saved-list" style="overflow-y:auto;flex:1;"></div>
+  </div>
+</div>
+
+<!-- Cost estimate confirm modal -->
+<div id="cost-confirm-overlay" onclick="if(event.target===this)closeCostConfirm()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;width:min(480px,95vw);padding:20px;">
+    <div style="font-weight:600;margin-bottom:10px;">Estimated generation cost</div>
+    <div id="cost-confirm-rows" style="font-size:12px;font-family:monospace;background:var(--surface);border-radius:4px;padding:10px;margin-bottom:12px;white-space:pre;overflow-x:auto;"></div>
+    <div id="cost-confirm-total" style="font-size:13px;font-weight:600;margin-bottom:4px;"></div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">
+      Hold a model button for 500ms to start generation. Output estimated at 1 000 tokens/song.
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button id="run-haiku-btn" class="btn btn-accent lp-run-btn" style="flex:1;padding:10px 6px;position:relative;overflow:hidden;">
+        <span class="lp-fill"></span>
+        <span class="lp-label" style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.2;">
+          <span style="font-size:13px;font-weight:600;">Haiku</span>
+          <span id="haiku-price" style="font-size:11px;opacity:0.8;">—</span>
+        </span>
+      </button>
+      <button id="run-sonnet-btn" class="btn btn-accent lp-run-btn" style="flex:1;padding:10px 6px;position:relative;overflow:hidden;">
+        <span class="lp-fill"></span>
+        <span class="lp-label" style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.2;">
+          <span style="font-size:13px;font-weight:600;">Sonnet</span>
+          <span id="sonnet-price" style="font-size:11px;opacity:0.8;">—</span>
+        </span>
+      </button>
+      <button id="run-embedded-btn" class="btn btn-accent" style="flex:1;padding:10px 6px;display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.2;" onclick="runEmbedded()">
+        <span style="font-size:13px;font-weight:600;">Embedded</span>
+        <span style="font-size:11px;">free · local</span>
+      </button>
+    </div>
+    <div style="display:flex;">
+      <button class="btn" style="flex:1;padding:8px;" onclick="closeCostConfirm()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Existing-triggers guard modal -->
+<div id="existing-triggers-overlay" onclick="if(event.target===this)closeExistingTriggersModal()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;width:min(400px,95vw);padding:20px;">
+    <div style="font-weight:600;margin-bottom:6px;">Song has existing triggers</div>
+    <div id="existing-triggers-msg" style="font-size:13px;color:var(--text-muted);margin-bottom:16px;"></div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="btn btn-accent" style="width:100%;padding:9px;" onclick="existingTriggersKeep()">
+        Keep existing triggers
+        <div style="font-size:11px;font-weight:400;opacity:.75;margin-top:2px;">AI will suggest additions only — no duplicates</div>
+      </button>
+      <!-- Hold-to-delete button -->
+      <button id="hold-delete-btn" class="btn btn-danger"
+        style="width:100%;padding:9px;position:relative;overflow:hidden;user-select:none;cursor:pointer;"
+        onmousedown="holdDeleteStart(event)" ontouchstart="holdDeleteStart(event)"
+        onmouseup="holdDeleteCancel()" onmouseleave="holdDeleteCancel()" ontouchend="holdDeleteCancel()">
+        <span id="hold-delete-label">Hold to delete all triggers</span>
+        <div id="hold-delete-fill"
+          style="position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.18);pointer-events:none;transition:none;"></div>
+      </button>
+      <button class="btn" style="width:100%;" onclick="closeExistingTriggersModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Analyze Learning result modal -->
+<div id="analyze-overlay" onclick="if(event.target===this)closeAnalyze()">
+  <div id="analyze-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span style="font-weight:600;">Refined Description</span>
+      <span style="cursor:pointer;color:var(--text-muted);" onclick="closeAnalyze()">✕</span>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+      Claude analyzed what you approved and rejected. Review the suggested refinement below, then click Apply to use it.
+    </div>
+    <textarea id="analyze-result" readonly></textarea>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-accent" onclick="applyRefinedDescription()">Apply to Profile</button>
+      <button class="btn" onclick="closeAnalyze()">Discard</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { connectWS, onMessage, GET, POST, DEL, api, markActiveNav, uuid, showToast } from '/static/js/app.js';
+import { createShapeCanvas, MARK_COLOR, MARK_ABBR } from '/static/js/shape_canvas.js';
+
+markActiveNav();
+connectWS();
+
+// ── State ──────────────────────────────────────────────────────────────────
+let trainingSongs    = [];
+let candidateSongs   = [];
+let events           = [];
+let trainingProfiles = [];
+let currentProfileId = null;
+let appSettings      = {};
+
+let _recentEventIds      = [];   // session-order: most recently used first
+
+let selectedTrainingUris    = new Set();
+let selectedEmbeddedOnlyUris = new Set();
+let selectedTargetUris   = [];
+
+// { uri: { title, artist, songComment, suggestions: [enriched] } }
+let suggestionCache  = {};
+let reviewedUris     = new Set();
+let currentTargetIdx = 0;
+
+let pickerMode  = 'training';
+let pickerSongs = [];
+
+let _profileCollapsed = false;
+
+let _zoomFollows    = false;
+let _followFutureMs = 5000;   // overridden from settings in init()
+let _followWindowMs = 20000;  // overridden from settings in init()
+
+// ── Canvas ─────────────────────────────────────────────────────────────────
+const reviewCanvas = createShapeCanvas(
+  document.getElementById('shape-canvas'),
+  document.getElementById('shape-resize-handle'),
+);
+reviewCanvas.wireResizeHandle();
+reviewCanvas.wireZoomHandles(
+  document.getElementById('timeline-bar'),
+  document.getElementById('zoom-handle-start'),
+  document.getElementById('zoom-handle-end'),
+  () => {
+    const song = candidateSongs.find(s => s.uri === _currentReviewUri);
+    return song?.duration_ms || 240000;
+  },
+  document.getElementById('zoom-handle-center'),
+);
+reviewCanvas.onZoomChange = (_s, _e) => updateZoomRegion();
+
+let _currentReviewUri = null;
+let _wsTrack          = null;
+let _lastProgressMs   = 0;
+let _lastUpdateTime   = Date.now();
+
+// ── WebSocket ──────────────────────────────────────────────────────────────
+let autoGenEnabled = false;
+let analysisEnabled = false;
+
+onMessage('state', msg => {
+  _wsTrack = msg.track || null;
+  if (_wsTrack) {
+    _lastProgressMs = _wsTrack.progress_ms;
+    _lastUpdateTime = Date.now();
+  }
+  autoGenEnabled = !!msg.auto_generate_enabled;
+  analysisEnabled = !!msg.audio_analysis_enabled;
+  updateAutoGenBtn();
+  updateAnalysisBtn();
+});
+
+onMessage('auto_generate_started', msg => {
+  showToast(`Generating AI triggers for ${msg.artist} — ${msg.title}…`, 'info');
+});
+onMessage('auto_generate_complete', msg => {
+  showToast(`AI triggers ready: ${msg.count} suggestions for ${msg.artist} — ${msg.title}`, 'success');
+  loadCandidateSongs();
+});
+onMessage('auto_generate_failed', msg => {
+  showToast(`Auto-gen failed for ${msg.title}: ${msg.error}`, 'error');
+});
+
+onMessage('shape_offset_updated', msg => {
+  if (msg.uri !== _currentReviewUri) return;
+  reviewCanvas.setOffset(msg.offset_ms);
+  reviewCanvas.draw();
+});
+
+function getPlayheadMs() {
+  if (!_wsTrack || _wsTrack.spotify_uri !== _currentReviewUri) return null;
+  return Math.min(
+    _lastProgressMs + (_wsTrack.is_playing ? Date.now() - _lastUpdateTime : 0),
+    _wsTrack.duration_ms,
+  );
+}
+
+// Canvas redraw loop
+setInterval(() => {
+  if (!_currentReviewUri) return;
+  const p = getPlayheadMs();
+  if (_zoomFollows && p !== null) {
+    const song   = candidateSongs.find(s => s.uri === _currentReviewUri);
+    const dur    = song?.duration_ms || reviewCanvas.zoomEnd || 240000;
+    const zEnd   = Math.min(dur, p + _followFutureMs);
+    const zStart = Math.max(0, zEnd - _followWindowMs);
+    reviewCanvas.setZoom(zStart, zEnd);
+    updateZoomRegion();
+  }
+  reviewCanvas.setPlayhead(p !== null ? p - (appSettings?.audio_latency_ms ?? 0) : null);
+  reviewCanvas.draw();
+}, 25);
+
+// ── Canvas drag — suggestion markers + middle-click pan ─────────────────────
+{
+  const _shapeEl = document.getElementById('shape-canvas');
+  let _canvasDrag = null; // { idx, startX, moved }
+  let _canvasPan  = null; // { startX, startZoomStart, startZoomEnd }
+
+  _shapeEl.addEventListener('mousedown', e => {
+    // Middle-click: start pan
+    if (e.button === 1) {
+      e.preventDefault();
+      _zoomFollows = false;
+      const btn = document.getElementById('btn-follow');
+      if (btn) btn.classList.remove('btn-accent');
+      _canvasPan = {
+        startX:         e.clientX,
+        startZoomStart: reviewCanvas.zoomStart,
+        startZoomEnd:   reviewCanvas.zoomEnd,
+      };
+      return;
+    }
+
+    if (e.button !== 0 || !_currentReviewUri) return;
+    const sugs = suggestionCache[_currentReviewUri]?.suggestions ?? [];
+    if (!sugs.length || !reviewCanvas.hasData) return;
+
+    const rect      = _shapeEl.getBoundingClientRect();
+    const mouseCssX = e.clientX - rect.left;
+    const startMs   = reviewCanvas.zoomStart, endMs = reviewCanvas.zoomEnd;
+
+    for (let i = 0; i < sugs.length; i++) {
+      const s = sugs[i];
+      if (s.timestamp_ms < startMs || s.timestamp_ms > endMs) continue;
+      const txCss = ((s.timestamp_ms - startMs) / (endMs - startMs)) * rect.width;
+      if (Math.abs(mouseCssX - txCss) <= 6) {
+        _canvasDrag = { idx: i, startX: e.clientX, moved: false };
+        e.preventDefault();
+        return;
+      }
+    }
+  });
+
+  // Double-click canvas: open existing suggestion if near click, else open manual-add
+  _shapeEl.addEventListener('dblclick', e => {
+    if (!_currentReviewUri || !reviewCanvas.hasData) return;
+    const rect      = _shapeEl.getBoundingClientRect();
+    const mouseCssX = e.clientX - rect.left;
+    const startMs   = reviewCanvas.zoomStart, endMs = reviewCanvas.zoomEnd;
+
+    // Check if clicking near an existing suggestion
+    const sugs = suggestionCache[_currentReviewUri]?.suggestions ?? [];
+    for (let i = 0; i < sugs.length; i++) {
+      const s = sugs[i];
+      if (s.timestamp_ms < startMs || s.timestamp_ms > endMs) continue;
+      const txCss = ((s.timestamp_ms - startMs) / (endMs - startMs)) * rect.width;
+      if (Math.abs(mouseCssX - txCss) <= 10) {
+        highlightSuggestion(i);
+        return;
+      }
+    }
+
+    const pct   = Math.max(0, Math.min(1, mouseCssX / rect.width));
+    const rawMs = Math.round((startMs + pct * (endMs - startMs)) / 20) * 20;
+    const ms    = reviewCanvas.snapTimestamp(rawMs, e.clientY - rect.top);
+    openManualAdd(ms);
+  });
+
+  // Right-click canvas: instantly add suggestion using last-used event (no dialog)
+  _shapeEl.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const uri = _currentReviewUri;
+    if (!uri || !reviewCanvas.hasData || !suggestionCache[uri]) return;
+    if (!_recentEventIds[0]) return;
+    const rect    = _shapeEl.getBoundingClientRect();
+    const pct     = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const startMs = reviewCanvas.zoomStart, endMs = reviewCanvas.zoomEnd;
+    const rawMs   = Math.round((startMs + pct * (endMs - startMs)) / 20) * 20;
+    const ms      = reviewCanvas.snapTimestamp(rawMs, e.clientY - rect.top);
+    const eventId = _recentEventIds[0];
+    const sug = {
+      timestamp_ms: ms, event_id: eventId, confidence: 1.0, reasoning: '',
+      original_timestamp_ms: ms, original_event_id: eventId,
+      labels: [], comment: '', manually_added: true, approved: true,
+    };
+    suggestionCache[uri].suggestions.push(sug);
+    suggestionCache[uri].suggestions.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    renderSuggestions(uri, suggestionCache[uri].suggestions);
+    updateCanvasMarkers();
+  });
+
+  window.addEventListener('mousemove', e => {
+    // Middle-click pan
+    if (_canvasPan) {
+      const rect     = _shapeEl.getBoundingClientRect();
+      const winMs    = _canvasPan.startZoomEnd - _canvasPan.startZoomStart;
+      const dxMs     = (e.clientX - _canvasPan.startX) / rect.width * winMs;
+      const song     = candidateSongs.find(s => s.uri === _currentReviewUri);
+      const dur      = song?.duration_ms || 240000;
+      const newStart = Math.max(0, Math.min(dur - winMs, _canvasPan.startZoomStart + dxMs));
+      reviewCanvas.setZoom(newStart, newStart + winMs);
+      updateZoomRegion();
+      return;
+    }
+
+    if (!_canvasDrag) return;
+    const sugs = suggestionCache[_currentReviewUri]?.suggestions ?? [];
+    const s    = sugs[_canvasDrag.idx];
+    if (!s) { _canvasDrag = null; return; }
+
+    if (!_canvasDrag.moved && Math.abs(e.clientX - _canvasDrag.startX) > 2)
+      _canvasDrag.moved = true;
+
+    if (_canvasDrag.moved) {
+      const rect = _shapeEl.getBoundingClientRect();
+      const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const startMs = reviewCanvas.zoomStart, endMs = reviewCanvas.zoomEnd;
+      let ms = Math.round((startMs + pct * (endMs - startMs)) / 20) * 20;
+      ms = reviewCanvas.snapTimestamp(ms, e.clientY - rect.top);
+      s.timestamp_ms = ms;
+      const input = document.querySelector(`#sug-${_canvasDrag.idx} .sug-ts-input`);
+      if (input) input.value = fmtTs(ms);
+      updateCanvasMarkers();
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    _canvasPan = null;
+    if (!_canvasDrag) return;
+    const { idx, moved } = _canvasDrag;
+    _canvasDrag = null;
+
+    if (!moved) {
+      // Click without drag → highlight the suggestion row
+      highlightSuggestion(idx);
+    } else {
+      // Drag ended → mark row as modified and re-sort list
+      const uri  = _currentReviewUri;
+      const sugs = suggestionCache[uri]?.suggestions ?? [];
+      if (sugs[idx]) refreshRowClass(uri, idx);
+      // Re-sort by timestamp and re-render
+      if (sugs.length) {
+        sugs.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+        renderSuggestions(uri, sugs);
+        updateCanvasMarkers();
+      }
+    }
+  });
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+async function init() {
+  const [tr, cand, evts, profiles, settings] = await Promise.all([
+    GET('/ai-triggers/training-songs').catch(() => []),
+    GET('/ai-triggers/candidate-songs').catch(() => []),
+    GET('/events').catch(() => []),
+    GET('/ai-triggers/training-profiles').catch(() => []),
+    GET('/settings').catch(() => ({})),
+  ]);
+  trainingSongs    = tr;
+  candidateSongs   = cand;
+  events           = evts;
+  trainingProfiles = profiles;
+  appSettings      = settings;
+  _followFutureMs  = (settings.builder_future_buffer_s ?? 5) * 1000;
+  _followWindowMs  = (settings.builder_zoom_window_s   ?? 20) * 1000;
+
+  // Populate event selects for embedded trigger settings
+  const evtOpts = events.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');
+  ['tp-lull-event','tp-drop-event','tp-charge-event','tp-quiet-event',
+   'tp-scene-fill-event','tp-start-event','tp-beat-start-event','tp-end-event','tp-flare-event'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (sel) {
+      const noneLabel = id === 'tp-flare-event' ? '(none — skip flares)' : '(none)';
+      sel.innerHTML = `<option value="">${noneLabel}</option>` + evtOpts;
+    }
+  });
+
+  renderProfileSelect();
+  fetchAndUpdateBadge();
+
+  // Wire filter buttons — short-click = toggle, long-press = scale drag
+  let _scaleDragLayer     = null;
+  let _scaleDragStartY    = 0;
+  let _scaleDragStartScale = 1;
+  let _scalePressTimer    = null;
+  let _scaleDragging      = false;
+
+  document.querySelectorAll('.shape-filter-btn').forEach(btn => {
+    const layer = btn.dataset.layer;
+
+    btn.addEventListener('mousedown', e => {
+      if (e.button !== 0 || layer === 'marks') return;
+      _scaleDragStartY     = e.clientY;
+      _scaleDragStartScale = reviewCanvas.scales[layer] ?? 1;
+      _scaleDragging       = false;
+      _scalePressTimer = setTimeout(() => {
+        _scaleDragging   = true;
+        _scaleDragLayer  = layer;
+        btn.classList.add('scaling');
+      }, 400);
+    });
+
+    btn.addEventListener('mouseup', e => {
+      clearTimeout(_scalePressTimer);
+      if (!_scaleDragging) {
+        // Short click: toggle filter
+        reviewCanvas.filters[layer] = !reviewCanvas.filters[layer];
+        btn.classList.toggle('active', reviewCanvas.filters[layer]);
+      }
+      _scaleDragging  = false;
+      _scaleDragLayer = null;
+      document.querySelectorAll('.shape-filter-btn').forEach(b => b.classList.remove('scaling'));
+    });
+
+    btn.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      reviewCanvas.avgFilters[layer] = !reviewCanvas.avgFilters[layer];
+    });
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!_scaleDragLayer) return;
+    const dy = _scaleDragStartY - e.clientY;
+    let s = _scaleDragStartScale * Math.pow(2, dy / 100);
+    if (Math.abs(s - 1.0) < 0.15) s = 1.0;
+    s = Math.max(0.1, Math.min(10, s));
+    reviewCanvas.scales[_scaleDragLayer] = s;
+    updateScaleButtons();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!_scaleDragLayer) return;
+    clearTimeout(_scalePressTimer);
+    _scaleDragLayer = null;
+    _scaleDragging  = false;
+    document.querySelectorAll('.shape-filter-btn').forEach(b => b.classList.remove('scaling'));
+    updateScaleButtons();
+  });
+
+  // Follow mode toggle
+  document.getElementById('btn-follow').addEventListener('click', () => {
+    _zoomFollows = !_zoomFollows;
+    const btn = document.getElementById('btn-follow');
+    btn.classList.toggle('btn-accent', _zoomFollows);
+  });
+
+  // Librosa filter toggles
+  document.querySelectorAll('.librosa-filter-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const lf = b.dataset.lf;
+      reviewCanvas.librosaFilters[lf] = !reviewCanvas.librosaFilters[lf];
+      b.classList.toggle('active', reviewCanvas.librosaFilters[lf]);
+    });
+  });
+}
+
+function updateScaleButtons() {
+  const labels = { total: 'Total', bass: 'Bass', mid: 'Mids', high: 'Highs' };
+  document.querySelectorAll('.shape-filter-btn').forEach(btn => {
+    const layer = btn.dataset.layer;
+    if (!labels[layer]) return;
+    const s = reviewCanvas.scales[layer];
+    btn.textContent = (s !== undefined && Math.abs(s - 1.0) > 0.05)
+      ? `${labels[layer]} ×${s.toFixed(1)}`
+      : labels[layer];
+  });
+}
+
+// ── Collapsible profile ─────────────────────────────────────────────────────
+window.toggleProfile = function() {
+  _profileCollapsed = !_profileCollapsed;
+  document.getElementById('profile-body').style.display = _profileCollapsed ? 'none' : '';
+  document.getElementById('profile-collapse-arrow').textContent = _profileCollapsed ? '▶' : '▼';
+  updateProfileSummary();
+};
+
+function updateProfileSummary() {
+  const name   = document.getElementById('profile-name').value.trim() || 'New Profile';
+  const nTrain = selectedTrainingUris.size;
+  const nTarget = selectedTargetUris.length;
+  const el = document.getElementById('profile-summary');
+  el.textContent = `${name} — ${nTrain} training · ${nTarget} target`;
+  el.style.display = _profileCollapsed ? '' : 'none';
+}
+
+// ── Profile management ─────────────────────────────────────────────────────
+function renderProfileSelect() {
+  const sel  = document.getElementById('profile-select');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— new profile —</option>';
+  for (const p of trainingProfiles) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  }
+  sel.value = prev && trainingProfiles.find(p => p.id === prev) ? prev : '';
+}
+
+window.loadProfile = function() {
+  const id = document.getElementById('profile-select').value;
+  if (!id) { newProfile(); return; }
+  const p = trainingProfiles.find(p => p.id === id);
+  if (!p) return;
+  currentProfileId = p.id;
+  document.getElementById('profile-name').value    = p.name || '';
+  document.getElementById('vibe-desc').value        = p.description || '';
+  document.getElementById('profile-genres').value   = (p.genres || []).join(', ');
+  document.getElementById('profile-default').checked = !!p.is_default;
+  document.getElementById('tp-min-spacing').value    = p.min_trigger_spacing_beats ?? 4;
+  document.getElementById('tp-scene-spacing').value      = p.min_scene_change_spacing_beats ?? 16;
+  document.getElementById('tp-notes').value               = p.notes              || '';
+  document.getElementById('tp-lull-event').value          = p.lull_event_id      || '';
+  document.getElementById('tp-drop-event').value          = p.drop_event_id      || '';
+  document.getElementById('tp-charge-event').value        = p.charge_event_id    || '';
+  document.getElementById('tp-quiet-event').value         = p.quiet_event_id     || '';
+  document.getElementById('tp-scene-fill-event').value    = p.scene_fill_event_id|| '';
+  document.getElementById('tp-fill-min-spacing').value    = p.fill_min_spacing_beats ?? 48;
+  document.getElementById('tp-start-event').value         = p.song_start_event_id    || '';
+  document.getElementById('tp-beat-start-event').value    = p.beat_start_event_id    || '';
+  document.getElementById('tp-end-event').value           = p.song_end_event_id  || '';
+  document.getElementById('tp-flare-event').value         = p.flare_event_id     || '';
+  document.getElementById('tp-flare-max-gap').value       = p.flare_max_gap_beats ?? 32;
+  selectedTrainingUris    = new Set(p.training_uris || []);
+  selectedEmbeddedOnlyUris = new Set(p.embedded_only_uris || []);
+  selectedTargetUris      = [...(p.target_uris || [])];
+  renderTrainingChips();
+  renderEmbeddedOnlyChips();
+  renderTargetChips();
+  suggestionCache = {};
+  reviewedUris    = new Set();
+  document.getElementById('review-panel').style.display = 'none';
+  updateProfileSummary();
+};
+
+window.newProfile = function() {
+  currentProfileId = null;
+  document.getElementById('profile-select').value     = '';
+  document.getElementById('profile-name').value       = '';
+  document.getElementById('vibe-desc').value           = '';
+  document.getElementById('profile-genres').value     = '';
+  document.getElementById('profile-default').checked  = false;
+  document.getElementById('tp-min-spacing').value     = 4;
+  document.getElementById('tp-scene-spacing').value        = 16;
+  document.getElementById('tp-notes').value                 = '';
+  document.getElementById('tp-lull-event').value            = '';
+  document.getElementById('tp-drop-event').value            = '';
+  document.getElementById('tp-charge-event').value          = '';
+  document.getElementById('tp-quiet-event').value           = '';
+  document.getElementById('tp-scene-fill-event').value      = '';
+  document.getElementById('tp-fill-min-spacing').value      = 48;
+  document.getElementById('tp-start-event').value           = '';
+  document.getElementById('tp-beat-start-event').value      = '';
+  document.getElementById('tp-end-event').value             = '';
+  document.getElementById('tp-flare-event').value           = '';
+  document.getElementById('tp-flare-max-gap').value         = 32;
+  selectedTrainingUris    = new Set();
+  selectedEmbeddedOnlyUris = new Set();
+  selectedTargetUris      = [];
+  renderTrainingChips();
+  renderEmbeddedOnlyChips();
+  renderTargetChips();
+  suggestionCache = {};
+  reviewedUris    = new Set();
+  document.getElementById('review-panel').style.display = 'none';
+  updateProfileSummary();
+};
+
+window.saveProfile = async function() {
+  const name        = document.getElementById('profile-name').value.trim() || 'Untitled Profile';
+  const description = document.getElementById('vibe-desc').value;
+  const genresRaw   = document.getElementById('profile-genres').value;
+  const genres      = genresRaw.split(',').map(g => g.trim()).filter(Boolean);
+  const is_default  = document.getElementById('profile-default').checked;
+  const min_trigger_spacing_beats       = parseInt(document.getElementById('tp-min-spacing').value)   || 4;
+  const min_scene_change_spacing_beats = parseInt(document.getElementById('tp-scene-spacing').value) || 16;
+  const id = currentProfileId || uuid();
+  currentProfileId = id;
+  await POST('/ai-triggers/training-profiles', {
+    id, name, description, genres, is_default,
+    training_uris:      [...selectedTrainingUris],
+    embedded_only_uris: [...selectedEmbeddedOnlyUris],
+    target_uris:        selectedTargetUris,
+    min_trigger_spacing_beats, min_scene_change_spacing_beats,
+    notes:               document.getElementById('tp-notes').value            || '',
+    lull_event_id:       document.getElementById('tp-lull-event').value       || '',
+    drop_event_id:       document.getElementById('tp-drop-event').value       || '',
+    charge_event_id:     document.getElementById('tp-charge-event').value     || '',
+    quiet_event_id:      document.getElementById('tp-quiet-event').value      || '',
+    scene_fill_event_id: document.getElementById('tp-scene-fill-event').value || '',
+    fill_min_spacing_beats: parseInt(document.getElementById('tp-fill-min-spacing').value) || 48,
+    song_start_event_id: document.getElementById('tp-start-event').value         || '',
+    beat_start_event_id: document.getElementById('tp-beat-start-event').value    || '',
+    song_end_event_id:   document.getElementById('tp-end-event').value        || '',
+    flare_event_id:      document.getElementById('tp-flare-event').value      || '',
+    flare_max_gap_beats: parseInt(document.getElementById('tp-flare-max-gap').value) || 32,
+  });
+  trainingProfiles = await GET('/ai-triggers/training-profiles');
+  renderProfileSelect();
+  document.getElementById('profile-select').value = id;
+  updateProfileSummary();
+};
+
+window.deleteProfile = async function() {
+  if (!currentProfileId) return;
+  if (!confirm('Delete this training profile?')) return;
+  await DEL(`/ai-triggers/training-profiles/${currentProfileId}`);
+  trainingProfiles = await GET('/ai-triggers/training-profiles');
+  renderProfileSelect();
+  newProfile();
+};
+
+window.duplicateProfile = async function() {
+  if (!currentProfileId) { alert('Load a profile to duplicate first.'); return; }
+  const src = trainingProfiles.find(p => p.id === currentProfileId);
+  if (!src) return;
+  const newId   = uuid();
+  const newName = (src.name || 'Profile') + ' - Copy';
+  await POST('/ai-triggers/training-profiles', {
+    ...src,
+    id:         newId,
+    name:       newName,
+    is_default: false,
+  });
+  trainingProfiles = await GET('/ai-triggers/training-profiles');
+  currentProfileId = newId;
+  renderProfileSelect();
+  document.getElementById('profile-select').value = newId;
+  document.getElementById('profile-name').value   = newName;
+  updateProfileSummary();
+};
+
+function updateAutoGenBtn() {
+  const btn = document.getElementById('auto-gen-btn');
+  if (!btn) return;
+  btn.textContent = autoGenEnabled ? 'Auto Analyze: On' : 'Auto Analyze: Off';
+  btn.style.background  = autoGenEnabled ? '#2e7d32' : '';
+  btn.style.color       = autoGenEnabled ? '#fff' : '';
+  btn.style.borderColor = autoGenEnabled ? 'transparent' : '';
+}
+
+window.toggleAutoGen = async function() {
+  await POST(`/control/auto-generate?enabled=${!autoGenEnabled}`);
+  // WS state update will trigger updateAutoGenBtn()
+};
+
+function updateAnalysisBtn() {
+  const btn = document.getElementById('analysis-btn');
+  if (!btn) return;
+  btn.textContent    = analysisEnabled ? 'Capture Shape: On' : 'Capture Shape: Off';
+  btn.style.background  = analysisEnabled ? '#1565c0' : '';
+  btn.style.color       = analysisEnabled ? '#fff' : '';
+  btn.style.borderColor = analysisEnabled ? 'transparent' : '';
+}
+
+window.toggleAnalysis = async function() {
+  await POST('/analysis/toggle', {});
+  // WS state update will trigger updateAnalysisBtn()
+};
+
+window.generateNow = async function(uri) {
+  await POST(`/ai-triggers/generate-now?uri=${encodeURIComponent(uri)}`);
+  showToast('Generation started…', 'info');
+};
+
+window.openManageProfiles = function() {
+  document.getElementById('manage-profiles-search').value = '';
+  renderManageProfilesList();
+  document.getElementById('manage-profiles-overlay').style.display = 'flex';
+};
+window.closeManageProfiles = function() {
+  document.getElementById('manage-profiles-overlay').style.display = 'none';
+};
+window.renderManageProfilesList = function() {
+  const q  = document.getElementById('manage-profiles-search').value.toLowerCase();
+  const el = document.getElementById('manage-profiles-list');
+  const filtered = q
+    ? trainingProfiles.filter(p => p.name.toLowerCase().includes(q))
+    : trainingProfiles;
+  if (!filtered.length) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:13px;padding:8px;">No training profiles found.</div>`;
+    return;
+  }
+  el.innerHTML = filtered.map(p => {
+    const genreStr = (p.genres || []).join(', ');
+    const defaultBadge = p.is_default ? ' <span style="font-size:10px;background:#1565c0;color:#fff;border-radius:8px;padding:1px 6px;">default</span>' : '';
+    return `
+    <div class="picker-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <div style="flex:1;min-width:0;cursor:pointer;" onclick="loadProfileFromModal('${esc(p.id)}')">
+        <div>${p.name}${defaultBadge}</div>
+        <div class="pr-sub">${p.training_uris?.length ?? 0} training · ${p.target_uris?.length ?? 0} target${genreStr ? ' · ' + genreStr : ''}</div>
+      </div>
+      <button onclick="deleteProfileFromModal('${esc(p.id)}','${esc(p.name)}')"
+        style="flex-shrink:0;background:transparent;border:1px solid #c62828;color:#ef9a9a;border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer;">✕</button>
+    </div>`;
+  }).join('');
+};
+window.loadProfileFromModal = function(id) {
+  document.getElementById('profile-select').value = id;
+  loadProfile();
+  closeManageProfiles();
+};
+window.deleteProfileFromModal = async function(id, name) {
+  if (!confirm(`Delete training profile "${name}"?`)) return;
+  await DEL(`/ai-triggers/training-profiles/${id}`);
+  trainingProfiles = await GET('/ai-triggers/training-profiles');
+  renderProfileSelect();
+  if (currentProfileId === id) newProfile();
+  renderManageProfilesList();
+};
+window.backfillGenres = async function() {
+  const btn = event.target;
+  btn.textContent = 'Working…';
+  btn.disabled = true;
+  try {
+    const r = await POST('/audio-shape/backfill-genres', {});
+    alert(`Updated ${r.updated} shape${r.updated !== 1 ? 's' : ''} with genres`);
+  } catch {
+    alert('Backfill failed — check the server log');
+  } finally {
+    btn.textContent = 'Backfill Genres';
+    btn.disabled = false;
+  }
+};
+
+// ── Training chips ─────────────────────────────────────────────────────────
+function renderTrainingChips() {
+  const el = document.getElementById('training-chips');
+  el.querySelectorAll('.chip').forEach(c => c.remove());
+  const noEl = document.getElementById('no-training');
+  if (noEl) noEl.style.display = selectedTrainingUris.size > 0 ? 'none' : '';
+  for (const uri of selectedTrainingUris) {
+    const song = trainingSongs.find(s => s.uri === uri);
+    if (!song) continue;
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.innerHTML = `<span>${song.artist} — ${song.title}</span>
+      <span class="chip-count">(${song.trigger_count ?? '?'})</span>
+      <span class="chip-x" onclick="removeTraining('${esc(uri)}')">✕</span>`;
+    el.appendChild(chip);
+  }
+  updateProfileSummary();
+}
+
+window.removeTraining = function(uri) {
+  selectedTrainingUris.delete(uri);
+  renderTrainingChips();
+};
+
+// ── Embedded-only chips ─────────────────────────────────────────────────────
+function renderEmbeddedOnlyChips() {
+  const el = document.getElementById('embedded-chips');
+  el.querySelectorAll('.chip').forEach(c => c.remove());
+  const noEl = document.getElementById('no-embedded');
+  if (noEl) noEl.style.display = selectedEmbeddedOnlyUris.size > 0 ? 'none' : '';
+  for (const uri of selectedEmbeddedOnlyUris) {
+    const song = trainingSongs.find(s => s.uri === uri);
+    if (!song) continue;
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.innerHTML = `<span>${song.artist} — ${song.title}</span>
+      <span class="chip-count">(${song.trigger_count ?? '?'})</span>
+      <span class="chip-x" onclick="removeEmbeddedOnly('${esc(uri)}')">✕</span>`;
+    el.appendChild(chip);
+  }
+  updateProfileSummary();
+}
+
+window.removeEmbeddedOnly = function(uri) {
+  selectedEmbeddedOnlyUris.delete(uri);
+  renderEmbeddedOnlyChips();
+};
+
+window.reloadSongLists = async function() {
+  const btn = document.getElementById('reload-songs-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '↺ Reloading…'; }
+  try {
+    [trainingSongs, candidateSongs] = await Promise.all([
+      GET('/ai-triggers/training-songs'),
+      GET('/ai-triggers/candidate-songs'),
+    ]);
+    showToast('Song lists refreshed.', 'success');
+  } catch {
+    showToast('Reload failed.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↺ Reload Songs'; }
+  }
+};
+
+window.addMatchingVerified = function(targetBox) {
+  const genresRaw = document.getElementById('profile-genres').value;
+  const profileGenres = genresRaw.split(',').map(g => g.trim().toLowerCase()).filter(Boolean);
+  if (!profileGenres.length) {
+    alert('Add genre tags to the profile first.');
+    return;
+  }
+  let added = 0;
+  for (const s of trainingSongs) {
+    const sGenres = (s.genres || []).map(g => g.toLowerCase());
+    const matches = profileGenres.some(pg => sGenres.some(sg => sg.includes(pg) || pg.includes(sg)));
+    if (!matches) continue;
+    if (targetBox === 'training') {
+      if (!selectedTrainingUris.has(s.uri)) { selectedTrainingUris.add(s.uri); added++; }
+    } else {
+      if (!selectedEmbeddedOnlyUris.has(s.uri) && !selectedTrainingUris.has(s.uri)) {
+        selectedEmbeddedOnlyUris.add(s.uri); added++;
+      }
+    }
+  }
+  if (targetBox === 'training') renderTrainingChips(); else renderEmbeddedOnlyChips();
+  if (added === 0) showToast('No verified songs match the profile genres.', 'info');
+  else showToast(`Added ${added} matching song${added !== 1 ? 's' : ''} to ${targetBox === 'training' ? 'AI + Embedded' : 'Embedded Only'} training.`, 'success');
+};
+
+// ── Target chips ───────────────────────────────────────────────────────────
+function renderTargetChips() {
+  const el = document.getElementById('target-chips');
+  el.querySelectorAll('.chip').forEach(c => c.remove());
+  const noEl = document.getElementById('no-target');
+  if (noEl) noEl.style.display = selectedTargetUris.length > 0 ? 'none' : '';
+  for (const uri of selectedTargetUris) {
+    const song   = candidateSongs.find(s => s.uri === uri);
+    if (!song) continue;
+    const cached = suggestionCache[uri];
+    const badge  = cached
+      ? `<span class="chip-count" style="color:#4caf50;">(${cached.suggestions.length} sug)</span>`
+      : `<span class="chip-count">(${song.trigger_count ?? 0} triggers)</span>`;
+    const genBtn = (!cached && !song.has_suggestions)
+      ? `<button onclick="generateNow('${esc(uri)}')" style="font-size:11px;padding:1px 6px;margin-left:4px;cursor:pointer;" title="Generate AI suggestions for this song">Generate</button>`
+      : '';
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.innerHTML = `<span>${song.artist} — ${song.title}</span>${badge}${genBtn}
+      <span class="chip-x" onclick="removeTarget('${esc(uri)}')">✕</span>`;
+    el.appendChild(chip);
+  }
+  updateProfileSummary();
+}
+
+window.removeTarget = function(uri) {
+  selectedTargetUris = selectedTargetUris.filter(u => u !== uri);
+  delete suggestionCache[uri];
+  reviewedUris.delete(uri);
+  renderTargetChips();
+  updateAnalyzeBtn();
+};
+
+// ── Song picker ────────────────────────────────────────────────────────────
+let pickerMatchesOnly = false;
+
+function songMatchesProfileGenres(song) {
+  const profile = trainingProfiles.find(p => p.id === currentProfileId);
+  if (!profile || !profile.genres?.length) return false;
+  const pgLower = profile.genres.map(g => g.toLowerCase());
+  const sgLower = (song.genres || []).map(g => g.toLowerCase());
+  if (!sgLower.length) return false;
+  return pgLower.some(pg => sgLower.some(sg => pg.includes(sg) || sg.includes(pg)));
+}
+
+function updatePickerMatchesBtn() {
+  const btn = document.getElementById('picker-matches-btn');
+  if (!btn) return;
+  btn.textContent     = pickerMatchesOnly ? 'Matches: On' : 'Matches: Off';
+  btn.style.background   = pickerMatchesOnly ? '#2e7d32' : '';
+  btn.style.color        = pickerMatchesOnly ? '#fff' : '';
+  btn.style.borderColor  = pickerMatchesOnly ? 'transparent' : '';
+}
+
+window.togglePickerMatches = function() {
+  pickerMatchesOnly = !pickerMatchesOnly;
+  updatePickerMatchesBtn();
+  renderPickerList();
+};
+
+window.openPicker = function(mode) {
+  pickerMode  = mode;
+  pickerSongs = mode === 'target' ? candidateSongs : trainingSongs;
+  document.getElementById('picker-title').textContent =
+    mode === 'training' ? 'Add AI + Embedded Training Song' :
+    mode === 'embedded' ? 'Add Embedded Only Training Song' : 'Add Target Song';
+  document.getElementById('picker-search').value = '';
+  pickerMatchesOnly = false;
+  document.getElementById('picker-matches-row').style.display = mode === 'target' ? 'block' : 'none';
+  updatePickerMatchesBtn();
+  document.getElementById('picker-overlay').classList.add('open');
+  renderPickerList();
+};
+window.closePicker = function() {
+  document.getElementById('picker-overlay').classList.remove('open');
+};
+window.renderPickerList = function() {
+  const q   = document.getElementById('picker-search').value.toLowerCase();
+  const el  = document.getElementById('picker-list');
+  el.innerHTML = '';
+  const activeSet = pickerMode === 'training' ? selectedTrainingUris :
+                    pickerMode === 'embedded'  ? selectedEmbeddedOnlyUris :
+                                                 new Set(selectedTargetUris);
+  let filtered = pickerSongs.filter(s => (s.title + s.artist).toLowerCase().includes(q));
+  if (pickerMatchesOnly && pickerMode === 'target') {
+    const trainingUriSet = new Set(trainingSongs.map(s => s.uri));
+    filtered = filtered.filter(s =>
+      songMatchesProfileGenres(s) &&
+      !trainingUriSet.has(s.uri) &&
+      !s.has_suggestions
+    );
+  }
+  if (!filtered.length) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:13px;padding:8px;">No songs found.</div>`;
+    return;
+  }
+  for (const s of filtered) {
+    const already = activeSet.has(s.uri);
+    const row = document.createElement('div');
+    row.className = 'picker-row' + (already ? ' disabled' : '');
+    row.innerHTML = `<div>${s.artist} — ${s.title}</div>
+      <div class="pr-sub">${s.trigger_count != null ? s.trigger_count + ' triggers · ' : ''}${s.mark_count} marks${already ? ' · already added' : ''}</div>`;
+    if (!already) {
+      row.onclick = async () => {
+        if (pickerMode === 'training') {
+          selectedTrainingUris.add(s.uri);
+          renderTrainingChips();
+        } else if (pickerMode === 'embedded') {
+          selectedEmbeddedOnlyUris.add(s.uri);
+          renderEmbeddedOnlyChips();
+        } else {
+          if (!selectedTargetUris.includes(s.uri)) {
+            if (s.trigger_count > 0) {
+              closePicker();
+              openExistingTriggersModal(s);
+              return;
+            }
+            selectedTargetUris.push(s.uri);
+            renderTargetChips();
+          }
+        }
+        closePicker();
+      };
+    }
+    el.appendChild(row);
+  }
+};
+
+// ── Existing-triggers guard modal ──────────────────────────────────────────
+let _pendingTargetSong = null;
+let _holdDeleteTimer   = null;
+const _HOLD_MS         = 2000;
+
+window.openExistingTriggersModal = function(song) {
+  _pendingTargetSong = song;
+  document.getElementById('existing-triggers-msg').textContent =
+    `"${song.title}" already has ${song.trigger_count} trigger(s). How should we proceed?`;
+  holdDeleteCancel();
+  document.getElementById('existing-triggers-overlay').style.display = 'flex';
+};
+
+window.closeExistingTriggersModal = function() {
+  holdDeleteCancel();
+  document.getElementById('existing-triggers-overlay').style.display = 'none';
+  _pendingTargetSong = null;
+};
+
+window.existingTriggersKeep = function() {
+  if (!_pendingTargetSong) return;
+  selectedTargetUris.push(_pendingTargetSong.uri);
+  renderTargetChips();
+  closeExistingTriggersModal();
+};
+
+window.holdDeleteStart = function(e) {
+  e.preventDefault();
+  const fill  = document.getElementById('hold-delete-fill');
+  const label = document.getElementById('hold-delete-label');
+  fill.style.transition = `width ${_HOLD_MS}ms linear`;
+  fill.style.width = '100%';
+  label.textContent = 'Hold…';
+  _holdDeleteTimer = setTimeout(async () => {
+    if (!_pendingTargetSong) return;
+    const song = _pendingTargetSong;
+    closeExistingTriggersModal();
+    const profile = await GET(`/profiles/by-uri?uri=${encodeURIComponent(song.uri)}`).catch(() => null);
+    if (profile) {
+      profile.triggers = [];
+      await POST('/profiles', profile);
+      song.trigger_count = 0;
+    }
+    selectedTargetUris.push(song.uri);
+    renderTargetChips();
+  }, _HOLD_MS);
+};
+
+window.holdDeleteCancel = function() {
+  clearTimeout(_holdDeleteTimer);
+  _holdDeleteTimer = null;
+  const fill  = document.getElementById('hold-delete-fill');
+  const label = document.getElementById('hold-delete-label');
+  if (!fill) return;
+  fill.style.transition = 'none';
+  fill.style.width = '0';
+  label.textContent = 'Hold to delete all triggers';
+};
+
+// ── Cost confirm modal ─────────────────────────────────────────────────────
+window.closeCostConfirm = function() {
+  document.getElementById('cost-confirm-overlay').style.display = 'none';
+};
+
+window.runEmbedded = async function() {
+  closeCostConfirm();
+  const allTrain = [...selectedTrainingUris, ...selectedEmbeddedOnlyUris];
+  if (!allTrain.length) { showToast('Add training songs first.', 'error'); return; }
+  if (!selectedTargetUris.length) { showToast('Add target songs first.', 'error'); return; }
+  const btn = document.getElementById('run-embedded-btn');
+  if (btn) btn.disabled = true;
+  let applied = 0, failed = 0;
+  for (const uri of selectedTargetUris) {
+    try {
+      const r = await POST('/ai-triggers/generate-embedded', {
+        target_uri: uri,
+        training_uris: allTrain,
+        training_profile_id: currentProfileId || '',
+      });
+      applied += r.applied ?? 0;
+    } catch {
+      failed++;
+    }
+  }
+  if (btn) btn.disabled = false;
+  if (failed) showToast(`Embedded: ${applied} triggers applied, ${failed} song(s) failed.`, 'error');
+  else showToast(`Embedded: ${applied} triggers applied to ${selectedTargetUris.length} song(s).`, 'success');
+};
+
+(function wireLongPressButtons() {
+  function wireBtn(btnId, model) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    let timer = null;
+    function start(e) {
+      e.preventDefault();
+      btn.classList.add('lp-pressing');
+      timer = setTimeout(() => {
+        timer = null;
+        btn.classList.remove('lp-pressing');
+        closeCostConfirm();
+        _runGeneration(model);
+      }, 500);
+    }
+    function cancel() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      btn.classList.remove('lp-pressing');
+    }
+    btn.addEventListener('mousedown', start);
+    btn.addEventListener('touchstart', start, { passive: false });
+    btn.addEventListener('mouseup',    cancel);
+    btn.addEventListener('mouseleave', cancel);
+    btn.addEventListener('touchend',   cancel);
+    btn.addEventListener('touchcancel', cancel);
+  }
+  wireBtn('run-haiku-btn',  'claude-haiku-4-5-20251001');
+  wireBtn('run-sonnet-btn', 'claude-sonnet-4-6');
+})();
+
+// ── Generate all ───────────────────────────────────────────────────────────
+window.generateAll = async function() {
+  if (selectedTargetUris.length === 0)  { alert('Add at least one target song.'); return; }
+  if (selectedTrainingUris.size  === 0) { alert('Add at least one training song.'); return; }
+
+  const description  = document.getElementById('vibe-desc').value;
+  const trainingUris = [...selectedTrainingUris];
+
+  // Show estimate first
+  let estimate;
+  try {
+    estimate = await POST('/ai-triggers/estimate-cost', {
+      training_uris: trainingUris,
+      target_uris:   selectedTargetUris,
+      description,
+    });
+  } catch (e) {
+    // If estimate fails (e.g. no exposed events), just show the error
+    alert(`Cannot generate: ${e.message || e}`);
+    return;
+  }
+
+  const fmtK = n => n >= 1000 ? `${(n/1000).toFixed(1)}k` : String(n);
+  const fmtC = n => `${(n * 100).toFixed(1)}¢`;
+  let rows = estimate.per_song.map(s => {
+    if (s.error) return `  ${(s.title || s.uri).padEnd(30)}  ERROR: ${s.error}`;
+    return `  ${(s.artist + ' — ' + s.title).padEnd(40)}  ${fmtK(s.input_tokens).padStart(6)} in  ${fmtK(s.output_tokens)} out`;
+  }).join('\n');
+  document.getElementById('cost-confirm-rows').textContent = rows;
+  document.getElementById('cost-confirm-total').textContent =
+    `~${fmtK(estimate.total_input_tokens)} in + ${fmtK(estimate.total_output_tokens)} out tokens`;
+  document.getElementById('haiku-price').textContent  = fmtC(estimate.total_haiku_cost_usd);
+  document.getElementById('sonnet-price').textContent = fmtC(estimate.total_sonnet_cost_usd);
+  document.getElementById('cost-confirm-overlay').style.display = 'flex';
+};
+
+async function _runGeneration(model = 'claude-sonnet-4-6') {
+
+  const btn = document.getElementById('generate-btn');
+  if (btn) btn.disabled = true;
+
+  const genProgress = document.getElementById('gen-progress');
+  const genStatus   = document.getElementById('gen-status');
+  const genBar      = document.getElementById('gen-bar');
+  const genCostLive = document.getElementById('gen-cost-live');
+  const genLog      = document.getElementById('gen-log');
+  genProgress.style.display = 'block';
+  genLog.innerHTML = '';
+  genCostLive.textContent = '';
+  genBar.style.width = '0%';
+
+  document.getElementById('error-msg').style.display = 'none';
+  document.getElementById('review-panel').style.display = 'none';
+
+  const description  = document.getElementById('vibe-desc').value;
+  const trainingUris = [...selectedTrainingUris];
+  const total = selectedTargetUris.length;
+  let totalCost = 0;
+
+  try {
+    for (let i = 0; i < total; i++) {
+      const uri  = selectedTargetUris[i];
+      const song = candidateSongs.find(s => s.uri === uri);
+      const title = song?.title || uri;
+      const modelShort = model.includes('haiku') ? 'Haiku' : 'Sonnet';
+      genStatus.textContent = `Calling Claude ${modelShort}… ${title} (${i + 1}/${total})`;
+      genBar.style.width = `${(i / total) * 100}%`;
+
+      const res = await fetch('/api/ai-triggers/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          training_uris: trainingUris,
+          target_uri: uri,
+          description,
+          model,
+          training_profile_id:   currentProfileId || '',
+          training_profile_name: trainingProfiles.find(p => p.id === currentProfileId)?.name || '',
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(`${song?.title || uri}: ${body.detail || 'HTTP ' + res.status}`);
+      }
+      const result = await res.json();
+      const songCost = result.cost_usd || 0;
+      const inTok    = result.input_tokens  || 0;
+      const outTok   = result.output_tokens || 0;
+      const sugCount = (result.suggestions || []).length;
+      totalCost += songCost;
+      genBar.style.width = `${((i + 1) / total) * 100}%`;
+      genCostLive.textContent = `$${totalCost.toFixed(4)} total`;
+      genLog.innerHTML += `<div>✓ ${title} — ${sugCount} triggers &nbsp;·&nbsp; ${inTok}+${outTok} tok &nbsp;·&nbsp; $${songCost.toFixed(4)}</div>`;
+      genLog.scrollTop = genLog.scrollHeight;
+
+      const prevCache = suggestionCache[uri];
+      suggestionCache[uri] = {
+        title:                result.target_title,
+        artist:               result.target_artist,
+        songComment:          prevCache?.songComment || '',
+        duration_ms:          candidateSongs.find(s => s.uri === uri)?.duration_ms || 0,
+        generated_at:         new Date().toISOString(),
+        training_profile_id:  currentProfileId || '',
+        training_profile_name: trainingProfiles.find(p => p.id === currentProfileId)?.name || '',
+        applied:              false,
+        cost_usd:             songCost,
+        input_tokens:         inTok,
+        output_tokens:        outTok,
+        suggestions: (result.suggestions || []).map(s => ({
+          ...s,
+          original_timestamp_ms: s.timestamp_ms,
+          original_event_id:     s.event_id,
+          labels:                [],
+          comment:               '',
+          manually_added:        false,
+        })),
+      };
+    }
+    genStatus.textContent = `Done — ${total} song${total > 1 ? 's' : ''} generated`;
+    reviewedUris     = new Set();
+    currentTargetIdx = 0;
+    renderTargetChips();
+    // Collapse profile section to give review space
+    if (!_profileCollapsed) toggleProfile();
+    showCurrentSong();
+    document.getElementById('review-panel').style.display = 'block';
+  } catch (err) {
+    const errEl = document.getElementById('error-msg');
+    errEl.textContent = `Error: ${err.message || err}`;
+    errEl.style.display = 'block';
+  } finally {
+    if (btn) btn.disabled = false;
+    genProgress.style.display = 'none';
+  }
+};
+
+// ── Song navigation ─────────────────────────────────────────────────────────
+window.navSong = function(delta) {
+  const newIdx = currentTargetIdx + delta;
+  if (newIdx < 0 || newIdx >= selectedTargetUris.length) return;
+  currentTargetIdx = newIdx;
+  showCurrentSong();
+};
+
+async function showCurrentSong() {
+  const uri    = selectedTargetUris[currentTargetIdx];
+  if (!uri) return;
+  let cached = suggestionCache[uri];
+  if (!cached) {
+    // Lazy-fetch from saved suggestion sets when navigating to an uncached song
+    const trackId = uri.split(':').pop();
+    try {
+      const set = await GET(`/ai-suggestions/${trackId}`);
+      suggestionCache[uri] = {
+        title: set.title, artist: set.artist, songComment: set.song_comment || '',
+        duration_ms: set.duration_ms || 0, generated_at: set.generated_at || '',
+        training_profile_id: set.training_profile_id || '',
+        training_profile_name: set.training_profile_name || '',
+        applied: set.applied || false,
+        cost_usd:      set.cost_usd      || 0,
+        input_tokens:  set.input_tokens  || 0,
+        output_tokens: set.output_tokens || 0,
+        suggestions: (set.suggestions || []).map(s => ({ ...s })),
+      };
+      cached = suggestionCache[uri];
+    } catch { return; }
+  }
+
+  reviewedUris.add(uri);
+  updateAnalyzeBtn();
+
+  document.getElementById('nav-counter').textContent =
+    `${currentTargetIdx + 1} / ${selectedTargetUris.length}`;
+  document.getElementById('sug-title').textContent =
+    `${cached.artist} — ${cached.title} (${cached.suggestions.length})`;
+  const costEl = document.getElementById('sug-cost');
+  if (cached.cost_usd) {
+    costEl.textContent = `$${cached.cost_usd.toFixed(4)}  (${cached.input_tokens}↑ ${cached.output_tokens}↓ tok)`;
+    costEl.title = `Actual cost: $${cached.cost_usd.toFixed(6)} | ${cached.input_tokens} input tokens, ${cached.output_tokens} output tokens`;
+  } else {
+    costEl.textContent = '';
+  }
+  document.getElementById('song-comment').value = cached.songComment || '';
+  document.getElementById('post-apply-strip').style.display = 'none';
+
+  renderSuggestions(uri, cached.suggestions);
+  await loadReviewShape(uri);
+}
+
+window.saveSongComment = function() {
+  const uri = selectedTargetUris[currentTargetIdx];
+  if (uri && suggestionCache[uri]) {
+    suggestionCache[uri].songComment = document.getElementById('song-comment').value;
+  }
+};
+
+// ── Canvas shape loading ────────────────────────────────────────────────────
+async function loadReviewShape(uri) {
+  _currentReviewUri = uri;
+  reviewCanvas.setData(null, null, 500);
+  reviewCanvas.setCustomMarkers([]);
+  document.getElementById('shape-status').textContent = 'Loading…';
+
+  try {
+    const [meta, data] = await Promise.all([
+      GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`),
+      GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`),
+    ]);
+    reviewCanvas.setData(data, meta, appSettings?.shape_average_window_ms ?? 500);
+    reviewCanvas.setOffset(meta?.offset_ms ?? 0);
+    reviewCanvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
+    const dur     = data.timestamps_ms[data.timestamps_ms.length - 1] || 240000;
+    const winMs   = Math.min(dur, (_followWindowMs || 20000));
+    reviewCanvas.setZoom(0, winMs);
+    updateZoomRegion();
+    document.getElementById('shape-status').textContent = '';
+    // Auto-load librosa overlay if analysis exists; hide otherwise
+    _loadLibrosaOverlay(uri);
+  } catch {
+    document.getElementById('shape-status').textContent = 'No audio shape available.';
+    reviewCanvas.setLibrosaMarkers(null);
+    document.getElementById('librosa-filter-row').style.display = 'none';
+  }
+  updateCanvasMarkers();
+}
+
+function _applyLibrosaAnalysis(la) {
+  reviewCanvas.setLibrosaMarkers(la);
+  document.getElementById('librosa-filter-row').style.display = 'flex';
+  document.getElementById('librosa-summary').textContent =
+    `${la.tempo_bpm.toFixed(1)} BPM  •  ${la.beats.length} beats  •  ` +
+    `${la.sections.length} sections  •  ${la.onsets.length} onsets  •  ` +
+    `${la.bass_onsets?.length ?? 0} bass  •  ${la.harmonic_changes.length} harmonic`;
+}
+
+async function _loadLibrosaOverlay(uri) {
+  try {
+    const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
+    _applyLibrosaAnalysis(la);
+  } catch {
+    reviewCanvas.setLibrosaMarkers(null);
+    document.getElementById('librosa-filter-row').style.display = 'none';
+    document.getElementById('librosa-summary').textContent = '';
+  }
+}
+
+document.getElementById('btn-librosa-analyze').addEventListener('click', async () => {
+  const uri = _currentReviewUri;
+  if (!uri) return;
+  const btn = document.getElementById('btn-librosa-analyze');
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    const existing = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`).catch(() => null);
+    if (existing) {
+      _applyLibrosaAnalysis(existing);
+      return;
+    }
+    const res = await POST('/audio-shape/librosa-analyze', { uri });
+    if (res.status === 'no_wav') {
+      alert('No WAV file found. Capture the song first.');
+    } else if (res.status === 'no_meta') {
+      alert('No audio shape found for this song.');
+    } else {
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
+          clearInterval(poll);
+          _applyLibrosaAnalysis(la);
+        } catch {
+          if (attempts >= 30) clearInterval(poll);
+        }
+      }, 2000);
+    }
+  } catch (e) {
+    alert('Librosa analysis failed: ' + e);
+  } finally {
+    btn.textContent = 'Librosa';
+    btn.disabled = false;
+  }
+});
+
+function updateCanvasMarkers() {
+  if (!_currentReviewUri || !suggestionCache[_currentReviewUri]) {
+    reviewCanvas.setCustomMarkers([]);
+    return;
+  }
+  reviewCanvas.setCustomMarkers(
+    suggestionCache[_currentReviewUri].suggestions.map(s => ({
+      timestamp_ms: s.timestamp_ms,
+      color: s.manually_added    ? '#1565c0'
+           : s.approved === true  ? '#4caf50'
+           : s.approved === false ? 'rgba(239,83,80,0.5)'
+           : 'rgba(255,255,255,0.5)',
+      shape:       'triangle',
+      event_color: events.find(e => e.id === s.event_id)?.color ?? null,
+    }))
+  );
+}
+
+function highlightSuggestion(idx) {
+  document.querySelectorAll('.suggestion-row.canvas-highlight')
+    .forEach(r => r.classList.remove('canvas-highlight'));
+  const row = document.getElementById(`sug-${idx}`);
+  if (row) {
+    row.classList.add('canvas-highlight');
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  reviewCanvas.setHighlightedMarker(idx);
+}
+
+function updateZoomRegion() {
+  const dur = candidateSongs.find(s => s.uri === _currentReviewUri)?.duration_ms
+           || reviewCanvas.zoomEnd
+           || 240000;
+  const s = reviewCanvas.zoomStart, e = reviewCanvas.zoomEnd;
+  const startPct = Math.max(0, Math.min(100, (s / dur) * 100));
+  const endPct   = Math.max(0, Math.min(100, (e / dur) * 100));
+  document.getElementById('zoom-region').style.left  = startPct + '%';
+  document.getElementById('zoom-region').style.width = (endPct - startPct) + '%';
+  document.getElementById('zoom-handle-start').style.left  = startPct + '%';
+  document.getElementById('zoom-handle-end').style.left    = endPct   + '%';
+  document.getElementById('zoom-handle-center').style.left = ((startPct + endPct) / 2) + '%';
+}
+
+window.zoomFull = function() {
+  if (!_currentReviewUri) return;
+  _zoomFollows = false;
+  const btn = document.getElementById('btn-follow');
+  if (btn) btn.classList.remove('btn-accent');
+  const song = candidateSongs.find(s => s.uri === _currentReviewUri);
+  const dur  = song?.duration_ms || reviewCanvas.zoomEnd || 240000;
+  reviewCanvas.setZoom(0, dur);
+  updateZoomRegion();
+};
+
+// ── Suggestions rendering ──────────────────────────────────────────────────
+function confColor(c) {
+  return c >= 0.8 ? '#4caf50' : c >= 0.6 ? '#ff9800' : '#ef5350';
+}
+
+function fmtTs(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}.${String(ms % 1000).slice(0, 1)}`;
+}
+
+function parseTsInput(str) {
+  const m = str.trim().match(/^(\d+):(\d{1,2})(?:\.(\d))?$/);
+  if (!m) return null;
+  return (parseInt(m[1]) * 60 + parseInt(m[2])) * 1000 + (m[3] ? parseInt(m[3]) * 100 : 0);
+}
+
+function isModified(sug) {
+  return sug.timestamp_ms !== sug.original_timestamp_ms || sug.event_id !== sug.original_event_id;
+}
+
+function rowClass(sug) {
+  let cls = 'suggestion-row';
+  if (sug.approved === true)  cls += ' approved';
+  if (sug.approved === false) cls += ' rejected';
+  if (!sug.manually_added && isModified(sug) && sug.approved !== false) cls += ' modified';
+  return cls;
+}
+
+function renderSuggestions(uri, sugs) {
+  const list = document.getElementById('sug-list');
+  list.innerHTML = '';
+  sugs.forEach((sug, idx) => {
+    const row = document.createElement('div');
+    row.className = rowClass(sug);
+    row.id = `sug-${idx}`;
+
+    const evOptions = events.map(ev =>
+      `<option value="${ev.id}" ${ev.id === sug.event_id ? 'selected' : ''}>${ev.name}</option>`
+    ).join('');
+
+    const fillW    = Math.round((sug.manually_added ? 1 : sug.confidence) * 100);
+    const modBadge = sug.manually_added
+      ? `<span class="sug-badge manual">+ manual</span>`
+      : (isModified(sug) ? `<span class="sug-badge modified">◆ edited</span>` : '');
+
+    const labelsVal   = (sug.labels || []).join(', ');
+    const commentVal  = sug.comment || '';
+    const commentOpen = commentVal ? ' open' : '';
+
+    row.innerHTML = `
+      <div class="sug-top" onclick="highlightSuggestion(${idx})">
+        ${modBadge}
+        <input class="sug-ts-input" value="${fmtTs(sug.timestamp_ms)}"
+          title="Edit timestamp (m:ss.t)"
+          onchange="updateSugTs('${esc(uri)}',${idx},this.value,this)"
+          onfocus="this.select(); event.stopPropagation()">
+        <span class="sug-event">
+          <select onchange="updateSugEvent('${esc(uri)}',${idx},this.value)"
+            onclick="event.stopPropagation()">${evOptions}</select>
+        </span>
+        <div class="conf-bar">
+          <div class="conf-fill" style="width:${fillW}%;background:${sug.manually_added ? '#1565c0' : confColor(sug.confidence)};"></div>
+        </div>
+        <span class="sug-pct">${sug.manually_added ? 'manual' : fillW + '%'}</span>
+      </div>
+      ${sug.manually_added ? '' : `<div class="sug-reasoning">${sug.reasoning}</div>`}
+      <div class="sug-labels">
+        <label>Labels:</label>
+        <input type="text" value="${labelsVal}" placeholder="comma-separated"
+          onchange="updateSugLabels('${esc(uri)}',${idx},this.value)">
+      </div>
+      <div class="sug-comment-wrap">
+        <span class="sug-comment-toggle" onclick="toggleComment(${idx})">
+          ${commentVal ? '▾ Feedback' : '▸ Add feedback'}
+        </span>
+        <textarea class="sug-comment${commentOpen}" id="sug-comment-${idx}"
+          placeholder="Why approve/reject? What did Claude get wrong?"
+          onchange="updateSugComment('${esc(uri)}',${idx},this.value)">${commentVal}</textarea>
+      </div>
+      <div class="sug-actions">
+        <button class="btn-approve" onclick="setSugState('${esc(uri)}',${idx},'approved')">✓ Approve</button>
+        <button class="btn-reject"  onclick="setSugState('${esc(uri)}',${idx},'rejected')">✕ Reject</button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+window.toggleComment = function(idx) {
+  const ta = document.getElementById(`sug-comment-${idx}`);
+  if (!ta) return;
+  ta.classList.toggle('open');
+  const toggle = ta.previousElementSibling;
+  if (toggle) toggle.textContent = ta.classList.contains('open') ? '▾ Feedback' : '▸ Add feedback';
+  if (ta.classList.contains('open')) ta.focus();
+};
+
+window.updateSugTs = function(uri, idx, val, inputEl) {
+  const ms  = parseTsInput(val);
+  if (ms === null) { inputEl.value = fmtTs(suggestionCache[uri]?.suggestions[idx]?.timestamp_ms ?? 0); return; }
+  const sug = suggestionCache[uri]?.suggestions[idx];
+  if (!sug) return;
+  sug.timestamp_ms = ms;
+  inputEl.value    = fmtTs(ms);
+  refreshRowClass(uri, idx);
+  updateCanvasMarkers();
+};
+
+window.updateSugEvent = function(uri, idx, eventId) {
+  const sug = suggestionCache[uri]?.suggestions[idx];
+  if (!sug) return;
+  sug.event_id = eventId;
+  refreshRowClass(uri, idx);
+};
+
+window.updateSugLabels = function(uri, idx, val) {
+  const sug = suggestionCache[uri]?.suggestions[idx];
+  if (!sug) return;
+  sug.labels = val.split(',').map(s => s.trim()).filter(Boolean);
+};
+
+window.updateSugComment = function(uri, idx, val) {
+  const sug = suggestionCache[uri]?.suggestions[idx];
+  if (!sug) return;
+  sug.comment = val;
+  const toggle = document.querySelector(`#sug-${idx} .sug-comment-toggle`);
+  if (toggle) toggle.textContent = val ? '▾ Feedback' : '▸ Add feedback';
+};
+
+function refreshRowClass(uri, idx) {
+  const sug = suggestionCache[uri]?.suggestions[idx];
+  const row = document.getElementById(`sug-${idx}`);
+  if (sug && row) row.className = rowClass(sug);
+  const top = row?.querySelector('.sug-top');
+  if (top) {
+    const oldBadge = top.querySelector('.sug-badge');
+    if (oldBadge) oldBadge.remove();
+    if (!sug.manually_added && isModified(sug)) {
+      const badge = document.createElement('span');
+      badge.className = 'sug-badge modified';
+      badge.textContent = '◆ edited';
+      top.prepend(badge);
+    }
+  }
+}
+
+window.setSugState = function(uri, idx, state) {
+  const sug = suggestionCache[uri]?.suggestions[idx];
+  if (!sug) return;
+  sug.approved = (state === 'approved');
+  const row = document.getElementById(`sug-${idx}`);
+  if (row) row.className = rowClass(sug);
+  if (state === 'rejected') {
+    const ta = document.getElementById(`sug-comment-${idx}`);
+    if (ta && !ta.classList.contains('open')) {
+      ta.classList.add('open');
+      const toggle = ta.previousElementSibling;
+      if (toggle) toggle.textContent = '▾ Feedback';
+      ta.focus();
+    }
+  }
+  updateCanvasMarkers();
+};
+
+window.approveHighConf = function() {
+  const uri = selectedTargetUris[currentTargetIdx];
+  if (!uri || !suggestionCache[uri]) return;
+  suggestionCache[uri].suggestions.forEach((s, i) => {
+    if ((s.manually_added || s.confidence >= 0.8) && s.approved !== false)
+      setSugState(uri, i, 'approved');
+  });
+};
+
+// ── Searchable select helpers ───────────────────────────────────────────────
+function searchableSelect(selectCls, opts, selectedValue) {
+  const optsJson = JSON.stringify(opts).replace(/'/g, '&#39;');
+  const optHtml = opts.map(o =>
+    `<option value="${o.value}"${o.value === selectedValue ? ' selected' : ''}>${o.label}</option>`
+  ).join('');
+  return `<div style="display:flex;flex-direction:column;gap:3px;">
+    <input type="text" class="ss-filter" placeholder="Filter…"
+      data-options='${optsJson}' oninput="filterSearchSelect(this)"
+      style="font-size:12px;padding:3px 6px;">
+    <select class="${selectCls}" style="width:100%">${optHtml}</select>
+  </div>`;
+}
+
+window.filterSearchSelect = function(input) {
+  const q = input.value.toLowerCase();
+  const select = input.nextElementSibling;
+  const currentVal = select.value;
+  const all = JSON.parse(input.dataset.options);
+  const filtered = q ? all.filter(o => o.label.toLowerCase().includes(q)) : all;
+  select.innerHTML = filtered.map(o =>
+    `<option value="${o.value}"${o.value === currentVal ? ' selected' : ''}>${o.label}</option>`
+  ).join('');
+  if (!select.value && filtered.length) select.value = filtered[0].value;
+};
+
+// ── Manual add trigger ─────────────────────────────────────────────────────
+window.openManualAdd = function(prefillMs = null) {
+  const ms = prefillMs ?? (() => {
+    const p = getPlayheadMs();
+    return p !== null ? Math.max(0, p - (appSettings?.audio_latency_ms ?? 0)) : null;
+  })();
+  document.getElementById('manual-ts').value      = ms !== null ? fmtTs(ms) : '';
+  document.getElementById('manual-labels').value  = '';
+  document.getElementById('manual-comment').value = '';
+
+  // Populate searchable event select sorted by most recently used
+  const sortedEvents = [
+    ..._recentEventIds.map(id => events.find(e => e.id === id)).filter(Boolean),
+    ...events.filter(e => !_recentEventIds.includes(e.id)),
+  ];
+  const opts = sortedEvents.map(e => ({
+    value: e.id,
+    label: e.name + (e.labels?.length ? ' [' + e.labels.join(', ') + ']' : ''),
+  }));
+  const currentId = _recentEventIds[0] || (events[0]?.id ?? '');
+  document.getElementById('manual-event-container').innerHTML =
+    searchableSelect('manual-event', opts, currentId);
+
+  document.getElementById('manual-add-overlay').classList.add('open');
+};
+window.closeManualAdd = function() {
+  document.getElementById('manual-add-overlay').classList.remove('open');
+};
+window.confirmManualAdd = function() {
+  const uri = selectedTargetUris[currentTargetIdx];
+  if (!uri || !suggestionCache[uri]) return;
+
+  const ms = parseTsInput(document.getElementById('manual-ts').value);
+  if (ms === null) { alert('Invalid timestamp. Use m:ss or m:ss.t format.'); return; }
+
+  const eventId   = document.querySelector('#manual-event-container .manual-event')?.value || '';
+  const labelsRaw = document.getElementById('manual-labels').value;
+  const comment   = document.getElementById('manual-comment').value;
+
+  const sug = {
+    timestamp_ms:          ms,
+    event_id:              eventId,
+    confidence:            1.0,
+    reasoning:             '',
+    original_timestamp_ms: ms,
+    original_event_id:     eventId,
+    labels:                labelsRaw.split(',').map(s => s.trim()).filter(Boolean),
+    comment,
+    manually_added:        true,
+    approved:              true,
+  };
+
+  suggestionCache[uri].suggestions.push(sug);
+  suggestionCache[uri].suggestions.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+  if (eventId) _recentEventIds = [eventId, ..._recentEventIds.filter(id => id !== eventId)];
+  closeManualAdd();
+  renderSuggestions(uri, suggestionCache[uri].suggestions);
+  updateCanvasMarkers();
+};
+
+// ── Apply approved ─────────────────────────────────────────────────────────
+window.applyApproved = async function() {
+  const uri = selectedTargetUris[currentTargetIdx];
+  if (!uri || !suggestionCache[uri]) return;
+  const sugs    = suggestionCache[uri].suggestions;
+  const approved = sugs
+    .filter(s => s.approved === true)
+    .map(s => ({ timestamp_ms: s.timestamp_ms, event_id: s.event_id }));
+
+  if (!approved.length) { alert('No suggestions approved yet.'); return; }
+
+  try {
+    const result = await POST('/ai-triggers/apply', {
+      target_uri:              uri,
+      suggestions:             approved,
+      ai_training_profile_id: currentProfileId || '',
+    });
+    const strip = document.getElementById('post-apply-strip');
+    document.getElementById('post-apply-msg').textContent =
+      `✓ Applied ${result.applied} triggers to ${suggestionCache[uri].title}.`;
+    strip.style.display = 'block';
+  } catch (err) {
+    alert(`Failed to apply: ${err.message || err}`);
+  }
+};
+
+// ── Save as training song ──────────────────────────────────────────────────
+window.saveAsTraining = async function() {
+  const uri = selectedTargetUris[currentTargetIdx];
+  if (!uri) return;
+  if (!currentProfileId) { alert('Save a training profile first.'); return; }
+
+  const p = trainingProfiles.find(p => p.id === currentProfileId);
+  if (!p) return;
+
+  const btn = document.getElementById('add-training-btn');
+  if (p.training_uris.includes(uri)) {
+    if (btn) btn.textContent = '✓ Already in training';
+    return;
+  }
+
+  p.training_uris.push(uri);
+  await POST('/ai-triggers/training-profiles', p);
+  trainingProfiles = await GET('/ai-triggers/training-profiles');
+  trainingSongs    = await GET('/ai-triggers/training-songs');
+
+  // Add to active training set so chip appears immediately
+  selectedTrainingUris.add(uri);
+  renderTrainingChips();
+
+  document.getElementById('post-apply-msg').textContent += ' · Added to training!';
+  if (btn) btn.textContent = '✓ Added';
+};
+
+// ── Analyze Learning ───────────────────────────────────────────────────────
+function currentUri() {
+  return selectedTargetUris[currentTargetIdx] || null;
+}
+
+function updateAnalyzeBtn() {
+  const uri = currentUri();
+  // "Analyze This Song" — visible whenever the current song's suggestions are loaded
+  document.getElementById('analyze-btn').style.display =
+    (uri && suggestionCache[uri]) ? '' : 'none';
+  // "Analyze All" — visible only when every selected song has been reviewed
+  const allReviewed = selectedTargetUris.length > 1 &&
+    selectedTargetUris.every(u => reviewedUris.has(u) && suggestionCache[u]);
+  document.getElementById('analyze-all-btn').style.display = allReviewed ? '' : 'none';
+}
+
+window.analyzeLearning = async function(uris) {
+  const description = document.getElementById('vibe-desc').value;
+  const feedback    = [];
+
+  for (const uri of uris) {
+    const cached = suggestionCache[uri];
+    if (!cached) continue;
+    const sugs = cached.suggestions;
+    const toEntry = s => ({
+      timestamp_ms: s.timestamp_ms,
+      event_name:   events.find(e => e.id === s.event_id)?.name || s.event_id,
+      reasoning:    s.reasoning || '',
+      comment:      s.comment   || '',
+    });
+    feedback.push({
+      song:           `${cached.artist} — ${cached.title}`,
+      song_comment:   cached.songComment || '',
+      approved:       sugs.filter(s => s.approved === true  && !s.manually_added).map(toEntry),
+      rejected:       sugs.filter(s => s.approved === false).map(toEntry),
+      manually_added: sugs.filter(s => s.manually_added).map(s => ({
+        timestamp_ms: s.timestamp_ms,
+        event_name:   events.find(e => e.id === s.event_id)?.name || s.event_id,
+        comment:      s.comment || '',
+      })),
+    });
+  }
+
+  if (!feedback.length) { alert('No reviewed songs with feedback.'); return; }
+
+  const isSingle   = uris.length === 1;
+  const analyzeBtn = document.getElementById(isSingle ? 'analyze-btn' : 'analyze-all-btn');
+  const origText   = analyzeBtn.textContent;
+  analyzeBtn.disabled    = true;
+  analyzeBtn.textContent = 'Analyzing…';
+  try {
+    const result = await POST('/ai-triggers/analyze-learning', { current_description: description, feedback });
+    document.getElementById('analyze-result').value = result.refined_description || '';
+    document.getElementById('analyze-overlay').classList.add('open');
+  } catch (err) {
+    alert(`Analyze failed: ${err.message || err}`);
+  } finally {
+    analyzeBtn.disabled    = false;
+    analyzeBtn.textContent = origText;
+  }
+};
+
+window.closeAnalyze = function() {
+  document.getElementById('analyze-overlay').classList.remove('open');
+};
+window.applyRefinedDescription = function() {
+  document.getElementById('vibe-desc').value = document.getElementById('analyze-result').value;
+  closeAnalyze();
+  if (currentProfileId) saveProfile();
+};
+
+// ── Save current suggestion state ─────────────────────────────────────────
+window.saveCurrent = async function() {
+  const uri = selectedTargetUris[currentTargetIdx];
+  if (!uri || !suggestionCache[uri]) return;
+  const cached  = suggestionCache[uri];
+  const trackId = uri.split(':').pop();
+
+  const body = {
+    spotify_uri:           uri,
+    title:                 cached.title,
+    artist:                cached.artist,
+    duration_ms:           cached.duration_ms || 0,
+    generated_at:          cached.generated_at || new Date().toISOString(),
+    training_profile_id:   cached.training_profile_id || '',
+    training_profile_name: cached.training_profile_name || '',
+    suggestions: cached.suggestions.map(s => ({
+      timestamp_ms:          s.timestamp_ms,
+      event_id:              s.event_id,
+      event_name:            s.event_name || events.find(e => e.id === s.event_id)?.name || '',
+      confidence:            s.confidence  ?? 1.0,
+      reasoning:             s.reasoning   || '',
+      original_timestamp_ms: s.original_timestamp_ms,
+      original_event_id:     s.original_event_id,
+      labels:                s.labels         || [],
+      comment:               s.comment         || '',
+      manually_added:        s.manually_added  || false,
+      approved:              s.approved        ?? null,
+    })),
+    song_comment: cached.songComment || '',
+    reviewed:     true,
+    applied:      cached.applied     || false,
+  };
+
+  const btn = document.getElementById('save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await api('PUT', `/ai-suggestions/${trackId}`, body);
+    fetchAndUpdateBadge();
+    if (btn) {
+      btn.textContent = '✓ Saved';
+      setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 1500);
+    }
+  } catch (err) {
+    if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+    alert(`Save failed: ${err.message || err}`);
+  }
+};
+
+// ── Load Saved Suggestions ─────────────────────────────────────────────────
+let _savedSets = [];
+let _savedFilter = 'all'; // 'all' | 'unreviewed' | 'reviewed' | 'applied'
+
+async function fetchAndUpdateBadge() {
+  try {
+    const sets = await GET('/ai-suggestions');
+    const n = sets.filter(s => !s.reviewed && !s.applied).length;
+    const badge = document.getElementById('pending-review-badge');
+    if (badge) { badge.textContent = n; badge.style.display = n > 0 ? '' : 'none'; }
+  } catch {}
+}
+
+function updateReviewNextBtn() {
+  const n = _savedSets.filter(s => !s.reviewed && !s.applied).length;
+  const btn = document.getElementById('review-next-btn');
+  if (btn) {
+    btn.style.display = n > 0 ? '' : 'none';
+    btn.textContent = `Review Next Unreviewed (${n} left) →`;
+  }
+}
+
+window.setSavedFilter = function(f) {
+  _savedFilter = f;
+  document.querySelectorAll('.ls-tab').forEach(b =>
+    b.classList.toggle('ls-tab-active', b.dataset.filter === f));
+  renderLoadSavedList();
+};
+
+window.reviewNextUnreviewed = async function() {
+  const next = _savedSets.find(s => !s.reviewed && !s.applied);
+  if (next) await confirmLoadSaved(next.track_id);
+};
+
+window.openLoadSaved = async function() {
+  try {
+    _savedSets = await GET('/ai-suggestions');
+  } catch {
+    _savedSets = [];
+  }
+  document.getElementById('load-saved-search').value = '';
+  updateReviewNextBtn();
+  renderLoadSavedList();
+  document.getElementById('load-saved-overlay').style.display = 'flex';
+};
+
+window.closeLoadSaved = function() {
+  document.getElementById('load-saved-overlay').style.display = 'none';
+};
+
+window.renderLoadSavedList = function() {
+  const q  = document.getElementById('load-saved-search').value.toLowerCase();
+  const el = document.getElementById('load-saved-list');
+
+  let filtered = _savedSets;
+  if (_savedFilter === 'not-applied') filtered = filtered.filter(s => !s.applied);
+  else if (_savedFilter === 'unreviewed') filtered = filtered.filter(s => !s.reviewed && !s.applied);
+  else if (_savedFilter === 'reviewed') filtered = filtered.filter(s => s.reviewed && !s.applied);
+  else if (_savedFilter === 'applied')  filtered = filtered.filter(s => s.applied);
+
+  if (q) filtered = filtered.filter(s => (s.title + s.artist).toLowerCase().includes(q));
+
+  if (_savedFilter === 'all') {
+    filtered = [...filtered].sort((a, b) => {
+      const aUnrev = !a.reviewed && !a.applied ? 0 : 1;
+      const bUnrev = !b.reviewed && !b.applied ? 0 : 1;
+      if (aUnrev !== bUnrev) return aUnrev - bUnrev;
+      return (b.generated_at || '').localeCompare(a.generated_at || '');
+    });
+  }
+
+  if (!filtered.length) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:13px;padding:8px;">No saved sets found for this filter.</div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map(s => {
+    const date = s.generated_at ? new Date(s.generated_at).toLocaleString() : '';
+    const chips = [
+      s.applied  ? `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#2e7d32;color:#fff;">applied</span>` : '',
+      s.reviewed ? `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#1565c0;color:#fff;">reviewed</span>` : '',
+    ].filter(Boolean).join(' ');
+    return `<div class="picker-row" onclick="confirmLoadSaved('${s.track_id}')">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <span>${s.artist} — ${s.title}</span>
+        ${chips}
+      </div>
+      <div class="pr-sub">${s.suggestion_count} suggestions · ${date}${s.training_profile_name ? ' · ' + s.training_profile_name : ''}</div>
+    </div>`;
+  }).join('');
+};
+
+window.confirmLoadSaved = async function(trackId) {
+  let set;
+  try {
+    set = await GET(`/ai-suggestions/${trackId}`);
+  } catch (err) {
+    alert(`Failed to load: ${err.message || err}`);
+    return;
+  }
+
+  const uri = set.spotify_uri;
+
+  // Populate cache for the clicked song
+  suggestionCache[uri] = {
+    title:                set.title,
+    artist:               set.artist,
+    songComment:          set.song_comment || '',
+    duration_ms:          set.duration_ms || 0,
+    generated_at:         set.generated_at || new Date().toISOString(),
+    training_profile_id:  set.training_profile_id || '',
+    training_profile_name: set.training_profile_name || '',
+    applied:              set.applied || false,
+    suggestions:          (set.suggestions || []).map(s => ({ ...s })),
+  };
+
+  // Ensure _savedSets is loaded so we can build the full unapplied nav list
+  if (!_savedSets.length) {
+    try { _savedSets = await GET('/ai-suggestions'); } catch {}
+  }
+
+  // Build nav from all unapplied sets — unreviewed first, then newest
+  const unapplied = [..._savedSets.filter(s => !s.applied)].sort((a, b) => {
+    const aUnrev = !a.reviewed ? 0 : 1, bUnrev = !b.reviewed ? 0 : 1;
+    if (aUnrev !== bUnrev) return aUnrev - bUnrev;
+    return (b.generated_at || '').localeCompare(a.generated_at || '');
+  });
+  selectedTargetUris = unapplied.map(s => s.spotify_uri);
+
+  // Ensure candidateSongs has entries for all (needed for duration/zoom)
+  for (const s of unapplied) {
+    if (!candidateSongs.find(c => c.uri === s.spotify_uri))
+      candidateSongs.push({ uri: s.spotify_uri, title: s.title, artist: s.artist, duration_ms: s.duration_ms, mark_count: 0 });
+  }
+  renderTargetChips();
+
+  // Navigate to the clicked song
+  currentTargetIdx = selectedTargetUris.indexOf(uri);
+  if (currentTargetIdx < 0) currentTargetIdx = 0;
+  closeLoadSaved();
+  document.getElementById('review-panel').style.display = 'block';
+  if (_profileCollapsed === false) toggleProfile();
+  showCurrentSong();
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(str) {
+  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// Assign window exports needed by inline onclick attributes
+window.loadProfile          = window.loadProfile;
+window.newProfile           = window.newProfile;
+window.saveProfile          = window.saveProfile;
+window.deleteProfile        = window.deleteProfile;
+window.duplicateProfile     = window.duplicateProfile;
+window.toggleProfile        = window.toggleProfile;
+window.openPicker           = window.openPicker;
+window.closePicker          = window.closePicker;
+window.renderPickerList     = window.renderPickerList;
+window.removeTraining              = window.removeTraining;
+window.removeEmbeddedOnly          = window.removeEmbeddedOnly;
+window.addMatchingVerified         = window.addMatchingVerified;
+window.runEmbedded                 = window.runEmbedded;
+window.removeTarget                = window.removeTarget;
+window.generateAll                 = window.generateAll;
+window.closeCostConfirm            = window.closeCostConfirm;
+window.openExistingTriggersModal   = window.openExistingTriggersModal;
+window.closeExistingTriggersModal  = window.closeExistingTriggersModal;
+window.existingTriggersKeep        = window.existingTriggersKeep;
+window.holdDeleteStart             = window.holdDeleteStart;
+window.holdDeleteCancel            = window.holdDeleteCancel;
+window.navSong              = window.navSong;
+window.saveSongComment      = window.saveSongComment;
+window.setSugState          = window.setSugState;
+window.updateSugTs          = window.updateSugTs;
+window.updateSugEvent       = window.updateSugEvent;
+window.updateSugLabels      = window.updateSugLabels;
+window.updateSugComment     = window.updateSugComment;
+window.toggleComment        = window.toggleComment;
+window.approveHighConf      = window.approveHighConf;
+window.applyApproved        = window.applyApproved;
+window.saveAsTraining       = window.saveAsTraining;
+window.openManualAdd        = window.openManualAdd;
+window.closeManualAdd       = window.closeManualAdd;
+window.confirmManualAdd     = window.confirmManualAdd;
+window.analyzeLearning      = window.analyzeLearning;
+window.closeAnalyze         = window.closeAnalyze;
+window.applyRefinedDescription = window.applyRefinedDescription;
+window.zoomFull             = window.zoomFull;
+window.saveCurrent          = window.saveCurrent;
+window.openLoadSaved        = window.openLoadSaved;
+window.closeLoadSaved       = window.closeLoadSaved;
+window.renderLoadSavedList  = window.renderLoadSavedList;
+window.confirmLoadSaved     = window.confirmLoadSaved;
+window.setSavedFilter           = window.setSavedFilter;
+window.reviewNextUnreviewed     = window.reviewNextUnreviewed;
+window.openManageProfiles       = window.openManageProfiles;
+window.closeManageProfiles      = window.closeManageProfiles;
+window.renderManageProfilesList = window.renderManageProfilesList;
+window.loadProfileFromModal     = window.loadProfileFromModal;
+window.deleteProfileFromModal   = window.deleteProfileFromModal;
+window.backfillGenres           = window.backfillGenres;
+window.toggleAutoGen            = window.toggleAutoGen;
+window.toggleAnalysis           = window.toggleAnalysis;
+window.generateNow              = window.generateNow;
+
+init();
+</script>
+</body>
+</html>

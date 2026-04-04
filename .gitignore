@@ -1,0 +1,32 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# IDE / cache
+.cache/
+
+# User data (profiles, audio shapes, settings, tokens)
+storage/profiles/*.json
+storage/audio_shapes/*
+storage/ai_suggestions/
+storage/backup_ai_suggestions/
+storage/backups/
+storage/nn_models/
+storage/resources/
+storage/.spotify_token_cache
+storage/events.json
+storage/gradients.json
+storage/palettes.json
+storage/settings.json
+storage/training_profiles.json
+storage/triggerless_profiles.json
+storage/xcorr_diagnostic.csv
+!storage/profiles/.gitkeep
+!storage/audio_shapes/.gitkeep
