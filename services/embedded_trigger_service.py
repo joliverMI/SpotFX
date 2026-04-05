@@ -495,6 +495,83 @@ def _detect_quiet_sections(beats, tp) -> list[int]:
     return result
 
 
+# ── Energy-change scene detector ──────────────────────────────────────────────
+
+def _detect_energy_scenes(
+    beats, tp, off: int, placed: list[dict],
+    scene_event_id: str, gap_ms: int,
+) -> list[dict]:
+    """
+    Detect scene-change moments by finding significant energy transitions.
+
+    Smooths the per-beat RMS energy over a rolling window, then finds beats where
+    the smoothed energy changes by more than a tunable delta. Prefers downbeats.
+    Returns list of trigger dicts to append to placed.
+
+    Tunable parameters (from training profile):
+      scene_smooth_window     8     beats to average for smoothing
+      scene_energy_delta      0.08  min smoothed energy change to qualify
+      scene_delta_window      4     beats over which to measure the change
+      scene_min_spacing_beats 16    min beats between scene triggers
+      scene_prefer_downbeat   True  snap to nearest downbeat within 2 beats
+    """
+    smooth_window = getattr(tp, "scene_smooth_window",      8)
+    energy_delta  = getattr(tp, "scene_energy_delta",       0.08)
+    delta_window  = getattr(tp, "scene_delta_window",       4)
+    min_spacing   = getattr(tp, "scene_min_spacing_beats",  16)
+    prefer_down   = getattr(tp, "scene_prefer_downbeat",    True)
+
+    n = len(beats)
+    if n < smooth_window + delta_window:
+        return []
+
+    # Smoothed energy curve (rolling mean of rms_total)
+    rms = np.array([b.rms_total for b in beats], dtype=float)
+    smoothed = np.convolve(rms, np.ones(smooth_window) / smooth_window, mode="same")
+
+    # Compute forward delta: how much does smoothed energy change over the next delta_window beats?
+    deltas = np.zeros(n)
+    for i in range(n - delta_window):
+        deltas[i] = smoothed[i + delta_window] - smoothed[i]
+
+    # Find candidate beats where |delta| exceeds threshold
+    candidates: list[tuple[int, float]] = []  # (beat_idx, abs_delta)
+    for i in range(delta_window, n - delta_window):
+        ad = abs(deltas[i])
+        if ad >= energy_delta:
+            candidates.append((i, ad))
+
+    # Sort by magnitude (strongest transitions first, greedy placement)
+    candidates.sort(key=lambda x: x[1], reverse=True)
+
+    spacing_ms = max(gap_ms, int(min_spacing * (beats[1].ms - beats[0].ms)) if n > 1 else gap_ms)
+    new_triggers: list[dict] = []
+
+    for bi, ad in candidates:
+        # Optionally snap to nearest downbeat within 2 beats
+        chosen = bi
+        if prefer_down:
+            for offset in [0, -1, 1, -2, 2]:
+                ci = bi + offset
+                if 0 <= ci < n and beats[ci].is_downbeat:
+                    chosen = ci
+                    break
+
+        ms = beats[chosen].ms + off
+        if _covered(ms, placed, spacing_ms) or _covered(ms, new_triggers, spacing_ms):
+            continue
+
+        confidence = round(min(ad / 0.20, 1.0), 3)  # normalize: 0.20 delta = 1.0 confidence
+        new_triggers.append({
+            "timestamp_ms": ms,
+            "event_id":     scene_event_id,
+            "confidence":   confidence,
+            "_exempt":      False,
+        })
+
+    return new_triggers
+
+
 # ── Standard fill helper ───────────────────────────────────────────────────────
 
 def _fill_standard_scenes(
@@ -697,15 +774,17 @@ def suggest_triggers(
     available_event_ids: set[str],
     *,
     training_profile=None,
+    _cached_analysis=None,
 ) -> list[dict]:
     """
     Run the 8-stage explicit structural pipeline for target_uri.
     No KNN — all event placements are driven by analytical detectors.
 
     Returns a list of dicts: {timestamp_ms, event_id, confidence}
-    """
-    from services.librosa_service import get_analysis_by_uri
 
+    _cached_analysis: optional pre-loaded LibrosaAnalysis to skip disk I/O
+                      (used by the tuning loop for performance).
+    """
     tp = training_profile
 
     # ── Per-profile event IDs ─────────────────────────────────────────────────
@@ -718,6 +797,9 @@ def suggest_triggers(
     quiet_event_id      = getattr(tp, "quiet_event_id",       "") or ""
     scene_fill_event_id = getattr(tp, "scene_fill_event_id",  "") or ""
     flare_event_id      = getattr(tp, "flare_event_id",       "") or ""
+    flare_low_event_id  = getattr(tp, "flare_low_event_id",  "") or ""
+    flare_mid_event_id  = getattr(tp, "flare_mid_event_id",  "") or ""
+    flare_high_event_id = getattr(tp, "flare_high_event_id", "") or ""
     flare_max_gap_beats = getattr(tp, "flare_max_gap_beats",  32)
 
     # ── Per-profile spacing ───────────────────────────────────────────────────
@@ -725,7 +807,10 @@ def suggest_triggers(
     scene_spacing_beats = getattr(tp, "min_scene_change_spacing_beats", 16)
 
     # ── Load target analysis ──────────────────────────────────────────────────
-    la = get_analysis_by_uri(target_uri)
+    la = _cached_analysis
+    if la is None:
+        from services.librosa_service import get_analysis_by_uri
+        la = get_analysis_by_uri(target_uri)
     if not la or not la.beats:
         logger.warning("Embedded: no librosa analysis for %s", target_uri)
         return []
@@ -819,7 +904,16 @@ def suggest_triggers(
                 _add(qms, quiet_event_id, min(0.80 * boost, SCORE_BOOST_MAX))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Stage 6 — Standard scene fill (fill-until-satisfied)
+    # Stage 6a — Energy-change scene detection (analytical, transition-based)
+    # ─────────────────────────────────────────────────────────────────────────
+    if scene_fill_event_id and scene_fill_event_id in available_event_ids:
+        energy_scenes = _detect_energy_scenes(
+            beats, tp, off, placed, scene_fill_event_id, gap_ms,
+        )
+        placed.extend(energy_scenes)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Stage 6b — Standard scene fill (coverage gap filler, runs after 6a)
     # ─────────────────────────────────────────────────────────────────────────
     if scene_fill_event_id and scene_fill_event_id in available_event_ids:
         fill_uptick       = getattr(tp, "fill_uptick_thresh",      0.10)
@@ -833,36 +927,104 @@ def suggest_triggers(
         )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Stage 7 — Flare fill (dynamic gap, harmonic-sorted)
+    # Stage 7 — Flare fill (composite score, genre-tunable weights)
     # ─────────────────────────────────────────────────────────────────────────
-    if flare_event_id and flare_event_id in available_event_ids:
-        from config import settings as _cfg
-        # Flares use gap_ms (min trigger spacing) as the high-energy floor —
-        # they are not bounded by min_scene_change_spacing_beats.
-        flare_max_gap_ms = max(gap_ms, int(flare_max_gap_beats * beat_interval_ms))
-        rms_high  = _cfg.flare_rms_high
-        rms_low   = _cfg.flare_rms_low
-        rms_range = max(rms_high - rms_low, 1e-9)
+    # Resolve which flare IDs are available (tiered or legacy single)
+    _has_tiered_flares = any(eid and eid in available_event_ids
+                             for eid in [flare_low_event_id, flare_mid_event_id, flare_high_event_id])
+    _has_any_flare = _has_tiered_flares or (flare_event_id and flare_event_id in available_event_ids)
+    if _has_any_flare:
+        # Tunable weights — 7 components (per-profile or defaults)
+        w_bass_hit   = getattr(tp, "flare_bass_hit_weight",       0.20)  # bass energy × bass onset
+        w_bass_onset = getattr(tp, "flare_bass_onset_weight",     0.10)  # bass onset alone
+        w_onset      = getattr(tp, "flare_onset_weight",          0.15)  # general onset strength
+        w_harm       = getattr(tp, "flare_harmonic_weight",       0.15)  # harmonic/chord change
+        w_uptick     = getattr(tp, "flare_energy_uptick_weight",  0.15)  # energy rise vs recent
+        w_energy     = getattr(tp, "flare_energy_weight",         0.10)  # absolute rms_total
+        w_dip        = getattr(tp, "flare_dip_weight",            0.15)  # energy dip then recovery
+        uptick_lb    = getattr(tp, "flare_uptick_lookback",       3)
+        dip_lb       = getattr(tp, "flare_dip_lookback",          2)
 
-        rms_arr     = np.array([b.rms_total for b in beats])
-        n_beats     = len(rms_arr)
-        window_avgs = np.zeros(n_beats)
-        for bi in range(n_beats):
-            lo = max(0, bi - _CONTEXT_BEATS)
-            hi = min(n_beats, bi + _CONTEXT_BEATS + 1)
-            window_avgs[bi] = rms_arr[lo:hi].mean()
+        # Tunable thresholds
+        shape_thresh       = getattr(tp, "flare_shape_thresh",       0.30)
+        flash_thresh       = getattr(tp, "flare_flash_thresh",       0.60)
+        combo_bass_thresh  = getattr(tp, "flare_combo_bass_thresh",  0.40)
+        combo_harm_thresh  = getattr(tp, "flare_combo_harm_thresh",  0.30)
+        shape_spacing      = getattr(tp, "flare_shape_min_spacing",  4)
+        flash_spacing      = getattr(tp, "flare_flash_min_spacing",  8)
+        combo_spacing      = getattr(tp, "flare_combo_min_spacing",  6)
 
-        candidates = [(bi, b) for bi, b in enumerate(beats) if b.harmonic_score > FLARE_HARMONIC_THRESH]
-        candidates.sort(key=lambda x: x[1].harmonic_score, reverse=True)
+        shape_spacing_ms = max(gap_ms, int(shape_spacing * beat_interval_ms))
+        flash_spacing_ms = max(gap_ms, int(flash_spacing * beat_interval_ms))
+        combo_spacing_ms = max(gap_ms, int(combo_spacing * beat_interval_ms))
 
-        for fbi, fb in candidates:
-            fms = fb.ms + off
-            t = float(np.clip((window_avgs[fbi] - rms_low) / rms_range, 0.0, 1.0))
-            local_gap_ms = int(flare_max_gap_ms + t * (gap_ms - flare_max_gap_ms))
-            local_gap_ms = max(gap_ms, local_gap_ms)
-            if _covered(fms, placed, local_gap_ms):
+        # Score every beat with 7 components
+        n_beats = len(beats)
+        scored: list[tuple[int, float, float, float]] = []  # (idx, total_score, bass_comp, harm_comp)
+        for bi, b in enumerate(beats):
+            # 1. Bass hit: bass energy × bass transient (both must be present)
+            bass_hit_comp = b.rms_bass * b.bass_onset_score
+            # 2. Bass onset alone: bass transient regardless of sustained energy
+            bass_onset_comp = b.bass_onset_score
+            # 3. General onset: any transient (syncopation bonus for off-beat)
+            onset_comp = b.onset_score if not b.is_downbeat else b.onset_score * 0.5
+            # 4. Harmonic change
+            harm_comp = b.harmonic_score
+            # 5. Energy uptick: beat is louder than recent average
+            if bi >= uptick_lb:
+                prev_avg = sum(beats[bi - j - 1].rms_total for j in range(uptick_lb)) / uptick_lb
+                uptick_comp = max(0.0, b.rms_total - prev_avg)
+            else:
+                uptick_comp = 0.0
+            # 6. Absolute energy level
+            energy_comp = b.rms_total
+            # 7. Energy dip: previous beats were quieter, this one recovers
+            #    (reggaeton "dip before re-entry" pattern)
+            if bi >= dip_lb + 1:
+                dip_window = [beats[bi - j - 1].rms_total for j in range(dip_lb)]
+                dip_min = min(dip_window)
+                before_dip = beats[bi - dip_lb - 1].rms_total if bi > dip_lb else 0
+                dip_comp = max(0.0, before_dip - dip_min) * max(0.0, b.rms_total - dip_min)
+            else:
+                dip_comp = 0.0
+
+            total = (w_bass_hit * bass_hit_comp + w_bass_onset * bass_onset_comp
+                     + w_onset * onset_comp + w_harm * harm_comp
+                     + w_uptick * uptick_comp + w_energy * energy_comp
+                     + w_dip * dip_comp)
+            # bass_comp for tier logic uses the combined bass signal
+            bass_comp = bass_hit_comp + bass_onset_comp * 0.5
+            scored.append((bi, total, bass_comp, harm_comp))
+
+        # Sort by composite score descending (greedy placement, best first)
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        for bi, total_score, bass_comp, harm_comp in scored:
+            if total_score < shape_thresh:
+                break  # all remaining are below the lowest threshold
+            fms = beats[bi].ms + off
+
+            # Determine tier, event ID, and spacing
+            if total_score >= flash_thresh:
+                tier_eid = flare_high_event_id or flare_event_id
+                tier_spacing_ms = flash_spacing_ms
+            elif bass_comp >= combo_bass_thresh and harm_comp >= combo_harm_thresh:
+                tier_eid = flare_mid_event_id or flare_event_id
+                tier_spacing_ms = combo_spacing_ms
+            elif total_score >= shape_thresh:
+                tier_eid = flare_low_event_id or flare_event_id
+                tier_spacing_ms = shape_spacing_ms
+            else:
+                continue  # below all thresholds
+
+            if not tier_eid or tier_eid not in available_event_ids:
+                tier_eid = flare_event_id  # fallback to legacy single tier
+            if not tier_eid:
                 continue
-            _add(fms, flare_event_id, 1.0)
+
+            if _covered(fms, placed, tier_spacing_ms):
+                continue
+            _add(fms, tier_eid, round(min(total_score, 1.0), 3))
 
     # ─────────────────────────────────────────────────────────────────────────
     # Density filter + final sort

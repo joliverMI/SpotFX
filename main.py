@@ -92,6 +92,8 @@ async def lifespan(app: FastAPI):
         state.auto_generate_enabled = bool(_saved["auto_generate_enabled"])
     if "dinner_party_mode" in _saved:
         state.dinner_party_mode = bool(_saved["dinner_party_mode"])
+    if "use_analyzed_triggerless" in _saved:
+        state.use_analyzed_triggerless = bool(_saved["use_analyzed_triggerless"])
 
     # Launch background tasks
     tasks = [

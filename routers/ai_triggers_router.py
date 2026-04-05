@@ -309,3 +309,79 @@ async def analyze_learning_endpoint(req: AnalyzeLearningRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Claude API error: {exc}")
     return {"refined_description": refined}
+
+
+# ── Analyzed trigger generation (for builder import) ──────────────────────────
+
+@router.get("/analyze-triggers")
+async def analyze_triggers(uri: str, category: str = "all"):
+    """
+    Generate analyzed triggers for a song using the embedded pipeline.
+
+    category: "all", "scenes", or "flares"
+    Returns list of {timestamp_ms, event_id, confidence, role}.
+    """
+    from services.librosa_service import get_analysis_by_uri
+    from services.embedded_trigger_service import suggest_triggers
+    from services.audio_shape_service import _find_profile_for_genres
+    from services.training_profile_manager import TrainingProfile
+    from services.profile_manager import load_profile_by_uri
+
+    la = get_analysis_by_uri(uri)
+    if not la or not la.beats:
+        raise HTTPException(400, "No librosa analysis available for this song")
+
+    profile = load_profile_by_uri(uri)
+    genres = profile.genres if profile and profile.genres else []
+    if not genres and state.current_track and state.current_track.spotify_uri == uri:
+        genres = state.current_track.genres or []
+
+    tp_data = _find_profile_for_genres(genres)
+    if not tp_data:
+        raise HTTPException(400, "No matching training profile found for this song's genres")
+
+    tp = TrainingProfile(**tp_data)
+
+    # Build available event IDs + role map
+    role_attrs = {
+        "song_start_event_id": "scene", "beat_start_event_id": "scene",
+        "song_end_event_id": "scene", "drop_event_id": "scene",
+        "lull_event_id": "scene", "charge_event_id": "scene",
+        "quiet_event_id": "scene", "scene_fill_event_id": "scene",
+        "flare_event_id": "flare", "flare_low_event_id": "flare",
+        "flare_mid_event_id": "flare", "flare_high_event_id": "flare",
+    }
+    available: set[str] = set()
+    eid_to_role: dict[str, str] = {}
+    for attr, role in role_attrs.items():
+        eid = getattr(tp, attr, "")
+        if eid:
+            available.add(eid)
+            eid_to_role[eid] = role
+
+    raw = suggest_triggers(
+        target_uri=uri, all_training_uris=[], available_event_ids=available,
+        training_profile=tp, _cached_analysis=la,
+    )
+
+    # Filter by category
+    results = []
+    for t in raw:
+        role = eid_to_role.get(t["event_id"], "unknown")
+        if category == "scenes" and role != "scene":
+            continue
+        if category == "flares" and role != "flare":
+            continue
+        results.append({
+            "timestamp_ms": t["timestamp_ms"],
+            "event_id": t["event_id"],
+            "confidence": t.get("confidence", 0.5),
+            "role": role,
+        })
+
+    return {
+        "triggers": results,
+        "training_profile": tp.name,
+        "total": len(results),
+        "category": category,
+    }

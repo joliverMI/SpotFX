@@ -145,6 +145,8 @@
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
         <button class="btn-sm" id="btn-relearn">Re-learn</button>
         <button class="btn-sm" id="btn-librosa-analyze" title="Run librosa analysis on this song's WAV">Librosa</button>
+        <button class="btn-sm" id="btn-analyze-scenes" title="Import analyzed scene triggers (replaces existing scenes)" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">Analyze Scenes</button>
+        <button class="btn-sm" id="btn-analyze-flares" title="Import analyzed flare triggers (replaces existing flares)" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">Analyze Flares</button>
         <div style="width:1px;height:18px;background:var(--border);margin:0 2px;"></div>
         <button class="shape-filter-btn active" data-layer="total" style="background:#555;">Total</button>
         <button class="shape-filter-btn active" data-layer="bass" style="background:rgba(46,204,113,0.6);">Bass</button>
@@ -1641,6 +1643,50 @@ function _applyTriggerShiftValue(ms) {
     renderTriggers();
   });
 }
+
+// ── Analyze Scenes / Flares import buttons ──────────────────────────────────
+async function analyzeAndImport(category) {
+  const uri = getActiveUri();
+  if (!uri || !profile) { toast('No song loaded'); return; }
+
+  const btn = document.getElementById(category === 'scenes' ? 'btn-analyze-scenes' : 'btn-analyze-flares');
+  const origText = btn.textContent;
+  btn.textContent = '...';
+  btn.disabled = true;
+
+  try {
+    const resp = await GET(`/ai-triggers/analyze-triggers?uri=${encodeURIComponent(uri)}&category=${category}`);
+    if (!resp.triggers?.length) { toast(`No ${category} triggers generated`); return; }
+
+    // Determine which event IDs belong to this category (from the response)
+    const importedEventIds = new Set(resp.triggers.map(t => t.event_id));
+
+    // Remove existing triggers that match this category
+    const kept = profile.triggers.filter(t => !importedEventIds.has(t.event_id));
+
+    // Add analyzed triggers
+    const imported = resp.triggers.map(t => ({
+      id:           crypto.randomUUID(),
+      timestamp_ms: t.timestamp_ms,
+      event_id:     t.event_id,
+      labels:       [],
+      enabled:      true,
+    }));
+
+    profile.triggers = [...kept, ...imported].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    await POST('/profiles', profile);
+    renderTriggers();
+    toast(`Imported ${imported.length} ${category} (profile: ${resp.training_profile})`);
+  } catch (e) {
+    toast(`Analyze ${category} failed: ${e.message || e}`);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('btn-analyze-scenes').addEventListener('click', () => analyzeAndImport('scenes'));
+document.getElementById('btn-analyze-flares').addEventListener('click', () => analyzeAndImport('flares'));
 
 // ── Librosa button + filter toggles + offset slider ─────────────────────────
 {

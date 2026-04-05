@@ -53,6 +53,8 @@ class WebSocketManager:
             "ledfx_rtt_ms": round(state.ledfx_rtt_ms, 1),
             "audio_analysis_enabled": state.audio_analysis_enabled,
             "use_unreviewed_ai_triggers": state.use_unreviewed_ai_triggers,
+            "use_analyzed_triggerless": state.use_analyzed_triggerless,
+            "analyzed_trigger_override": state.analyzed_trigger_override,
             "auto_generate_enabled": state.auto_generate_enabled,
             "dinner_party_mode": state.dinner_party_mode,
             "track": None,

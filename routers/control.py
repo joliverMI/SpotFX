@@ -70,6 +70,41 @@ async def set_use_ai_triggers(enabled: bool):
     return {"use_unreviewed_ai_triggers": enabled}
 
 
+@router.post("/use-analyzed-triggerless")
+async def set_use_analyzed_triggerless(enabled: bool):
+    """Toggle between analyzed triggers and synthetic triggerless for songs without user triggers."""
+    state.use_analyzed_triggerless = enabled
+    from routers.settings_router import _load_settings_file, _save_settings_file
+    saved = _load_settings_file()
+    saved["use_analyzed_triggerless"] = enabled
+    _save_settings_file(saved)
+    # Ensure analyzed triggers exist for current song
+    from main import engine
+    if enabled and engine._analyzed_triggers is None and engine._profile:
+        engine._analyzed_triggers = engine._generate_analyzed_triggers(engine._profile.spotify_uri)
+    engine.refresh_triggerless()
+    await ws_manager.broadcast_state(state)
+    return {"use_analyzed_triggerless": enabled}
+
+
+@router.post("/analyzed-trigger-override")
+async def set_analyzed_trigger_override(enabled: bool):
+    """Debug: override user triggers with analyzed triggers for testing."""
+    state.analyzed_trigger_override = enabled
+    # Ensure analyzed triggers are generated for the current song
+    from main import engine
+    if enabled and engine._analyzed_triggers is None and engine._profile:
+        engine._analyzed_triggers = engine._generate_analyzed_triggers(engine._profile.spotify_uri)
+    # Clear fired sets so triggers re-evaluate from current position
+    if enabled:
+        engine._fired.clear()
+        engine._pre_fired.clear()
+        engine._pre_ramp_fired.clear()
+    await ws_manager.broadcast_state(state)
+    return {"analyzed_trigger_override": enabled, "has_analyzed": engine._analyzed_triggers is not None,
+            "count": len(engine._analyzed_triggers) if engine._analyzed_triggers else 0}
+
+
 @router.post("/auto-generate")
 async def set_auto_generate(enabled: bool):
     """Enable or disable auto-generation of AI triggers after audio shape capture."""
@@ -101,12 +136,18 @@ async def set_dinner_party(enabled: bool):
 
 @router.get("/active-triggers")
 async def active_triggers():
-    """Return the engine's currently active trigger list (synthetic triggerless or empty)."""
+    """Return the engine's currently active trigger list if it's non-user triggers.
+    Returns the triggers + a source label so the frontend knows what's playing."""
     from main import engine
-    triggers = engine._triggerless_triggers
-    if triggers is None:
-        return []
-    return [t.model_dump() for t in triggers]
+    if engine._triggerless_triggers is not None:
+        return {"source": "triggerless", "triggers": [t.model_dump() for t in engine._triggerless_triggers]}
+    if state.analyzed_trigger_override and engine._analyzed_triggers:
+        return {"source": "analyzed_override", "triggers": [t.model_dump() for t in engine._analyzed_triggers]}
+    if engine._profile and any(t.enabled for t in engine._profile.triggers):
+        return {"source": "user", "triggers": []}  # user triggers — frontend already has them
+    if state.use_analyzed_triggerless and engine._analyzed_triggers:
+        return {"source": "analyzed", "triggers": [t.model_dump() for t in engine._analyzed_triggers]}
+    return {"source": "none", "triggers": []}
 
 
 @router.get("/ledfx/probe")

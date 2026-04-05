@@ -67,7 +67,7 @@
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <button id="pause-btn">⏸ Pause Triggers</button>
         <button id="dinner-party-btn" style="font-size:11px;padding:3px 10px;" title="Dinner Party: ignore song triggers, use automatic ambient lighting">Dinner Party: Off</button>
-        <button id="ai-toggle-btn" style="font-size:11px;padding:3px 10px;" title="Use unreviewed AI suggestion set triggers for the current song">AI Triggers: Off</button>
+        <button id="analyzed-toggle-btn" style="font-size:11px;padding:3px 10px;" title="Use analyzed triggers (embedded pipeline) instead of synthetic triggerless for songs without user triggers">Analyzed: On</button>
         <span id="ai-indicator" style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;display:none;"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
           <span id="trigger-flash"></span>
@@ -156,6 +156,10 @@
         <div id="dbg-last-fire" style="margin-top:4px;font-family:monospace;font-size:11px;opacity:0.8;"></div>
         <div style="margin-top:4px;">Poll age: <span id="dbg-poll-age">—</span> ms</div>
       </div>
+      <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px;display:flex;align-items:center;gap:10px;">
+        <button id="dbg-analyzed-override" onclick="toggleAnalyzedOverride()" style="font-size:11px;padding:3px 10px;">Analyzed Override: Off</button>
+        <span style="opacity:0.5;font-size:11px;">Override user triggers with analyzed pipeline output</span>
+      </div>
       <div id="dbg-cal" style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px;display:none;">
         <span style="opacity:0.7;">Calibration:</span>
         <span id="dbg-cal-status" style="margin-left:8px;font-style:italic;"></span>
@@ -189,6 +193,8 @@ let paused = false;
 let onTargetDevice = false;
 let nextPreview = null;  // { trigger_id, event_name, event_color, action_label, locked }
 let useAiTriggers = false;
+let useAnalyzedTriggerless = true;
+let analyzedTriggerOverride = false;
 let dinnerPartyMode = false;
 let _timing = {};         // latest timing info from WS state
 let _lastFireInfo = null; // { event_name, scheduled_ms, fired_at_ms, effective_offset_ms }
@@ -229,7 +235,13 @@ onMessage('state', msg => {
 
   const prevUseAi = useAiTriggers;
   useAiTriggers = msg.use_unreviewed_ai_triggers ?? false;
-  updateAiToggleBtn();
+
+  const prevAnalyzed = useAnalyzedTriggerless;
+  useAnalyzedTriggerless = msg.use_analyzed_triggerless ?? true;
+  const prevOverride = analyzedTriggerOverride;
+  analyzedTriggerOverride = msg.analyzed_trigger_override ?? false;
+  updateAnalyzedToggleBtn();
+  updateAnalyzedOverrideBtn();
 
   const prevDp = dinnerPartyMode;
   dinnerPartyMode = msg.dinner_party_mode ?? false;
@@ -244,7 +256,8 @@ onMessage('state', msg => {
     updateServiceBadge();
     renderTrack();
     // Reload profile if track changed, AI toggle changed, or dinner party toggled
-    if (changed || prevUseAi !== useAiTriggers || prevDp !== dinnerPartyMode) loadProfile();
+    if (changed || prevUseAi !== useAiTriggers || prevDp !== dinnerPartyMode
+        || prevAnalyzed !== useAnalyzedTriggerless || prevOverride !== analyzedTriggerOverride) loadProfile();
   } else {
     track = null;
     updatePauseBtn();
@@ -501,13 +514,30 @@ function updateAiIndicator() {
 }
 
 function updateAiToggleBtn() {
-  const btn = document.getElementById('ai-toggle-btn');
-  if (!btn) return;
-  btn.textContent = useAiTriggers ? 'AI Triggers: On' : 'AI Triggers: Off';
-  btn.style.background = useAiTriggers ? 'rgba(255,152,0,0.2)' : '';
-  btn.style.color = useAiTriggers ? '#ff9800' : '';
-  btn.style.border = useAiTriggers ? '1px solid #ff9800' : '';
+  // Legacy — no longer rendered but keep for compat
 }
+
+function updateAnalyzedToggleBtn() {
+  const btn = document.getElementById('analyzed-toggle-btn');
+  if (!btn) return;
+  btn.textContent = useAnalyzedTriggerless ? 'Analyzed: On' : 'Analyzed: Off';
+  btn.style.background = useAnalyzedTriggerless ? 'rgba(76,175,80,0.2)' : '';
+  btn.style.color = useAnalyzedTriggerless ? '#4caf50' : '';
+  btn.style.border = useAnalyzedTriggerless ? '1px solid #4caf50' : '';
+}
+
+function updateAnalyzedOverrideBtn() {
+  const btn = document.getElementById('dbg-analyzed-override');
+  if (!btn) return;
+  btn.textContent = analyzedTriggerOverride ? 'Analyzed Override: ON' : 'Analyzed Override: Off';
+  btn.style.background = analyzedTriggerOverride ? 'rgba(255,87,34,0.3)' : '';
+  btn.style.color = analyzedTriggerOverride ? '#ff5722' : '';
+  btn.style.border = analyzedTriggerOverride ? '1px solid #ff5722' : '';
+}
+
+window.toggleAnalyzedOverride = async function() {
+  await POST(`/control/analyzed-trigger-override?enabled=${!analyzedTriggerOverride}`);
+};
 
 function updateServiceBadge() {
   const el = document.getElementById('service-status');
@@ -548,38 +578,18 @@ async function loadProfile() {
     }
     profile = data;
 
-    // When AI toggle is on, substitute triggers from saved suggestion set
-    if (useAiTriggers) {
-      const trackId = track.spotify_uri.split(':').pop();
-      const sug = await GET(`/ai-suggestions/${trackId}`).catch(() => null);
-      if (sug?.suggestions?.length) {
-        profile.triggers = sug.suggestions.map(s => {
-          const ev = events[s.event_id];
-          return {
-            id:           `ai_${s.event_id}_${s.timestamp_ms}`,
-            timestamp_ms: s.timestamp_ms,
-            event_id:     s.event_id,
-            name:         ev?.name || s.event_name || s.event_id,
-            color:        ev?.color || '#00bcd4',
-            labels:       s.labels || [],
-          };
-        });
-        profile._usingAiTriggers = true;
-      }
-    }
-
-    // Check for synthetic triggerless triggers from the engine
-    const tlTriggers = await GET('/control/active-triggers').catch(() => []);
-    if (tlTriggers.length) {
-      profile.triggers = tlTriggers.map(t => {
+    // Check engine for active non-user triggers (triggerless, analyzed, override)
+    const active = await GET('/control/active-triggers').catch(() => ({ source: 'none', triggers: [] }));
+    if (active.source !== 'user' && active.source !== 'none' && active.triggers?.length) {
+      profile.triggers = active.triggers.map(t => {
         const ev = events[t.event_id];
         return {
           ...t,
           name:  ev?.name || t.event_id,
-          color: ev?.color || '#9c27b0',
+          color: ev?.color || (active.source.startsWith('analyzed') ? '#4caf50' : '#9c27b0'),
         };
       });
-      profile._usingTriggerless = true;
+      profile._triggerSource = active.source;  // 'triggerless', 'analyzed', 'analyzed_override'
     }
   } catch {
     profile = null;
@@ -843,10 +853,9 @@ document.getElementById('dinner-party-btn').addEventListener('click', async () =
   await POST(`/control/dinner-party?enabled=${!dinnerPartyMode}`);
 });
 
-// ── AI Triggers toggle ─────────────────────────────────────────────────────
-document.getElementById('ai-toggle-btn').addEventListener('click', async () => {
-  await POST(`/control/use-ai-triggers?enabled=${!useAiTriggers}`);
-  // Backend broadcasts state update which triggers loadProfile via WS handler
+// ── Analyzed Triggerless toggle ─────────────────────────────────────────────
+document.getElementById('analyzed-toggle-btn').addEventListener('click', async () => {
+  await POST(`/control/use-analyzed-triggerless?enabled=${!useAnalyzedTriggerless}`);
 });
 
 // ── Debug panel ────────────────────────────────────────────────────────────

@@ -42,7 +42,10 @@ class TrainingProfile(BaseModel):
     charge_event_id: str = ""        # Stage 4 — buildup peak before lull (empty = skip)
     quiet_event_id: str = ""         # Stage 5 — extended quiet section entry (empty = skip)
     scene_fill_event_id: str = ""    # Stage 6 — standard fill / energy re-entry (empty = skip)
-    flare_event_id: str = ""         # Stage 7 — flare triggers (empty = skip flare stage)
+    flare_event_id: str = ""         # Stage 7 — flare triggers (legacy single tier; empty = skip)
+    flare_low_event_id: str = ""     # Stage 7 — low-confidence flare (subtle; FPs okay)
+    flare_mid_event_id: str = ""     # Stage 7 — mid-confidence flare (moderate; some FPs okay)
+    flare_high_event_id: str = ""    # Stage 7 — high-confidence flare (clear musical element)
     flare_max_gap_beats: int = 32    # maximum beats between flares (at low energy sections)
 
     # ── Profile notes (running explainer, shown in UI) ────────────────────────
@@ -78,7 +81,14 @@ class TrainingProfile(BaseModel):
     quiet_ramp_beats: int = 8        # look-back window to detect gradual ramp
     quiet_ramp_max_step: float = 0.08  # max per-beat rms drop to count as "gradual"
 
-    # Standard Fill (Stage 6)
+    # Energy-Change Scene Detection (Stage 6a)
+    scene_smooth_window: int = 8         # beats for rolling energy average
+    scene_energy_delta: float = 0.08     # min smoothed energy change to trigger scene
+    scene_delta_window: int = 4          # beats over which to measure energy change
+    scene_min_spacing_beats: int = 16    # min beats between energy-detected scenes
+    scene_prefer_downbeat: bool = True   # snap to nearest downbeat within 2 beats
+
+    # Standard Fill (Stage 6b)
     fill_uptick_thresh: float = 0.10
     fill_harmonic_thresh: float = 0.35
     fill_min_spacing_beats: int = 48     # minimum beats between any two fill scene triggers

@@ -42,6 +42,8 @@ class AppState:
     on_target_device: bool = False  # True = playing on settings.spotify_device_name
     audio_analysis_enabled: bool = False  # True = capture audio shapes for new songs
     use_unreviewed_ai_triggers: bool = False  # True = use saved AI suggestion set instead of profile triggers
+    use_analyzed_triggerless: bool = True      # True = use embedded pipeline triggers instead of synthetic triggerless
+    analyzed_trigger_override: bool = False    # True = override user triggers with analyzed (debug/testing)
     auto_generate_enabled: bool = False       # True = auto-generate triggers after shape capture
     dinner_party_mode: bool = False            # True = ignore song triggers, use Dinner Party triggerless profile
 
