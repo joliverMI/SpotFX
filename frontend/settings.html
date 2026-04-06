@@ -13,14 +13,22 @@
     <a href="/">Now Playing</a>
     <a href="/builder.html">Profile Builder</a>
     <a href="/events.html">Events</a>
-    <a href="/playlist.html">Playlist</a>
-    <a href="/settings.html" class="active">Settings</a>
-    <a href="/ai_triggers.html">AI Triggers</a>
+    <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
     <a href="/triggerless.html">Triggerless</a>
+    <a href="/settings.html" class="active">Settings</a>
     <div id="ws-status"><div id="ws-dot"></div> Live</div>
   </nav>
 
   <main>
+    <div class="card">
+      <div class="card-title">Navigation</div>
+      <div class="field" style="display:flex;align-items:center;gap:8px;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="s-show-ai-triggers"> Show AI Triggers page in nav bar
+        </label>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-title">Latency &amp; Timing</div>
       <div class="field">
@@ -242,6 +250,7 @@ document.getElementById('s-analysis-max').value   = settings.audio_analysis_max_
 document.getElementById('s-avg-window').value     = settings.shape_average_window_ms  ?? 500;
 document.getElementById('s-smooth-ramp').value    = settings.smooth_ramp_ms ?? 0;
 document.getElementById('s-auto-gen-mode').value  = settings.auto_generate_mode ?? 'embedded';
+document.getElementById('s-show-ai-triggers').checked = settings.show_ai_triggers ?? false;
 
 document.getElementById('btn-save').addEventListener('click', async () => {
   await PATCH('/settings', {
@@ -264,6 +273,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     shape_average_window_ms:  parseInt(document.getElementById('s-avg-window').value),
     smooth_ramp_ms:           parseInt(document.getElementById('s-smooth-ramp').value),
     auto_generate_mode:       document.getElementById('s-auto-gen-mode').value,
+    show_ai_triggers:         document.getElementById('s-show-ai-triggers').checked,
   });
   const msg = document.getElementById('save-msg');
   msg.style.display = 'inline';

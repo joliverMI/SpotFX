@@ -96,6 +96,12 @@ export function markActiveNav() {
   });
 }
 
+// ── Conditional nav visibility ─────────────────────────────────────────────
+GET('/settings').then(s => {
+  const aiLink = document.querySelector('.nav-ai-triggers');
+  if (aiLink && !s?.show_ai_triggers) aiLink.style.display = 'none';
+}).catch(() => {});
+
 // ── Toast notifications ────────────────────────────────────────────────────
 export function showToast(msg, type = 'info') {
   const el = document.createElement('div');

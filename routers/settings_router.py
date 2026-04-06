@@ -61,6 +61,7 @@ class SettingsPatch(BaseModel):
     pre_transition_lead_ms: Optional[int] = None
     smooth_ramp_ms: Optional[int] = None
     auto_generate_mode: Optional[str] = None   # "embedded" | "claude"
+    show_ai_triggers: Optional[bool] = None
 
 
 @router.get("")
@@ -92,6 +93,7 @@ async def get_settings():
         "pre_transition_lead_ms": settings.pre_transition_lead_ms,
         "smooth_ramp_ms": settings.smooth_ramp_ms,
         "auto_generate_mode": settings.auto_generate_mode,
+        "show_ai_triggers": settings.show_ai_triggers,
     }
 
 

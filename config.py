@@ -192,6 +192,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     # "embedded" = free local KNN (auto-applies); "claude" = paid Claude API (saves suggestion set)
     auto_generate_mode: str = "embedded"
+    # Show the AI Triggers page in the nav bar
+    show_ai_triggers: bool = False
 
     # ── Last.fm (genre fallback) ──────────────────────────────────────────────
     lastfm_api_key: str = ""
