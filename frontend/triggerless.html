@@ -3,46 +3,47 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SpotFX — Triggerless Play</title>
+  <title>SpotFX — Triggerless Profiles</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
     .tl-layout { display: flex; gap: 16px; }
     .tl-list   { width: 260px; flex-shrink: 0; }
     .tl-editor { flex: 1; min-width: 0; }
     .tl-list-items { max-height: 70vh; overflow-y: auto; }
-    .tl-row {
-      padding: 8px 10px; cursor: pointer; border-radius: 6px;
-      border: 1px solid transparent; margin-bottom: 4px;
-    }
+    .tl-row { padding: 8px 10px; cursor: pointer; border-radius: 6px; border: 1px solid transparent; margin-bottom: 4px; }
     .tl-row:hover { background: var(--surface2); }
     .tl-row.active { border-color: var(--accent); background: var(--surface2); }
     .tl-row .name { font-weight: 600; font-size: 14px; }
     .tl-row .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-    .tl-row .default-badge {
-      font-size: 10px; background: rgba(29,185,84,0.15); color: var(--accent);
-      padding: 1px 6px; border-radius: 8px; margin-left: 6px;
-    }
+    .tl-row .default-badge { font-size: 10px; background: rgba(29,185,84,0.15); color: var(--accent); padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
     .field-group { margin-bottom: 14px; }
     .field-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
-    .field-group input[type="text"],
-    .field-group input[type="number"] {
+    .field-group input[type="text"], .field-group input[type="number"], .field-group textarea {
       width: 100%; padding: 6px 8px; font-size: 13px;
       background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
     }
     .field-group input[type="number"] { width: 100px; }
-    .event-field { display: flex; align-items: flex-start; gap: 10px; }
-    .event-field .ss-wrap { flex: 1; }
+    .field-group textarea { resize: vertical; min-height: 40px; font-family: inherit; }
+    .event-field { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+    .event-field .ss-wrap { flex: 1; min-width: 200px; }
     .event-field .interval-input { width: 90px; }
-    .btn-bar { display: flex; gap: 8px; margin-top: 16px; }
-    .ss-filter {
-      font-size: 12px; padding: 4px 6px; background: var(--surface2);
-      border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 100%;
-    }
+    .label-input { width: 100%; font-size: 11px; padding: 3px 6px; margin-top: 3px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); }
+    .btn-bar { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    .ss-filter { font-size: 12px; padding: 4px 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 100%; }
     .ss-select { width: 100%; padding: 4px; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
-    @media (max-width: 600px) {
-      .tl-layout { flex-direction: column; }
-      .tl-list { width: 100%; }
-    }
+    .song-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .song-chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); display: flex; align-items: center; gap: 4px; }
+    .song-chip .remove { cursor: pointer; color: var(--text-muted); font-size: 14px; }
+    .song-chip .remove:hover { color: #e74c3c; }
+    .picker-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+    .picker-overlay.visible { display: flex; }
+    .picker-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; width: 500px; max-width: 90vw; max-height: 70vh; overflow-y: auto; }
+    .picker-row { padding: 6px 8px; cursor: pointer; border-radius: 4px; font-size: 13px; }
+    .picker-row:hover { background: var(--surface2); }
+    .picker-row.disabled { opacity: 0.4; cursor: default; }
+    .section-title { font-size: 13px; font-weight: 600; color: var(--text); margin: 16px 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+    @media (max-width: 600px) { .tl-layout { flex-direction: column; } .tl-list { width: 100%; } }
   </style>
 </head>
 <body>
@@ -60,82 +61,111 @@
   </nav>
 
   <main>
-    <h2 style="margin-bottom:12px;">Triggerless Play</h2>
+    <h2 style="margin-bottom:12px;">Triggerless Profiles</h2>
     <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
-      Configure automatic lighting for songs without triggers. Profiles are matched by genre; the default profile is used as fallback.
+      Unified profiles for automatic lighting. Songs with librosa data use <b>Analyzed</b> mode (embedded pipeline).
+      Songs without librosa use <b>Simple</b> mode (fixed intervals). Both share the same events.
     </p>
 
     <div class="tl-layout">
       <!-- List panel -->
       <div class="tl-list card">
         <div style="display:flex;gap:6px;margin-bottom:10px;">
-          <input type="text" id="search" placeholder="Search…" style="flex:1;padding:4px 8px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+          <input type="text" id="search" placeholder="Search..." style="flex:1;padding:4px 8px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
           <button class="btn btn-accent btn-sm" id="new-btn">+ New</button>
         </div>
         <div class="tl-list-items" id="list"></div>
       </div>
 
-      <!-- Editor panel -->
+      <!-- Unified editor -->
       <div class="tl-editor card" id="editor" style="display:none;">
-        <div class="field-group">
-          <label>Name</label>
-          <input type="text" id="ed-name">
-        </div>
-        <div class="field-group">
-          <label>Genres (comma-separated)</label>
-          <input type="text" id="ed-genres" placeholder="rock, indie, alt-rock">
-        </div>
+
+        <!-- Profile Info -->
+        <div class="field-group"><label>Name</label><input type="text" id="ed-name"></div>
+        <div class="field-group"><label>Genres (comma-separated)</label><input type="text" id="ed-genres" placeholder="reggaeton, trap latino"></div>
         <div class="field-group">
           <label style="display:inline-flex;align-items:center;gap:6px;">
             <input type="checkbox" id="ed-default"> Default profile (fallback when no genre match)
           </label>
         </div>
 
-        <hr style="border-color:var(--border);margin:14px 0;">
+        <!-- Shared Events -->
+        <div class="section-title">Shared Events (used by both Simple and Analyzed)</div>
+        <div class="field-group"><label>Song Start</label><div id="ed-start-event"></div><input type="text" class="label-input" id="ed-start-labels" placeholder="Filter labels (e.g. -rainbow)"></div>
+        <div class="field-group"><label>Song End</label><div id="ed-end-event"></div><input type="text" class="label-input" id="ed-end-labels" placeholder="Filter labels"></div>
+        <div class="field-group"><label>Scene Fill</label><div id="ed-scene-fill-event"></div><input type="text" class="label-input" id="ed-scene-fill-labels" placeholder="Filter labels"></div>
+        <div class="field-group"><label>Flare</label><div id="ed-flare-event"></div><input type="text" class="label-input" id="ed-flare-labels" placeholder="Filter labels"></div>
 
-        <div class="field-group">
-          <label>Song Start Event</label>
-          <div id="ed-start-event"></div>
+        <!-- Simple Settings (collapsible) -->
+        <div class="section-title" onclick="toggleSection('sec-simple')" style="cursor:pointer;">
+          <span id="sec-simple-arrow">&#9660;</span> Simple Mode (interval-based, no librosa)
         </div>
-
-        <div class="field-group">
-          <label>Song End Event</label>
-          <div class="event-field">
-            <div class="ss-wrap" id="ed-end-event"></div>
-            <div>
-              <label style="font-size:11px;">Pre-fire (ms)</label>
-              <input type="number" id="ed-end-prefire" class="interval-input" value="5000" min="0" step="500">
-            </div>
+        <div id="sec-simple">
+          <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div class="field-group"><label>Scene interval (sec)</label><input type="number" id="ed-scene-interval" value="30" min="1" style="width:80px;"></div>
+            <div class="field-group"><label>Flare interval (sec)</label><input type="number" id="ed-flare-interval" value="15" min="1" style="width:80px;"></div>
+            <div class="field-group"><label>End pre-fire (ms)</label><input type="number" id="ed-end-prefire" value="5000" min="0" step="500" style="width:80px;"></div>
           </div>
         </div>
 
-        <div class="field-group">
-          <label>Standard Scene Event</label>
-          <div class="event-field">
-            <div class="ss-wrap" id="ed-scene-event"></div>
-            <div>
-              <label style="font-size:11px;">Interval (sec)</label>
-              <input type="number" id="ed-scene-interval" class="interval-input" value="30" min="1" step="1">
-            </div>
+        <!-- Analyzed Events (collapsible) -->
+        <div class="section-title" onclick="toggleSection('sec-analyzed')" style="cursor:pointer;">
+          <span id="sec-analyzed-arrow">&#9660;</span> Analyzed Mode (embedded pipeline, requires librosa)
+        </div>
+        <div id="sec-analyzed">
+          <div class="field-group"><label>Beat Start</label><div id="ed-beat-start-event"></div><input type="text" class="label-input" id="ed-beat-start-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Quiet</label><div id="ed-quiet-event"></div><input type="text" class="label-input" id="ed-quiet-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Drop</label><div id="ed-drop-event"></div><input type="text" class="label-input" id="ed-drop-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Lull</label><div id="ed-lull-event"></div><input type="text" class="label-input" id="ed-lull-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Charge</label><div id="ed-charge-event"></div><input type="text" class="label-input" id="ed-charge-labels" placeholder="Filter labels"></div>
+          <div style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;">
+            <div class="field-group"><label>Min trigger spacing (beats)</label><input type="number" id="ed-spacing" value="4" min="1" style="width:80px;"></div>
+            <div class="field-group"><label>Min scene spacing (beats)</label><input type="number" id="ed-scene-spacing" value="16" min="1" style="width:80px;"></div>
+            <div class="field-group"><label>Flare max gap (beats)</label><input type="number" id="ed-flare-gap" value="32" min="1" style="width:80px;"></div>
           </div>
         </div>
 
-        <div class="field-group">
-          <label>Flare Event <span style="color:var(--text-muted);font-size:11px;">(optional)</span></label>
-          <div class="event-field">
-            <div class="ss-wrap" id="ed-flare-event"></div>
-            <div>
-              <label style="font-size:11px;">Interval (sec)</label>
-              <input type="number" id="ed-flare-interval" class="interval-input" value="15" min="1" step="1">
-            </div>
-          </div>
+        <!-- Flare Tiers (collapsible) -->
+        <div class="section-title" onclick="toggleSection('sec-flare-tiers')" style="cursor:pointer;">
+          <span id="sec-flare-tiers-arrow">&#9660;</span> Flare Tiers (Analyzed)
+        </div>
+        <div id="sec-flare-tiers">
+          <div class="field-group"><label>Flare Low (subtle)</label><div id="ed-flare-low-event"></div><input type="text" class="label-input" id="ed-flare-low-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Flare Mid (moderate)</label><div id="ed-flare-mid-event"></div><input type="text" class="label-input" id="ed-flare-mid-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Flare High (clear musical element)</label><div id="ed-flare-high-event"></div><input type="text" class="label-input" id="ed-flare-high-labels" placeholder="Filter labels"></div>
         </div>
 
+        <!-- Training Songs -->
+        <div class="section-title">Training Songs</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+          <button class="btn btn-sm" id="add-song-btn">+ Add Song</button>
+          <span id="song-count" style="font-size:11px;color:var(--text-muted);"></span>
+        </div>
+        <div class="song-chips" id="song-chips"></div>
+
+        <!-- Actions -->
         <div class="btn-bar">
           <button class="btn btn-accent" id="save-btn">Save</button>
+          <button class="btn" id="train-btn" style="background:rgba(255,152,0,0.15);color:#ffb74d;border-color:#ffb74d;">Train</button>
           <button class="btn" id="dup-btn">Duplicate</button>
           <button class="btn btn-danger" id="del-btn">Delete</button>
         </div>
+        <div id="train-status" style="font-size:12px;color:var(--text-muted);margin-top:8px;display:none;"></div>
+
+        <!-- Notes (at bottom) -->
+        <div class="field-group" style="margin-top:16px;"><label>Notes</label><textarea id="ed-notes" rows="3" placeholder="Describe the vibe, tuning notes, etc."></textarea></div>
+      </div>
+    </div>
+
+    <!-- Song picker popup -->
+    <div class="picker-overlay" id="song-picker">
+      <div class="picker-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <b>Add Training Song</b>
+          <button class="btn btn-sm" onclick="closePicker()">Close</button>
+        </div>
+        <input type="text" id="picker-search" placeholder="Search by title or artist..." style="width:100%;padding:6px 8px;font-size:13px;margin-bottom:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+        <div id="picker-list" style="max-height:50vh;overflow-y:auto;"></div>
       </div>
     </div>
   </main>
@@ -148,20 +178,17 @@ connectWS();
 
 let profiles = [];
 let events = [];
-let selected = null;  // currently selected TriggerlessProfile
+let trainingSongs = [];
+let selected = null;
 
-// ── Searchable select helper ──────────────────────────────────────────────
+// ── Searchable select ─────────────────────────────────────────────────────
 
 function buildSearchSelect(container, opts, selectedValue, allowNone = false) {
-  if (allowNone) opts = [{ value: '', label: '— None —' }, ...opts];
+  if (allowNone) opts = [{ value: '', label: '-- None --' }, ...opts];
   const filter = document.createElement('input');
-  filter.type = 'text';
-  filter.className = 'ss-filter';
-  filter.placeholder = 'Filter events…';
-
+  filter.type = 'text'; filter.className = 'ss-filter'; filter.placeholder = 'Filter events...';
   const select = document.createElement('select');
   select.className = 'ss-select';
-
   function render(q = '') {
     const ql = q.toLowerCase();
     const filtered = ql ? opts.filter(o => o.label.toLowerCase().includes(ql)) : opts;
@@ -171,48 +198,43 @@ function buildSearchSelect(container, opts, selectedValue, allowNone = false) {
     ).join('');
     if (!select.value && filtered.length) select.value = filtered[0].value;
   }
-
   filter.addEventListener('input', () => render(filter.value));
   container.innerHTML = '';
   container.appendChild(filter);
   container.appendChild(select);
   render();
-
-  // Set initial value
-  if (selectedValue !== undefined && selectedValue !== null) {
-    select.value = selectedValue;
-    if (!select.value && opts.length) select.value = opts[0].value;
-  }
+  if (selectedValue != null) { select.value = selectedValue; }
   return select;
 }
 
 function eventOpts() {
-  return events.map(ev => ({
-    value: ev.id,
-    label: ev.name + (ev.labels?.length ? ' [' + ev.labels.join(', ') + ']' : ''),
-  }));
+  return events.map(ev => ({ value: ev.id, label: ev.name + (ev.labels?.length ? ' [' + ev.labels.join(', ') + ']' : '') }));
 }
 
 // ── Load data ─────────────────────────────────────────────────────────────
 
 async function loadData() {
-  [profiles, events] = await Promise.all([GET('/triggerless'), GET('/events')]);
+  [profiles, events, trainingSongs] = await Promise.all([
+    GET('/ai-triggers/training-profiles'),
+    GET('/events'),
+    GET('/ai-triggers/training-songs').catch(() => []),
+  ]);
   renderList();
 }
 
-// ── List rendering ────────────────────────────────────────────────────────
+// ── List ──────────────────────────────────────────────────────────────────
 
 function renderList() {
   const q = (document.getElementById('search').value || '').toLowerCase();
   const el = document.getElementById('list');
   const filtered = q ? profiles.filter(p =>
-    p.name.toLowerCase().includes(q) || p.genres.some(g => g.toLowerCase().includes(q))
+    (p.name || '').toLowerCase().includes(q) || (p.genres || []).some(g => g.toLowerCase().includes(q))
   ) : profiles;
 
   el.innerHTML = filtered.map(p => `
-    <div class="tl-row${selected && selected.id === p.id ? ' active' : ''}" data-id="${p.id}">
+    <div class="tl-row${selected?.id === p.id ? ' active' : ''}" data-id="${p.id}">
       <div class="name">${p.name || '(unnamed)'}${p.is_default ? '<span class="default-badge">DEFAULT</span>' : ''}</div>
-      <div class="meta">${p.genres.length ? p.genres.join(', ') : 'No genres'}</div>
+      <div class="meta">${(p.genres || []).length ? p.genres.join(', ') : 'No genres'}</div>
     </div>
   `).join('') || '<div style="color:var(--text-muted);padding:8px;font-size:13px;">No profiles yet</div>';
 
@@ -221,43 +243,158 @@ function renderList() {
   });
 }
 
-// ── Select / Edit ─────────────────────────────────────────────────────────
+// ── Select / populate ─────────────────────────────────────────────────────
 
 function selectProfile(id) {
   selected = profiles.find(p => p.id === id) || null;
   if (!selected) { document.getElementById('editor').style.display = 'none'; return; }
   renderList();
-  const ed = document.getElementById('editor');
-  ed.style.display = '';
+  document.getElementById('editor').style.display = '';
 
-  document.getElementById('ed-name').value = selected.name;
-  document.getElementById('ed-genres').value = (selected.genres || []).join(', ');
-  document.getElementById('ed-default').checked = selected.is_default;
-  document.getElementById('ed-end-prefire').value = selected.end_pre_fire_ms;
-  document.getElementById('ed-scene-interval').value = selected.scene_change_interval_s;
-  document.getElementById('ed-flare-interval').value = selected.flare_interval_s;
+  const p = selected;
+  document.getElementById('ed-name').value = p.name || '';
+  document.getElementById('ed-genres').value = (p.genres || []).join(', ');
+  document.getElementById('ed-default').checked = !!p.is_default;
+  document.getElementById('ed-notes').value = p.notes || p.description || '';
 
+  // Simple fields
+  document.getElementById('ed-scene-interval').value = p.scene_change_interval_s ?? 30;
+  document.getElementById('ed-flare-interval').value = p.flare_interval_s ?? 15;
+  document.getElementById('ed-end-prefire').value = p.end_pre_fire_ms ?? 5000;
+
+  // Analyzed spacing
+  document.getElementById('ed-spacing').value = p.min_trigger_spacing_beats ?? 4;
+  document.getElementById('ed-scene-spacing').value = p.min_scene_change_spacing_beats ?? 16;
+  document.getElementById('ed-flare-gap').value = p.flare_max_gap_beats ?? 32;
+
+  // Event dropdowns
   const opts = eventOpts();
-  buildSearchSelect(document.getElementById('ed-start-event'), opts, selected.start_event_id, true);
-  buildSearchSelect(document.getElementById('ed-end-event'), opts, selected.end_event_id, true);
-  buildSearchSelect(document.getElementById('ed-scene-event'), opts, selected.scene_event_id, true);
-  buildSearchSelect(document.getElementById('ed-flare-event'), opts, selected.flare_event_id || '', true);
+  const evFields = [
+    ['ed-start-event', 'song_start_event_id'], ['ed-end-event', 'song_end_event_id'],
+    ['ed-scene-fill-event', 'scene_fill_event_id'], ['ed-flare-event', 'flare_event_id'],
+    ['ed-beat-start-event', 'beat_start_event_id'], ['ed-quiet-event', 'quiet_event_id'],
+    ['ed-drop-event', 'drop_event_id'], ['ed-lull-event', 'lull_event_id'],
+    ['ed-charge-event', 'charge_event_id'],
+    ['ed-flare-low-event', 'flare_low_event_id'], ['ed-flare-mid-event', 'flare_mid_event_id'],
+    ['ed-flare-high-event', 'flare_high_event_id'],
+  ];
+  for (const [elId, field] of evFields) {
+    buildSearchSelect(document.getElementById(elId), opts, p[field] || '', true);
+  }
+
+  // Labels
+  const labelFields = [
+    ['ed-start-labels', 'song_start_labels'], ['ed-end-labels', 'song_end_labels'],
+    ['ed-scene-fill-labels', 'scene_fill_labels'], ['ed-flare-labels', 'flare_labels'],
+    ['ed-beat-start-labels', 'beat_start_labels'], ['ed-quiet-labels', 'quiet_labels'],
+    ['ed-drop-labels', 'drop_labels'], ['ed-lull-labels', 'lull_labels'],
+    ['ed-charge-labels', 'charge_labels'],
+    ['ed-flare-low-labels', 'flare_low_labels'], ['ed-flare-mid-labels', 'flare_mid_labels'],
+    ['ed-flare-high-labels', 'flare_high_labels'],
+  ];
+  for (const [elId, field] of labelFields) {
+    document.getElementById(elId).value = (p[field] || []).join(', ');
+  }
+
+  renderSongChips();
 }
 
+function renderSongChips() {
+  const uris = [...(selected.training_uris || []), ...(selected.embedded_only_uris || [])];
+  document.getElementById('song-count').textContent = `${uris.length} songs`;
+  const el = document.getElementById('song-chips');
+  el.innerHTML = uris.map(uri => {
+    const song = trainingSongs.find(s => s.uri === uri);
+    const label = song ? `${song.artist} - ${song.title}` : uri.split(':').pop();
+    return `<span class="song-chip">${label}<span class="remove" data-uri="${uri}">&times;</span></span>`;
+  }).join('');
+  el.querySelectorAll('.remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const uri = btn.dataset.uri;
+      if (selected.training_uris) selected.training_uris = selected.training_uris.filter(u => u !== uri);
+      if (selected.embedded_only_uris) selected.embedded_only_uris = selected.embedded_only_uris.filter(u => u !== uri);
+      renderSongChips();
+    });
+  });
+}
+
+// ── Read editor ───────────────────────────────────────────────────────────
+
 function readEditor() {
+  const getEv = id => document.getElementById(id).querySelector('select')?.value || '';
+  const getLabels = id => document.getElementById(id).value.split(',').map(s => s.trim()).filter(Boolean);
   return {
-    id: selected.id,
+    ...selected,  // preserve tuning params and other fields not shown in UI
     name: document.getElementById('ed-name').value.trim(),
     genres: document.getElementById('ed-genres').value.split(',').map(s => s.trim()).filter(Boolean),
     is_default: document.getElementById('ed-default').checked,
-    start_event_id: document.getElementById('ed-start-event').querySelector('select')?.value || '',
-    end_event_id: document.getElementById('ed-end-event').querySelector('select')?.value || '',
-    end_pre_fire_ms: parseInt(document.getElementById('ed-end-prefire').value) || 5000,
-    scene_event_id: document.getElementById('ed-scene-event').querySelector('select')?.value || '',
+    notes: document.getElementById('ed-notes').value,
+    // Simple
     scene_change_interval_s: parseInt(document.getElementById('ed-scene-interval').value) || 30,
-    flare_event_id: document.getElementById('ed-flare-event').querySelector('select')?.value || null,
     flare_interval_s: parseInt(document.getElementById('ed-flare-interval').value) || 15,
+    end_pre_fire_ms: parseInt(document.getElementById('ed-end-prefire').value) || 5000,
+    // Analyzed spacing
+    min_trigger_spacing_beats: parseInt(document.getElementById('ed-spacing').value) || 4,
+    min_scene_change_spacing_beats: parseInt(document.getElementById('ed-scene-spacing').value) || 16,
+    flare_max_gap_beats: parseInt(document.getElementById('ed-flare-gap').value) || 32,
+    // Events
+    song_start_event_id: getEv('ed-start-event'), song_end_event_id: getEv('ed-end-event'),
+    scene_fill_event_id: getEv('ed-scene-fill-event'), flare_event_id: getEv('ed-flare-event'),
+    beat_start_event_id: getEv('ed-beat-start-event'), quiet_event_id: getEv('ed-quiet-event'),
+    drop_event_id: getEv('ed-drop-event'), lull_event_id: getEv('ed-lull-event'),
+    charge_event_id: getEv('ed-charge-event'),
+    flare_low_event_id: getEv('ed-flare-low-event'), flare_mid_event_id: getEv('ed-flare-mid-event'),
+    flare_high_event_id: getEv('ed-flare-high-event'),
+    // Labels
+    song_start_labels: getLabels('ed-start-labels'), song_end_labels: getLabels('ed-end-labels'),
+    scene_fill_labels: getLabels('ed-scene-fill-labels'), flare_labels: getLabels('ed-flare-labels'),
+    beat_start_labels: getLabels('ed-beat-start-labels'), quiet_labels: getLabels('ed-quiet-labels'),
+    drop_labels: getLabels('ed-drop-labels'), lull_labels: getLabels('ed-lull-labels'),
+    charge_labels: getLabels('ed-charge-labels'),
+    flare_low_labels: getLabels('ed-flare-low-labels'), flare_mid_labels: getLabels('ed-flare-mid-labels'),
+    flare_high_labels: getLabels('ed-flare-high-labels'),
+    // Songs
+    training_uris: selected.training_uris || [],
+    embedded_only_uris: selected.embedded_only_uris || [],
   };
+}
+
+// ── Song picker ───────────────────────────────────────────────────────────
+
+window.closePicker = function() { document.getElementById('song-picker').classList.remove('visible'); };
+
+function openPicker() {
+  document.getElementById('song-picker').classList.add('visible');
+  const searchEl = document.getElementById('picker-search');
+  searchEl.value = '';
+  renderPickerList('');
+  searchEl.focus();
+  searchEl.oninput = () => renderPickerList(searchEl.value);
+}
+
+function renderPickerList(q) {
+  const ql = q.toLowerCase();
+  const currentUris = new Set([...(selected.training_uris || []), ...(selected.embedded_only_uris || [])]);
+  const filtered = trainingSongs.filter(s =>
+    (!ql || (s.title || '').toLowerCase().includes(ql) || (s.artist || '').toLowerCase().includes(ql))
+  );
+  const el = document.getElementById('picker-list');
+  el.innerHTML = filtered.map(s => {
+    const added = currentUris.has(s.uri);
+    return `<div class="picker-row${added ? ' disabled' : ''}" data-uri="${s.uri}">
+      <b>${s.artist}</b> - ${s.title}
+      <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">${s.trigger_count ?? 0} triggers</span>
+      ${added ? '<span style="font-size:11px;color:var(--accent);margin-left:8px;">added</span>' : ''}
+    </div>`;
+  }).join('') || '<div style="color:var(--text-muted);padding:8px;">No matching songs</div>';
+  el.querySelectorAll('.picker-row:not(.disabled)').forEach(row => {
+    row.addEventListener('click', () => {
+      if (!selected.embedded_only_uris) selected.embedded_only_uris = [];
+      selected.embedded_only_uris.push(row.dataset.uri);
+      renderSongChips();
+      renderPickerList(document.getElementById('picker-search').value);
+    });
+  });
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────
@@ -265,58 +402,66 @@ function readEditor() {
 document.getElementById('save-btn').addEventListener('click', async () => {
   if (!selected) return;
   try {
-    const data = readEditor();
-    await POST('/triggerless', data);
-    showToast('Profile saved', 'success');
-    await loadData();
-    selectProfile(data.id);
-  } catch (e) {
-    showToast('Error: ' + e.message, 'error');
-    console.error(e);
-  }
+    await POST('/ai-triggers/training-profiles', readEditor());
+    showToast('Saved', 'success');
+    await loadData(); selectProfile(selected.id);
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
 });
 
 document.getElementById('del-btn').addEventListener('click', async () => {
   if (!selected || !confirm(`Delete "${selected.name}"?`)) return;
-  await DEL(`/triggerless/${selected.id}`);
-  selected = null;
-  document.getElementById('editor').style.display = 'none';
-  showToast('Profile deleted', 'success');
-  await loadData();
+  await DEL(`/ai-triggers/training-profiles/${selected.id}`);
+  selected = null; document.getElementById('editor').style.display = 'none';
+  showToast('Deleted', 'success'); await loadData();
 });
 
 document.getElementById('dup-btn').addEventListener('click', async () => {
   if (!selected) return;
-  const data = readEditor();
-  data.id = uuid();
-  data.name = data.name + ' (copy)';
-  data.is_default = false;
-  await POST('/triggerless', data);
-  showToast('Profile duplicated', 'success');
-  await loadData();
-  selectProfile(data.id);
+  const d = readEditor(); d.id = uuid(); d.name += ' (copy)'; d.is_default = false;
+  await POST('/ai-triggers/training-profiles', d);
+  showToast('Duplicated', 'success'); await loadData(); selectProfile(d.id);
 });
 
 document.getElementById('new-btn').addEventListener('click', async () => {
+  const id = uuid();
+  await POST('/ai-triggers/training-profiles', { id, name: 'New Profile', genres: [], is_default: false });
+  showToast('Created', 'success'); await loadData(); selectProfile(id);
+});
+
+document.getElementById('add-song-btn').addEventListener('click', openPicker);
+
+document.getElementById('train-btn').addEventListener('click', async () => {
+  if (!selected) return;
+  try { await POST('/ai-triggers/training-profiles', readEditor()); } catch {}
+  const statusEl = document.getElementById('train-status');
+  const btn = document.getElementById('train-btn');
+  statusEl.style.display = ''; statusEl.textContent = 'Training... this may take a few minutes.'; statusEl.style.color = '#ffb74d';
+  btn.disabled = true; btn.textContent = 'Training...';
   try {
-    const id = uuid();
-    const data = {
-      id, name: 'New Profile', genres: [], is_default: false,
-      start_event_id: '', end_event_id: '', end_pre_fire_ms: 5000,
-      scene_event_id: '', scene_change_interval_s: 30,
-      flare_event_id: null, flare_interval_s: 15,
-    };
-    await POST('/triggerless', data);
-    showToast('Profile created', 'success');
-    await loadData();
-    selectProfile(id);
-  } catch (e) {
-    showToast('Error: ' + e.message, 'error');
-    console.error(e);
-  }
+    const result = await POST(`/ai-triggers/training-profiles/${selected.id}/tune`, {});
+    if (result.improved) {
+      statusEl.textContent = `Improved: ${result.baseline_f1} -> ${result.tuned_f1} (+${result.improvement_pct}%) using ${result.songs_used} songs.`;
+      statusEl.style.color = '#81c784';
+      await loadData(); selectProfile(selected.id);
+    } else {
+      statusEl.textContent = `No improvement found (F1=${result.baseline_f1}, ${result.songs_used} songs).`;
+      statusEl.style.color = 'var(--text-muted)';
+    }
+  } catch (e) { statusEl.textContent = 'Failed: ' + (e.message || e); statusEl.style.color = '#e74c3c'; }
+  finally { btn.disabled = false; btn.textContent = 'Train'; }
 });
 
 document.getElementById('search').addEventListener('input', renderList);
+
+// ── Collapsible sections ──────────────────────────────────────────────────
+window.toggleSection = function(id) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(id + '-arrow');
+  if (!el) return;
+  const collapsed = el.style.display === 'none';
+  el.style.display = collapsed ? '' : 'none';
+  if (arrow) arrow.textContent = collapsed ? '\u25BC' : '\u25B6';  // ▼ or ▶
+};
 
 // ── Init ──────────────────────────────────────────────────────────────────
 loadData();

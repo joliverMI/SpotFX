@@ -29,6 +29,11 @@ class TrainingProfile(BaseModel):
     target_uris: list[str] = []
     genres: list[str] = []      # genre tags this profile handles (e.g. ["edm", "dubstep"])
     is_default: bool = False    # fallback when no profile's genres match the song
+    # ── Simple triggerless (interval-based, for songs without librosa data) ──
+    end_pre_fire_ms: int = 5000              # ms before song end to fire end event
+    scene_change_interval_s: int = 30        # seconds between scene changes in Simple mode
+    flare_interval_s: int = 15               # seconds between flares in Simple mode
+
     # ── Embedded trigger tuning ───────────────────────────────────────────────
     min_trigger_spacing_beats: int = 4        # min beats between any two triggers (overrides ms fallback)
     min_scene_change_spacing_beats: int = 16  # min beats between standard scene fill triggers
@@ -47,6 +52,20 @@ class TrainingProfile(BaseModel):
     flare_mid_event_id: str = ""     # Stage 7 — mid-confidence flare (moderate; some FPs okay)
     flare_high_event_id: str = ""    # Stage 7 — high-confidence flare (clear musical element)
     flare_max_gap_beats: int = 32    # maximum beats between flares (at low energy sections)
+
+    # ── Per-event filter labels (passed to MusicTrigger.labels for action filtering) ──
+    song_start_labels: list[str] = Field(default_factory=list)
+    beat_start_labels: list[str] = Field(default_factory=list)
+    song_end_labels: list[str] = Field(default_factory=list)
+    drop_labels: list[str] = Field(default_factory=list)
+    lull_labels: list[str] = Field(default_factory=list)
+    charge_labels: list[str] = Field(default_factory=list)
+    quiet_labels: list[str] = Field(default_factory=list)
+    scene_fill_labels: list[str] = Field(default_factory=list)
+    flare_labels: list[str] = Field(default_factory=list)
+    flare_low_labels: list[str] = Field(default_factory=list)
+    flare_mid_labels: list[str] = Field(default_factory=list)
+    flare_high_labels: list[str] = Field(default_factory=list)
 
     # ── Profile notes (running explainer, shown in UI) ────────────────────────
     notes: str = ""

@@ -257,7 +257,7 @@ class TriggerEngine:
                 id=f"analyzed_{r['event_id']}_{r['timestamp_ms']}",
                 timestamp_ms=r["timestamp_ms"],
                 event_id=r["event_id"],
-                labels=[],
+                labels=r.get("labels", []),
             )
             for r in raw
         ]
@@ -276,67 +276,101 @@ class TriggerEngine:
         return len([t for t in triggers if t.enabled]) == 0
 
     def _resolve_triggerless_profile(self):
-        """Find the right triggerless profile for the current context."""
-        from services.profile_manager import find_triggerless_for_genres, list_triggerless_profiles
+        """Find the right unified profile for triggerless/analyzed mode.
+        Returns a TrainingProfile (unified model) or None."""
+        from services.training_profile_manager import TrainingProfile, TRAINING_PROFILES_FILE
+        import json
+
+        raw = {}
+        if TRAINING_PROFILES_FILE.exists():
+            try:
+                raw = json.loads(TRAINING_PROFILES_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        profiles = [TrainingProfile(**v) for v in raw.values()]
+
         if state.dinner_party_mode:
-            for p in list_triggerless_profiles():
+            for p in profiles:
                 if p.name.lower().strip() == "dinner party":
                     logger.info("Triggerless: resolved Dinner Party profile '%s'", p.name)
                     return p
             logger.warning("Triggerless: Dinner Party mode ON but no profile named 'Dinner Party' found")
             return None
+
         genres = []
         if state.current_track:
             genres = state.current_track.genres or []
         if not genres and self._profile:
-            genres = self._profile.artist_genre or []
-        result = find_triggerless_for_genres(genres)
-        logger.info("Triggerless: resolved genre profile '%s' for genres %s",
-                     result.name if result else None, genres)
-        return result
+            genres = getattr(self._profile, "genres", []) or []
+
+        # Genre matching: find profile whose genres overlap with the song's genres
+        song_genres_lower = {g.lower() for g in genres}
+        for p in profiles:
+            profile_genres = {g.lower() for g in p.genres}
+            if song_genres_lower & profile_genres:
+                logger.info("Triggerless: resolved genre profile '%s' for genres %s", p.name, genres)
+                return p
+
+        # Fallback to default
+        for p in profiles:
+            if p.is_default:
+                logger.info("Triggerless: using default profile '%s' (no genre match for %s)", p.name, genres)
+                return p
+
+        logger.info("Triggerless: no profile found for genres %s", genres)
+        return None
 
     def _generate_triggerless_triggers(self, tp, duration_ms: int) -> list[MusicTrigger]:
-        """Generate synthetic MusicTrigger objects from a TriggerlessProfile."""
+        """Generate synthetic interval-based triggers from a unified TrainingProfile (Simple mode)."""
         triggers: list[MusicTrigger] = []
-        end_cutoff = duration_ms - tp.end_pre_fire_ms if tp.end_event_id else duration_ms
+        end_pre = getattr(tp, "end_pre_fire_ms", 5000)
+        end_eid = getattr(tp, "song_end_event_id", "") or ""
+        start_eid = getattr(tp, "song_start_event_id", "") or ""
+        scene_eid = getattr(tp, "scene_fill_event_id", "") or ""
+        flare_eid = getattr(tp, "flare_event_id", "") or ""
+        scene_interval = getattr(tp, "scene_change_interval_s", 30)
+        flare_interval = getattr(tp, "flare_interval_s", 15)
+
+        end_cutoff = duration_ms - end_pre if end_eid else duration_ms
 
         # 1. Start event at 0ms
-        if tp.start_event_id:
+        if start_eid:
             triggers.append(MusicTrigger(
                 id="tl_start_0", timestamp_ms=0,
-                event_id=tp.start_event_id, labels=["triggerless", "start"],
+                event_id=start_eid, labels=["triggerless", "start"],
             ))
 
-        # 2. Scene events at regular intervals (first fire after one full interval)
+        # 2. Scene events at regular intervals
         scene_timestamps: set[int] = set()
-        if tp.scene_event_id and tp.scene_change_interval_s > 0:
-            interval_ms = tp.scene_change_interval_s * 1000
+        if scene_eid and scene_interval > 0:
+            interval_ms = scene_interval * 1000
             t = interval_ms
             while t < end_cutoff:
                 scene_timestamps.add(t)
                 triggers.append(MusicTrigger(
                     id=f"tl_scene_{t}", timestamp_ms=t,
-                    event_id=tp.scene_event_id, labels=["triggerless", "scene"],
+                    event_id=scene_eid, labels=["triggerless", "scene"],
                 ))
                 t += interval_ms
 
         # 3. Flare events (skip timestamps that coincide with scene events)
-        if tp.flare_event_id and tp.flare_interval_s > 0:
-            flare_interval_ms = tp.flare_interval_s * 1000
+        if flare_eid and flare_interval > 0:
+            flare_interval_ms = flare_interval * 1000
             t = flare_interval_ms
             while t < end_cutoff:
                 if t not in scene_timestamps:
                     triggers.append(MusicTrigger(
                         id=f"tl_flare_{t}", timestamp_ms=t,
-                        event_id=tp.flare_event_id, labels=["triggerless", "flare"],
+                        event_id=flare_eid, labels=["triggerless", "flare"],
                     ))
                 t += flare_interval_ms
 
         # 4. End event
-        if tp.end_event_id and duration_ms > tp.end_pre_fire_ms:
+        if end_eid and duration_ms > end_pre:
             triggers.append(MusicTrigger(
                 id=f"tl_end_{end_cutoff}", timestamp_ms=end_cutoff,
-                event_id=tp.end_event_id, labels=["triggerless", "end"],
+                event_id=end_eid, labels=["triggerless", "end"],
             ))
 
         triggers.sort(key=lambda t: t.timestamp_ms)

@@ -385,3 +385,90 @@ async def analyze_triggers(uri: str, category: str = "all"):
         "total": len(results),
         "category": category,
     }
+
+
+# ── Training profile tuning ──────────────────────────────────────────────────
+
+@router.post("/training-profiles/{profile_id}/tune")
+async def tune_profile(profile_id: str):
+    """Run the automated tuning loop for a training profile.
+    Returns the best parameters found and applies them to the profile."""
+    import asyncio
+    from services.training_profile_manager import TrainingProfile, TRAINING_PROFILES_FILE
+    import json
+
+    raw = json.loads(TRAINING_PROFILES_FILE.read_text(encoding="utf-8")) if TRAINING_PROFILES_FILE.exists() else {}
+    if profile_id not in raw:
+        raise HTTPException(404, f"Training profile {profile_id} not found")
+
+    tp = TrainingProfile(**raw[profile_id])
+
+    # Run tuning in executor to avoid blocking
+    def _run_tune():
+        import sys, os
+        sys.path.insert(0, str(TRAINING_PROFILES_FILE.parent.parent))
+        from scripts.tune_triggers import tune as _tune, load_training_profiles, _grid_combos, \
+            _apply_overrides, preload_songs, score_fast, SCENE_GRID, FLARE_GRID
+        from scripts.score_triggers import build_role_map, DEFAULT_SCORE_WEIGHTS
+        from services.librosa_service import get_analysis_by_uri
+
+        role_map = build_role_map(tp)
+        weights = DEFAULT_SCORE_WEIGHTS
+        all_uris = list(set(tp.training_uris + tp.embedded_only_uris))
+        songs = preload_songs(all_uris)
+        if not songs:
+            return {"error": "No usable training songs", "improved": False}
+
+        beat_ms = (60_000 / songs[0]["analysis"].tempo_bpm) if songs[0]["analysis"].tempo_bpm else 500
+        tolerance_ms = int(2 * beat_ms)
+
+        baseline_f1 = score_fast(tp, songs, role_map, tolerance_ms, weights)
+
+        # Scene tuning
+        best_scene = {}
+        best_f1 = baseline_f1
+        for overrides in _grid_combos(SCENE_GRID):
+            trial = _apply_overrides(tp, overrides)
+            f1 = score_fast(trial, songs, role_map, tolerance_ms, weights)
+            if f1 > best_f1:
+                best_f1 = f1
+                best_scene = overrides.copy()
+
+        # Flare tuning (locked to best scene)
+        tp_scene = _apply_overrides(tp, best_scene) if best_scene else tp
+        scene_f1 = score_fast(tp_scene, songs, role_map, tolerance_ms, weights)
+        best_flare = {}
+        best_f1_flare = scene_f1
+        for overrides in _grid_combos(FLARE_GRID):
+            all_ov = {**best_scene, **overrides}
+            trial = _apply_overrides(tp, all_ov)
+            f1 = score_fast(trial, songs, role_map, tolerance_ms, weights)
+            if f1 > best_f1_flare:
+                best_f1_flare = f1
+                best_flare = overrides.copy()
+
+        all_best = {**best_scene, **best_flare}
+        final_f1 = best_f1_flare if best_flare else best_f1
+
+        return {
+            "baseline_f1": round(baseline_f1, 3),
+            "tuned_f1": round(final_f1, 3),
+            "improvement_pct": round((final_f1 - baseline_f1) / max(baseline_f1, 0.001) * 100, 1),
+            "best_params": all_best,
+            "songs_used": len(songs),
+            "improved": final_f1 > baseline_f1,
+        }
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _run_tune)
+
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+
+    # Auto-apply if improved
+    if result["improved"] and result["best_params"]:
+        raw_data = json.loads(TRAINING_PROFILES_FILE.read_text(encoding="utf-8"))
+        raw_data[profile_id].update(result["best_params"])
+        TRAINING_PROFILES_FILE.write_text(json.dumps(raw_data, indent=2), encoding="utf-8")
+
+    return result

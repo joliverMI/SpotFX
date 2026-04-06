@@ -855,11 +855,27 @@ def suggest_triggers(
 
     placed: list[dict] = []
 
+    # Build event_id → labels map from training profile
+    _label_map: dict[str, list[str]] = {}
+    for _attr, _eid_attr in [
+        ("song_start_labels", "song_start_event_id"), ("beat_start_labels", "beat_start_event_id"),
+        ("song_end_labels", "song_end_event_id"), ("drop_labels", "drop_event_id"),
+        ("lull_labels", "lull_event_id"), ("charge_labels", "charge_event_id"),
+        ("quiet_labels", "quiet_event_id"), ("scene_fill_labels", "scene_fill_event_id"),
+        ("flare_labels", "flare_event_id"), ("flare_low_labels", "flare_low_event_id"),
+        ("flare_mid_labels", "flare_mid_event_id"), ("flare_high_labels", "flare_high_event_id"),
+    ]:
+        _eid = getattr(tp, _eid_attr, "")
+        _lbls = getattr(tp, _attr, [])
+        if _eid and _lbls:
+            _label_map[_eid] = _lbls
+
     def _add(timestamp_ms: int, event_id: str, confidence: float, exempt: bool = False):
         placed.append({
             "timestamp_ms": timestamp_ms,
             "event_id":     event_id,
             "confidence":   confidence,
+            "labels":       list(_label_map.get(event_id, [])),
             "_exempt":      exempt,
         })
 
