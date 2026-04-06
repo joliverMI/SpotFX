@@ -426,6 +426,7 @@ function renderPalList() {
       <div style="width:16px;height:16px;border-radius:50%;background:${p.color};flex-shrink:0;border:1px solid var(--border);"></div>
       <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.name}</span>
       <button class="btn-sm" onclick="palEdit('${p.id}')">Edit</button>
+      <button class="btn-sm" onclick="palDupe('${p.id}')" title="Duplicate" style="padding:4px 6px;line-height:1;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
     </div>
   `).join('');
 }
@@ -483,6 +484,15 @@ function collectPalKeys() {
   });
   return keys;
 }
+
+window.palDupe = async function(id) {
+  const p = palettes.find(x => x.id === id);
+  if (!p) return;
+  const body = { name: p.name + ' - Copy', color: p.color, keys: { ...p.keys } };
+  const saved = await POST('/palettes', body);
+  palettes.push(saved);
+  renderPalList();
+};
 
 window.palEdit = function(id) {
   const p = palettes.find(x => x.id === id);
