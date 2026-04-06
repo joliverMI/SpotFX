@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from config import settings, AUDIO_SHAPES_DIR
 from models.librosa_analysis import LibrosaAnalysis
-from services.profile_manager import load_profile_by_uri, list_profiles, get_event_map
+from services.profile_manager import load_profile_by_uri, get_event_map
 from services.audio_analyzer import load_audio_shape_meta
 
 logger = logging.getLogger(__name__)
@@ -673,6 +673,7 @@ def list_songs_with_shapes() -> list[dict]:
                 "mark_count":      len(data.get("music_marks", [])),
                 "genres":          data.get("genres", []),
                 "has_suggestions": (AI_SUGGESTIONS_DIR / f"{track_id}.json").exists(),
+                "npz_file":        data.get("npz_file", ""),
             })
         except Exception:
             pass
@@ -682,29 +683,48 @@ def list_songs_with_shapes() -> list[dict]:
 def list_songs_with_librosa() -> list[dict]:
     """All songs with a complete audio shape AND a librosa analysis (suitable as generation targets).
     Includes trigger_count from the song profile (0 if no profile exists)."""
-    from services.librosa_service import get_analysis_by_uri
+    from pathlib import Path as _Path
+    from config import PROFILES_DIR as _PROFILES_DIR
+
+    # Build profile trigger-count lookup in one pass (avoids per-song glob)
+    profile_triggers: dict[str, int] = {}
+    for path in _PROFILES_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            profile_triggers[data["spotify_uri"]] = len(data.get("triggers", []))
+        except Exception:
+            pass
+
+    # Filter shapes to those with a librosa file (exists check, no full read)
     result = []
     for s in list_songs_with_shapes():
-        if get_analysis_by_uri(s["uri"]) is None:
+        npz_file = s.get("npz_file", "")
+        if not npz_file:
             continue
-        profile = load_profile_by_uri(s["uri"])
-        s["trigger_count"] = len(profile.triggers) if profile else 0
+        base = _Path(npz_file).stem
+        if not (AUDIO_SHAPES_DIR / f"{base}.librosa.json").exists():
+            continue
+        s["trigger_count"] = profile_triggers.get(s["uri"], 0)
         result.append(s)
     return result
 
 
 def list_training_songs() -> list[dict]:
     """Songs with a complete audio shape AND at least one trigger in their profile."""
+    from config import PROFILES_DIR as _PROFILES_DIR
+
     all_shapes = {s["uri"]: s for s in list_songs_with_shapes()}
     result = []
-    for meta in list_profiles():
-        uri = meta["spotify_uri"]
-        if uri not in all_shapes:
-            continue
-        profile = load_profile_by_uri(uri)
-        if not profile or not profile.triggers:
-            continue
-        row = dict(all_shapes[uri])
-        row["trigger_count"] = len(profile.triggers)
-        result.append(row)
+    for path in _PROFILES_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            uri = data.get("spotify_uri", "")
+            triggers = data.get("triggers", [])
+            if not triggers or uri not in all_shapes:
+                continue
+            row = dict(all_shapes[uri])
+            row["trigger_count"] = len(triggers)
+            result.append(row)
+        except Exception:
+            pass
     return result
