@@ -52,15 +52,6 @@ async def ledfx_scenes():
     return await get_scenes()
 
 
-@router.post("/reroll")
-async def reroll_trigger(trigger_id: str):
-    """Re-roll the pre-selected action for the upcoming trigger."""
-    from main import engine
-    ok = await engine.reroll(trigger_id)
-    if not ok:
-        raise HTTPException(400, "Cannot re-roll: trigger not found, locked, or not a single-action event")
-    return {"ok": True}
-
 
 @router.post("/use-ai-triggers")
 async def set_use_ai_triggers(enabled: bool):

@@ -80,7 +80,7 @@
         <span id="next-event-name" style="font-size:12px;font-weight:600;"></span>
         <span id="next-action-arrow" style="font-size:11px;color:var(--text-muted);">▸</span>
         <span id="next-action-label" style="font-size:12px;color:var(--text-muted);font-family:monospace;"></span>
-        <button id="reroll-btn" style="font-size:11px;padding:2px 8px;margin-left:4px;" title="Pick a different action">🎲 Re-roll</button>
+
       </div>
     </div>
 
@@ -428,7 +428,6 @@ function updatePreviewRow() {
   const evName = document.getElementById('next-event-name');
   const arrow  = document.getElementById('next-action-arrow');
   const label  = document.getElementById('next-action-label');
-  const btn    = document.getElementById('reroll-btn');
   if (!nextPreview) {
     row.style.visibility = 'hidden';
     return;
@@ -444,10 +443,6 @@ function updatePreviewRow() {
     arrow.style.display = 'none';
     label.style.display = 'none';
   }
-  const locked = nextPreview.locked;
-  btn.disabled = locked;
-  btn.style.opacity = locked ? '0.4' : '1';
-  btn.title = locked ? 'Locked — < 5s to fire' : 'Pick a different action';
 }
 
 // ── Render helpers ─────────────────────────────────────────────────────────
@@ -834,14 +829,6 @@ function tick() {
       const row = document.querySelector(`.trigger-row[data-id="${upcoming.id}"]`);
       if (row) row.classList.add('next');
 
-      // Sync re-roll lock state client-side (in case WS lock broadcast is slightly late)
-      if (nextPreview && nextPreview.trigger_id === upcoming.id) {
-        const locked = remaining < 5000;
-        if (locked !== nextPreview.locked) {
-          nextPreview.locked = locked;
-          updatePreviewRow();
-        }
-      }
     } else {
       document.getElementById('countdown').textContent = '';
     }
@@ -916,12 +903,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'd' || e.key === 'D') toggleDebug();
 });
 
-// ── Re-roll button ──────────────────────────────────────────────────────────
-document.getElementById('reroll-btn').addEventListener('click', async () => {
-  if (!nextPreview || nextPreview.locked) return;
-  await POST(`/control/reroll?trigger_id=${encodeURIComponent(nextPreview.trigger_id)}`);
-  // Backend broadcasts updated trigger_preview; no local state change needed.
-});
 
 </script>
 </body>
