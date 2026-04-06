@@ -122,7 +122,28 @@ class AudioShapeService:
                         for _p in (npz_path, npz_path.with_suffix(".json")):
                             _p.unlink(missing_ok=True)
                         self._blocked_uris.add(new_uri)
-                # no WAV but yes librosa → do nothing
+                elif not _has_wav and _has_librosa and app_state.recapture_wavs and new_uri not in self._auto_recapture_attempted:
+                    # Has librosa but no WAV — recapture WAV for MFCC re-analysis
+                    self._auto_recapture_attempted.add(new_uri)
+                    progress_ms = track.interpolated_progress_ms()
+                    npz_path = AUDIO_SHAPES_DIR / existing.npz_file
+                    if progress_ms < 7000:
+                        logger.info(
+                            "WAV recapture: clearing shape for %s (progress %.0fms)",
+                            existing.title, progress_ms,
+                        )
+                        for _p in (npz_path, npz_path.with_suffix(".json")):
+                            _p.unlink(missing_ok=True)
+                        existing = None  # fall through to _start below
+                    else:
+                        logger.info(
+                            "WAV recapture: deleting shape for %s (progress %.0fms) — will recapture next play",
+                            existing.title, progress_ms,
+                        )
+                        for _p in (npz_path, npz_path.with_suffix(".json")):
+                            _p.unlink(missing_ok=True)
+                        self._blocked_uris.add(new_uri)
+                # no WAV but yes librosa and recapture off → do nothing
             # ───────────────────────────────────────────────────────────────
 
             if existing is None or not existing.capture_complete:

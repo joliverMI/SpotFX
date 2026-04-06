@@ -52,6 +52,7 @@ class WebSocketManager:
             "on_target_device": state.on_target_device,
             "ledfx_rtt_ms": round(state.ledfx_rtt_ms, 1),
             "audio_analysis_enabled": state.audio_analysis_enabled,
+            "recapture_wavs": state.recapture_wavs,
             "use_unreviewed_ai_triggers": state.use_unreviewed_ai_triggers,
             "use_analyzed_triggerless": state.use_analyzed_triggerless,
             "analyzed_trigger_override": state.analyzed_trigger_override,

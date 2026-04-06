@@ -169,6 +169,27 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
         beat_times, onsets, bass_onsets, harmonic_changes,
     )
 
+    # ── Per-beat MFCC features ──────────────────────────────────────────
+    # 13 MFCCs + 13 delta-MFCCs, beat-synced and z-score normalised per song.
+    mfcc_raw = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    mfcc_delta_raw = librosa.feature.delta(mfcc_raw)
+    bf_clip = np.clip(beat_frames, 0, mfcc_raw.shape[1] - 1)
+    mfcc_sync = librosa.util.sync(mfcc_raw, bf_clip, aggregate=np.mean)     # (13, n_beats)
+    mfcc_delta_sync = librosa.util.sync(mfcc_delta_raw, bf_clip, aggregate=np.mean)
+    # Z-score normalise each coefficient across beats (cross-song comparability)
+    for row in range(mfcc_sync.shape[0]):
+        mu, std = mfcc_sync[row].mean(), mfcc_sync[row].std()
+        if std > 1e-9:
+            mfcc_sync[row] = (mfcc_sync[row] - mu) / std
+        else:
+            mfcc_sync[row] = 0.0
+        mu_d, std_d = mfcc_delta_sync[row].mean(), mfcc_delta_sync[row].std()
+        if std_d > 1e-9:
+            mfcc_delta_sync[row] = (mfcc_delta_sync[row] - mu_d) / std_d
+        else:
+            mfcc_delta_sync[row] = 0.0
+    n_mfcc_beats = mfcc_sync.shape[1]
+
     # onset/bass/harmonic_scores are already trimmed (last beat dropped)
     beats = [
         LibrosaBeat(
@@ -181,6 +202,8 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
             onset_score     =round(onset_scores[i],    3),
             bass_onset_score=round(bass_scores[i],     3),
             harmonic_score  =round(harmonic_scores[i], 3),
+            mfcc=[round(float(mfcc_sync[c, i]), 3) for c in range(13)] if i < n_mfcc_beats else [],
+            mfcc_delta=[round(float(mfcc_delta_sync[c, i]), 3) for c in range(13)] if i < n_mfcc_beats else [],
         )
         for i, t in enumerate(beat_times[:-1])  # last beat dropped
     ]

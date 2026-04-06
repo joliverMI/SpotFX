@@ -514,12 +514,16 @@ def _detect_energy_scenes(
       scene_delta_window      4     beats over which to measure the change
       scene_min_spacing_beats 16    min beats between scene triggers
       scene_prefer_downbeat   True  snap to nearest downbeat within 2 beats
+      scene_mfcc_weight       0.0   weight of MFCC timbral distance (0 = disabled)
+      scene_mfcc_window       4     beats over which to measure MFCC distance
     """
     smooth_window = getattr(tp, "scene_smooth_window",      8)
     energy_delta  = getattr(tp, "scene_energy_delta",       0.08)
     delta_window  = getattr(tp, "scene_delta_window",       4)
     min_spacing   = getattr(tp, "scene_min_spacing_beats",  16)
     prefer_down   = getattr(tp, "scene_prefer_downbeat",    True)
+    mfcc_weight   = getattr(tp, "scene_mfcc_weight",        0.0)
+    mfcc_window   = getattr(tp, "scene_mfcc_window",        4)
 
     n = len(beats)
     if n < smooth_window + delta_window:
@@ -534,12 +538,37 @@ def _detect_energy_scenes(
     for i in range(n - delta_window):
         deltas[i] = smoothed[i + delta_window] - smoothed[i]
 
-    # Find candidate beats where |delta| exceeds threshold
-    candidates: list[tuple[int, float]] = []  # (beat_idx, abs_delta)
+    # MFCC timbral distance (optional — only if beats have MFCC data and weight > 0)
+    mfcc_deltas = np.zeros(n)
+    if mfcc_weight > 0 and beats[0].mfcc:
+        mfcc_arr = np.array([b.mfcc for b in beats], dtype=float)  # (n_beats, 13)
+        # Smooth MFCCs with same window as energy
+        for col in range(mfcc_arr.shape[1]):
+            mfcc_arr[:, col] = np.convolve(
+                mfcc_arr[:, col], np.ones(smooth_window) / smooth_window, mode="same"
+            )
+        # Euclidean distance between beat i and beat i-mfcc_window
+        for i in range(mfcc_window, n):
+            mfcc_deltas[i] = float(np.linalg.norm(mfcc_arr[i] - mfcc_arr[i - mfcc_window]))
+        # Normalise to 0-1 range
+        mx = mfcc_deltas.max()
+        if mx > 1e-9:
+            mfcc_deltas /= mx
+
+    # Combine energy delta + MFCC distance into a single score per beat
+    energy_weight = 1.0 - mfcc_weight
+    combined = np.zeros(n)
     for i in range(delta_window, n - delta_window):
-        ad = abs(deltas[i])
-        if ad >= energy_delta:
-            candidates.append((i, ad))
+        combined[i] = energy_weight * abs(deltas[i]) + mfcc_weight * mfcc_deltas[i]
+
+    # Dynamic threshold: use energy_delta scaled by the combined weight
+    threshold = energy_delta * energy_weight + (energy_delta * mfcc_weight) if mfcc_weight > 0 else energy_delta
+
+    # Find candidate beats where combined score exceeds threshold
+    candidates: list[tuple[int, float]] = []  # (beat_idx, combined_score)
+    for i in range(delta_window, n - delta_window):
+        if combined[i] >= threshold:
+            candidates.append((i, combined[i]))
 
     # Sort by magnitude (strongest transitions first, greedy placement)
     candidates.sort(key=lambda x: x[1], reverse=True)

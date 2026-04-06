@@ -105,6 +105,14 @@ async def set_analyzed_trigger_override(enabled: bool):
             "count": len(engine._analyzed_triggers) if engine._analyzed_triggers else 0}
 
 
+@router.post("/recapture-wavs")
+async def set_recapture_wavs(enabled: bool):
+    """Temporarily enable WAV recapture for songs that have librosa data but no WAV."""
+    state.recapture_wavs = enabled
+    await ws_manager.broadcast_state(state)
+    return {"recapture_wavs": enabled}
+
+
 @router.post("/auto-generate")
 async def set_auto_generate(enabled: bool):
     """Enable or disable auto-generation of AI triggers after audio shape capture."""

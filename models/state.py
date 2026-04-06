@@ -41,6 +41,7 @@ class AppState:
     paused: bool = True           # True = triggers suppressed, polling continues
     on_target_device: bool = False  # True = playing on settings.spotify_device_name
     audio_analysis_enabled: bool = False  # True = capture audio shapes for new songs
+    recapture_wavs: bool = False          # True = recapture WAVs for songs that have librosa but no WAV
     use_unreviewed_ai_triggers: bool = False  # True = use saved AI suggestion set instead of profile triggers
     use_analyzed_triggerless: bool = True      # True = use embedded pipeline triggers instead of synthetic triggerless
     analyzed_trigger_override: bool = False    # True = override user triggers with analyzed (debug/testing)

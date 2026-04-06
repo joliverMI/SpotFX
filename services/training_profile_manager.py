@@ -87,6 +87,8 @@ class TrainingProfile(BaseModel):
     scene_delta_window: int = 4          # beats over which to measure energy change
     scene_min_spacing_beats: int = 16    # min beats between energy-detected scenes
     scene_prefer_downbeat: bool = True   # snap to nearest downbeat within 2 beats
+    scene_mfcc_weight: float = 0.0       # weight of MFCC timbral distance (0 = energy only)
+    scene_mfcc_window: int = 4           # beats over which to measure MFCC distance
 
     # Standard Fill (Stage 6b)
     fill_uptick_thresh: float = 0.10

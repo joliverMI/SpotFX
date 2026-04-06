@@ -142,7 +142,7 @@ class Settings(BaseSettings):
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)
-    audio_wav_max_songs: int = 10
+    audio_wav_max_songs: int = 50
 
     # ── Librosa analysis tuning ───────────────────────────────────────────────
     # Section detection: novelty score threshold (0.0–1.0) a boundary must reach

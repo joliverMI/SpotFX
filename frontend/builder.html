@@ -96,6 +96,7 @@
         <button id="btn-live" class="btn-accent">Live Mode</button>
         <button id="btn-auto-wait">Auto Wait: OFF</button>
         <button id="btn-analysis">Capture Shape: OFF</button>
+        <button id="btn-recapture-wavs" style="font-size:11px;padding:3px 8px;" title="Recapture WAV files for songs with librosa data but no WAV">Recapture WAVs: OFF</button>
         <button id="btn-auto-gen">Auto Analyze: OFF</button>
         <button class="btn-sm" id="btn-verify">Mark Verified</button>
         <span id="embedded-tag" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:#1a237e;color:#90caf9;font-weight:600;">⚙ Embedded</span>
@@ -365,6 +366,11 @@ onMessage('state', async msg => {
   if (analysisBtn && msg.audio_analysis_enabled !== undefined) {
     analysisBtn.textContent = msg.audio_analysis_enabled ? 'Capture Shape: ON' : 'Capture Shape: OFF';
     analysisBtn.classList.toggle('btn-accent', !!msg.audio_analysis_enabled);
+  }
+  const recapBtn = document.getElementById('btn-recapture-wavs');
+  if (recapBtn && msg.recapture_wavs !== undefined) {
+    recapBtn.textContent = msg.recapture_wavs ? 'Recapture WAVs: ON' : 'Recapture WAVs: OFF';
+    recapBtn.classList.toggle('btn-accent', !!msg.recapture_wavs);
   }
   const autoBtn = document.getElementById('btn-auto-gen');
   if (autoBtn && msg.auto_generate_enabled !== undefined) {
@@ -1032,6 +1038,11 @@ document.getElementById('btn-analysis').addEventListener('click', async () => {
   const btn = document.getElementById('btn-analysis');
   btn.textContent = res.audio_analysis_enabled ? 'Capture Shape: ON' : 'Capture Shape: OFF';
   btn.classList.toggle('btn-accent', !!res.audio_analysis_enabled);
+});
+
+document.getElementById('btn-recapture-wavs').addEventListener('click', async () => {
+  const curOn = document.getElementById('btn-recapture-wavs').classList.contains('btn-accent');
+  await POST(`/control/recapture-wavs?enabled=${!curOn}`);
 });
 
 document.getElementById('btn-auto-gen').addEventListener('click', async () => {

@@ -40,15 +40,16 @@ logger = logging.getLogger(__name__)
 # ── Parameter grids ───────────────────────────────────────────────────────────
 
 SCENE_GRID = {
-    "gap_energy_thresh":            [0.10, 0.15, 0.20, 0.25],
-    "gap_after_thresh":             [0.30, 0.40, 0.50],
-    "gap_min_beats":                [1, 2, 4],
-    "charge_min_score":             [0.30, 0.40, 0.50],
-    "quiet_thresh":                 [0.30, 0.40, 0.50],
-    "quiet_min_beats":              [8, 16, 24],
-    "scene_energy_delta":           [0.05, 0.08, 0.12, 0.18],
+    "gap_energy_thresh":            [0.10, 0.20],
+    "gap_after_thresh":             [0.3, 0.4],
+    "gap_min_beats":                [2, 4],
+    "charge_min_score":             [0.3, 0.4],
+    "quiet_thresh":                 [0.4, 0.5],
+    "quiet_min_beats":              [16, 24],
+    "scene_energy_delta":           [0.08, 0.12, 0.18],
     "scene_smooth_window":          [4, 8, 12],
-    "scene_min_spacing_beats":      [12, 16, 24],
+    "scene_min_spacing_beats":      [16, 24],
+    "scene_mfcc_weight":            [0.0, 0.2, 0.4, 0.6],
 }
 
 FLARE_GRID = {

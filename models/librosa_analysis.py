@@ -21,6 +21,8 @@ class LibrosaBeat(BaseModel):
     onset_score:      float = 0.0  # sum of onset strengths in this interval, normalised 0–1 across song
     bass_onset_score: float = 0.0  # sum of bass onset strengths, normalised 0–1
     harmonic_score:   float = 0.0  # sum of harmonic novelty values, normalised 0–1
+    mfcc: list[float] = Field(default_factory=list)        # 13 MFCC coefficients (z-score normalised per song)
+    mfcc_delta: list[float] = Field(default_factory=list)  # 13 delta-MFCC coefficients
 
 
 class LibrosaOnset(BaseModel):
