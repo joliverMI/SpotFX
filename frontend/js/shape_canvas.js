@@ -121,7 +121,8 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   // Librosa analysis overlay
   let _librosaAnalysis = null;
   let _librosaOffsetMs = 0;
-  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true };
+  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true, mfcc: false };
+  let _mfccDistances = null;  // pre-computed MFCC timbral distances per beat (0-1 normalised)
 
   // Profile triggers (used by builder.html when no custom markers set)
   let _profile = null;
@@ -141,8 +142,9 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
 
   // ── Draw ─────────────────────────────────────────────────────────────────────
   const BEAT_STRIP_H  = 21;   // height of one heat-map strip (1px separator + 20px cells)
-  const NUM_BEAT_STRIPS = 5;  // rms_total | rms_bass | onsets | bass onsets | harmonics
-  const TOTAL_STRIP_H = BEAT_STRIP_H * NUM_BEAT_STRIPS;
+  const BASE_BEAT_STRIPS = 5;  // rms_total | rms_bass | onsets | bass onsets | harmonics
+  function _numStrips() { return BASE_BEAT_STRIPS + (_librosaFilters.mfcc && _mfccDistances ? 1 : 0); }
+  function _totalStripH() { return BEAT_STRIP_H * _numStrips(); }
 
   function draw() {
     const ctx = canvasEl.getContext('2d');
@@ -153,7 +155,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
 
     // Reserve bottom strips for beat-energy heat-maps when librosa beats are present
     const hasBeatStrip = !!(_librosaAnalysis?.beats?.length);
-    const mainH = hasBeatStrip ? H - TOTAL_STRIP_H : H;
+    const mainH = hasBeatStrip ? H - _totalStripH() : H;
 
     if (!_shapeData?.timestamps_ms?.length) return;
 
@@ -276,6 +278,26 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
           const tickH = tickMin + Math.round((tickMax - tickMin) * hc.novelty);
           ctx.globalAlpha = 0.45 + hc.novelty * 0.4;
           ctx.strokeStyle = '#cc66ff';
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, tickH); ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // MFCC timbral distance — red-orange ticks from top; height + opacity scale with distance
+      if (_librosaFilters.mfcc && _mfccDistances && la.beats?.length) {
+        const tickMin = Math.round(mainH * 0.04);
+        const tickMax = Math.round(mainH * 0.25);
+        ctx.save();
+        ctx.lineWidth = 2;
+        for (let i = 0; i < la.beats.length; i++) {
+          const d = _mfccDistances[i];
+          if (d < 0.15) continue;  // skip low-distance beats to reduce clutter
+          const t = la.beats[i].ms + off;
+          if (t < startMs || t > endMs) continue;
+          const x = timeToX(t);
+          const tickH = tickMin + Math.round((tickMax - tickMin) * d);
+          ctx.globalAlpha = 0.3 + d * 0.6;
+          ctx.strokeStyle = '#ff6633';
           ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, tickH); ctx.stroke();
         }
         ctx.restore();
@@ -498,6 +520,17 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
         { get: b => b.bass_onset_score ?? 0, color: '#44dd88', dbColor: '#88ffbb' },
         { get: b => b.harmonic_score   ?? 0, color: '#cc66ff', dbColor: '#ee99ff' },
       ];
+      // Conditionally add MFCC distance strip
+      if (_librosaFilters.mfcc) {
+        if (_mfccDistances) {
+          const _md = _mfccDistances;
+          STRIPS.push({ get: (_b, idx) => _md[idx] ?? 0, color: '#ff6633', dbColor: '#ff9966' });
+        } else {
+          // No MFCC data: show a flat placeholder so the row is visible
+          STRIPS.push({ get: () => 0.5, color: '#ff6633', dbColor: '#ff9966' });
+          console.warn('MFCC filter on but no _mfccDistances — song may lack MFCC data');
+        }
+      }
 
       ctx.save();
       ctx.lineWidth = 0;
@@ -531,7 +564,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
           const cx0 = Math.max(0, x0);
           const cx1 = Math.min(W, x1 - 1);
           if (cx1 <= cx0) continue;
-          const val   = get(b);
+          const val   = get(b, i);
           const cellH = Math.round(minCellH + val * (stripH - minCellH));
           ctx.globalAlpha = 0.15 + val * 0.75;
           ctx.fillStyle   = b.is_downbeat ? dbColor : color;
@@ -672,12 +705,32 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
      *  Automatically expands / shrinks canvas height by BEAT_STRIP_H to accommodate the beat-energy strip. */
     setLibrosaMarkers(analysis) {
       const hadStrip = !!(_librosaAnalysis?.beats?.length);
+      const oldStripH = hadStrip ? _totalStripH() : 0;
       _librosaAnalysis = analysis ?? null;
       _librosaOffsetMs = analysis?.librosa_offset_ms ?? 0;
+      // Pre-compute MFCC timbral distances
+      _mfccDistances = null;
+      if (_librosaAnalysis?.beats?.length) {
+        const beats = _librosaAnalysis.beats;
+        const WINDOW = 4;  // match scene_mfcc_window default
+        if (beats[0]?.mfcc?.length) {
+          const dists = new Array(beats.length).fill(0);
+          for (let i = WINDOW; i < beats.length; i++) {
+            const a = beats[i].mfcc, b = beats[i - WINDOW].mfcc;
+            let sum = 0;
+            for (let c = 0; c < a.length; c++) sum += (a[c] - b[c]) ** 2;
+            dists[i] = Math.sqrt(sum);
+          }
+          const mx = Math.max(...dists);
+          if (mx > 1e-9) for (let i = 0; i < dists.length; i++) dists[i] /= mx;
+          _mfccDistances = dists;
+        }
+      }
       const hasStrip = !!(_librosaAnalysis?.beats?.length);
-      if (hasStrip !== hadStrip) {
+      const newStripH = hasStrip ? _totalStripH() : 0;
+      if (oldStripH !== newStripH) {
         const curH = canvasEl.offsetHeight || 120;
-        canvasEl.style.height = (hasStrip ? curH + TOTAL_STRIP_H : curH - TOTAL_STRIP_H) + 'px';
+        canvasEl.style.height = (curH - oldStripH + newStripH) + 'px';
       }
     },
     /** Override the librosa time offset (ms) without replacing the analysis object. */
@@ -729,7 +782,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
       const la = _librosaAnalysis;
       const off = _librosaOffsetMs;
       const canvasHCss = canvasEl.offsetHeight || 120;
-      const mainHCss = canvasHCss - TOTAL_STRIP_H;  // all strips present when beats loaded
+      const mainHCss = canvasHCss - _totalStripH();  // all strips present when beats loaded
       const radiusMs = 10 * (_zoomEndMs - _zoomStartMs) / (canvasEl.offsetWidth || 1);
 
       function _nearest(events) {
@@ -777,10 +830,10 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
       const la  = _librosaAnalysis;
       const off = _librosaOffsetMs;
       const canvasHCss = canvasEl.offsetHeight || 120;
-      const mainHCss   = canvasHCss - TOTAL_STRIP_H;
+      const mainHCss   = canvasHCss - _totalStripH();
       if (cssY < mainHCss || cssY >= canvasHCss) return null;
 
-      const stripIndex = Math.min(NUM_BEAT_STRIPS - 1,
+      const stripIndex = Math.min(_numStrips() - 1,
                                   Math.floor((cssY - mainHCss) / BEAT_STRIP_H));
       const STRIP_COLORS = ['#ffffff', '#00ccdd', '#ff8800', '#44dd88', '#cc66ff'];
       const STRIP_GET    = [
@@ -790,6 +843,15 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
         b => b.bass_onset_score ?? 0,
         b => b.harmonic_score   ?? 0,
       ];
+      // Extend for MFCC strip when active
+      if (_librosaFilters.mfcc && _mfccDistances) {
+        STRIP_COLORS.push('#ff6633');
+        const _mfccDists = _mfccDistances;
+        STRIP_GET.push((b, _i) => {
+          const idx = la.beats.indexOf(b);
+          return idx >= 0 ? (_mfccDists[idx] ?? 0) : 0;
+        });
+      }
 
       // Map cssX to song time; find beat whose cell contains the click (left-edge ownership)
       const pct     = Math.max(0, Math.min(1, cssX / (canvasEl.offsetWidth || 1)));

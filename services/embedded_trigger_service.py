@@ -281,9 +281,11 @@ def _detect_beat_start(beats, tp, off: int = 0) -> int | None:
     near_zero  = getattr(tp, "beat_start_near_zero_thresh", 0.05)
     factor     = getattr(tp, "beat_start_factor",            3.0)
     abs_thresh = getattr(tp, "beat_start_abs_thresh",        0.15)
+    max_search = getattr(tp, "beat_start_max_search_beats",  60)
 
     n = len(beats)
-    for i in range(1, n):
+    search_limit = min(n, max_search)
+    for i in range(1, search_limit):
         past   = beats[max(0, i - lookback):i]
         future = beats[i:min(n, i + lookahead)]
         if not past or not future:
@@ -296,9 +298,9 @@ def _detect_beat_start(beats, tp, off: int = 0) -> int | None:
             return i
 
     # Fallback: song opens with immediate bass — return the first beat with
-    # meaningful bass energy (no quiet intro to contrast against)
-    for i, b in enumerate(beats):
-        if b.rms_bass > abs_thresh:
+    # meaningful bass energy (within the search window)
+    for i in range(search_limit):
+        if beats[i].rms_bass > abs_thresh:
             return i
     return None
 

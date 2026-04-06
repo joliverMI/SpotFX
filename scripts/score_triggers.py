@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 # ── Default score weights per category ────────────────────────────────────────
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
-    "drop":         3.0,
+    "drop":         4.0,
     "scene_change": 2.0,
-    "structural":   1.5,
+    "structural":   3.0,
     "flare":        1.0,
     "flare_low":    0.8,
     "flare_mid":    1.0,
@@ -45,6 +45,10 @@ DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
 # Category groups for sub-scores
 SCENE_CATEGORIES = {"drop", "scene_change", "structural", "song_start", "song_end"}
 FLARE_CATEGORIES = {"flare", "flare_low", "flare_mid", "flare_high"}
+
+# Cross-category partial credit: scene-family triggers in the right place but wrong type
+SCENE_FAMILY = {"drop", "scene_change", "structural"}
+CROSS_CATEGORY_CREDIT = 0.3  # credit for right-place-wrong-type within scene family
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -185,30 +189,37 @@ def match_triggers(
 
     Returns per-category CategoryScore.
     """
-    # Group by category
+    # Group by category: list of (timestamp_ms, original_index)
     human_by_cat: dict[str, list[int]] = {}
-    gen_by_cat: dict[str, list[int]] = {}
+    gen_by_cat: dict[str, list[tuple[int, str]]] = {}  # (ms, unique_key)
 
     for t in human:
         cat = categorize_trigger(t, role_map)
         human_by_cat.setdefault(cat, []).append(t.get("timestamp_ms", 0))
 
+    # Track generated triggers globally for cross-category matching
+    gen_all: list[tuple[int, str]] = []  # (ms, category)
     for t in generated:
         cat = categorize_trigger(t, role_map)
         gen_by_cat.setdefault(cat, []).append(t.get("timestamp_ms", 0))
+        gen_all.append((t.get("timestamp_ms", 0), cat))
 
     # All categories seen
     all_cats = set(human_by_cat.keys()) | set(gen_by_cat.keys())
     all_cats.discard("unknown")
 
+    max_match_ms = tolerance_ms + DECAY_RANGE_MS
+
+    # Phase 1: exact category matching (same as before)
     scores: dict[str, CategoryScore] = {}
+    matched_gen_by_cat: dict[str, set[int]] = {}  # cat -> set of matched indices
+
     for cat in sorted(all_cats):
         h_times = sorted(human_by_cat.get(cat, []))
         g_times = sorted(gen_by_cat.get(cat, []))
 
         cs = CategoryScore(human_count=len(h_times), gen_count=len(g_times))
         matched_gen: set[int] = set()
-        max_match_ms = tolerance_ms + DECAY_RANGE_MS  # full credit + decay zone
 
         for h_ms in h_times:
             best_idx = -1
@@ -226,10 +237,68 @@ def match_triggers(
                 cs.match_count += 1
                 matched_gen.add(best_idx)
             else:
-                cs.fn += 1.0  # full miss only for unmatched triggers
+                cs.fn += 1.0  # tentative — may be reduced by cross-category match
 
         cs.fp = len(g_times) - len(matched_gen)
         scores[cat] = cs
+        matched_gen_by_cat[cat] = matched_gen
+
+    # Phase 2: cross-category partial credit within scene family
+    # For each unmatched human scene trigger, check if an unmatched generated
+    # trigger from a different scene-family category is nearby.
+    for cat in sorted(all_cats):
+        if cat not in SCENE_FAMILY:
+            continue
+        cs = scores[cat]
+        h_times = sorted(human_by_cat.get(cat, []))
+        matched_h = matched_gen_by_cat.get(cat, set())
+
+        # Find unmatched human triggers in this category
+        unmatched_h: list[int] = []
+        matched_count = 0
+        for h_ms in h_times:
+            if matched_count < len(matched_h):
+                matched_count += 1
+            else:
+                unmatched_h.append(h_ms)
+        # More precise: rebuild which h_times were matched
+        # A human trigger is unmatched if no same-category gen was within range
+        g_times = sorted(gen_by_cat.get(cat, []))
+        _matched_h_set: set[int] = set()
+        _temp_matched_gen: set[int] = set()
+        for hi, h_ms in enumerate(h_times):
+            for gi, g_ms in enumerate(g_times):
+                if gi in _temp_matched_gen:
+                    continue
+                if abs(h_ms - g_ms) <= max_match_ms:
+                    _matched_h_set.add(hi)
+                    _temp_matched_gen.add(gi)
+                    break
+
+        for hi, h_ms in enumerate(h_times):
+            if hi in _matched_h_set:
+                continue
+            # This human trigger was unmatched — look for cross-category gen
+            for other_cat in sorted(SCENE_FAMILY - {cat}):
+                other_g = sorted(gen_by_cat.get(other_cat, []))
+                other_matched = matched_gen_by_cat.get(other_cat, set())
+                for gi, g_ms in enumerate(other_g):
+                    if gi in other_matched:
+                        continue
+                    dist = abs(h_ms - g_ms)
+                    if dist <= max_match_ms:
+                        # Cross-category match: partial credit
+                        dist_credit = _distance_credit(dist)
+                        cross_credit = dist_credit * CROSS_CATEGORY_CREDIT
+                        cs.tp += cross_credit
+                        cs.fn -= 1.0  # remove the full miss
+                        cs.fn += (1.0 - cross_credit)  # add partial miss
+                        cs.match_count += 1
+                        other_matched.add(gi)
+                        # Reduce FP on the other category
+                        if other_cat in scores:
+                            scores[other_cat].fp = max(0, scores[other_cat].fp - 1)
+                        break  # only one cross-match per human trigger
 
     return scores
 

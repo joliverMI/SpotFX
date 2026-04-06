@@ -171,6 +171,7 @@
         <button class="librosa-filter-btn active" data-lf="onsets" style="background:rgba(255,136,0,0.5);">Onsets</button>
         <button class="librosa-filter-btn active" data-lf="harmonic" style="background:rgba(204,102,255,0.5);">Harmonic</button>
         <button class="librosa-filter-btn active" data-lf="bass"    style="background:rgba(68,221,136,0.5);">Bass</button>
+        <button class="librosa-filter-btn" data-lf="mfcc" style="background:rgba(255,102,51,0.5);">MFCC</button>
         <span id="librosa-summary" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
         <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Offset:</span>
         <input type="range" id="librosa-offset-slider" min="-5000" max="5000" step="50" value="0"
@@ -1793,7 +1794,17 @@ document.getElementById('btn-analyze-flares').addEventListener('click', () => an
 document.querySelectorAll('.librosa-filter-btn').forEach(b => {
   b.addEventListener('click', () => {
     const lf = b.dataset.lf;
-    shapeCanvas.librosaFilters[lf] = !shapeCanvas.librosaFilters[lf];
+    // For MFCC: adjust canvas height since it adds/removes a strip row
+    if (lf === 'mfcc') {
+      const el = document.getElementById('shape-canvas');
+      const curH = el.offsetHeight || 120;
+      const STRIP = 21;  // BEAT_STRIP_H
+      const wasOn = shapeCanvas.librosaFilters.mfcc;
+      shapeCanvas.librosaFilters.mfcc = !wasOn;
+      el.style.height = (wasOn ? curH - STRIP : curH + STRIP) + 'px';
+    } else {
+      shapeCanvas.librosaFilters[lf] = !shapeCanvas.librosaFilters[lf];
+    }
     b.classList.toggle('active', shapeCanvas.librosaFilters[lf]);
   });
 });

@@ -18,7 +18,7 @@
                       min-width: 90px; overflow: hidden;
                       text-overflow: ellipsis; white-space: nowrap; text-align: right; }
     #np-canvas-wrap { margin-top: 8px; }
-    #np-canvas { width: 100%; height: 120px; display: block; border-radius: 4px; }
+    #np-canvas { width: 100%; height: 250px; display: block; border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -767,6 +767,13 @@ async function loadNpShape(uri) {
     try {
       const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
       _npCanvas.setLibrosaMarkers(la);
+      // Enable MFCC strip always-on for now playing (after setLibrosaMarkers computed distances)
+      if (!_npCanvas.librosaFilters.mfcc) {
+        _npCanvas.librosaFilters.mfcc = true;
+        // Expand canvas by one strip row
+        const el = document.getElementById('np-canvas');
+        el.style.height = ((el.offsetHeight || 120) + 21) + 'px';
+      }
     } catch { _npCanvas.setLibrosaMarkers(null); }
     _npShapeLoaded = true;
     updateNpShapeStatus();
