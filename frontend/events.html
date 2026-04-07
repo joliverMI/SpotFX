@@ -31,21 +31,12 @@
 </head>
 <body>
 <div class="app-shell">
-  <nav>
-    <span class="logo">SpotFX</span>
-    <a href="/">Now Playing</a>
-    <a href="/builder.html">Profile Builder</a>
-    <a href="/events.html" class="active">Events</a>
-    <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
-    <a href="/triggerless.html">Triggerless</a>
-    <a href="/settings.html">Settings</a>
-    <div id="ws-status"><div id="ws-dot"></div> Live</div>
-  </nav>
+  <div id="nav-root"></div>
 
   <main>
     <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start;">
       <!-- ── Event list ─────────────────────────────────────────────────── -->
-      <div class="card" style="min-width:0;">
+      <div class="card" style="min-width:0;max-height:calc(100vh - 80px);display:flex;flex-direction:column;">
         <div class="card-title" style="display:flex;align-items:center;">
           Events
           <button class="btn-sm btn-accent" id="btn-new" style="margin-left:auto">+ New</button>
@@ -59,12 +50,18 @@
           <button class="btn-sm" id="filter-beat-seq">Beat Seq</button>
           <button class="btn-sm" id="filter-ai-ex" title="Show only events exposed to AI generation">AI Ex</button>
         </div>
-        <div id="event-list"></div>
+        <div id="event-list" style="overflow-y:auto;flex:1;min-height:0;"></div>
       </div>
 
       <!-- ── Editor ────────────────────────────────────────────────────── -->
-      <div class="card editor" id="editor">
+      <div class="card editor" id="editor" style="max-height:calc(100vh - 80px);overflow-y:auto;">
         <div class="card-title">Edit Event</div>
+        <div class="event-action-bar" style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+          <button class="btn-accent action-save">Save</button>
+          <button class="btn-danger btn-sm action-delete">Delete</button>
+          <button class="btn-sm action-duplicate">Duplicate</button>
+          <button class="btn-sm action-fire" style="margin-left:auto">▶ Fire</button>
+        </div>
         <div class="field">
           <label>Name</label>
           <input id="e-name" type="text" placeholder="Event name">
@@ -197,11 +194,11 @@
           </div>
         </div>
 
-        <div style="display:flex;gap:8px;margin-top:16px;align-items:center;">
-          <button id="btn-save" class="btn-accent">Save</button>
-          <button id="btn-delete" class="btn-danger btn-sm">Delete</button>
-          <button id="btn-duplicate" class="btn-sm">Duplicate</button>
-          <button id="btn-fire" class="btn-sm" style="margin-left:auto">▶ Fire</button>
+        <div class="event-action-bar" style="display:flex;gap:8px;margin-top:16px;align-items:center;">
+          <button id="btn-save" class="btn-accent action-save">Save</button>
+          <button id="btn-delete" class="btn-danger btn-sm action-delete">Delete</button>
+          <button id="btn-duplicate" class="btn-sm action-duplicate">Duplicate</button>
+          <button id="btn-fire" class="btn-sm action-fire" style="margin-left:auto">▶ Fire</button>
         </div>
       </div>
     </div>
@@ -209,8 +206,9 @@
 </div>
 
 <script type="module">
-import { connectWS, markActiveNav, GET, POST, DEL, uuid } from '/static/js/app.js';
-markActiveNav();
+import { connectWS, GET, POST, DEL, uuid } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
+initNav();
 connectWS();
 
 let events = [];
@@ -1086,7 +1084,15 @@ function renderList() {
         <div style="font-size:13px;font-weight:500;">${e.name}${dur ? ` <span style="font-size:11px;font-weight:400;opacity:0.5;">${fmtDuration(dur)}</span>` : ''}</div>
         <div style="font-size:11px;color:var(--text-muted);">${(e.labels||[]).join(', ')}</div>
       </div>
-      <span style="margin-left:auto;font-size:11px;color:var(--text-muted);">${e.event_type}${e.energy_level != null ? ' · E' + e.energy_level : ''}${e.ai_exposed ? ' · <span style="color:#7c4dff;" title="Exposed to AI">AI</span>' : ''}</span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">
+        <span style="font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;${
+          e.event_type === 'single' ? 'background:rgba(33,150,243,0.15);color:#2196f3;' :
+          e.event_type === 'sequence' ? 'background:rgba(255,152,0,0.15);color:#ff9800;' :
+          'background:rgba(156,39,176,0.15);color:#ce93d8;'
+        }">${e.event_type === 'beat_sequence' ? 'beat' : e.event_type}</span>
+        ${e.energy_level != null ? `<span style="font-size:10px;color:var(--text-muted);">E${e.energy_level}</span>` : ''}
+        ${e.ai_exposed ? '<span style="font-size:10px;color:#7c4dff;" title="Exposed to AI">AI</span>' : ''}
+      </span>
     </div>
   `;
   }).join('');
@@ -1361,6 +1367,24 @@ document.getElementById('btn-fire').addEventListener('click', async () => {
     btn.textContent = '✕ Failed';
   }
   setTimeout(() => { btn.disabled = false; btn.textContent = '▶ Fire'; }, 1500);
+});
+
+// ── Wire top action bar buttons to delegate to bottom bar ────────────────
+document.querySelectorAll('.action-save').forEach(btn => {
+  if (btn.id) return; // skip the primary (already wired)
+  btn.addEventListener('click', () => document.getElementById('btn-save').click());
+});
+document.querySelectorAll('.action-delete').forEach(btn => {
+  if (btn.id) return;
+  btn.addEventListener('click', () => document.getElementById('btn-delete').click());
+});
+document.querySelectorAll('.action-duplicate').forEach(btn => {
+  if (btn.id) return;
+  btn.addEventListener('click', () => document.getElementById('btn-duplicate').click());
+});
+document.querySelectorAll('.action-fire').forEach(btn => {
+  if (btn.id) return;
+  btn.addEventListener('click', () => document.getElementById('btn-fire').click());
 });
 
 // ── Seed default event ─────────────────────────────────────────────────────

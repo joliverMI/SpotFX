@@ -23,16 +23,7 @@
 </head>
 <body>
 <div class="app-shell">
-  <nav>
-    <span class="logo">SpotFX</span>
-    <a href="/" class="active">Now Playing</a>
-    <a href="/builder.html">Profile Builder</a>
-    <a href="/events.html">Events</a>
-    <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
-    <a href="/triggerless.html">Triggerless</a>
-    <a href="/settings.html">Settings</a>
-    <div id="ws-status"><div id="ws-dot"></div> Live</div>
-  </nav>
+  <div id="nav-root"></div>
 
   <main>
     <!-- ── Auth banner (hidden when authenticated) ─────────────────────── -->
@@ -64,9 +55,9 @@
     <!-- ── Controls ────────────────────────────────────────────────────── -->
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <button id="pause-btn">⏸ Pause Triggers</button>
-        <button id="dinner-party-btn" style="font-size:11px;padding:3px 10px;" title="Dinner Party: ignore song triggers, use automatic ambient lighting">Dinner Party: Off</button>
-        <button id="analyzed-toggle-btn" style="font-size:11px;padding:3px 10px;" title="Use analyzed triggers (embedded pipeline) instead of synthetic triggerless for songs without user triggers">Analyzed: On</button>
+        <button id="pause-btn" class="toggle-btn" title="Activate / pause trigger firing">Activate</button>
+        <button id="dinner-party-btn" class="toggle-btn" title="Ignore song triggers, use automatic ambient lighting">Dinner Party</button>
+        <button id="analyzed-toggle-btn" class="toggle-btn" title="Use analyzed triggers for songs without user triggers">Analyzed</button>
         <span id="ai-indicator" style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;display:none;"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
           <span id="trigger-flash"></span>
@@ -170,10 +161,11 @@
 </div>
 
 <script type="module">
-import { connectWS, onMessage, fmtMs, fmtCountdown, flashTrigger, markActiveNav, GET, POST, PATCH, showToast } from '/static/js/app.js';
+import { connectWS, onMessage, fmtMs, fmtCountdown, flashTrigger, GET, POST, PATCH, showToast } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
 import { createShapeCanvas } from '/static/js/shape_canvas.js';
 
-markActiveNav();
+initNav();
 connectWS();
 
 // Check auth status on load
@@ -214,6 +206,7 @@ let _pendingPreviewLabels = {};   // trigger_id → action_label cached as previ
 let _npCanvas       = null;
 let _npShapeVisible = true;
 let _npShapeLoaded  = false;
+let _npShapeUri     = null;    // URI of the last shape load attempt (prevents repeated 404s)
 let _npLoopId       = null;
 let appSettings     = null;
 GET('/settings').then(s => { appSettings = s; }).catch(() => {});
@@ -472,17 +465,13 @@ function renderNoTrack() {
 
 function updatePauseBtn() {
   const btn = document.getElementById('pause-btn');
-  btn.textContent = paused ? '▶ Resume Triggers' : '⏸ Pause Triggers';
-  btn.classList.toggle('paused', paused);
+  btn.classList.toggle('active', !paused);
 }
 
 function updateDinnerPartyBtn() {
   const btn = document.getElementById('dinner-party-btn');
   if (!btn) return;
-  btn.textContent = dinnerPartyMode ? 'Dinner Party: On' : 'Dinner Party: Off';
-  btn.style.background = dinnerPartyMode ? 'rgba(156,39,176,0.2)' : '';
-  btn.style.color = dinnerPartyMode ? '#ce93d8' : '';
-  btn.style.border = dinnerPartyMode ? '1px solid #ce93d8' : '';
+  btn.classList.toggle('active', dinnerPartyMode);
 }
 
 function updateAiIndicator() {
@@ -514,10 +503,7 @@ function updateAiToggleBtn() {
 function updateAnalyzedToggleBtn() {
   const btn = document.getElementById('analyzed-toggle-btn');
   if (!btn) return;
-  btn.textContent = useAnalyzedTriggerless ? 'Analyzed: On' : 'Analyzed: Off';
-  btn.style.background = useAnalyzedTriggerless ? 'rgba(76,175,80,0.2)' : '';
-  btn.style.color = useAnalyzedTriggerless ? '#4caf50' : '';
-  btn.style.border = useAnalyzedTriggerless ? '1px solid #4caf50' : '';
+  btn.classList.toggle('active', useAnalyzedTriggerless);
 }
 
 function updateAnalyzedOverrideBtn() {
@@ -735,16 +721,17 @@ window.toggleShapeCanvas = function() {
 
 async function loadNpShape(uri) {
   if (!uri) return;
+  if (uri === _npShapeUri) return; // already loaded or failed for this URI
+  _npShapeUri = uri;
   _npShapeLoaded = false;
   document.getElementById('shape-np-status').textContent = 'Loading…';
   if (!_npCanvas) {
     _npCanvas = createShapeCanvas(document.getElementById('np-canvas'));
   }
   try {
-    const [meta, data] = await Promise.all([
-      GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`),
-      GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`),
-    ]);
+    const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`);
+    if (!meta) throw new Error('no shape');
+    const data = await GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`);
     const avgWindow = appSettings?.shape_average_window_ms ?? 500;
     _npCanvas.setData(data, meta, avgWindow);
     _npCanvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);

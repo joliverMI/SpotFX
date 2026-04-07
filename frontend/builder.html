@@ -42,6 +42,13 @@
     .palette-btn { padding:3px 10px; font-size:11px; border-radius:10px; border:2px solid transparent; cursor:pointer; user-select:none; color:#fff; opacity:0.55; transition:opacity 0.15s, border-color 0.15s; }
     .palette-btn:hover { opacity:0.8; }
     .palette-btn.active { opacity:1; border-color:#fff; }
+    .qwerty-row { display:flex; gap:4px; margin-bottom:4px; }
+    .qwerty-row:nth-child(2) { margin-left:12px; }
+    .qwerty-row:nth-child(3) { margin-left:24px; }
+    .qwerty-key { width:32px; height:32px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; color:var(--text-muted); position:relative; cursor:default; }
+    .qwerty-key .key-dot { width:10px; height:10px; border-radius:50%; position:absolute; bottom:2px; right:2px; }
+    .pal-key-row { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+    .pal-key-label { width:20px; font-size:12px; font-weight:700; text-transform:uppercase; color:var(--text-muted); text-align:center; flex-shrink:0; }
     #trigger-edit-popup {
       display:none;
       position:fixed; inset:0; background:rgba(0,0,0,.6);
@@ -77,27 +84,19 @@
 </head>
 <body>
 <div class="app-shell">
-  <nav>
-    <span class="logo">SpotFX</span>
-    <a href="/">Now Playing</a>
-    <a href="/builder.html" class="active">Profile Builder</a>
-    <a href="/events.html">Events</a>
-    <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
-    <a href="/triggerless.html">Triggerless</a>
-    <a href="/settings.html">Settings</a>
-    <div id="ws-status"><div id="ws-dot"></div> Live</div>
-  </nav>
+  <div id="nav-root"></div>
 
   <main>
     <!-- ── Mode bar ──────────────────────────────────────────────────────── -->
     <div class="card">
       <div id="mode-bar">
-        <button id="btn-live" class="btn-accent">Live Mode</button>
-        <button id="btn-auto-wait">Auto Wait: OFF</button>
-        <button id="btn-analysis">Capture Shape: OFF</button>
-        <button id="btn-recapture-wavs" style="font-size:11px;padding:3px 8px;" title="Recapture WAV files for songs with librosa data but no WAV">Recapture WAVs: OFF</button>
-        <button id="btn-auto-gen">Auto Analyze: OFF</button>
+        <button id="btn-live" class="toggle-btn active">Live</button>
+        <button id="btn-auto-wait" class="toggle-btn">Auto Wait</button>
+        <span style="width:1px;height:18px;background:var(--border);"></span>
+        <button id="btn-analysis" class="toggle-btn">Capture</button>
+        <button id="btn-auto-gen" class="toggle-btn">Analyze</button>
         <button class="btn-sm" id="btn-verify">Mark Verified</button>
+        <button id="btn-recapture-wavs" class="toggle-btn advanced-only" title="Recapture WAV files for songs with librosa data but no WAV">Recapture</button>
         <span id="embedded-tag" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:#1a237e;color:#90caf9;font-weight:600;">⚙ Embedded</span>
         <div class="search-wrap">
           <input id="song-search" type="text" placeholder="Search song profiles…" style="display:none" autocomplete="off">
@@ -121,9 +120,6 @@
         <button class="btn-sm btn-accent" id="btn-zoom">Follow</button>
         <button class="btn-sm" id="btn-zoom-out">Full Song</button>
       </div>
-      <div id="palette-bar" style="display:none;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
-        <span style="font-size:11px;color:var(--text-muted);">Palette:</span>
-      </div>
       <div class="timeline-wrap">
         <div class="timeline-bar" id="timeline-bar">
           <div class="timeline-progress" id="timeline-progress" style="width:0%"></div>
@@ -143,16 +139,17 @@
     <div class="card audio-wrap">
       <div class="card-title">Audio Shape</div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
-        <button class="btn-sm" id="btn-relearn">Re-learn</button>
-        <button class="btn-sm" id="btn-librosa-analyze" title="Run librosa analysis on this song's WAV">Librosa</button>
-        <button class="btn-sm" id="btn-analyze-scenes" title="Import analyzed scene triggers (replaces existing scenes)" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">Analyze Scenes</button>
-        <button class="btn-sm" id="btn-analyze-flares" title="Import analyzed flare triggers (replaces existing flares)" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">Analyze Flares</button>
-        <div style="width:1px;height:18px;background:var(--border);margin:0 2px;"></div>
         <button class="shape-filter-btn active" data-layer="total" style="background:#555;">Total</button>
         <button class="shape-filter-btn active" data-layer="bass" style="background:rgba(46,204,113,0.6);">Bass</button>
         <button class="shape-filter-btn active" data-layer="mid" style="background:rgba(230,126,34,0.6);">Mids</button>
         <button class="shape-filter-btn active" data-layer="high" style="background:rgba(52,152,219,0.6);">Highs</button>
         <button class="shape-filter-btn active" data-layer="marks">Marks</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;" class="advanced-only">
+        <button class="btn-sm" id="btn-relearn">Re-learn</button>
+        <button class="btn-sm" id="btn-librosa-analyze" title="Run librosa analysis on this song's WAV">Librosa</button>
+        <button class="btn-sm" id="btn-analyze-scenes" title="Import analyzed scene triggers (replaces existing scenes)" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">Analyze Scenes</button>
+        <button class="btn-sm" id="btn-analyze-flares" title="Import analyzed flare triggers (replaces existing flares)" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">Analyze Flares</button>
         <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
           <span style="font-size:11px;color:var(--text-muted);">Shape offset:</span>
           <input type="range" id="shape-offset-slider" min="-3000" max="3000" step="10" value="0"
@@ -185,13 +182,38 @@
       </div>
     </div>
 
+    <!-- ── Palettes ──────────────────────────────────────────────────────── -->
+    <div class="card" id="palette-card" style="display:none;">
+      <div class="card-title" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;" id="palette-card-toggle">
+        <span id="palette-collapse-arrow">▸</span> Palettes
+        <button class="btn-sm btn-accent" id="btn-pal-new" style="margin-left:auto;display:none;">+ New</button>
+      </div>
+      <div id="palette-card-body" style="display:none;">
+        <div id="palette-select-bar" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center;"></div>
+        <div id="palette-qwerty" style="display:none;margin-bottom:10px;"></div>
+        <div id="palette-edit-panel" style="display:none;">
+          <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+            <input type="text" id="pal-edit-name" placeholder="Palette name" style="width:160px;">
+            <input type="color" id="pal-edit-color" value="#ff5500" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;">
+          </div>
+          <div id="pal-edit-keys"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button class="btn-sm btn-accent" id="btn-pal-save">Save</button>
+            <button class="btn-sm" id="btn-pal-cancel">Cancel</button>
+            <button class="btn-sm" id="btn-pal-dupe" title="Duplicate" style="margin-left:auto;padding:4px 6px;line-height:1;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="btn-sm btn-danger" id="btn-pal-delete">Delete</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Trigger detail list ────────────────────────────────────────────── -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <div class="card-title" style="margin:0;">All Triggers</div>
         <button id="btn-delete-all-triggers" class="btn-danger" style="font-size:11px;padding:3px 10px;">🗑 Delete All</button>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;" class="advanced-only">
         <span style="font-size:11px;color:var(--text-muted);">Shift all:</span>
         <input type="range" id="trigger-shift-slider" min="-5000" max="5000" step="50" value="0"
                style="width:100px;accent-color:#ffaa44;">
@@ -246,13 +268,14 @@
 </div>
 
 <script type="module">
-import { connectWS, onMessage, fmtMs, markActiveNav, GET, POST, DEL, uuid, showToast } from '/static/js/app.js';
+import { connectWS, onMessage, fmtMs, GET, POST, DEL, PATCH, uuid, showToast } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
 import {
   createShapeCanvas,
   MARK_COLOR, MARK_ABBR, SCALE_LABELS,
 } from '/static/js/shape_canvas.js';
 
-markActiveNav();
+initNav();
 connectWS();
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -278,7 +301,10 @@ let _liveShapePoll = null;
 let _recentEventIds = [];   // session-order: most recently used first
 let palettes = [];
 let activePaletteId = null;
-let activeKey = null;  // 'q'|'w'|'e'|'r'|'t'
+let activeKey = null;  // 'q'|'w'|'e'|'r'|'t' etc.
+let palEditMode = false;
+const PALETTE_KEYS = new Set(['q','w','e','r','t','a','s','d','f','g','z','x','c','v']);
+const QWERTY_ROWS = [['q','w','e','r','t'], ['a','s','d','f','g'], ['z','x','c','v']];
 const SHAPE_TICK_MS = 25;   // canvas redraw interval in ms — tune here
 
 // ── Verify button ───────────────────────────────────────────────────────────
@@ -357,25 +383,22 @@ updateScaleButtons();
 renderModeBar();
 updateTriggerBtnState();
 updateVerifyBtn();
-renderPaletteBar();
+renderPaletteCard();
 
 // ── WebSocket ──────────────────────────────────────────────────────────────
 onMessage('state', async msg => {
   // Always sync analysis + auto-gen toggle buttons
   const analysisBtn = document.getElementById('btn-analysis');
   if (analysisBtn && msg.audio_analysis_enabled !== undefined) {
-    analysisBtn.textContent = msg.audio_analysis_enabled ? 'Capture Shape: ON' : 'Capture Shape: OFF';
-    analysisBtn.classList.toggle('btn-accent', !!msg.audio_analysis_enabled);
+    analysisBtn.classList.toggle('active', !!msg.audio_analysis_enabled);
   }
   const recapBtn = document.getElementById('btn-recapture-wavs');
   if (recapBtn && msg.recapture_wavs !== undefined) {
-    recapBtn.textContent = msg.recapture_wavs ? 'Recapture WAVs: ON' : 'Recapture WAVs: OFF';
-    recapBtn.classList.toggle('btn-accent', !!msg.recapture_wavs);
+    recapBtn.classList.toggle('active', !!msg.recapture_wavs);
   }
   const autoBtn = document.getElementById('btn-auto-gen');
   if (autoBtn && msg.auto_generate_enabled !== undefined) {
-    autoBtn.textContent = msg.auto_generate_enabled ? 'Auto Analyze: ON' : 'Auto Analyze: OFF';
-    autoBtn.classList.toggle('btn-accent', !!msg.auto_generate_enabled);
+    autoBtn.classList.toggle('active', !!msg.auto_generate_enabled);
   }
   if (!liveMode) return;
 
@@ -524,10 +547,9 @@ async function refreshShape() {
 
   // Try completed shape first
   try {
-    const [meta, data] = await Promise.all([
-      GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`),
-      GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`),
-    ]);
+    const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`);
+    if (!meta) throw new Error('no shape');
+    const data = await GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`);
     shapeCanvas.setData(data, meta, appSettings.shape_average_window_ms ?? 500);
     shapeCanvas.setMaxRms(Math.max(...data.rms_total, 1e-9));  // pin Y-axis for saved shape
     const savedOffset = meta?.timestamp_offset_ms ?? 0;
@@ -571,6 +593,11 @@ async function refreshShape() {
         let metaDone = false;
         try {
           const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(pollUri)}`);
+          if (!meta) {
+            // No shape exists — stop polling
+            clearInterval(_liveShapePoll); _liveShapePoll = null;
+            return;
+          }
           if (meta.capture_complete) {
             metaDone = true;
             clearInterval(_liveShapePoll); _liveShapePoll = null;
@@ -630,8 +657,8 @@ function renderTrack() {
 }
 
 function renderModeBar() {
-  document.getElementById('btn-live').classList.toggle('btn-accent', liveMode);
-  document.getElementById('btn-auto-wait').textContent = `Auto Wait: ${autoWait ? 'ON' : 'OFF'}`;
+  document.getElementById('btn-live').classList.toggle('active', liveMode);
+  document.getElementById('btn-auto-wait').classList.toggle('active', autoWait);
   document.getElementById('song-search').style.display = liveMode ? 'none' : 'inline-block';
   document.getElementById('mode-label').textContent = liveMode ? 'Editing live song' : 'Standard mode';
 }
@@ -826,46 +853,209 @@ function getActiveEventId() {
   return palette?.keys[activeKey] || null;
 }
 
-function renderPaletteBar() {
-  const bar = document.getElementById('palette-bar');
-  if (!palettes.length) { bar.style.display = 'none'; return; }
-  bar.style.display = 'flex';
-  bar.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Palette:</span>' +
-    palettes.map(p => {
-      const isActive = p.id === activePaletteId;
-      let label = p.name;
-      if (isActive && activeKey) {
-        const eid = p.keys[activeKey];
-        const ev = eid && events.find(e => e.id === eid);
-        label = p.name + ': ' + (ev?.name || '?');
-      }
-      return `<button class="palette-btn${isActive ? ' active' : ''}" data-palette-id="${p.id}" style="background:${p.color};" title="${buildPaletteTooltip(p)}">${label}</button>`;
-    }).join('');
-  bar.querySelectorAll('.palette-btn').forEach(btn => {
+function renderPaletteCard() {
+  const card = document.getElementById('palette-card');
+  card.style.display = '';
+  // Palette select buttons
+  const selectBar = document.getElementById('palette-select-bar');
+  selectBar.innerHTML = palettes.map(p => {
+    const isActive = p.id === activePaletteId;
+    let label = p.name;
+    if (isActive && activeKey) {
+      const eid = p.keys[activeKey];
+      const ev = eid && events.find(e => e.id === eid);
+      label = p.name + ': ' + (ev?.name || '?');
+    }
+    return `<button class="palette-btn${isActive ? ' active' : ''}" data-palette-id="${p.id}" style="background:${p.color};">${label}</button>`;
+  }).join('');
+  selectBar.querySelectorAll('.palette-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const pid = btn.dataset.paletteId;
       if (activePaletteId === pid) { activePaletteId = null; activeKey = null; }
       else { activePaletteId = pid; activeKey = null; }
-      renderPaletteBar();
+      palEditMode = false;
+      renderPaletteCard();
     });
+    btn.addEventListener('dblclick', () => {
+      activePaletteId = btn.dataset.paletteId;
+      activeKey = null;
+      enterPalEditMode();
+    });
+  });
+  // Show QWERTY display if a palette is selected (and not editing)
+  renderQwerty();
+  // Show/hide edit panel
+  document.getElementById('palette-edit-panel').style.display = palEditMode ? '' : 'none';
+  document.getElementById('palette-qwerty').style.display = (activePaletteId && !palEditMode) ? '' : 'none';
+  document.getElementById('btn-pal-new').style.display = palEditMode ? 'none' : '';
+}
+
+function renderQwerty() {
+  const container = document.getElementById('palette-qwerty');
+  if (!activePaletteId || palEditMode) { container.style.display = 'none'; return; }
+  const palette = palettes.find(p => p.id === activePaletteId);
+  if (!palette) { container.style.display = 'none'; return; }
+  container.style.display = '';
+  container.innerHTML = QWERTY_ROWS.map(row =>
+    `<div class="qwerty-row">${row.map(k => {
+      const eid = palette.keys[k];
+      const ev = eid ? events.find(e => e.id === eid) : null;
+      const dotColor = ev?.color || 'transparent';
+      const isActive = k === activeKey;
+      const border = isActive ? 'border-color:var(--accent);' : '';
+      const title = ev ? ev.name : '(empty)';
+      return `<div class="qwerty-key" style="${border}" title="${k.toUpperCase()}: ${title}">
+        ${k.toUpperCase()}
+        ${ev ? `<span class="key-dot" style="background:${dotColor};"></span>` : ''}
+      </div>`;
+    }).join('')}</div>`
+  ).join('');
+}
+
+function enterPalEditMode() {
+  palEditMode = true;
+  const palette = palettes.find(p => p.id === activePaletteId);
+  if (!palette) return;
+  document.getElementById('pal-edit-name').value = palette.name;
+  document.getElementById('pal-edit-color').value = palette.color;
+  renderPalEditKeys(palette.keys);
+  renderPaletteCard();
+}
+
+function renderPalEditKeys(keys) {
+  const container = document.getElementById('pal-edit-keys');
+  const allKeys = [...PALETTE_KEYS];
+  container.innerHTML = allKeys.map(k => {
+    const eid = (keys && keys[k]) || '';
+    const ev = eid ? events.find(e => e.id === eid) : null;
+    return `<div class="pal-key-row" style="position:relative;">
+      <span class="pal-key-label">${k.toUpperCase()}</span>
+      <input type="text" class="pal-key-search" data-key="${k}" placeholder="Search events…"
+             value="${ev ? ev.name : ''}" style="flex:1;" autocomplete="off">
+      <input type="hidden" class="pal-key-value" data-key="${k}" value="${eid}">
+      ${ev ? `<span style="width:10px;height:10px;border-radius:50%;background:${ev.color};flex-shrink:0;"></span>` : ''}
+      <div class="pal-key-dropdown" data-key="${k}"
+           style="display:none;position:absolute;left:28px;right:0;top:100%;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-height:160px;overflow-y:auto;"></div>
+    </div>`;
+  }).join('');
+  // Wire search inputs
+  container.querySelectorAll('.pal-key-search').forEach(input => {
+    const k = input.dataset.key;
+    const dropdown = container.querySelector(`.pal-key-dropdown[data-key="${k}"]`);
+    const hidden = container.querySelector(`.pal-key-value[data-key="${k}"]`);
+    function showDropdown(filter) {
+      const lc = filter.toLowerCase();
+      const matches = [{ id: '', name: '(none)', color: '' }, ...events].filter(ev =>
+        ev.name.toLowerCase().includes(lc)
+      );
+      dropdown.innerHTML = matches.map(ev =>
+        `<div class="pal-key-option" data-id="${ev.id}" style="padding:5px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;${ev.id === hidden.value ? 'background:var(--accent);color:#fff;border-radius:3px;' : ''}">
+          ${ev.color ? `<span style="width:8px;height:8px;border-radius:50%;background:${ev.color};flex-shrink:0;"></span>` : ''}
+          ${ev.name}
+        </div>`
+      ).join('');
+      dropdown.style.display = '';
+      dropdown.querySelectorAll('.pal-key-option').forEach(opt => {
+        opt.addEventListener('mousedown', e => {
+          e.preventDefault();
+          hidden.value = opt.dataset.id;
+          input.value = opt.dataset.id ? opt.textContent.trim() : '';
+          dropdown.style.display = 'none';
+        });
+      });
+    }
+    input.addEventListener('focus', () => showDropdown(input.value));
+    input.addEventListener('input', () => showDropdown(input.value));
+    input.addEventListener('blur', () => { setTimeout(() => dropdown.style.display = 'none', 150); });
   });
 }
 
-function buildPaletteTooltip(palette) {
-  return ['q','w','e','r','t','a','s','d','f'].map(k => {
-    const eid = palette.keys[k];
-    if (!eid) return `${k.toUpperCase()}: (empty)`;
-    const ev = events.find(e => e.id === eid);
-    return `${k.toUpperCase()}: ${ev?.name || '?'}`;
-  }).join('\n');
+function collectPalEditKeys() {
+  const keys = {};
+  document.querySelectorAll('.pal-key-value').forEach(el => {
+    keys[el.dataset.key] = el.value || null;
+  });
+  return keys;
 }
 
+// Palette card toggle (collapse/expand)
+document.getElementById('palette-card-toggle').addEventListener('click', e => {
+  if (e.target.closest('#btn-pal-new')) return; // don't toggle when clicking + New
+  const body = document.getElementById('palette-card-body');
+  const arrow = document.getElementById('palette-collapse-arrow');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  arrow.textContent = open ? '▸' : '▾';
+});
+
+// + New palette
+document.getElementById('btn-pal-new').addEventListener('click', async () => {
+  const body = { name: 'New Palette', color: '#888888', keys: {} };
+  const saved = await POST('/palettes', body);
+  palettes.push(saved);
+  activePaletteId = saved.id;
+  activeKey = null;
+  enterPalEditMode();
+});
+
+// Save palette
+document.getElementById('btn-pal-save').addEventListener('click', async () => {
+  if (!activePaletteId) return;
+  const body = {
+    name: document.getElementById('pal-edit-name').value.trim() || 'Untitled',
+    color: document.getElementById('pal-edit-color').value,
+    keys: collectPalEditKeys(),
+  };
+  const saved = await PATCH(`/palettes/${activePaletteId}`, body);
+  const idx = palettes.findIndex(p => p.id === activePaletteId);
+  if (idx >= 0) palettes[idx] = saved;
+  palEditMode = false;
+  renderPaletteCard();
+});
+
+// Cancel edit
+document.getElementById('btn-pal-cancel').addEventListener('click', () => {
+  palEditMode = false;
+  renderPaletteCard();
+});
+
+// Duplicate palette
+document.getElementById('btn-pal-dupe').addEventListener('click', async () => {
+  if (!activePaletteId) return;
+  const p = palettes.find(x => x.id === activePaletteId);
+  if (!p) return;
+  const body = { name: p.name + ' - Copy', color: p.color, keys: { ...p.keys } };
+  const saved = await POST('/palettes', body);
+  palettes.push(saved);
+  activePaletteId = saved.id;
+  enterPalEditMode();
+});
+
+// Delete palette
+document.getElementById('btn-pal-delete').addEventListener('click', async () => {
+  if (!activePaletteId) return;
+  if (!confirm('Delete this palette?')) return;
+  await DEL(`/palettes/${activePaletteId}`);
+  palettes = palettes.filter(p => p.id !== activePaletteId);
+  activePaletteId = null;
+  activeKey = null;
+  palEditMode = false;
+  renderPaletteCard();
+});
+
 // ── Palette keyboard listener ──────────────────────────────────────────────
-const PALETTE_KEYS = new Set(['q','w','e','r','t','a','s','d','f']);
 document.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   const key = e.key.toLowerCase();
+
+  // B key → toggle Follow/Manual zoom mode
+  if (key === 'b') {
+    e.preventDefault();
+    document.getElementById('btn-zoom').click();
+    return;
+  }
+
   if (!PALETTE_KEYS.has(key)) return;
   if (!activePaletteId) return;
   // If trigger edit popup is open, apply key's event and save
@@ -881,7 +1071,7 @@ document.addEventListener('keydown', e => {
   }
   // Otherwise set active key for next right-click
   activeKey = key;
-  renderPaletteBar();
+  renderPaletteCard();
 });
 
 // ── Add trigger ────────────────────────────────────────────────────────────
@@ -1035,20 +1225,17 @@ document.getElementById('btn-auto-wait').addEventListener('click', () => {
 
 document.getElementById('btn-analysis').addEventListener('click', async () => {
   const res = await POST('/analysis/toggle', {});
-  const btn = document.getElementById('btn-analysis');
-  btn.textContent = res.audio_analysis_enabled ? 'Capture Shape: ON' : 'Capture Shape: OFF';
-  btn.classList.toggle('btn-accent', !!res.audio_analysis_enabled);
+  document.getElementById('btn-analysis').classList.toggle('active', !!res.audio_analysis_enabled);
 });
 
 document.getElementById('btn-recapture-wavs').addEventListener('click', async () => {
-  const curOn = document.getElementById('btn-recapture-wavs').classList.contains('btn-accent');
+  const curOn = document.getElementById('btn-recapture-wavs').classList.contains('active');
   await POST(`/control/recapture-wavs?enabled=${!curOn}`);
 });
 
 document.getElementById('btn-auto-gen').addEventListener('click', async () => {
-  const curOn = document.getElementById('btn-auto-gen').classList.contains('btn-accent');
+  const curOn = document.getElementById('btn-auto-gen').classList.contains('active');
   await POST(`/control/auto-generate?enabled=${!curOn}`);
-  // WS state update handles button refresh
 });
 
 onMessage('auto_generate_started', msg => {

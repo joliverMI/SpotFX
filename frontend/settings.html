@@ -8,24 +8,14 @@
 </head>
 <body>
 <div class="app-shell">
-  <nav>
-    <span class="logo">SpotFX</span>
-    <a href="/">Now Playing</a>
-    <a href="/builder.html">Profile Builder</a>
-    <a href="/events.html">Events</a>
-    <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
-    <a href="/triggerless.html">Triggerless</a>
-    <a href="/settings.html" class="active">Settings</a>
-    <div id="ws-status"><div id="ws-dot"></div> Live</div>
-  </nav>
+  <div id="nav-root"></div>
 
   <main>
     <div class="card">
       <div class="card-title">Navigation</div>
-      <div class="field" style="display:flex;align-items:center;gap:8px;">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-          <input type="checkbox" id="s-show-ai-triggers"> Show AI Triggers page in nav bar
-        </label>
+      <div class="field" style="display:flex;flex-direction:column;gap:8px;">
+        <label><input type="checkbox" id="s-show-ai-triggers"> Show AI Triggers page</label>
+        <label><input type="checkbox" id="s-show-advanced"> Show advanced controls</label>
       </div>
     </div>
 
@@ -51,7 +41,7 @@
         <label>Smooth ramp duration (ms) — global default for brightness &amp; effect ramps; 0 = instant</label>
         <input type="number" id="s-smooth-ramp" step="50" min="0">
       </div>
-      <div class="field">
+      <div class="field advanced-only-block">
         <label>Auto-generate mode — method used when audio capture completes</label>
         <select id="s-auto-gen-mode">
           <option value="embedded">Embedded (free, local KNN — auto-applies triggers)</option>
@@ -60,7 +50,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card advanced-only-block">
       <div class="card-title">Builder</div>
       <div class="field">
         <label>Zoom Window (seconds)</label>
@@ -72,7 +62,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card advanced-only-block">
       <div class="card-title">Audio Shape Display Scales</div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Default scale factors for each graph layer. Can also be adjusted live in the builder via long-press drag on the layer buttons.</div>
       <div class="field">
@@ -97,7 +87,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card advanced-only-block">
       <div class="card-title">Audio Capture</div>
       <div class="field">
         <label>Audio Input Device ("default" or device name/index)</label>
@@ -109,7 +99,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card advanced-only-block">
       <div class="card-title">Audio Shape Graph Averaging</div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Sliding-window average width for the overlay lines on the audio shape graph. Right-click a layer button in the builder to toggle its line.</div>
       <div class="field">
@@ -192,41 +182,13 @@
         </div>
       </div>
     </div>
-    <!-- ── Palettes ───────────────────────────────────────────────────── -->
-    <div class="card" style="margin-top:16px;">
-      <div class="card-title">Palettes</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Map keyboard keys (Q W E R T) to events for rapid trigger placement in the Profile Builder.</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
-        <!-- List panel -->
-        <div>
-          <button class="btn-sm btn-accent" id="pal-new">+ New Palette</button>
-          <div id="pal-list" style="margin-top:10px;"></div>
-        </div>
-        <!-- Editor panel -->
-        <div id="pal-editor" style="display:none;">
-          <div class="field">
-            <label>Name</label>
-            <input type="text" id="pal-name" placeholder="e.g. Verse Colors">
-          </div>
-          <div class="field">
-            <label>Color Tag</label>
-            <input type="color" id="pal-color" value="#ff5500">
-          </div>
-          <div id="pal-keys-container"></div>
-          <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
-            <button class="btn-accent btn-sm" id="pal-save">Save</button>
-            <button class="btn-sm" id="pal-cancel">Cancel</button>
-            <button class="btn-sm btn-danger" id="pal-delete" style="margin-left:auto;display:none;">Delete</button>
-          </div>
-        </div>
-      </div>
-    </div>
   </main>
 </div>
 
 <script type="module">
-import { connectWS, markActiveNav, GET, POST, PATCH, DEL } from '/static/js/app.js';
-markActiveNav();
+import { connectWS, GET, POST, PATCH, DEL } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
+initNav();
 connectWS();
 
 const settings = await GET('/settings');
@@ -251,6 +213,7 @@ document.getElementById('s-avg-window').value     = settings.shape_average_windo
 document.getElementById('s-smooth-ramp').value    = settings.smooth_ramp_ms ?? 0;
 document.getElementById('s-auto-gen-mode').value  = settings.auto_generate_mode ?? 'embedded';
 document.getElementById('s-show-ai-triggers').checked = settings.show_ai_triggers ?? false;
+document.getElementById('s-show-advanced').checked = settings.show_advanced ?? false;
 
 document.getElementById('btn-save').addEventListener('click', async () => {
   await PATCH('/settings', {
@@ -274,6 +237,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     smooth_ramp_ms:           parseInt(document.getElementById('s-smooth-ramp').value),
     auto_generate_mode:       document.getElementById('s-auto-gen-mode').value,
     show_ai_triggers:         document.getElementById('s-show-ai-triggers').checked,
+    show_advanced:            document.getElementById('s-show-advanced').checked,
   });
   const msg = document.getElementById('save-msg');
   msg.style.display = 'inline';
@@ -416,146 +380,6 @@ document.getElementById('grad-delete').addEventListener('click', async () => {
   document.getElementById('grad-editor').style.display = 'none';
 });
 
-// ── Palettes ────────────────────────────────────────────────────────────────
-const PAL_KEYS = ['q','w','e','r','t','a','s','d','f'];
-let palettes = [];
-let palEditId = null;
-let palEvents = [];
-
-try { palEvents = await GET('/events'); } catch {}
-try { palettes = await GET('/palettes'); } catch {}
-
-function renderPalList() {
-  const el = document.getElementById('pal-list');
-  if (!palettes.length) {
-    el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No palettes yet.</div>';
-    return;
-  }
-  el.innerHTML = palettes.map(p => `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-      <div style="width:16px;height:16px;border-radius:50%;background:${p.color};flex-shrink:0;border:1px solid var(--border);"></div>
-      <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.name}</span>
-      <button class="btn-sm" onclick="palEdit('${p.id}')">Edit</button>
-      <button class="btn-sm" onclick="palDupe('${p.id}')" title="Duplicate" style="padding:4px 6px;line-height:1;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
-    </div>
-  `).join('');
-}
-
-function renderPalKeyRows(keys) {
-  const container = document.getElementById('pal-keys-container');
-  container.innerHTML = PAL_KEYS.map(k => {
-    const selectedId = (keys && keys[k]) || '';
-    const selectedEv = selectedId ? palEvents.find(e => e.id === selectedId) : null;
-    return `
-      <div class="field" style="margin-bottom:6px;position:relative;" data-pal-key="${k}">
-        <label style="font-weight:700;text-transform:uppercase;">${k}</label>
-        <input type="text" class="pal-key-search" data-key="${k}"
-               placeholder="Search events…"
-               value="${selectedEv ? selectedEv.name : ''}"
-               style="width:100%;">
-        <input type="hidden" class="pal-key-value" data-key="${k}" value="${selectedId}">
-        <div class="pal-key-dropdown" data-key="${k}"
-             style="display:none;position:absolute;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-height:180px;overflow-y:auto;width:100%;margin-top:2px;"></div>
-      </div>`;
-  }).join('');
-  // Wire up search inputs
-  container.querySelectorAll('.pal-key-search').forEach(input => {
-    const k = input.dataset.key;
-    const dropdown = container.querySelector(`.pal-key-dropdown[data-key="${k}"]`);
-    const hidden = container.querySelector(`.pal-key-value[data-key="${k}"]`);
-    function showDropdown(filter) {
-      const lc = filter.toLowerCase();
-      const matches = [{ id: '', name: '(none)' }, ...palEvents].filter(ev =>
-        ev.name.toLowerCase().includes(lc)
-      );
-      dropdown.innerHTML = matches.map(ev =>
-        `<div class="pal-key-option" data-id="${ev.id}" style="padding:6px 10px;cursor:pointer;font-size:13px;${ev.id === hidden.value ? 'background:var(--accent);color:#fff;border-radius:3px;' : ''}">${ev.name}</div>`
-      ).join('');
-      dropdown.style.display = '';
-      dropdown.querySelectorAll('.pal-key-option').forEach(opt => {
-        opt.addEventListener('mousedown', e => {
-          e.preventDefault();
-          hidden.value = opt.dataset.id;
-          input.value = opt.dataset.id ? opt.textContent : '';
-          dropdown.style.display = 'none';
-        });
-      });
-    }
-    input.addEventListener('focus', () => showDropdown(input.value));
-    input.addEventListener('input', () => showDropdown(input.value));
-    input.addEventListener('blur', () => { setTimeout(() => dropdown.style.display = 'none', 150); });
-  });
-}
-
-function collectPalKeys() {
-  const keys = {};
-  document.querySelectorAll('.pal-key-value').forEach(el => {
-    keys[el.dataset.key] = el.value || null;
-  });
-  return keys;
-}
-
-window.palDupe = async function(id) {
-  const p = palettes.find(x => x.id === id);
-  if (!p) return;
-  const body = { name: p.name + ' - Copy', color: p.color, keys: { ...p.keys } };
-  const saved = await POST('/palettes', body);
-  palettes.push(saved);
-  renderPalList();
-};
-
-window.palEdit = function(id) {
-  const p = palettes.find(x => x.id === id);
-  if (!p) return;
-  palEditId = id;
-  document.getElementById('pal-name').value = p.name;
-  document.getElementById('pal-color').value = p.color;
-  renderPalKeyRows(p.keys);
-  document.getElementById('pal-editor').style.display = '';
-  document.getElementById('pal-delete').style.display = '';
-};
-
-renderPalList();
-
-document.getElementById('pal-new').addEventListener('click', () => {
-  palEditId = null;
-  document.getElementById('pal-name').value = '';
-  document.getElementById('pal-color').value = '#ff5500';
-  renderPalKeyRows({});
-  document.getElementById('pal-editor').style.display = '';
-  document.getElementById('pal-delete').style.display = 'none';
-});
-
-document.getElementById('pal-save').addEventListener('click', async () => {
-  const name = document.getElementById('pal-name').value.trim();
-  if (!name) { alert('Enter a palette name.'); return; }
-  const color = document.getElementById('pal-color').value;
-  const keys = collectPalKeys();
-  const body = { name, color, keys };
-  let saved;
-  if (palEditId) {
-    saved = await PATCH(`/palettes/${palEditId}`, body);
-    const idx = palettes.findIndex(p => p.id === palEditId);
-    if (idx >= 0) palettes[idx] = saved;
-  } else {
-    saved = await POST('/palettes', body);
-    palettes.push(saved);
-  }
-  renderPalList();
-  document.getElementById('pal-editor').style.display = 'none';
-});
-
-document.getElementById('pal-cancel').addEventListener('click', () => {
-  document.getElementById('pal-editor').style.display = 'none';
-});
-
-document.getElementById('pal-delete').addEventListener('click', async () => {
-  if (!palEditId || !confirm('Delete this palette?')) return;
-  await DEL(`/palettes/${palEditId}`);
-  palettes = palettes.filter(p => p.id !== palEditId);
-  renderPalList();
-  document.getElementById('pal-editor').style.display = 'none';
-});
 </script>
 </body>
 </html>

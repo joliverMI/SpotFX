@@ -203,8 +203,6 @@ button:hover, .btn:hover { background: #2e2e2e; border-color: #555; }
 .badge-red { background: #3a0e0e; color: var(--danger); }
 .badge-gray { background: var(--surface2); color: var(--text-muted); }
 
-/* ── Pause button ────────────────────────────────────────────────────────── */
-#pause-btn.paused { border-color: var(--accent2); color: var(--accent2); }
 
 /* ── Connection indicator ────────────────────────────────────────────────── */
 #ws-status {
@@ -260,7 +258,47 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
 }
 label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+label:has(input[type="checkbox"]) {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 0;
+}
+input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
 .field { margin-bottom: 12px; }
+
+/* ── Dark scrollbars ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--surface); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+* { scrollbar-color: #444 var(--surface); scrollbar-width: thin; }
+
+/* ── Toggle buttons ──────────────────────────────────────────────────────── */
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  height: 28px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toggle-btn:hover { background: #2e2e2e; border-color: #555; }
+.toggle-btn.active {
+  background: rgba(29, 185, 84, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Advanced mode ───────────────────────────────────────────────────────── */
+.advanced-only, .advanced-only-block, .advanced-only-inline { display: none !important; }
+body.advanced-mode .advanced-only { display: flex !important; }
+body.advanced-mode .advanced-only-block { display: block !important; }
+body.advanced-mode .advanced-only-inline { display: inline !important; }
 
 /* ── Responsive / mobile ─────────────────────────────────────────────────── */
 @media (max-width: 600px) {

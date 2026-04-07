@@ -48,16 +48,7 @@
 </head>
 <body>
 <div class="app-shell">
-  <nav>
-    <span class="logo">SpotFX</span>
-    <a href="/">Now Playing</a>
-    <a href="/builder.html">Profile Builder</a>
-    <a href="/events.html">Events</a>
-    <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
-    <a href="/triggerless.html">Triggerless</a>
-    <a href="/settings.html">Settings</a>
-    <div id="ws-status"><div id="ws-dot"></div> Live</div>
-  </nav>
+  <div id="nav-root"></div>
 
   <main>
     <h2 style="margin-bottom:12px;">Triggerless Profiles</h2>
@@ -83,7 +74,7 @@
         <div class="field-group"><label>Name</label><input type="text" id="ed-name"></div>
         <div class="field-group"><label>Genres (comma-separated)</label><input type="text" id="ed-genres" placeholder="reggaeton, trap latino"></div>
         <div class="field-group">
-          <label style="display:inline-flex;align-items:center;gap:6px;">
+          <label>
             <input type="checkbox" id="ed-default"> Default profile (fallback when no genre match)
           </label>
         </div>
@@ -171,8 +162,9 @@
 </div>
 
 <script type="module">
-import { connectWS, markActiveNav, GET, POST, DEL, showToast, uuid } from '/static/js/app.js';
-markActiveNav();
+import { connectWS, GET, POST, DEL, showToast, uuid } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
+initNav();
 connectWS();
 
 let profiles = [];

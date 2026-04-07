@@ -134,6 +134,8 @@ class TriggerEngine:
             return
 
         if state.dinner_party_mode:
+            if self._triggerless_triggers is not None:
+                return  # Dinner party triggers already active — don't regenerate/clear
             # Turning ON: generate synthetic triggers
             tp = self._resolve_triggerless_profile()
             if tp:

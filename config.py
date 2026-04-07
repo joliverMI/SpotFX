@@ -194,6 +194,8 @@ class Settings(BaseSettings):
     auto_generate_mode: str = "embedded"
     # Show the AI Triggers page in the nav bar
     show_ai_triggers: bool = False
+    # Show advanced controls across all pages
+    show_advanced: bool = False
 
     # ── Last.fm (genre fallback) ──────────────────────────────────────────────
     lastfm_api_key: str = ""

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/audio-shape", tags=["audio-shape"])
 async def get_meta(uri: str = Query(...)):
     meta = load_audio_shape_meta(uri)
     if meta is None:
-        raise HTTPException(404, "No audio shape found for this URI")
+        return None
     return meta.model_dump()
 
 
