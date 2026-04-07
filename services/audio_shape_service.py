@@ -85,7 +85,9 @@ class AudioShapeService:
                     analyze_async as _analyze_async,
                 )
                 _has_wav     = _wav_path(existing).exists()
-                _has_librosa = _get_analysis(new_uri) is not None
+                _la          = _get_analysis(new_uri)
+                _has_librosa = _la is not None
+                _has_mfcc    = _has_librosa and _la.beats and hasattr(_la.beats[0], 'mfcc') and bool(_la.beats[0].mfcc)
 
                 if _has_wav and not _has_librosa and new_uri not in self._auto_librosa_queued:
                     # WAV present but no librosa — just run analysis, no recapture needed
@@ -122,8 +124,29 @@ class AudioShapeService:
                         for _p in (npz_path, npz_path.with_suffix(".json")):
                             _p.unlink(missing_ok=True)
                         self._blocked_uris.add(new_uri)
-                elif not _has_wav and _has_librosa and app_state.recapture_wavs and new_uri not in self._auto_recapture_attempted:
-                    # Has librosa but no WAV — recapture WAV for MFCC re-analysis
+                elif not _has_wav and _has_librosa and not _has_mfcc and new_uri not in self._auto_recapture_attempted:
+                    # Has librosa but no WAV and missing MFCC — auto-recapture to get MFCC data
+                    self._auto_recapture_attempted.add(new_uri)
+                    progress_ms = track.interpolated_progress_ms()
+                    npz_path = AUDIO_SHAPES_DIR / existing.npz_file
+                    if progress_ms < 7000:
+                        logger.info(
+                            "MFCC recapture: clearing shape for %s (progress %.0fms)",
+                            existing.title, progress_ms,
+                        )
+                        for _p in (npz_path, npz_path.with_suffix(".json")):
+                            _p.unlink(missing_ok=True)
+                        existing = None  # fall through to _start below
+                    else:
+                        logger.info(
+                            "MFCC recapture: deleting shape for %s (progress %.0fms) — will recapture next play",
+                            existing.title, progress_ms,
+                        )
+                        for _p in (npz_path, npz_path.with_suffix(".json")):
+                            _p.unlink(missing_ok=True)
+                        self._blocked_uris.add(new_uri)
+                elif not _has_wav and _has_librosa and _has_mfcc and app_state.recapture_wavs and new_uri not in self._auto_recapture_attempted:
+                    # Has librosa WITH MFCC but no WAV — only recapture if toggle is on
                     self._auto_recapture_attempted.add(new_uri)
                     progress_ms = track.interpolated_progress_ms()
                     npz_path = AUDIO_SHAPES_DIR / existing.npz_file
