@@ -32,9 +32,11 @@ class AudioShapeService:
         # Guard against firing auto-librosa/recapture more than once per URI per session
         self._auto_librosa_queued: set[str] = set()
         self._auto_recapture_attempted: set[str] = set()
+        self._capture_started_at: float = 0.0  # monotonic time when capture began
 
     # How far into a song (ms) counts as "restarted from the beginning"
     _RESTART_THRESHOLD_MS = 5000
+    _CAPTURE_GRACE_S = 5.0  # ignore transient URI changes for this long after capture starts
 
     async def on_track_change(self, track: Optional[SpotifyTrackInfo]) -> None:
         """
@@ -46,6 +48,11 @@ class AudioShapeService:
 
         # Stop recording if URI changed or nothing is playing
         if self._recording_uri and self._recording_uri != new_uri:
+            age = time.monotonic() - self._capture_started_at
+            if age < self._CAPTURE_GRACE_S and new_uri is None:
+                # Transient API blip during song skip — ignore
+                logger.debug("Capture grace period: ignoring transient None URI (%.1fs old)", age)
+                return
             await self._stop_and_save()
 
         # Clear block when a blocked URI is detected restarting from the beginning
@@ -198,6 +205,7 @@ class AudioShapeService:
         song_start = time.monotonic() - progress_s
 
         self._recording_uri = track.spotify_uri
+        self._capture_started_at = time.monotonic()
         self._recorder = AudioShapeRecorder(
             track.spotify_uri, track.title, track.artist, track.duration_ms,
             genres=track.genres,

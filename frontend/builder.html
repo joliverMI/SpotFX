@@ -586,6 +586,7 @@ async function refreshShape() {
     _setOffsetControls(0, false);
     shapeCanvas.setOffset(0);
     updateOffsetBadge(null);
+    loadLibrosaOverlay(uri);   // clear stale librosa from previous song
     document.getElementById('shape-status').textContent = 'Capturing audio shape…';
     shapeCanvas.draw();
     if (!_liveShapePoll) {
@@ -617,6 +618,9 @@ async function refreshShape() {
     }
   } catch {
     shapeCanvas.setData(null, null, 500);
+    shapeCanvas.setLibrosaMarkers(null);
+    document.getElementById('librosa-filter-row').style.display = 'none';
+    document.getElementById('librosa-summary').textContent = '';
     shapeCanvas.setCalibrationTarget(null, []);
     _setOffsetControls(0, false);
     shapeCanvas.setOffset(0);
@@ -1868,7 +1872,7 @@ async function analyzeAndImport(category) {
     if (!resp.triggers?.length) { showToast(`No ${category} triggers generated`); return; }
 
     const imported = resp.triggers.map(t => ({
-      id:           crypto.randomUUID(),
+      id:           uuid(),
       timestamp_ms: t.timestamp_ms,
       event_id:     t.event_id,
       labels:       [],

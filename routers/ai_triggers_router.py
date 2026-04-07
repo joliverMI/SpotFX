@@ -332,7 +332,7 @@ async def analyze_triggers(uri: str, category: str = "all"):
         raise HTTPException(400, "No librosa analysis available for this song")
 
     profile = load_profile_by_uri(uri)
-    genres = profile.genres if profile and profile.genres else []
+    genres = profile.artist_genre if profile and profile.artist_genre else []
     if not genres and state.current_track and state.current_track.spotify_uri == uri:
         genres = state.current_track.genres or []
 
