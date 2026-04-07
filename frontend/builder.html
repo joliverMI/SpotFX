@@ -594,25 +594,25 @@ async function refreshShape() {
         const pollUri = getActiveUri();
         if (!pollUri) { clearInterval(_liveShapePoll); _liveShapePoll = null; return; }
         let metaDone = false;
+        // Check if capture completed (sidecar written with capture_complete=true)
         try {
           const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(pollUri)}`);
-          if (!meta) {
-            // No shape exists — stop polling
-            clearInterval(_liveShapePoll); _liveShapePoll = null;
-            return;
-          }
-          if (meta.capture_complete) {
+          if (meta?.capture_complete) {
             metaDone = true;
             clearInterval(_liveShapePoll); _liveShapePoll = null;
             await refreshShape();
           }
         } catch {}
+        // Keep fetching live data while capture is in progress
         if (!metaDone) {
           try {
             const liveData = await GET(`/audio-shape/live?uri=${encodeURIComponent(pollUri)}`);
             shapeCanvas.setData(liveData, null, appSettings.shape_average_window_ms ?? 500);
             shapeCanvas.draw();
-          } catch { clearInterval(_liveShapePoll); _liveShapePoll = null; }
+          } catch {
+            // Live endpoint 404 = capture stopped — stop polling
+            clearInterval(_liveShapePoll); _liveShapePoll = null;
+          }
         }
       }, 2000);
     }
