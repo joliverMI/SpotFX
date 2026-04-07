@@ -241,6 +241,18 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
 
     jpath = librosa_json_path(meta)
     jpath.write_text(analysis.model_dump_json(indent=2), encoding="utf-8")
+
+    # Stamp the sidecar with librosa version (2 = has MFCC)
+    meta.librosa_version = 2
+    sidecar_path = (AUDIO_SHAPES_DIR / meta.npz_file).with_suffix(".json")
+    if sidecar_path.exists():
+        try:
+            sidecar_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            sidecar_data["librosa_version"] = 2
+            sidecar_path.write_text(json.dumps(sidecar_data, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Could not update sidecar librosa_version: %s", exc)
+
     logger.info(
         "Librosa analysis complete: %s — %.1f BPM, %d beats, %d onsets, %d bass, %d sections, %d harmonic",
         meta.title, tempo_bpm, len(beats), len(onsets), len(bass_onsets), len(sections), len(harmonic_changes),

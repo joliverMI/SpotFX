@@ -66,3 +66,5 @@ class AudioShapeMeta(BaseModel):
     xcorr_params_hash: str = ""                                # invalidation hash
     # Per-play offset history (most recent first, cap at 20)
     offset_history: list[dict] = Field(default_factory=list)   # [{iso_timestamp, offset_ms, quality, window_count}]
+    # Librosa analysis version: 0=none, 1=basic (no MFCC), 2=full (with MFCC)
+    librosa_version: int = 0

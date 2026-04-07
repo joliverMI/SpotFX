@@ -85,9 +85,8 @@ class AudioShapeService:
                     analyze_async as _analyze_async,
                 )
                 _has_wav     = _wav_path(existing).exists()
-                _la          = _get_analysis(new_uri)
-                _has_librosa = _la is not None
-                _has_mfcc    = _has_librosa and _la.beats and hasattr(_la.beats[0], 'mfcc') and bool(_la.beats[0].mfcc)
+                _has_librosa = _get_analysis(new_uri) is not None
+                _has_mfcc    = existing.librosa_version >= 2  # fast check from sidecar, no JSON parsing
 
                 if _has_wav and not _has_librosa and new_uri not in self._auto_librosa_queued:
                     # WAV present but no librosa — just run analysis, no recapture needed
