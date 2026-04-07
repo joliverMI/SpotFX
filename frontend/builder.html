@@ -115,10 +115,14 @@
     <!-- ── Timeline ──────────────────────────────────────────────────────── -->
     <div class="card">
       <div class="card-title">Triggers</div>
-      <div style="display:flex;gap:6px;margin-bottom:10px;">
-        <button class="btn-sm" id="btn-add-trigger">+ Trigger</button>
+      <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
         <button class="btn-sm btn-accent" id="btn-zoom">Follow</button>
         <button class="btn-sm" id="btn-zoom-out">Full Song</button>
+        <div style="margin-left:auto;display:flex;gap:6px;">
+          <button class="btn-sm" id="btn-add-trigger">+ Trigger</button>
+          <button class="btn-sm" id="btn-analyze-scenes" title="Import analyzed scene triggers" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">+ Scenes</button>
+          <button class="btn-sm" id="btn-analyze-flares" title="Import analyzed flare triggers" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">+ Flares</button>
+        </div>
       </div>
       <div class="timeline-wrap">
         <div class="timeline-bar" id="timeline-bar">
@@ -148,8 +152,6 @@
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;" class="advanced-only">
         <button class="btn-sm" id="btn-relearn">Re-learn</button>
         <button class="btn-sm" id="btn-librosa-analyze" title="Run librosa analysis on this song's WAV">Librosa</button>
-        <button class="btn-sm" id="btn-analyze-scenes" title="Import analyzed scene triggers (replaces existing scenes)" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">Analyze Scenes</button>
-        <button class="btn-sm" id="btn-analyze-flares" title="Import analyzed flare triggers (replaces existing flares)" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">Analyze Flares</button>
         <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
           <span style="font-size:11px;color:var(--text-muted);">Shape offset:</span>
           <input type="range" id="shape-offset-slider" min="-3000" max="3000" step="10" value="0"
@@ -1845,7 +1847,16 @@ function _applyTriggerShiftValue(ms) {
 // ── Analyze Scenes / Flares import buttons ──────────────────────────────────
 async function analyzeAndImport(category) {
   const uri = getActiveUri();
-  if (!uri || !profile) { toast('No song loaded'); return; }
+  if (!uri || !profile) { showToast('No song loaded', 'error'); return; }
+
+  // Ask how to handle existing triggers
+  const hasExisting = profile.triggers.length > 0;
+  let mode = 'keep'; // 'keep' or 'clear'
+  if (hasExisting) {
+    const choice = await showImportDialog(category);
+    if (choice === 'cancel') return;
+    mode = choice; // 'clear' or 'keep'
+  }
 
   const btn = document.getElementById(category === 'scenes' ? 'btn-analyze-scenes' : 'btn-analyze-flares');
   const origText = btn.textContent;
@@ -1854,15 +1865,8 @@ async function analyzeAndImport(category) {
 
   try {
     const resp = await GET(`/ai-triggers/analyze-triggers?uri=${encodeURIComponent(uri)}&category=${category}`);
-    if (!resp.triggers?.length) { toast(`No ${category} triggers generated`); return; }
+    if (!resp.triggers?.length) { showToast(`No ${category} triggers generated`); return; }
 
-    // Determine which event IDs belong to this category (from the response)
-    const importedEventIds = new Set(resp.triggers.map(t => t.event_id));
-
-    // Remove existing triggers that match this category
-    const kept = profile.triggers.filter(t => !importedEventIds.has(t.event_id));
-
-    // Add analyzed triggers
     const imported = resp.triggers.map(t => ({
       id:           crypto.randomUUID(),
       timestamp_ms: t.timestamp_ms,
@@ -1871,16 +1875,44 @@ async function analyzeAndImport(category) {
       enabled:      true,
     }));
 
-    profile.triggers = [...kept, ...imported].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    if (mode === 'clear') {
+      profile.triggers = imported;
+    } else {
+      profile.triggers = [...profile.triggers, ...imported].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    }
     await POST('/profiles', profile);
     renderTriggers();
-    toast(`Imported ${imported.length} ${category} (profile: ${resp.training_profile})`);
+    showToast(`Imported ${imported.length} ${category} (profile: ${resp.training_profile})`, 'success');
   } catch (e) {
-    toast(`Analyze ${category} failed: ${e.message || e}`);
+    showToast(`Analyze ${category} failed: ${e.message || e}`, 'error');
   } finally {
     btn.textContent = origText;
     btn.disabled = false;
   }
+}
+
+function showImportDialog(category) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;width:360px;max-width:90vw;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:12px;">Import ${category}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
+          This song already has triggers. How should the new ${category} triggers be added?
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button class="btn-sm" id="import-keep" style="padding:8px;">Keep existing + add new</button>
+          <button class="btn-sm btn-danger" id="import-clear" style="padding:8px;">Clear all existing, replace with new</button>
+          <button class="btn-sm" id="import-cancel" style="padding:8px;">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#import-keep').addEventListener('click', () => { overlay.remove(); resolve('keep'); });
+    overlay.querySelector('#import-clear').addEventListener('click', () => { overlay.remove(); resolve('clear'); });
+    overlay.querySelector('#import-cancel').addEventListener('click', () => { overlay.remove(); resolve('cancel'); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve('cancel'); } });
+  });
 }
 
 document.getElementById('btn-analyze-scenes').addEventListener('click', () => analyzeAndImport('scenes'));
