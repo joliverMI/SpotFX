@@ -174,6 +174,11 @@ FRONTEND_DIR = Path(__file__).parent / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(str(FRONTEND_DIR / "favicon.svg"), media_type="image/svg+xml")
+
+
 @app.get("/")
 async def root():
     return FileResponse(str(FRONTEND_DIR / "index.html"))

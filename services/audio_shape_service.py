@@ -69,8 +69,13 @@ class AudioShapeService:
         except Exception as exc:
             logger.warning("Auto-offset service error (ignored): %s", exc)
 
-        # Only capture when analysis is enabled
+        # Only capture when analysis is enabled and on target device
         if not app_state.audio_analysis_enabled:
+            return
+        if not app_state.on_target_device:
+            if self._recording_uri:
+                logger.info("Device changed away from target — stopping capture")
+                await self._stop_and_save()
             return
 
         # Start recording if:

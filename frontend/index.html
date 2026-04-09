@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SpotFX</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
     .trigger-list-wrap { max-height: 280px; overflow-y: auto; scroll-behavior: auto; }
@@ -478,7 +479,18 @@ function updateAiIndicator() {
   const el = document.getElementById('ai-indicator');
   if (!profile) { el.style.display = 'none'; return; }
   el.style.display = '';
-  if (profile._usingAiTriggers) {
+  const src = profile._triggerSource;
+  if (src === 'analyzed' || src === 'analyzed_override') {
+    el.textContent = src === 'analyzed_override' ? 'Analyzed Override' : 'Auto Triggerless';
+    el.style.background = 'rgba(76,175,80,0.15)';
+    el.style.color = '#4caf50';
+    el.style.border = '1px solid #4caf50';
+  } else if (src === 'triggerless') {
+    el.textContent = 'Simple Triggerless';
+    el.style.background = 'rgba(156,39,176,0.15)';
+    el.style.color = '#9c27b0';
+    el.style.border = '1px solid #9c27b0';
+  } else if (profile._usingAiTriggers) {
     el.textContent = 'AI (Live)';
     el.style.background = 'rgba(255,152,0,0.15)';
     el.style.color = '#ff9800';

@@ -2,9 +2,20 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "SpotFX: Restart",
+      "type": "shell",
+      "command": "systemctl --user restart spotfx",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "SpotFX: Start",
       "type": "shell",
-      "command": ".venv\\Scripts\\python main.py",
+      "command": ".venv/bin/python main.py",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -22,7 +33,7 @@
     {
       "label": "SpotFX: Re-detect Marks (Dopamine)",
       "type": "shell",
-      "command": "curl.exe -s -X POST \"http://localhost:8000/api/audio-shape/redetect?uri=spotify%3Atrack%3A7vFKcXQ39f74XNrZmXADIT\" | .venv\\Scripts\\python -m json.tool",
+      "command": "curl -s -X POST \"http://localhost:8000/api/audio-shape/redetect?uri=spotify%3Atrack%3A7vFKcXQ39f74XNrZmXADIT\" | .venv/bin/python -m json.tool",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -37,7 +48,7 @@
     {
       "label": "SpotFX: Install Dependencies",
       "type": "shell",
-      "command": ".venv\\Scripts\\pip install -r requirements.txt",
+      "command": ".venv/bin/pip install -r requirements.txt",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -51,7 +62,7 @@
     {
       "label": "NN: Install Dependencies",
       "type": "shell",
-      "command": ".venv\\Scripts\\pip install torch --index-url https://download.pytorch.org/whl/cpu && .venv\\Scripts\\pip install matplotlib",
+      "command": ".venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu && .venv/bin/pip install matplotlib",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -65,7 +76,7 @@
     {
       "label": "NN: Export Training Data",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.export_training_data",
+      "command": ".venv/bin/python -m nn.export_training_data",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -79,7 +90,7 @@
     {
       "label": "NN: Visualize Song",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.visualize --list",
+      "command": ".venv/bin/python -m nn.visualize --list",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -93,7 +104,7 @@
     {
       "label": "NN: Visualize Song 3",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.visualize --song 3",
+      "command": ".venv/bin/python -m nn.visualize --song 3",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -107,7 +118,7 @@
     {
       "label": "NN: Train MLP",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.train --model mlp --epochs 50",
+      "command": ".venv/bin/python -m nn.train --model mlp --epochs 50",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -121,7 +132,7 @@
     {
       "label": "NN: Evaluate Model",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.evaluate --model mlp",
+      "command": ".venv/bin/python -m nn.evaluate --model mlp",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -135,7 +146,7 @@
     {
       "label": "NN: Train Transformer",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.train --model transformer --epochs 150 --lr 0.001 --batch-size 8 --chunk-size 128 --jitter 0.02",
+      "command": ".venv/bin/python -m nn.train --model transformer --epochs 150 --lr 0.001 --batch-size 8 --chunk-size 128 --jitter 0.02",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -149,7 +160,7 @@
     {
       "label": "NN: Train Transformer (no aug)",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.train --model transformer --epochs 100 --lr 0.001 --no-chunking --jitter 0.0",
+      "command": ".venv/bin/python -m nn.train --model transformer --epochs 100 --lr 0.001 --no-chunking --jitter 0.0",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -163,7 +174,7 @@
     {
       "label": "NN: List Latin Songs",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.list_songs",
+      "command": ".venv/bin/python -m nn.list_songs",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -177,7 +188,7 @@
     {
       "label": "NN: Evaluate Transformer",
       "type": "shell",
-      "command": ".venv\\Scripts\\python -m nn.evaluate --model transformer",
+      "command": ".venv/bin/python -m nn.evaluate --model transformer",
       "options": {
         "cwd": "${workspaceFolder}"
       },

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <radialGradient id="ball" cx="40%" cy="35%" r="50%">
+      <stop offset="0%" stop-color="#e8e8e8"/>
+      <stop offset="100%" stop-color="#888"/>
+    </radialGradient>
+    <clipPath id="clip"><circle cx="16" cy="16" r="14"/></clipPath>
+  </defs>
+  <!-- Ball base -->
+  <circle cx="16" cy="16" r="14" fill="url(#ball)" stroke="#555" stroke-width="0.5"/>
+  <!-- Facets grid clipped to circle -->
+  <g clip-path="url(#clip)" opacity="0.85">
+    <!-- Row 1 (top) - red/orange -->
+    <rect x="2" y="2" width="5" height="4" rx="0.5" fill="#ff1744" opacity="0.7"/>
+    <rect x="8" y="2" width="5" height="4" rx="0.5" fill="#ff5722" opacity="0.6"/>
+    <rect x="14" y="2" width="5" height="4" rx="0.5" fill="#ff9100" opacity="0.7"/>
+    <rect x="20" y="2" width="5" height="4" rx="0.5" fill="#ff1744" opacity="0.5"/>
+    <rect x="26" y="2" width="5" height="4" rx="0.5" fill="#ff5722" opacity="0.6"/>
+    <!-- Row 2 - orange/yellow -->
+    <rect x="4" y="7" width="5" height="4" rx="0.5" fill="#ffab00" opacity="0.7"/>
+    <rect x="10" y="7" width="5" height="4" rx="0.5" fill="#ffd600" opacity="0.8"/>
+    <rect x="16" y="7" width="5" height="4" rx="0.5" fill="#fff" opacity="0.9"/>
+    <rect x="22" y="7" width="5" height="4" rx="0.5" fill="#ffab00" opacity="0.6"/>
+    <!-- Row 3 - green -->
+    <rect x="2" y="12" width="5" height="4" rx="0.5" fill="#00e676" opacity="0.7"/>
+    <rect x="8" y="12" width="5" height="4" rx="0.5" fill="#69f0ae" opacity="0.8"/>
+    <rect x="14" y="12" width="5" height="4" rx="0.5" fill="#fff" opacity="0.6"/>
+    <rect x="20" y="12" width="5" height="4" rx="0.5" fill="#00e676" opacity="0.7"/>
+    <rect x="26" y="12" width="5" height="4" rx="0.5" fill="#1de9b6" opacity="0.5"/>
+    <!-- Row 4 - blue -->
+    <rect x="4" y="17" width="5" height="4" rx="0.5" fill="#2979ff" opacity="0.7"/>
+    <rect x="10" y="17" width="5" height="4" rx="0.5" fill="#00b0ff" opacity="0.6"/>
+    <rect x="16" y="17" width="5" height="4" rx="0.5" fill="#448aff" opacity="0.8"/>
+    <rect x="22" y="17" width="5" height="4" rx="0.5" fill="#2979ff" opacity="0.5"/>
+    <!-- Row 5 - violet/purple -->
+    <rect x="2" y="22" width="5" height="4" rx="0.5" fill="#d500f9" opacity="0.6"/>
+    <rect x="8" y="22" width="5" height="4" rx="0.5" fill="#651fff" opacity="0.7"/>
+    <rect x="14" y="22" width="5" height="4" rx="0.5" fill="#e040fb" opacity="0.6"/>
+    <rect x="20" y="22" width="5" height="4" rx="0.5" fill="#7c4dff" opacity="0.7"/>
+    <rect x="26" y="22" width="5" height="4" rx="0.5" fill="#d500f9" opacity="0.5"/>
+    <!-- Row 6 (bottom) - pink/red -->
+    <rect x="4" y="27" width="5" height="4" rx="0.5" fill="#f50057" opacity="0.6"/>
+    <rect x="10" y="27" width="5" height="4" rx="0.5" fill="#ff4081" opacity="0.5"/>
+    <rect x="16" y="27" width="5" height="4" rx="0.5" fill="#f50057" opacity="0.7"/>
+    <rect x="22" y="27" width="5" height="4" rx="0.5" fill="#ff4081" opacity="0.5"/>
+  </g>
+  <!-- Grid lines for disco ball effect -->
+  <g clip-path="url(#clip)" stroke="#555" stroke-width="0.3" fill="none" opacity="0.4">
+    <line x1="0" y1="6" x2="32" y2="6"/>
+    <line x1="0" y1="11" x2="32" y2="11"/>
+    <line x1="0" y1="16" x2="32" y2="16"/>
+    <line x1="0" y1="21" x2="32" y2="21"/>
+    <line x1="0" y1="26" x2="32" y2="26"/>
+    <line x1="7" y1="0" x2="7" y2="32"/>
+    <line x1="13" y1="0" x2="13" y2="32"/>
+    <line x1="19" y1="0" x2="19" y2="32"/>
+    <line x1="25" y1="0" x2="25" y2="32"/>
+  </g>
+  <!-- Specular highlight -->
+  <ellipse cx="11" cy="10" rx="4" ry="3" fill="white" opacity="0.35"/>
+</svg>
