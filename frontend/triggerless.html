@@ -7,10 +7,10 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
-    .tl-layout { display: flex; gap: 16px; }
-    .tl-list   { width: 260px; flex-shrink: 0; }
-    .tl-editor { flex: 1; min-width: 0; }
-    .tl-list-items { max-height: 70vh; overflow-y: auto; }
+    .tl-layout { display: flex; gap: 16px; align-items: flex-start; }
+    .tl-list   { width: 260px; flex-shrink: 0; max-height: calc(100vh - 80px); display: flex; flex-direction: column; }
+    .tl-editor { flex: 1; min-width: 0; max-height: calc(100vh - 80px); overflow-y: auto; }
+    .tl-list-items { overflow-y: auto; flex: 1; min-height: 0; }
     .tl-row { padding: 8px 10px; cursor: pointer; border-radius: 6px; border: 1px solid transparent; margin-bottom: 4px; }
     .tl-row:hover { background: var(--surface2); }
     .tl-row.active { border-color: var(--accent); background: var(--surface2); }
@@ -44,6 +44,33 @@
     .picker-row:hover { background: var(--surface2); }
     .picker-row.disabled { opacity: 0.4; cursor: default; }
     .section-title { font-size: 13px; font-weight: 600; color: var(--text); margin: 16px 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+    /* Training progress banner */
+    .train-banner { font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; display: none; }
+    .train-banner.active { display: block; }
+    .train-banner .banner-row { display: flex; align-items: center; gap: 10px; }
+    .train-banner .profile-label { font-weight: 600; color: var(--text); }
+    .train-banner .phase-label { color: var(--text-muted); font-size: 11px; }
+    .train-banner .pct { font-weight: 600; color: #ffb74d; min-width: 42px; text-align: right; }
+    .train-progress-bar { height: 4px; background: var(--surface2); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+    .train-progress-fill { height: 100%; background: #ffb74d; border-radius: 2px; transition: width 0.3s ease; width: 0%; }
+    /* Long-press button */
+    .long-press-btn { position: relative; overflow: hidden; user-select: none; -webkit-user-select: none; }
+    .long-press-btn .lp-fill { position: absolute; inset: 0; background: rgba(255,255,255,0.08); width: 0%; transition: none; pointer-events: none; }
+    .long-press-btn.pressing .lp-fill { width: 100%; transition: width 500ms linear; }
+    /* Expandable results panel (debug-panel style) */
+    .train-results-panel { font-size: 12px; color: var(--text-muted); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0; margin-top: 16px; }
+    .train-results-header { padding: 8px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); font-size: 13px; }
+    .train-results-body { padding: 0 14px 10px 14px; display: none; }
+    .train-results-panel.open .train-results-body { display: block; }
+    .train-results-grid { display: grid; grid-template-columns: auto auto auto; gap: 3px 14px; margin-bottom: 8px; }
+    .train-results-grid .cat-name { color: var(--text); }
+    .train-results-grid .cat-val { font-family: monospace; font-size: 11px; }
+    .train-results-grid .cat-def { font-size: 11px; opacity: 0.5; }
+    .songs-used-panel { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+    .songs-used-header { cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); font-size: 12px; }
+    .songs-used-body { display: none; margin-top: 6px; }
+    .songs-used-panel.open .songs-used-body { display: block; }
+    .songs-used-body .song-row { font-size: 11px; padding: 2px 0; color: var(--text-muted); }
     @media (max-width: 600px) { .tl-layout { flex-direction: column; } .tl-list { width: 100%; } }
   </style>
 </head>
@@ -52,12 +79,6 @@
   <div id="nav-root"></div>
 
   <main>
-    <h2 style="margin-bottom:12px;">Triggerless Profiles</h2>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
-      Unified profiles for automatic lighting. Songs with librosa data use <b>Analyzed</b> mode (embedded pipeline).
-      Songs without librosa use <b>Simple</b> mode (fixed intervals). Both share the same events.
-    </p>
-
     <div class="tl-layout">
       <!-- List panel -->
       <div class="tl-list card">
@@ -71,6 +92,30 @@
       <!-- Unified editor -->
       <div class="tl-editor card" id="editor" style="display:none;">
 
+        <!-- Persistent training banner -->
+        <div class="train-banner" id="train-banner">
+          <div class="banner-row">
+            <span class="profile-label" id="banner-profile">—</span>
+            <span class="phase-label" id="banner-phase">loading...</span>
+            <span class="pct" id="banner-pct">0%</span>
+            <button class="btn btn-sm long-press-btn" id="cancel-train-btn" style="margin-left:auto;background:rgba(231,76,60,0.15);color:#e74c3c;border-color:#e74c3c;font-size:11px;padding:2px 10px;" title="Hold 500ms to cancel">
+              <span class="lp-fill"></span>Cancel
+            </button>
+          </div>
+          <div class="train-progress-bar"><div class="train-progress-fill" id="banner-fill"></div></div>
+        </div>
+
+        <!-- Actions (top) -->
+        <div class="btn-bar" style="margin-top:0;margin-bottom:14px;">
+          <button class="btn btn-accent" id="save-btn">Save</button>
+          <button class="btn long-press-btn" id="train-btn" style="background:rgba(255,152,0,0.15);color:#ffb74d;border-color:#ffb74d;" title="Hold 500ms to start training">
+            <span class="lp-fill"></span>Train
+          </button>
+          <button class="btn" id="dup-btn">Duplicate</button>
+          <button class="btn btn-danger" id="del-btn">Delete</button>
+        </div>
+        <div id="train-status" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;display:none;"></div>
+
         <!-- Profile Info -->
         <div class="field-group"><label>Name</label><input type="text" id="ed-name"></div>
         <div class="field-group"><label>Genres (comma-separated)</label><input type="text" id="ed-genres" placeholder="reggaeton, trap latino"></div>
@@ -80,18 +125,22 @@
           </label>
         </div>
 
-        <!-- Shared Events -->
-        <div class="section-title">Shared Events (used by both Simple and Analyzed)</div>
-        <div class="field-group"><label>Song Start</label><div id="ed-start-event"></div><input type="text" class="label-input" id="ed-start-labels" placeholder="Filter labels (e.g. -rainbow)"></div>
-        <div class="field-group"><label>Song End</label><div id="ed-end-event"></div><input type="text" class="label-input" id="ed-end-labels" placeholder="Filter labels"></div>
-        <div class="field-group"><label>Scene Fill</label><div id="ed-scene-fill-event"></div><input type="text" class="label-input" id="ed-scene-fill-labels" placeholder="Filter labels"></div>
-        <div class="field-group"><label>Flare</label><div id="ed-flare-event"></div><input type="text" class="label-input" id="ed-flare-labels" placeholder="Filter labels"></div>
-
-        <!-- Simple Settings (collapsible) -->
-        <div class="section-title" onclick="toggleSection('sec-simple')" style="cursor:pointer;">
-          <span id="sec-simple-arrow">&#9660;</span> Simple Mode (interval-based, no librosa)
+        <!-- Shared Events (collapsible) -->
+        <div class="section-title" onclick="toggleSection('sec-shared')" style="cursor:pointer;">
+          <span id="sec-shared-arrow">&#9654;</span> Shared Events
         </div>
-        <div id="sec-simple">
+        <div id="sec-shared" style="display:none;">
+          <div class="field-group"><label>Song Start</label><div id="ed-start-event"></div><input type="text" class="label-input" id="ed-start-labels" placeholder="Filter labels (e.g. -rainbow)"></div>
+          <div class="field-group"><label>Song End</label><div id="ed-end-event"></div><input type="text" class="label-input" id="ed-end-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Scene Fill</label><div id="ed-scene-fill-event"></div><input type="text" class="label-input" id="ed-scene-fill-labels" placeholder="Filter labels"></div>
+          <div class="field-group"><label>Flare</label><div id="ed-flare-event"></div><input type="text" class="label-input" id="ed-flare-labels" placeholder="Filter labels"></div>
+        </div>
+
+        <!-- Simple Settings (collapsible, collapsed) -->
+        <div class="section-title" onclick="toggleSection('sec-simple')" style="cursor:pointer;">
+          <span id="sec-simple-arrow">&#9654;</span> Simple Mode (interval-based, no librosa)
+        </div>
+        <div id="sec-simple" style="display:none;">
           <div style="display:flex;gap:16px;flex-wrap:wrap;">
             <div class="field-group"><label>Scene interval (sec)</label><input type="number" id="ed-scene-interval" value="30" min="1" style="width:80px;"></div>
             <div class="field-group"><label>Flare interval (sec)</label><input type="number" id="ed-flare-interval" value="15" min="1" style="width:80px;"></div>
@@ -99,11 +148,11 @@
           </div>
         </div>
 
-        <!-- Analyzed Events (collapsible) -->
+        <!-- Analyzed Events (collapsible, collapsed) -->
         <div class="section-title" onclick="toggleSection('sec-analyzed')" style="cursor:pointer;">
-          <span id="sec-analyzed-arrow">&#9660;</span> Analyzed Mode (embedded pipeline, requires librosa)
+          <span id="sec-analyzed-arrow">&#9654;</span> Analyzed Mode (embedded pipeline, requires librosa)
         </div>
-        <div id="sec-analyzed">
+        <div id="sec-analyzed" style="display:none;">
           <div class="field-group"><label>Beat Start</label><div id="ed-beat-start-event"></div><input type="text" class="label-input" id="ed-beat-start-labels" placeholder="Filter labels"></div>
           <div class="field-group"><label>Quiet</label><div id="ed-quiet-event"></div><input type="text" class="label-input" id="ed-quiet-labels" placeholder="Filter labels"></div>
           <div class="field-group"><label>Drop</label><div id="ed-drop-event"></div><input type="text" class="label-input" id="ed-drop-labels" placeholder="Filter labels"></div>
@@ -116,35 +165,42 @@
           </div>
         </div>
 
-        <!-- Flare Tiers (collapsible) -->
+        <!-- Flare Tiers (collapsible, collapsed) -->
         <div class="section-title" onclick="toggleSection('sec-flare-tiers')" style="cursor:pointer;">
-          <span id="sec-flare-tiers-arrow">&#9660;</span> Flare Tiers (Analyzed)
+          <span id="sec-flare-tiers-arrow">&#9654;</span> Flare Tiers (Analyzed)
         </div>
-        <div id="sec-flare-tiers">
+        <div id="sec-flare-tiers" style="display:none;">
           <div class="field-group"><label>Flare Low (subtle)</label><div id="ed-flare-low-event"></div><input type="text" class="label-input" id="ed-flare-low-labels" placeholder="Filter labels"></div>
           <div class="field-group"><label>Flare Mid (moderate)</label><div id="ed-flare-mid-event"></div><input type="text" class="label-input" id="ed-flare-mid-labels" placeholder="Filter labels"></div>
           <div class="field-group"><label>Flare High (clear musical element)</label><div id="ed-flare-high-event"></div><input type="text" class="label-input" id="ed-flare-high-labels" placeholder="Filter labels"></div>
         </div>
 
-        <!-- Training Songs -->
-        <div class="section-title">Training Songs</div>
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-          <button class="btn btn-sm" id="add-song-btn">+ Add Song</button>
-          <span id="song-count" style="font-size:11px;color:var(--text-muted);"></span>
+        <!-- Training Songs (collapsible, collapsed) -->
+        <div class="section-title" onclick="toggleSection('sec-songs')" style="cursor:pointer;">
+          <span id="sec-songs-arrow">&#9654;</span> Training Songs <span id="song-count" style="font-size:11px;color:var(--text-muted);font-weight:400;"></span>
         </div>
-        <div class="song-chips" id="song-chips"></div>
-
-        <!-- Actions -->
-        <div class="btn-bar">
-          <button class="btn btn-accent" id="save-btn">Save</button>
-          <button class="btn" id="train-btn" style="background:rgba(255,152,0,0.15);color:#ffb74d;border-color:#ffb74d;">Train</button>
-          <button class="btn" id="dup-btn">Duplicate</button>
-          <button class="btn btn-danger" id="del-btn">Delete</button>
+        <div id="sec-songs" style="display:none;">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+            <button class="btn btn-sm" id="add-song-btn">+ Add Song</button>
+          </div>
+          <div class="song-chips" id="song-chips"></div>
         </div>
-        <div id="train-status" style="font-size:12px;color:var(--text-muted);margin-top:8px;display:none;"></div>
 
-        <!-- Notes (at bottom) -->
-        <div class="field-group" style="margin-top:16px;"><label>Notes</label><textarea id="ed-notes" rows="3" placeholder="Describe the vibe, tuning notes, etc."></textarea></div>
+        <!-- Last Training Results (expandable, debug-panel style) -->
+        <div class="train-results-panel" id="train-results" style="display:none;">
+          <div class="train-results-header" onclick="toggleResults()">
+            <span id="train-results-arrow">&#9654;</span> Last Training Results
+          </div>
+          <div class="train-results-body" id="train-results-body"></div>
+        </div>
+
+        <!-- Notes (collapsible, collapsed) -->
+        <div class="section-title" onclick="toggleSection('sec-notes')" style="cursor:pointer;">
+          <span id="sec-notes-arrow">&#9654;</span> Notes
+        </div>
+        <div id="sec-notes" style="display:none;">
+          <div class="field-group"><textarea id="ed-notes" rows="3" placeholder="Describe the vibe, tuning notes, etc."></textarea></div>
+        </div>
       </div>
     </div>
 
@@ -288,6 +344,13 @@ function selectProfile(id) {
     document.getElementById(elId).value = (p[field] || []).join(', ');
   }
 
+  // Restore last training results for this profile
+  if (_lastTrainResult[p.id]) {
+    renderTrainResults(_lastTrainResult[p.id], p.id);
+  } else {
+    document.getElementById('train-results').style.display = 'none';
+  }
+
   renderSongChips();
 }
 
@@ -422,30 +485,218 @@ document.getElementById('new-btn').addEventListener('click', async () => {
 
 document.getElementById('add-song-btn').addEventListener('click', openPicker);
 
-document.getElementById('train-btn').addEventListener('click', async () => {
+// ── Long-press helper ────────────────────────────────────────────────────────
+function setupLongPress(btn, durationMs, onComplete) {
+  let timer = null;
+  const start = (e) => {
+    e.preventDefault();
+    btn.classList.add('pressing');
+    timer = setTimeout(() => {
+      btn.classList.remove('pressing');
+      timer = null;
+      onComplete();
+    }, durationMs);
+  };
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    btn.classList.remove('pressing');
+  };
+  btn.addEventListener('mousedown', start);
+  btn.addEventListener('touchstart', start, { passive: false });
+  btn.addEventListener('mouseup', cancel);
+  btn.addEventListener('mouseleave', cancel);
+  btn.addEventListener('touchend', cancel);
+  btn.addEventListener('touchcancel', cancel);
+}
+
+// ── Training state ──────────────────────────────────────────────────────────
+let _trainingProfileId = null;
+let _pollTimer = null;
+let _lastTrainResult = {};  // keyed by profile_id
+
+function showBanner(profileName) {
+  const banner = document.getElementById('train-banner');
+  banner.classList.add('active');
+  document.getElementById('banner-profile').textContent = profileName;
+  document.getElementById('banner-phase').textContent = 'starting...';
+  document.getElementById('banner-pct').textContent = '0%';
+  document.getElementById('banner-fill').style.width = '0%';
+}
+
+function hideBanner() {
+  document.getElementById('train-banner').classList.remove('active');
+}
+
+function updateBanner(prog) {
+  if (!prog || !prog.running) return;
+  const phaseLabels = { loading: 'Loading songs...', scene: 'Tuning scenes...', flare: 'Tuning flares...' };
+  document.getElementById('banner-profile').textContent = prog.profile_name || '—';
+  document.getElementById('banner-phase').textContent = phaseLabels[prog.phase] || prog.phase;
+  const pct = prog.pct || 0;
+  document.getElementById('banner-pct').textContent = pct.toFixed(1) + '%';
+  document.getElementById('banner-fill').style.width = pct + '%';
+}
+
+async function pollProgress() {
+  if (!_trainingProfileId) return;
+  try {
+    const prog = await GET(`/ai-triggers/training-profiles/${_trainingProfileId}/tune/progress`);
+    if (prog.running) {
+      updateBanner(prog);
+    }
+  } catch {}
+}
+
+function startPolling(profileId, profileName) {
+  _trainingProfileId = profileId;
+  showBanner(profileName);
+  _pollTimer = setInterval(pollProgress, 1500);
+}
+
+function stopPolling() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  _trainingProfileId = null;
+  hideBanner();
+}
+
+// ── Score category definitions ──────────────────────────────────────────────
+const SCORE_DEFS = {
+  drop: 'Bass re-entry after silence',
+  scene_change: 'Energy/timbral shift (scene trigger)',
+  structural: 'Beat start, lull, charge, quiet',
+  flare: 'Legacy single-tier flare',
+  flare_low: 'Subtle flare (FPs okay)',
+  flare_mid: 'Moderate flare',
+  flare_high: 'Clear musical element flare',
+  song_start: 'Song beginning marker',
+  song_end: 'Fade-out detection',
+};
+
+function renderTrainResults(result, profileId) {
+  _lastTrainResult[profileId] = result;
+  const panel = document.getElementById('train-results');
+  const body = document.getElementById('train-results-body');
+  if (!result || result.cancelled) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  panel.classList.remove('open');
+  document.getElementById('train-results-arrow').textContent = '\u25B6';
+
+  const when = result.timestamp ? new Date(result.timestamp * 1000).toLocaleString() : '—';
+  const dur = result.duration_s ? (result.duration_s < 60 ? result.duration_s + 's' : (result.duration_s / 60).toFixed(1) + 'min') : '—';
+
+  let html = `
+    <div class="train-results-grid">
+      <span class="cat-name">Result</span>
+      <span class="cat-val" style="color:${result.improved ? '#81c784' : 'var(--text-muted)'}">${result.improved ? 'Improved' : 'No improvement'}</span>
+      <span class="cat-def">${result.baseline_f1} &rarr; ${result.tuned_f1} (${result.improvement_pct > 0 ? '+' : ''}${result.improvement_pct}%)</span>
+      <span class="cat-name">When</span><span class="cat-val">${when}</span><span class="cat-def"></span>
+      <span class="cat-name">Duration</span><span class="cat-val">${dur}</span><span class="cat-def"></span>
+      <span class="cat-name">Songs</span><span class="cat-val">${result.songs_used}</span><span class="cat-def"></span>
+      <span class="cat-name">Scene triggers</span><span class="cat-val">${result.scene_triggers ?? '—'}</span><span class="cat-def"></span>
+      <span class="cat-name">Flare triggers</span><span class="cat-val">${result.flare_triggers ?? '—'}</span><span class="cat-def"></span>
+      <span class="cat-name">Total triggers</span><span class="cat-val">${result.total_triggers ?? '—'}</span><span class="cat-def"></span>
+    </div>`;
+
+  // Score breakdown
+  if (result.score_breakdown && Object.keys(result.score_breakdown).length) {
+    html += `<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+      <div style="font-weight:600;color:var(--text);margin-bottom:4px;font-size:12px;">Score Breakdown</div>
+      <div class="train-results-grid">
+        <span class="cat-name" style="font-weight:600;">Category</span>
+        <span class="cat-val" style="font-weight:600;">F1</span>
+        <span class="cat-def" style="font-weight:600;">Description</span>`;
+    const sorted = Object.entries(result.score_breakdown).sort((a, b) => (b[1].weight || 1) - (a[1].weight || 1));
+    for (const [cat, s] of sorted) {
+      const f1Color = s.f1 >= 0.7 ? '#81c784' : s.f1 >= 0.4 ? '#ffb74d' : '#e74c3c';
+      html += `
+        <span class="cat-name">${cat}</span>
+        <span class="cat-val" style="color:${f1Color}">${s.f1.toFixed(3)} <span style="opacity:0.5;font-size:10px;">P=${s.precision.toFixed(2)} R=${s.recall.toFixed(2)} x${s.weight}</span></span>
+        <span class="cat-def">${SCORE_DEFS[cat] || ''}</span>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // Saved parameters
+  if (result.best_params && Object.keys(result.best_params).length) {
+    html += `<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px;">
+      <div style="font-weight:600;color:var(--text);margin-bottom:4px;font-size:12px;">Parameters ${result.improved ? 'Saved' : '(not applied)'}</div>
+      <div style="font-family:monospace;font-size:11px;opacity:0.8;">`;
+    for (const [k, v] of Object.entries(result.best_params).sort()) {
+      html += `${k}: ${v}<br>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // Songs used (nested expandable)
+  if (result.song_list && result.song_list.length) {
+    html += `
+    <div class="songs-used-panel" id="songs-used-panel">
+      <div class="songs-used-header" onclick="document.getElementById('songs-used-panel').classList.toggle('open');this.querySelector('span').textContent=document.getElementById('songs-used-panel').classList.contains('open')?'\\u25BC':'\\u25B6'">
+        <span>&#9654;</span> Songs Used (${result.song_list.length})
+      </div>
+      <div class="songs-used-body">
+        ${result.song_list.map(s => `<div class="song-row"><b>${s.artist}</b> — ${s.title}</div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+// ── Train (long-press) ──────────────────────────────────────────────────────
+setupLongPress(document.getElementById('train-btn'), 500, async () => {
   if (!selected) return;
+  const btn = document.getElementById('train-btn');
+  if (btn.disabled) return;
   try { await POST('/ai-triggers/training-profiles', readEditor()); } catch {}
   const statusEl = document.getElementById('train-status');
-  const btn = document.getElementById('train-btn');
-  statusEl.style.display = ''; statusEl.textContent = 'Training... this may take a few minutes.'; statusEl.style.color = '#ffb74d';
-  btn.disabled = true; btn.textContent = 'Training...';
+  statusEl.style.display = ''; statusEl.textContent = 'Training started...'; statusEl.style.color = '#ffb74d';
+  btn.disabled = true;
+
+  const profileId = selected.id;
+  const profileName = selected.name;
+  startPolling(profileId, profileName);
+
   try {
-    const result = await POST(`/ai-triggers/training-profiles/${selected.id}/tune`, {});
-    if (result.improved) {
-      statusEl.textContent = `Improved: ${result.baseline_f1} -> ${result.tuned_f1} (+${result.improvement_pct}%) using ${result.songs_used} songs.`;
+    const result = await POST(`/ai-triggers/training-profiles/${profileId}/tune`, {});
+    stopPolling();
+    if (result.cancelled) {
+      statusEl.textContent = 'Training cancelled — old parameters kept.';
+      statusEl.style.color = 'var(--text-muted)';
+    } else if (result.improved) {
+      statusEl.textContent = `Improved: ${result.baseline_f1} \u2192 ${result.tuned_f1} (+${result.improvement_pct}%)`;
       statusEl.style.color = '#81c784';
-      await loadData(); selectProfile(selected.id);
+      await loadData(); selectProfile(profileId);
     } else {
       statusEl.textContent = `No improvement found (F1=${result.baseline_f1}, ${result.songs_used} songs).`;
       statusEl.style.color = 'var(--text-muted)';
     }
-  } catch (e) { statusEl.textContent = 'Failed: ' + (e.message || e); statusEl.style.color = '#e74c3c'; }
-  finally { btn.disabled = false; btn.textContent = 'Train'; }
+    renderTrainResults(result, profileId);
+  } catch (e) {
+    stopPolling();
+    statusEl.textContent = 'Failed: ' + (e.message || e); statusEl.style.color = '#e74c3c';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Cancel (long-press) ─────────────────────────────────────────────────────
+setupLongPress(document.getElementById('cancel-train-btn'), 500, async () => {
+  if (!_trainingProfileId) return;
+  try {
+    await POST(`/ai-triggers/training-profiles/${_trainingProfileId}/tune/cancel`, {});
+    document.getElementById('banner-phase').textContent = 'Cancelling...';
+  } catch {}
 });
 
 document.getElementById('search').addEventListener('input', renderList);
 
 // ── Collapsible sections ──────────────────────────────────────────────────
+window.toggleResults = function() {
+  const panel = document.getElementById('train-results');
+  panel.classList.toggle('open');
+  document.getElementById('train-results-arrow').textContent = panel.classList.contains('open') ? '\u25BC' : '\u25B6';
+};
 window.toggleSection = function(id) {
   const el = document.getElementById(id);
   const arrow = document.getElementById(id + '-arrow');
@@ -457,6 +708,19 @@ window.toggleSection = function(id) {
 
 // ── Init ──────────────────────────────────────────────────────────────────
 loadData();
+
+// Check for active training on page load (survives navigation/refresh)
+(async () => {
+  try {
+    const prog = await GET('/ai-triggers/tune/active');
+    if (prog.running && prog.profile_id) {
+      _trainingProfileId = prog.profile_id;
+      showBanner(prog.profile_name || '—');
+      updateBanner(prog);
+      _pollTimer = setInterval(pollProgress, 1500);
+    }
+  } catch {}
+})();
 </script>
 </body>
 </html>
