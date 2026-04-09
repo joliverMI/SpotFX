@@ -278,7 +278,6 @@ const ACTION_TYPES = [
   { value: 'ledfx_scene',             label: 'Scene'             },
   { value: 'ledfx_ambient',           label: 'Change Ambient'    },
   { value: 'ledfx_ambient_color',     label: 'Contrast Color'    },
-  { value: 'ledfx_reverse',           label: 'Reverse'           },
   { value: 'ledfx_global_brightness', label: 'Global Brightness' },
   { value: 'ledfx_global_transition', label: 'Global Transition' },
   { value: 'ledfx_effect_param',      label: 'Effect Parameter'  },
@@ -326,8 +325,6 @@ function actionFields(a) {
     case 'ledfx_ambient_color':
       return `<span class="action-hint">Reads current ambient color → applies 180° complementary color (cache-based, no latency)</span>`;
 
-    case 'ledfx_reverse':
-      return `<span class="action-hint">Crystal-Mapper: negate spin / flip invert · Strip Effect: flip (power only)</span>`;
 
     case 'ledfx_global_brightness':
       return `<label>Brightness
@@ -606,8 +603,6 @@ function syncActionFromRow(row) {
     case 'ledfx_ambient_color':
       return { type, weight, labels };
 
-    case 'ledfx_reverse':
-      return { type, weight, labels };
 
     case 'ledfx_global_brightness': {
       const rampStr = row.querySelector('.action-gb-ramp')?.value;

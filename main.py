@@ -28,7 +28,7 @@ from services.websocket_manager import ws_manager
 from services.profile_manager import load_profile_by_uri, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
-from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless
+from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager
 from routers.settings_router import apply_settings_override
 from services import effect_params
 
@@ -80,6 +80,11 @@ async def lifespan(app: FastAPI):
     # Load effect parameter registry
     effect_params.load()
 
+    # Seed device categories from static config (first-run migration)
+    from services.device_category_service import seed_from_effect_params, migrate_roles
+    seed_from_effect_params()
+    migrate_roles()
+
     # Apply persisted settings overrides (takes precedence over .env defaults)
     apply_settings_override()
 
@@ -129,6 +134,7 @@ app.include_router(effect_params_router.router)
 app.include_router(gradients_router.router)
 app.include_router(palettes_router.router)
 app.include_router(triggerless.router)
+app.include_router(device_manager.router)
 
 
 # ── Service status (health check for external callers) ────────────────────────

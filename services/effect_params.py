@@ -21,16 +21,21 @@ def load() -> None:
 
 
 def get_virtuals_for_category(category: str) -> list[str]:
-    return _CONFIG.get("categories", {}).get(category, {}).get("virtuals", [])
+    from services.device_category_service import get_category_by_name
+    cat = get_category_by_name(category)
+    return cat.virtuals if cat else []
 
 
 def get_effects_for_category(category: str) -> list[str]:
-    return _CONFIG.get("categories", {}).get(category, {}).get("effects", [])
+    from services.device_category_service import get_category_by_name
+    cat = get_category_by_name(category)
+    return cat.effects if cat else []
 
 
 def get_all_virtual_ids() -> list[str]:
     """Return flat list of every virtual id across all categories."""
-    return [v for cat in _CONFIG.get("categories", {}).values() for v in cat.get("virtuals", [])]
+    from services.device_category_service import list_categories
+    return [v for cat in list_categories() for v in cat.virtuals]
 
 
 def resolve_param(effect_type: str, label: str) -> str | None:

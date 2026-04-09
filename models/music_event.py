@@ -9,7 +9,6 @@ Supported action types:
   ledfx_scene           — activate a named LedFX scene
   ledfx_ambient         — patch Single Color Effect (color, blur, etc.)
   ledfx_ambient_color   — apply complementary color to Single Color Effect (cache-based, no latency)
-  ledfx_reverse         — toggle spin/invert/flip on Crystal-Mapper + Strip Effect
   ledfx_global_brightness — set LedFX global brightness
   ledfx_global_transition — set LedFX global transition time / mode
 """
@@ -59,18 +58,6 @@ class LedFxAmbientColorAction(BaseModel):
     labels: list[str] = Field(default_factory=list)
     weight: float = 1.0
 
-
-class LedFxReverseAction(BaseModel):
-    """
-    Stateless toggle on Crystal-Mapper and Strip Effect:
-      - Crystal-Mapper radial:     negate spin
-      - Crystal-Mapper concentric: flip invert
-      - Strip Effect power:        flip flip
-    Uses cached virtual state; no extra GET at fire time.
-    """
-    type: Literal["ledfx_reverse"] = "ledfx_reverse"
-    labels: list[str] = Field(default_factory=list)
-    weight: float = 1.0
 
 
 class LedFxGlobalBrightnessAction(BaseModel):
@@ -140,7 +127,6 @@ Action = Annotated[
     | LedFxSceneAction
     | LedFxAmbientAction
     | LedFxAmbientColorAction
-    | LedFxReverseAction
     | LedFxGlobalBrightnessAction
     | LedFxGlobalTransitionAction
     | LedFxEffectParamAction,

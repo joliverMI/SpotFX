@@ -218,6 +218,18 @@ async def get_virtual(virtual_id: str) -> dict:
         return {}
 
 
+async def get_all_virtuals() -> dict:
+    """Fetch all LedFX virtuals. Returns {} on failure."""
+    client = _get_client()
+    try:
+        resp = await client.get("/api/virtuals")
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.warning("Could not fetch LedFX virtuals: %s", exc)
+        return {}
+
+
 async def set_virtual_config(virtual_id: str, config: dict) -> bool:
     """
     Patch a virtual's device config (max_brightness, transition_time, etc.).
@@ -351,13 +363,16 @@ async def ramp_polar_offset(
 
 # ── Virtual state poller ───────────────────────────────────────────────────────
 
-POLLED_VIRTUALS = ["single-color-effect", "crystal-mapper", "strip-effect", "radial-dummy"]
+def _get_polled_virtuals() -> list[str]:
+    """Return virtual IDs to poll, from device categories."""
+    from services import effect_params
+    return effect_params.get_all_virtual_ids()
 
 
 async def poll_virtual_states() -> None:
     """Poll key LedFX virtuals every 5 s and cache results in state."""
     while True:
-        for vid in POLLED_VIRTUALS:
+        for vid in _get_polled_virtuals():
             data = await get_virtual(vid)
             if data:
                 state.ledfx_virtual_cache[vid] = data.get(vid, data)

@@ -28,6 +28,8 @@ from models.song_profile import SongProfile, MusicTrigger
 from models.music_event import MusicEvent, Action
 from services.profile_manager import get_event
 from services.audio_analyzer import load_audio_shape_meta, load_beats_for_uri, load_tempo_for_uri
+from services.device_category_service import get_virtuals_for_role
+from services.effect_params import get_all_virtual_ids
 from services.websocket_manager import ws_manager
 from api import ledfx_client
 
@@ -597,7 +599,7 @@ class TriggerEngine:
         if not ov.get("skip_transition") and event.pre_transition_enabled:
             value = ov.get("transition_value", event.pre_transition_value)
             cfg = {"transition_time": value}
-            for vid in ["single-color-effect", "crystal-mapper", "strip-effect"]:
+            for vid in get_all_virtual_ids():
                 await ledfx_client.set_virtual_config(vid, cfg)
 
     async def _execute_action(self, action: Action, labels: list[str] | None = None, await_ramps: bool = False) -> None:
@@ -637,26 +639,32 @@ class TriggerEngine:
             if action.background_brightness is not None:
                 patch["background_brightness"] = action.background_brightness
             if patch:
-                await ledfx_client.set_virtual_effect("single-color-effect", "power", patch)
+                for vid in get_virtuals_for_role("ambient"):
+                    await ledfx_client.set_virtual_effect(vid, "power", patch)
             if action.max_brightness is not None:
-                await ledfx_client.set_virtual_config(
-                    "single-color-effect", {"max_brightness": action.max_brightness}
-                )
+                for vid in get_virtuals_for_role("ambient"):
+                    await ledfx_client.set_virtual_config(
+                        vid, {"max_brightness": action.max_brightness}
+                    )
 
         elif action.type == "ledfx_ambient_color":
-            # Read cached color — fall back to live GET if cache is empty
-            virtual = state.ledfx_virtual_cache.get("single-color-effect", {})
+            amb_vids = get_virtuals_for_role("ambient")
+            if not amb_vids:
+                return
+            # Read cached color from first ambient virtual — fall back to live GET
+            primary = amb_vids[0]
+            virtual = state.ledfx_virtual_cache.get(primary, {})
             if not virtual:
-                live = await ledfx_client.get_virtual("single-color-effect")
+                live = await ledfx_client.get_virtual(primary)
                 if live:
-                    virtual = live.get("single-color-effect", live)
-                    state.ledfx_virtual_cache["single-color-effect"] = virtual
+                    virtual = live.get(primary, live)
+                    state.ledfx_virtual_cache[primary] = virtual
                     logger.info("ledfx_ambient_color: cache was empty, fetched live virtual state")
             effect_type = virtual.get("effect", {}).get("type", "")
             if effect_type.lower() != "power":
                 logger.warning(
-                    "ledfx_ambient_color skipped — single-color-effect is running '%s', not 'power'",
-                    effect_type,
+                    "ledfx_ambient_color skipped — %s is running '%s', not 'power'",
+                    primary, effect_type,
                 )
                 return
             effect_cfg = virtual.get("effect", {}).get("config", {})
@@ -670,46 +678,16 @@ class TriggerEngine:
             hue, s, v = colorsys.rgb_to_hsv(r, g, b)
             r2, g2, b2 = colorsys.hsv_to_rgb((hue + 0.5) % 1.0, s, v)
             comp = f"#{int(r2 * 255):02x}{int(g2 * 255):02x}{int(b2 * 255):02x}"
-            await ledfx_client.set_virtual_effect(
-                "single-color-effect", "power",
-                {"gradient": comp, "background_color": comp, "sparks_color": comp},
-            )
-            # Update cache immediately so a back-to-back firing reads the new color
-            cached = state.ledfx_virtual_cache.get("single-color-effect", {})
-            cfg = cached.get("effect", {}).get("config")
-            if cfg is not None:
-                cfg["gradient"] = comp
-                cfg["background_color"] = comp
-                cfg["sparks_color"] = comp
-
-        elif action.type == "ledfx_reverse":
-            # Crystal-Mapper: negate spin (radial) or flip invert (concentric)
-            # Cache is normalized: poll_virtual_states stores the virtual data directly
-            cm = state.ledfx_virtual_cache.get("crystal-mapper", {})
-            cm_effect = cm.get("effect", {})
-            cm_type = cm_effect.get("type")
-            cm_cfg = cm_effect.get("config", {})
-            if cm_type == "radial" and "spin" in cm_cfg:
-                await ledfx_client.set_virtual_effect(
-                    "crystal-mapper", cm_type, {"spin": -cm_cfg["spin"]}
-                )
-                cm_cfg["spin"] = -cm_cfg["spin"]
-            elif cm_type == "concentric" and "invert" in cm_cfg:
-                await ledfx_client.set_virtual_effect(
-                    "crystal-mapper", cm_type, {"invert": not cm_cfg["invert"]}
-                )
-                cm_cfg["invert"] = not cm_cfg["invert"]
-
-            # Strip Effect: toggle flip if using power effect (no-ops if virtual absent)
-            se = state.ledfx_virtual_cache.get("strip-effect", {})
-            se_effect = se.get("effect", {})
-            se_type = se_effect.get("type")
-            se_cfg = se_effect.get("config", {})
-            if se_type == "power" and "flip" in se_cfg:
-                await ledfx_client.set_virtual_effect(
-                    "strip-effect", se_type, {"flip": not se_cfg["flip"]}
-                )
-                se_cfg["flip"] = not se_cfg["flip"]
+            color_patch = {"gradient": comp, "background_color": comp, "sparks_color": comp}
+            for vid in amb_vids:
+                await ledfx_client.set_virtual_effect(vid, "power", color_patch)
+                # Update cache immediately so a back-to-back firing reads the new color
+                cached = state.ledfx_virtual_cache.get(vid, {})
+                cfg = cached.get("effect", {}).get("config")
+                if cfg is not None:
+                    cfg["gradient"] = comp
+                    cfg["background_color"] = comp
+                    cfg["sparks_color"] = comp
 
         elif action.type == "ledfx_global_brightness":
             ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
@@ -725,11 +703,11 @@ class TriggerEngine:
             cfg: dict = {"transition_time": action.transition_time}
             if action.transition_mode:
                 cfg["transition_mode"] = action.transition_mode
-            for vid in ["single-color-effect", "crystal-mapper", "strip-effect"]:
+            for vid in get_all_virtual_ids():
                 await ledfx_client.set_virtual_config(vid, cfg)
 
         elif action.type == "ledfx_effect_param":
-            from services.effect_params import get_virtuals_for_category, resolve_params, get_all_virtual_ids, get_param_meta
+            from services.effect_params import get_virtuals_for_category, resolve_params, get_param_meta
             if action.virtual_id:
                 virtuals = [action.virtual_id]
             elif action.category:
@@ -954,35 +932,26 @@ class TriggerEngine:
                     snapshot.setdefault("global_brightness", _lc._current_brightness)
 
                 elif action.type == "ledfx_ambient":
-                    if action.color is not None:
-                        _snap_effect("single-color-effect",
-                                     ["gradient", "background_color", "sparks_color"])
-                    for field, pname in [
-                        ("brightness",            "brightness"),
-                        ("blur",                  "blur"),
-                        ("bass_decay_rate",        "bass_decay_rate"),
-                        ("background_brightness",  "background_brightness"),
-                    ]:
-                        if getattr(action, field) is not None:
-                            _snap_effect("single-color-effect", [pname])
-                    if action.max_brightness is not None:
-                        _snap_vconfig("single-color-effect", ["max_brightness"])
+                    for vid in get_virtuals_for_role("ambient"):
+                        if action.color is not None:
+                            _snap_effect(vid, ["gradient", "background_color", "sparks_color"])
+                        for field, pname in [
+                            ("brightness",            "brightness"),
+                            ("blur",                  "blur"),
+                            ("bass_decay_rate",        "bass_decay_rate"),
+                            ("background_brightness",  "background_brightness"),
+                        ]:
+                            if getattr(action, field) is not None:
+                                _snap_effect(vid, [pname])
+                        if action.max_brightness is not None:
+                            _snap_vconfig(vid, ["max_brightness"])
 
                 elif action.type == "ledfx_ambient_color":
-                    _snap_effect("single-color-effect",
-                                 ["gradient", "background_color", "sparks_color"])
-
-                elif action.type == "ledfx_reverse":
-                    cm = state.ledfx_virtual_cache.get("crystal-mapper", {})
-                    cm_type = cm.get("effect", {}).get("type")
-                    if cm_type == "radial":
-                        _snap_effect("crystal-mapper", ["spin"])
-                    elif cm_type == "concentric":
-                        _snap_effect("crystal-mapper", ["invert"])
-                    _snap_effect("strip-effect", ["flip"])
+                    for vid in get_virtuals_for_role("ambient"):
+                        _snap_effect(vid, ["gradient", "background_color", "sparks_color"])
 
                 elif action.type == "ledfx_global_transition":
-                    for vid in _lc.POLLED_VIRTUALS:
+                    for vid in get_all_virtual_ids():
                         _snap_vconfig(vid, ["transition_time", "transition_mode"])
 
                 elif action.type == "ledfx_effect_param":
@@ -991,7 +960,7 @@ class TriggerEngine:
                     elif action.category:
                         virtuals = get_virtuals_for_category(action.category)
                     else:
-                        virtuals = list(_lc.POLLED_VIRTUALS)
+                        virtuals = get_all_virtual_ids()
                     for vid in virtuals:
                         cached = state.ledfx_virtual_cache.get(vid, {})
                         effect_type = cached.get("effect", {}).get("type")
@@ -1087,7 +1056,7 @@ class TriggerEngine:
         if not ov.get("skip_transition") and event.pre_transition_enabled:
             value = ov.get("transition_value", event.pre_transition_value)
             cfg = {"transition_time": value}
-            for vid in ["single-color-effect", "crystal-mapper", "strip-effect"]:
+            for vid in get_all_virtual_ids():
                 await ledfx_client.set_virtual_config(vid, cfg)
             if labels:
                 labels[:] = [l for l in labels if not l.startswith("=transition:")]
@@ -1222,7 +1191,7 @@ class TriggerEngine:
         # Refresh cache first so snapshot reflects actual LedFX state, not stale poll data.
         snapshot: dict = {}
         if revert and revert.enabled:
-            for _vid in ledfx_client.POLLED_VIRTUALS:
+            for _vid in get_all_virtual_ids():
                 _fresh = await ledfx_client.get_virtual(_vid)
                 if _fresh:
                     state.ledfx_virtual_cache[_vid] = _fresh.get(_vid, _fresh)
