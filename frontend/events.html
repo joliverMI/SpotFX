@@ -119,6 +119,11 @@
             <option value="beat_sequence">Beat Sequence</option>
           </select>
         </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;">
+          <label style="white-space:nowrap;font-size:12px;">Event offset (ms)</label>
+          <input type="number" id="e-offset" step="50" value="0" style="width:100px">
+          <span style="font-size:11px;color:var(--text-muted);">negative = fire earlier</span>
+        </div>
 
         <!-- Single actions list -->
         <div id="actions-section">
@@ -1181,6 +1186,7 @@ function selectEvent(id) {
   // Pre-brightness ramp
   const rampInput = document.getElementById('e-pre-brightness-ramp');
   rampInput.value = e.pre_brightness_ramp_ms != null ? e.pre_brightness_ramp_ms : '';
+  document.getElementById('e-offset').value = e.event_offset_ms ?? 0;
   renderActions(e);
   renderSequence(e);
   loadRevertIntoDOM(e.revert);
@@ -1285,6 +1291,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   e.pre_transition_value    = parseFloat(document.getElementById('e-pre-transition-val').value);
   const rampStr = document.getElementById('e-pre-brightness-ramp').value;
   e.pre_brightness_ramp_ms = rampStr !== '' ? parseInt(rampStr) : null;
+  e.event_offset_ms = parseInt(document.getElementById('e-offset').value) || 0;
 
   if (e.event_type === 'single') {
     syncActionsFromDOM(e);
@@ -1324,6 +1331,7 @@ document.getElementById('btn-duplicate').addEventListener('click', async () => {
   src.event_type = document.getElementById('e-type').value;
   src.energy_level = document.getElementById('e-energy-en').checked
     ? parseInt(document.getElementById('e-energy-val').value) : null;
+  src.event_offset_ms = parseInt(document.getElementById('e-offset').value) || 0;
   if (src.event_type === 'single') {
     syncActionsFromDOM(src);
     src.pre_brightness_enabled = document.getElementById('e-pre-brightness-en').checked;

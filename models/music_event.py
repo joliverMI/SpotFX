@@ -209,5 +209,8 @@ class MusicEvent(BaseModel):
     beat_sequence_fallback: Literal["skip", "fallback"] = "fallback"
     beat_sequence_start_offset_ms: int = 0  # ms to shift entire sequence (negative = start earlier)
 
+    # Timing offset: shift when this event fires (negative = earlier, positive = later)
+    event_offset_ms: int = 0
+
     # Internal: id of last-called action (to avoid repeating), not persisted
     _last_action_id: str | None = None
