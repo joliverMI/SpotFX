@@ -28,5 +28,9 @@ storage/settings.json
 storage/training_profiles.json
 storage/triggerless_profiles.json
 storage/xcorr_diagnostic.csv
+storage/device_categories.json
 !storage/profiles/.gitkeep
 !storage/audio_shapes/.gitkeep
+
+# Claude local settings
+.claude/settings.local.json
