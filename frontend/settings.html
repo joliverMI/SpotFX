@@ -110,10 +110,65 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Spotify</div>
-      <div class="field">
-        <label>Target Device Name</label>
-        <input type="text" id="s-spotify-device">
+      <div class="card-title">Song Source</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <button type="button" class="toggle-btn" id="ss-btn-spotify" data-value="spotify">Spotify API</button>
+        <button type="button" class="toggle-btn" id="ss-btn-ledfx" data-value="ledfx">
+          LedFX
+          <span style="font-size:10px;opacity:0.7;">event-driven</span>
+        </button>
+      </div>
+      <div id="spotify-only-fields">
+        <div class="field">
+          <label>Target Device Name</label>
+          <input type="text" id="s-spotify-device">
+        </div>
+      </div>
+      <div id="lastfm-fields" style="display:none;">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+          Genres are sourced from Last.fm when not using the Spotify API.
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;">
+            Last.fm API Key
+            <button type="button" id="btn-lastfm-howto" style="padding:2px 8px;font-size:11px;height:auto;border-radius:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);cursor:pointer;">How to →</button>
+          </label>
+          <input type="text" id="s-lastfm-api-key" placeholder="Paste your API key here">
+        </div>
+        <div class="field">
+          <label>Last.fm Username <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
+          <input type="text" id="s-lastfm-username" placeholder="Your Last.fm username">
+        </div>
+      </div>
+    </div>
+
+    <!-- Last.fm How-To Modal -->
+    <div id="lastfm-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;">
+      <div style="background:#1a1a1a;border:1px solid var(--border);border-radius:10px;max-width:520px;width:90%;padding:28px;position:relative;max-height:85vh;overflow-y:auto;">
+        <button id="btn-lastfm-modal-close" type="button" style="position:absolute;top:14px;right:16px;background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0;line-height:1;">✕</button>
+        <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:16px;">Getting a Last.fm API Key</div>
+        <ol style="padding-left:18px;margin:0;line-height:1.9;font-size:13px;color:var(--text);">
+          <li>Go to <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener" style="color:var(--accent);">last.fm/api/account/create</a></li>
+          <li>Sign in or create a free Last.fm account if you don't have one</li>
+          <li>Fill in the form:
+            <ul style="margin-top:4px;margin-bottom:4px;">
+              <li><strong>Application name</strong> — anything you like, e.g. <em>SpotFX</em></li>
+              <li><strong>Application description</strong> — e.g. <em>Genre lookup for music lighting</em></li>
+              <li><strong>Callback URL</strong> — leave blank</li>
+              <li><strong>Application homepage</strong> — leave blank</li>
+            </ul>
+          </li>
+          <li>Click <strong>Submit</strong></li>
+          <li>You'll see your new <strong>API key</strong> on the next page — copy it</li>
+          <li>Paste it into the <em>Last.fm API Key</em> field in SpotFX settings and save</li>
+        </ol>
+        <div style="margin-top:16px;font-size:12px;color:var(--text-muted);">
+          The API key is free and rate-limited to 5 req/s — well within SpotFX's usage.
+          Your username is optional; SpotFX only uses it for future scrobbling features.
+        </div>
+        <div style="margin-top:18px;text-align:right;">
+          <button id="btn-lastfm-modal-close2" type="button" class="btn-accent" style="padding:7px 20px;">Done</button>
+        </div>
       </div>
     </div>
 
@@ -200,7 +255,27 @@ document.getElementById('s-pre-transition-lead').value = settings.pre_transition
 document.getElementById('s-zoom-window').value    = settings.builder_zoom_window_s;
 document.getElementById('s-future-buffer').value  = settings.builder_future_buffer_s;
 document.getElementById('s-audio-device').value   = settings.audio_input_device;
-document.getElementById('s-spotify-device').value = settings.spotify_device_name;
+// Song source toggle buttons
+let _songSource = settings.song_source ?? 'spotify';
+function setSongSource(src) {
+  _songSource = src;
+  document.getElementById('ss-btn-spotify').classList.toggle('active', src === 'spotify');
+  document.getElementById('ss-btn-ledfx').classList.toggle('active', src === 'ledfx');
+  document.getElementById('spotify-only-fields').style.display = src === 'spotify' ? '' : 'none';
+  document.getElementById('lastfm-fields').style.display       = src === 'ledfx'   ? '' : 'none';
+}
+setSongSource(_songSource);
+document.getElementById('ss-btn-spotify').addEventListener('click', () => setSongSource('spotify'));
+document.getElementById('ss-btn-ledfx').addEventListener('click', () => setSongSource('ledfx'));
+// Last.fm how-to modal
+const lastfmModal = document.getElementById('lastfm-modal');
+document.getElementById('btn-lastfm-howto').addEventListener('click', () => { lastfmModal.style.display = 'flex'; });
+document.getElementById('btn-lastfm-modal-close').addEventListener('click', () => { lastfmModal.style.display = 'none'; });
+document.getElementById('btn-lastfm-modal-close2').addEventListener('click', () => { lastfmModal.style.display = 'none'; });
+lastfmModal.addEventListener('click', e => { if (e.target === lastfmModal) lastfmModal.style.display = 'none'; });
+document.getElementById('s-spotify-device').value  = settings.spotify_device_name;
+document.getElementById('s-lastfm-api-key').value  = settings.lastfm_api_key ?? '';
+document.getElementById('s-lastfm-username').value = settings.lastfm_username ?? '';
 document.getElementById('s-ledfx-host').value     = settings.ledfx_host;
 document.getElementById('s-ledfx-port').value     = settings.ledfx_port;
 document.getElementById('s-ledfx-url').textContent = settings.ledfx_base_url;
@@ -225,7 +300,10 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     builder_zoom_window_s:   parseInt(document.getElementById('s-zoom-window').value),
     builder_future_buffer_s: parseInt(document.getElementById('s-future-buffer').value),
     audio_input_device:      document.getElementById('s-audio-device').value,
+    song_source:             _songSource,
     spotify_device_name:     document.getElementById('s-spotify-device').value,
+    lastfm_api_key:          document.getElementById('s-lastfm-api-key').value,
+    lastfm_username:         document.getElementById('s-lastfm-username').value,
     ledfx_host:              document.getElementById('s-ledfx-host').value,
     ledfx_port:              parseInt(document.getElementById('s-ledfx-port').value),
     shape_scale_overall:     parseFloat(document.getElementById('s-scale-overall').value),

@@ -17,6 +17,7 @@ from spotipy.oauth2 import SpotifyOAuth
 
 from config import settings, PROFILES_DIR
 from models.state import state, SpotifyTrackInfo
+from api.lastfm import fetch_lastfm_genres
 
 logger = logging.getLogger(__name__)
 
@@ -25,46 +26,6 @@ SCOPES = "user-read-playback-state user-read-currently-playing"
 _sp: Optional[spotipy.Spotify] = None
 _artist_genre_cache: dict[str, list[str]] = {}
 _burst_until: float = 0.0  # monotonic timestamp until which to use burst poll rate
-
-# Tags that are not genres — filtered out from Last.fm results
-_LASTFM_JUNK = {
-    "seen live", "favourite", "favorites", "loved", "love", "owned",
-    "under 2000 listeners", "my favorites", "beautiful", "awesome",
-    "amazing", "great", "good", "cool", "best", "classic",
-}
-
-
-def _fetch_lastfm_genres(artist_name: str) -> list[str]:
-    """Fetch genre tags from Last.fm for an artist (fallback when Spotify has none)."""
-    if not settings.lastfm_api_key:
-        return []
-    import json as _json
-    import urllib.request
-    import urllib.parse
-    url = (
-        "http://ws.audioscrobbler.com/2.0/"
-        f"?method=artist.getTopTags"
-        f"&artist={urllib.parse.quote(artist_name)}"
-        f"&api_key={settings.lastfm_api_key}"
-        f"&format=json"
-    )
-    try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            data = _json.loads(resp.read().decode())
-        tags = data.get("toptags", {}).get("tag", [])
-        genres: list[str] = []
-        for tag in tags:
-            name = tag.get("name", "").lower().strip()
-            count = int(tag.get("count", 0))
-            if count < 10:
-                break  # sorted desc; low-count tail is noise
-            if name and name not in _LASTFM_JUNK:
-                genres.append(name)
-            if len(genres) >= 5:
-                break
-        return genres
-    except Exception:
-        return []
 
 
 def _fetch_artist_genres(sp: spotipy.Spotify, artist_id: str, artist_name: str = "") -> list[str]:
@@ -76,7 +37,7 @@ def _fetch_artist_genres(sp: spotipy.Spotify, artist_id: str, artist_name: str =
     except Exception:
         genres = []
     if not genres and artist_name:
-        genres = _fetch_lastfm_genres(artist_name)
+        genres = fetch_lastfm_genres(artist_name)
     _artist_genre_cache[artist_id] = genres
     return genres
 

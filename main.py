@@ -5,7 +5,7 @@ Startup sequence:
   1. Mount static frontend files
   2. Register API routers
   3. Start background tasks:
-       - Spotify polling loop
+       - Song source loop (Spotify polling or LedFX WebSocket, per settings)
        - LedFX latency probe loop
        - Trigger engine loop
   4. WebSocket endpoint for real-time browser updates
@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse
 
 from config import settings, PROFILES_DIR, AUDIO_SHAPES_DIR
 from models.state import state
-from api import spotify_client, ledfx_client
+from api import ledfx_client
 from services.trigger_engine import TriggerEngine
 from services.websocket_manager import ws_manager
 from services.profile_manager import load_profile_by_uri, save_profile
@@ -100,9 +100,19 @@ async def lifespan(app: FastAPI):
     if "use_analyzed_triggerless" in _saved:
         state.use_analyzed_triggerless = bool(_saved["use_analyzed_triggerless"])
 
+    # Select song source based on settings
+    if settings.song_source == "ledfx":
+        from api.ledfx_song_client import polling_loop as _song_polling_loop
+        _song_task_name = "ledfx-song-source"
+        logger.info("Song source: LedFX (event-driven)")
+    else:
+        from api.spotify_client import polling_loop as _song_polling_loop
+        _song_task_name = "spotify-poll"
+        logger.info("Song source: Spotify API")
+
     # Launch background tasks
     tasks = [
-        asyncio.create_task(spotify_client.polling_loop(_on_state_update), name="spotify-poll"),
+        asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
         asyncio.create_task(engine.run(), name="trigger-engine"),

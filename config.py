@@ -197,8 +197,14 @@ class Settings(BaseSettings):
     # Show advanced controls across all pages
     show_advanced: bool = False
 
-    # ── Last.fm (genre fallback) ──────────────────────────────────────────────
+    # ── Last.fm (genre fallback / primary in LedFX mode) ─────────────────────
     lastfm_api_key: str = ""
+    lastfm_username: str = ""
+
+    # ── Song source ───────────────────────────────────────────────────────────
+    # "spotify" — Spotify Web API polling (default)
+    # "ledfx"   — LedFX song_detected WebSocket events (event-driven, faster)
+    song_source: str = "spotify"
 
 
 settings = Settings()
