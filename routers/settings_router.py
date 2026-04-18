@@ -66,6 +66,9 @@ class SettingsPatch(BaseModel):
     song_source: Optional[str] = None          # "spotify" | "ledfx"
     lastfm_api_key: Optional[str] = None
     lastfm_username: Optional[str] = None
+    spotipy_client_id: Optional[str] = None
+    spotipy_client_secret: Optional[str] = None
+    spotipy_redirect_uri: Optional[str] = None
 
 
 @router.get("")
@@ -102,6 +105,9 @@ async def get_settings():
         "song_source": settings.song_source,
         "lastfm_api_key": settings.lastfm_api_key,
         "lastfm_username": settings.lastfm_username,
+        "spotipy_client_id": settings.spotipy_client_id,
+        "spotipy_client_secret": settings.spotipy_client_secret,
+        "spotipy_redirect_uri": settings.spotipy_redirect_uri,
     }
 
 

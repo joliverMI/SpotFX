@@ -123,6 +123,18 @@
           <label>Target Device Name</label>
           <input type="text" id="s-spotify-device">
         </div>
+        <div class="field">
+          <label>Client ID</label>
+          <input type="text" id="s-spotify-client-id" placeholder="From Spotify Developer Dashboard">
+        </div>
+        <div class="field">
+          <label>Client Secret</label>
+          <input type="password" id="s-spotify-client-secret" placeholder="From Spotify Developer Dashboard">
+        </div>
+        <div class="field">
+          <label>Redirect URI</label>
+          <input type="text" id="s-spotify-redirect-uri" placeholder="http://127.0.0.1:8000/api/spotify/callback">
+        </div>
       </div>
       <div id="lastfm-fields" style="display:none;">
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
@@ -273,7 +285,10 @@ document.getElementById('btn-lastfm-howto').addEventListener('click', () => { la
 document.getElementById('btn-lastfm-modal-close').addEventListener('click', () => { lastfmModal.style.display = 'none'; });
 document.getElementById('btn-lastfm-modal-close2').addEventListener('click', () => { lastfmModal.style.display = 'none'; });
 lastfmModal.addEventListener('click', e => { if (e.target === lastfmModal) lastfmModal.style.display = 'none'; });
-document.getElementById('s-spotify-device').value  = settings.spotify_device_name;
+document.getElementById('s-spotify-device').value         = settings.spotify_device_name;
+document.getElementById('s-spotify-client-id').value      = settings.spotipy_client_id ?? '';
+document.getElementById('s-spotify-client-secret').value  = settings.spotipy_client_secret ?? '';
+document.getElementById('s-spotify-redirect-uri').value   = settings.spotipy_redirect_uri ?? '';
 document.getElementById('s-lastfm-api-key').value  = settings.lastfm_api_key ?? '';
 document.getElementById('s-lastfm-username').value = settings.lastfm_username ?? '';
 document.getElementById('s-ledfx-host').value     = settings.ledfx_host;
@@ -301,7 +316,10 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     builder_future_buffer_s: parseInt(document.getElementById('s-future-buffer').value),
     audio_input_device:      document.getElementById('s-audio-device').value,
     song_source:             _songSource,
-    spotify_device_name:     document.getElementById('s-spotify-device').value,
+    spotify_device_name:       document.getElementById('s-spotify-device').value,
+    spotipy_client_id:         document.getElementById('s-spotify-client-id').value,
+    spotipy_client_secret:     document.getElementById('s-spotify-client-secret').value,
+    spotipy_redirect_uri:      document.getElementById('s-spotify-redirect-uri').value,
     lastfm_api_key:          document.getElementById('s-lastfm-api-key').value,
     lastfm_username:         document.getElementById('s-lastfm-username').value,
     ledfx_host:              document.getElementById('s-ledfx-host').value,
