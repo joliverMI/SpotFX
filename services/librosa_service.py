@@ -554,11 +554,14 @@ def _detect_harmonic_changes(y: np.ndarray, sr: int, beat_frames: np.ndarray) ->
 # ── Async wrapper ─────────────────────────────────────────────────────────────
 
 async def analyze_async(meta: AudioShapeMeta) -> Optional[LibrosaAnalysis]:
-    """Run analysis in a thread executor so it doesn't block the event loop."""
+    """Run analysis in a single-use subprocess so all numpy/librosa heap is
+    returned to the OS when the worker exits (max_tasks_per_child=1)."""
     import asyncio
+    from concurrent.futures import ProcessPoolExecutor
     try:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, analyze_sync, meta)
+        with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as pool:
+            return await loop.run_in_executor(pool, analyze_sync, meta)
     except Exception as exc:
         logger.error("Librosa analysis failed for %s: %s", meta.title, exc)
         return None
