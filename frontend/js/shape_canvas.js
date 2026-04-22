@@ -121,7 +121,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   // Librosa analysis overlay
   let _librosaAnalysis = null;
   let _librosaOffsetMs = 0;
-  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true, mfcc: false };
+  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true, mfcc: true };
   let _mfccDistances = null;  // pre-computed MFCC timbral distances per beat (0-1 normalised)
 
   // Profile triggers (used by builder.html when no custom markers set)

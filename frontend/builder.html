@@ -170,14 +170,14 @@
         <button class="librosa-filter-btn active" data-lf="onsets" style="background:rgba(255,136,0,0.5);">Onsets</button>
         <button class="librosa-filter-btn active" data-lf="harmonic" style="background:rgba(204,102,255,0.5);">Harmonic</button>
         <button class="librosa-filter-btn active" data-lf="bass"    style="background:rgba(68,221,136,0.5);">Bass</button>
-        <button class="librosa-filter-btn" data-lf="mfcc" style="background:rgba(255,102,51,0.5);">MFCC</button>
+        <button class="librosa-filter-btn active" data-lf="mfcc" style="background:rgba(255,102,51,0.5);">MFCC</button>
         <span id="librosa-summary" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
         <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Offset:</span>
         <input type="range" id="librosa-offset-slider" min="-5000" max="5000" step="50" value="0"
                style="width:90px;accent-color:#4488ff;">
         <span id="librosa-offset-display" style="font-size:11px;color:var(--text-muted);min-width:44px;text-align:right;">0 ms</span>
       </div>
-      <canvas id="shape-canvas" style="height:120px;"></canvas>
+      <canvas id="shape-canvas" style="height:141px;"></canvas>
       <div id="shape-resize-handle" title="Drag to resize"></div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
         <span style="font-size:11px;color:var(--text-muted);" id="shape-status">No audio shape captured yet.</span>
@@ -260,7 +260,9 @@
     </div>
     <div class="field">
       <label>Filter Labels (comma separated)</label>
-      <input type="text" id="edit-labels" placeholder="e.g. blue, -red">
+      <input type="text" id="edit-labels"
+             placeholder="e.g. blue, -red, =brightness:0.5, =transition:1.5"
+             title="Comma-separated label filters (case-insensitive).&#10;&#10;Filter syntax:&#10;  foo     include actions tagged &quot;foo&quot;&#10;  -foo    exclude actions tagged &quot;foo&quot;&#10;&#10;An action must match at least one positive label (if any are given) and no negative labels.&#10;Weight-0 actions are label-only: included only when a positive label matches.&#10;If no actions match, the filter is ignored and all actions are used.&#10;&#10;Pre-command overrides (applied once, not cascaded to nested events):&#10;  -brightness           skip this event's pre-brightness&#10;  -transition           skip this event's pre-transition&#10;  =brightness:0.5       override pre-brightness to 0.5 (0..1)&#10;  =transition:1.5       override pre-transition to 1.5 seconds&#10;  =ramp:500             override brightness ramp to 500 ms&#10;&#10;Common convention labels authors tag actions with:&#10;  colors:      blue, red, warm, cool&#10;  intensity:   bright, dim, subtle&#10;  transition:  fast, slow, smooth, snap">
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button id="popup-save" class="btn-accent">Save</button>
