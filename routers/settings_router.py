@@ -4,7 +4,10 @@ SpotFX — Settings API router.
 Exposes runtime-adjustable settings. Changes take effect immediately and are
 persisted to storage/settings.json so they survive server restarts.
 """
+import asyncio
 import json
+import os
+import signal
 from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -109,6 +112,16 @@ async def get_settings():
         "spotipy_client_secret": settings.spotipy_client_secret,
         "spotipy_redirect_uri": settings.spotipy_redirect_uri,
     }
+
+
+@router.post("/restart")
+async def restart_server():
+    """Kill the whole process group so systemd restarts SpotFX cleanly."""
+    async def _kill():
+        await asyncio.sleep(0.15)  # let the response flush first
+        os.killpg(os.getpgid(os.getpid()), signal.SIGTERM)
+    asyncio.create_task(_kill())
+    return {"status": "restarting"}
 
 
 @router.patch("")

@@ -25,7 +25,7 @@ from models.state import state
 from api import ledfx_client
 from services.trigger_engine import TriggerEngine
 from services.websocket_manager import ws_manager
-from services.profile_manager import load_profile_by_uri, save_profile
+from services.profile_manager import load_profile_by_uri, load_profile_by_title_artist, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
 from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager
@@ -50,6 +50,10 @@ async def _on_state_update(app_state) -> None:
     track = app_state.current_track
     if track:
         profile = load_profile_by_uri(track.spotify_uri)
+        if profile is None and track.title and track.artist:
+            profile = load_profile_by_title_artist(track.title, track.artist)
+            if profile:
+                logger.info("Profile matched by title/artist fallback: %s", profile.filename)
         if profile is None:
             # Auto-create a blank profile for any new song
             profile = SongProfile(

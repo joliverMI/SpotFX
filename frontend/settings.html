@@ -118,6 +118,9 @@
           <span style="font-size:10px;opacity:0.7;">event-driven</span>
         </button>
       </div>
+      <p id="ss-restart-notice" style="display:none;font-size:12px;color:var(--warn,#e6a817);margin:0 0 10px;">
+        Restart SpotFX for this change to take effect.
+      </p>
       <div id="spotify-only-fields">
         <div class="field">
           <label>Target Device Name</label>
@@ -199,9 +202,13 @@
       </div>
     </div>
 
-    <div style="display:flex;gap:10px;align-items:center;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn-accent" id="btn-save">Save Settings</button>
       <span id="save-msg" style="font-size:13px;color:var(--accent);display:none;">Saved!</span>
+      <button id="btn-restart" class="btn btn-danger"
+              style="background-image:linear-gradient(var(--danger),var(--danger));background-size:0% 100%;background-repeat:no-repeat;user-select:none;">
+        Restart SpotFX
+      </button>
     </div>
 
     <!-- ── Gradient Profiles ──────────────────────────────────────────────── -->
@@ -268,13 +275,15 @@ document.getElementById('s-zoom-window').value    = settings.builder_zoom_window
 document.getElementById('s-future-buffer').value  = settings.builder_future_buffer_s;
 document.getElementById('s-audio-device').value   = settings.audio_input_device;
 // Song source toggle buttons
-let _songSource = settings.song_source ?? 'spotify';
+const _initialSongSource = settings.song_source ?? 'spotify';
+let _songSource = _initialSongSource;
 function setSongSource(src) {
   _songSource = src;
   document.getElementById('ss-btn-spotify').classList.toggle('active', src === 'spotify');
   document.getElementById('ss-btn-ledfx').classList.toggle('active', src === 'ledfx');
   document.getElementById('spotify-only-fields').style.display = src === 'spotify' ? '' : 'none';
   document.getElementById('lastfm-fields').style.display       = src === 'ledfx'   ? '' : 'none';
+  document.getElementById('ss-restart-notice').style.display   = src !== _initialSongSource ? '' : 'none';
 }
 setSongSource(_songSource);
 document.getElementById('ss-btn-spotify').addEventListener('click', () => setSongSource('spotify'));
@@ -477,6 +486,40 @@ document.getElementById('grad-delete').addEventListener('click', async () => {
   document.getElementById('grad-editor').style.display = 'none';
 });
 
+// ── Hold-to-restart button ───────────────────────────────────────────────────
+{
+  const btn = document.getElementById('btn-restart');
+  const HOLD_MS = 500;
+  let holdTimer = null;
+
+  function startHold() {
+    if (holdTimer) return;
+    btn.style.transition = `background-size ${HOLD_MS}ms linear`;
+    btn.style.backgroundSize = '100% 100%';
+    btn.style.color = '#fff';
+    holdTimer = setTimeout(async () => {
+      btn.textContent = 'Restarting…';
+      btn.disabled = true;
+      await POST('/settings/restart');
+    }, HOLD_MS);
+  }
+
+  function cancelHold() {
+    if (!holdTimer) return;
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    btn.style.transition = 'background-size 150ms linear';
+    btn.style.backgroundSize = '0% 100%';
+    btn.style.color = '';
+  }
+
+  btn.addEventListener('mousedown', startHold);
+  btn.addEventListener('touchstart', e => { e.preventDefault(); startHold(); }, { passive: false });
+  btn.addEventListener('mouseup', cancelHold);
+  btn.addEventListener('mouseleave', cancelHold);
+  btn.addEventListener('touchend', cancelHold);
+  btn.addEventListener('touchcancel', cancelHold);
+}
 </script>
 </body>
 </html>

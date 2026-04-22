@@ -21,6 +21,7 @@ from api.lastfm import fetch_lastfm_genres
 logger = logging.getLogger(__name__)
 
 _RETRY_DELAY_S = 5
+_event_data_logged = False  # log raw event_data once to confirm field shape
 
 
 def _make_uri(artist: str, title: str) -> str:
@@ -75,14 +76,21 @@ async def _handle_event(
     msg: dict,
     broadcast_fn: Callable[..., Awaitable[None]],
 ) -> None:
-    title = msg.get("title", "")
-    artist = msg.get("artist", "")
+    global _event_data_logged
+    # LedFX wraps event payload in event_data; fall back to flat msg for older versions
+    data = msg.get("event_data", msg)
+    if not _event_data_logged:
+        logger.debug("LedFX song_detected event_data: %s", data)
+        _event_data_logged = True
+
+    title = data.get("title", "")
+    artist = data.get("artist", "")
     if not title and not artist:
         return
 
-    duration_s = msg.get("duration") or 0
+    duration_s = data.get("duration") or 0
     duration_ms = int(duration_s * 1000) if duration_s else 0
-    playing = msg.get("playing", True)
+    playing = data.get("playing", True)
     uri = _make_uri(artist, title)
 
     # Broadcast immediately with no genres so the UI updates without delay
