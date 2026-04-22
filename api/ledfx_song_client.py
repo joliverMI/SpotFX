@@ -15,7 +15,7 @@ import time
 from typing import Callable, Awaitable
 
 from config import settings
-from models.state import state, SpotifyTrackInfo
+from models.state import state, SpotifyTrackInfo, PrevTrackSnapshot
 from api.lastfm import fetch_lastfm_genres
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,19 @@ async def _handle_event(
     playing = data.get("playing", True)
     uri = _make_uri(artist, title)
 
+    # Snapshot the outgoing track before overwriting — used by Genre Blending.
+    old = state.current_track
+    if old is not None and old.spotify_uri != uri:
+        implied_progress_ms = old.interpolated_progress_ms()
+        if old.duration_ms:
+            implied_progress_ms = min(implied_progress_ms, old.duration_ms)
+        state.last_ended_track = PrevTrackSnapshot(
+            spotify_uri=old.spotify_uri,
+            genres=list(old.genres or []),
+            duration_ms=old.duration_ms,
+            last_known_progress_ms=implied_progress_ms,
+        )
+
     # Broadcast immediately with no genres so the UI updates without delay
     track = SpotifyTrackInfo(
         spotify_uri=uri,
@@ -126,4 +139,10 @@ async def _fetch_and_update_genres(
     # Only update if this track is still playing (user hasn't skipped again)
     if genres and state.current_track and state.current_track.spotify_uri == uri:
         state.current_track.genres = genres
+        # Let the engine reconsider genre blending now that we have genres.
+        try:
+            from main import engine as _engine
+            _engine.reconsider_genre_blend()
+        except Exception as exc:
+            logger.debug("reconsider_genre_blend skipped: %s", exc)
         await broadcast_fn(state)

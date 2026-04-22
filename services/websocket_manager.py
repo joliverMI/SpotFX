@@ -45,6 +45,7 @@ class WebSocketManager:
 
     async def broadcast_state(self, state: AppState) -> None:
         """Serialize AppState and broadcast to all clients."""
+        from config import settings as _settings
         track = state.current_track
         payload: dict[str, Any] = {
             "type": "state",
@@ -58,6 +59,7 @@ class WebSocketManager:
             "analyzed_trigger_override": state.analyzed_trigger_override,
             "auto_generate_enabled": state.auto_generate_enabled,
             "dinner_party_mode": state.dinner_party_mode,
+            "genre_blending_enabled": _settings.genre_blending_enabled,
             "track": None,
         }
         if track:

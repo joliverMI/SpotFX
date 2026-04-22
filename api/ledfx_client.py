@@ -36,6 +36,12 @@ logger = logging.getLogger(__name__)
 # Shared async client (reuse connections)
 _client: Optional[httpx.AsyncClient] = None
 
+# Separate client for the latency probe so the probe's RTT measurement isn't
+# contaminated by queueing behind trigger writes. The main client caps
+# concurrent connections to avoid overloading LedFX; the probe needs its own
+# connection to reflect true network+server RTT, not pool queue time.
+_probe_client: Optional[httpx.AsyncClient] = None
+
 # Cached global brightness — updated whenever we set it so ramps start from the right value
 _current_brightness: float = 1.0
 
@@ -51,9 +57,34 @@ def _get_client() -> httpx.AsyncClient:
     if _client is None or _client.is_closed:
         _client = httpx.AsyncClient(
             base_url=settings.ledfx_url,
-            timeout=2.0,
+            timeout=5.0,
+            # LedFX's HTTP server starts ConnectTimeout-ing under concurrent load
+            # (observed during trigger-chain bursts: flip + revert + snapshot-warm
+            # fire 10+ requests simultaneously and LedFX drops connections).
+            # Cap the pool so httpx queues instead of flooding LedFX.
+            # 8 gives room for ~a flare chain (flip + revert + warm) without
+            # letting a true flood reach LedFX.
+            limits=httpx.Limits(max_connections=8, max_keepalive_connections=8),
         )
     return _client
+
+
+def _get_probe_client() -> httpx.AsyncClient:
+    """
+    Dedicated httpx client for the latency probe. Keeping it separate from
+    `_client` ensures the RTT measurement reflects true network+LedFX
+    response time rather than the queue time waiting for a spot in the
+    trigger-writes pool. Otherwise `effective_offset_ms` would swing
+    wildly during chain bursts and shift trigger timing by seconds.
+    """
+    global _probe_client
+    if _probe_client is None or _probe_client.is_closed:
+        _probe_client = httpx.AsyncClient(
+            base_url=settings.ledfx_url,
+            timeout=2.0,
+            limits=httpx.Limits(max_connections=1, max_keepalive_connections=1),
+        )
+    return _probe_client
 
 
 # ── Internal direct-fire helpers (bypass bus) ─────────────────────────────────
@@ -72,7 +103,7 @@ async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: 
         resp.raise_for_status()
         return True
     except Exception as exc:
-        logger.error("Failed to patch LedFX virtual '%s' effect: %s", virtual_id, exc)
+        logger.error("Failed to patch LedFX virtual '%s' effect: %r", virtual_id, exc)
         return False
 
 
@@ -84,7 +115,7 @@ async def _set_config_direct(patch: dict) -> bool:
         resp.raise_for_status()
         return True
     except Exception as exc:
-        logger.error("Failed to update LedFX config %s: %s", patch, exc)
+        logger.error("Failed to update LedFX config %s: %r", patch, exc)
         return False
 
 
@@ -145,8 +176,11 @@ async def measure_latency() -> float:
     """
     Send a lightweight status request to LedFX and return the RTT in ms.
     Updates state.ledfx_rtt_ms.
+
+    Uses a dedicated httpx client so the probe doesn't queue behind trigger
+    writes — that would inflate RTT under load and skew effective_offset_ms.
     """
-    client = _get_client()
+    client = _get_probe_client()
     try:
         t0 = time.monotonic()
         await client.get("/api/info")
@@ -154,7 +188,7 @@ async def measure_latency() -> float:
         state.ledfx_rtt_ms = rtt_ms
         return rtt_ms
     except Exception as exc:
-        logger.warning("LedFX latency probe failed: %s", exc)
+        logger.warning("LedFX latency probe failed: %r", exc)
         return 0.0
 
 
@@ -173,7 +207,7 @@ async def trigger_scene(scene_id: str) -> bool:
         logger.info("LedFX scene triggered: %s", scene_id)
         return True
     except Exception as exc:
-        logger.error("Failed to trigger LedFX scene '%s': %s", scene_id, exc)
+        logger.error("Failed to trigger LedFX scene '%s': %r", scene_id, exc)
         return False
 
 
@@ -190,7 +224,7 @@ async def get_scenes() -> list[dict]:
         scenes_dict = data.get("scenes", {})
         return [{"id": sid, **meta} for sid, meta in scenes_dict.items()]
     except Exception as exc:
-        logger.warning("Could not fetch LedFX scenes: %s", exc)
+        logger.warning("Could not fetch LedFX scenes: %r", exc)
         return []
 
 
@@ -202,7 +236,7 @@ async def get_config() -> dict:
         resp.raise_for_status()
         return resp.json()
     except Exception as exc:
-        logger.warning("Could not fetch LedFX config: %s", exc)
+        logger.warning("Could not fetch LedFX config: %r", exc)
         return {}
 
 
@@ -214,7 +248,7 @@ async def get_virtual(virtual_id: str) -> dict:
         resp.raise_for_status()
         return resp.json()
     except Exception as exc:
-        logger.warning("Could not fetch LedFX virtual '%s': %s", virtual_id, exc)
+        logger.warning("Could not fetch LedFX virtual '%s': %r", virtual_id, exc)
         return {}
 
 
@@ -226,7 +260,7 @@ async def get_all_virtuals() -> dict:
         resp.raise_for_status()
         return resp.json()
     except Exception as exc:
-        logger.warning("Could not fetch LedFX virtuals: %s", exc)
+        logger.warning("Could not fetch LedFX virtuals: %r", exc)
         return {}
 
 
@@ -250,7 +284,7 @@ async def set_virtual_config(virtual_id: str, config: dict) -> bool:
         logger.debug("LedFX virtual config patched on '%s': %s", virtual_id, config)
         return True
     except Exception as exc:
-        logger.error("Failed to patch LedFX virtual '%s' config: %s", virtual_id, exc)
+        logger.error("Failed to patch LedFX virtual '%s' config: %r", virtual_id, exc)
         return False
 
 

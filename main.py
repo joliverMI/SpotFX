@@ -175,6 +175,18 @@ async def toggle_analysis():
     return {"audio_analysis_enabled": state.audio_analysis_enabled}
 
 
+@app.post("/api/genre-blending/toggle")
+async def toggle_genre_blending():
+    from config import settings as _settings
+    object.__setattr__(_settings, "genre_blending_enabled", not _settings.genre_blending_enabled)
+    from routers.settings_router import _load_settings_file, _save_settings_file
+    saved = _load_settings_file()
+    saved["genre_blending_enabled"] = _settings.genre_blending_enabled
+    _save_settings_file(saved)
+    await ws_manager.broadcast_state(state)
+    return {"genre_blending_enabled": _settings.genre_blending_enabled}
+
+
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):

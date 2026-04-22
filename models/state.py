@@ -31,6 +31,20 @@ class SpotifyTrackInfo:
 
 
 @dataclass
+class PrevTrackSnapshot:
+    """Snapshot of the outgoing track captured at the moment a new URI arrives.
+
+    Used by Genre Blending to decide whether the previous song ended naturally
+    (progress within a few seconds of duration) and whether its genres overlap
+    with the incoming song's genres.
+    """
+    spotify_uri: str
+    genres: list
+    duration_ms: int
+    last_known_progress_ms: int
+
+
+@dataclass
 class AppState:
     # ── Spotify ───────────────────────────────────────────────────────────────
     current_track: Optional[SpotifyTrackInfo] = None
@@ -38,7 +52,7 @@ class AppState:
     last_activity_time: float = field(default_factory=time.monotonic)
 
     # ── Service control ───────────────────────────────────────────────────────
-    paused: bool = True           # True = triggers suppressed, polling continues
+    paused: bool = False          # True = triggers suppressed, polling continues
     on_target_device: bool = False  # True = playing on settings.spotify_device_name
     audio_analysis_enabled: bool = False  # True = capture audio shapes for new songs
     recapture_wavs: bool = False          # True = recapture WAVs for songs that have librosa but no WAV
@@ -47,6 +61,10 @@ class AppState:
     analyzed_trigger_override: bool = False    # True = override user triggers with analyzed (debug/testing)
     auto_generate_enabled: bool = False       # True = auto-generate triggers after shape capture
     dinner_party_mode: bool = False            # True = ignore song triggers, use Dinner Party triggerless profile
+
+    # ── Genre Blending ────────────────────────────────────────────────────────
+    # Snapshot of the outgoing track captured just before current_track is replaced.
+    last_ended_track: Optional[PrevTrackSnapshot] = None
 
     # ── LedFX latency ────────────────────────────────────────────────────────
     ledfx_rtt_ms: float = 0.0    # calculated round-trip time to LedFX

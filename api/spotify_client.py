@@ -16,7 +16,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import settings, PROFILES_DIR
-from models.state import state, SpotifyTrackInfo
+from models.state import state, SpotifyTrackInfo, PrevTrackSnapshot
 from api.lastfm import fetch_lastfm_genres
 
 logger = logging.getLogger(__name__)
@@ -143,10 +143,25 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
         genres=genres,
     )
     global _burst_until
-    old_uri = state.current_track.spotify_uri if state.current_track else None
-    if info.spotify_uri != old_uri and info.is_playing:
-        _burst_until = time.monotonic() + settings.poll_start_burst_duration_ms / 1000.0
-        logger.debug("New song detected — burst polling for %dms", settings.poll_start_burst_duration_ms)
+    old = state.current_track
+    old_uri = old.spotify_uri if old else None
+    if info.spotify_uri != old_uri:
+        if old is not None:
+            state.last_ended_track = PrevTrackSnapshot(
+                spotify_uri=old.spotify_uri,
+                genres=list(old.genres or []),
+                duration_ms=old.duration_ms,
+                last_known_progress_ms=old.interpolated_progress_ms(),
+            )
+            logger.info(
+                "URI change: %s → %s (prev progress=%dms/%dms, playing=%s)",
+                old_uri, info.spotify_uri,
+                state.last_ended_track.last_known_progress_ms,
+                old.duration_ms, info.is_playing,
+            )
+        if info.is_playing:
+            _burst_until = time.monotonic() + settings.poll_start_burst_duration_ms / 1000.0
+            logger.debug("New song detected — burst polling for %dms", settings.poll_start_burst_duration_ms)
     state.current_track = info
     state.last_poll_time = time.monotonic()
     if info.is_playing:

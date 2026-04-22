@@ -66,6 +66,7 @@ class SettingsPatch(BaseModel):
     auto_generate_mode: Optional[str] = None   # "embedded" | "claude"
     show_ai_triggers: Optional[bool] = None
     show_advanced: Optional[bool] = None
+    genre_blending_enabled: Optional[bool] = None
     song_source: Optional[str] = None          # "spotify" | "ledfx"
     lastfm_api_key: Optional[str] = None
     lastfm_username: Optional[str] = None
@@ -105,6 +106,7 @@ async def get_settings():
         "auto_generate_mode": settings.auto_generate_mode,
         "show_ai_triggers": settings.show_ai_triggers,
         "show_advanced": settings.show_advanced,
+        "genre_blending_enabled": settings.genre_blending_enabled,
         "song_source": settings.song_source,
         "lastfm_api_key": settings.lastfm_api_key,
         "lastfm_username": settings.lastfm_username,

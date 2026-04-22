@@ -196,6 +196,9 @@ class Settings(BaseSettings):
     show_ai_triggers: bool = False
     # Show advanced controls across all pages
     show_advanced: bool = False
+    # Genre Blending — when ON, suppress song-start triggers if the previous song
+    # ended naturally and the new song shares any genre with it.
+    genre_blending_enabled: bool = True
 
     # ── Last.fm (genre fallback / primary in LedFX mode) ─────────────────────
     lastfm_api_key: str = ""

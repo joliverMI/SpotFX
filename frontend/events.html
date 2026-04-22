@@ -163,10 +163,10 @@
             Beat Steps
             <span id="bs-beat-count" style="font-size:11px;font-weight:400;opacity:0.55;"></span>
             <span style="margin-left:auto;font-size:11px;color:var(--text-muted);">Offset:</span>
-            <input type="number" id="bs-start-offset" value="0" step="50"
+            <input type="number" id="bs-start-offset" value="0" step="1"
               style="width:58px;text-align:right;font-size:12px;padding:2px 4px;"
-              title="Shift entire sequence by this many ms (negative = start earlier)">
-            <span style="font-size:11px;color:var(--text-muted);">ms</span>
+              title="Shift entire sequence by this many beats (negative = start earlier)">
+            <span style="font-size:11px;color:var(--text-muted);">beats</span>
             <span style="font-size:11px;color:var(--text-muted);">Fallback:</span>
             <select id="bs-fallback" style="font-size:12px;padding:2px 4px;">
               <option value="fallback">120 BPM</option>
@@ -966,7 +966,7 @@ function renderBeatSequence(e) {
   const bcEl = document.getElementById('bs-beat-count');
   if (bcEl) bcEl.textContent = bc > 0 ? `${bc} beat${bc !== 1 ? 's' : ''}` : '';
   document.getElementById('bs-fallback').value = e.beat_sequence_fallback || 'fallback';
-  document.getElementById('bs-start-offset').value = e.beat_sequence_start_offset_ms ?? 0;
+  document.getElementById('bs-start-offset').value = e.beat_sequence_start_offset_beats ?? 0;
 
   const list = document.getElementById('bs-step-list');
   const steps = e.beat_sequence_steps || [];
@@ -1302,7 +1302,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     e.beat_sequence_steps = syncBsStepsFromDOM();
     e.beat_revert = readBsRevertFromDOM();
     e.beat_sequence_fallback = document.getElementById('bs-fallback').value;
-    e.beat_sequence_start_offset_ms = parseInt(document.getElementById('bs-start-offset').value) || 0;
+    e.beat_sequence_start_offset_beats = parseInt(document.getElementById('bs-start-offset').value) || 0;
   }
 
   await POST('/events', e);

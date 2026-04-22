@@ -96,6 +96,7 @@
         <span style="width:1px;height:18px;background:var(--border);"></span>
         <button id="btn-analysis" class="toggle-btn">Capture</button>
         <button id="btn-auto-gen" class="toggle-btn">Analyze</button>
+        <button id="btn-genre-blend" class="toggle-btn" title="Skip song start when the next song shares a genre and the previous song ended naturally">Genre Blending</button>
         <button class="btn-sm" id="btn-verify">Mark Verified</button>
         <button id="btn-recapture-wavs" class="toggle-btn advanced-only" title="Recapture WAV files for songs with librosa data but no WAV">Recapture</button>
         <span id="embedded-tag" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:#1a237e;color:#90caf9;font-weight:600;">⚙ Embedded</span>
@@ -404,6 +405,10 @@ onMessage('state', async msg => {
   const autoBtn = document.getElementById('btn-auto-gen');
   if (autoBtn && msg.auto_generate_enabled !== undefined) {
     autoBtn.classList.toggle('active', !!msg.auto_generate_enabled);
+  }
+  const blendBtn = document.getElementById('btn-genre-blend');
+  if (blendBtn && msg.genre_blending_enabled !== undefined) {
+    blendBtn.classList.toggle('active', !!msg.genre_blending_enabled);
   }
   if (!liveMode) return;
 
@@ -1245,6 +1250,11 @@ document.getElementById('btn-recapture-wavs').addEventListener('click', async ()
 document.getElementById('btn-auto-gen').addEventListener('click', async () => {
   const curOn = document.getElementById('btn-auto-gen').classList.contains('active');
   await POST(`/control/auto-generate?enabled=${!curOn}`);
+});
+
+document.getElementById('btn-genre-blend').addEventListener('click', async () => {
+  const res = await POST('/genre-blending/toggle', {});
+  document.getElementById('btn-genre-blend').classList.toggle('active', !!res.genre_blending_enabled);
 });
 
 onMessage('auto_generate_started', msg => {
