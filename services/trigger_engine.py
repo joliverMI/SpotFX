@@ -204,16 +204,22 @@ class TriggerEngine:
             # fired so they won't fire on the first tick.
             self._apply_genre_blend_on_load()
 
-            # Fire Song Start immediately on URI change. Spotify reports a
-            # non-zero position on skips, so by the time the main loop ticks
-            # the 0ms anchor may already be past STALE_FIRE_MS and get
-            # silently suppressed. Any enabled trigger at timestamp 0 is a
-            # song-start trigger regardless of its event name. If genre
-            # blending already added it to _fired, the guard below skips it.
+            # Fire any near-start trigger immediately if the song is already
+            # past it. Covers mid-song skips: Spotify reports a non-zero
+            # position on skip, and by the time the main loop ticks, triggers
+            # at small timestamps (e.g. 0, 350ms) land past STALE_FIRE_MS and
+            # get silently suppressed. Users often anchor Song Start slightly
+            # off zero, so we can't rely on `== 0`. The `< now_ms` guard
+            # keeps fresh plays flowing through the main loop at the right
+            # moment instead of pre-firing here.
+            _now_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
             start_trig = next(
                 (
                     t for t in self._get_active_triggers()
-                    if t.enabled and t.timestamp_ms == 0 and t.id not in self._fired
+                    if t.enabled
+                    and t.timestamp_ms <= STALE_FIRE_MS
+                    and t.timestamp_ms < _now_ms
+                    and t.id not in self._fired
                 ),
                 None,
             )
