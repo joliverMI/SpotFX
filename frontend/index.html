@@ -727,7 +727,11 @@ window.toggleShapeCanvas = function() {
   document.getElementById('np-canvas-wrap').style.display = _npShapeVisible ? '' : 'none';
   document.getElementById('shape-toggle-btn').textContent = _npShapeVisible ? '▲ Audio Shape' : '▼ Audio Shape';
   if (_npShapeVisible && track) {
+    // loadNpShape() short-circuits when URI hasn't changed since it was
+    // last loaded — so on re-expand we also need to restart the render
+    // tick ourselves, otherwise the playhead stays frozen.
     loadNpShape(track.spotify_uri);
+    if (_npShapeLoaded) _startNpLoop();
   } else {
     _stopNpLoop();
   }

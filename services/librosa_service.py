@@ -555,13 +555,28 @@ def _detect_harmonic_changes(y: np.ndarray, sr: int, beat_frames: np.ndarray) ->
 
 async def analyze_async(meta: AudioShapeMeta) -> Optional[LibrosaAnalysis]:
     """Run analysis in a single-use subprocess so all numpy/librosa heap is
-    returned to the OS when the worker exits (max_tasks_per_child=1)."""
+    returned to the OS when the worker exits (max_tasks_per_child=1).
+    On success, pre-generate and persist analyzed triggers for this URI so
+    the next playback is a cache hit instead of paying the ~1s pipeline cost.
+    """
     import asyncio
     from concurrent.futures import ProcessPoolExecutor
     try:
         loop = asyncio.get_event_loop()
         with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as pool:
-            return await loop.run_in_executor(pool, analyze_sync, meta)
+            result = await loop.run_in_executor(pool, analyze_sync, meta)
     except Exception as exc:
         logger.error("Librosa analysis failed for %s: %s", meta.title, exc)
         return None
+
+    if result is not None and getattr(meta, "spotify_uri", None):
+        async def _prewarm(uri=meta.spotify_uri, title=meta.title):
+            try:
+                from services import analyzed_trigger_store
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: analyzed_trigger_store.generate_for_uri(uri, save_cache=True),
+                )
+            except Exception as exc:
+                logger.warning("Analyzed-trigger pre-generation failed for %s: %s", title, exc)
+        asyncio.create_task(_prewarm())
+    return result

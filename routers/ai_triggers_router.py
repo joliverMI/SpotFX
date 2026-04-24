@@ -10,6 +10,8 @@ POST /api/ai-triggers/training-profiles       — create / update a training pro
 DELETE /api/ai-triggers/training-profiles/{id} — delete a training profile
 POST /api/ai-triggers/analyze-learning        — Claude meta-analysis of approval feedback
 """
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -34,6 +36,8 @@ from services.suggestion_store import (
 )
 from models.song_profile import MusicTrigger
 from models.ai_suggestion_set import AISuggestionSet, SavedSuggestion
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai-triggers", tags=["ai-triggers"])
 
@@ -363,6 +367,26 @@ async def analyze_triggers(uri: str, category: str = "all"):
         target_uri=uri, all_training_uris=[], available_event_ids=available,
         training_profile=tp, _cached_analysis=la,
     )
+
+    # Persist the full (unfiltered) result to the analyzed-trigger cache so
+    # subsequent playbacks of this song are cache hits using the same triggers
+    # the user just imported. The trigger_engine consumes the full list and
+    # lets the label-aware action selector decide what to fire.
+    try:
+        from services import analyzed_trigger_store
+        cached = [
+            analyzed_trigger_store.CachedTrigger(
+                id=f"analyzed_{t['event_id']}_{t['timestamp_ms']}",
+                timestamp_ms=t["timestamp_ms"],
+                event_id=t["event_id"],
+                labels=list(t.get("labels") or []),
+            )
+            for t in raw
+        ]
+        track_id = uri.split(":")[-1]
+        analyzed_trigger_store.save(track_id, tp, cached)
+    except Exception as exc:
+        logger.warning("Analyzed-trigger cache save failed for %s: %s", uri, exc)
 
     # Filter by category
     results = []

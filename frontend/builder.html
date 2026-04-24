@@ -124,6 +124,7 @@
           <button class="btn-sm" id="btn-add-trigger">+ Trigger</button>
           <button class="btn-sm" id="btn-analyze-scenes" title="Import analyzed scene triggers" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">+ Scenes</button>
           <button class="btn-sm" id="btn-analyze-flares" title="Import analyzed flare triggers" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">+ Flares</button>
+          <button class="btn-sm" id="btn-analyze-both" title="Import analyzed scenes + flares" style="background:rgba(255,152,0,0.15);color:#ff9800;border-color:#ff9800;">+ Both</button>
         </div>
       </div>
       <div class="timeline-wrap">
@@ -1862,20 +1863,25 @@ function _applyTriggerShiftValue(ms) {
 }
 
 // ── Analyze Scenes / Flares import buttons ──────────────────────────────────
-async function analyzeAndImport(category) {
+async function analyzeAndImport(category, preselectedMode) {
   const uri = getActiveUri();
   if (!uri || !profile) { showToast('No song loaded', 'error'); return; }
 
-  // Ask how to handle existing triggers
+  // Ask how to handle existing triggers (caller may pass preselectedMode to skip)
   const hasExisting = profile.triggers.length > 0;
   let mode = 'keep'; // 'keep' or 'clear'
-  if (hasExisting) {
+  if (preselectedMode) {
+    mode = preselectedMode;
+  } else if (hasExisting) {
     const choice = await showImportDialog(category);
     if (choice === 'cancel') return;
     mode = choice; // 'clear' or 'keep'
   }
 
-  const btn = document.getElementById(category === 'scenes' ? 'btn-analyze-scenes' : 'btn-analyze-flares');
+  const btnId = category === 'scenes' ? 'btn-analyze-scenes'
+              : category === 'flares' ? 'btn-analyze-flares'
+              : 'btn-analyze-both';
+  const btn = document.getElementById(btnId);
   const origText = btn.textContent;
   btn.textContent = '...';
   btn.disabled = true;
@@ -1908,6 +1914,23 @@ async function analyzeAndImport(category) {
   }
 }
 
+// Import scenes + flares in one click. Prompt for keep/clear once, then
+// import scenes (using that choice), then import flares in "keep" mode so
+// we don't re-clear and wipe the scenes we just added.
+async function analyzeAndImportBoth() {
+  const uri = getActiveUri();
+  if (!uri || !profile) { showToast('No song loaded', 'error'); return; }
+  const hasExisting = profile.triggers.length > 0;
+  let mode = 'keep';
+  if (hasExisting) {
+    const choice = await showImportDialog('scenes + flares');
+    if (choice === 'cancel') return;
+    mode = choice;
+  }
+  await analyzeAndImport('scenes', mode);
+  await analyzeAndImport('flares', 'keep');
+}
+
 function showImportDialog(category) {
   return new Promise(resolve => {
     const overlay = document.createElement('div');
@@ -1934,6 +1957,7 @@ function showImportDialog(category) {
 
 document.getElementById('btn-analyze-scenes').addEventListener('click', () => analyzeAndImport('scenes'));
 document.getElementById('btn-analyze-flares').addEventListener('click', () => analyzeAndImport('flares'));
+document.getElementById('btn-analyze-both').addEventListener('click', analyzeAndImportBoth);
 
 // ── Librosa button + filter toggles + offset slider ─────────────────────────
 {

@@ -418,65 +418,58 @@ class TriggerEngine:
     # ── Analyzed trigger generation ──────────────────────────────────────────
 
     def _generate_analyzed_triggers(self, spotify_uri: str) -> Optional[list[MusicTrigger]]:
-        """Generate triggers using the embedded pipeline if librosa data exists.
-        Returns list of MusicTrigger or None if not available."""
+        """Return analyzed triggers for this URI, using the on-disk cache when
+        valid and regenerating + persisting only when the training profile
+        match or its content has changed. Skips entirely when analyzed mode
+        is not active — no point paying the cost if nothing will consume them.
+        """
+        from services import analyzed_trigger_store
         from services.librosa_service import get_analysis_by_uri
-        from services.embedded_trigger_service import suggest_triggers
         from services.audio_shape_service import _find_profile_for_genres
         from services.training_profile_manager import TrainingProfile
 
+        if not state.use_analyzed_triggerless and not state.analyzed_trigger_override:
+            return None
+
+        # Cheap pre-checks: bail early if librosa data or profile match is missing.
         la = get_analysis_by_uri(spotify_uri)
         if not la or not la.beats:
             return None
 
-        # Find training profile matching the song's genres
         genres = state.current_track.genres if state.current_track else []
-        # Also try profile genres if current_track genres are empty
         if not genres and self._profile:
             genres = getattr(self._profile, "genres", []) or []
         tp_data = _find_profile_for_genres(genres)
         if not tp_data:
             logger.info("Analyzed triggers: no matching training profile for genres %s", genres)
             return None
-
         tp = TrainingProfile(**tp_data)
 
-        # Build available event IDs
-        available: set[str] = set()
-        for attr in ["song_start_event_id", "beat_start_event_id", "song_end_event_id",
-                      "drop_event_id", "lull_event_id", "charge_event_id",
-                      "quiet_event_id", "scene_fill_event_id", "flare_event_id",
-                      "flare_low_event_id", "flare_mid_event_id", "flare_high_event_id"]:
-            eid = getattr(tp, attr, "")
-            if eid:
-                available.add(eid)
-
-        if not available:
-            return None
-
-        raw = suggest_triggers(
-            target_uri=spotify_uri,
-            all_training_uris=[],
-            available_event_ids=available,
-            training_profile=tp,
-            _cached_analysis=la,
-        )
-
-        if not raw:
-            return None
-
-        triggers = [
-            MusicTrigger(
-                id=f"analyzed_{r['event_id']}_{r['timestamp_ms']}",
-                timestamp_ms=r["timestamp_ms"],
-                event_id=r["event_id"],
-                labels=r.get("labels", []),
+        track_id = spotify_uri.split(":")[-1]
+        cached = analyzed_trigger_store.load(track_id)
+        if cached and analyzed_trigger_store.is_valid(cached, tp):
+            logger.info(
+                "Analyzed triggers: loaded %d cached for %s (profile: %s)",
+                len(cached.triggers), spotify_uri, tp.name,
             )
-            for r in raw
+            return [
+                MusicTrigger(
+                    id=t.id, timestamp_ms=t.timestamp_ms,
+                    event_id=t.event_id, labels=list(t.labels or []),
+                )
+                for t in cached.triggers
+            ]
+
+        generated = analyzed_trigger_store.generate_for_uri(spotify_uri, save_cache=True)
+        if not generated:
+            return None
+        return [
+            MusicTrigger(
+                id=t.id, timestamp_ms=t.timestamp_ms,
+                event_id=t.event_id, labels=list(t.labels or []),
+            )
+            for t in generated
         ]
-        logger.info("Analyzed triggers: generated %d for %s (profile: %s)",
-                     len(triggers), spotify_uri, tp.name)
-        return triggers
 
     # ── Triggerless play helpers ────────────────────────────────────────────
 
