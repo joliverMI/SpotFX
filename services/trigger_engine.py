@@ -107,6 +107,12 @@ class TriggerEngine:
         # of how many flips interleave. See plan section "added, 4".
         # {vid: (snapshot, revert_cfg, revert_task)}
         self._pending_ambient_revert: dict[str, tuple[dict, object, asyncio.Task]] = {}
+        # Tracks the look-ahead _fire_pre_commands task per trigger, so when
+        # _execute_plan_entry runs with skip_pre_commands=True it can AWAIT
+        # the task before step 0 — guaranteeing the transition PUT reaches
+        # LedFX before the effect PUT (otherwise the httpx pool may dispatch
+        # them out of order and the transition won't apply to the change).
+        self._pre_cmd_tasks: dict[str, asyncio.Task] = {}
 
     def _spawn_ramp(self, coro) -> asyncio.Task:
         """Create a tracked ramp task. All ramp tasks should use this instead of create_task."""
@@ -129,6 +135,7 @@ class TriggerEngine:
             self._fired.clear()
             self._pre_fired.clear()
             self._pre_ramp_fired.clear()
+            self._pre_cmd_tasks.clear()
             self._last_action.clear()
             self._preselected.clear()
             self._preselected_steps.clear()
@@ -161,10 +168,21 @@ class TriggerEngine:
                 self._ai_triggers = None
             # Generate analyzed triggers from embedded pipeline (if librosa data exists)
             self._analyzed_triggers = self._generate_analyzed_triggers(profile.spotify_uri)
-            # Generate synthetic triggerless triggers if needed
-            #   Skip if analyzed triggers are available and the user prefers them
+            # Generate synthetic triggerless triggers if needed.
+            # Dinner Party mode always wins — its synthetic triggers come from the
+            # "Dinner Party" profile regardless of whether analyzed triggers exist.
             if self._should_use_triggerless():
-                if state.use_analyzed_triggerless and self._analyzed_triggers:
+                if state.dinner_party_mode:
+                    tp = self._resolve_triggerless_profile()
+                    if tp:
+                        self._triggerless_triggers = self._generate_triggerless_triggers(
+                            tp, profile.duration_ms
+                        )
+                        logger.info("Triggerless: generated %d synthetic triggers from '%s' (dinner party)",
+                                    len(self._triggerless_triggers), tp.name)
+                    else:
+                        self._triggerless_triggers = None
+                elif state.use_analyzed_triggerless and self._analyzed_triggers:
                     self._triggerless_triggers = None
                     logger.info("Using analyzed triggers (%d) instead of synthetic triggerless",
                                 len(self._analyzed_triggers))
@@ -185,6 +203,31 @@ class TriggerEngine:
             # genre with the incoming song, pre-mark any "start" triggers as
             # fired so they won't fire on the first tick.
             self._apply_genre_blend_on_load()
+
+            # Fire Song Start immediately on URI change. Spotify reports a
+            # non-zero position on skips, so by the time the main loop ticks
+            # the 0ms anchor may already be past STALE_FIRE_MS and get
+            # silently suppressed. Any enabled trigger at timestamp 0 is a
+            # song-start trigger regardless of its event name. If genre
+            # blending already added it to _fired, the guard below skips it.
+            start_trig = next(
+                (
+                    t for t in self._get_active_triggers()
+                    if t.enabled and t.timestamp_ms == 0 and t.id not in self._fired
+                ),
+                None,
+            )
+            if start_trig:
+                self._fired.add(start_trig.id)
+                self._pre_fired.add(start_trig.id)
+                self._pre_ramp_fired.add(start_trig.id)
+                asyncio.create_task(
+                    self.fire_event_now(start_trig.event_id, start_trig.labels)
+                )
+                logger.info(
+                    "load_profile: firing Song Start trigger %s immediately (event=%s)",
+                    start_trig.id, start_trig.event_id,
+                )
 
     def _start_trigger_ids(self) -> list[str]:
         """IDs of triggers whose resolved event name contains 'start' (case-insensitive).
@@ -230,6 +273,9 @@ class TriggerEngine:
         return True, f"match={sorted(overlap)} (prev={sorted(a)}, new={sorted(b)})"
 
     def _apply_genre_blend_on_load(self) -> None:
+        if state.dinner_party_mode:
+            logger.debug("Genre Blending: skipped (dinner party mode — Song Start always fires)")
+            return
         suppress, reason = self._genre_blend_should_suppress()
         if not suppress:
             logger.debug("Genre Blending: no-op on load (%s)", reason)
@@ -251,6 +297,8 @@ class TriggerEngine:
         and the start trigger hasn't fired yet, suppress it. If it already
         fired, we accept the race.
         """
+        if state.dinner_party_mode:
+            return
         suppress, reason = self._genre_blend_should_suppress()
         if not suppress:
             return
@@ -272,17 +320,38 @@ class TriggerEngine:
             return
 
         if state.dinner_party_mode:
-            if self._triggerless_triggers is not None:
-                return  # Dinner party triggers already active — don't regenerate/clear
-            # Turning ON: generate synthetic triggers
+            # Turning ON: regenerate synthetic triggers from the Dinner Party profile
+            # (even if triggerless triggers were already active from a genre-matched
+            # profile) and fire Song Start immediately.
             tp = self._resolve_triggerless_profile()
             if tp:
                 self._triggerless_triggers = self._generate_triggerless_triggers(
                     tp, self._profile.duration_ms
                 )
                 self._fired = {tid for tid in self._fired if not tid.startswith("tl_")}
+                self._pre_fired = {tid for tid in self._pre_fired if not tid.startswith("tl_")}
+                self._pre_ramp_fired = {tid for tid in self._pre_ramp_fired if not tid.startswith("tl_")}
                 logger.info("Triggerless: refreshed %d synthetic triggers from '%s'",
                             len(self._triggerless_triggers), tp.name)
+                # Fire the Song Start event now. The tl_start_0 trigger is at 0ms,
+                # so mid-song the stale-fire suppression would mark it fired
+                # without actually running it — call the event directly instead.
+                start_trig = next(
+                    (t for t in self._triggerless_triggers if "start" in t.labels),
+                    None,
+                )
+                if start_trig:
+                    self._fired.add(start_trig.id)
+                    self._pre_fired.add(start_trig.id)
+                    self._pre_ramp_fired.add(start_trig.id)
+                    import asyncio as _asyncio
+                    _asyncio.create_task(
+                        self.fire_event_now(start_trig.event_id, start_trig.labels)
+                    )
+                    logger.info(
+                        "Dinner Party on: firing Song Start event %s immediately",
+                        start_trig.event_id,
+                    )
             else:
                 self._triggerless_triggers = None
         else:
@@ -922,6 +991,7 @@ class TriggerEngine:
             value = ov.get("transition_value", event.pre_transition_value)
             cfg = {"transition_time": value}
             vids = get_all_virtual_ids()
+            logger.info("Pre-transition (look-ahead) '%s': set transition_time=%s on %d virtuals", event.name, value, len(vids))
             if vids:
                 await asyncio.gather(
                     *(ledfx_client.set_virtual_config(vid, cfg) for vid in vids),
@@ -1454,6 +1524,7 @@ class TriggerEngine:
             value = ov.get("transition_value", event.pre_transition_value)
             cfg = {"transition_time": value}
             vids = get_all_virtual_ids()
+            logger.info("Pre-transition (inline) '%s': set transition_time=%s on %d virtuals", event.name, value, len(vids))
             if vids:
                 await asyncio.gather(
                     *(ledfx_client.set_virtual_config(vid, cfg) for vid in vids),
@@ -1629,6 +1700,17 @@ class TriggerEngine:
         # look-ahead path (_pre_fired set), skip them inside the sequence
         # so step 0 fires immediately instead of awaiting brightness ramps.
         skip_pc = entry.is_root and entry.trigger_id in self._pre_fired
+        # Await the look-ahead pre-commands task if one is still running for
+        # this trigger. Without this await, the sequence's first effect PUT
+        # can reach LedFX before the transition PUT (both go through the same
+        # httpx pool concurrently), making the transition silently not apply.
+        if skip_pc:
+            _pc_task = self._pre_cmd_tasks.pop(entry.trigger_id, None)
+            if _pc_task is not None and not _pc_task.done():
+                try:
+                    await _pc_task
+                except Exception:
+                    pass
         # If the planner kicked off a pre-fire snapshot task, await it now.
         # Should already be complete (built seconds ago while the loop was idle).
         snap: Optional[dict] = None
@@ -1868,6 +1950,7 @@ class TriggerEngine:
                                 _e.snapshot_task.cancel()
                         self._plan.pop(tid, None)
                         self._plan_desc.pop(tid, None)
+                        self._pre_cmd_tasks.pop(tid, None)
                     logger.info("Seek-back detected (%dms → %dms): re-enabled %d triggers",
                                 self._last_progress_ms, now_ms, len(re_enabled))
             self._last_progress_ms = now_ms
@@ -1903,6 +1986,7 @@ class TriggerEngine:
                     self._plan_desc.pop(_t.id, None)
                     self._preselected.pop(_t.id, None)
                     self._preselected_steps.pop(_t.id, None)
+                    self._pre_cmd_tasks.pop(_t.id, None)
                 logger.info(
                     "Stale-fire suppression: skipped %d trigger(s) more than %dms behind song position %d",
                     len(_stale), STALE_FIRE_MS, now_ms,
@@ -2035,9 +2119,19 @@ class TriggerEngine:
                             if _e.event.id == trigger.event_id:
                                 anchor_ms = _e.fire_at_ms
                                 break
-                        if anchor_ms - lead_ms <= effective_now:
+                        _delta = anchor_ms - lead_ms - effective_now
+                        if _delta <= 0:
+                            logger.info(
+                                "Pre-cmd look-ahead: trigger=%s event='%s' type=%s pt_en=%s pb_en=%s lead=%d anchor=%d eff_now=%d delta=%d",
+                                trigger.id, event.name, event.event_type,
+                                event.pre_transition_enabled, event.pre_brightness_enabled,
+                                lead_ms, anchor_ms, effective_now, _delta,
+                            )
                             self._pre_fired.add(trigger.id)
-                            asyncio.create_task(self._fire_pre_commands(event, trigger.id, trigger.labels))
+                            _pc_task = asyncio.create_task(
+                                self._fire_pre_commands(event, trigger.id, trigger.labels)
+                            )
+                            self._pre_cmd_tasks[trigger.id] = _pc_task
 
                 # ── Fire plan entries whose time has come ─────────────────
                 # Each entry is an atomic fire computed by _plan_timeline with
