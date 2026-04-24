@@ -581,7 +581,8 @@ window.changeStepType = function(sel) {
 // Read a single action row back to an action object
 function syncActionFromRow(row) {
   const type   = row.querySelector('.action-type')?.value || 'ledfx_scene';
-  const weight = parseFloat(row.querySelector('.action-weight')?.value) || 1;
+  const _wRaw = parseFloat(row.querySelector('.action-weight')?.value);
+  const weight = Number.isFinite(_wRaw) ? _wRaw : 1;
   const labels = (row.querySelector('.action-labels')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
   const num = (cls) => { const v = row.querySelector(cls)?.value; return (v !== '' && v != null) ? parseFloat(v) : null; };
 
