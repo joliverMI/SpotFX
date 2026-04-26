@@ -50,9 +50,39 @@ logger = logging.getLogger(__name__)
 _XCORR_FIRST_START_MS = 5_000    # first window starts at 5s
 _XCORR_END_BUFFER_MS  = 30_000   # stop 30s before song end
 _XCORR_MARGIN_MS      = 1_000    # wait this far past window_end before computing
-_XCORR_SEARCH_MS      = 2_000    # search range ±ms around each window
 _XCORR_BIN_MS         = 25       # resample resolution (ms)
 _XCORR_CANDIDATE_STEP = 500     # step size for candidate window positions (ms)
+
+
+def _xcorr_search_ms(captured_duration_ms: int) -> int:
+    """Per-side xcorr search range, in ms. Mix-aware:
+        base + max(0, captured - polled) + buffer (per-Set-List or global).
+    """
+    polled = app_state.current_track.duration_ms if app_state.current_track else 0
+    cut_ms = max(0, int(captured_duration_ms or 0) - int(polled or 0))
+    buffer_ms = settings.xcorr_cut_buffer_ms
+    try:
+        from services import setlist_store
+        sl = setlist_store.get_by_context_uri(
+            app_state.current_track.context_uri if app_state.current_track else ""
+        )
+        if sl and sl.xcorr_cut_buffer_ms is not None:
+            buffer_ms = int(sl.xcorr_cut_buffer_ms)
+    except Exception:
+        pass
+    return int(settings.xcorr_search_ms_base + cut_ms + buffer_ms)
+
+
+def _agc_normalize(arr: np.ndarray) -> np.ndarray:
+    """Per-band AGC: divide by 95th percentile of |arr| so two windows captured
+    at different volumes remain comparable. Symmetric on both sides of the
+    correlation, so it never biases the winner; only stabilizes when SNR is
+    asymmetric. Volume invariance is already mostly handled by the per-window
+    z-score below — this is belt-and-suspenders for compressed dynamics."""
+    if arr.size == 0:
+        return arr
+    scale = float(np.percentile(np.abs(arr), 95)) + 1e-6
+    return arr / scale
 
 # DIAGNOSTIC CSV ──────────────────────────────────────────────────────────────
 _CSV_PATH = Path(__file__).resolve().parent.parent / "storage" / "xcorr_diagnostic.csv"
@@ -314,6 +344,25 @@ class AutoOffsetService:
             capture.stop()
             return
 
+        # Mix-aware diagnostics: log the search range and which slot we're using.
+        polled_dur = app_state.current_track.duration_ms if app_state.current_track else 0
+        cut_ms = max(0, int(meta.duration_ms or 0) - int(polled_dur or 0))
+        search_ms = _xcorr_search_ms(int(meta.duration_ms or 0))
+        sl_id = app_state.active_setlist_id
+        offset_source = f"setlist:{sl_id}" if (sl_id and cut_ms > 0) else "default"
+        sl_name = ""
+        if sl_id:
+            try:
+                from services import setlist_store
+                sl_obj = setlist_store.get_by_id(sl_id)
+                sl_name = sl_obj.name if sl_obj else ""
+            except Exception:
+                pass
+        logger.info(
+            "xcorr search range = ±%dms (cut=%dms, buffer=%dms, source=%s, setlist=%s)",
+            search_ms, cut_ms, settings.xcorr_cut_buffer_ms, offset_source, sl_name or "-",
+        )
+
         # Each frame: (timestamp_ms, rms_total, rms_low, rms_high) — 3 bands for multi-band xcorr
         frames: list[tuple[int, float, float, float]] = []
         _csv_window_rows: list[dict] = []   # DIAGNOSTIC CSV
@@ -343,7 +392,10 @@ class AutoOffsetService:
                 difficulty = _difficulty_score(window_template, stored_rms)
 
                 # ── NEW candidate: free-search xcorr (multi-band) ────────────
-                new_result = _xcorr_window(stored_ts, stored_bands, frames, win_start, win_end)
+                new_result = _xcorr_window(
+                    stored_ts, stored_bands, frames, win_start, win_end,
+                    captured_duration_ms=int(meta.duration_ms or 0),
+                )
                 if new_result is not None:
                     new_offset_ms, new_r = new_result
                     new_quality = round(new_r * difficulty, 3)
@@ -351,9 +403,20 @@ class AutoOffsetService:
                     new_offset_ms, new_r, new_quality = 0, 0.0, 0.0
 
                 # ── OLD candidate: evaluate stored offset ─────────────────────
-                # Re-read meta so we always compare against the CURRENT stored offset
+                # Re-read meta so we always compare against the CURRENT stored offset.
+                # When a Set List is active and there's a real cut, prefer its
+                # per-Set-List offset entry so the winner-margin check isn't
+                # comparing against an irrelevant default baseline.
                 cur_meta = load_audio_shape_meta(uri)
                 stored_offset_ms = cur_meta.timestamp_offset_ms if cur_meta else 0
+                stored_quality_for_old = cur_meta.offset_quality if cur_meta else 0.0
+                if cur_meta and app_state.active_setlist_id:
+                    polled_dur = app_state.current_track.duration_ms if app_state.current_track else 0
+                    if max(0, int(cur_meta.duration_ms or 0) - int(polled_dur or 0)) > 0:
+                        sl_entry = (cur_meta.setlist_offsets or {}).get(app_state.active_setlist_id)
+                        if sl_entry:
+                            stored_offset_ms = int(sl_entry.get("timestamp_offset_ms", 0))
+                            stored_quality_for_old = float(sl_entry.get("offset_quality", 0.0))
                 old_r = _eval_at_shift(
                     stored_ts, stored_bands, frames, win_start, win_end,
                     shift_ms=-stored_offset_ms,
@@ -367,7 +430,7 @@ class AutoOffsetService:
                 # Compare r-values directly. NEW must beat OLD's r by at least
                 # (stored_quality / 10) — the better the stored offset's historical
                 # quality, the larger the margin NEW needs to displace it.
-                stored_quality = cur_meta.offset_quality if cur_meta else 0.0
+                stored_quality = stored_quality_for_old
                 base_threshold = stored_quality / 10.0
                 # Skips have unreliable song_start → require 3x margin to displace
                 displacement_threshold = base_threshold * (3.0 if play_type == "skip" else 1.0)
@@ -432,6 +495,7 @@ class AutoOffsetService:
                         stored_ts, stored_bands, frames,
                         win_start, win_end,
                         winning_shift=-win_offset,
+                        captured_duration_ms=int(meta.duration_ms or 0),
                     )
                     _csv_window_rows.append({
                         "start_ms":   win_start,
@@ -848,13 +912,13 @@ def _eval_at_shift(
 
     r_values: list[float] = []
     for band_idx in range(len(stored_bands)):
-        template = np.interp(bins, stored_ts, stored_bands[band_idx])
+        template = _agc_normalize(np.interp(bins, stored_ts, stored_bands[band_idx]))
         if template.std() < 1e-6:
             continue
         template_norm = (template - template.mean()) / template.std()
 
         live_rms = np.array([f[1 + band_idx] for f in frames], dtype=float)
-        signal = np.interp(live_bins, live_ts, live_rms, left=0.0, right=0.0)
+        signal = _agc_normalize(np.interp(live_bins, live_ts, live_rms, left=0.0, right=0.0))
         if signal.std() < 1e-6:
             continue
         signal_norm = (signal - signal.mean()) / signal.std()
@@ -871,18 +935,21 @@ def _xcorr_window(
     frames: list[tuple[int, float, float, float]],
     win_start: int,
     win_end: int,
+    captured_duration_ms: int = 0,
 ) -> Optional[tuple[int, float]]:
     """
     Multi-band cross-correlation of stored shape window against live audio.
     Returns (offset_ms, avg_pearson_r) or None if below threshold.
 
-    Computes Pearson r for each band (rms_total, rms_low, rms_high) at every
-    candidate shift, averages across bands, then picks the shift with best avg r.
-    This breaks beat-shift ambiguity because mid/high content (vocals, melody)
-    doesn't repeat on the same cycle as bass.
+    Coarse-then-fine sweep:
+      1. Coarse: step xcorr_coarse_step_ms across the full ±search range,
+         keep top-K candidates by averaged r.
+      2. Fine: refine each candidate with ±150 ms at _XCORR_BIN_MS resolution.
+         Keep the global best.
 
-    stored_bands: [rms_total, rms_low, rms_high] arrays from npz.
-    frames: [(ts, rms_total, rms_low, rms_high), ...] from live capture.
+    The search range itself is mix-aware (derived from captured vs polled
+    duration plus a buffer). When the range is wide, an adaptive threshold
+    rejects ambiguous matches.
 
     Sign convention: offset_ms = -best_shift
       shift > 0  →  live is LATE by |shift| ms  →  offset < 0  →  fires later  ✓
@@ -891,25 +958,22 @@ def _xcorr_window(
     n_bins = len(bins)
     live_ts = np.array([f[0] for f in frames], dtype=float)
 
-    # Pre-compute normalised templates per band (skip flat bands)
-    band_info: list[tuple[int, np.ndarray]] = []  # (band_idx, template_norm)
+    band_info: list[tuple[int, np.ndarray]] = []
     for band_idx, stored_rms in enumerate(stored_bands):
-        template = np.interp(bins, stored_ts, stored_rms)
+        template = _agc_normalize(np.interp(bins, stored_ts, stored_rms))
         if template.std() < 1e-6:
             continue
         band_info.append((band_idx, (template - template.mean()) / template.std()))
-
     if not band_info:
         return None
 
-    # Pre-extract live RMS arrays per band
     live_arrays: dict[int, np.ndarray] = {}
     for band_idx, _ in band_info:
-        live_arrays[band_idx] = np.array([f[1 + band_idx] for f in frames], dtype=float)
+        live_arrays[band_idx] = _agc_normalize(
+            np.array([f[1 + band_idx] for f in frames], dtype=float)
+        )
 
-    best_corr  = -np.inf
-    best_shift = 0
-    for shift in range(-_XCORR_SEARCH_MS, _XCORR_SEARCH_MS + 1, _XCORR_BIN_MS):
+    def score_at(shift: int) -> Optional[float]:
         live_bins = bins + shift
         r_sum = 0.0
         n_valid = 0
@@ -920,21 +984,62 @@ def _xcorr_window(
             signal_norm = (signal - signal.mean()) / signal.std()
             r_sum += float(np.dot(template_norm, signal_norm)) / n_bins
             n_valid += 1
-        if n_valid == 0:
-            continue
-        avg_r = r_sum / n_valid
-        if avg_r > best_corr:
-            best_corr  = avg_r
-            best_shift = shift
+        return (r_sum / n_valid) if n_valid else None
 
-    if best_corr < settings.xcorr_global_threshold:
+    search_ms   = _xcorr_search_ms(captured_duration_ms)
+    coarse_step = max(_XCORR_BIN_MS, settings.xcorr_coarse_step_ms)
+
+    # ── Coarse pass ──────────────────────────────────────────────────────────
+    coarse_results: list[tuple[float, int]] = []
+    for shift in range(-search_ms, search_ms + 1, coarse_step):
+        r = score_at(shift)
+        if r is not None:
+            coarse_results.append((r, shift))
+    if not coarse_results:
+        return None
+    coarse_results.sort(reverse=True)  # by r desc
+    top_k = max(1, settings.xcorr_top_k_refine)
+    candidates = coarse_results[:top_k]
+
+    # ── Fine pass (refine each top-K) ────────────────────────────────────────
+    fine_radius = 150
+    best_r, best_shift = -float("inf"), 0
+    second_r = -float("inf")
+    for _, c_shift in candidates:
+        for shift in range(c_shift - fine_radius, c_shift + fine_radius + 1, _XCORR_BIN_MS):
+            r = score_at(shift)
+            if r is None:
+                continue
+            if r > best_r:
+                second_r = best_r
+                best_r, best_shift = r, shift
+            elif r > second_r:
+                second_r = r
+
+    if best_r == -float("inf"):
+        return None
+
+    # Adaptive thresholds for wide searches.
+    threshold = settings.xcorr_global_threshold
+    require_margin = 0.0
+    if search_ms > settings.xcorr_wide_threshold_ms:
+        threshold = max(threshold, settings.xcorr_wide_min_r)
+        require_margin = settings.xcorr_wide_top1_margin
+
+    if best_r < threshold:
         logger.debug(
-            "Auto-offset xcorr: window [%d–%d]ms best r=%.2f below threshold %.2f",
-            win_start, win_end, best_corr, settings.xcorr_global_threshold,
+            "Auto-offset xcorr: window [%d–%d]ms best r=%.2f below threshold %.2f (search=±%dms)",
+            win_start, win_end, best_r, threshold, search_ms,
+        )
+        return None
+    if require_margin > 0 and second_r > -float("inf") and (best_r - second_r) < require_margin:
+        logger.debug(
+            "Auto-offset xcorr: window [%d–%d]ms ambiguous — top1=%.2f top2=%.2f margin<%.2f (search=±%dms)",
+            win_start, win_end, best_r, second_r, require_margin, search_ms,
         )
         return None
 
-    return (-best_shift, round(best_corr, 3))
+    return (-best_shift, round(best_r, 3))
 
 
 # DIAGNOSTIC CSV ──────────────────────────────────────────────────────────────
@@ -945,6 +1050,7 @@ def _xcorr_window_detail(
     win_start: int,
     win_end: int,
     winning_shift: int,
+    captured_duration_ms: int = 0,
 ) -> _XcorrDetail:
     """
     Compute per-band r at the winning shift and per-band independent peak shifts.
@@ -981,7 +1087,8 @@ def _xcorr_window_detail(
         # independent peak for this band alone
         best_r     = -np.inf
         best_shift = 0
-        for shift in range(-_XCORR_SEARCH_MS, _XCORR_SEARCH_MS + 1, _XCORR_BIN_MS):
+        _detail_search = _xcorr_search_ms(captured_duration_ms)
+        for shift in range(-_detail_search, _detail_search + 1, _XCORR_BIN_MS):
             sig = np.interp(bins + shift, live_ts, live_rms, left=0.0, right=0.0)
             if sig.std() < 1e-6:
                 continue
@@ -1172,13 +1279,36 @@ def _write_csv_row(
 
 
 def _save_offset(uri: str, offset_ms: int, quality: float = 0.0) -> None:
-    """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine."""
+    """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine.
+
+    When the active context is a Set List AND the polled duration is shorter
+    than the captured one (i.e. the song is mix-trimmed in this playlist),
+    write into `meta.setlist_offsets[setlist_id]` instead of the legacy
+    fields, so non-mix plays of the same song aren't polluted.
+    """
+    from datetime import datetime, timezone
     meta = load_audio_shape_meta(uri)
     if meta is None:
         return
-    meta.timestamp_offset_ms = offset_ms
-    meta.offset_quality = round(quality, 3)
-    meta.offset_verification = "auto_verified"
+
+    polled = app_state.current_track.duration_ms if app_state.current_track else 0
+    cut_ms = max(0, int(meta.duration_ms or 0) - int(polled or 0))
+    sl_id = app_state.active_setlist_id if cut_ms > 0 else ""
+
+    if sl_id:
+        if not isinstance(meta.setlist_offsets, dict):
+            meta.setlist_offsets = {}
+        meta.setlist_offsets[sl_id] = {
+            "timestamp_offset_ms": int(offset_ms),
+            "offset_quality": round(quality, 3),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "observed_cut_ms": int(cut_ms),
+        }
+    else:
+        meta.timestamp_offset_ms = offset_ms
+        meta.offset_quality = round(quality, 3)
+        meta.offset_verification = "auto_verified"
+
     meta_path = AUDIO_SHAPES_DIR / meta.npz_file.replace(".npz", ".json")
     meta_path.write_text(meta.model_dump_json(indent=2), encoding="utf-8")
 

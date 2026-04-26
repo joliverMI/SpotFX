@@ -66,5 +66,11 @@ class AudioShapeMeta(BaseModel):
     xcorr_params_hash: str = ""                                # invalidation hash
     # Per-play offset history (most recent first, cap at 20)
     offset_history: list[dict] = Field(default_factory=list)   # [{iso_timestamp, offset_ms, quality, window_count}]
+    # Per-Set-List offset memory. Keyed by Setlist.id (UUID). Each entry is
+    # {timestamp_offset_ms, offset_quality, generated_at, observed_cut_ms}.
+    # Used when the active context is a tracked Set List and the polled
+    # duration shows a measurable cut from the captured duration. Legacy
+    # `timestamp_offset_ms` / `offset_quality` remain the no-Set-List baseline.
+    setlist_offsets: dict[str, dict] = Field(default_factory=dict)
     # Librosa analysis version: 0=none, 1=basic (no MFCC), 2=full (with MFCC)
     librosa_version: int = 0

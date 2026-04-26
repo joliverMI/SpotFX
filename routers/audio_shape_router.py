@@ -110,6 +110,24 @@ async def get_calibration_status(uri: str):
     return auto_offset_service.get_status(uri)
 
 
+@router.get("/auto-offset-stats")
+async def auto_offset_stats(uri: str):
+    """Return per-Set-List + default offset entries for the song's audio shape."""
+    meta = load_audio_shape_meta(uri)
+    if meta is None:
+        raise HTTPException(404, "No audio shape found")
+    return {
+        "uri": uri,
+        "default": {
+            "timestamp_offset_ms": meta.timestamp_offset_ms,
+            "offset_quality": meta.offset_quality,
+            "verification": meta.offset_verification,
+        },
+        "setlist_offsets": meta.setlist_offsets or {},
+        "captured_duration_ms": meta.duration_ms,
+    }
+
+
 @router.patch("/offset")
 async def update_offset(uri: str, timestamp_offset_ms: int,
                         offset_verification: str = "user_verified"):
