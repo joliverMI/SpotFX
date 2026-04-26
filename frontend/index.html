@@ -758,6 +758,7 @@ function updatePerceptionTrimDisplay() {
   const v = _perceptionTrimMs || 0;
   el.textContent = `${v > 0 ? '+' : (v < 0 ? '' : '±')}${v}ms`;
   el.style.color = v === 0 ? 'var(--text-muted)' : 'var(--text)';
+  if (_npCanvas?.setTrim) _npCanvas.setTrim(v);
 }
 
 window.bumpPerceptionTrim = async function(deltaMs, reset) {
@@ -809,6 +810,7 @@ async function loadNpShape(uri) {
     _npCanvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);
     _npCanvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
     _npCanvas.setOffset(meta?.timestamp_offset_ms ?? 0);
+    _npCanvas.setTrim(_perceptionTrimMs || 0);
     // Apply saved scales from settings
     const sc = _npCanvas.scales;
     sc.total = appSettings?.shape_scale_total   ?? 1;

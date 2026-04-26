@@ -113,6 +113,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   let _zoomStartMs  = 0;
   let _zoomEndMs    = 20000;
   let _playheadMs   = null;    // null = no playhead drawn; caller applies latency offset
+  let _trimMs       = 0;       // perception trim — drawn as a secondary playhead when non-zero
 
   // Custom markers override profile trigger markers (used by ai_triggers.html)
   // Each: { timestamp_ms, color, shape: 'triangle'|'diamond', event_color? }
@@ -491,17 +492,38 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
       }
     }
 
-    // Playhead — caller applies audio_latency_ms; _offsetMs corrects capture timing
+    // Playhead — caller applies audio_latency_ms; _offsetMs corrects capture timing.
+    // When a perception trim is active, draw a second (orange) playhead at
+    // _offsetMs + _trimMs so the user can see the effective firing position
+    // alongside the xcorr-only baseline.
     if (_playheadMs !== null) {
-      const displayMs = _playheadMs + _offsetMs;
-      if (displayMs >= startMs && displayMs <= endMs) {
-        const x = timeToX(displayMs);
+      const xcorrMs = _playheadMs + _offsetMs;
+      if (xcorrMs >= startMs && xcorrMs <= endMs) {
+        const x = timeToX(xcorrMs);
         ctx.globalAlpha = 0.85;
         ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
         ctx.setLineDash([4, 3]);
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
         ctx.setLineDash([]);
         ctx.globalAlpha = 1;
+      }
+      if (_trimMs) {
+        const trimDisplayMs = _playheadMs + _offsetMs + _trimMs;
+        if (trimDisplayMs >= startMs && trimDisplayMs <= endMs) {
+          const x = timeToX(trimDisplayMs);
+          ctx.globalAlpha = 0.95;
+          ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 2;
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
+          ctx.setLineDash([]);
+          // Small label above the line so the user knows what it is
+          ctx.fillStyle = '#ff9800';
+          ctx.font = '10px monospace';
+          ctx.textAlign = 'left';
+          const label = `trim ${_trimMs > 0 ? '+' : ''}${_trimMs}ms`;
+          ctx.fillText(label, x + 3, 11);
+          ctx.globalAlpha = 1;
+        }
       }
     }
 
@@ -691,6 +713,8 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     setMaxRms(v) { _maxRms = v ?? null; },
     /** Shift shape data (RMS + marks) by ms to align capture timing with playhead. Triggers/playhead unaffected. */
     setOffset(ms) { _offsetMs = ms ?? 0; draw(); },
+    /** Perception trim — drawn as a secondary (orange) playhead at offset+trim when non-zero. */
+    setTrim(ms) { _trimMs = ms ?? 0; draw(); },
     /** Set auto-offset calibration target. Pass null/[] to clear. */
     setCalibrationTarget(ms, candidates) {
       _calibrationTargetMs   = ms ?? null;
