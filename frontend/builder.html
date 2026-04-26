@@ -118,14 +118,14 @@
     <div class="card">
       <div class="card-title">Triggers</div>
       <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
-        <button class="btn-sm btn-accent" id="btn-zoom">Follow</button>
-        <button class="btn-sm" id="btn-zoom-out">Full Song</button>
-        <select id="setlist-select" title="Trigger set being edited" style="font-size:12px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+        <button class="btn-sm btn-accent" id="btn-zoom" style="white-space:nowrap;">Follow</button>
+        <button class="btn-sm" id="btn-zoom-out" style="white-space:nowrap;">Full Song</button>
+        <select id="setlist-select" title="Trigger set being edited" style="font-size:12px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);width:auto;max-width:160px;flex:0 0 auto;">
           <option value="">Default</option>
         </select>
-        <div style="margin-left:auto;display:flex;gap:6px;">
-          <button class="btn-sm" id="btn-add-trigger">+ Trigger</button>
-          <button class="btn-sm" id="btn-import-triggers" title="Import triggers from analysis or copy from another set" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">Import</button>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <button class="btn-sm" id="btn-add-trigger" style="white-space:nowrap;">+ Trigger</button>
+          <button class="btn-sm" id="btn-import-triggers" title="Import triggers from analysis or copy from another set" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;white-space:nowrap;padding:5px 10px;">Import</button>
         </div>
       </div>
       <div class="timeline-wrap">
@@ -1940,6 +1940,22 @@ async function _saveProfile() {
 async function _persistAfterEdit() { await _saveProfile(); }
 
 // ── Import popup ───────────────────────────────────────────────────────────
+//
+// Merge semantics: "add on top with same-timestamp overwrite". Incoming
+// triggers append to the current slot; if a new trigger lands at exactly the
+// same timestamp_ms as an existing one, the new one replaces it.
+function _mergeAddTriggers(newOnes) {
+  if (!profile) return 0;
+  const byTs = new Map();
+  for (const t of profile.triggers) byTs.set(t.timestamp_ms, t);
+  for (const t of newOnes) byTs.set(t.timestamp_ms, t);
+  profile.triggers.length = 0;
+  for (const t of [...byTs.values()].sort((a, b) => a.timestamp_ms - b.timestamp_ms)) {
+    profile.triggers.push(t);
+  }
+  return newOnes.length;
+}
+
 async function _runAnalyzeImport(category) {
   const uri = getActiveUri();
   if (!uri || !profile) { showToast('No song loaded', 'error'); return; }
@@ -1949,13 +1965,10 @@ async function _runAnalyzeImport(category) {
     const imported = resp.triggers.map(t => ({
       id: uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id, labels: [], enabled: true,
     }));
-    // Overwrite the currently-selected slot.
-    profile.triggers.length = 0;
-    for (const t of imported) profile.triggers.push(t);
-    profile.triggers.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    const added = _mergeAddTriggers(imported);
     await _persistAfterEdit();
     renderTriggers();
-    showToast(`Imported ${imported.length} ${category} (profile: ${resp.training_profile})`, 'success');
+    showToast(`Added ${added} ${category} (profile: ${resp.training_profile})`, 'success');
   } catch (e) {
     showToast(`Analyze ${category} failed: ${e.message || e}`, 'error');
   }
@@ -1963,16 +1976,15 @@ async function _runAnalyzeImport(category) {
 
 async function _runAnalyzeImportBoth() {
   await _runAnalyzeImport('scenes');
-  // Append flares without clearing scenes we just placed.
   const uri = getActiveUri();
   if (!uri || !profile) return;
   try {
     const resp = await GET(`/ai-triggers/analyze-triggers?uri=${encodeURIComponent(uri)}&category=flares`);
     if (!resp.triggers?.length) return;
-    for (const t of resp.triggers) {
-      profile.triggers.push({ id: uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id, labels: [], enabled: true });
-    }
-    profile.triggers.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    const imported = resp.triggers.map(t => ({
+      id: uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id, labels: [], enabled: true,
+    }));
+    _mergeAddTriggers(imported);
     await _persistAfterEdit();
     renderTriggers();
   } catch (e) { showToast(`Import flares failed: ${e.message || e}`, 'error'); }
@@ -2004,20 +2016,18 @@ function _availableCopySources() {
 async function _copyFromSlot(sourceId) {
   if (!profile) return;
   const source = sourceId === '' ? _defaultTriggers : (profile.setlist_triggers?.[sourceId] || []);
-  // Deep-clone with fresh UUIDs so trigger ids don't collide.
-  profile.triggers.length = 0;
-  for (const t of source) {
-    profile.triggers.push({
-      id: uuid(),
-      timestamp_ms: t.timestamp_ms,
-      event_id: t.event_id,
-      labels: [...(t.labels || [])],
-      enabled: t.enabled !== false,
-    });
-  }
+  // Deep-clone with fresh UUIDs so trigger ids don't collide; merge on top.
+  const cloned = source.map(t => ({
+    id: uuid(),
+    timestamp_ms: t.timestamp_ms,
+    event_id: t.event_id,
+    labels: [...(t.labels || [])],
+    enabled: t.enabled !== false,
+  }));
+  const added = _mergeAddTriggers(cloned);
   await _persistAfterEdit();
   renderTriggers();
-  showToast(`Copied ${profile.triggers.length} triggers from ${_slotLabel(sourceId)}`, 'success');
+  showToast(`Added ${added} triggers from ${_slotLabel(sourceId)}`, 'success');
 }
 
 function openImportPopup() {
@@ -2025,30 +2035,37 @@ function openImportPopup() {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;';
   const sources = _availableCopySources();
+  // Match the +Scenes/+Flares/+Both palette: cycle through the same three colours.
+  const _slotColors = [
+    'background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;',
+    'background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;',
+    'background:rgba(255,152,0,0.15);color:#ff9800;border-color:#ff9800;',
+    'background:rgba(156,39,176,0.15);color:#9c27b0;border-color:#9c27b0;',
+    'background:rgba(0,188,212,0.15);color:#00bcd4;border-color:#00bcd4;',
+  ];
   const copyHtml = sources.length
-    ? sources.map(s => `<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;cursor:pointer;border-radius:4px;" class="copy-row">
-        <input type="radio" name="copy-source" value="${s.id}">
-        <span style="flex:1;">${s.label}</span>
-        <span style="font-size:11px;color:var(--text-muted);">${s.count} triggers</span>
-      </label>`).join('')
-    : '<div style="font-size:12px;color:var(--text-muted);padding:6px 4px;">No other slots have triggers for this song yet.</div>';
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">` + sources.map((s, i) =>
+        `<button class="btn-sm ip-copy-btn" data-id="${s.id}" style="white-space:nowrap;${_slotColors[i % _slotColors.length]}">
+          ${s.label} <span style="opacity:0.7;font-weight:400;">(${s.count})</span>
+        </button>`
+      ).join('') + `</div>`
+    : '<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">No other slots have triggers for this song yet.</div>';
 
   overlay.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;width:420px;max-width:90vw;">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;width:440px;max-width:90vw;">
       <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Import Triggers</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">Replaces the currently-selected trigger set: <b>${_slotLabel(_activeSlotId)}</b></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">Adds to the currently-selected set: <b>${_slotLabel(_activeSlotId)}</b>. Triggers at the same timestamp are replaced.</div>
 
       <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Pull from Analysis</div>
       <div style="display:flex;gap:6px;margin-bottom:18px;">
-        <button class="btn-sm" id="ip-scenes" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">+ Scenes</button>
-        <button class="btn-sm" id="ip-flares" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">+ Flares</button>
-        <button class="btn-sm" id="ip-both"   style="background:rgba(255,152,0,0.15);color:#ff9800;border-color:#ff9800;">+ Both</button>
+        <button class="btn-sm" id="ip-scenes" style="white-space:nowrap;background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">+ Scenes</button>
+        <button class="btn-sm" id="ip-flares" style="white-space:nowrap;background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">+ Flares</button>
+        <button class="btn-sm" id="ip-both"   style="white-space:nowrap;background:rgba(255,152,0,0.15);color:#ff9800;border-color:#ff9800;">+ Both</button>
       </div>
 
       <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Copy from Set List</div>
-      <div id="ip-copy-list" style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:6px;margin-bottom:8px;background:var(--surface2);">${copyHtml}</div>
-      <div style="display:flex;gap:6px;justify-content:flex-end;">
-        <button class="btn-sm" id="ip-copy" ${sources.length ? '' : 'disabled'}>Copy</button>
+      ${copyHtml}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:14px;">
         <button class="btn-sm" id="ip-cancel">Cancel</button>
       </div>
     </div>`;
@@ -2059,11 +2076,12 @@ function openImportPopup() {
   overlay.querySelector('#ip-scenes').addEventListener('click', async () => { close(); await _runAnalyzeImport('scenes'); });
   overlay.querySelector('#ip-flares').addEventListener('click', async () => { close(); await _runAnalyzeImport('flares'); });
   overlay.querySelector('#ip-both'  ).addEventListener('click', async () => { close(); await _runAnalyzeImportBoth(); });
-  overlay.querySelector('#ip-copy'  ).addEventListener('click', async () => {
-    const sel = overlay.querySelector('input[name="copy-source"]:checked');
-    if (!sel) { showToast('Pick a source to copy from', 'error'); return; }
-    close();
-    await _copyFromSlot(sel.value);
+  overlay.querySelectorAll('.ip-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      close();
+      await _copyFromSlot(id);
+    });
   });
 }
 
