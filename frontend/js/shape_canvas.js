@@ -114,6 +114,9 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   let _zoomEndMs    = 20000;
   let _playheadMs   = null;    // null = no playhead drawn; caller applies latency offset
   let _trimMs       = 0;       // perception trim — drawn as a secondary playhead when non-zero
+  let _onTrimChange = null;    // (newTrimMs, isFinal:boolean) — called while dragging the orange playhead
+  let _trimDragging = false;
+  let _trimViewport = { startMs: 0, endMs: 1, W: 1 };  // updated each draw, used by drag handler
 
   // Custom markers override profile trigger markers (used by ai_triggers.html)
   // Each: { timestamp_ms, color, shape: 'triangle'|'diamond', event_color? }
@@ -174,6 +177,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     if (!inWindow.length) return;
 
     const timeToX = t => ((t - startMs) / (endMs - startMs)) * W;
+    _trimViewport = { startMs, endMs, W };
     const rawMax  = _maxRms ?? Math.max(...inWindow.map(i => rmsT[i]), 1e-9);
     const maxRms  = rawMax * _scales.total * _scaleOverall;
     const rmsToY  = v => mainH - (v / maxRms) * mainH * 0.9;
@@ -615,6 +619,54 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     window.addEventListener('mouseup', () => { _resizing = false; });
   }
 
+  // ── Perception-trim playhead drag ─────────────────────────────────────────
+  // Click within ±6px of the orange (trim) playhead and drag horizontally;
+  // each move updates _trimMs and notifies the caller. mouseup fires a final
+  // notification so the caller can persist.
+  function _xToTime(x) {
+    const v = _trimViewport;
+    return v.startMs + (x / v.W) * (v.endMs - v.startMs);
+  }
+  function _trimPlayheadX() {
+    if (_playheadMs == null) return null;
+    const xcorrMs = _playheadMs + _offsetMs;
+    const v = _trimViewport;
+    return ((xcorrMs + _trimMs) - v.startMs) / (v.endMs - v.startMs) * v.W;
+  }
+  canvasEl.addEventListener('mousedown', e => {
+    if (!_onTrimChange || _playheadMs == null) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    const tx = _trimPlayheadX();
+    if (tx == null) return;
+    if (Math.abs(x - tx) > 8) return;
+    _trimDragging = true;
+    e.preventDefault();
+  });
+  canvasEl.addEventListener('mousemove', e => {
+    if (_trimDragging || !_onTrimChange || _playheadMs == null) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    const tx = _trimPlayheadX();
+    canvasEl.style.cursor = (tx != null && Math.abs(x - tx) <= 8) ? 'ew-resize' : '';
+  });
+  window.addEventListener('mousemove', e => {
+    if (!_trimDragging || !_onTrimChange || _playheadMs == null) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    const t = _xToTime(x);
+    const xcorrMs = _playheadMs + _offsetMs;
+    const newTrim = Math.round(t - xcorrMs);
+    _trimMs = newTrim;
+    draw();
+    _onTrimChange(newTrim, false);
+  });
+  window.addEventListener('mouseup', () => {
+    if (!_trimDragging) return;
+    _trimDragging = false;
+    if (_onTrimChange) _onTrimChange(_trimMs, true);
+  });
+
   // ── Zoom handle drag (simple non-follow-mode) ─────────────────────────────────
   /**
    * Wire zoom handle drag for a simple timeline bar.
@@ -715,6 +767,9 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     setOffset(ms) { _offsetMs = ms ?? 0; draw(); },
     /** Perception trim — drawn as a secondary (orange) playhead at offset+trim when non-zero. */
     setTrim(ms) { _trimMs = ms ?? 0; draw(); },
+    /** Register a callback fired while the user drags the orange playhead.
+     *  Signature: (newTrimMs, isFinal:boolean) — isFinal=true on mouseup. */
+    setOnTrimChange(fn) { _onTrimChange = fn || null; },
     /** Set auto-offset calibration target. Pass null/[] to clear. */
     setCalibrationTarget(ms, candidates) {
       _calibrationTargetMs   = ms ?? null;

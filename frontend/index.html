@@ -102,7 +102,8 @@
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-250)" title="−250ms (fires earlier)">−250</button>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-100)">−100</button>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-50)">−50</button>
-          <span id="perception-trim-display" style="font-size:11px;color:var(--text);min-width:50px;text-align:center;">±0ms</span>
+          <input id="perception-trim-input" type="number" step="50" value="0" title="Type a value (ms) and press Enter, or drag the orange playhead on the audio shape." style="width:60px;font-size:11px;padding:1px 4px;text-align:center;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+          <span style="font-size:10px;color:var(--text-muted);">ms</span>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(50)">+50</button>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(100)">+100</button>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(250)" title="+250ms (fires later)">+250</button>
@@ -753,13 +754,35 @@ async function loadPerceptionTrim() {
 }
 
 function updatePerceptionTrimDisplay() {
-  const el = document.getElementById('perception-trim-display');
+  const el = document.getElementById('perception-trim-input');
   if (!el) return;
   const v = _perceptionTrimMs || 0;
-  el.textContent = `${v > 0 ? '+' : (v < 0 ? '' : '±')}${v}ms`;
+  // Don't clobber the value while the field is focused (user is typing).
+  if (document.activeElement !== el) el.value = String(v);
   el.style.color = v === 0 ? 'var(--text-muted)' : 'var(--text)';
   if (_npCanvas?.setTrim) _npCanvas.setTrim(v);
 }
+
+async function setPerceptionTrim(absoluteMs) {
+  if (!track?.spotify_uri) return;
+  const params = new URLSearchParams({ uri: track.spotify_uri, value_ms: String(absoluteMs|0) });
+  try {
+    const r = await fetch(`/api/audio-shape/perception-trim?${params}`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    _perceptionTrimMs = data.perception_trim_ms ?? 0;
+    updatePerceptionTrimDisplay();
+  } catch (e) {
+    showToast('Trim failed: ' + (e.message || e), 'error');
+  }
+}
+
+(function wireTrimInput() {
+  const el = document.getElementById('perception-trim-input');
+  if (!el) return;
+  el.addEventListener('change', () => setPerceptionTrim(parseInt(el.value, 10) || 0));
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') el.blur(); });
+})();
 
 window.bumpPerceptionTrim = async function(deltaMs, reset) {
   if (!track?.spotify_uri) return;
@@ -800,6 +823,11 @@ async function loadNpShape(uri) {
   document.getElementById('shape-np-status').textContent = 'Loading…';
   if (!_npCanvas) {
     _npCanvas = createShapeCanvas(document.getElementById('np-canvas'));
+    _npCanvas.setOnTrimChange((newTrim, isFinal) => {
+      _perceptionTrimMs = newTrim;
+      updatePerceptionTrimDisplay();
+      if (isFinal) setPerceptionTrim(newTrim);
+    });
   }
   try {
     const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`);
