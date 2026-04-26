@@ -1997,10 +1997,14 @@ class TriggerEngine:
             # with a negative-offset child that already fired is mid-execution,
             # and its root plan entry may still be ahead in time. Killing it
             # here aborts the sequence mid-flight.
+            # Compare against effective_now, not raw now_ms: with negative
+            # shape_offset_ms the fire window opens later than the song
+            # position, so raw-now would mark triggers stale before they
+            # could fire.
             _stale = [
                 t for t in self._get_active_triggers()
                 if t.enabled and t.id not in self._fired
-                and now_ms - t.timestamp_ms > STALE_FIRE_MS
+                and effective_now - t.timestamp_ms > STALE_FIRE_MS
                 and not any(e.fired for e in self._plan.get(t.id, []))
             ]
             if _stale:
@@ -2015,8 +2019,8 @@ class TriggerEngine:
                     self._preselected_steps.pop(_t.id, None)
                     self._pre_cmd_tasks.pop(_t.id, None)
                 logger.info(
-                    "Stale-fire suppression: skipped %d trigger(s) more than %dms behind song position %d",
-                    len(_stale), STALE_FIRE_MS, now_ms,
+                    "Stale-fire suppression: skipped %d trigger(s) more than %dms behind effective_now=%d (raw song pos=%d, offset=%+d)",
+                    len(_stale), STALE_FIRE_MS, effective_now, now_ms, offset,
                 )
 
             # Keep live timing info in shared state for WS broadcast
