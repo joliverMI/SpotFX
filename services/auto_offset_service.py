@@ -396,22 +396,10 @@ class AutoOffsetService:
                 window_template = np.interp(bins, stored_ts, stored_rms)
                 difficulty = _difficulty_score(window_template, stored_rms)
 
-                # ── NEW candidate: free-search xcorr (multi-band) ────────────
-                new_result = _xcorr_window(
-                    stored_ts, stored_bands, frames, win_start, win_end,
-                    captured_duration_ms=int(meta.duration_ms or 0),
-                )
-                if new_result is not None:
-                    new_offset_ms, new_r = new_result
-                    new_quality = round(new_r * difficulty, 3)
-                else:
-                    new_offset_ms, new_r, new_quality = 0, 0.0, 0.0
-
                 # ── OLD candidate: evaluate stored offset ─────────────────────
-                # Re-read meta so we always compare against the CURRENT stored offset.
-                # When a Set List is active and there's a real cut, prefer its
-                # per-Set-List offset entry so the winner-margin check isn't
-                # comparing against an irrelevant default baseline.
+                # Computed first so its r can feed into NEW's margin gate
+                # (when OLD is anti-correlated, a strong NEW peak is allowed
+                # through even if it has a near-twin — see _xcorr_window).
                 cur_meta = load_audio_shape_meta(uri)
                 stored_offset_ms = cur_meta.timestamp_offset_ms if cur_meta else 0
                 stored_quality_for_old = cur_meta.offset_quality if cur_meta else 0.0
@@ -428,6 +416,18 @@ class AutoOffsetService:
                     old_quality = round(old_r * difficulty, 3)
                 else:
                     old_r, old_quality = 0.0, 0.0
+
+                # ── NEW candidate: free-search xcorr (multi-band) ────────────
+                new_result = _xcorr_window(
+                    stored_ts, stored_bands, frames, win_start, win_end,
+                    captured_duration_ms=int(meta.duration_ms or 0),
+                    old_r=old_r,
+                )
+                if new_result is not None:
+                    new_offset_ms, new_r = new_result
+                    new_quality = round(new_r * difficulty, 3)
+                else:
+                    new_offset_ms, new_r, new_quality = 0, 0.0, 0.0
 
                 # ── Pick winner for this window ───────────────────────────────
                 # Compare r-values directly. NEW must beat OLD's r by at least
@@ -601,30 +601,63 @@ class AutoOffsetService:
             # Save guard: don't pollute the stored offset with weak or
             # one-window-only measurements. A real lock should clear the
             # global threshold AND be confirmed by at least one other window
-            # with a winning shift within ±300ms (beat-coincidence twin peaks
-            # on a single window have caused bad locks before).
+            # with a winning shift within ±300ms.
+            #
+            # The single-best-Q heuristic (best_offset) can pick a window
+            # whose Q happens to be highest while another shift had more
+            # *agreement* across windows. So we cluster confirmation_shifts
+            # within ±tol and prefer the most-agreed cluster when it beats
+            # best_offset's agreement count.
             min_save_q  = float(getattr(settings, "xcorr_save_min_quality", 0.50))
             confirm_tol = int(getattr(settings, "xcorr_save_confirm_tol_ms", 300))
             min_confirm = int(getattr(settings, "xcorr_save_min_confirm", 2))
-            agree = sum(
-                1 for s in confirmation_shifts
-                if abs(s - best_offset) <= confirm_tol
-            )
-            if best_quality < min_save_q:
+
+            def _agree_count(target: int) -> int:
+                return sum(1 for s in confirmation_shifts if abs(s - target) <= confirm_tol)
+
+            # Tally clusters: each unique shift becomes a cluster centre,
+            # collect its members, score by member count then by mean shift.
+            cluster_counts: dict[int, int] = {}
+            for s in confirmation_shifts:
+                cluster_counts[s] = _agree_count(s)
+            best_cluster_centre = max(cluster_counts, key=cluster_counts.get) if cluster_counts else best_offset
+            best_cluster_count  = cluster_counts.get(best_cluster_centre, 0)
+            best_offset_agree   = _agree_count(best_offset)
+
+            # Prefer cluster centre when it has strictly more agreement than
+            # the single-best-Q offset — addresses the "two competing peaks,
+            # one happened to win one window" case.
+            if best_cluster_count > best_offset_agree and best_cluster_count >= min_confirm:
+                # Mean shift of cluster members for finer placement
+                cluster_members = [s for s in confirmation_shifts if abs(s - best_cluster_centre) <= confirm_tol]
+                save_offset = int(round(sum(cluster_members) / len(cluster_members)))
+                save_quality = best_quality  # keep the highest-Q value seen this session
+                logger.info(
+                    "Auto-offset xcorr: cluster override — saving %+dms (cluster=%d windows) "
+                    "instead of single-best %+dms (agree=%d)",
+                    save_offset, best_cluster_count, best_offset, best_offset_agree,
+                )
+            else:
+                save_offset = best_offset
+                save_quality = best_quality
+
+            agree = _agree_count(save_offset)
+
+            if save_quality < min_save_q:
                 logger.info(
                     "Auto-offset xcorr: NOT saving — best Q=%.2f < min %.2f "
                     "(measured=%+dms, stored offset unchanged)",
-                    best_quality, min_save_q, best_offset,
+                    save_quality, min_save_q, save_offset,
                 )
             elif agree < min_confirm:
                 logger.info(
                     "Auto-offset xcorr: NOT saving — only %d window(s) confirmed "
                     "%+dms within ±%dms (need %d) "
                     "(measured Q=%.2f, stored offset unchanged)",
-                    agree, best_offset, confirm_tol, min_confirm, best_quality,
+                    agree, save_offset, confirm_tol, min_confirm, save_quality,
                 )
             else:
-                _save_offset(uri, best_offset, best_quality)
+                _save_offset(uri, save_offset, save_quality)
 
         self._watching_uri = None
         self._task = None
@@ -1081,6 +1114,7 @@ def _xcorr_window(
     win_start: int,
     win_end: int,
     captured_duration_ms: int = 0,
+    old_r: Optional[float] = None,
 ) -> Optional[tuple[int, float]]:
     """
     Multi-band cross-correlation of stored shape window against live audio.
@@ -1177,12 +1211,16 @@ def _xcorr_window(
             win_start, win_end, best_r, threshold, search_ms,
         )
         return None
-    # Margin check: only enforce when top1 is moderate. A strong top1 (>=0.70)
-    # is high-confidence on its own — periodic music legitimately produces
-    # near-twin peaks (beat / bar shifts), and rejecting those would prefer
-    # the OLD baseline even when OLD is wrong.
+    # Margin check is skipped in two cases:
+    #   1. top1 is itself high-confidence (xcorr_high_confidence_r) — strong
+    #      enough on its own, twin peaks just reflect periodic music.
+    #   2. OLD baseline is provably wrong (anti-correlated, r<0) — any peak
+    #      that cleared `threshold` is better than what we have. The
+    #      multi-window save gate will refuse to persist this until another
+    #      window agrees, so letting the measurement through is safe.
     if (require_margin > 0 and second_r > -float("inf")
-            and best_r < 0.70
+            and best_r < settings.xcorr_high_confidence_r
+            and (old_r is None or old_r >= 0.0)
             and (best_r - second_r) < require_margin):
         logger.info(
             "xcorr reject: window [%d–%d]ms ambiguous — top1=%.2f top2=%.2f margin<%.2f (search=±%dms)",

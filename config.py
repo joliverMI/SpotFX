@@ -155,8 +155,12 @@ class Settings(BaseSettings):
     # to reject ambiguous matches: raise acceptance to >=0.55 r and require
     # top1-top2 r margin >= 0.08.
     xcorr_wide_threshold_ms: int = 4000
-    xcorr_wide_min_r: float = 0.55
+    xcorr_wide_min_r: float = 0.50  # was 0.55 — too strict, save-gate handles noise downstream
     xcorr_wide_top1_margin: float = 0.08
+    # Above this single-window r, skip the margin (twin-peak) gate — strong
+    # peaks shouldn't be discarded just because periodic music produces
+    # near-twin coincidences.
+    xcorr_high_confidence_r: float = 0.65  # was 0.70
     # Coarse-then-fine: coarse step (ms) and number of top candidates to refine.
     xcorr_coarse_step_ms: int = 100
     xcorr_top_k_refine: int = 3
