@@ -144,16 +144,16 @@ class TriggerEngine:
             self._last_preview_id = None
             self._last_uri = profile.spotify_uri
             meta = load_audio_shape_meta(profile.spotify_uri)
-            # Prefer a per-Set-List offset when (a) a Set List is active and
-            # (b) the polled duration shows a real cut vs. the captured length.
+            # Prefer a per-Set-List offset whenever a tracked Set List is the
+            # active context. The Spotify API doesn't reliably report mix-trim
+            # via duration, so we trust the user's Set List marking as the
+            # signal that this song's offset may differ in this context.
             sl_offset = None
             sl_source = "default"
             if meta and state.active_setlist_id:
-                cut_ms = max(0, int(meta.duration_ms or 0) - int(profile.duration_ms or 0))
-                if cut_ms > 0:
-                    sl_offset = (meta.setlist_offsets or {}).get(state.active_setlist_id)
-                    if sl_offset:
-                        sl_source = f"setlist:{state.active_setlist_id}"
+                sl_offset = (meta.setlist_offsets or {}).get(state.active_setlist_id)
+                if sl_offset:
+                    sl_source = f"setlist:{state.active_setlist_id}"
             if sl_offset:
                 self._shape_offset_ms = int(sl_offset.get("timestamp_offset_ms", 0))
                 self._shape_offset_quality = float(sl_offset.get("offset_quality", 0.0))

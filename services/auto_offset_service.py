@@ -349,7 +349,7 @@ class AutoOffsetService:
         cut_ms = max(0, int(meta.duration_ms or 0) - int(polled_dur or 0))
         search_ms = _xcorr_search_ms(int(meta.duration_ms or 0))
         sl_id = app_state.active_setlist_id
-        offset_source = f"setlist:{sl_id}" if (sl_id and cut_ms > 0) else "default"
+        offset_source = f"setlist:{sl_id}" if sl_id else "default"
         sl_name = ""
         if sl_id:
             try:
@@ -371,6 +371,11 @@ class AutoOffsetService:
         best_difficulty = 0.0
         n_measurements = 0
         window_queue = list(windows)
+        # Per-window winning shift, only when the winner had a meaningful score
+        # (r >= xcorr_global_threshold). Used after the loop for a multi-window
+        # confirmation gate so a one-window beat-coincidence at high Q doesn't
+        # overwrite a previously good baseline.
+        confirmation_shifts: list[int] = []
 
         try:
             async for frame in capture:
@@ -411,12 +416,10 @@ class AutoOffsetService:
                 stored_offset_ms = cur_meta.timestamp_offset_ms if cur_meta else 0
                 stored_quality_for_old = cur_meta.offset_quality if cur_meta else 0.0
                 if cur_meta and app_state.active_setlist_id:
-                    polled_dur = app_state.current_track.duration_ms if app_state.current_track else 0
-                    if max(0, int(cur_meta.duration_ms or 0) - int(polled_dur or 0)) > 0:
-                        sl_entry = (cur_meta.setlist_offsets or {}).get(app_state.active_setlist_id)
-                        if sl_entry:
-                            stored_offset_ms = int(sl_entry.get("timestamp_offset_ms", 0))
-                            stored_quality_for_old = float(sl_entry.get("offset_quality", 0.0))
+                    sl_entry = (cur_meta.setlist_offsets or {}).get(app_state.active_setlist_id)
+                    if sl_entry:
+                        stored_offset_ms = int(sl_entry.get("timestamp_offset_ms", 0))
+                        stored_quality_for_old = float(sl_entry.get("offset_quality", 0.0))
                 old_r = _eval_at_shift(
                     stored_ts, stored_bands, frames, win_start, win_end,
                     shift_ms=-stored_offset_ms,
@@ -444,6 +447,12 @@ class AutoOffsetService:
                     best_quality   = win_quality
                     best_offset    = win_offset
                     best_difficulty = difficulty
+
+                # Multi-window confirmation: record this winning shift only if
+                # it cleared the global threshold (a real measurement, not a
+                # fallback to a still-bad OLD).
+                if win_r >= settings.xcorr_global_threshold:
+                    confirmation_shifts.append(win_offset)
 
                 n_measurements += 1
 
@@ -589,7 +598,33 @@ class AutoOffsetService:
                 best_offset, best_quality,
             )
         else:
-            _save_offset(uri, best_offset, best_quality)
+            # Save guard: don't pollute the stored offset with weak or
+            # one-window-only measurements. A real lock should clear the
+            # global threshold AND be confirmed by at least one other window
+            # with a winning shift within ±300ms (beat-coincidence twin peaks
+            # on a single window have caused bad locks before).
+            min_save_q  = float(getattr(settings, "xcorr_save_min_quality", 0.50))
+            confirm_tol = int(getattr(settings, "xcorr_save_confirm_tol_ms", 300))
+            min_confirm = int(getattr(settings, "xcorr_save_min_confirm", 2))
+            agree = sum(
+                1 for s in confirmation_shifts
+                if abs(s - best_offset) <= confirm_tol
+            )
+            if best_quality < min_save_q:
+                logger.info(
+                    "Auto-offset xcorr: NOT saving — best Q=%.2f < min %.2f "
+                    "(measured=%+dms, stored offset unchanged)",
+                    best_quality, min_save_q, best_offset,
+                )
+            elif agree < min_confirm:
+                logger.info(
+                    "Auto-offset xcorr: NOT saving — only %d window(s) confirmed "
+                    "%+dms within ±%dms (need %d) "
+                    "(measured Q=%.2f, stored offset unchanged)",
+                    agree, best_offset, confirm_tol, min_confirm, best_quality,
+                )
+            else:
+                _save_offset(uri, best_offset, best_quality)
 
         self._watching_uri = None
         self._task = None
@@ -728,7 +763,12 @@ def _compute_params_hash(npz_mtime: float) -> str:
     raw = (
         f"{s.xcorr_window_size_ms}:{s.xcorr_max_test_gap_ms}:"
         f"{s.xcorr_starting_threshold}:{s.xcorr_global_threshold}:"
-        f"{s.xcorr_max_windows}:{s.xcorr_min_early_windows}:{npz_mtime}"
+        f"{s.xcorr_max_windows}:{s.xcorr_min_early_windows}:"
+        # mix-aware search affects self-similarity radius → must invalidate
+        f"{s.xcorr_search_ms_base}:{s.xcorr_cut_buffer_ms}:"
+        # bump on planner algorithm changes (e.g. self-similarity)
+        f"selfsim_v1:"
+        f"{npz_mtime}"
     )
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
@@ -764,13 +804,39 @@ def _plan_xcorr_windows(
         return []
 
     # ── Step 1: Generate all candidate positions and score them ──────────
+    # Self-similarity radius uses the worst-case mix-aware search: a song's
+    # active Set List buffer can override the global, so use base + global
+    # buffer + headroom so we don't under-search for periodic candidates.
+    sim_search_ms = (
+        settings.xcorr_search_ms_base
+        + settings.xcorr_cut_buffer_ms
+        + 5000  # headroom; per-Set-List buffers can exceed the global default
+    )
+    full_bins = np.arange(0, duration_ms, _XCORR_BIN_MS, dtype=float)
+    full_template = np.interp(full_bins, stored_ts, stored_rms)
+
     candidates: list[dict] = []
     pos = min_start
     while pos + win_size <= max_end:
         bins = np.arange(pos, pos + win_size, _XCORR_BIN_MS, dtype=float)
         window_rms = np.interp(bins, stored_ts, stored_rms)
-        diff = _difficulty_score(window_rms, stored_rms)
-        candidates.append({"start_ms": pos, "end_ms": pos + win_size, "difficulty": round(diff, 4)})
+        raw_diff = _difficulty_score(window_rms, stored_rms)
+        sim_count = _self_similarity_count(
+            window_template=window_rms,
+            full_template=full_template,
+            win_start_ms=pos,
+            search_radius_ms=sim_search_ms,
+        )
+        uniqueness = _uniqueness_factor(sim_count)
+        final_diff = raw_diff * uniqueness
+        candidates.append({
+            "start_ms": pos,
+            "end_ms": pos + win_size,
+            "difficulty": round(final_diff, 4),
+            "raw_difficulty": round(raw_diff, 4),
+            "self_similarity": sim_count,
+            "uniqueness": round(uniqueness, 3),
+        })
         pos += _XCORR_CANDIDATE_STEP
 
     if not candidates:
@@ -858,11 +924,90 @@ def _plan_xcorr_windows(
             break
 
     logger.info(
-        "Auto-offset xcorr: planned %d windows (difficulties: %s)",
+        "Auto-offset xcorr: planned %d windows (sim/diff: %s)",
         len(selected),
-        ", ".join(f"{w['difficulty']:.2f}" for w in selected),
+        ", ".join(
+            f"{w.get('self_similarity', 1)}|{w['difficulty']:.2f}" for w in selected
+        ),
     )
     return selected
+
+
+def _self_similarity_count(
+    window_template: np.ndarray,
+    full_template: np.ndarray,
+    win_start_ms: int,
+    search_radius_ms: int,
+    sim_threshold: float = 0.65,
+    min_peak_separation_ms: int = 800,
+) -> int:
+    """
+    Count how many times this window's pattern occurs within ±search_radius_ms
+    around its own start position in the full song template.
+
+    A truly unique window returns 1 (only matches itself). A window whose
+    pattern repeats N times returns N. The trivial self-match at the
+    candidate's own position is always excluded from the count.
+
+    Both arrays are expected to be sampled at _XCORR_BIN_MS resolution.
+    """
+    n = len(window_template)
+    full_n = len(full_template)
+    if n < 2 or full_n < n:
+        return 1
+
+    # Bin index for the window's own start in full_template
+    self_bin = int(round(win_start_ms / _XCORR_BIN_MS))
+    radius_bins = max(1, int(search_radius_ms / _XCORR_BIN_MS))
+
+    # Pre-normalise the template (z-score)
+    t_mean = float(window_template.mean())
+    t_std  = float(window_template.std())
+    if t_std < 1e-6:
+        return 1
+    template_norm = (window_template - t_mean) / t_std
+
+    # Walk all candidate start bins in [self_bin - radius_bins, self_bin + radius_bins]
+    lo = max(0, self_bin - radius_bins)
+    hi = min(full_n - n, self_bin + radius_bins)
+    r_curve: list[tuple[int, float]] = []  # (bin_offset_from_self, r)
+    for b in range(lo, hi + 1):
+        seg = full_template[b:b + n]
+        s_std = float(seg.std())
+        if s_std < 1e-6:
+            r_curve.append((b - self_bin, 0.0))
+            continue
+        seg_norm = (seg - seg.mean()) / s_std
+        r = float(np.dot(template_norm, seg_norm)) / n
+        r_curve.append((b - self_bin, r))
+
+    # Count peaks above sim_threshold, enforcing min_peak_separation
+    sep_bins = max(1, int(min_peak_separation_ms / _XCORR_BIN_MS))
+    peaks: list[int] = []  # bin offsets of accepted peaks
+    # Sort by r descending; greedily accept if not within sep_bins of an existing peak.
+    for shift_bins, r in sorted(r_curve, key=lambda x: x[1], reverse=True):
+        if r < sim_threshold:
+            break
+        if all(abs(shift_bins - p) >= sep_bins for p in peaks):
+            peaks.append(shift_bins)
+
+    # Exclude the self-match peak (at shift_bins == 0). Accept a small tolerance
+    # in case rounding misaligns by one bin.
+    excluded = sum(1 for p in peaks if abs(p) <= 1)
+    return max(1, len(peaks) - excluded + 1)  # +1 always counts self
+
+
+def _uniqueness_factor(self_sim_count: int) -> float:
+    """Map self-similarity peak count to a difficulty multiplier in [0..1].
+
+    count == 1 → 1.0   (perfectly unique — keep full difficulty)
+    count == 2 → 0.5   (twin pattern — half-credit)
+    count == 3 → 0.25
+    count >= 4 → 0.0   (effectively disqualified)
+    """
+    if self_sim_count <= 1:
+        return 1.0
+    return max(0.0, 1.0 / (2 ** (self_sim_count - 1)))
 
 
 def _difficulty_score(window_rms: np.ndarray, song_rms: np.ndarray) -> float:
@@ -1027,14 +1172,20 @@ def _xcorr_window(
         require_margin = settings.xcorr_wide_top1_margin
 
     if best_r < threshold:
-        logger.debug(
-            "Auto-offset xcorr: window [%d–%d]ms best r=%.2f below threshold %.2f (search=±%dms)",
+        logger.info(
+            "xcorr reject: window [%d–%d]ms best r=%.2f below threshold %.2f (search=±%dms)",
             win_start, win_end, best_r, threshold, search_ms,
         )
         return None
-    if require_margin > 0 and second_r > -float("inf") and (best_r - second_r) < require_margin:
-        logger.debug(
-            "Auto-offset xcorr: window [%d–%d]ms ambiguous — top1=%.2f top2=%.2f margin<%.2f (search=±%dms)",
+    # Margin check: only enforce when top1 is moderate. A strong top1 (>=0.70)
+    # is high-confidence on its own — periodic music legitimately produces
+    # near-twin peaks (beat / bar shifts), and rejecting those would prefer
+    # the OLD baseline even when OLD is wrong.
+    if (require_margin > 0 and second_r > -float("inf")
+            and best_r < 0.70
+            and (best_r - second_r) < require_margin):
+        logger.info(
+            "xcorr reject: window [%d–%d]ms ambiguous — top1=%.2f top2=%.2f margin<%.2f (search=±%dms)",
             win_start, win_end, best_r, second_r, require_margin, search_ms,
         )
         return None
@@ -1281,10 +1432,12 @@ def _write_csv_row(
 def _save_offset(uri: str, offset_ms: int, quality: float = 0.0) -> None:
     """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine.
 
-    When the active context is a Set List AND the polled duration is shorter
-    than the captured one (i.e. the song is mix-trimmed in this playlist),
-    write into `meta.setlist_offsets[setlist_id]` instead of the legacy
-    fields, so non-mix plays of the same song aren't polluted.
+    When the active context is a tracked Set List, write into
+    `meta.setlist_offsets[setlist_id]` instead of the legacy fields, so
+    non-mix plays of the same song aren't polluted by mix-warped offsets.
+    The Spotify API doesn't reliably surface mix-trim, so the active Set
+    List itself is the trigger — the user has explicitly told us this
+    playlist is mix-affected by tracking it.
     """
     from datetime import datetime, timezone
     meta = load_audio_shape_meta(uri)
@@ -1293,7 +1446,7 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0) -> None:
 
     polled = app_state.current_track.duration_ms if app_state.current_track else 0
     cut_ms = max(0, int(meta.duration_ms or 0) - int(polled or 0))
-    sl_id = app_state.active_setlist_id if cut_ms > 0 else ""
+    sl_id = app_state.active_setlist_id
 
     if sl_id:
         if not isinstance(meta.setlist_offsets, dict):
