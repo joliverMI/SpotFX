@@ -28,6 +28,7 @@ storage/palettes.json
 storage/settings.json
 storage/training_profiles.json
 storage/triggerless_profiles.json
+storage/setlists.json
 storage/xcorr_diagnostic.csv
 storage/device_categories.json
 !storage/profiles/.gitkeep

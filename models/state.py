@@ -21,6 +21,9 @@ class SpotifyTrackInfo:
     fetched_at: float          # time.monotonic() when progress_ms was fetched
     device_name: str = ""
     genres: list = field(default_factory=list)
+    # ── Spotify playback context (playlist / album / artist) ──────────────────
+    context_uri: str = ""      # e.g. "spotify:playlist:abc123" or "" if no context
+    context_type: str = ""     # "playlist" | "album" | "artist" | ""
 
     def interpolated_progress_ms(self) -> int:
         """Estimate current progress without an extra API call."""
@@ -74,6 +77,18 @@ class AppState:
 
     # ── Live sync timing info (updated each tick by TriggerEngine) ────────────
     timing: dict = field(default_factory=dict)
+
+    # ── Set List context ─────────────────────────────────────────────────────
+    next_track_uri: str = ""           # spotify URI of queue[0] after the current track
+    next_track_title: str = ""         # display label for the next track
+    active_setlist_id: str = ""        # id of the Set List matching current_track.context_uri
+    # Snapshot of toggles before a Set List override took effect, so we can
+    # restore them when leaving the Set List context.
+    pre_setlist_state: dict = field(default_factory=dict)
+    # Recently observed context URIs → last-known display name. Lets the Set List
+    # page offer "track this playlist" without the user pasting URIs. Bounded
+    # to the most recent ~20 entries.
+    observed_context_uris: dict = field(default_factory=dict)
 
 
 # Singleton instance — import this everywhere

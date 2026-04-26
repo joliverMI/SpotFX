@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     poll_interval_end_song_ms: int = 500  # max burst near end of song
     poll_end_song_burst_duration_ms: int = 3000  # how long to burst at end
     poll_start_burst_duration_ms: int = 4000  # burst after new song detected
+    # When the remaining time to song-end is less than this, drop to the
+    # end-song fast poll rate. Wider than poll_end_song_burst_duration_ms
+    # because mix-playlist transitions flip the URI well before the
+    # song would have ended naturally.
+    pretransition_burst_window_ms: int = 8000
 
     # ── UI / timeline ─────────────────────────────────────────────────────────
     timeline_update_interval_ms: int = 250
@@ -139,6 +144,25 @@ class Settings(BaseSettings):
     xcorr_max_windows: int = 10               # cap on total windows per song
     xcorr_min_early_windows: int = 2          # mandate: at least N windows in first 20s
     xcorr_csv_logging: bool = True            # DIAGNOSTIC CSV — write per-play CSV log
+    # Mix-aware search range: total search window per side =
+    #   xcorr_search_ms_base + max(0, captured_duration - polled_duration) + xcorr_cut_buffer_ms
+    # The buffer absorbs small inaccuracies in capture vs. poll duration; the
+    # delta term grows the search when a Spotify mix transition has trimmed the
+    # song's reported duration. Per-Set-List override on Setlist.xcorr_cut_buffer_ms.
+    xcorr_search_ms_base: int = 2000
+    xcorr_cut_buffer_ms: int = 5000
+    # When the search range exceeds this width (one-sided), tighten thresholds
+    # to reject ambiguous matches: raise acceptance to >=0.55 r and require
+    # top1-top2 r margin >= 0.08.
+    xcorr_wide_threshold_ms: int = 4000
+    xcorr_wide_min_r: float = 0.55
+    xcorr_wide_top1_margin: float = 0.08
+    # Coarse-then-fine: coarse step (ms) and number of top candidates to refine.
+    xcorr_coarse_step_ms: int = 100
+    xcorr_top_k_refine: int = 3
+    # Song-start sniff: fire a dedicated start-window xcorr after this much
+    # accumulated live audio at song load.
+    xcorr_start_sniff_ms: int = 5000
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)

@@ -72,8 +72,30 @@ class WebSocketManager:
                 "is_playing": track.is_playing,
                 "device_name": track.device_name,
                 "genres": track.genres,
+                "context_uri": track.context_uri,
+                "context_type": track.context_type,
             }
         payload["timing"] = state.timing or {}
+        payload["next_track_uri"] = state.next_track_uri
+        payload["next_track_title"] = state.next_track_title
+        # Active Set List, if any
+        if state.active_setlist_id:
+            try:
+                from services import setlist_store
+                sl = setlist_store.get_by_id(state.active_setlist_id)
+                if sl:
+                    payload["active_setlist"] = {
+                        "id": sl.id,
+                        "name": sl.name,
+                        "auto_activate": sl.auto_activate,
+                        "auto_use_analyzed": sl.auto_use_analyzed,
+                        "genre_blending": sl.genre_blending,
+                    }
+            except Exception:
+                pass
+        # Friendly playlist name (when known) for "Playing from: ..." UI line
+        if track and track.context_uri and state.observed_context_uris:
+            payload["context_name"] = state.observed_context_uris.get(track.context_uri, "")
         await self.broadcast(payload)
 
     async def broadcast_trigger_fired(
