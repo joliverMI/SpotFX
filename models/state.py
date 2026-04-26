@@ -82,6 +82,7 @@ class AppState:
     next_track_uri: str = ""           # spotify URI of queue[0] after the current track
     next_track_title: str = ""         # display label for the next track
     active_setlist_id: str = ""        # id of the Set List matching current_track.context_uri
+    active_setlist_xcorr_enabled: bool = True   # mirrored from Setlist.xcorr_enabled (False → skip per-play xcorr)
     # Snapshot of toggles before a Set List override took effect, so we can
     # restore them when leaving the Set List context.
     pre_setlist_state: dict = field(default_factory=dict)

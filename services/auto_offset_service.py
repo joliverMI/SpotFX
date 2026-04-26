@@ -52,6 +52,59 @@ _XCORR_END_BUFFER_MS  = 30_000   # stop 30s before song end
 _XCORR_MARGIN_MS      = 1_000    # wait this far past window_end before computing
 _XCORR_BIN_MS         = 25       # resample resolution (ms)
 _XCORR_CANDIDATE_STEP = 500     # step size for candidate window positions (ms)
+_OFFSET_HISTORY_CAP   = 5       # rolling window of saved offsets per (track, Set List)
+_SETLIST_DELTA_CAP    = 10      # rolling deltas per Set List for cross-track bias hint
+_PRE_FLIGHT_INTRO_MS  = 8_000   # how much of the intro we sample for the pre-flight scan
+_PRE_FLIGHT_MIN_R     = 0.55    # acceptance threshold for pre-flight displacement
+
+
+def _median_offset(history: list[dict]) -> int | None:
+    """Median of `offset_ms` over a saved-offset history list. Returns None
+    if the history is empty. Used to start each play from a stable baseline
+    instead of the (potentially noisy) most recent save.
+    """
+    vals = sorted(int(h.get("offset_ms", 0)) for h in (history or []) if h)
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) // 2
+
+
+def _bump_anti_corr_count(uri: str, setlist_id: str, is_drifting: bool) -> None:
+    """Track consecutive plays where the stored offset for (uri, setlist_id)
+    was anti-correlated. Resets when the play looks normal. Persisted on
+    AudioShapeMeta.setlist_offsets so the Set List page can surface drifting
+    songs without keeping a separate index.
+    """
+    meta = load_audio_shape_meta(uri)
+    if meta is None:
+        return
+    if not isinstance(meta.setlist_offsets, dict):
+        meta.setlist_offsets = {}
+    entry = meta.setlist_offsets.get(setlist_id) or {}
+    if is_drifting:
+        entry["anti_corr_count"] = int(entry.get("anti_corr_count", 0)) + 1
+        entry["last_anti_corr_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        if int(entry.get("anti_corr_count", 0)) > 0:
+            entry["anti_corr_count"] = 0
+    meta.setlist_offsets[setlist_id] = entry
+    meta_path = AUDIO_SHAPES_DIR / meta.npz_file.replace(".npz", ".json")
+    meta_path.write_text(meta.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _record_setlist_delta(setlist_id: str, delta_ms: int) -> None:
+    """Append a (latest_lock − prior_median) sample to the Set List's
+    recent_offset_deltas FIFO. Used as a starting bias for tracks the Set
+    List hasn't seen before."""
+    from services import setlist_store
+    sl = setlist_store.get_by_id(setlist_id)
+    if sl is None:
+        return
+    deltas = list(sl.recent_offset_deltas or [])
+    deltas.insert(0, int(delta_ms))
+    sl.recent_offset_deltas = deltas[:_SETLIST_DELTA_CAP]
+    setlist_store.save(sl)
 
 
 def _xcorr_search_ms(captured_duration_ms: int) -> int:
@@ -190,6 +243,17 @@ class AutoOffsetService:
         if meta is None or not meta.capture_complete:
             return
 
+        # Per-Set-List opt-out: when the active Set List has xcorr_enabled=False
+        # (typically a non-mixed playlist), skip the per-play sweep entirely so
+        # the user's previously-tuned stored offset is used as-is.
+        if app_state.active_setlist_id and not app_state.active_setlist_xcorr_enabled:
+            logger.info(
+                "Auto-offset xcorr: skipped for %s — Set List has xcorr disabled",
+                new_uri,
+            )
+            self._watching_uri = new_uri  # prevent re-checking every poll
+            return
+
         current_pos_ms = track.interpolated_progress_ms()
 
         # Get smart windows (cached or freshly computed)
@@ -199,6 +263,22 @@ class AutoOffsetService:
                        for w in (meta.xcorr_windows or [])}
         # Filter to only windows we can still reach
         windows = [(s, e) for s, e in all_windows if current_pos_ms < s]
+
+        # Pre-flight scan: when the first reachable window starts well after
+        # _PRE_FLIGHT_INTRO_MS and we're still near the song start, inject
+        # a short [0, _PRE_FLIGHT_INTRO_MS] window at the front so the lock
+        # has a chance to land before the planned schedule does. Saves the
+        # song from playing 10–30s under a stale baseline.
+        first_planned = windows[0][0] if windows else None
+        if (current_pos_ms < 1500
+                and first_planned is not None
+                and first_planned >= _PRE_FLIGHT_INTRO_MS
+                and (not all_windows or all_windows[0][0] != 0)):
+            windows.insert(0, (0, _PRE_FLIGHT_INTRO_MS))
+            logger.info(
+                "Auto-offset xcorr: pre-flight window [0–%d]ms prepended for %s",
+                _PRE_FLIGHT_INTRO_MS, uri,
+            )
 
         if not windows:
             logger.info(
@@ -376,6 +456,10 @@ class AutoOffsetService:
         # confirmation gate so a one-window beat-coincidence at high Q doesn't
         # overwrite a previously good baseline.
         confirmation_shifts: list[int] = []
+        # Per-window OLD r values — drives the "OLD is broken" detector that
+        # bumps the Set List slot's anti_corr_count when the stored offset is
+        # consistently anti-correlated this play.
+        old_r_samples: list[float] = []
 
         try:
             async for frame in capture:
@@ -400,13 +484,16 @@ class AutoOffsetService:
                 # Computed first so its r can feed into NEW's margin gate
                 # (when OLD is anti-correlated, a strong NEW peak is allowed
                 # through even if it has a near-twin — see _xcorr_window).
+                # Use median of recent saves rather than the last save alone,
+                # so a single noisy lock doesn't poison subsequent plays.
                 cur_meta = load_audio_shape_meta(uri)
                 stored_offset_ms = cur_meta.timestamp_offset_ms if cur_meta else 0
                 stored_quality_for_old = cur_meta.offset_quality if cur_meta else 0.0
                 if cur_meta and app_state.active_setlist_id:
                     sl_entry = (cur_meta.setlist_offsets or {}).get(app_state.active_setlist_id)
                     if sl_entry:
-                        stored_offset_ms = int(sl_entry.get("timestamp_offset_ms", 0))
+                        med = _median_offset(sl_entry.get("history") or [])
+                        stored_offset_ms = med if med is not None else int(sl_entry.get("timestamp_offset_ms", 0))
                         stored_quality_for_old = float(sl_entry.get("offset_quality", 0.0))
                 old_r = _eval_at_shift(
                     stored_ts, stored_bands, frames, win_start, win_end,
@@ -416,6 +503,7 @@ class AutoOffsetService:
                     old_quality = round(old_r * difficulty, 3)
                 else:
                     old_r, old_quality = 0.0, 0.0
+                old_r_samples.append(float(old_r))
 
                 # ── NEW candidate: free-search xcorr (multi-band) ────────────
                 new_result = _xcorr_window(
@@ -544,6 +632,21 @@ class AutoOffsetService:
             "from %d window(s) for %s",
             best_offset, best_quality, best_difficulty, n_measurements, uri,
         )
+
+        # ── OLD-anti-correlated detector ───────────────────────────────────
+        # When a majority of windows (with non-trivial OLD samples) showed the
+        # stored offset as anti-correlated, the stored baseline doesn't fit
+        # this play. Bump anti_corr_count on the Set List slot so the UI can
+        # surface drifting songs. Reset on any "well-correlated" play.
+        try:
+            if app_state.active_setlist_id and old_r_samples:
+                meaningful = [r for r in old_r_samples if abs(r) > 0.05]
+                neg_count  = sum(1 for r in meaningful if r < -0.10)
+                if meaningful:
+                    is_drifting = neg_count >= max(2, len(meaningful) // 2)
+                    _bump_anti_corr_count(uri, app_state.active_setlist_id, is_drifting)
+        except Exception as exc:
+            logger.debug("anti_corr_count update failed: %s", exc)
 
         # ── Record offset history ──────────────────────────────────────────
         prev_offset_ms = None
@@ -1486,15 +1589,36 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0) -> None:
     cut_ms = max(0, int(meta.duration_ms or 0) - int(polled or 0))
     sl_id = app_state.active_setlist_id
 
+    now_iso = datetime.now(timezone.utc).isoformat()
     if sl_id:
         if not isinstance(meta.setlist_offsets, dict):
             meta.setlist_offsets = {}
+        prev = meta.setlist_offsets.get(sl_id) or {}
+        history = list(prev.get("history") or [])
+        history.insert(0, {
+            "offset_ms": int(offset_ms),
+            "quality": round(quality, 3),
+            "generated_at": now_iso,
+        })
+        history = history[:_OFFSET_HISTORY_CAP]
         meta.setlist_offsets[sl_id] = {
+            **prev,                                          # preserve perception_trim_ms, anti_corr_count, etc
             "timestamp_offset_ms": int(offset_ms),
             "offset_quality": round(quality, 3),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": now_iso,
             "observed_cut_ms": int(cut_ms),
+            "history": history,
+            # Successful save means the stored offset is good for this play —
+            # reset the anti-correlated streak counter.
+            "anti_corr_count": 0,
         }
+        # Track per-Set-List bias delta against the prior median (Option 5).
+        try:
+            prior_median = _median_offset(prev.get("history") or [])
+            if prior_median is not None:
+                _record_setlist_delta(sl_id, int(offset_ms) - int(prior_median))
+        except Exception as exc:
+            logger.debug("setlist delta record failed: %s", exc)
     else:
         meta.timestamp_offset_ms = offset_ms
         meta.offset_quality = round(quality, 3)

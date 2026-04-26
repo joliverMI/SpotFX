@@ -77,6 +77,13 @@
         </div>
 
         <div class="section-title">xcorr / mix tolerance</div>
+        <div class="check-row">
+          <input type="checkbox" id="ed-xcorr-enabled" checked>
+          <label for="ed-xcorr-enabled" style="margin:0;">Run per-play xcorr while this Set List is active</label>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin:-6px 0 10px 24px;">
+          Disable for non-mixed playlists where you've already dialed in good per-song offsets — the stored offset is used as-is.
+        </div>
         <div class="field-group">
           <label>xcorr cut buffer (ms) — leave blank to use global default</label>
           <input type="number" id="ed-cut-buffer" min="0" step="500" placeholder="(global)">
@@ -84,6 +91,7 @@
             Search range = base + max(0, captured − polled) + buffer. The buffer absorbs small inaccuracies in the duration delta.
           </div>
         </div>
+        <div id="anti-corr-warning" style="display:none;background:rgba(255,152,0,0.10);border:1px solid rgba(255,152,0,0.4);padding:8px 10px;border-radius:6px;font-size:12px;color:#ff9800;margin-bottom:10px;"></div>
 
         <div class="section-title">Notes</div>
         <div class="field-group"><textarea id="ed-notes" rows="3" placeholder="Anything to remember about this set list..."></textarea></div>
@@ -149,8 +157,22 @@ function selectSetlist(id) {
   document.getElementById('ed-auto-activate').checked = !!selected.auto_activate;
   document.getElementById('ed-auto-analyzed').checked = !!selected.auto_use_analyzed;
   document.getElementById('ed-genre-blending').value = selected.genre_blending || 'global';
+  document.getElementById('ed-xcorr-enabled').checked = selected.xcorr_enabled !== false;
   document.getElementById('ed-cut-buffer').value = selected.xcorr_cut_buffer_ms == null ? '' : selected.xcorr_cut_buffer_ms;
   document.getElementById('ed-notes').value = selected.notes || '';
+  renderAntiCorrWarning();
+}
+
+async function renderAntiCorrWarning() {
+  const box = document.getElementById('anti-corr-warning');
+  if (!selected?.id) { box.style.display = 'none'; return; }
+  let drift = [];
+  try { drift = await GET(`/setlists/${selected.id}/drift`); } catch { drift = []; }
+  if (!drift.length) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML = `<strong>${drift.length} song${drift.length>1?'s':''} drifting</strong> — stored offset doesn't match recent playback:<br>`
+    + drift.slice(0, 5).map(d => `• ${d.title || d.uri.split(':').pop()} — ${d.anti_corr_count}× anti-correlated`).join('<br>')
+    + (drift.length > 5 ? `<br>+ ${drift.length - 5} more` : '');
 }
 
 function readEditor() {
@@ -162,6 +184,7 @@ function readEditor() {
     auto_activate: document.getElementById('ed-auto-activate').checked,
     auto_use_analyzed: document.getElementById('ed-auto-analyzed').checked,
     genre_blending: document.getElementById('ed-genre-blending').value,
+    xcorr_enabled: document.getElementById('ed-xcorr-enabled').checked,
     xcorr_cut_buffer_ms: cutRaw === '' ? null : Math.max(0, parseInt(cutRaw, 10) || 0),
     notes: document.getElementById('ed-notes').value,
   };

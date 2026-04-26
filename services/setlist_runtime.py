@@ -35,12 +35,14 @@ def apply_for_context(context_uri: str) -> None:
         _snapshot()
         _apply(sl)
         state.active_setlist_id = sl.id
+        state.active_setlist_xcorr_enabled = bool(getattr(sl, "xcorr_enabled", True))
         logger.info(
-            "Set List active: %s (auto_activate=%s, auto_use_analyzed=%s, genre_blending=%s)",
-            sl.name, sl.auto_activate, sl.auto_use_analyzed, sl.genre_blending,
+            "Set List active: %s (auto_activate=%s, auto_use_analyzed=%s, genre_blending=%s, xcorr_enabled=%s)",
+            sl.name, sl.auto_activate, sl.auto_use_analyzed, sl.genre_blending, sl.xcorr_enabled,
         )
     else:
         state.active_setlist_id = ""
+        state.active_setlist_xcorr_enabled = True
 
 
 def active_setlist():

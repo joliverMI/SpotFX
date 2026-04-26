@@ -10,6 +10,9 @@ Effects when active:
   - auto_use_analyzed     — flip state.use_analyzed_triggerless to True
   - genre_blending        — override settings.genre_blending_enabled
   - xcorr_cut_buffer_ms   — override the global xcorr cut buffer (None = use global)
+  - xcorr_enabled         — when False, skip per-play xcorr entirely; use stored
+                            offset as-is (right for non-mixed playlists where the
+                            user has already dialed in a single good offset)
 
 Per-song trigger overrides live on SongProfile.setlist_triggers, keyed by
 this Set List's `id`. Per-Set-List xcorr offsets live on AudioShapeMeta.setlist_offsets,
@@ -29,5 +32,10 @@ class Setlist(BaseModel):
     auto_use_analyzed: bool = False    # force use_analyzed_triggerless on while active
     genre_blending: str = "global"     # "on" | "off" | "global" (defer to settings)
     xcorr_cut_buffer_ms: Optional[int] = None  # None = use settings.xcorr_cut_buffer_ms
+    xcorr_enabled: bool = True         # False → skip per-play xcorr while active
+    # Rolling history of (xcorr-derived offset − stored baseline) deltas observed
+    # while this Set List was active. Used as a starting bias for new tracks
+    # this Set List hasn't seen yet. Most recent first; cap at 10.
+    recent_offset_deltas: list[int] = Field(default_factory=list)
     notes: str = ""
     created_at: str = ""

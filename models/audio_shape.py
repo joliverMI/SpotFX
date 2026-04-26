@@ -59,6 +59,9 @@ class AudioShapeMeta(BaseModel):
     capture_complete: bool = False   # False while still being recorded
     capture_failed: bool = False     # True if capture was discarded (e.g. gap in data)
     timestamp_offset_ms: int = 0     # shift shape data to align capture timing with playhead
+    perception_trim_ms: int = 0      # user-applied nudge layered on top of timestamp_offset_ms
+                                      # (applies when no Set List is active; per-Set-List trims
+                                      # live in setlist_offsets[id].perception_trim_ms)
     offset_verification: Literal["unverified", "auto_verified", "user_verified"] = "unverified"
     offset_quality: float = 0.0      # best quality score: r × difficulty (0–1); 0 = not calibrated
     # Cached smart-window schedule (recomputed if params or shape change)
@@ -67,10 +70,20 @@ class AudioShapeMeta(BaseModel):
     # Per-play offset history (most recent first, cap at 20)
     offset_history: list[dict] = Field(default_factory=list)   # [{iso_timestamp, offset_ms, quality, window_count}]
     # Per-Set-List offset memory. Keyed by Setlist.id (UUID). Each entry is
-    # {timestamp_offset_ms, offset_quality, generated_at, observed_cut_ms}.
-    # Used when the active context is a tracked Set List and the polled
-    # duration shows a measurable cut from the captured duration. Legacy
-    # `timestamp_offset_ms` / `offset_quality` remain the no-Set-List baseline.
+    # {
+    #   timestamp_offset_ms : int    — latest xcorr-derived offset (math)
+    #   offset_quality      : float  — Q score of latest lock
+    #   generated_at        : iso    — when latest lock was saved
+    #   observed_cut_ms     : int
+    #   perception_trim_ms  : int    — user-applied nudge layered on top of xcorr
+    #                                  (positive = fire later; negative = earlier)
+    #   history             : list   — last 5 saved locks, most-recent first:
+    #                                    [{offset_ms, quality, generated_at}]
+    #   anti_corr_count     : int    — consecutive plays where stored offset
+    #                                  was anti-correlated against captured audio
+    #   last_anti_corr_at   : iso
+    # }
+    # Legacy `timestamp_offset_ms` / `offset_quality` remain the no-Set-List baseline.
     setlist_offsets: dict[str, dict] = Field(default_factory=dict)
     # Librosa analysis version: 0=none, 1=basic (no MFCC), 2=full (with MFCC)
     librosa_version: int = 0

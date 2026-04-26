@@ -45,6 +45,36 @@ async def by_context(uri: str):
     return sl.model_dump() if sl else None
 
 
+@router.get("/{setlist_id}/drift")
+async def drift_for_setlist(setlist_id: str):
+    """Songs whose stored offset for this Set List has been anti-correlated
+    on recent plays (anti_corr_count >= 2). Surfaces in the Set List page so
+    the user knows which entries to re-tune."""
+    from config import AUDIO_SHAPES_DIR
+    import json
+    out = []
+    for path in AUDIO_SHAPES_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        entry = (data.get("setlist_offsets") or {}).get(setlist_id)
+        if not entry:
+            continue
+        n = int(entry.get("anti_corr_count") or 0)
+        if n >= 2:
+            out.append({
+                "uri": data.get("spotify_uri"),
+                "title": data.get("title"),
+                "artist": data.get("artist"),
+                "anti_corr_count": n,
+                "last_anti_corr_at": entry.get("last_anti_corr_at"),
+                "stored_offset_ms": entry.get("timestamp_offset_ms"),
+            })
+    out.sort(key=lambda r: r["anti_corr_count"], reverse=True)
+    return out
+
+
 @router.get("/discoverable")
 async def discoverable():
     """Return context URIs SpotFX has observed but isn't tracking yet, so the

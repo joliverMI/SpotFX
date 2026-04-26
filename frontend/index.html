@@ -93,10 +93,21 @@
 
     <!-- ── Audio Shape (expandable) ─────────────────────────────────────── -->
     <div class="card" style="padding:10px 16px;">
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <button id="shape-toggle-btn" class="btn" style="font-size:12px;padding:4px 12px;"
                 onclick="toggleShapeCanvas()">▲ Audio Shape</button>
         <span id="shape-np-status" style="font-size:11px;color:var(--text-muted);"></span>
+        <span style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;">
+          <span style="font-size:11px;color:var(--text-muted);" title="Per-track perception trim — layered on top of the xcorr-derived offset and persisted per (song, Set List). Negative = lighting fires earlier; positive = later.">trim</span>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-250)" title="−250ms (fires earlier)">−250</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-100)">−100</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-50)">−50</button>
+          <span id="perception-trim-display" style="font-size:11px;color:var(--text);min-width:50px;text-align:center;">±0ms</span>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(50)">+50</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(100)">+100</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(250)" title="+250ms (fires later)">+250</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(0, true)" title="Reset to 0">×</button>
+        </span>
       </div>
       <div id="np-canvas-wrap" style="display:;">
         <canvas id="np-canvas"></canvas>
@@ -189,6 +200,7 @@ let useAnalyzedTriggerless = true;
 let analyzedTriggerOverride = false;
 let dinnerPartyMode = false;
 let _timing = {};         // latest timing info from WS state
+let _perceptionTrimMs = 0;  // current per-(track, Set List) trim — refreshed on song change
 let _lastFireInfo = null; // { event_name, scheduled_ms, fired_at_ms, effective_offset_ms }
 let _debugVisible = false;
 let _lastPollTime = 0;    // Date.now() when last state message arrived
@@ -243,7 +255,7 @@ onMessage('state', msg => {
   // Update track FIRST so badge and renderTrack use fresh data
   if (msg.track) {
     const changed = !track || track.spotify_uri !== msg.track.spotify_uri;
-    if (changed) { _calState = null; updateCalPanel(); }
+    if (changed) { _calState = null; updateCalPanel(); _perceptionTrimMs = 0; updatePerceptionTrimDisplay(); }
     track = msg.track;
     updatePauseBtn();
     updateServiceBadge();
@@ -251,6 +263,7 @@ onMessage('state', msg => {
     // Reload profile if track changed, AI toggle changed, or dinner party toggled
     if (changed || prevUseAi !== useAiTriggers || prevDp !== dinnerPartyMode
         || prevAnalyzed !== useAnalyzedTriggerless || prevOverride !== analyzedTriggerOverride) loadProfile();
+    if (changed) loadPerceptionTrim();
   } else {
     track = null;
     updatePauseBtn();
@@ -326,6 +339,14 @@ onMessage('xcorr_window', msg => {
   if (_calState && _calState.uri === msg.uri) {
     _calState.windowResults[`${msg.win_start}-${msg.win_end}`] = msg;
     updateCalPanel();
+  }
+});
+
+onMessage('perception_trim_updated', msg => {
+  if (msg.uri === track?.spotify_uri) {
+    _perceptionTrimMs = msg.perception_trim_ms ?? 0;
+    updatePerceptionTrimDisplay();
+    showToast(`Trim: ${_perceptionTrimMs >= 0 ? '+' : ''}${_perceptionTrimMs}ms`, 'info');
   }
 });
 
@@ -721,6 +742,39 @@ function updateNpShapeStatus() {
   const qStr = (q && q > 0) ? `  Q=${q.toFixed(2)}` : '';
   el.textContent = `${sign}${offset}ms${qStr}`;
 }
+
+async function loadPerceptionTrim() {
+  if (!track?.spotify_uri) return;
+  try {
+    const r = await GET(`/audio-shape/perception-trim?uri=${encodeURIComponent(track.spotify_uri)}`);
+    _perceptionTrimMs = r?.perception_trim_ms ?? 0;
+  } catch { _perceptionTrimMs = 0; }
+  updatePerceptionTrimDisplay();
+}
+
+function updatePerceptionTrimDisplay() {
+  const el = document.getElementById('perception-trim-display');
+  if (!el) return;
+  const v = _perceptionTrimMs || 0;
+  el.textContent = `${v > 0 ? '+' : (v < 0 ? '' : '±')}${v}ms`;
+  el.style.color = v === 0 ? 'var(--text-muted)' : 'var(--text)';
+}
+
+window.bumpPerceptionTrim = async function(deltaMs, reset) {
+  if (!track?.spotify_uri) return;
+  const params = new URLSearchParams({ uri: track.spotify_uri });
+  if (reset) params.set('value_ms', '0');
+  else params.set('delta_ms', String(deltaMs));
+  try {
+    const r = await fetch(`/api/audio-shape/perception-trim?${params}`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    _perceptionTrimMs = data.perception_trim_ms ?? 0;
+    updatePerceptionTrimDisplay();
+  } catch (e) {
+    showToast('Trim failed: ' + (e.message || e), 'error');
+  }
+};
 
 window.toggleShapeCanvas = function() {
   _npShapeVisible = !_npShapeVisible;

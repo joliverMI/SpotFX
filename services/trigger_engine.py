@@ -66,6 +66,70 @@ class _PlanEntry:
     fired: bool = False
 
 
+def _resolve_shape_offset(meta) -> tuple[int, float, str]:
+    """Pick the right offset slot for the current Set List context, then
+    layer the user's perception trim on top. Uses the median of recent
+    saved locks (when present) instead of the latest one alone — keeps a
+    single noisy save from displacing a stable baseline.
+
+    When no per-(track, Set List) entry exists yet, fall back to the
+    track's default offset PLUS the active Set List's recent-deltas bias
+    (median of the last few "lock − baseline" deltas observed in this
+    Set List), so the first play of an unseen track in a mix-warped
+    Set List doesn't start cold.
+
+    Returns (effective_offset_ms, quality, source_label).
+    """
+    if meta is None:
+        return 0, 0.0, "default"
+    sl_id = state.active_setlist_id
+    if sl_id:
+        sl_entry = (meta.setlist_offsets or {}).get(sl_id)
+        if sl_entry:
+            history = sl_entry.get("history") or []
+            base = _median_offset_local(history)
+            if base is None:
+                base = int(sl_entry.get("timestamp_offset_ms", 0))
+            quality = float(sl_entry.get("offset_quality", 0.0))
+            trim = int(sl_entry.get("perception_trim_ms", 0))
+            return base + trim, quality, f"setlist:{sl_id}"
+        # No entry yet — bias the default by the Set List's recent deltas.
+        bias = _setlist_delta_bias(sl_id)
+        if bias != 0:
+            base = int(meta.timestamp_offset_ms or 0) + bias
+            quality = float(meta.offset_quality or 0.0)
+            trim = int(getattr(meta, "perception_trim_ms", 0) or 0)
+            return base + trim, quality, f"default+setlist_bias:{bias:+d}"
+    base = int(meta.timestamp_offset_ms or 0)
+    quality = float(meta.offset_quality or 0.0)
+    trim = int(getattr(meta, "perception_trim_ms", 0) or 0)
+    return base + trim, quality, "default"
+
+
+def _median_offset_local(history: list) -> int | None:
+    vals = sorted(int(h.get("offset_ms", 0)) for h in (history or []) if h)
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) // 2
+
+
+def _setlist_delta_bias(setlist_id: str) -> int:
+    """Median of recent (lock - baseline) deltas observed while this Set
+    List was active. Used as a starting bias for tracks the Set List
+    hasn't seen yet. Returns 0 when there's not enough history."""
+    try:
+        from services import setlist_store
+        sl = setlist_store.get_by_id(setlist_id)
+    except Exception:
+        return 0
+    if not sl or not sl.recent_offset_deltas or len(sl.recent_offset_deltas) < 2:
+        return 0
+    vals = sorted(int(d) for d in sl.recent_offset_deltas)
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) // 2
+
+
 class TriggerEngine:
     """
     Runs a loop that fires triggers against the current song profile.
@@ -144,22 +208,10 @@ class TriggerEngine:
             self._last_preview_id = None
             self._last_uri = profile.spotify_uri
             meta = load_audio_shape_meta(profile.spotify_uri)
-            # Prefer a per-Set-List offset whenever a tracked Set List is the
-            # active context. The Spotify API doesn't reliably report mix-trim
-            # via duration, so we trust the user's Set List marking as the
-            # signal that this song's offset may differ in this context.
-            sl_offset = None
-            sl_source = "default"
-            if meta and state.active_setlist_id:
-                sl_offset = (meta.setlist_offsets or {}).get(state.active_setlist_id)
-                if sl_offset:
-                    sl_source = f"setlist:{state.active_setlist_id}"
-            if sl_offset:
-                self._shape_offset_ms = int(sl_offset.get("timestamp_offset_ms", 0))
-                self._shape_offset_quality = float(sl_offset.get("offset_quality", 0.0))
-            else:
-                self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
-                self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            # Resolve the offset from whichever slot fits the current context
+            # (Set List override or default), then layer the user's perception
+            # trim on top so subjective alignment persists across plays.
+            self._shape_offset_ms, self._shape_offset_quality, sl_source = _resolve_shape_offset(meta)
             logger.info(
                 "load_profile: shape_offset_ms=%+d Q=%.2f source=%s",
                 self._shape_offset_ms, self._shape_offset_quality, sl_source,
@@ -613,14 +665,13 @@ class TriggerEngine:
     # ── Shape offset ─────────────────────────────────────────────────────────
 
     def reload_shape_offset(self, uri: str) -> None:
-        """Hot-reload timestamp_offset_ms for the currently playing song."""
+        """Hot-reload offset for the currently playing song (after xcorr save or trim change)."""
         if self._last_uri == uri:
             meta = load_audio_shape_meta(uri)
-            self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
-            self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            self._shape_offset_ms, self._shape_offset_quality, src = _resolve_shape_offset(meta)
             logger.info(
-                "Shape offset reloaded: %+dms Q=%.2f for %s",
-                self._shape_offset_ms, self._shape_offset_quality, uri,
+                "Shape offset reloaded: %+dms Q=%.2f source=%s for %s",
+                self._shape_offset_ms, self._shape_offset_quality, src, uri,
             )
 
     def _effective_offset_ms(self) -> int:
