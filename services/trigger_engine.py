@@ -144,8 +144,26 @@ class TriggerEngine:
             self._last_preview_id = None
             self._last_uri = profile.spotify_uri
             meta = load_audio_shape_meta(profile.spotify_uri)
-            self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
-            self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            # Prefer a per-Set-List offset when (a) a Set List is active and
+            # (b) the polled duration shows a real cut vs. the captured length.
+            sl_offset = None
+            sl_source = "default"
+            if meta and state.active_setlist_id:
+                cut_ms = max(0, int(meta.duration_ms or 0) - int(profile.duration_ms or 0))
+                if cut_ms > 0:
+                    sl_offset = (meta.setlist_offsets or {}).get(state.active_setlist_id)
+                    if sl_offset:
+                        sl_source = f"setlist:{state.active_setlist_id}"
+            if sl_offset:
+                self._shape_offset_ms = int(sl_offset.get("timestamp_offset_ms", 0))
+                self._shape_offset_quality = float(sl_offset.get("offset_quality", 0.0))
+            else:
+                self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
+                self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            logger.info(
+                "load_profile: shape_offset_ms=%+d Q=%.2f source=%s",
+                self._shape_offset_ms, self._shape_offset_quality, sl_source,
+            )
             # Pre-load librosa beats/tempo once so beat-sequence fires don't
             # each re-parse the JSON file from disk.
             self._beats_cache = load_beats_for_uri(profile.spotify_uri)
@@ -396,6 +414,15 @@ class TriggerEngine:
                 # _triggerless_triggers unchanged; next song won't use Dinner Party
                 # because state.dinner_party_mode is already False
 
+    def _user_triggers(self) -> list[MusicTrigger]:
+        """User-defined triggers, picking the active Set List override if any."""
+        if not self._profile:
+            return []
+        sl_id = state.active_setlist_id
+        if sl_id and self._profile.setlist_triggers.get(sl_id):
+            return self._profile.setlist_triggers[sl_id]
+        return self._profile.triggers
+
     def _get_active_triggers(self) -> list[MusicTrigger]:
         """Return the trigger list to use, in priority order."""
         # 1. Dinner party / explicit triggerless (synthetic)
@@ -404,16 +431,17 @@ class TriggerEngine:
         # 2. Debug override: analyzed triggers replace user triggers
         if state.analyzed_trigger_override and self._analyzed_triggers:
             return self._analyzed_triggers
-        # 3. User-defined triggers (if any are enabled)
-        if self._profile and any(t.enabled for t in self._profile.triggers):
-            return self._profile.triggers
+        # 3. User-defined triggers (if any are enabled), honouring active Set List override
+        user = self._user_triggers()
+        if user and any(t.enabled for t in user):
+            return user
         # 4. Analyzed triggerless (embedded pipeline output)
         if state.use_analyzed_triggerless and self._analyzed_triggers:
             return self._analyzed_triggers
         # 5. AI suggestion set (legacy)
         if state.use_unreviewed_ai_triggers and self._ai_triggers:
             return self._ai_triggers
-        return self._profile.triggers if self._profile else []
+        return self._user_triggers()
 
     # ── Analyzed trigger generation ──────────────────────────────────────────
 
@@ -1998,6 +2026,8 @@ class TriggerEngine:
                 "shape_offset_quality":  self._shape_offset_quality,
                 "ledfx_rtt_ms":          int(state.ledfx_rtt_ms),
                 "buffer_ms":             settings.ledfx_trigger_buffer_ms,
+                "shape_offset_source":   "setlist" if state.active_setlist_id else "default",
+                "active_setlist_id":     state.active_setlist_id,
             }
 
             # ── Pre-select next trigger action for preview ────────────────────

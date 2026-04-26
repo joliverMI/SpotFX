@@ -36,6 +36,11 @@ class SongProfile(BaseModel):
 
     # ── Triggers ──────────────────────────────────────────────────────────────
     triggers: list[MusicTrigger] = Field(default_factory=list)
+    # Per-Set-List trigger overrides. Keyed by Setlist.id (UUID, stable across
+    # context_uri renames). When a Set List is the active context for this
+    # song, the engine prefers its entry here over `triggers`. Empty list /
+    # missing key → fall back to `triggers`.
+    setlist_triggers: dict[str, list[MusicTrigger]] = Field(default_factory=dict)
 
     # ── Audio shape reference ─────────────────────────────────────────────────
     # Relative path under storage/audio_shapes/ or None if not yet captured
