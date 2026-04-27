@@ -110,8 +110,9 @@
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(0, true)" title="Reset to 0">×</button>
         </span>
       </div>
-      <div id="np-canvas-wrap" style="display:;">
+      <div id="np-canvas-wrap" style="display:;position:relative;">
         <canvas id="np-canvas"></canvas>
+        <canvas id="np-canvas-buf" style="display:none;position:absolute;left:0;top:0;width:100%;"></canvas>
       </div>
     </div>
 
@@ -217,10 +218,24 @@ let _resolvedActions = {};        // trigger_id → action_label (shown in trigg
 let _pendingPreviewLabels = {};   // trigger_id → action_label cached as previews arrive
 
 // ── Audio shape canvas (now playing) ───────────────────────────────────────
-let _npCanvas       = null;
+// ── Audio shape: double-buffered canvases ─────────────────────────────────
+// We keep two canvas instances. The "active" canvas is the visible one,
+// painted with the currently playing song. The "buffer" canvas is hidden;
+// when we know the next track URI (from state.next_track_uri) we populate
+// the buffer ahead of time so the swap on URI change is instant. After
+// every swap, the now-stale active canvas becomes the new buffer slot.
+let _npCanvasA      = null;    // wraps <canvas id="np-canvas">
+let _npCanvasB      = null;    // wraps <canvas id="np-canvas-buf">
+let _npActive       = null;    // pointer to whichever of A/B is live
+let _npBuffer       = null;    // pointer to the hidden one
+let _npActiveEl     = null;    // <canvas> element for active (for visibility/style)
+let _npBufferEl     = null;    // <canvas> element for buffer
+let _npActiveUri    = null;    // URI loaded into active
+let _npBufferUri    = null;    // URI loaded (or being loaded) into buffer
+let _npBufferInflight = null;  // promise of in-flight buffer load (so we don't double-fetch)
+let _nextTrackUri   = null;    // latest state.next_track_uri seen in WS state updates
 let _npShapeVisible = true;
 let _npShapeLoaded  = false;
-let _npShapeUri     = null;    // URI of the last shape load attempt (prevents repeated 404s)
 let _npLoopId       = null;
 let appSettings     = null;
 GET('/settings').then(s => { appSettings = s; }).catch(() => {});
@@ -271,6 +286,10 @@ onMessage('state', msg => {
     updateServiceBadge();
     renderNoTrack();
   }
+  // Remember the next-track URI; the actual prefetch fires after loadNpShape
+  // finishes swapping (otherwise we'd race and clobber the buffer slot that
+  // holds the about-to-be-active track).
+  _nextTrackUri = msg.next_track_uri || null;
 });
 
 onMessage('trigger_fired', msg => {
@@ -333,9 +352,9 @@ onMessage('xcorr_start', msg => {
 });
 
 onMessage('xcorr_window', msg => {
-  if (_npCanvas && msg.uri === track?.spotify_uri && msg.applied) {
+  if (_npActive && msg.uri === track?.spotify_uri && msg.applied) {
     const offset = msg.winner === 'new' ? msg.new_offset_ms : msg.old_offset_ms;
-    _npCanvas.setOffset(offset);
+    _npActive.setOffset(offset);
   }
   if (_calState && _calState.uri === msg.uri) {
     _calState.windowResults[`${msg.win_start}-${msg.win_end}`] = msg;
@@ -352,8 +371,8 @@ onMessage('perception_trim_updated', msg => {
 });
 
 onMessage('xcorr_final', msg => {
-  if (_npCanvas && msg.uri === track?.spotify_uri) {
-    _npCanvas.setOffset(msg.offset_ms);
+  if (_npActive && msg.uri === track?.spotify_uri) {
+    _npActive.setOffset(msg.offset_ms);
   }
   if (_calState && _calState.uri === msg.uri) {
     _calState.final = msg;
@@ -760,7 +779,7 @@ function updatePerceptionTrimDisplay() {
   // Don't clobber the value while the field is focused (user is typing).
   if (document.activeElement !== el) el.value = String(v);
   el.style.color = v === 0 ? 'var(--text-muted)' : 'var(--text)';
-  if (_npCanvas?.setTrim) _npCanvas.setTrim(v);
+  if (_npActive?.setTrim) _npActive.setTrim(v);
 }
 
 async function setPerceptionTrim(absoluteMs) {
@@ -815,54 +834,125 @@ window.toggleShapeCanvas = function() {
   }
 };
 
+function _ensureNpCanvases() {
+  if (_npCanvasA) return;
+  _npActiveEl = document.getElementById('np-canvas');
+  _npBufferEl = document.getElementById('np-canvas-buf');
+  const onTrim = (newTrim, isFinal) => {
+    _perceptionTrimMs = newTrim;
+    updatePerceptionTrimDisplay();
+    if (isFinal) setPerceptionTrim(newTrim);
+  };
+  _npCanvasA = createShapeCanvas(_npActiveEl); _npCanvasA.setOnTrimChange(onTrim);
+  _npCanvasB = createShapeCanvas(_npBufferEl); _npCanvasB.setOnTrimChange(onTrim);
+  _npActive = _npCanvasA; _npBuffer = _npCanvasB;
+}
+
+// Populate a canvas with all the data for one URI (meta + data + librosa).
+// Resolves to true on success, false if no audio shape is available.
+async function _populateCanvas(canvas, canvasEl, uri) {
+  const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`).catch(() => null);
+  if (!meta) return false;
+  const data = await GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`).catch(() => null);
+  if (!data) return false;
+  const avgWindow = appSettings?.shape_average_window_ms ?? 500;
+  canvas.setData(data, meta, avgWindow);
+  canvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);
+  canvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
+  canvas.setOffset(meta?.timestamp_offset_ms ?? 0);
+  canvas.setTrim(0);                          // trim is per-track; live one re-applies after swap
+  const sc = canvas.scales;
+  sc.total = appSettings?.shape_scale_total   ?? 1;
+  sc.bass  = appSettings?.shape_scale_bass    ?? 1;
+  sc.mid   = appSettings?.shape_scale_mid     ?? 1;
+  sc.high  = appSettings?.shape_scale_high    ?? 1;
+  canvas.scaleOverall = appSettings?.shape_scale_overall ?? 1;
+  try {
+    const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
+    canvas.setLibrosaMarkers(la);
+    if (!canvas.librosaFilters.mfcc) {
+      canvas.librosaFilters.mfcc = true;
+      // Bump both canvases by one strip row so the swap stays the same size.
+      const curH = canvasEl.offsetHeight || 120;
+      const newH = (curH + 21) + 'px';
+      _npActiveEl.style.height = newH;
+      _npBufferEl.style.height = newH;
+    }
+  } catch { canvas.setLibrosaMarkers(null); }
+  return true;
+}
+
+// Prefetch a future track into the hidden buffer canvas (idempotent).
+async function _prefetchBuffer(uri) {
+  if (!uri || uri === _npActiveUri) return;
+  if (uri === _npBufferUri) return;             // already loaded
+  if (_npBufferInflight) {
+    try { await _npBufferInflight; } catch {}
+    if (uri === _npBufferUri || uri === _npActiveUri) return;
+  }
+  _ensureNpCanvases();
+  _npBufferUri = uri;                            // claim slot before await
+  _npBufferInflight = (async () => {
+    const ok = await _populateCanvas(_npBuffer, _npBufferEl, uri);
+    if (!ok) _npBufferUri = null;
+    _npBufferInflight = null;
+  })();
+  await _npBufferInflight;
+}
+
+// Swap active ↔ buffer DOM elements + canvas instances.
+function _swapBuffers() {
+  [_npCanvasA, _npCanvasB] = [_npCanvasB, _npCanvasA];
+  [_npActiveEl, _npBufferEl] = [_npBufferEl, _npActiveEl];
+  [_npActiveUri, _npBufferUri] = [_npBufferUri, _npActiveUri];
+  _npActive = _npCanvasA; _npBuffer = _npCanvasB;
+  _npActiveEl.style.display  = _npShapeVisible ? '' : 'none';
+  _npBufferEl.style.display  = 'none';
+  _npActiveEl.style.position = '';
+  _npBufferEl.style.position = 'absolute';
+}
+
 async function loadNpShape(uri) {
   if (!uri) return;
-  if (uri === _npShapeUri) return; // already loaded or failed for this URI
-  _npShapeUri = uri;
+  _ensureNpCanvases();
+
+  // Buffer hit — instant swap, no fetch.
+  if (uri === _npBufferUri) {
+    _swapBuffers();
+    _npShapeLoaded = true;
+    updateNpShapeStatus();
+    _npActive.setTrim(_perceptionTrimMs || 0);
+    _startNpLoop();
+    _kickPrefetch();
+    return;
+  }
+  if (uri === _npActiveUri && _npShapeLoaded) {
+    // Same song — just make sure the loop is running.
+    _startNpLoop();
+    _kickPrefetch();
+    return;
+  }
+
   _npShapeLoaded = false;
   document.getElementById('shape-np-status').textContent = 'Loading…';
-  if (!_npCanvas) {
-    _npCanvas = createShapeCanvas(document.getElementById('np-canvas'));
-    _npCanvas.setOnTrimChange((newTrim, isFinal) => {
-      _perceptionTrimMs = newTrim;
-      updatePerceptionTrimDisplay();
-      if (isFinal) setPerceptionTrim(newTrim);
-    });
-  }
+  _npActiveUri = uri;
   try {
-    const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`);
-    if (!meta) throw new Error('no shape');
-    const data = await GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`);
-    const avgWindow = appSettings?.shape_average_window_ms ?? 500;
-    _npCanvas.setData(data, meta, avgWindow);
-    _npCanvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);
-    _npCanvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
-    _npCanvas.setOffset(meta?.timestamp_offset_ms ?? 0);
-    _npCanvas.setTrim(_perceptionTrimMs || 0);
-    // Apply saved scales from settings
-    const sc = _npCanvas.scales;
-    sc.total = appSettings?.shape_scale_total   ?? 1;
-    sc.bass  = appSettings?.shape_scale_bass    ?? 1;
-    sc.mid   = appSettings?.shape_scale_mid     ?? 1;
-    sc.high  = appSettings?.shape_scale_high    ?? 1;
-    _npCanvas.scaleOverall = appSettings?.shape_scale_overall ?? 1;
-    // Try loading librosa overlay
-    try {
-      const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
-      _npCanvas.setLibrosaMarkers(la);
-      // Enable MFCC strip always-on for now playing (after setLibrosaMarkers computed distances)
-      if (!_npCanvas.librosaFilters.mfcc) {
-        _npCanvas.librosaFilters.mfcc = true;
-        // Expand canvas by one strip row
-        const el = document.getElementById('np-canvas');
-        el.style.height = ((el.offsetHeight || 120) + 21) + 'px';
-      }
-    } catch { _npCanvas.setLibrosaMarkers(null); }
+    const ok = await _populateCanvas(_npActive, _npActiveEl, uri);
+    if (!ok) throw new Error('no shape');
+    _npActive.setTrim(_perceptionTrimMs || 0);
     _npShapeLoaded = true;
     updateNpShapeStatus();
     _startNpLoop();
+    _kickPrefetch();
   } catch {
     document.getElementById('shape-np-status').textContent = 'No audio shape for this song';
+  }
+}
+
+function _kickPrefetch() {
+  const next = _nextTrackUri;
+  if (next && next !== _npActiveUri && next !== _npBufferUri) {
+    _prefetchBuffer(next).catch(() => {});
   }
 }
 
@@ -873,17 +963,17 @@ function _stopNpLoop() {
 function _startNpLoop() {
   _stopNpLoop();
   _npLoopId = setInterval(() => {
-    if (!_npShapeLoaded || !_npCanvas || !track) return;
+    if (!_npShapeLoaded || !_npActive || !track) return;
     const progress = getInterpolatedProgress();
     const latency  = appSettings?.audio_latency_ms ?? 0;
     const futureMs = (appSettings?.builder_future_buffer_s ?? 5) * 1000;
     const windowMs = (appSettings?.builder_zoom_window_s  ?? 20) * 1000;
     const zEnd   = Math.min(track.duration_ms, progress + futureMs);
     const zStart = Math.max(0, zEnd - windowMs);
-    _npCanvas.setZoom(zStart, zEnd);
-    if (profile) _npCanvas.setProfile(profile, Object.values(events));
-    _npCanvas.setPlayhead(progress - latency);
-    _npCanvas.draw();
+    _npActive.setZoom(zStart, zEnd);
+    if (profile) _npActive.setProfile(profile, Object.values(events));
+    _npActive.setPlayhead(progress - latency);
+    _npActive.draw();
   }, 25);
 }
 
