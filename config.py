@@ -168,6 +168,19 @@ class Settings(BaseSettings):
     # accumulated live audio at song load.
     xcorr_start_sniff_ms: int = 5000
 
+    # ── Early-feature anchor alignment ─────────────────────────────────────────
+    # At capture time we scan the first `anchor_scan_window_ms` for steep RMS
+    # rises and pick the most-unique candidates. At song start the live capture
+    # is matched against those candidates to snap-align before the per-window
+    # sweep runs.
+    anchor_scan_window_ms: int = 30000        # offline scan covers first 30s
+    anchor_template_radius_ms: int = 1000     # ± slice for template (1s either side of rise)
+    anchor_min_uniqueness: float = 0.15       # offline candidate accept threshold (best - second)
+    anchor_min_rise_ratio: float = 1.4        # rise magnitude vs local baseline
+    anchor_max_candidates: int = 3            # how many to store per song
+    anchor_search_radius_ms: int = 5000       # ± window during live match
+    anchor_min_match_q: float = 0.30          # online match accept threshold (r × uniqueness)
+
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)
     audio_wav_max_songs: int = 50

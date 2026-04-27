@@ -473,11 +473,50 @@ class AutoOffsetService:
         # consistently anti-correlated this play.
         old_r_samples: list[float] = []
 
+        # Early-feature anchor match: consumes the first N seconds of frames
+        # and snap-aligns before the per-window sweep starts evaluating. Only
+        # tried once per sweep, only when the song has stored anchor
+        # candidates AND we entered near song start.
+        from services import anchor_detector
+        anchor_candidates: list[anchor_detector.AnchorCandidate] = [
+            anchor_detector.AnchorCandidate.from_dict(d)
+            for d in (meta.anchor_candidates or [])
+        ]
+        anchor_attempted = False
+        anchor_horizon_ms = (
+            int(settings.anchor_search_radius_ms)
+            + int(settings.anchor_template_radius_ms)
+            + max((c.timestamp_ms for c in anchor_candidates), default=0)
+        )
+
         try:
             async for frame in capture:
                 if not app_state.current_track:
                     break
                 frames.append((frame.timestamp_ms, frame.rms_total, frame.rms_low, frame.rms_high))
+
+                # Anchor snap: try once we've buffered enough live audio to
+                # cover all candidates' search regions. Captured-side timing
+                # is song-relative, same coordinate system as the stored
+                # candidate timestamps.
+                if (anchor_candidates
+                        and not anchor_attempted
+                        and frame.timestamp_ms >= anchor_horizon_ms):
+                    anchor_attempted = True
+                    match = anchor_detector.match_in_frames(anchor_candidates, frames)
+                    if match is not None:
+                        logger.info(
+                            "Anchor: snap matched candidate at song-time=%dms band=%s — "
+                            "offset=%+dms r=%.2f Q=%.2f for %s",
+                            match.candidate.timestamp_ms, match.candidate.band,
+                            match.offset_ms, match.match_r, match.match_q, uri,
+                        )
+                        _save_offset_from_anchor(uri, match.offset_ms, match.match_q)
+                    else:
+                        logger.info(
+                            "Anchor: no candidate matched in %d frames — falling back to per-window sweep for %s",
+                            len(frames), uri,
+                        )
 
                 if not window_queue:
                     break
@@ -1626,7 +1665,17 @@ def _write_csv_row(
 # END DIAGNOSTIC CSV ──────────────────────────────────────────────────────────
 
 
-def _save_offset(uri: str, offset_ms: int, quality: float = 0.0) -> None:
+def _save_offset_from_anchor(uri: str, offset_ms: int, quality: float) -> None:
+    """Anchor-derived save. The anchor's uniqueness is vetted offline, so a
+    single confident match is enough to commit — no cluster gate needed.
+    History entry is tagged `source: "anchor"` so it can be distinguished
+    from cluster-confirmed sweep saves in diagnostics.
+    """
+    _save_offset(uri, offset_ms, quality, source="anchor")
+
+
+def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
+                 source: str = "sweep") -> None:
     """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine.
 
     When the active context is a tracked Set List, write into
@@ -1635,6 +1684,9 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0) -> None:
     The Spotify API doesn't reliably surface mix-trim, so the active Set
     List itself is the trigger — the user has explicitly told us this
     playlist is mix-affected by tracking it.
+
+    `source` is recorded on the history entry: "sweep" for cluster-confirmed
+    per-window xcorr saves, "anchor" for early-feature snap saves.
     """
     from datetime import datetime, timezone
     meta = load_audio_shape_meta(uri)
@@ -1655,6 +1707,7 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0) -> None:
             "offset_ms": int(offset_ms),
             "quality": round(quality, 3),
             "generated_at": now_iso,
+            "source": source,
         })
         history = history[:_OFFSET_HISTORY_CAP]
         meta.setlist_offsets[sl_id] = {

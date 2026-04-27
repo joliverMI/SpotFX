@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from config import AUDIO_SHAPES_DIR
 from models.state import SpotifyTrackInfo
 from api.audio_capture import AudioCaptureStream
@@ -284,6 +286,32 @@ class AudioShapeService:
                 meta = self._recorder.meta
                 meta.music_marks = marks
                 meta.capture_complete = True
+
+                # Detect early-feature anchor candidates for snap-alignment on
+                # subsequent plays. Uses the just-saved npz arrays.
+                try:
+                    from services import anchor_detector
+                    npz = np.load(npz_path)
+                    anchors = anchor_detector.detect_anchor_candidates(
+                        npz["timestamps_ms"],
+                        npz["rms_total"],
+                        npz["rms_low"],
+                        npz["rms_high"],
+                    )
+                    meta.anchor_candidates = [c.to_dict() for c in anchors]
+                    if anchors:
+                        top = anchors[0]
+                        logger.info(
+                            "Anchor: detected %d candidates for %s (top: %dms band=%s rise=%.2f uniqueness=%.2f)",
+                            len(anchors), meta.spotify_uri,
+                            top.timestamp_ms, top.band, top.rise_magnitude, top.uniqueness,
+                        )
+                    else:
+                        logger.info("Anchor: no candidates passed thresholds for %s", meta.spotify_uri)
+                except Exception as exc:
+                    logger.warning("Anchor: detector failed for %s: %s", meta.spotify_uri, exc)
+                    meta.anchor_candidates = []
+
                 sidecar = npz_path.with_suffix(".json")
                 sidecar.write_text(meta.model_dump_json(indent=2), encoding="utf-8")
                 self._songs_captured += 1

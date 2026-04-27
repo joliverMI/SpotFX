@@ -67,6 +67,12 @@ class AudioShapeMeta(BaseModel):
     # Cached smart-window schedule (recomputed if params or shape change)
     xcorr_windows: list[dict] = Field(default_factory=list)   # [{start_ms, end_ms, difficulty}]
     xcorr_params_hash: str = ""                                # invalidation hash
+    # Pre-computed early-feature anchor candidates (computed at capture time).
+    # Each entry: {timestamp_ms, band, rise_magnitude, uniqueness, template: [float, ...]}
+    # Used at song start by anchor_detector.match_in_frames() to snap-align before
+    # the per-window xcorr sweep runs. Empty list = no anchor available, fall back
+    # to the regular sweep.
+    anchor_candidates: list[dict] = Field(default_factory=list)
     # Per-play offset history (most recent first, cap at 20)
     offset_history: list[dict] = Field(default_factory=list)   # [{iso_timestamp, offset_ms, quality, window_count}]
     # Per-Set-List offset memory. Keyed by Setlist.id (UUID). Each entry is

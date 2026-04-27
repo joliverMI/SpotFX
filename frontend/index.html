@@ -97,7 +97,7 @@
         <button id="shape-toggle-btn" class="btn" style="font-size:12px;padding:4px 12px;"
                 onclick="toggleShapeCanvas()">▲ Audio Shape</button>
         <span id="shape-np-status" style="font-size:11px;color:var(--text-muted);"></span>
-        <span style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;">
+        <span class="advanced-only" style="margin-left:auto;align-items:center;gap:4px;">
           <span style="font-size:11px;color:var(--text-muted);" title="Per-track perception trim — layered on top of the xcorr-derived offset and persisted per (song, Set List). Negative = lighting fires earlier; positive = later.">trim</span>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-250)" title="−250ms (fires earlier)">−250</button>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-100)">−100</button>
