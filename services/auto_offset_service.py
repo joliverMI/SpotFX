@@ -447,7 +447,17 @@ class AutoOffsetService:
         frames: list[tuple[int, float, float, float]] = []
         _csv_window_rows: list[dict] = []   # DIAGNOSTIC CSV
         best_quality = -1.0
-        best_offset  = 0
+        # Seed best_offset with the stored offset for this slot so the post-loop
+        # save defaults to "no change" if nothing convincingly displaces it.
+        # (best_quality stays at -1.0 — we don't seed it, otherwise legitimate
+        # corrections at lower Q than the historical lock could never displace.)
+        _seed_meta = load_audio_shape_meta(uri)
+        if _seed_meta is not None and app_state.active_setlist_id:
+            _seed_entry = (_seed_meta.setlist_offsets or {}).get(app_state.active_setlist_id) or {}
+            _seed_med = _median_offset(_seed_entry.get("history") or [])
+            best_offset = _seed_med if _seed_med is not None else int(_seed_entry.get("timestamp_offset_ms", 0))
+        else:
+            best_offset = int(_seed_meta.timestamp_offset_ms or 0) if _seed_meta else 0
         best_difficulty = 0.0
         n_measurements = 0
         window_queue = list(windows)
@@ -583,8 +593,28 @@ class AutoOffsetService:
                 except Exception:
                     pass
 
-                if is_global_best and verification != "user_verified":
+                # Per-window save: only fire when the winning shift has been
+                # corroborated by another window within ±tol. Single-window
+                # coincidences (typically: a weak/coarse early window catching
+                # a fluke peak that scores higher than the historical lock's
+                # *fresh* re-evaluation in the same weak window) no longer
+                # overwrite a good stored baseline. The post-loop save logic
+                # remains the final authority for cluster vs single-best.
+                _save_confirm_tol = int(getattr(settings, "xcorr_save_confirm_tol_ms", 300))
+                _save_min_confirm = int(getattr(settings, "xcorr_save_min_confirm", 2))
+                _agree_now = sum(
+                    1 for s in confirmation_shifts
+                    if abs(s - best_offset) <= _save_confirm_tol
+                )
+                if (is_global_best
+                        and verification != "user_verified"
+                        and _agree_now >= _save_min_confirm):
                     _save_offset(uri, best_offset, best_quality)
+                elif is_global_best and verification != "user_verified":
+                    logger.info(
+                        "Auto-offset xcorr: per-window save deferred — %+dms only %d/%d confirmations within ±%dms",
+                        best_offset, _agree_now, _save_min_confirm, _save_confirm_tol,
+                    )
 
                 # DIAGNOSTIC CSV ──────────────────────────────────────────
                 if settings.xcorr_csv_logging:
