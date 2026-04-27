@@ -178,12 +178,14 @@ class Settings(BaseSettings):
     anchor_min_uniqueness: float = 0.15       # offline candidate accept threshold (best - second)
     anchor_min_rise_ratio: float = 1.4        # rise magnitude vs local baseline
     anchor_max_candidates: int = 3            # how many to store per song
-    # ± window during live match. Was 5000 — too wide for periodic music
-    # (Pepas 100 BPM, 4-beat tile = 2400ms; r=0.77 matched a wrong beat
-    # within the 10s window). 1500 covers DJ mix variance comfortably while
-    # cutting beat-tile false matches.
-    anchor_search_radius_ms: int = 1500
+    anchor_search_radius_ms: int = 5000       # ± window during live match
     anchor_min_match_q: float = 0.30          # online match accept threshold (r × uniqueness)
+    # Hard floor on the match's raw correlation. Beat-tile false matches in
+    # periodic music can score r≈0.75–0.80 against the wrong beat; raising
+    # this threshold rejects those and lets the per-window sweep handle them.
+    # Confirmed-good matches (CANCIÓN, BAD CON NICKY in mixed playlist) score
+    # r≈0.85–0.95, well above the floor.
+    anchor_min_match_r: float = 0.80
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)

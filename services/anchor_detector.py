@@ -306,6 +306,13 @@ def match_in_frames(
         if best_centre_bin < 0:
             continue
         match_q = best_r * cand.uniqueness
+        min_r = float(getattr(settings, "anchor_min_match_r", 0.0))
+        if best_r < min_r:
+            logger.info(
+                "Anchor: candidate at %dms band=%s declined — match_r=%.2f below %.2f (Q=%.2f, would beat min_q)",
+                cand.timestamp_ms, cand.band, best_r, min_r, match_q,
+            )
+            continue
         if match_q < min_q:
             logger.info(
                 "Anchor: candidate at %dms band=%s declined — match_r=%.2f Q=%.2f below %.2f",
