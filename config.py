@@ -178,7 +178,11 @@ class Settings(BaseSettings):
     anchor_min_uniqueness: float = 0.15       # offline candidate accept threshold (best - second)
     anchor_min_rise_ratio: float = 1.4        # rise magnitude vs local baseline
     anchor_max_candidates: int = 3            # how many to store per song
-    anchor_search_radius_ms: int = 5000       # ± window during live match
+    # ± window during live match. Was 5000 — too wide for periodic music
+    # (Pepas 100 BPM, 4-beat tile = 2400ms; r=0.77 matched a wrong beat
+    # within the 10s window). 1500 covers DJ mix variance comfortably while
+    # cutting beat-tile false matches.
+    anchor_search_radius_ms: int = 1500
     anchor_min_match_q: float = 0.30          # online match accept threshold (r × uniqueness)
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
