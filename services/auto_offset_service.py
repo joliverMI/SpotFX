@@ -474,20 +474,23 @@ class AutoOffsetService:
         old_r_samples: list[float] = []
 
         # Early-feature anchor match: consumes the first N seconds of frames
-        # and snap-aligns before the per-window sweep starts evaluating. Only
-        # tried once per sweep, only when the song has stored anchor
-        # candidates AND we entered near song start.
+        # and snap-aligns before the per-window sweep starts evaluating.
+        # Progressive: each candidate has its own horizon (timestamp + search
+        # radius + template radius). As frame time crosses a new horizon, try
+        # matching against ALL eligible candidates so far (in uniqueness order
+        # so the best ones are tried first). The earliest unique candidate
+        # that locks fires the snap — saves wall-clock when an early candidate
+        # is the right one, and only waits for the latest candidate when
+        # earlier ones don't confidently match.
         from services import anchor_detector
         anchor_candidates: list[anchor_detector.AnchorCandidate] = [
             anchor_detector.AnchorCandidate.from_dict(d)
             for d in (meta.anchor_candidates or [])
         ]
-        anchor_attempted = False
-        anchor_horizon_ms = (
-            int(settings.anchor_search_radius_ms)
-            + int(settings.anchor_template_radius_ms)
-            + max((c.timestamp_ms for c in anchor_candidates), default=0)
-        )
+        anchor_done = False
+        _anchor_radius = int(settings.anchor_search_radius_ms) + int(settings.anchor_template_radius_ms)
+        anchor_horizons: list[int] = [c.timestamp_ms + _anchor_radius for c in anchor_candidates]
+        anchor_last_eligible = 0
 
         try:
             async for frame in capture:
@@ -495,28 +498,38 @@ class AutoOffsetService:
                     break
                 frames.append((frame.timestamp_ms, frame.rms_total, frame.rms_low, frame.rms_high))
 
-                # Anchor snap: try once we've buffered enough live audio to
-                # cover all candidates' search regions. Captured-side timing
-                # is song-relative, same coordinate system as the stored
-                # candidate timestamps.
-                if (anchor_candidates
-                        and not anchor_attempted
-                        and frame.timestamp_ms >= anchor_horizon_ms):
-                    anchor_attempted = True
-                    match = anchor_detector.match_in_frames(anchor_candidates, frames)
-                    if match is not None:
-                        logger.info(
-                            "Anchor: snap matched candidate at song-time=%dms band=%s — "
-                            "offset=%+dms r=%.2f Q=%.2f for %s",
-                            match.candidate.timestamp_ms, match.candidate.band,
-                            match.offset_ms, match.match_r, match.match_q, uri,
-                        )
-                        _save_offset_from_anchor(uri, match.offset_ms, match.match_q)
-                    else:
-                        logger.info(
-                            "Anchor: no candidate matched in %d frames — falling back to per-window sweep for %s",
-                            len(frames), uri,
-                        )
+                # Anchor snap (progressive). Each candidate has its own
+                # horizon; as frame time crosses a new one, retry matching
+                # against the full set of eligible candidates so far. We try
+                # in uniqueness order (already the order of anchor_candidates)
+                # so the strongest candidate that becomes available has first
+                # shot. Stops on first match or when all candidates have been
+                # tried.
+                if anchor_candidates and not anchor_done:
+                    eligible_count = sum(1 for h in anchor_horizons if frame.timestamp_ms >= h)
+                    if eligible_count > anchor_last_eligible:
+                        eligible = [
+                            c for c, h in zip(anchor_candidates, anchor_horizons)
+                            if frame.timestamp_ms >= h
+                        ]
+                        match = anchor_detector.match_in_frames(eligible, frames)
+                        if match is not None:
+                            logger.info(
+                                "Anchor: snap matched candidate at song-time=%dms band=%s — "
+                                "offset=%+dms r=%.2f Q=%.2f (tried %d/%d candidates) for %s",
+                                match.candidate.timestamp_ms, match.candidate.band,
+                                match.offset_ms, match.match_r, match.match_q,
+                                eligible_count, len(anchor_candidates), uri,
+                            )
+                            _save_offset_from_anchor(uri, match.offset_ms, match.match_q)
+                            anchor_done = True
+                        elif eligible_count >= len(anchor_candidates):
+                            logger.info(
+                                "Anchor: no candidate matched in %d frames — falling back to per-window sweep for %s",
+                                len(frames), uri,
+                            )
+                            anchor_done = True
+                        anchor_last_eligible = eligible_count
 
                 if not window_queue:
                     break
