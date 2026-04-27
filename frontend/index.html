@@ -252,6 +252,10 @@ onMessage('state', msg => {
     document.getElementById('effective-offset').textContent = _timing.effective_offset_ms ?? '—';
     updateDebugPanel();
     updateNpShapeStatus();
+    // Keep the white playhead in sync with the engine's actual xcorr offset
+    // (median of recent saves), so it matches the status number's xcorr part
+    // and the orange playhead's position is exactly the trim away.
+    if (_npActive?.setOffset) _npActive.setOffset(_engineXcorrOffsetMs());
   }
 
   const prevUseAi = useAiTriggers;
@@ -834,6 +838,15 @@ window.toggleShapeCanvas = function() {
   }
 };
 
+// The engine's actual xcorr offset (median of recent saves, no perception
+// trim). Falls back to the meta's last-saved timestamp_offset_ms when the
+// WS timing block hasn't arrived yet.
+function _engineXcorrOffsetMs(metaFallback) {
+  const tot = _timing?.shape_offset_ms;
+  if (tot != null) return tot - (_perceptionTrimMs || 0);
+  return metaFallback?.timestamp_offset_ms ?? 0;
+}
+
 function _ensureNpCanvases() {
   if (_npCanvasA) return;
   _npActiveEl = document.getElementById('np-canvas');
@@ -859,7 +872,9 @@ async function _populateCanvas(canvas, canvasEl, uri) {
   canvas.setData(data, meta, avgWindow);
   canvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);
   canvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
-  canvas.setOffset(meta?.timestamp_offset_ms ?? 0);
+  // Use the engine's resolved xcorr offset (median of recent saves) so the
+  // white playhead matches the displayed status number's xcorr part.
+  canvas.setOffset(_engineXcorrOffsetMs(meta));
   canvas.setTrim(0);                          // trim is per-track; live one re-applies after swap
   const sc = canvas.scales;
   sc.total = appSettings?.shape_scale_total   ?? 1;
