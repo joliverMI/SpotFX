@@ -280,7 +280,14 @@ onMessage('state', msg => {
   // Update track FIRST so badge and renderTrack use fresh data
   if (msg.track) {
     const changed = !track || track.spotify_uri !== msg.track.spotify_uri;
-    if (changed) { _calState = null; updateCalPanel(); _perceptionTrimMs = 0; updatePerceptionTrimDisplay(); }
+    if (changed) {
+      _calState = null;
+      updateCalPanel();
+      _perceptionTrimMs = 0;
+      updatePerceptionTrimDisplay();
+      _npStartingOffsetMs = null;     // re-capture starting value on next state tick
+      _npStartingQuality = null;
+    }
     track = msg.track;
     updatePauseBtn();
     updateServiceBadge();
@@ -780,15 +787,39 @@ document.getElementById('trigger-list-wrap').addEventListener('scroll', () => {
 }, { passive: true });
 
 // ── Audio shape canvas ─────────────────────────────────────────────────────
+let _npStartingOffsetMs = null;   // captured on first state update of each song
+let _npStartingQuality = null;
+
 function updateNpShapeStatus() {
   const el = document.getElementById('shape-np-status');
   if (!el) return;
   const offset = _timing.shape_offset_ms;
   if (offset == null) return;
-  const sign = offset >= 0 ? '+' : '';
   const q = _timing.shape_offset_quality;
-  const qStr = (q && q > 0) ? `  Q=${q.toFixed(2)}` : '';
-  el.textContent = `${sign}${offset}ms${qStr}`;
+
+  // Capture the starting offset the first time we see a value for the current
+  // song. _npStartingOffsetMs is reset to null on every URI change.
+  if (_npStartingOffsetMs == null) {
+    _npStartingOffsetMs = offset;
+    _npStartingQuality = q;
+  }
+
+  const fmt = (o, qv) => {
+    const s = o >= 0 ? '+' : '';
+    const qs = (qv && qv > 0) ? ` Q=${qv.toFixed(2)}` : '';
+    return `${s}${o}ms${qs}`;
+  };
+
+  // When the engine has snapped to a different offset than the starting one,
+  // show both: "start … → now …". Otherwise just the single value.
+  if (_npStartingOffsetMs !== offset) {
+    el.innerHTML =
+      `<span style="color:var(--text-muted);">start ${fmt(_npStartingOffsetMs, _npStartingQuality)}</span>` +
+      ` <span style="color:var(--text-muted);">→</span> ` +
+      `<span style="color:var(--text);font-weight:600;">now ${fmt(offset, q)}</span>`;
+  } else {
+    el.textContent = fmt(offset, q);
+  }
 }
 
 async function loadPerceptionTrim() {
