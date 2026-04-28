@@ -186,6 +186,13 @@ class Settings(BaseSettings):
     # Confirmed-good matches (CANCIÓN, BAD CON NICKY in mixed playlist) score
     # r≈0.85–0.95, well above the floor.
     anchor_min_match_r: float = 0.80
+    # Cross-candidate validation. Single-candidate high-r matches in periodic
+    # music can be off by 1-4 beats. Requiring N candidates to agree on the
+    # same offset within ±tolerance is much harder for beat-tile twins to
+    # spoof: each candidate's twin sits at a different per-candidate shift,
+    # so they don't all converge on the same wrong offset.
+    anchor_min_agreeing_candidates: int = 2
+    anchor_agree_tolerance_ms: int = 200
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)

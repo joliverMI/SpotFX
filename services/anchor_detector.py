@@ -237,8 +237,20 @@ def match_in_frames(
     candidates: list[AnchorCandidate],
     frames: list[tuple],
 ) -> Optional[AnchorMatch]:
-    """Try each anchor candidate (uniqueness order) against the captured
-    frames. Returns the first match whose match_q clears the threshold.
+    """Cross-validate matches across all eligible candidates. A single
+    high-r template match in periodic music can lock to a beat-tile twin
+    position 1–2 beats off the true alignment (observed: r=0.84 still
+    landed 2 beats wrong). Requiring TWO independent candidates to agree
+    on the same offset (within ±anchor_agree_tolerance_ms) is much harder
+    to fool — periodic peaks at different timestamps would each need to
+    coincide with the same beat-tile shift, which they generally don't.
+
+    Each candidate produces a (best_r, offset) regardless of whether it
+    individually clears thresholds. Then group offsets that agree within
+    tolerance. If a group of size ≥ anchor_min_agreeing_candidates exists,
+    snap with the median offset and the highest match_r in the group.
+
+    Returns None when fewer than the required candidates agree.
 
     `frames` is the list[tuple] used by auto_offset_service: each entry is
     `(timestamp_ms, rms_total, rms_low, rms_high)`. The matcher picks the
@@ -249,15 +261,17 @@ def match_in_frames(
     if not candidates or not frames:
         return None
     search_radius_ms = int(settings.anchor_search_radius_ms)
-    min_q = float(settings.anchor_min_match_q)
     template_radius_ms = int(settings.anchor_template_radius_ms)
+    min_r = float(getattr(settings, "anchor_min_match_r", 0.0))
+    min_q = float(settings.anchor_min_match_q)
+    agree_tol_ms = int(getattr(settings, "anchor_agree_tolerance_ms", 200))
+    min_agree = int(getattr(settings, "anchor_min_agreeing_candidates", 2))
 
     ts = np.array([f[0] for f in frames], dtype=float)
     if ts.size < 2:
         return None
     band_index = {"rms_total": 1, "rms_low": 2, "rms_high": 3}
 
-    # Build resampled live signals once per needed band.
     earliest_ms = max(0.0, float(ts[0]))
     latest_ms = float(ts[-1])
     live_grid = np.arange(earliest_ms, latest_ms, _BIN_MS, dtype=float)
@@ -269,20 +283,18 @@ def match_in_frames(
         values = np.array([f[idx] for f in frames], dtype=float)
         live_signals[cand.band] = np.interp(live_grid, ts, values)
 
-    # Try each candidate.
+    # Per-candidate evaluation. Collect everyone's best peak; cross-validation
+    # happens after this loop.
+    proposals: list[tuple[AnchorCandidate, int, float]] = []  # (cand, offset, r)
     for cand in candidates:
         live = live_signals.get(cand.band)
         tmpl = np.asarray(cand.template, dtype=float)
         if live is None or tmpl.size == 0:
             continue
-        # Search a ±search_radius_ms band around cand.timestamp_ms in LIVE time.
         tmpl_radius_bins = max(1, template_radius_ms // _BIN_MS)
         live_centre_ms = cand.timestamp_ms
-        search_lo_ms = live_centre_ms - search_radius_ms
-        search_hi_ms = live_centre_ms + search_radius_ms
-        # Convert to live_grid bin indices.
-        live_lo = int(round((search_lo_ms - earliest_ms) / _BIN_MS))
-        live_hi = int(round((search_hi_ms - earliest_ms) / _BIN_MS))
+        live_lo = int(round((live_centre_ms - search_radius_ms - earliest_ms) / _BIN_MS))
+        live_hi = int(round((live_centre_ms + search_radius_ms - earliest_ms) / _BIN_MS))
         live_lo = max(tmpl_radius_bins, live_lo)
         live_hi = min(len(live) - tmpl_radius_bins, live_hi)
         if live_hi <= live_lo + 1:
@@ -306,32 +318,59 @@ def match_in_frames(
         if best_centre_bin < 0:
             continue
         match_q = best_r * cand.uniqueness
-        min_r = float(getattr(settings, "anchor_min_match_r", 0.0))
         if best_r < min_r:
             logger.info(
-                "Anchor: candidate at %dms band=%s declined — match_r=%.2f below %.2f (Q=%.2f, would beat min_q)",
-                cand.timestamp_ms, cand.band, best_r, min_r, match_q,
+                "Anchor: candidate at %dms band=%s declined (cross-val pool) — r=%.2f below %.2f",
+                cand.timestamp_ms, cand.band, best_r, min_r,
             )
             continue
         if match_q < min_q:
             logger.info(
-                "Anchor: candidate at %dms band=%s declined — match_r=%.2f Q=%.2f below %.2f",
-                cand.timestamp_ms, cand.band, best_r, match_q, min_q,
+                "Anchor: candidate at %dms band=%s declined (cross-val pool) — Q=%.2f below %.2f",
+                cand.timestamp_ms, cand.band, match_q, min_q,
             )
             continue
         live_match_ms = earliest_ms + best_centre_bin * _BIN_MS
-        # Stored anchor is at `cand.timestamp_ms` in song coordinates.
-        # Live capture has the same musical event at `live_match_ms` in song
-        # coordinates (frame timestamp_ms is already song-relative).
-        # The capture's "song time" is shifted vs. stored shape by
-        # offset_ms = stored_time - live_time. A positive offset means live
-        # arrived later than stored expected, so trigger fire times shift
-        # into the future — same convention as the rest of auto_offset_service.
         offset_ms = int(round(cand.timestamp_ms - live_match_ms))
-        return AnchorMatch(
-            offset_ms=offset_ms,
-            match_r=round(best_r, 3),
-            match_q=round(match_q, 3),
-            candidate=cand,
+        proposals.append((cand, offset_ms, best_r))
+
+    if len(proposals) < min_agree:
+        if proposals:
+            logger.info(
+                "Anchor: cross-validation deferred — only %d candidate(s) above thresholds, need %d agreeing",
+                len(proposals), min_agree,
+            )
+        return None
+
+    # Find the largest cluster of proposals whose offsets agree within tolerance.
+    best_group: list[tuple[AnchorCandidate, int, float]] = []
+    for i, (_, anchor_off, _) in enumerate(proposals):
+        group = [p for p in proposals if abs(p[1] - anchor_off) <= agree_tol_ms]
+        if len(group) > len(best_group):
+            best_group = group
+    if len(best_group) < min_agree:
+        offsets = [o for _, o, _ in proposals]
+        logger.info(
+            "Anchor: cross-validation failed — %d proposals %s but no group of %d agrees within ±%dms",
+            len(proposals), offsets, min_agree, agree_tol_ms,
         )
-    return None
+        return None
+
+    # Snap with the median offset and the highest match_r in the group.
+    group_offsets = sorted(o for _, o, _ in best_group)
+    n = len(group_offsets)
+    median_offset = group_offsets[n // 2] if n % 2 else (group_offsets[n // 2 - 1] + group_offsets[n // 2]) // 2
+    best_member = max(best_group, key=lambda p: p[2])
+    best_cand, _, best_r = best_member
+    match_q = best_r * best_cand.uniqueness
+    logger.info(
+        "Anchor: %d/%d candidates agreed (offsets=%s, group=%d) — using median %+dms",
+        len(best_group), len(proposals), [o for _, o, _ in proposals],
+        len(best_group), median_offset,
+    )
+    return AnchorMatch(
+        offset_ms=median_offset,
+        match_r=round(best_r, 3),
+        match_q=round(match_q, 3),
+        candidate=best_cand,
+    )
