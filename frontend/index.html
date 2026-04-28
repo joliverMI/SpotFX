@@ -383,6 +383,21 @@ onMessage('perception_trim_updated', msg => {
   }
 });
 
+// Update playhead + status the instant a save happens, instead of waiting
+// for the next 1Hz state broadcast. Applies to anchor snap + sweep saves.
+onMessage('shape_offset_updated', msg => {
+  if (msg.uri !== track?.spotify_uri) return;
+  if (_timing) {
+    _timing.shape_offset_ms = msg.offset_ms;
+    if (msg.quality != null) _timing.shape_offset_quality = msg.quality;
+  }
+  updateNpShapeStatus();
+  if (_npActive?.setOffset) {
+    _npActive.setOffset(_engineXcorrOffsetMs());
+    _npActive.draw();
+  }
+});
+
 onMessage('xcorr_final', msg => {
   if (_npActive && msg.uri === track?.spotify_uri) {
     _npActive.setOffset(msg.offset_ms);
