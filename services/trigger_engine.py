@@ -106,6 +106,17 @@ def _resolve_shape_offset(meta) -> tuple[int, float, str]:
     return base + trim, quality, "default"
 
 
+def _perception_trim_for(meta) -> int:
+    """Return the perception trim that applies for the current Set List context."""
+    if meta is None:
+        return 0
+    sl_id = state.active_setlist_id
+    if sl_id:
+        sl_entry = (meta.setlist_offsets or {}).get(sl_id) or {}
+        return int(sl_entry.get("perception_trim_ms", 0))
+    return int(getattr(meta, "perception_trim_ms", 0) or 0)
+
+
 def _median_offset_local(history: list) -> int | None:
     vals = sorted(int(h.get("offset_ms", 0)) for h in (history or []) if h)
     if not vals:
@@ -147,6 +158,12 @@ class TriggerEngine:
         self._last_action: dict[str, str] = {}  # event_id -> action index/key
         self._shape_offset_ms: int = 0       # cached from AudioShapeMeta.timestamp_offset_ms
         self._shape_offset_quality: float = 0.0  # cached quality score (r × difficulty)
+        # Highest match-quality observed during the current play. Reset on URI
+        # change. Anchor and sweep saves only override the engine's live offset
+        # when their quality strictly beats this — gives priority to confident
+        # matches mid-play while still letting median (loaded at song start)
+        # be the floor when no match clears it.
+        self._play_best_quality: float = 0.0
         # Per-song librosa cache — avoids re-reading the JSON every beat-sequence fire.
         self._beats_cache: Optional[list] = None
         self._tempo_cache: Optional[float] = None
@@ -207,6 +224,9 @@ class TriggerEngine:
             self._plan_desc.clear()
             self._last_preview_id = None
             self._last_uri = profile.spotify_uri
+            # New song — clear the play-best floor so any anchor or sweep
+            # save this play can override the median-derived starting baseline.
+            self._play_best_quality = 0.0
             meta = load_audio_shape_meta(profile.spotify_uri)
             # Resolve the offset from whichever slot fits the current context
             # (Set List override or default), then layer the user's perception
@@ -665,7 +685,9 @@ class TriggerEngine:
     # ── Shape offset ─────────────────────────────────────────────────────────
 
     def reload_shape_offset(self, uri: str) -> None:
-        """Hot-reload offset for the currently playing song (after xcorr save or trim change)."""
+        """Re-derive the engine offset from disk (median + trim). Used for
+        perception-trim updates and other context changes where we want to
+        force a re-resolve rather than apply a single new save."""
         if self._last_uri == uri:
             meta = load_audio_shape_meta(uri)
             self._shape_offset_ms, self._shape_offset_quality, src = _resolve_shape_offset(meta)
@@ -673,6 +695,38 @@ class TriggerEngine:
                 "Shape offset reloaded: %+dms Q=%.2f source=%s for %s",
                 self._shape_offset_ms, self._shape_offset_quality, src, uri,
             )
+
+    def apply_save(self, uri: str, raw_offset_ms: int, quality: float, source: str = "sweep") -> bool:
+        """Apply a fresh save to the live engine if its quality beats the
+        best seen this play. Layers the current perception trim on top.
+
+        The disk write is handled separately by _save_offset; this only
+        updates the in-memory offset for the rest of the current play. At
+        song start, _play_best_quality is reset to 0 so the first save with
+        any quality wins. Subsequent saves must strictly improve to override.
+
+        Returns True if applied. False = ignored (lower quality than current).
+        """
+        if uri != self._last_uri:
+            return False
+        if quality <= self._play_best_quality:
+            logger.info(
+                "Engine: skip snap — %+dms Q=%.2f source=%s ≤ play-best Q=%.2f (current=%+d)",
+                raw_offset_ms, quality, source, self._play_best_quality, self._shape_offset_ms,
+            )
+            return False
+        meta = load_audio_shape_meta(uri)
+        trim = _perception_trim_for(meta)
+        new_effective = int(raw_offset_ms) + int(trim)
+        logger.info(
+            "Engine: snap %+dms → %+dms (Q %.2f → %.2f, source=%s, trim=%+d) for %s",
+            self._shape_offset_ms, new_effective,
+            self._play_best_quality, quality, source, trim, uri,
+        )
+        self._shape_offset_ms = new_effective
+        self._shape_offset_quality = quality
+        self._play_best_quality = quality
+        return True
 
     def _effective_offset_ms(self) -> int:
         """

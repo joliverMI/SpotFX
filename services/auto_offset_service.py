@@ -1749,12 +1749,14 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
     meta_path = AUDIO_SHAPES_DIR / meta.npz_file.replace(".npz", ".json")
     meta_path.write_text(meta.model_dump_json(indent=2), encoding="utf-8")
 
-    # Hot-reload in the trigger engine so offset takes effect without song change
+    # Apply to the live engine — only takes effect if this save's quality
+    # beats the best seen this play. Persists either way (we just wrote to
+    # disk above), so the next play's median can include this save.
     try:
         from main import engine
-        engine.reload_shape_offset(uri)
+        engine.apply_save(uri, int(offset_ms), float(quality), source)
     except Exception as exc:
-        logger.warning("Auto-offset: could not hot-reload trigger engine offset: %s", exc)
+        logger.warning("Auto-offset: could not apply offset to trigger engine: %s", exc)
 
     # Broadcast to update all open pages (builder, ai_triggers sliders)
     try:
