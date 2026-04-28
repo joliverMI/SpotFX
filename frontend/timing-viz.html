@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpotFX — Timing Visualisation</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .tv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .tv-grid > div.card { padding: 12px 16px; }
+    .tv-grid h3 { margin: 0 0 8px 0; font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .kv-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+    .kv-row .k { color: var(--text-muted); }
+    .kv-row .v { color: var(--text); font-family: monospace; }
+
+    /* Pipeline diagram */
+    .pipeline { padding: 16px 8px; }
+    .pipeline-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+    .pipeline-row.top { font-size: 12px; color: var(--text-muted); }
+    .pipe-box {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 5px 9px; font-family: monospace; font-size: 12px; color: var(--text);
+      min-width: 80px; text-align: center;
+    }
+    .pipe-box.input { border-color: #4caf50; }
+    .pipe-box.output { border-color: #ff9800; background: rgba(255,152,0,0.08); }
+    .pipe-box .label { display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px; }
+    .pipe-arrow { color: var(--text-muted); font-size: 14px; }
+    .pipe-op { color: #ff9800; font-weight: bold; font-size: 14px; padding: 0 4px; }
+
+    /* Sweep cards */
+    .sweep-card { margin-bottom: 12px; padding: 10px 14px; background: var(--surface2); border-radius: 6px; }
+    .sweep-card .head { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-bottom: 6px; align-items: baseline; }
+    .sweep-card .head .ts { color: var(--text-muted); font-family: monospace; }
+    .sweep-card .head .final { color: var(--accent); font-weight: 600; font-family: monospace; }
+    .sweep-card .head .play-type { padding: 1px 6px; border-radius: 3px; font-size: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+    table.sweep { width: 100%; border-collapse: collapse; font-size: 11px; font-family: monospace; }
+    table.sweep th, table.sweep td { text-align: right; padding: 2px 6px; border-bottom: 1px solid var(--border); }
+    table.sweep th { color: var(--text-muted); font-weight: normal; text-transform: uppercase; font-size: 10px; }
+    table.sweep td.win-NEW { color: #4caf50; font-weight: 600; }
+    table.sweep td.win-OLD { color: #888; }
+    table.sweep td.diff-1 { color: #4caf50; }
+    table.sweep td.diff-low { color: #f44336; }
+
+    /* Anchor candidates */
+    table.anchors { width: 100%; border-collapse: collapse; font-size: 12px; font-family: monospace; }
+    table.anchors th, table.anchors td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    table.anchors th { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
+
+    .small-muted { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .pill { display: inline-block; padding: 1px 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; font-size: 11px; color: var(--text-muted); margin-right: 6px; }
+    .pill.warn { color: #ff9800; border-color: #ff9800; background: rgba(255,152,0,0.08); }
+    .pill.ok { color: #4caf50; border-color: #4caf50; background: rgba(76,175,80,0.08); }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <div id="nav-root"></div>
+
+  <main>
+    <div class="card" style="padding:12px 16px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div id="tv-title" style="font-weight:600;font-size:15px;">—</div>
+          <div id="tv-uri" style="color:var(--text-muted);font-size:11px;font-family:monospace;">—</div>
+        </div>
+        <button class="btn" id="tv-refresh" style="margin-left:auto;font-size:12px;">Refresh</button>
+        <button class="btn btn-danger" id="tv-recapture" title="Delete the stored audio shape so the song re-captures on next play. Use this to test if device-change is causing poor matches." style="font-size:12px;">Recapture shape</button>
+      </div>
+      <div id="tv-flags" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- Pipeline diagram -->
+    <div class="card pipeline" style="padding:14px 16px;margin-bottom:12px;">
+      <h3 style="margin:0 0 8px 0;font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Trigger fire-time pipeline</h3>
+      <div class="pipeline-row top">From Spotify-reported song time to the moment a trigger actually fires:</div>
+      <div class="pipeline-row" id="tv-pipeline"></div>
+      <div class="small-muted">
+        Each box is a measured ms value at the time of dump. Any inaccuracy in the input boxes
+        propagates straight to the output. The <strong>shape_offset_ms</strong> term is the only
+        one xcorr controls — everything else is config or live RTT.
+      </div>
+    </div>
+
+    <div class="tv-grid">
+      <!-- Audio shape -->
+      <div class="card">
+        <h3>Stored audio shape</h3>
+        <div id="tv-shape"></div>
+      </div>
+
+      <!-- Active set list / setlist offsets -->
+      <div class="card">
+        <h3>Set List context</h3>
+        <div id="tv-setlist"></div>
+      </div>
+
+      <!-- Anchor candidates -->
+      <div class="card" style="grid-column:1/-1;">
+        <h3>Early-feature anchor candidates</h3>
+        <div id="tv-anchors"></div>
+      </div>
+
+      <!-- Recent sweeps -->
+      <div class="card" style="grid-column:1/-1;">
+        <h3>Recent xcorr sweeps</h3>
+        <div id="tv-sweeps"></div>
+      </div>
+
+      <!-- Settings dump -->
+      <div class="card" style="grid-column:1/-1;">
+        <h3>Settings affecting this song</h3>
+        <div class="tv-grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+          <div id="tv-xcorr-settings"></div>
+          <div id="tv-anchor-settings"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script type="module">
+import { GET, DEL, showToast, connectWS } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
+initNav();
+connectWS();
+
+const params = new URLSearchParams(location.search);
+let trackUri = params.get('uri') || '';
+
+// The backend's /timing-viz/dump endpoint defaults to the currently-playing
+// track when called without a URI param, so we just pass through whatever the
+// query string holds (empty string is fine).
+
+function kvRow(k, v) {
+  return `<div class="kv-row"><span class="k">${k}</span><span class="v">${v ?? '—'}</span></div>`;
+}
+
+function fmtMs(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (isNaN(n)) return String(v);
+  return (n >= 0 ? '+' : '') + Math.round(n) + 'ms';
+}
+
+function fmtNum(v, digits = 2) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (isNaN(n)) return String(v);
+  return n.toFixed(digits);
+}
+
+function renderPipeline(d) {
+  const t = d.live_timing || {};
+  const eff = (t.shape_offset_ms ?? 0) + (t.ledfx_trigger_buffer_ms ?? 0) + (t.ledfx_rtt_ms ?? 0);
+  const tip = (t.audio_latency_ms ?? 0);
+  const html = `
+    <div class="pipe-box input"><span class="label">song pos</span>${fmtMs(d.spotify_track?.interpolated_progress_ms)}</div>
+    <span class="pipe-op">+</span>
+    <div class="pipe-box"><span class="label">shape_offset</span>${fmtMs(t.shape_offset_ms)}</div>
+    <span class="pipe-op">+</span>
+    <div class="pipe-box"><span class="label">ledfx buf</span>${fmtMs(t.ledfx_trigger_buffer_ms)}</div>
+    <span class="pipe-op">+</span>
+    <div class="pipe-box"><span class="label">ledfx rtt</span>${fmtMs(t.ledfx_rtt_ms)}</div>
+    <span class="pipe-arrow">→</span>
+    <div class="pipe-box output"><span class="label">effective</span>${fmtMs(t.effective_offset_ms)}</div>
+    <span style="margin:0 12px;color:var(--text-muted);">|</span>
+    <div class="pipe-box input" title="Subtracted from frame.timestamp_ms during capture"><span class="label">audio latency</span>−${tip}ms</div>
+  `;
+  document.getElementById('tv-pipeline').innerHTML = html;
+}
+
+function renderShape(d) {
+  const s = d.audio_shape;
+  if (!s) { document.getElementById('tv-shape').innerHTML = '<div class="small-muted">No audio shape stored for this song.</div>'; return; }
+  const captured_pol = (d.spotify_track?.polled_duration_ms ?? 0);
+  const cut = Math.max(0, (s.captured_duration_ms ?? 0) - captured_pol);
+  document.getElementById('tv-shape').innerHTML = [
+    kvRow('captured duration', fmtMs(s.captured_duration_ms)),
+    kvRow('polled duration', fmtMs(captured_pol)),
+    kvRow('cut (captured − polled)', `<strong>${fmtMs(cut)}</strong>`),
+    kvRow('default offset', fmtMs(s.default_offset_ms) + ' Q=' + fmtNum(s.default_quality)),
+    kvRow('verification', s.offset_verification),
+    kvRow('default trim', fmtMs(s.default_perception_trim_ms ?? 0)),
+    kvRow('history entries', String((s.offset_history || []).length)),
+    kvRow('anchor candidates', String((s.anchor_candidates || []).length)),
+  ].join('');
+}
+
+function renderSetlist(d) {
+  const sl = d.active_setlist;
+  if (!sl) { document.getElementById('tv-setlist').innerHTML = '<div class="small-muted">No active Set List.</div>'; return; }
+  const slot = sl.slot || {};
+  const history = slot.history || [];
+  const lines = [
+    kvRow('name', sl.name ?? '—'),
+    kvRow('xcorr enabled', sl.xcorr_enabled ? '<span class="pill ok">yes</span>' : '<span class="pill warn">no</span>'),
+    kvRow('cut buffer override', fmtMs(sl.xcorr_cut_buffer_ms)),
+    kvRow('slot offset', fmtMs(slot.timestamp_offset_ms) + ' Q=' + fmtNum(slot.offset_quality)),
+    kvRow('perception trim', fmtMs(slot.perception_trim_ms ?? 0)),
+    kvRow('anti-corr count', String(slot.anti_corr_count ?? 0)),
+    kvRow('observed cut', fmtMs(slot.observed_cut_ms)),
+    kvRow('history (latest first)', history.map(h => `${h.offset_ms >= 0 ? '+' : ''}${h.offset_ms}ms[Q${fmtNum(h.quality)} ${h.source || 'sweep'}]`).join('<br>') || '—'),
+    kvRow('recent deltas', (sl.recent_offset_deltas || []).map(d => fmtMs(d)).join(', ') || '—'),
+  ];
+  document.getElementById('tv-setlist').innerHTML = lines.join('');
+}
+
+function renderAnchors(d) {
+  const list = d.audio_shape?.anchor_candidates || [];
+  if (!list.length) {
+    document.getElementById('tv-anchors').innerHTML = '<div class="small-muted">No anchor candidates stored. Re-capture to re-run anchor detection on the latest device.</div>';
+    return;
+  }
+  const rows = list.map((a, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${fmtMs(a.timestamp_ms)}</td>
+      <td>${a.band}</td>
+      <td>${fmtNum(a.rise_magnitude)}</td>
+      <td>${fmtNum(a.uniqueness)}</td>
+      <td>${(a.template || []).length} samples</td>
+    </tr>
+  `).join('');
+  document.getElementById('tv-anchors').innerHTML = `
+    <table class="anchors">
+      <thead><tr><th>#</th><th>at</th><th>band</th><th>rise</th><th>uniqueness</th><th>template</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderSweeps(d) {
+  const sweeps = d.recent_sweeps || [];
+  if (!sweeps.length) {
+    document.getElementById('tv-sweeps').innerHTML = '<div class="small-muted">No sweep history in the diagnostic CSV for this URI.</div>';
+    return;
+  }
+  document.getElementById('tv-sweeps').innerHTML = sweeps.map(sw => {
+    const ws = (sw.windows || []).map(w => {
+      const winnerCls = w.winner === 'NEW' ? 'win-NEW' : (w.winner === 'OLD' ? 'win-OLD' : '');
+      return `<tr>
+        <td>${fmtMs(w.start_ms)}</td>
+        <td>${fmtNum(w.difficulty)}</td>
+        <td class="${winnerCls}">${w.winner || '—'}</td>
+        <td>${fmtMs(w.offset_ms)}</td>
+        <td>${fmtNum(w.quality)}</td>
+        <td>${fmtNum(w.r_avg)}</td>
+        <td>${fmtNum(w.r_total)}</td>
+        <td>${fmtNum(w.r_low)}</td>
+        <td>${fmtNum(w.r_high)}</td>
+        <td>${fmtNum(w.old_r_avg)}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="sweep-card">
+      <div class="head">
+        <span class="ts">${sw.timestamp || '—'}</span>
+        <span class="play-type">${sw.play_type || '—'}</span>
+        <span>n=${sw.n_windows ?? 0}</span>
+        <span>prev=${fmtMs(sw.prev_offset_ms)}</span>
+        <span class="final">final=${fmtMs(sw.final_offset_ms)} Q=${fmtNum(sw.final_quality)}</span>
+      </div>
+      <table class="sweep">
+        <thead><tr><th>start</th><th>diff</th><th>winner</th><th>offset</th><th>Q</th><th>r_avg</th><th>r_total</th><th>r_low</th><th>r_high</th><th>old_r</th></tr></thead>
+        <tbody>${ws}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+}
+
+function renderSettings(d) {
+  const x = d.xcorr_settings || {};
+  const a = d.anchor_settings || {};
+  document.getElementById('tv-xcorr-settings').innerHTML = '<div class="small-muted">xcorr settings</div>' + [
+    kvRow('global threshold', fmtNum(x.global_threshold)),
+    kvRow('wide min r', fmtNum(x.wide_min_r)),
+    kvRow('wide top1 margin', fmtNum(x.wide_top1_margin)),
+    kvRow('high confidence r', fmtNum(x.high_confidence_r)),
+    kvRow('save min Q', fmtNum(x.save_min_quality)),
+    kvRow('save min confirm', fmtNum(x.save_min_confirm)),
+    kvRow('save confirm tol', fmtMs(x.save_confirm_tol_ms)),
+    kvRow('search base', fmtMs(x.search_ms_base)),
+    kvRow('cut buffer', fmtMs(x.cut_buffer_ms)),
+  ].join('');
+  document.getElementById('tv-anchor-settings').innerHTML = '<div class="small-muted">anchor settings</div>' + [
+    kvRow('scan window', fmtMs(a.scan_window_ms)),
+    kvRow('template radius', fmtMs(a.template_radius_ms)),
+    kvRow('min uniqueness', fmtNum(a.min_uniqueness)),
+    kvRow('min rise ratio', fmtNum(a.min_rise_ratio)),
+    kvRow('max candidates', String(a.max_candidates ?? '—')),
+    kvRow('search radius', fmtMs(a.search_radius_ms)),
+    kvRow('min match Q', fmtNum(a.min_match_q)),
+  ].join('');
+}
+
+function renderFlags(d) {
+  const flags = [];
+  const s = d.audio_shape;
+  if (s) {
+    if (!(s.anchor_candidates || []).length) flags.push('<span class="pill warn">no anchors</span>');
+    const captured_pol = (d.spotify_track?.polled_duration_ms ?? 0);
+    const cut = Math.max(0, (s.captured_duration_ms ?? 0) - captured_pol);
+    if (cut > 6000) flags.push(`<span class="pill warn">large cut ${fmtMs(cut)}</span>`);
+  } else {
+    flags.push('<span class="pill warn">no audio shape</span>');
+  }
+  const sl = d.active_setlist;
+  if (sl?.slot?.anti_corr_count >= 2) flags.push(`<span class="pill warn">drifting (anti-corr×${sl.slot.anti_corr_count})</span>`);
+  document.getElementById('tv-flags').innerHTML = flags.join(' ') || '<span class="small-muted">no warnings</span>';
+}
+
+async function load() {
+  const d = await GET(`/timing-viz/dump?uri=${encodeURIComponent(trackUri || '')}`);
+  trackUri = d.uri || trackUri;
+  if (!trackUri) {
+    document.getElementById('tv-title').textContent = 'No track playing.';
+    document.getElementById('tv-uri').textContent = 'Open this page while a song is playing, or pass ?uri=spotify:track:... in the URL.';
+    return;
+  }
+  document.getElementById('tv-title').textContent = `${d.audio_shape?.artist || ''} — ${d.audio_shape?.title || trackUri}`;
+  document.getElementById('tv-uri').textContent = trackUri;
+  renderPipeline(d);
+  renderShape(d);
+  renderSetlist(d);
+  renderAnchors(d);
+  renderSweeps(d);
+  renderSettings(d);
+  renderFlags(d);
+}
+
+document.getElementById('tv-refresh').addEventListener('click', load);
+document.getElementById('tv-recapture').addEventListener('click', async () => {
+  if (!trackUri) return;
+  if (!confirm('Delete the stored audio shape, WAV, and librosa data for this song?\n\nIt will re-capture from the live device on the next play.')) return;
+  try {
+    await DEL(`/audio-shape?uri=${encodeURIComponent(trackUri)}`);
+    showToast('Shape deleted — will re-capture on next play.', 'success');
+    setTimeout(load, 500);
+  } catch (e) {
+    showToast('Delete failed: ' + (e.message || e), 'error');
+  }
+});
+
+load();
+</script>
+</body>
+</html>

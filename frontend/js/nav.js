@@ -13,6 +13,7 @@ const NAV_HTML = `<nav>
   <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
   <a href="/triggerless.html">Triggerless</a>
   <a href="/setlist.html">Set Lists</a>
+  <a href="/timing-viz.html" class="nav-timing-viz advanced-only-inline">Timing</a>
   <a href="/settings.html">Settings</a>
   <div id="ws-status"><div id="ws-dot"></div> Live</div>
 </nav>`;

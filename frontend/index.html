@@ -97,6 +97,11 @@
         <button id="shape-toggle-btn" class="btn" style="font-size:12px;padding:4px 12px;"
                 onclick="toggleShapeCanvas()">▲ Audio Shape</button>
         <span id="shape-np-status" style="font-size:11px;color:var(--text-muted);"></span>
+        <button id="recapture-btn" class="btn advanced-only-inline" style="font-size:11px;padding:2px 8px;color:#f44336;border-color:#f44336;"
+                title="Delete the stored audio shape (NPZ + WAV + librosa + sidecar) so the song re-captures on next play.&#10;Use this to A/B test if a device change is causing poor xcorr matches."
+                onclick="recaptureShape()">Recapture</button>
+        <a id="timing-viz-link" class="btn advanced-only-inline" style="font-size:11px;padding:2px 8px;text-decoration:none;"
+           href="/timing-viz.html" title="Open timing-viz dump for this song.">Timing</a>
         <span class="advanced-only" style="margin-left:auto;align-items:center;gap:4px;">
           <span style="font-size:11px;color:var(--text-muted);" title="Per-track perception trim — layered on top of the xcorr-derived offset and persisted per (song, Set List). Negative = lighting fires earlier; positive = later.">trim</span>
           <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-250)" title="−250ms (fires earlier)">−250</button>
@@ -284,6 +289,10 @@ onMessage('state', msg => {
     if (changed || prevUseAi !== useAiTriggers || prevDp !== dinnerPartyMode
         || prevAnalyzed !== useAnalyzedTriggerless || prevOverride !== analyzedTriggerOverride) loadProfile();
     if (changed) loadPerceptionTrim();
+    if (changed) {
+      const tvLink = document.getElementById('timing-viz-link');
+      if (tvLink) tvLink.href = `/timing-viz.html?uri=${encodeURIComponent(track.spotify_uri)}`;
+    }
   } else {
     track = null;
     updatePauseBtn();
@@ -820,6 +829,18 @@ window.bumpPerceptionTrim = async function(deltaMs, reset) {
     updatePerceptionTrimDisplay();
   } catch (e) {
     showToast('Trim failed: ' + (e.message || e), 'error');
+  }
+};
+
+window.recaptureShape = async function() {
+  if (!track?.spotify_uri) { showToast('No track playing', 'error'); return; }
+  if (!confirm(`Delete the stored audio shape, WAV, and librosa data for:\n\n${track.title} — ${track.artist}\n\nThe song will re-capture on the next play. This is useful for testing whether a device change is causing poor xcorr matches.`)) return;
+  try {
+    const r = await fetch(`/api/audio-shape?uri=${encodeURIComponent(track.spotify_uri)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    showToast('Shape deleted — will re-capture on next play.', 'success');
+  } catch (e) {
+    showToast('Delete failed: ' + (e.message || e), 'error');
   }
 };
 
