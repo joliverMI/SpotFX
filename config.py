@@ -194,6 +194,14 @@ class Settings(BaseSettings):
     anchor_min_agreeing_candidates: int = 2
     anchor_agree_tolerance_ms: int = 200
 
+    # In-song engine drift cap. Once a song's baseline offset is loaded
+    # (median of recent saves + perception trim), mid-play snaps in the
+    # trigger engine are limited to within this many ms of that loaded value.
+    # Bigger jumps are almost always beat-tile false matches. Disk writes are
+    # NOT affected — large corrections still accumulate in history and shift
+    # next play's median across plays. Set to 0 to disable.
+    engine_in_song_drift_cap_ms: int = 2000
+
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)
     audio_wav_max_songs: int = 50

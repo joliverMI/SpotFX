@@ -164,6 +164,11 @@ class TriggerEngine:
         # matches mid-play while still letting median (loaded at song start)
         # be the floor when no match clears it.
         self._play_best_quality: float = 0.0
+        # Loaded offset at song start (median + trim). Used as the reference
+        # for the in-song drift cap: mid-play saves more than
+        # `engine_in_song_drift_cap_ms` away from this are rejected as
+        # likely beat-tile false matches.
+        self._loaded_offset_ms: int = 0
         # Per-song librosa cache — avoids re-reading the JSON every beat-sequence fire.
         self._beats_cache: Optional[list] = None
         self._tempo_cache: Optional[float] = None
@@ -232,6 +237,7 @@ class TriggerEngine:
             # (Set List override or default), then layer the user's perception
             # trim on top so subjective alignment persists across plays.
             self._shape_offset_ms, self._shape_offset_quality, sl_source = _resolve_shape_offset(meta)
+            self._loaded_offset_ms = self._shape_offset_ms
             logger.info(
                 "load_profile: shape_offset_ms=%+d Q=%.2f source=%s",
                 self._shape_offset_ms, self._shape_offset_quality, sl_source,
@@ -718,6 +724,23 @@ class TriggerEngine:
         meta = load_audio_shape_meta(uri)
         trim = _perception_trim_for(meta)
         new_effective = int(raw_offset_ms) + int(trim)
+        # In-song drift cap: once we have a loaded baseline, big mid-play
+        # jumps are almost always beat-tile false matches (observed: anchor
+        # locks at +5000ms then later corrects back). Reject saves that
+        # diverge more than `engine_in_song_drift_cap_ms` from the offset
+        # loaded at song start. The disk-write path is unaffected — large
+        # corrections still accumulate in history and influence next play's
+        # median.
+        drift_cap = int(getattr(settings, "engine_in_song_drift_cap_ms", 2000))
+        if drift_cap > 0:
+            drift = abs(new_effective - self._loaded_offset_ms)
+            if drift > drift_cap:
+                logger.info(
+                    "Engine: reject snap — %+dms is %+dms from loaded %+dms (cap=%dms, source=%s, Q=%.2f)",
+                    new_effective, new_effective - self._loaded_offset_ms,
+                    self._loaded_offset_ms, drift_cap, source, quality,
+                )
+                return False
         logger.info(
             "Engine: snap %+dms → %+dms (Q %.2f → %.2f, source=%s, trim=%+d) for %s",
             self._shape_offset_ms, new_effective,
