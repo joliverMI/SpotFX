@@ -666,13 +666,26 @@ class AutoOffsetService:
                 except Exception:
                     pass
 
-                # Per-window save: only fire when the winning shift has been
-                # corroborated by another window within ±tol. Single-window
-                # coincidences (typically: a weak/coarse early window catching
-                # a fluke peak that scores higher than the historical lock's
-                # *fresh* re-evaluation in the same weak window) no longer
-                # overwrite a good stored baseline. The post-loop save logic
-                # remains the final authority for cluster vs single-best.
+                # Engine snap (uncluttered): every high-r window also tries to
+                # snap the live engine via apply_save. apply_save only takes
+                # effect when its Q strictly beats the play-best, so a noisy
+                # single window can't override a confident anchor or earlier
+                # higher-Q window. This is what makes the Now Playing display
+                # update mid-play even before a cluster has formed for disk.
+                if (verification != "user_verified" and win_r >= settings.xcorr_global_threshold):
+                    try:
+                        from main import engine
+                        engine.apply_save(uri, int(win_offset), float(win_quality), source="sweep-window")
+                    except Exception as exc:
+                        logger.debug("Engine apply_save (window) failed: %s", exc)
+
+                # Per-window DISK save: only fire when the winning shift has
+                # been corroborated by another window within ±tol. Single-
+                # window coincidences (typically: a weak/coarse early window
+                # catching a fluke peak that scores higher than the historical
+                # lock's *fresh* re-evaluation in the same weak window) no
+                # longer overwrite a good stored baseline. The post-loop save
+                # logic remains the final authority for cluster vs single-best.
                 _save_confirm_tol = int(getattr(settings, "xcorr_save_confirm_tol_ms", 300))
                 _save_min_confirm = float(getattr(settings, "xcorr_save_min_confirm", 2))
                 _agree_now = sum(
