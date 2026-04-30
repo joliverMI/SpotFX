@@ -288,29 +288,43 @@ class AudioShapeService:
                 meta.capture_complete = True
 
                 # Detect early-feature anchor candidates for snap-alignment on
-                # subsequent plays. Uses the just-saved npz arrays.
-                try:
-                    from services import anchor_detector
-                    npz = np.load(npz_path)
-                    anchors = anchor_detector.detect_anchor_candidates(
-                        npz["timestamps_ms"],
-                        npz["rms_total"],
-                        npz["rms_low"],
-                        npz["rms_high"],
-                    )
-                    meta.anchor_candidates = [c.to_dict() for c in anchors]
-                    if anchors:
-                        top = anchors[0]
-                        logger.info(
-                            "Anchor: detected %d candidates for %s (top: %dms band=%s rise=%.2f uniqueness=%.2f)",
-                            len(anchors), meta.spotify_uri,
-                            top.timestamp_ms, top.band, top.rise_magnitude, top.uniqueness,
+                # subsequent plays. Round 6: gated behind settings.anchor_enabled
+                # — the smart-window xcorr sweep handles song-start snapping by
+                # itself with the round-5 4-band math, so rise detection at
+                # capture time is unnecessary unless re-enabled for debugging.
+                if settings.anchor_enabled:
+                    try:
+                        from services import anchor_detector, librosa_service
+                        npz = np.load(npz_path)
+                        # Tempo may not be available at first-capture time (librosa
+                        # runs after). When missing, the beat-twin penalty inside
+                        # _score_uniqueness silently no-ops — the backfill script
+                        # re-runs anchor detection once librosa.json exists.
+                        analysis = librosa_service.get_analysis(meta)
+                        tempo_bpm = float(analysis.tempo_bpm) if analysis else None
+                        anchors = anchor_detector.detect_anchor_candidates(
+                            npz["timestamps_ms"],
+                            npz["rms_total"],
+                            npz["rms_low"],
+                            npz["rms_high"],
+                            tempo_bpm=tempo_bpm,
                         )
-                    else:
-                        logger.info("Anchor: no candidates passed thresholds for %s", meta.spotify_uri)
-                except Exception as exc:
-                    logger.warning("Anchor: detector failed for %s: %s", meta.spotify_uri, exc)
-                    meta.anchor_candidates = []
+                        meta.anchor_candidates = [c.to_dict() for c in anchors]
+                        if anchors:
+                            top = anchors[0]
+                            logger.info(
+                                "Anchor: detected %d candidates for %s (top: %dms band=%s rise=%.2f uniqueness=%.2f)",
+                                len(anchors), meta.spotify_uri,
+                                top.timestamp_ms, top.band, top.rise_magnitude, top.uniqueness,
+                            )
+                        else:
+                            logger.info("Anchor: no candidates passed thresholds for %s", meta.spotify_uri)
+                    except Exception as exc:
+                        logger.warning("Anchor: detector failed for %s: %s", meta.spotify_uri, exc)
+                        meta.anchor_candidates = []
+                else:
+                    # Anchor disabled — leave the field at its default (empty list).
+                    pass
 
                 sidecar = npz_path.with_suffix(".json")
                 sidecar.write_text(meta.model_dump_json(indent=2), encoding="utf-8")

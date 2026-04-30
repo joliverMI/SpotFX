@@ -320,16 +320,26 @@ class TriggerEngine:
                 None,
             )
             if start_trig:
+                # Mark fired so the main loop doesn't try again; but only
+                # actually fire when the service is active. The main per-tick
+                # firing path also respects state.paused — this branch was
+                # bypassing it and firing Song Start regardless.
                 self._fired.add(start_trig.id)
                 self._pre_fired.add(start_trig.id)
                 self._pre_ramp_fired.add(start_trig.id)
-                asyncio.create_task(
-                    self.fire_event_now(start_trig.event_id, start_trig.labels)
-                )
-                logger.info(
-                    "load_profile: firing Song Start trigger %s immediately (event=%s)",
-                    start_trig.id, start_trig.event_id,
-                )
+                if state.paused:
+                    logger.info(
+                        "load_profile: skipping Song Start trigger %s — service paused",
+                        start_trig.id,
+                    )
+                else:
+                    asyncio.create_task(
+                        self.fire_event_now(start_trig.event_id, start_trig.labels)
+                    )
+                    logger.info(
+                        "load_profile: firing Song Start trigger %s immediately (event=%s)",
+                        start_trig.id, start_trig.event_id,
+                    )
 
     def _start_trigger_ids(self) -> list[str]:
         """IDs of triggers whose resolved event name contains 'start' (case-insensitive).
@@ -446,14 +456,20 @@ class TriggerEngine:
                     self._fired.add(start_trig.id)
                     self._pre_fired.add(start_trig.id)
                     self._pre_ramp_fired.add(start_trig.id)
-                    import asyncio as _asyncio
-                    _asyncio.create_task(
-                        self.fire_event_now(start_trig.event_id, start_trig.labels)
-                    )
-                    logger.info(
-                        "Dinner Party on: firing Song Start event %s immediately",
-                        start_trig.event_id,
-                    )
+                    if state.paused:
+                        logger.info(
+                            "Dinner Party on: skipping Song Start event %s — service paused",
+                            start_trig.event_id,
+                        )
+                    else:
+                        import asyncio as _asyncio
+                        _asyncio.create_task(
+                            self.fire_event_now(start_trig.event_id, start_trig.labels)
+                        )
+                        logger.info(
+                            "Dinner Party on: firing Song Start event %s immediately",
+                            start_trig.event_id,
+                        )
             else:
                 self._triggerless_triggers = None
         else:
@@ -478,12 +494,18 @@ class TriggerEngine:
                 self._pre_fired.update(skip_ids)
                 self._pre_ramp_fired.update(skip_ids)
                 self._fired.add(song_start.id)
-                logger.info(
-                    "Dinner Party off: firing Song Start trigger %s; suppressing %d triggers within 10s window",
-                    song_start.id, len(skip_ids),
-                )
-                import asyncio as _asyncio
-                _asyncio.create_task(self.fire_event_now(song_start.event_id, song_start.labels))
+                if state.paused:
+                    logger.info(
+                        "Dinner Party off: skipping Song Start trigger %s (suppressing %d triggers in 10s window) — service paused",
+                        song_start.id, len(skip_ids),
+                    )
+                else:
+                    logger.info(
+                        "Dinner Party off: firing Song Start trigger %s; suppressing %d triggers within 10s window",
+                        song_start.id, len(skip_ids),
+                    )
+                    import asyncio as _asyncio
+                    _asyncio.create_task(self.fire_event_now(song_start.event_id, song_start.labels))
             else:
                 # No real triggers: let Dinner Party synthetic triggers finish this song
                 logger.info(
@@ -702,7 +724,8 @@ class TriggerEngine:
                 self._shape_offset_ms, self._shape_offset_quality, src, uri,
             )
 
-    def apply_save(self, uri: str, raw_offset_ms: int, quality: float, source: str = "sweep") -> bool:
+    def apply_save(self, uri: str, raw_offset_ms: int, quality: float,
+                   source: str = "sweep", bypass_drift_cap: bool = False) -> bool:
         """Apply a fresh save to the live engine if its quality beats the
         best seen this play. Layers the current perception trim on top.
 
@@ -731,14 +754,29 @@ class TriggerEngine:
         # loaded at song start. The disk-write path is unaffected — large
         # corrections still accumulate in history and influence next play's
         # median.
+        # Drift cap: low-confidence mid-play snaps that diverge from the loaded
+        # baseline by more than `engine_in_song_drift_cap_ms` are rejected as
+        # likely beat-tile false matches. The beat-twin gates upstream already
+        # reject most such matches, so we let high-Q measurements bypass the cap
+        # — the loaded baseline is just a previous play's median, not ground
+        # truth, and a confident new measurement should be allowed to correct it.
         drift_cap = int(getattr(settings, "engine_in_song_drift_cap_ms", 2000))
-        if drift_cap > 0:
+        bypass_q = float(getattr(settings, "engine_drift_bypass_q", 0.70))
+        # Round 8: anti-correlated baseline relaxation no longer waives the cap
+        # for low-Q saves. Multiple plays showed Q=0.55-0.79 anti-corr-bypass
+        # snaps overriding correct locks (Pepas +5200, Contra -2275). Now the
+        # bypass requires Q ≥ engine_anti_corr_bypass_q (0.85 default) — i.e.
+        # only really-confident measurements are trusted to far-jump even
+        # when the loaded baseline appears anti-correlated.
+        anti_corr_bypass_q = float(getattr(settings, "engine_anti_corr_bypass_q", 0.85))
+        effective_bypass = bypass_drift_cap and quality >= anti_corr_bypass_q
+        if drift_cap > 0 and quality < bypass_q and not effective_bypass:
             drift = abs(new_effective - self._loaded_offset_ms)
             if drift > drift_cap:
                 logger.info(
-                    "Engine: reject snap — %+dms is %+dms from loaded %+dms (cap=%dms, source=%s, Q=%.2f)",
+                    "Engine: reject snap — %+dms is %+dms from loaded %+dms (cap=%dms, source=%s, Q=%.2f<%.2f)",
                     new_effective, new_effective - self._loaded_offset_ms,
-                    self._loaded_offset_ms, drift_cap, source, quality,
+                    self._loaded_offset_ms, drift_cap, source, quality, bypass_q,
                 )
                 return False
         logger.info(

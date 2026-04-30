@@ -67,12 +67,18 @@ class AudioCaptureStream:
         self._loop = asyncio.get_event_loop()
         # Raw PCM buffer for WAV/librosa — list.append is GIL-atomic in CPython
         self._pcm_chunks: list[np.ndarray] = []
+        # Diagnostic counter for queue-full drops (correlated with gap discards).
+        self._dropped_frames: int = 0
 
     def _callback(self, indata: np.ndarray, frames: int,
                   cb_time, status) -> None:
         """Called by sounddevice in a separate thread — must be thread-safe."""
         if status:
-            logger.debug("Audio callback status: %s", status)
+            # Elevate to WARNING so we can correlate device-level overflows /
+            # underruns with downstream gap discards. PortAudio sets this
+            # whenever the input buffer overruns (we missed reading samples
+            # in time), which is exactly the signal we want.
+            logger.warning("Audio callback status: %s", status)
 
         pcm = indata[:, 0].astype(np.float32)  # mono
         self._pcm_chunks.append(pcm.copy())
@@ -106,11 +112,19 @@ class AudioCaptureStream:
         # Non-blocking put from the audio thread.
         # QueueFull must be caught inside the scheduled callback (where it's raised),
         # not here — call_soon_threadsafe runs put_nowait in the event loop thread.
-        def _put(f=frame):
+        def _put(f=frame, _self=self):
             try:
-                self._queue.put_nowait(f)
+                _self._queue.put_nowait(f)
             except asyncio.QueueFull:
-                pass  # drop frame rather than block audio thread
+                # Diagnostic: log queue-full drops so we can correlate them
+                # with the downstream gap discards. Throttled to once per 50
+                # drops to avoid flooding the journal.
+                _self._dropped_frames += 1
+                if _self._dropped_frames % 50 == 1:
+                    logger.warning(
+                        "AudioCaptureStream: queue full, dropped frame (total dropped this stream=%d)",
+                        _self._dropped_frames,
+                    )
         self._loop.call_soon_threadsafe(_put)
 
     def start(self) -> None:

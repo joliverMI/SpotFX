@@ -51,6 +51,20 @@ class AudioShapeRecorder:
         return f"{safe(artist)} - {safe(title)}.npz"
 
     def ingest(self, frame: AudioFrame) -> None:
+        # Per-ingest gap diagnostic: when an inter-sample gap exceeds half the
+        # discard threshold, log it immediately with the song-position so we
+        # can correlate gaps to specific moments (track transitions, CPU
+        # spikes, etc.) without waiting for the post-capture discard.
+        if self._timestamps:
+            from config import settings as _s
+            gap = frame.timestamp_ms - self._timestamps[-1]
+            warn_at = max(60, int(_s.audio_max_gap_ms * 0.5))
+            if gap >= warn_at:
+                logger.warning(
+                    "Capture gap %dms at song-time=%dms in %s — %s",
+                    gap, frame.timestamp_ms, self.meta.npz_file,
+                    "WILL DISCARD" if gap > _s.audio_max_gap_ms else "still under limit",
+                )
         self._timestamps.append(frame.timestamp_ms)
         self._rms_total.append(frame.rms_total)
         self._rms_low.append(frame.rms_low)

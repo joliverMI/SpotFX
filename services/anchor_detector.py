@@ -35,6 +35,13 @@ _BIN_MS = 25                # resample resolution for templates (matches xcorr)
 _SLOPE_WINDOW_MS = 250      # rolling derivative span — short enough to catch sharp rises
 _BASELINE_WINDOW_MS = 2000  # local baseline span used to score rise magnitude
 _MIN_PEAK_SEPARATION_MS = 1500  # candidates must be at least this far apart
+_BEAT_TWIN_OFFSETS = (1, 2, 3, 4)  # ±N-beat offsets tested when scoring uniqueness
+
+
+def _signed_square(arr: np.ndarray) -> np.ndarray:
+    # x → x·|x|: amplitude-weighted, sign-preserving. Loud transients dominate
+    # downstream Pearson r so a clear rise outscores noise-floor wiggles.
+    return arr * np.abs(arr)
 
 
 @dataclass
@@ -80,10 +87,17 @@ def detect_anchor_candidates(
     rms_total: np.ndarray,
     rms_low: np.ndarray,
     rms_high: np.ndarray,
+    tempo_bpm: Optional[float] = None,
 ) -> list[AnchorCandidate]:
     """Scan the first `anchor_scan_window_ms` of each band for steep RMS rises,
     score uniqueness against the surrounding section, return the top
     `anchor_max_candidates` ranked by uniqueness.
+
+    `tempo_bpm` (when provided, e.g. from librosa) drives a beat-offset twin
+    penalty in the uniqueness scorer: candidates whose template also matches
+    well at ±1..4 beats from their own position score lower and are filtered
+    out, eliminating periodic-music beat-tile traps before the live matcher
+    ever sees them.
     """
     scan_ms = int(settings.anchor_scan_window_ms)
     template_radius_ms = int(settings.anchor_template_radius_ms)
@@ -91,15 +105,17 @@ def detect_anchor_candidates(
     min_rise_ratio = float(settings.anchor_min_rise_ratio)
     max_candidates = int(settings.anchor_max_candidates)
 
-    # Resample all bands onto a uniform grid covering [0, scan_ms].
+    # Resample all bands onto a uniform grid covering [0, scan_ms]. Apply
+    # signed-square so loud transients dominate both the rise detection and
+    # the uniqueness scorer (matches the xcorr sweep's amplitude weighting).
     grid = np.arange(0, scan_ms, _BIN_MS, dtype=float)
     if len(grid) < 4 or len(timestamps_ms) < 2:
         return []
     ts = timestamps_ms.astype(float)
     bands = {
-        "rms_total": np.interp(grid, ts, rms_total.astype(float), left=0.0, right=0.0),
-        "rms_low":   np.interp(grid, ts, rms_low.astype(float),   left=0.0, right=0.0),
-        "rms_high":  np.interp(grid, ts, rms_high.astype(float),  left=0.0, right=0.0),
+        "rms_total": _signed_square(np.interp(grid, ts, rms_total.astype(float), left=0.0, right=0.0)),
+        "rms_low":   _signed_square(np.interp(grid, ts, rms_low.astype(float),   left=0.0, right=0.0)),
+        "rms_high":  _signed_square(np.interp(grid, ts, rms_high.astype(float),  left=0.0, right=0.0)),
     }
 
     raw: list[AnchorCandidate] = []
@@ -114,7 +130,7 @@ def detect_anchor_candidates(
     scored: list[AnchorCandidate] = []
     for cand in raw:
         signal = bands[cand.band]
-        u = _score_uniqueness(signal, cand.template, cand.timestamp_ms)
+        u = _score_uniqueness(signal, cand.template, cand.timestamp_ms, tempo_bpm)
         if u >= min_unique:
             cand.uniqueness = u
             scored.append(cand)
@@ -148,6 +164,12 @@ def _find_rise_candidates(
     slope_bins = max(2, _SLOPE_WINDOW_MS // _BIN_MS)
     baseline_bins = max(slope_bins * 2, _BASELINE_WINDOW_MS // _BIN_MS)
     template_bins = max(2, template_radius_ms // _BIN_MS)
+    # Skip the first `anchor_min_timestamp_ms` of the song for candidate
+    # detection. Some songs' captured intros don't align with live mixed
+    # playback, and accepting an early candidate then locks us to the wrong
+    # alignment. Both calibrators now skip the first 8s by default.
+    min_ts_ms = int(getattr(settings, "anchor_min_timestamp_ms", 8000))
+    min_idx = max(template_bins + slope_bins, min_ts_ms // _BIN_MS)
 
     # Centred rolling derivative.
     slope = np.zeros_like(signal)
@@ -156,7 +178,7 @@ def _find_rise_candidates(
 
     # Local maxima of the slope.
     cands: list[AnchorCandidate] = []
-    for i in range(template_bins + slope_bins, len(signal) - template_bins - slope_bins):
+    for i in range(min_idx, len(signal) - template_bins - slope_bins):
         s = slope[i]
         if s <= 0:
             continue
@@ -185,11 +207,20 @@ def _find_rise_candidates(
     return cands
 
 
-def _score_uniqueness(signal: np.ndarray, template: list[float], skip_ms: int) -> float:
+def _score_uniqueness(
+    signal: np.ndarray,
+    template: list[float],
+    skip_ms: int,
+    tempo_bpm: Optional[float] = None,
+) -> float:
     """Cross-correlate the template against the full early-section signal,
-    return (best self-match correlation) − (best non-self correlation).
-    Higher = the rise's shape is more distinctive within its surroundings.
-    Excludes the source position from the non-self search.
+    return `best_r − max(second_r, twin_r)` where twin_r is the strongest
+    correlation at ±1..4 beats from the self-match (when tempo is known).
+
+    Without the beat-twin term, periodic music produces high uniqueness scores
+    for shapes that actually have strong twins exactly one beat away — those
+    twins live well outside the ±half-template self-mask. Penalising them at
+    capture time prevents the live matcher from locking onto a beat-tile.
     """
     if not template or len(signal) < len(template) + 2:
         return 0.0
@@ -215,10 +246,23 @@ def _score_uniqueness(signal: np.ndarray, template: list[float], skip_ms: int) -
     mask_lo = max(0, best_idx - half)
     mask_hi = min(len(rs), best_idx + half + 1)
     mask[mask_lo:mask_hi] = False
-    if not mask.any():
-        return 0.0
-    second_r = float(rs[mask].max())
-    return max(0.0, best_r - second_r)
+    second_r = float(rs[mask].max()) if mask.any() else 0.0
+
+    # Beat-twin penalty: if the template ALSO matches well at ±1..4 beats
+    # from the self-match, the shape is not distinct against the song's beat
+    # grid and uniqueness must reflect that.
+    twin_r = 0.0
+    if tempo_bpm and tempo_bpm > 0:
+        beat_period_bins = int(round((60_000.0 / float(tempo_bpm)) / _BIN_MS))
+        if beat_period_bins > 0:
+            for n in _BEAT_TWIN_OFFSETS:
+                for sign in (-1, 1):
+                    idx = best_idx + sign * n * beat_period_bins
+                    if 0 <= idx < len(rs):
+                        twin_r = max(twin_r, float(rs[idx]))
+
+    competitor = max(second_r, twin_r)
+    return max(0.0, best_r - competitor)
 
 
 def _zscore(arr: np.ndarray) -> Optional[np.ndarray]:
@@ -266,22 +310,33 @@ def match_in_frames(
     min_q = float(settings.anchor_min_match_q)
     agree_tol_ms = int(getattr(settings, "anchor_agree_tolerance_ms", 200))
     min_agree = int(getattr(settings, "anchor_min_agreeing_candidates", 2))
+    # Skip live frames inside the first `anchor_min_timestamp_ms`. Some songs'
+    # captured intro doesn't align with live audio (mix variance, transition
+    # carryover), so neither calibrator should rely on the first few seconds.
+    min_ts_ms = int(getattr(settings, "anchor_min_timestamp_ms", 8000))
+    frames = [f for f in frames if f[0] >= min_ts_ms]
+    if not frames:
+        return None
 
     ts = np.array([f[0] for f in frames], dtype=float)
     if ts.size < 2:
         return None
-    band_index = {"rms_total": 1, "rms_low": 2, "rms_high": 3}
+    # Frame tuple layout (post round-5): (ts, rms_total, rms_low, rms_mid, rms_high)
+    band_index = {"rms_total": 1, "rms_low": 2, "rms_mid": 3, "rms_high": 4}
 
     earliest_ms = max(0.0, float(ts[0]))
     latest_ms = float(ts[-1])
     live_grid = np.arange(earliest_ms, latest_ms, _BIN_MS, dtype=float)
     live_signals: dict[str, np.ndarray] = {}
+    # Apply signed-square so live signals are amplitude-weighted to match the
+    # squared templates persisted at capture time. Without this the live
+    # correlation would be flatter than the offline uniqueness score expected.
     for cand in candidates:
         if cand.band in live_signals:
             continue
         idx = band_index.get(cand.band, 1)
         values = np.array([f[idx] for f in frames], dtype=float)
-        live_signals[cand.band] = np.interp(live_grid, ts, values)
+        live_signals[cand.band] = _signed_square(np.interp(live_grid, ts, values))
 
     # Per-candidate evaluation. Collect everyone's best peak; cross-validation
     # happens after this loop.

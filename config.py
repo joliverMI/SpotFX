@@ -142,7 +142,11 @@ class Settings(BaseSettings):
     xcorr_starting_threshold: float = 0.15    # min difficulty to accept a window (except early mandate)
     xcorr_global_threshold: float = 0.50      # min Pearson r to accept a measurement
     xcorr_max_windows: int = 10               # cap on total windows per song
-    xcorr_min_early_windows: int = 2          # mandate: at least N windows in first 20s
+    xcorr_min_early_windows: int = 3          # mandate: at least N windows in first 20s
+                                              # (round 6: bumped 2→3 to compensate for retiring
+                                              # the rise-detector anchor — more early sweep
+                                              # windows give the cluster gate enough data to
+                                              # confirm or reject the song-start lock)
     xcorr_csv_logging: bool = True            # DIAGNOSTIC CSV — write per-play CSV log
     # Mix-aware search range: total search window per side =
     #   xcorr_search_ms_base + max(0, captured_duration - polled_duration) + xcorr_cut_buffer_ms
@@ -161,6 +165,47 @@ class Settings(BaseSettings):
     # peaks shouldn't be discarded just because periodic music produces
     # near-twin coincidences.
     xcorr_high_confidence_r: float = 0.65  # was 0.70
+    # Beat-twin rejection. When a per-window xcorr's best peak has a competitor
+    # within `xcorr_beat_twin_margin` r at exactly ±1..4 beats (using librosa
+    # tempo), the window is genuinely ambiguous between beat-aligned offsets
+    # and we reject it. Mirrors the anchor's beat-twin penalty so both
+    # calibrators agree on what counts as ambiguous in periodic music.
+    xcorr_beat_twin_margin: float = 0.10
+    # Single-window high-r escape hatch for the disk-save gate. When the cluster
+    # gate (xcorr_save_min_confirm) doesn't fire because no second window
+    # confirms, allow a save anyway if this *one* window has very high r AND
+    # quality. Justified because the squared-signal correlator + beat-twin
+    # gate make r ≥ xcorr_single_window_save_r false matches very rare.
+    xcorr_single_window_save_r: float = 0.78
+    xcorr_single_window_save_q: float = 0.70
+    # Round 8: far-jump tier — when a proposed single-window save is more than
+    # `xcorr_far_jump_ms` away from the sweep's current converged best offset,
+    # require much stronger evidence before committing. Local refinements
+    # stay easy; section-twin section-coincidences at +/-5s away from the
+    # truth need to clear a high bar. Closes Pepas (+5200) / Contra (-2275)
+    # / 7vFKcXQ (-1875) holes from round 7.
+    xcorr_single_window_save_far_r: float = 0.90
+    xcorr_single_window_save_far_q: float = 0.85
+    # Round 9: dropped 2000 → 1000 to catch Bad Con Nicky's 1150ms shift that
+    # slipped under the old gate. Pairs with the engine-snap stickiness gate
+    # (engine_snap_far_jump_ms below) so disk and engine paths agree on what
+    # "far" means.
+    xcorr_far_jump_ms: int = 1000
+    # Round 8: OLD-aware displacement floor. When OLD r ≥ xcorr_old_correlating_floor,
+    # the loaded baseline is structurally agreeing with this window, so a NEW
+    # candidate at a different offset must beat OLD by at least
+    # xcorr_old_correlating_margin r-units before it's allowed to displace.
+    # Section-twins in periodic music score r=0.85-0.95 against the wrong
+    # alignment; without this floor they easily clear the 0.10 default
+    # threshold and override correct locks (Pepas, Contra, 7vFKcXQ).
+    xcorr_old_correlating_floor: float = 0.50
+    xcorr_old_correlating_margin: float = 0.20
+    # Anti-correlated baseline rescue threshold. When the stored offset shows
+    # OLD r<0 across 3+ consecutive windows, the loaded baseline is provably
+    # wrong for this play; lower the cluster save requirement so a single
+    # sweep window plus the anchor's weight (or two weak sweep windows) can
+    # fire the save and unstick the song.
+    xcorr_save_min_confirm_anti: float = 1.5
     # Coarse-then-fine: coarse step (ms) and number of top candidates to refine.
     xcorr_coarse_step_ms: int = 100
     xcorr_top_k_refine: int = 3
@@ -173,11 +218,24 @@ class Settings(BaseSettings):
     # rises and pick the most-unique candidates. At song start the live capture
     # is matched against those candidates to snap-align before the per-window
     # sweep runs.
-    anchor_scan_window_ms: int = 30000        # offline scan covers first 30s
+    # Round 7: rise-detector anchor reinstated as a cold-start fallback. The
+    # actual gate is per-Set-List `coarse_locked` (set on `setlist_offsets[id]`):
+    # when False (no save has fired for this slot, OR `anti_corr_count >= 3`),
+    # anchor runs as a safety net at song start. When True (a confirmed save
+    # exists), sweep alone handles calibration. This global flag is a master
+    # override; flip to False to disable anchor everywhere regardless of slot
+    # state.
+    anchor_enabled: bool = True
+    anchor_scan_window_ms: int = 90000        # offline scan covers first 90s — wider pool
+                                              # ensures candidates are spread across the song,
+                                              # not clustered near the start where mix lag and
+                                              # transitions can disqualify them all
     anchor_template_radius_ms: int = 1000     # ± slice for template (1s either side of rise)
     anchor_min_uniqueness: float = 0.15       # offline candidate accept threshold (best - second)
     anchor_min_rise_ratio: float = 1.4        # rise magnitude vs local baseline
-    anchor_max_candidates: int = 3            # how many to store per song
+    anchor_max_candidates: int = 8            # how many to store per song (paired with the
+                                              # 90s scan, gives 8 well-spread chances for the
+                                              # online matcher to find ≥2 agreeing candidates)
     anchor_search_radius_ms: int = 5000       # ± window during live match
     anchor_min_match_q: float = 0.30          # online match accept threshold (r × uniqueness)
     # Hard floor on the match's raw correlation. Beat-tile false matches in
@@ -185,7 +243,7 @@ class Settings(BaseSettings):
     # this threshold rejects those and lets the per-window sweep handle them.
     # Confirmed-good matches (CANCIÓN, BAD CON NICKY in mixed playlist) score
     # r≈0.85–0.95, well above the floor.
-    anchor_min_match_r: float = 0.80
+    anchor_min_match_r: float = 0.75
     # Cross-candidate validation. Single-candidate high-r matches in periodic
     # music can be off by 1-4 beats. Requiring N candidates to agree on the
     # same offset within ±tolerance is much harder for beat-tile twins to
@@ -193,6 +251,11 @@ class Settings(BaseSettings):
     # so they don't all converge on the same wrong offset.
     anchor_min_agreeing_candidates: int = 2
     anchor_agree_tolerance_ms: int = 200
+    # Skip the first `anchor_min_timestamp_ms` of every song in BOTH calibrators
+    # (anchor candidate detection AND live-frame matching). Captured intros and
+    # live intros frequently diverge due to mix variance / transition carryover,
+    # so we don't trust the first few seconds for alignment.
+    anchor_min_timestamp_ms: int = 5000
 
     # In-song engine drift cap. Once a song's baseline offset is loaded
     # (median of recent saves + perception trim), mid-play snaps in the
@@ -201,6 +264,28 @@ class Settings(BaseSettings):
     # NOT affected — large corrections still accumulate in history and shift
     # next play's median across plays. Set to 0 to disable.
     engine_in_song_drift_cap_ms: int = 2000
+    # Drift cap bypass: snaps with quality at or above this threshold ignore
+    # the cap. Beat-twin / ambiguous gates upstream make Q≥0.70 false matches
+    # very rare, so a high-confidence correction is trusted to displace a
+    # potentially-wrong loaded baseline.
+    engine_drift_bypass_q: float = 0.70
+    # Round 8: anti-correlated baseline drift-cap bypass requires this Q floor.
+    # Previously, anti-corr unconditionally bypassed the cap; multiple plays
+    # showed Q=0.55-0.79 anti-corr-bypass snaps overriding correct locks.
+    # With this floor, only really-confident measurements (Q ≥ 0.85) are
+    # trusted to far-jump even when the loaded baseline appears anti-correlated.
+    engine_anti_corr_bypass_q: float = 0.85
+    # Round 9: stickiness gate on the engine-snap path. A per-window measurement
+    # whose offset is more than `engine_snap_far_jump_ms` away from the engine's
+    # CURRENT offset (not the loaded baseline) is suppressed unless one of:
+    # (a) a prior window in this play landed within ±xcorr_save_confirm_tol_ms
+    #     of the new offset (cluster-style agreement),
+    # (b) the new measurement clears `engine_snap_far_jump_q` on its own,
+    # (c) cold-start with anti-corr baseline (loaded median provably wrong).
+    # Closes the round-8 ping-pong observed on `3pm4Xtcs…` where four
+    # mutually inconsistent offsets each beat the play-best in succession.
+    engine_snap_far_jump_ms: int = 1000
+    engine_snap_far_jump_q: float = 0.85
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)

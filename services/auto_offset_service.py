@@ -47,7 +47,10 @@ from services.audio_analyzer import load_audio_shape_meta
 logger = logging.getLogger(__name__)
 
 # ── Cross-correlation alignment ────────────────────────────────────────────────
-_XCORR_FIRST_START_MS = 5_000    # first window starts at 5s
+_XCORR_FIRST_START_MS = 8_000    # first window starts at 8s — earlier sections
+                                  # frequently misalign with stored shapes due to
+                                  # mix variance / capture-time intro differences,
+                                  # so both calibrators avoid the first 8s now.
 _XCORR_END_BUFFER_MS  = 30_000   # stop 30s before song end
 _XCORR_MARGIN_MS      = 1_000    # wait this far past window_end before computing
 _XCORR_BIN_MS         = 25       # resample resolution (ms)
@@ -85,6 +88,15 @@ def _bump_anti_corr_count(uri: str, setlist_id: str, is_drifting: bool) -> None:
     if is_drifting:
         entry["anti_corr_count"] = int(entry.get("anti_corr_count", 0)) + 1
         entry["last_anti_corr_at"] = datetime.now(timezone.utc).isoformat()
+        # Round 7: when the loaded baseline has been anti-correlated for
+        # ≥3 consecutive plays, demote the slot back to coarse-unlocked so
+        # the next play uses anchor as a cold-start safety net.
+        if entry["anti_corr_count"] >= 3 and entry.get("coarse_locked", False):
+            entry["coarse_locked"] = False
+            logger.info(
+                "Anti-corr streak ≥3 for %s slot %s — demoted coarse_locked → False (anchor will run next play)",
+                uri, setlist_id,
+            )
     else:
         if int(entry.get("anti_corr_count", 0)) > 0:
             entry["anti_corr_count"] = 0
@@ -136,6 +148,13 @@ def _agc_normalize(arr: np.ndarray) -> np.ndarray:
         return arr
     scale = float(np.percentile(np.abs(arr), 95)) + 1e-6
     return arr / scale
+
+
+def _signed_square(arr: np.ndarray) -> np.ndarray:
+    # x → x·|x|: amplitude-weighted, sign-preserving. Loud excursions dominate
+    # downstream Pearson r; quiet noise-floor wiggles contribute proportionally
+    # less. Z-norm downstream still works (mean/std of squared values are valid).
+    return arr * np.abs(arr)
 
 # DIAGNOSTIC CSV ──────────────────────────────────────────────────────────────
 _CSV_PATH = Path(__file__).resolve().parent.parent / "storage" / "xcorr_diagnostic.csv"
@@ -323,31 +342,71 @@ class AutoOffsetService:
         uri: str,
         meta,
     ) -> list[tuple[int, int]]:
-        """Return smart xcorr windows, using cache if valid or computing fresh."""
+        """Return xcorr windows, using cache if valid or computing fresh.
+
+        Round 7+: prefers the U-Score planner (services.uscore_planner) when
+        librosa data is available. Falls back to the legacy difficulty/uniqueness
+        planner when no beats are present (rare — songs without librosa shouldn't
+        normally reach the sweep, but the fallback keeps things working).
+        """
         npz_path = AUDIO_SHAPES_DIR / meta.npz_file
-        try:
-            npz_mtime = os.path.getmtime(npz_path)
-        except OSError:
-            npz_mtime = 0
 
-        params_hash = _compute_params_hash(npz_mtime)
-
-        # Check cache
-        if meta.xcorr_windows and meta.xcorr_params_hash == params_hash:
+        # Cache hit: stored windows match the current params version.
+        if meta.xcorr_windows and meta.xcorr_params_hash:
             windows = [(w["start_ms"], w["end_ms"]) for w in meta.xcorr_windows]
-            logger.info("Auto-offset xcorr: using %d cached windows for %s", len(windows), uri)
+            logger.info(
+                "Auto-offset xcorr: using %d cached windows for %s (hash=%s)",
+                len(windows), uri, meta.xcorr_params_hash,
+            )
             return windows
 
-        # Compute fresh
+        # Fresh compute path. Load all 4 bands + librosa beats; route to the
+        # U-Score planner when beats exist, fall back to the legacy planner.
         try:
             data = np.load(npz_path)
             stored_ts = data["timestamps_ms"].astype(float)
-            stored_rms = data["rms_low"]
         except Exception as exc:
             logger.warning("Auto-offset xcorr: failed to load npz for window planning: %s", exc)
             return []
 
-        planned = _plan_xcorr_windows(stored_ts, stored_rms, meta.duration_ms)
+        planned: list[dict] = []
+        params_hash = ""
+        beats_ms: list[int] = []
+        try:
+            from services import librosa_service
+            analysis = librosa_service.get_analysis(meta)
+            if analysis and analysis.beats:
+                beats_ms = [int(b.ms) for b in analysis.beats]
+        except Exception:
+            beats_ms = []
+
+        if beats_ms:
+            try:
+                from services import uscore_planner
+                bands_dict = {
+                    "rms_total": data["rms_total"],
+                    "rms_low":   data["rms_low"],
+                    "rms_mid":   data["rms_mid"],
+                    "rms_high":  data["rms_high"],
+                }
+                planned = uscore_planner.plan_uscore_windows(
+                    stored_ts, bands_dict, meta.duration_ms, beats_ms,
+                )
+                params_hash = "uscore-v2"
+            except Exception as exc:
+                logger.warning("Auto-offset xcorr: U-Score planner failed for %s: %s", uri, exc)
+                planned = []
+
+        if not planned:
+            # Fallback: legacy planner using rms_low only (no librosa needed).
+            try:
+                npz_mtime = os.path.getmtime(npz_path)
+            except OSError:
+                npz_mtime = 0
+            stored_rms = data["rms_low"]
+            planned = _plan_xcorr_windows(stored_ts, stored_rms, meta.duration_ms)
+            params_hash = _compute_params_hash(npz_mtime)
+
         windows = [(w["start_ms"], w["end_ms"]) for w in planned]
 
         # Save to sidecar
@@ -357,8 +416,8 @@ class AutoOffsetService:
         try:
             meta_path.write_text(meta.model_dump_json(indent=2), encoding="utf-8")
             logger.info(
-                "Auto-offset xcorr: planned %d smart windows (saved to sidecar) for %s",
-                len(planned), uri,
+                "Auto-offset xcorr: planned %d windows via %s (saved to sidecar) for %s",
+                len(planned), params_hash or "legacy", uri,
             )
         except Exception as exc:
             logger.warning("Auto-offset xcorr: failed to save window cache: %s", exc)
@@ -417,12 +476,28 @@ class AutoOffsetService:
         try:
             data = np.load(AUDIO_SHAPES_DIR / meta.npz_file)
             stored_ts  = data["timestamps_ms"].astype(float)
-            stored_bands = [data["rms_total"], data["rms_low"], data["rms_high"]]
-            stored_rms = data["rms_low"]  # kept for difficulty scoring
+            stored_bands = [
+                _signed_square(np.asarray(data["rms_total"], dtype=float)),
+                _signed_square(np.asarray(data["rms_low"], dtype=float)),
+                _signed_square(np.asarray(data["rms_mid"], dtype=float)),
+                _signed_square(np.asarray(data["rms_high"], dtype=float)),
+            ]
+            stored_rms = stored_bands[1]  # kept for difficulty scoring (squared rms_low)
         except Exception as exc:
             logger.warning("Auto-offset xcorr: failed to load npz for %s: %s", uri, exc)
             capture.stop()
             return
+
+        # Librosa tempo (if analysed) — feeds the per-window beat-twin
+        # rejection in _xcorr_window. Same source as the anchor detector.
+        tempo_bpm: Optional[float] = None
+        try:
+            from services import librosa_service
+            _analysis = librosa_service.get_analysis(meta)
+            if _analysis is not None:
+                tempo_bpm = float(_analysis.tempo_bpm) if _analysis.tempo_bpm else None
+        except Exception:
+            tempo_bpm = None
 
         # Mix-aware diagnostics: log the search range and which slot we're using.
         polled_dur = app_state.current_track.duration_ms if app_state.current_track else 0
@@ -444,7 +519,7 @@ class AutoOffsetService:
         )
 
         # Each frame: (timestamp_ms, rms_total, rms_low, rms_high) — 3 bands for multi-band xcorr
-        frames: list[tuple[int, float, float, float]] = []
+        frames: list[tuple[int, float, float, float, float]] = []
         _csv_window_rows: list[dict] = []   # DIAGNOSTIC CSV
         best_quality = -1.0
         # Seed best_offset with the stored offset for this slot so the post-loop
@@ -472,6 +547,13 @@ class AutoOffsetService:
         # bumps the Set List slot's anti_corr_count when the stored offset is
         # consistently anti-correlated this play.
         old_r_samples: list[float] = []
+        # Anti-correlated baseline detector. After 3+ windows with OLD r<0 (the
+        # stored offset is provably wrong for this play), relax downstream gates:
+        # the cluster save threshold drops to xcorr_save_min_confirm_anti, and
+        # apply_save bypasses the engine drift cap (the loaded baseline isn't
+        # protecting anything).
+        baseline_anti_corr = False
+        _anti_neg_streak = 0
 
         # Early-feature anchor match: consumes the first N seconds of frames
         # and snap-aligns before the per-window sweep starts evaluating.
@@ -482,11 +564,41 @@ class AutoOffsetService:
         # that locks fires the snap — saves wall-clock when an early candidate
         # is the right one, and only waits for the latest candidate when
         # earlier ones don't confidently match.
+        # Round 7: per-slot cold-start anchor gate. Anchor only runs when both
+        # the global flag is enabled AND the active Set List slot is *not*
+        # coarse-locked — i.e., we don't yet have a confirmed save for this
+        # slot, OR the loaded baseline has gone anti-correlated for ≥3 plays
+        # (anti_corr_count ≥ 3 demotes coarse_locked back to False).
+        # When coarse-locked, the smart-window sweep handles calibration by
+        # itself; the rise-detector's redundant work is skipped.
         from services import anchor_detector
-        anchor_candidates: list[anchor_detector.AnchorCandidate] = [
-            anchor_detector.AnchorCandidate.from_dict(d)
-            for d in (meta.anchor_candidates or [])
-        ]
+        slot_coarse_locked = False
+        try:
+            sl_id = app_state.active_setlist_id
+            if sl_id and meta.setlist_offsets:
+                _slot = meta.setlist_offsets.get(sl_id) or {}
+                slot_coarse_locked = bool(_slot.get("coarse_locked", False))
+        except Exception:
+            slot_coarse_locked = False
+
+        anchor_should_run = settings.anchor_enabled and not slot_coarse_locked
+        if anchor_should_run:
+            anchor_candidates: list[anchor_detector.AnchorCandidate] = [
+                anchor_detector.AnchorCandidate.from_dict(d)
+                for d in (meta.anchor_candidates or [])
+            ]
+            if not anchor_candidates:
+                logger.info(
+                    "Anchor: cold-start path active for %s but no candidates stored — sweep-only this play",
+                    uri,
+                )
+            else:
+                logger.info(
+                    "Anchor: cold-start path active for %s (slot.coarse_locked=False, %d candidates available)",
+                    uri, len(anchor_candidates),
+                )
+        else:
+            anchor_candidates = []
         anchor_done = False
         _anchor_radius = int(settings.anchor_search_radius_ms) + int(settings.anchor_template_radius_ms)
         anchor_horizons: list[int] = [c.timestamp_ms + _anchor_radius for c in anchor_candidates]
@@ -496,7 +608,7 @@ class AutoOffsetService:
             async for frame in capture:
                 if not app_state.current_track:
                     break
-                frames.append((frame.timestamp_ms, frame.rms_total, frame.rms_low, frame.rms_high))
+                frames.append((frame.timestamp_ms, frame.rms_total, frame.rms_low, frame.rms_mid, frame.rms_high))
 
                 # Anchor snap (progressive). Each candidate has its own
                 # horizon; as frame time crosses a new one, retry matching
@@ -522,6 +634,39 @@ class AutoOffsetService:
                                 eligible_count, len(anchor_candidates), uri,
                             )
                             _save_offset_from_anchor(uri, match.offset_ms, match.match_q)
+                            # The anchor's offset becomes a vote in the sweep's
+                            # cluster gate. Weight = match_r × eligible_count
+                            # (i.e. the cross-validation strength). A 5/5 anchor
+                            # at r=0.95 contributes ~4.75; a 2/5 anchor at r=0.86
+                            # contributes ~1.72. With the anchor's vote, even
+                            # one sweep window agreeing within ±300ms can push
+                            # the cluster gate over its threshold and save.
+                            anchor_vote_weight = float(match.match_r) * max(1, eligible_count)
+                            confirmation_shifts.append(
+                                (int(match.offset_ms), anchor_vote_weight)
+                            )
+                            # Broadcast match details so the shape canvas can
+                            # render the live-match marker + beat-twin lines.
+                            try:
+                                cand_idx = next(
+                                    (i for i, c in enumerate(anchor_candidates)
+                                     if c.timestamp_ms == match.candidate.timestamp_ms
+                                     and c.band == match.candidate.band),
+                                    -1,
+                                )
+                                from services.websocket_manager import ws_manager
+                                asyncio.create_task(ws_manager.broadcast({
+                                    "type":           "shape_match_updated",
+                                    "uri":            uri,
+                                    "offset_ms":      int(match.offset_ms),
+                                    "r":              float(match.match_r),
+                                    "q":              float(match.match_q),
+                                    "candidate_idx":  int(cand_idx),
+                                    "band":           match.candidate.band,
+                                    "source":         "anchor",
+                                }))
+                            except Exception:
+                                pass
                             anchor_done = True
                         elif eligible_count >= len(anchor_candidates):
                             logger.info(
@@ -568,12 +713,27 @@ class AutoOffsetService:
                 else:
                     old_r, old_quality = 0.0, 0.0
                 old_r_samples.append(float(old_r))
+                # Track consecutive negative-OLD-r windows. When this hits 3+,
+                # the loaded baseline is provably wrong for this play and the
+                # downstream gates relax to allow a corrective save.
+                if old_r is not None and old_r < -0.05:
+                    _anti_neg_streak += 1
+                    if _anti_neg_streak >= 3 and not baseline_anti_corr:
+                        baseline_anti_corr = True
+                        logger.info(
+                            "Auto-offset xcorr: baseline flagged anti-correlated for %s "
+                            "(%d consecutive windows with OLD r<0) — relaxing save gates",
+                            uri, _anti_neg_streak,
+                        )
+                else:
+                    _anti_neg_streak = 0
 
                 # ── NEW candidate: free-search xcorr (multi-band) ────────────
                 new_result = _xcorr_window(
                     stored_ts, stored_bands, frames, win_start, win_end,
                     captured_duration_ms=int(meta.duration_ms or 0),
                     old_r=old_r,
+                    tempo_bpm=tempo_bpm,
                 )
                 if new_result is not None:
                     new_offset_ms, new_r = new_result
@@ -593,6 +753,18 @@ class AutoOffsetService:
                 base_threshold = stored_quality / 10.0
                 displacement_threshold = base_threshold * (1.5 if play_type == "skip" else 1.0)
                 displacement_threshold = min(displacement_threshold, 0.10)
+                # Round 8 — OLD-aware displacement floor. When OLD is positively
+                # correlating (r ≥ xcorr_old_correlating_floor), the loaded
+                # baseline is structurally agreeing with this window. A NEW
+                # measurement at a DIFFERENT offset only deserves to displace
+                # if it beats OLD by a wide margin — section-twins in periodic
+                # music can score r=0.85-0.95 against the wrong alignment, and
+                # without this floor they easily clear the small (≤0.10)
+                # default threshold and override correct locks.
+                old_floor = float(getattr(settings, "xcorr_old_correlating_floor", 0.50))
+                if old_r >= old_floor:
+                    old_margin = float(getattr(settings, "xcorr_old_correlating_margin", 0.20))
+                    displacement_threshold = max(displacement_threshold, old_margin)
                 if new_result is not None and new_r > old_r + displacement_threshold:
                     win_offset, win_quality, win_r, is_new = new_offset_ms, new_quality, new_r, True
                 else:
@@ -613,6 +785,7 @@ class AutoOffsetService:
                 # Each entry is weighted by `difficulty` so periodic-tile peaks
                 # (low diff) can't outvote a unique-feature peak (diff≈1.0).
                 seen: set[int] = set()
+                _prev_shifts_len = len(confirmation_shifts)  # round 9: snapshot for engine-snap stickiness gate
                 if win_r >= settings.xcorr_global_threshold:
                     confirmation_shifts.append((win_offset, float(difficulty)))
                     seen.add(win_offset)
@@ -675,7 +848,40 @@ class AutoOffsetService:
                 if (verification != "user_verified" and win_r >= settings.xcorr_global_threshold):
                     try:
                         from main import engine
-                        engine.apply_save(uri, int(win_offset), float(win_quality), source="sweep-window")
+                        # Round 9: stickiness gate. A single low-confidence window
+                        # shouldn't yank the engine far from its current offset
+                        # unless a prior window in this play already agreed with
+                        # the new offset, the measurement is high-Q on its own,
+                        # or this is a cold-start with anti-corr baseline (loaded
+                        # median provably wrong). Compares NEW vs engine's *current*
+                        # offset, not the loaded baseline.
+                        engine_current = engine._shape_offset_ms
+                        far_jump_ms = int(getattr(settings, "engine_snap_far_jump_ms", 1000))
+                        displacement = abs(int(win_offset) - engine_current)
+                        skip_snap = False
+                        if displacement > far_jump_ms:
+                            tol = int(getattr(settings, "xcorr_save_confirm_tol_ms", 300))
+                            agreeing = sum(
+                                1 for s, _w in confirmation_shifts[:_prev_shifts_len]
+                                if abs(s - win_offset) <= tol
+                            )
+                            high_q_floor = float(getattr(settings, "engine_snap_far_jump_q", 0.85))
+                            cold_start = engine._play_best_quality == 0.0
+                            allow = (
+                                agreeing >= 1
+                                or win_quality >= high_q_floor
+                                or (cold_start and baseline_anti_corr)
+                            )
+                            if not allow:
+                                logger.info(
+                                    "Engine: skip snap — far jump %+dms (Δ=%dms, Q=%.2f) without prior agreement for %s",
+                                    int(win_offset), displacement, float(win_quality), uri,
+                                )
+                                skip_snap = True
+                        if not skip_snap:
+                            engine.apply_save(uri, int(win_offset), float(win_quality),
+                                              source="sweep-window",
+                                              bypass_drift_cap=baseline_anti_corr)
                     except Exception as exc:
                         logger.debug("Engine apply_save (window) failed: %s", exc)
 
@@ -687,19 +893,67 @@ class AutoOffsetService:
                 # longer overwrite a good stored baseline. The post-loop save
                 # logic remains the final authority for cluster vs single-best.
                 _save_confirm_tol = int(getattr(settings, "xcorr_save_confirm_tol_ms", 300))
-                _save_min_confirm = float(getattr(settings, "xcorr_save_min_confirm", 2))
+                # Anti-correlated baseline halves-ish the confirmation requirement
+                # (default 2.0 → 1.5) so a single sweep window plus the anchor's
+                # weight (item 4) or just two weak windows can fire the save.
+                if baseline_anti_corr:
+                    _save_min_confirm = float(getattr(settings, "xcorr_save_min_confirm_anti", 1.5))
+                else:
+                    _save_min_confirm = float(getattr(settings, "xcorr_save_min_confirm", 2))
                 _agree_now = sum(
                     w for s, w in confirmation_shifts
                     if abs(s - best_offset) <= _save_confirm_tol
                 )
+                # Single-window high-r escape hatch. With the squared-signal
+                # correlator + beat-twin gate, an r ≥ xcorr_single_window_save_r
+                # measurement is hard for false matches to reach. Allow it to
+                # save without the cluster confirmation when its quality is also
+                # strong enough — this rescues songs where the lone good window
+                # was the right answer but no second window confirmed it.
+                #
+                # Round 8: tier the threshold by distance from the sweep's
+                # current best offset (i.e. the engine's converged lock for
+                # this play). Local refinements stay easy; far jumps require
+                # much stronger evidence. Cluster confirmation can still
+                # displace anything regardless of distance.
+                _single_save_r = float(getattr(settings, "xcorr_single_window_save_r", 0.78))
+                _single_save_q = float(getattr(settings, "xcorr_single_window_save_q", 0.70))
+                _single_save_far_r = float(getattr(settings, "xcorr_single_window_save_far_r", 0.90))
+                _single_save_far_q = float(getattr(settings, "xcorr_single_window_save_far_q", 0.85))
+                _far_jump_ms = int(getattr(settings, "xcorr_far_jump_ms", 1000))
+                # Distance from the sweep's current converged offset. When
+                # best_quality is still 0 (no prior cluster this play),
+                # treat as "near" so the first window can save normally.
+                if best_quality > 0.5:
+                    is_far_jump = abs(win_offset - best_offset) > _far_jump_ms
+                else:
+                    is_far_jump = False
+                if is_far_jump:
+                    eff_r = _single_save_far_r
+                    eff_q = _single_save_far_q
+                else:
+                    eff_r = _single_save_r
+                    eff_q = _single_save_q
                 if (is_global_best
                         and verification != "user_verified"
                         and _agree_now >= _save_min_confirm):
-                    _save_offset(uri, best_offset, best_quality)
+                    _save_offset(uri, best_offset, best_quality,
+                                 bypass_drift_cap=baseline_anti_corr)
+                elif (is_global_best and verification != "user_verified"
+                        and win_r >= eff_r and win_quality >= eff_q):
+                    tag = "far-jump" if is_far_jump else "near"
+                    logger.info(
+                        "Auto-offset xcorr: SAVING single-window high-r [%s] — %+dms r=%.2f Q=%.2f (cluster %.2f<%.1f, but r≥%.2f & Q≥%.2f)",
+                        tag, win_offset, win_r, win_quality, _agree_now, _save_min_confirm,
+                        eff_r, eff_q,
+                    )
+                    _save_offset(uri, win_offset, win_quality, source="sweep-single",
+                                 bypass_drift_cap=baseline_anti_corr)
                 elif is_global_best and verification != "user_verified":
                     logger.info(
-                        "Auto-offset xcorr: per-window save deferred — %+dms only weighted=%.2f/%.1f within ±%dms",
+                        "Auto-offset xcorr: per-window save deferred — %+dms only weighted=%.2f/%.1f within ±%dms (r=%.2f<%.2f or Q=%.2f<%.2f for single-win)",
                         best_offset, _agree_now, _save_min_confirm, _save_confirm_tol,
+                        win_r, _single_save_r, win_quality, _single_save_q,
                     )
 
                 # DIAGNOSTIC CSV ──────────────────────────────────────────
@@ -835,7 +1089,12 @@ class AutoOffsetService:
             # unique-feature windows agree." Periodic-tile windows (diff~0.6)
             # need 4+ agreements to clear the same bar, which suppresses
             # spurious clusters from looped musical content.
-            min_confirm = float(getattr(settings, "xcorr_save_min_confirm", 2))
+            # Anti-correlated baselines get a relaxed cluster threshold so the
+            # song can recover from a wrong stored median.
+            if baseline_anti_corr:
+                min_confirm = float(getattr(settings, "xcorr_save_min_confirm_anti", 1.5))
+            else:
+                min_confirm = float(getattr(settings, "xcorr_save_min_confirm", 2))
 
             def _agree_weight(target: int) -> float:
                 return sum(w for s, w in confirmation_shifts if abs(s - target) <= confirm_tol)
@@ -881,7 +1140,8 @@ class AutoOffsetService:
                     agree, save_offset, confirm_tol, min_confirm, save_quality,
                 )
             else:
-                _save_offset(uri, save_offset, save_quality)
+                _save_offset(uri, save_offset, save_quality,
+                             bypass_drift_cap=baseline_anti_corr)
 
         self._watching_uri = None
         self._task = None
@@ -1295,7 +1555,7 @@ def _difficulty_score(window_rms: np.ndarray, song_rms: np.ndarray) -> float:
 def _eval_at_shift(
     stored_ts: np.ndarray,
     stored_bands: list[np.ndarray],
-    frames: list[tuple[int, float, float, float]],
+    frames: list[tuple[int, float, float, float, float]],
     win_start: int,
     win_end: int,
     shift_ms: int,
@@ -1303,10 +1563,16 @@ def _eval_at_shift(
     """
     Evaluate multi-band Pearson r at a SPECIFIC shift (no search).
     shift_ms > 0 means the live signal is tested shifted right by shift_ms.
-    Returns average correlation coefficient across bands, or None if all flat.
+    Returns simple-mean correlation across all 4 bands, or None if all flat.
 
-    stored_bands: [rms_total, rms_low, rms_high] arrays from npz.
-    frames: [(ts, rms_total, rms_low, rms_high), ...] from live capture.
+    stored_bands: [rms_total, rms_low, rms_mid, rms_high] arrays from npz.
+    frames: [(ts, rms_total, rms_low, rms_mid, rms_high), ...] from live capture.
+
+    Round 5 reverted from variance-weighted combine to a simple mean: each
+    band gets equal vote. Forces all 4 bands (including melody-carrying mid)
+    to agree, which makes beat-tile twins much harder to fool the matcher
+    than when one high-variance band (typically rms_high during repetitive
+    hi-hat patterns) dominated the score.
     """
     bins = np.arange(win_start, win_end, _XCORR_BIN_MS, dtype=float)
     live_ts = np.array([f[0] for f in frames], dtype=float)
@@ -1319,7 +1585,9 @@ def _eval_at_shift(
             continue
         template_norm = (template - template.mean()) / template.std()
 
-        live_rms = np.array([f[1 + band_idx] for f in frames], dtype=float)
+        live_rms = _signed_square(
+            np.array([f[1 + band_idx] for f in frames], dtype=float)
+        )
         signal = _agc_normalize(np.interp(live_bins, live_ts, live_rms, left=0.0, right=0.0))
         if signal.std() < 1e-6:
             continue
@@ -1334,11 +1602,12 @@ def _eval_at_shift(
 def _xcorr_window(
     stored_ts: np.ndarray,
     stored_bands: list[np.ndarray],
-    frames: list[tuple[int, float, float, float]],
+    frames: list[tuple[int, float, float, float, float]],
     win_start: int,
     win_end: int,
     captured_duration_ms: int = 0,
     old_r: Optional[float] = None,
+    tempo_bpm: Optional[float] = None,
 ) -> Optional[tuple[int, float]]:
     """
     Multi-band cross-correlation of stored shape window against live audio.
@@ -1361,6 +1630,9 @@ def _xcorr_window(
     n_bins = len(bins)
     live_ts = np.array([f[0] for f in frames], dtype=float)
 
+    # band_info: (band_idx, template_norm). Round 5 reverted from variance-
+    # weighted to simple-mean band combine, so per-band variance is no longer
+    # tracked — each of the 4 bands gets equal vote in score_at.
     band_info: list[tuple[int, np.ndarray]] = []
     for band_idx, stored_rms in enumerate(stored_bands):
         template = _agc_normalize(np.interp(bins, stored_ts, stored_rms))
@@ -1373,7 +1645,7 @@ def _xcorr_window(
     live_arrays: dict[int, np.ndarray] = {}
     for band_idx, _ in band_info:
         live_arrays[band_idx] = _agc_normalize(
-            np.array([f[1 + band_idx] for f in frames], dtype=float)
+            _signed_square(np.array([f[1 + band_idx] for f in frames], dtype=float))
         )
 
     def score_at(shift: int) -> Optional[float]:
@@ -1452,6 +1724,33 @@ def _xcorr_window(
         )
         return None
 
+    # Beat-twin rejection. When tempo is known, explicitly score the same
+    # template at best_shift ± n*beat_period for n ∈ {1, 2, 3, 4}. A periodic
+    # passage's beat-tile twin matches strongly there; if any twin's r is
+    # within `xcorr_beat_twin_margin` of best_r, the window is genuinely
+    # ambiguous between two beat-aligned offsets and we should fall back to
+    # OLD rather than commit to the wrong tile. Mirrors the anchor's
+    # beat-twin penalty so both calibrators agree on what counts as
+    # ambiguous in periodic music.
+    if tempo_bpm and tempo_bpm > 0 and best_r < settings.xcorr_high_confidence_r:
+        beat_period_ms = 60_000.0 / float(tempo_bpm)
+        twin_margin = float(getattr(settings, "xcorr_beat_twin_margin", 0.10))
+        for n in (1, 2, 3, 4):
+            for sign in (-1, 1):
+                twin_shift = best_shift + sign * int(round(n * beat_period_ms))
+                if abs(twin_shift) > search_ms:
+                    continue
+                twin_r = score_at(twin_shift)
+                if twin_r is None:
+                    continue
+                if best_r - twin_r < twin_margin:
+                    logger.info(
+                        "xcorr reject: window [%d–%d]ms beat-twin — best=%.2f at %+dms vs twin=%.2f at %+dms (%+d beats, margin<%.2f)",
+                        win_start, win_end, best_r, best_shift,
+                        twin_r, twin_shift, sign * n, twin_margin,
+                    )
+                    return None
+
     return (-best_shift, round(best_r, 3))
 
 
@@ -1459,7 +1758,7 @@ def _xcorr_window(
 def _xcorr_window_detail(
     stored_ts: np.ndarray,
     stored_bands: list[np.ndarray],
-    frames: list[tuple[int, float, float, float]],
+    frames: list[tuple[int, float, float, float, float]],
     win_start: int,
     win_end: int,
     winning_shift: int,
@@ -1701,7 +2000,8 @@ def _save_offset_from_anchor(uri: str, offset_ms: int, quality: float) -> None:
 
 
 def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
-                 source: str = "sweep") -> None:
+                 source: str = "sweep",
+                 bypass_drift_cap: bool = False) -> None:
     """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine.
 
     When the active context is a tracked Set List, write into
@@ -1746,6 +2046,11 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
             # Successful save means the stored offset is good for this play —
             # reset the anti-correlated streak counter.
             "anti_corr_count": 0,
+            # Round 7: a save fired for this slot, so the slot is now
+            # "coarse-locked" — anchor-as-cold-start is no longer needed
+            # unless future plays anti-correlate enough to demote this back
+            # to False (see _bump_anti_corr_count).
+            "coarse_locked": True,
         }
         # Track per-Set-List bias delta against the prior median (Option 5).
         try:
@@ -1765,9 +2070,21 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
     # Apply to the live engine — only takes effect if this save's quality
     # beats the best seen this play. Persists either way (we just wrote to
     # disk above), so the next play's median can include this save.
+    #
+    # Anchor quality boost: the anchor save's `quality` field is match_r ×
+    # uniqueness, typically 0.30–0.50. The per-window sweep emits Q values
+    # of 0.50–0.80 (Pearson_r × difficulty), so without a boost an early
+    # sweep window can win the engine.apply_save quality-wins gate within
+    # seconds of the anchor snap and replace it. Anchors carry stronger
+    # provenance — uniqueness vetted offline, ≥2 candidates cross-validated
+    # at runtime — so they should hold their position unless the sweep finds
+    # something genuinely better. Multiplying by 1.6 puts a strong anchor
+    # (Q≈0.45) on par with a strong sweep window (Q≈0.72).
+    apply_quality = float(quality) * (1.6 if source == "anchor" else 1.0)
     try:
         from main import engine
-        engine.apply_save(uri, int(offset_ms), float(quality), source)
+        engine.apply_save(uri, int(offset_ms), apply_quality, source,
+                          bypass_drift_cap=bypass_drift_cap)
     except Exception as exc:
         logger.warning("Auto-offset: could not apply offset to trigger engine: %s", exc)
 
