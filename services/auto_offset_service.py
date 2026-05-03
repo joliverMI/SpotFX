@@ -252,6 +252,21 @@ class AutoOffsetService:
         if not track or not track.is_playing or not app_state.on_target_device:
             return
 
+        # If ANY capture is in progress, stop a running xcorr — the recorder
+        # competes with xcorr for event-loop time and PulseAudio frames. Don't
+        # restrict to URI match: a capture for song A still starves the xcorr
+        # loop matching song B that's currently playing.
+        try:
+            from services.audio_shape_service import audio_shape_service as _ass
+            if self._watching_uri and _ass._recording_uri:
+                logger.info(
+                    "Auto-offset xcorr: stopping (was watching %s) — capture in progress for %s",
+                    self._watching_uri, _ass._recording_uri,
+                )
+                await self._stop()
+        except Exception:
+            pass
+
         # Already watching this song
         if self._watching_uri == new_uri:
             return
@@ -261,6 +276,27 @@ class AutoOffsetService:
         meta = load_audio_shape_meta(new_uri)
         if meta is None or not meta.capture_complete:
             return
+
+        # Skip xcorr while ANY capture is in progress. xcorr opens its own
+        # AudioCaptureStream and runs numpy work per window — competing with
+        # the active capture for event-loop time and PulseAudio frames. The
+        # observed failure mode: queue-full frame drops in the recorder ->
+        # capture-gap > 200ms -> shape discarded (`Audio shape discarded —
+        # gap of 2869ms detected (limit 200ms)`). Re-enabling xcorr after
+        # capture finishes is automatic — `_recording_uri` clears when the
+        # recorder stops, and the next track-change poll sets things up.
+        try:
+            from services.audio_shape_service import audio_shape_service
+            if audio_shape_service._recording_uri:
+                logger.info(
+                    "Auto-offset xcorr: deferred for %s — capture in progress (recording=%s)",
+                    new_uri, audio_shape_service._recording_uri,
+                )
+                return
+        except Exception:
+            # Defensive: if the import fails for any reason, fall through to
+            # normal xcorr behavior rather than silently breaking the sweep.
+            pass
 
         # Per-Set-List opt-out: when the active Set List has xcorr_enabled=False
         # (typically a non-mixed playlist), skip the per-play sweep entirely so
@@ -351,14 +387,26 @@ class AutoOffsetService:
         """
         npz_path = AUDIO_SHAPES_DIR / meta.npz_file
 
+        # Current planner version. Any other stored hash (older U-Score versions
+        # or the legacy hex-style hash from the difficulty/uniqueness planner)
+        # triggers a fresh re-plan so songs picked up before round 10 still
+        # benefit from the new bands without an explicit backfill run.
+        _current_uscore_hash = "uscore-v6"
+
         # Cache hit: stored windows match the current params version.
-        if meta.xcorr_windows and meta.xcorr_params_hash:
+        if (meta.xcorr_windows and meta.xcorr_params_hash
+                and meta.xcorr_params_hash == _current_uscore_hash):
             windows = [(w["start_ms"], w["end_ms"]) for w in meta.xcorr_windows]
             logger.info(
                 "Auto-offset xcorr: using %d cached windows for %s (hash=%s)",
                 len(windows), uri, meta.xcorr_params_hash,
             )
             return windows
+        if meta.xcorr_windows and meta.xcorr_params_hash:
+            logger.info(
+                "Auto-offset xcorr: cache invalidated for %s — stored hash=%s, current=%s; re-planning",
+                uri, meta.xcorr_params_hash, _current_uscore_hash,
+            )
 
         # Fresh compute path. Load all 4 bands + librosa beats; route to the
         # U-Score planner when beats exist, fall back to the legacy planner.
@@ -392,7 +440,7 @@ class AutoOffsetService:
                 planned = uscore_planner.plan_uscore_windows(
                     stored_ts, bands_dict, meta.duration_ms, beats_ms,
                 )
-                params_hash = "uscore-v2"
+                params_hash = "uscore-v6"
             except Exception as exc:
                 logger.warning("Auto-offset xcorr: U-Score planner failed for %s: %s", uri, exc)
                 planned = []
@@ -487,6 +535,24 @@ class AutoOffsetService:
             logger.warning("Auto-offset xcorr: failed to load npz for %s: %s", uri, exc)
             capture.stop()
             return
+
+        # Round 9.5: envelope lookup. For each cached window, the planner
+        # stored (safe_neg_ms, safe_pos_ms) — the safe-shift range relative
+        # to the window's expected match position. At runtime we clip the
+        # NEW measurement to engine_current ± envelope so a window can't
+        # report a measurement that lies in twin territory. Missing entries
+        # (legacy shapes that pre-date round 9.5) get a wide-open envelope
+        # so the clip is a no-op for them.
+        envelope_lookup: dict[tuple[int, int], tuple[int, int]] = {}
+        for w in (meta.xcorr_windows or []):
+            try:
+                key = (int(w["start_ms"]), int(w["end_ms"]))
+                envelope_lookup[key] = (
+                    int(w.get("safe_neg_ms", -10**9)),
+                    int(w.get("safe_pos_ms",  10**9)),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
 
         # Librosa tempo (if analysed) — feeds the per-window beat-twin
         # rejection in _xcorr_window. Same source as the anchor detector.
@@ -740,6 +806,35 @@ class AutoOffsetService:
                     new_quality = round(new_r * difficulty, 3)
                 else:
                     new_offset_ms, new_r, new_quality = 0, 0.0, 0.0
+
+                # Round 9.5: envelope clip. Each window has a precomputed safe-
+                # shift range — outside it, the matcher's peak likely landed on
+                # a twin rather than the truth. Reject the NEW measurement when
+                # it falls outside `engine_current ± envelope`. Skip the clip
+                # during cold-start (engine has not snapped yet this play) so
+                # a far-from-loaded truth can still be discovered.
+                if new_result is not None:
+                    try:
+                        from main import engine as _engine_for_clip
+                        _engine_current = _engine_for_clip._shape_offset_ms
+                        _play_best = _engine_for_clip._play_best_quality
+                    except Exception:
+                        _engine_current = 0
+                        _play_best = 0.0
+                    if _play_best > 0.0:
+                        env = envelope_lookup.get((win_start, win_end))
+                        if env is not None:
+                            _safe_neg, _safe_pos = env
+                            _rel = new_offset_ms - _engine_current
+                            if _rel < _safe_neg or _rel > _safe_pos:
+                                logger.info(
+                                    "xcorr reject: window [%d–%d]ms envelope clip — NEW %+dms "
+                                    "(%+dms from engine %+dms) outside [%+d, %+d] for %s",
+                                    win_start, win_end, new_offset_ms, _rel, _engine_current,
+                                    _safe_neg, _safe_pos, uri,
+                                )
+                                new_result = None
+                                new_offset_ms, new_r, new_quality = 0, 0.0, 0.0
 
                 # ── Pick winner for this window ───────────────────────────────
                 # NEW must beat OLD's r by displacement_threshold to displace.

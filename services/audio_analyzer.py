@@ -367,6 +367,55 @@ def load_audio_shape_meta(spotify_uri: str) -> Optional[AudioShapeMeta]:
     return None
 
 
+def flag_needs_recapture(spotify_uri: str, reason: str) -> bool:
+    """Mark an audio shape as suggested-for-recapture. Called by runtime
+    detectors (anti-corr persistence, repeated low Q, etc.) to record that
+    this captured shape is no longer aligning reliably and should be
+    re-recorded. An external script scans for shapes with
+    `needs_recapture=True` and triggers fresh captures.
+
+    `reason` is a short tag, e.g. "anti_corr_persistent",
+    "low_q_streak", "no_uscore_windows", "section_twin_dominant".
+
+    Returns True on success. Idempotent: if already flagged, only
+    `needs_recapture_flag_count` and `needs_recapture_flagged_at` update.
+    """
+    import datetime
+    for path in AUDIO_SHAPES_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("spotify_uri") != spotify_uri:
+                continue
+            data["needs_recapture"] = True
+            data["needs_recapture_reason"] = reason
+            data["needs_recapture_flagged_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+            data["needs_recapture_flag_count"] = int(data.get("needs_recapture_flag_count") or 0) + 1
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def clear_needs_recapture(spotify_uri: str) -> bool:
+    """Reset the recapture-suggested flag. Called by audio_shape_service after
+    a fresh capture saves over the same URI. Returns True on success."""
+    for path in AUDIO_SHAPES_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("spotify_uri") != spotify_uri:
+                continue
+            data["needs_recapture"] = False
+            data["needs_recapture_reason"] = ""
+            data["needs_recapture_flagged_at"] = ""
+            # keep flag_count as a historical record so the script can prioritize chronic offenders
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def _librosa_path_for_uri(spotify_uri: str):
     """Return the Path to the .librosa.json file for a URI, or None if not found."""
     meta = load_audio_shape_meta(spotify_uri)

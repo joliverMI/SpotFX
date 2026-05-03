@@ -172,7 +172,7 @@ def main() -> None:
 
         # Write back to sidecar.
         data["xcorr_windows"] = windows
-        data["xcorr_params_hash"] = "uscore-v2"   # round 9: wider _BEAT_RANGE + tighter ambiguous gate
+        data["xcorr_params_hash"] = "uscore-v6"   # round 10: + rms_low_inv + rms_low_deriv bands
         try:
             j_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:

@@ -21,7 +21,11 @@ from api.lastfm import fetch_lastfm_genres
 
 logger = logging.getLogger(__name__)
 
-SCOPES = "user-read-playback-state user-read-currently-playing"
+SCOPES = (
+    "user-read-playback-state user-read-currently-playing "
+    "user-modify-playback-state "
+    "playlist-read-private playlist-modify-private playlist-modify-public"
+)
 
 _sp: Optional[spotipy.Spotify] = None
 _artist_genre_cache: dict[str, list[str]] = {}

@@ -37,7 +37,7 @@ class AudioShapeService:
         self._capture_started_at: float = 0.0  # monotonic time when capture began
 
     # How far into a song (ms) counts as "restarted from the beginning"
-    _RESTART_THRESHOLD_MS = 5000
+    _RESTART_THRESHOLD_MS = 10000
     _CAPTURE_GRACE_S = 5.0  # ignore transient URI changes for this long after capture starts
 
     async def on_track_change(self, track: Optional[SpotifyTrackInfo]) -> None:
@@ -292,7 +292,7 @@ class AudioShapeService:
                 # — the smart-window xcorr sweep handles song-start snapping by
                 # itself with the round-5 4-band math, so rise detection at
                 # capture time is unnecessary unless re-enabled for debugging.
-                if settings.anchor_enabled:
+                if _s.anchor_enabled:
                     try:
                         from services import anchor_detector, librosa_service
                         npz = np.load(npz_path)
@@ -570,6 +570,19 @@ async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> None:
         return
 
     await analyze_async(meta)
+
+    # All analysis complete (shape + WAV + librosa). Remove from recapture
+    # playlist if present, and clear the needs_recapture flag on the sidecar.
+    try:
+        from services import recapture_playlist
+        recapture_playlist.remove_track(meta.spotify_uri)
+    except Exception:
+        pass
+    try:
+        from services.audio_analyzer import clear_needs_recapture
+        clear_needs_recapture(meta.spotify_uri)
+    except Exception:
+        pass
 
 
 # Singleton — import this everywhere

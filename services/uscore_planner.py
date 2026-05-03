@@ -37,8 +37,13 @@ _BIN_MS = 25
 # Default planner parameters (round 7).
 _WINDOW_LENGTH_MS = 5000          # fixed for now; scaffold is variable per-window
 _CANDIDATE_STEP_MS = 250          # slide between candidate window positions
-_MAX_WINDOWS_DEFAULT = 20
-_MAX_OVERLAP_MS = 1000            # max overlap between two selected windows
+# Round 9.6: bumped cap 20 → 40 and max overlap 1000 → 3000.
+# Even narrow-envelope windows can incrementally refine the engine when many
+# of them agree; the runtime envelope clip per-window prevents far-twin damage,
+# so denser packing is safe. Adjacent 5000ms windows can now sit 2000ms apart
+# (was 4000ms), and we'll accept up to 40 selections per song.
+_MAX_WINDOWS_DEFAULT = 40
+_MAX_OVERLAP_MS = 3000            # max overlap between two selected windows
 _MANDATORY_EARLY_START_MIN = 10000
 _MANDATORY_EARLY_START_MAX = 20000
 _MANDATORY_BEFORE_MS = 40000
@@ -51,27 +56,40 @@ _END_BUFFER_MS = 30000
 # `3pm4Xtcs` failure had four candidates spaced 1500-7500ms apart, beyond ±6
 # beats at 120 BPM). Matrix width doubles; matrix-once architecture absorbs it.
 _BEAT_RANGE = 12                  # ±N beats span for the shift search
-_BEAT_TWIN_OFFSETS = (1, 2, 4)    # tested for the beat-twin filter
-_AMBIGUOUS_SEARCH_MS = 7000       # ±N ms range for the ambiguous-margin filter
-# Round 9: tightened 0.02 → 0.08 to match runtime r-space gate behavior more
-# closely (runtime `xcorr_wide_top1_margin` ≈ 0.05 in r-space; squared-residual
-# ratios scale roughly squared, so 0.08 here ≈ 0.04 in r). The round-7 0.02
-# was misleadingly permissive — periodic music windows that "passed" still
-# bounced at runtime.
-_AMBIGUOUS_MARGIN_PCT = 0.08
-# Round 9: small absolute floor on absolute uniqueness. 0.0 (round 7) accepted
-# every positive u_score; the wider _BEAT_RANGE plus tighter ambiguous gate
-# already weed out most lukewarm picks, but a tiny floor catches the
-# borderline cases that survive the binary gates with marginally low scores.
-# Tune after backfill output if too aggressive.
-_MIN_USCORE_KEEP = 0.005
+_BEAT_TWIN_OFFSETS = (1, 2, 4)    # tested for the beat-twin filter (legacy; round 9.5 envelope subsumes)
+_AMBIGUOUS_SEARCH_MS = 7000       # ±N ms range for the ambiguous-margin filter (legacy)
+_AMBIGUOUS_MARGIN_PCT = 0.08      # legacy binary-gate threshold; superseded by envelope in round 9.5.
+# Round 9.5: per-window safe-shift envelope. For each band, find the smallest
+# |δ| in each direction where the residual drops within
+# `_ENVELOPE_THRESHOLD_PCT` of the band's worst-case alternative-shift residual
+# — that's the closest twin in that direction. The window's safe envelope =
+# (twin_distance − _ENVELOPE_SAFETY_BUFFER_MS) in each direction, taken as the
+# min across bands so the window is safe in ALL bands. Replaces the binary
+# beat-twin / ambiguous-margin gates with a continuous, per-direction tolerance
+# the runtime can clip its measurement to.
+_ENVELOPE_THRESHOLD_PCT = 0.10        # twin = residual within 10% of band's worst-case alt
+# Round 9.6: 200 → 100. Smaller buffer = wider envelopes, so more windows
+# qualify with usable refinement range.
+_ENVELOPE_SAFETY_BUFFER_MS = 100
+# Round 9.6: 600 → 100. Even narrow-envelope windows can refine the engine in
+# small steps when many of them agree. The runtime envelope clip still rejects
+# any measurement that strays past a window's safe range, so admitting a
+# tight-envelope window doesn't open the door to far twins — it just contributes
+# evidence for offsets close to the engine's current position.
+_MIN_TOTAL_ENVELOPE_MS = 100
+_MIN_USCORE_KEEP = 0.005              # absolute uniqueness floor (round 9)
 _DEFAULT_BEAT_MS_FALLBACK = 500.0 # 120 BPM if no librosa data
 
 # Per-band weights for the mean-across-bands window U-Score. Bass dominates
 # because triggers usually anchor on bass hits and the mid/high bands carry
-# more noise. Order matches `_BAND_KEYS` below: total, low, mid, high.
-_BAND_WEIGHTS = (1.0, 3.0, 1.5, 1.0)
-_BAND_KEYS = ("rms_total", "rms_low", "rms_mid", "rms_high")
+# more noise. Round 10 appends two derived bands AFTER the four primary RMS
+# bands: rms_low_inv (silence-emphasizing — high during quiet sections) and
+# rms_low_deriv (onset/offset transitions — spikes at any abrupt energy change).
+# Captures structure that signed_square amplitude weighting flattens to zero.
+# Order: total, low, mid, high, low_inv, low_deriv.
+_BAND_WEIGHTS = (1.0, 3.0, 1.5, 1.0, 2.0, 1.5)
+_BAND_KEYS = ("rms_total", "rms_low", "rms_mid", "rms_high")  # primary bands loaded from npz
+_DERIVED_BAND_NAMES = ("rms_low_inv", "rms_low_deriv")        # round 10 derived from rms_low
 
 
 def _signed_square(arr: np.ndarray) -> np.ndarray:
@@ -263,6 +281,76 @@ def _residual_at_shift(
     return float(np.mean(diff * diff))
 
 
+def _compute_safe_envelope(
+    bands_full_norm: list[np.ndarray],
+    win_start_bin: int,
+    win_len_bins: int,
+    max_shift_bins: int,
+    threshold_pct: float = _ENVELOPE_THRESHOLD_PCT,
+    safety_buffer_bins: int = _ENVELOPE_SAFETY_BUFFER_MS // _BIN_MS,
+) -> tuple[int, int]:
+    """Compute the safe-shift envelope (safe_neg_bins, safe_pos_bins) for a
+    candidate window.
+
+    For each band, walk outward from δ=0 and find the smallest |δ| where the
+    residual drops within `threshold_pct` of the band's worst-case alternative
+    residual (the closest "twin" in that direction). Subtract the safety buffer
+    and floor at 0. The window-level envelope is the MIN across bands — we
+    must be safe in every band.
+
+    Returns:
+      (safe_neg_bins, safe_pos_bins) — both non-negative integers in
+      bin units. The runtime can trust a window measurement that lands within
+      [engine_current - safe_neg_bins*_BIN_MS, engine_current + safe_pos_bins*_BIN_MS].
+    """
+    if max_shift_bins < 1 or len(bands_full_norm) == 0:
+        return 0, 0
+    n_bands = len(bands_full_norm)
+    band_windows = [b[win_start_bin:win_start_bin + win_len_bins] for b in bands_full_norm]
+    if any(b.size != win_len_bins for b in band_windows):
+        return 0, 0
+    if any(float(b.std()) < 1e-6 for b in band_windows):
+        return 0, 0
+
+    per_band_neg = [max_shift_bins] * n_bands
+    per_band_pos = [max_shift_bins] * n_bands
+
+    for band_idx, (b_window, b_full) in enumerate(zip(band_windows, bands_full_norm)):
+        residuals_pos: dict[int, float] = {}
+        residuals_neg: dict[int, float] = {}
+        band_min: float = float("inf")
+        for delta in range(1, max_shift_bins + 1):
+            r_pos = _residual_at_shift(b_window, b_full, win_start_bin, win_len_bins,  delta)
+            if r_pos is not None:
+                residuals_pos[delta] = r_pos
+                if r_pos < band_min:
+                    band_min = r_pos
+            r_neg = _residual_at_shift(b_window, b_full, win_start_bin, win_len_bins, -delta)
+            if r_neg is not None:
+                residuals_neg[delta] = r_neg
+                if r_neg < band_min:
+                    band_min = r_neg
+        if not np.isfinite(band_min) or band_min <= 0:
+            # No valid alternative shifts; treat as fully safe (max range).
+            continue
+        threshold = band_min * (1.0 + threshold_pct)
+        for delta in range(1, max_shift_bins + 1):
+            r = residuals_pos.get(delta)
+            if r is not None and r <= threshold:
+                per_band_pos[band_idx] = delta
+                break
+        for delta in range(1, max_shift_bins + 1):
+            r = residuals_neg.get(delta)
+            if r is not None and r <= threshold:
+                per_band_neg[band_idx] = delta
+                break
+
+    # Min across bands (worst-case) — minus the safety buffer, floored at 0.
+    safe_pos = max(0, min(per_band_pos) - safety_buffer_bins)
+    safe_neg = max(0, min(per_band_neg) - safety_buffer_bins)
+    return safe_neg, safe_pos
+
+
 def _gate_check_window(
     bands_full_norm: list[np.ndarray],
     win_start_bin: int,
@@ -377,12 +465,39 @@ def plan_uscore_windows(
     # window slices and the shifted candidate slices).
     grid_ms = np.arange(0, duration_ms, _BIN_MS, dtype=float)
     bands_full_norm: list[np.ndarray] = []
+    rms_low_resampled: Optional[np.ndarray] = None
     for key in _BAND_KEYS:
         b = bands.get(key)
         if b is None:
             return []
         squared = _resample_band(timestamps_ms, b, grid_ms)
         bands_full_norm.append(_agc(squared))
+        if key == "rms_low":
+            # Keep the raw resampled-and-squared rms_low for deriving the
+            # silence/onset bands below — we want the same time grid and AGC
+            # treatment but different transformations.
+            rms_low_resampled = squared
+
+    # Round 10: derived bands. Computed from the same rms_low grid so the
+    # window indexing aligns. Both go through _agc independently so each
+    # band's AGC scale is internally consistent.
+    if rms_low_resampled is not None:
+        # Inverse-energy: high during quiet, low during loud. signed_square has
+        # already been applied in _resample_band; here we invert in normalized
+        # space. Take |rms_low|, normalize by 95th percentile, invert (1 − x),
+        # clip to [0, 1], then re-square for amplitude weighting consistency.
+        abs_low = np.abs(rms_low_resampled)
+        p95 = float(np.percentile(abs_low, 95)) + 1e-6
+        inv = 1.0 - np.clip(abs_low / p95, 0.0, 1.0)
+        inv_sq = _signed_square(inv)
+        bands_full_norm.append(_agc(inv_sq))
+
+        # Onset-derivative: |d/dt rms_low| spikes at any abrupt energy change
+        # (loud→quiet or quiet→loud). Use np.diff and pad to keep length
+        # aligned with the other bands.
+        deriv = np.abs(np.diff(rms_low_resampled, prepend=rms_low_resampled[:1]))
+        deriv_sq = _signed_square(deriv)
+        bands_full_norm.append(_agc(deriv_sq))
 
     # Determine the global shift range for the residual matrix. Use the largest
     # local beat period × _BEAT_RANGE so every position has its full ±N-beat
@@ -414,9 +529,20 @@ def plan_uscore_windows(
         if agg is None:
             continue
         u_score, per_band_values = agg
-        beat_twin_safe, ambig_safe = _gate_check_window(
-            bands_full_norm, win_start_bin, win_len_bins, beat_period_bins
+        # Round 9.5: envelope replaces binary beat-twin / ambiguous-margin gates.
+        # Search range is the smaller of the global matrix max and the local
+        # ±_BEAT_RANGE in this window's local beat period — we don't need to
+        # inspect shifts farther than what the runtime would search.
+        env_max_shift_bins = min(
+            max_shift_bins,
+            max(1, _BEAT_RANGE * beat_period_bins),
+            _AMBIGUOUS_SEARCH_MS // _BIN_MS,
         )
+        safe_neg_bins, safe_pos_bins = _compute_safe_envelope(
+            bands_full_norm, win_start_bin, win_len_bins, env_max_shift_bins,
+        )
+        safe_neg_ms = -safe_neg_bins * _BIN_MS
+        safe_pos_ms = safe_pos_bins * _BIN_MS
         scored.append({
             "start_ms": start_ms,
             "end_ms": start_ms + window_length_ms,
@@ -424,8 +550,8 @@ def plan_uscore_windows(
             "u_score": round(u_score, 4),
             "u_per_band": [round(v, 4) for v in per_band_values],
             "beat_period_ms": round(beat_ms, 1),
-            "beat_twin_safe": beat_twin_safe,
-            "ambig_safe": ambig_safe,
+            "safe_neg_ms": int(safe_neg_ms),
+            "safe_pos_ms": int(safe_pos_ms),
             "difficulty": round(u_score, 4),    # backward-compat alias
         })
 
@@ -433,8 +559,15 @@ def plan_uscore_windows(
         logger.info("U-Score planner: no valid candidate windows for duration=%dms", duration_ms)
         return []
 
-    # Filter: must pass both simulated runtime gates.
-    eligible = [w for w in scored if w["beat_twin_safe"] and w["ambig_safe"] and w["u_score"] > _MIN_USCORE_KEEP]
+    # Filter: envelope width must clear the minimum, AND U-Score must clear floor.
+    # Round 9.5: the envelope subsumes the prior beat_twin_safe / ambig_safe
+    # binary gates — a window with a useful safe range in both directions has
+    # already implicitly passed both simulated gates.
+    eligible = [
+        w for w in scored
+        if (w["safe_pos_ms"] - w["safe_neg_ms"]) >= _MIN_TOTAL_ENVELOPE_MS
+        and w["u_score"] > _MIN_USCORE_KEEP
+    ]
     if not eligible:
         # Fallback: take top candidates by U-Score even if they failed gates,
         # so we always have something to evaluate. Tag them so the caller can

@@ -52,6 +52,33 @@ _bus_task: Optional[asyncio.Task] = None
 BUS_WINDOW_MS = 8  # coalesce window; must be << ramp step_ms (25 ms)
 
 
+_capture_gate_diag_logged = False
+
+def _capture_in_progress() -> bool:
+    """Return True when audio_shape_service is recording any URI. Used to
+    short-circuit LedFX HTTP calls so the capture doesn't compete with
+    LedFX writes for event-loop time / PulseAudio frames. Re-enables
+    automatically when capture finishes (audio_shape_service clears its
+    `_recording_uri` and the next call dispatches normally).
+    """
+    global _capture_gate_diag_logged
+    try:
+        from services.audio_shape_service import audio_shape_service
+        rec = audio_shape_service._recording_uri
+        if rec and not _capture_gate_diag_logged:
+            logger.info("LedFX gate: capture detected, muting LedFX calls (uri=%s)", rec)
+            _capture_gate_diag_logged = True
+        elif not rec and _capture_gate_diag_logged:
+            logger.info("LedFX gate: capture finished, resuming LedFX calls")
+            _capture_gate_diag_logged = False
+        return bool(rec)
+    except Exception as exc:
+        if not _capture_gate_diag_logged:
+            logger.warning("LedFX gate: could not read audio_shape_service: %r", exc)
+            _capture_gate_diag_logged = True
+        return False
+
+
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
@@ -90,6 +117,8 @@ def _get_probe_client() -> httpx.AsyncClient:
 # ── Internal direct-fire helpers (bypass bus) ─────────────────────────────────
 
 async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: dict) -> bool:
+    if _capture_in_progress():
+        return True   # capture-in-progress mute (acts like success so callers don't error)
     client = _get_client()
     try:
         resp = await client.put(
@@ -108,6 +137,8 @@ async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: 
 
 
 async def _set_config_direct(patch: dict) -> bool:
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
     client = _get_client()
     try:
         resp = await client.put("/api/config", json=patch)
@@ -180,6 +211,8 @@ async def measure_latency() -> float:
     Uses a dedicated httpx client so the probe doesn't queue behind trigger
     writes — that would inflate RTT under load and skew effective_offset_ms.
     """
+    if _capture_in_progress():
+        return state.ledfx_rtt_ms or 0.0   # mute during capture; keep last known RTT
     client = _get_probe_client()
     try:
         t0 = time.monotonic()
@@ -197,6 +230,8 @@ async def trigger_scene(scene_id: str) -> bool:
     Activate a LedFX scene by its scene_id.
     Returns True on success.
     """
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
     client = _get_client()
     try:
         resp = await client.put(
@@ -216,6 +251,8 @@ async def get_scenes() -> list[dict]:
     Fetch the list of available LedFX scenes.
     Returns an empty list if LedFX is unreachable.
     """
+    if _capture_in_progress():
+        return []
     client = _get_client()
     try:
         resp = await client.get("/api/scenes")
@@ -230,6 +267,8 @@ async def get_scenes() -> list[dict]:
 
 async def get_config() -> dict:
     """Fetch LedFX global config (GET /api/config). Returns {} on failure."""
+    if _capture_in_progress():
+        return {}
     client = _get_client()
     try:
         resp = await client.get("/api/config")
@@ -242,6 +281,8 @@ async def get_config() -> dict:
 
 async def get_virtual(virtual_id: str) -> dict:
     """Fetch a single LedFX virtual's current state. Returns {} on failure."""
+    if _capture_in_progress():
+        return state.ledfx_virtual_cache.get(virtual_id, {})
     client = _get_client()
     try:
         resp = await client.get(f"/api/virtuals/{virtual_id}")
@@ -254,6 +295,8 @@ async def get_virtual(virtual_id: str) -> dict:
 
 async def get_all_virtuals() -> dict:
     """Fetch all LedFX virtuals. Returns {} on failure."""
+    if _capture_in_progress():
+        return {}
     client = _get_client()
     try:
         resp = await client.get("/api/virtuals")
@@ -270,6 +313,8 @@ async def set_virtual_config(virtual_id: str, config: dict) -> bool:
     POST /api/virtuals  body: {"id": virtual_id, "config": config}
     This merges with the existing virtual config — only specified fields are changed.
     """
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
     client = _get_client()
     try:
         resp = await client.post(

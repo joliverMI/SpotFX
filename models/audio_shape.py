@@ -58,6 +58,16 @@ class AudioShapeMeta(BaseModel):
     genres: list[str] = Field(default_factory=list)
     capture_complete: bool = False   # False while still being recorded
     capture_failed: bool = False     # True if capture was discarded (e.g. gap in data)
+    # Recapture-suggested flag: set by runtime detectors that observe the
+    # captured shape is no longer aligning well (chronic anti-corr baselines,
+    # repeated sweep-final Q < threshold, no usable U-Score windows, etc.).
+    # An external script will scan the audio_shapes directory for shapes with
+    # `needs_recapture=True` and recapture them. Once a fresh capture saves
+    # over the same npz, the flag is reset to False.
+    needs_recapture: bool = False
+    needs_recapture_reason: str = ""           # short tag, e.g. "anti_corr_persistent", "low_q_streak", "no_uscore_windows"
+    needs_recapture_flagged_at: str = ""       # ISO 8601 UTC timestamp when set
+    needs_recapture_flag_count: int = 0        # incremented on each flag event; lets the script prioritize chronic offenders
     timestamp_offset_ms: int = 0     # shift shape data to align capture timing with playhead
     perception_trim_ms: int = 0      # user-applied nudge layered on top of timestamp_offset_ms
                                       # (applies when no Set List is active; per-Set-List trims

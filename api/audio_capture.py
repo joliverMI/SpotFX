@@ -62,7 +62,13 @@ class AudioCaptureStream:
 
     def __init__(self, song_start_monotonic: float):
         self._song_start = song_start_monotonic
-        self._queue: asyncio.Queue[AudioFrame | None] = asyncio.Queue(maxsize=200)
+        # Queue size: at 50ms/frame, 200 = 10s of buffer. Observed in production
+        # that a 200-frame buffer overflows during normal trigger-fire bursts
+        # (3+ concurrent plan fires + WebSocket reconnects + librosa subprocess
+        # IPC), creating capture gaps that get the shape discarded. 1000 frames
+        # = 50s lets the consumer absorb several-second event-loop blips without
+        # dropping audio data. Memory cost: ~1000 × ~80 bytes/AudioFrame = 80KB.
+        self._queue: asyncio.Queue[AudioFrame | None] = asyncio.Queue(maxsize=1000)
         self._stream: sd.InputStream | None = None
         self._loop = asyncio.get_event_loop()
         # Raw PCM buffer for WAV/librosa — list.append is GIL-atomic in CPython
