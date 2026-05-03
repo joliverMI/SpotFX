@@ -114,6 +114,11 @@ async def lifespan(app: FastAPI):
         _song_task_name = "spotify-poll"
         logger.info("Song source: Spotify API")
 
+    # Always-on PCM ring buffer — fills continuously so force-recapture can
+    # backfill song-start audio even when URI detection lags.
+    from api.pcm_ring_buffer import pcm_ring_buffer
+    pcm_ring_buffer.start()
+
     # Launch background tasks
     tasks = [
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
@@ -128,6 +133,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     await audio_shape_service.on_track_change(None)  # flush any in-progress capture
+    pcm_ring_buffer.stop()
     logger.info("SpotFX shutdown complete.")
 
 

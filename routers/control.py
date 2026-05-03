@@ -96,12 +96,26 @@ async def set_analyzed_trigger_override(enabled: bool):
             "count": len(engine._analyzed_triggers) if engine._analyzed_triggers else 0}
 
 
-@router.post("/recapture-wavs")
-async def set_recapture_wavs(enabled: bool):
-    """Temporarily enable WAV recapture for songs that have librosa data but no WAV."""
-    state.recapture_wavs = enabled
+@router.post("/recapture")
+async def set_recapture(enabled: bool, count: int = 0):
+    """Force-recapture mode. While `recapture_active` is true, every song that
+    plays gets recaptured with pre-roll PCM from the always-on ring buffer.
+    The counter (1-999) decrements on every song-change poll; reaches 0 →
+    auto-disables. Existing shape is preserved unless the new capture passes
+    all four atomic-save checks (coverage, WAV write, librosa, anchor count).
+    """
+    if enabled:
+        n = max(1, min(999, int(count or 50)))
+        state.recapture_active = True
+        state.recapture_remaining = n
+    else:
+        state.recapture_active = False
+        state.recapture_remaining = 0
     await ws_manager.broadcast_state(state)
-    return {"recapture_wavs": enabled}
+    return {
+        "recapture_active": state.recapture_active,
+        "recapture_remaining": state.recapture_remaining,
+    }
 
 
 @router.post("/auto-generate")

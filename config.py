@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     audio_analysis_max_songs: int = 0
     # Maximum allowed gap between consecutive audio samples; larger gaps discard the shape
     audio_max_gap_ms: int = 200
+    # Always-on PCM ring buffer depth (seconds). Held in memory continuously so
+    # force-recapture mode can backfill song-start audio that played before the
+    # URI-change handler realized a new song started. Memory cost at 44.1kHz
+    # mono float32: ~5.3 MB for 30s.
+    pcm_ring_buffer_seconds: int = 30
 
     # ── Audio shape display averages ──────────────────────────────────────────
     # Sliding-window average width for the smoothed overlay lines (ms)

@@ -198,6 +198,20 @@
         "clear": true
       },
       "problemMatcher": []
+    },
+    {
+      "label": "SpotFX: Update Recapture Playlist",
+      "type": "shell",
+      "command": ".venv/bin/python -m scripts.recapture_playlist --mode needs_recapture",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
     }
   ]
 }

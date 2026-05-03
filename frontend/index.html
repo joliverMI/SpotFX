@@ -214,6 +214,8 @@ let profile = null;   // { triggers: [{id, timestamp_ms, event_id, color, name}]
 let events = {};      // event_id -> event
 let paused = false;
 let onTargetDevice = false;
+let recording_active = false;
+let last_capture = null;   // { status: "ok"|"failed"|null, reason: str, uri: str|null }
 let nextPreview = null;  // { trigger_id, event_name, event_color, action_label, locked }
 let useAiTriggers = false;
 let useAnalyzedTriggerless = true;
@@ -270,6 +272,8 @@ GET('/settings').then(s => { appSettings = s; }).catch(() => {});
 onMessage('state', msg => {
   paused = msg.paused;
   onTargetDevice = msg.on_target_device ?? false;
+  recording_active = msg.recording_active ?? false;
+  last_capture = msg.last_capture ?? null;
   document.getElementById('ledfx-rtt').textContent = msg.ledfx_rtt_ms;
   _lastPollTime = Date.now();
   if (msg.timing && Object.keys(msg.timing).length) {
@@ -603,9 +607,21 @@ function renderTrack() {
   document.getElementById('track-artist').textContent = artist;
   document.getElementById('track-genre').textContent = (track.genres || []).join(' · ');
   const chipClass = onTargetDevice ? 'badge badge-green' : 'badge badge-red';
-  document.getElementById('track-device').innerHTML = track.device_name
+  const deviceChip = track.device_name
     ? `<span class="${chipClass}" style="font-size:10px;padding:1px 7px;">▶ on ${track.device_name}</span>`
     : '';
+  let recChip = '';
+  if (recording_active) {
+    recChip = ` <span class="badge badge-yellow" style="font-size:10px;padding:1px 7px;">● Recording Audio</span>`;
+  } else if (last_capture && last_capture.uri === track.spotify_uri) {
+    if (last_capture.status === 'ok') {
+      recChip = ` <span class="badge badge-green" style="font-size:10px;padding:1px 7px;">✓ Recorded</span>`;
+    } else if (last_capture.status === 'failed') {
+      const reason = (last_capture.reason || 'failed').replace(/_/g, ' ');
+      recChip = ` <span class="badge badge-red" style="font-size:10px;padding:1px 7px;" title="${reason}">✗ Capture failed</span>`;
+    }
+  }
+  document.getElementById('track-device').innerHTML = deviceChip + recChip;
   document.getElementById('time-total').textContent = fmtMs(track.duration_ms);
 }
 

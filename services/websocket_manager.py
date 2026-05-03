@@ -16,6 +16,31 @@ from models.state import AppState
 logger = logging.getLogger(__name__)
 
 
+def _recording_active() -> bool:
+    """True when audio_shape_service is currently capturing a song. Read fresh
+    from the singleton on every broadcast; lazy import avoids circular load."""
+    try:
+        from services.audio_shape_service import audio_shape_service
+        return bool(audio_shape_service._recording_uri)
+    except Exception:
+        return False
+
+
+def _last_capture() -> dict:
+    """Snapshot of the most recent capture's terminal state (success or
+    failure with reason tag). Used by Now Playing to render a green/red
+    badge after a capture finishes."""
+    try:
+        from services.audio_shape_service import audio_shape_service
+        return {
+            "status": audio_shape_service._last_capture_status,
+            "reason": audio_shape_service._last_capture_reason,
+            "uri":    audio_shape_service._last_capture_uri,
+        }
+    except Exception:
+        return {"status": None, "reason": "", "uri": None}
+
+
 class WebSocketManager:
     def __init__(self):
         self._connections: list[WebSocket] = []
@@ -53,7 +78,10 @@ class WebSocketManager:
             "on_target_device": state.on_target_device,
             "ledfx_rtt_ms": round(state.ledfx_rtt_ms, 1),
             "audio_analysis_enabled": state.audio_analysis_enabled,
-            "recapture_wavs": state.recapture_wavs,
+            "recapture_active": state.recapture_active,
+            "recapture_remaining": state.recapture_remaining,
+            "recording_active": _recording_active(),
+            "last_capture": _last_capture(),
             "use_unreviewed_ai_triggers": state.use_unreviewed_ai_triggers,
             "use_analyzed_triggerless": state.use_analyzed_triggerless,
             "analyzed_trigger_override": state.analyzed_trigger_override,

@@ -98,7 +98,11 @@
         <button id="btn-auto-gen" class="toggle-btn">Analyze</button>
         <button id="btn-genre-blend" class="toggle-btn" title="Skip song start when the next song shares a genre and the previous song ended naturally">Genre Blending</button>
         <button class="btn-sm" id="btn-verify">Mark Verified</button>
-        <button id="btn-recapture-wavs" class="toggle-btn advanced-only" title="Recapture WAV files for songs with librosa data but no WAV">Recapture</button>
+        <button id="btn-recapture-wavs" class="toggle-btn advanced-only" title="Force-recapture every song that plays. Counter limits how many songs.">Recapture</button>
+        <input id="input-recapture-count" type="number" min="1" max="999" value="50"
+               class="advanced-only"
+               style="width:54px;padding:4px 6px;font-size:12px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;"
+               title="Songs to recapture before auto-disable (1-999)" />
         <span id="embedded-tag" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:#1a237e;color:#90caf9;font-weight:600;">⚙ Embedded</span>
         <div class="search-wrap">
           <input id="song-search" type="text" placeholder="Search song profiles…" style="display:none" autocomplete="off">
@@ -401,8 +405,17 @@ onMessage('state', async msg => {
     analysisBtn.classList.toggle('active', !!msg.audio_analysis_enabled);
   }
   const recapBtn = document.getElementById('btn-recapture-wavs');
-  if (recapBtn && msg.recapture_wavs !== undefined) {
-    recapBtn.classList.toggle('active', !!msg.recapture_wavs);
+  const recapCount = document.getElementById('input-recapture-count');
+  if (recapBtn && msg.recapture_active !== undefined) {
+    recapBtn.classList.toggle('active', !!msg.recapture_active);
+  }
+  // Live-update counter as it ticks down server-side, but ONLY when the
+  // user isn't actively editing the input (otherwise the broadcast clobbers
+  // their typed value mid-edit).
+  if (recapCount && msg.recapture_remaining !== undefined
+        && msg.recapture_remaining > 0
+        && document.activeElement !== recapCount) {
+    recapCount.value = msg.recapture_remaining;
   }
   const autoBtn = document.getElementById('btn-auto-gen');
   if (autoBtn && msg.auto_generate_enabled !== undefined) {
@@ -1245,8 +1258,32 @@ document.getElementById('btn-analysis').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-recapture-wavs').addEventListener('click', async () => {
-  const curOn = document.getElementById('btn-recapture-wavs').classList.contains('active');
-  await POST(`/control/recapture-wavs?enabled=${!curOn}`);
+  const btn = document.getElementById('btn-recapture-wavs');
+  const countInput = document.getElementById('input-recapture-count');
+  const curOn = btn.classList.contains('active');
+  if (curOn) {
+    await POST(`/control/recapture?enabled=false`);
+  } else {
+    let n = parseInt(countInput.value, 10);
+    if (isNaN(n) || n < 1) n = 50;
+    if (n > 999) n = 999;
+    countInput.value = n;
+    await POST(`/control/recapture?enabled=true&count=${n}`);
+  }
+});
+
+// Live-update the server-side counter when user changes the input while
+// the toggle is active. Fires on blur or Enter (the standard `change`
+// event timing) so per-keystroke POSTs don't flood the server.
+document.getElementById('input-recapture-count').addEventListener('change', async () => {
+  const btn = document.getElementById('btn-recapture-wavs');
+  const countInput = document.getElementById('input-recapture-count');
+  if (!btn.classList.contains('active')) return;   // toggle off → nothing to update
+  let n = parseInt(countInput.value, 10);
+  if (isNaN(n) || n < 1) n = 1;
+  if (n > 999) n = 999;
+  countInput.value = n;
+  await POST(`/control/recapture?enabled=true&count=${n}`);
 });
 
 document.getElementById('btn-auto-gen').addEventListener('click', async () => {

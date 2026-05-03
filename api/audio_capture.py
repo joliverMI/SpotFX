@@ -15,6 +15,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import sounddevice as sd
@@ -46,6 +47,48 @@ def _compute_band_rms(pcm: np.ndarray, sample_rate: int,
     sos = butter(4, [low, high], btype="band", output="sos")
     filtered = sosfilt(sos, pcm)
     return float(np.sqrt(np.mean(filtered ** 2)))
+
+
+def synthesize_frames_from_pcm(
+    pcm: np.ndarray,
+    pcm_start_ms: int,
+    chunk_size: Optional[int] = None,
+    sample_rate: Optional[int] = None,
+) -> list["AudioFrame"]:
+    """Chunk a raw mono float32 PCM array and produce AudioFrame objects with
+    the same rms math as the live capture callback. Used to backfill song-start
+    audio from the always-on PCM ring buffer when force-recapture starts.
+
+    pcm_start_ms is the song-relative timestamp (in ms) for the FIRST sample
+    of `pcm`. Subsequent frames advance by chunk_size / sample_rate.
+
+    Returns frames in chronological order; ready to feed to recorder.ingest()
+    one by one.
+    """
+    if pcm is None or len(pcm) == 0:
+        return []
+    if chunk_size is None:
+        chunk_size = settings.audio_chunk_size
+    if sample_rate is None:
+        sample_rate = settings.audio_sample_rate
+    chunk_dur_ms = (chunk_size / sample_rate) * 1000.0
+    frames: list[AudioFrame] = []
+    n_chunks = len(pcm) // chunk_size
+    for i in range(n_chunks):
+        chunk = pcm[i * chunk_size : (i + 1) * chunk_size]
+        ts_ms = int(pcm_start_ms + i * chunk_dur_ms)
+        rms_total = float(np.sqrt(np.mean(chunk ** 2)))
+        # Same FFT decomposition as _callback for consistency
+        freqs = np.fft.rfftfreq(len(chunk), d=1 / sample_rate)
+        fft_mag = np.abs(np.fft.rfft(chunk)) / len(chunk)
+        low_mask = freqs < LOW_FREQ_CUTOFF
+        mid_mask = (freqs >= LOW_FREQ_CUTOFF) & (freqs <= HIGH_FREQ_CUTOFF)
+        high_mask = freqs > HIGH_FREQ_CUTOFF
+        rms_low = float(np.sqrt(np.mean(fft_mag[low_mask] ** 2))) if low_mask.any() else 0.0
+        rms_mid = float(np.sqrt(np.mean(fft_mag[mid_mask] ** 2))) if mid_mask.any() else 0.0
+        rms_high = float(np.sqrt(np.mean(fft_mag[high_mask] ** 2))) if high_mask.any() else 0.0
+        frames.append(AudioFrame(ts_ms, rms_total, rms_low, rms_mid, rms_high))
+    return frames
 
 
 class AudioCaptureStream:
