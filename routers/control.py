@@ -156,6 +156,22 @@ async def active_triggers():
         return {"source": "triggerless", "triggers": [t.model_dump() for t in engine._triggerless_triggers]}
     if state.analyzed_trigger_override and engine._analyzed_triggers:
         return {"source": "analyzed_override", "triggers": [t.model_dump() for t in engine._analyzed_triggers]}
+    # User-defined triggers, honouring active Set List override. The frontend
+    # already has profile.triggers (the default list) on hand from the WS
+    # state broadcast — but when a Set List has its own override on this
+    # song, the engine fires THOSE timestamps, not the default ones. Without
+    # this branch the Now Playing markers showed default trigger positions
+    # while triggers fired at setlist positions, looking like every trigger
+    # was "early" (or late) by the position delta.
+    sl_id = state.active_setlist_id
+    if (engine._profile and sl_id
+            and engine._profile.setlist_triggers.get(sl_id)
+            and any(t.enabled for t in engine._profile.setlist_triggers[sl_id])):
+        return {
+            "source": "setlist",
+            "setlist_id": sl_id,
+            "triggers": [t.model_dump() for t in engine._profile.setlist_triggers[sl_id]],
+        }
     if engine._profile and any(t.enabled for t in engine._profile.triggers):
         return {"source": "user", "triggers": []}  # user triggers — frontend already has them
     if state.use_analyzed_triggerless and engine._analyzed_triggers:
