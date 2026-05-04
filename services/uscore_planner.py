@@ -43,7 +43,14 @@ _CANDIDATE_STEP_MS = 250          # slide between candidate window positions
 # so denser packing is safe. Adjacent 5000ms windows can now sit 2000ms apart
 # (was 4000ms), and we'll accept up to 40 selections per song.
 _MAX_WINDOWS_DEFAULT = 40
-_MAX_OVERLAP_MS = 3000            # max overlap between two selected windows
+_MAX_OVERLAP_MS = 1000            # max overlap between two selected windows
+                                  # (was 3000 — produced 50-60% redundant audio
+                                  # across adjacent windows; xcorr was re-scoring
+                                  # the same chunks. 1000ms cap means each new
+                                  # window adds ≥4s of fresh signal AND the
+                                  # sparser placement exposes the true offset
+                                  # for tracks where the dense v6 plan had
+                                  # locked onto a beat-tile twin.)
 _MANDATORY_EARLY_START_MIN = 10000
 _MANDATORY_EARLY_START_MAX = 20000
 _MANDATORY_BEFORE_MS = 40000
@@ -508,6 +515,7 @@ def plan_uscore_windows(
     else:
         global_beat_ms = _DEFAULT_BEAT_MS_FALLBACK
     max_shift_bins = max(1, int(np.ceil(_BEAT_RANGE * global_beat_ms / _BIN_MS)))
+
 
     # One matrix pass: per-band per-position WINDOW uniqueness + per-tick
     # max-band visualization profile.

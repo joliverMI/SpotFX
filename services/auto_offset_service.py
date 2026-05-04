@@ -143,10 +143,20 @@ def _agc_normalize(arr: np.ndarray) -> np.ndarray:
     at different volumes remain comparable. Symmetric on both sides of the
     correlation, so it never biases the winner; only stabilizes when SNR is
     asymmetric. Volume invariance is already mostly handled by the per-window
-    z-score below — this is belt-and-suspenders for compressed dynamics."""
+    z-score below — this is belt-and-suspenders for compressed dynamics.
+
+    Uses `np.partition` for O(N) selection instead of `np.percentile`'s
+    O(N log N) sort. Result is bit-identical to `np.percentile(..., 95)` for
+    the integer index — no interpolation between adjacent percentiles, which
+    is fine here since the AGC scale is then divided into a per-window
+    z-score that absorbs any tiny offset.
+    """
     if arr.size == 0:
         return arr
-    scale = float(np.percentile(np.abs(arr), 95)) + 1e-6
+    n = arr.size
+    k = min(n - 1, max(0, int(n * 0.95)))
+    abs_arr = np.abs(arr)
+    scale = float(np.partition(abs_arr, k)[k]) + 1e-6
     return arr / scale
 
 
@@ -391,7 +401,7 @@ class AutoOffsetService:
         # or the legacy hex-style hash from the difficulty/uniqueness planner)
         # triggers a fresh re-plan so songs picked up before round 10 still
         # benefit from the new bands without an explicit backfill run.
-        _current_uscore_hash = "uscore-v6"
+        _current_uscore_hash = "uscore-v8"
 
         # Cache hit: stored windows match the current params version.
         if (meta.xcorr_windows and meta.xcorr_params_hash
@@ -440,7 +450,7 @@ class AutoOffsetService:
                 planned = uscore_planner.plan_uscore_windows(
                     stored_ts, bands_dict, meta.duration_ms, beats_ms,
                 )
-                params_hash = "uscore-v6"
+                params_hash = "uscore-v8"
             except Exception as exc:
                 logger.warning("Auto-offset xcorr: U-Score planner failed for %s: %s", uri, exc)
                 planned = []
@@ -524,11 +534,19 @@ class AutoOffsetService:
         try:
             data = np.load(AUDIO_SHAPES_DIR / meta.npz_file)
             stored_ts  = data["timestamps_ms"].astype(float)
+            # Prefer the pre-squared bands cached at capture time. Legacy
+            # shapes (saved before the cache landed) are recomputed live;
+            # the math is identical (`x · |x|`).
+            def _band(name: str) -> np.ndarray:
+                sq_key = f"{name}_sq"
+                if sq_key in data.files:
+                    return np.asarray(data[sq_key], dtype=float)
+                return _signed_square(np.asarray(data[name], dtype=float))
             stored_bands = [
-                _signed_square(np.asarray(data["rms_total"], dtype=float)),
-                _signed_square(np.asarray(data["rms_low"], dtype=float)),
-                _signed_square(np.asarray(data["rms_mid"], dtype=float)),
-                _signed_square(np.asarray(data["rms_high"], dtype=float)),
+                _band("rms_total"),
+                _band("rms_low"),
+                _band("rms_mid"),
+                _band("rms_high"),
             ]
             stored_rms = stored_bands[1]  # kept for difficulty scoring (squared rms_low)
         except Exception as exc:
@@ -620,6 +638,11 @@ class AutoOffsetService:
         # protecting anything).
         baseline_anti_corr = False
         _anti_neg_streak = 0
+        # Set by the lock-and-stop early exit. When True, the post-loop
+        # cleanup leaves `_watching_uri` set so on_track_change's "already
+        # watching this URI" guard prevents a fresh xcorr task from spawning
+        # for the rest of this play. Cleared on the next URI change.
+        _locked_via_stop = False
 
         # Early-feature anchor match: consumes the first N seconds of frames
         # and snap-aligns before the per-window sweep starts evaluating.
@@ -755,24 +778,40 @@ class AutoOffsetService:
                 window_template = np.interp(bins, stored_ts, stored_rms)
                 difficulty = _difficulty_score(window_template, stored_rms)
 
-                # ── OLD candidate: evaluate stored offset ─────────────────────
-                # Computed first so its r can feed into NEW's margin gate
-                # (when OLD is anti-correlated, a strong NEW peak is allowed
-                # through even if it has a near-twin — see _xcorr_window).
-                # Use median of recent saves rather than the last save alone,
-                # so a single noisy lock doesn't poison subsequent plays.
+                # ── OLD candidate: evaluate the engine's CURRENT live offset ──
+                # Test r at whatever the trigger engine is actually using to fire
+                # triggers right now. The disk-stored median is also computed so
+                # downstream gating + diagnostic quality fields stay populated, but
+                # the OLD test point itself is the engine's runtime offset.
+                #
+                # Why: when the engine loaded a stale median at song start (file
+                # updated since by another play), testing OLD at the disk median
+                # hides the engine staleness — every window says "OLD looks fine"
+                # while triggers fire at the wrong offset. Testing at the engine's
+                # actual offset surfaces the gap (low OLD r → NEW wins → apply_save
+                # corrects the engine).
                 cur_meta = load_audio_shape_meta(uri)
-                stored_offset_ms = cur_meta.timestamp_offset_ms if cur_meta else 0
+                stored_offset_ms_disk = cur_meta.timestamp_offset_ms if cur_meta else 0
                 stored_quality_for_old = cur_meta.offset_quality if cur_meta else 0.0
                 if cur_meta and app_state.active_setlist_id:
                     sl_entry = (cur_meta.setlist_offsets or {}).get(app_state.active_setlist_id)
                     if sl_entry:
                         med = _median_offset(sl_entry.get("history") or [])
-                        stored_offset_ms = med if med is not None else int(sl_entry.get("timestamp_offset_ms", 0))
+                        stored_offset_ms_disk = med if med is not None else int(sl_entry.get("timestamp_offset_ms", 0))
                         stored_quality_for_old = float(sl_entry.get("offset_quality", 0.0))
-                old_r = _eval_at_shift(
+                try:
+                    from main import engine as _engine_for_old
+                    engine_offset_ms = int(_engine_for_old._shape_offset_ms)
+                except Exception:
+                    engine_offset_ms = None
+                stored_offset_ms = engine_offset_ms if engine_offset_ms is not None else stored_offset_ms_disk
+                # Run the OLD evaluation on a worker thread — same reason as
+                # _xcorr_window: numpy releases the GIL during interp/dot, so
+                # the asyncio loop stays responsive while xcorr math runs.
+                old_r = await asyncio.to_thread(
+                    _eval_at_shift,
                     stored_ts, stored_bands, frames, win_start, win_end,
-                    shift_ms=-stored_offset_ms,
+                    -stored_offset_ms,                # shift_ms
                 )
                 if old_r is not None:
                     old_quality = round(old_r * difficulty, 3)
@@ -795,7 +834,11 @@ class AutoOffsetService:
                     _anti_neg_streak = 0
 
                 # ── NEW candidate: free-search xcorr (multi-band) ────────────
-                new_result = _xcorr_window(
+                # Run on a worker thread so the per-shift numpy sweep doesn't
+                # block the asyncio event loop (which serves LedFX HTTP writes,
+                # WebSocket broadcasts, and the trigger engine tick).
+                new_result = await asyncio.to_thread(
+                    _xcorr_window,
                     stored_ts, stored_bands, frames, win_start, win_end,
                     captured_duration_ms=int(meta.duration_ms or 0),
                     old_r=old_r,
@@ -1053,11 +1096,12 @@ class AutoOffsetService:
 
                 # DIAGNOSTIC CSV ──────────────────────────────────────────
                 if settings.xcorr_csv_logging:
-                    _detail = _xcorr_window_detail(
+                    _detail = await asyncio.to_thread(
+                        _xcorr_window_detail,
                         stored_ts, stored_bands, frames,
                         win_start, win_end,
-                        winning_shift=-win_offset,
-                        captured_duration_ms=int(meta.duration_ms or 0),
+                        -win_offset,                          # winning_shift
+                        int(meta.duration_ms or 0),           # captured_duration_ms
                     )
                     _csv_window_rows.append({
                         "start_ms":   win_start,
@@ -1075,6 +1119,27 @@ class AutoOffsetService:
                         "old_r_avg":  round(old_r, 4),
                     })
                 # END DIAGNOSTIC CSV ──────────────────────────────────────
+
+                # Lock-and-stop: once the engine has snapped at high Q AND
+                # multiple windows agree on the offset, the marginal value of
+                # the trailing windows is nil — halt the rest of this play's
+                # xcorr loop so worker-thread CPU isn't burned on diminishing
+                # returns. Disk-save logic continues working off whatever
+                # offset the engine has locked.
+                _lock_q = float(getattr(settings, "xcorr_lock_q", 0.75))
+                _lock_agree = int(getattr(settings, "xcorr_lock_agree_windows", 3))
+                try:
+                    from main import engine as _engine_for_lock
+                    if (_engine_for_lock._play_best_quality >= _lock_q
+                            and _agree_now >= _lock_agree):
+                        logger.info(
+                            "Auto-offset xcorr: lock-and-stop at Q=%.2f after %.1f agreeing weight (≥%d) for %s",
+                            _engine_for_lock._play_best_quality, _agree_now, _lock_agree, uri,
+                        )
+                        _locked_via_stop = True
+                        break
+                except Exception:
+                    pass
 
                 if not window_queue:
                     break
@@ -1238,7 +1303,13 @@ class AutoOffsetService:
                 _save_offset(uri, save_offset, save_quality,
                              bypass_drift_cap=baseline_anti_corr)
 
-        self._watching_uri = None
+        # Lock-and-stop: keep `_watching_uri` set so on_track_change's
+        # "already watching this URI" guard suppresses a fresh xcorr task
+        # spawn until the song actually changes. Without this, the task ends
+        # → guard sees no watch → next poll starts a new xcorr → lock-and-stop
+        # fires again on the next ~3 windows → endless loop.
+        if not _locked_via_stop:
+            self._watching_uri = None
         self._task = None
 
     async def _detect_loop_spike_legacy(self, uri: str, candidates: list[dict]) -> None:
@@ -1743,21 +1814,41 @@ def _xcorr_window(
             _signed_square(np.array([f[1 + band_idx] for f in frames], dtype=float))
         )
 
+    search_ms   = _xcorr_search_ms(captured_duration_ms)
+    coarse_step = max(_XCORR_BIN_MS, settings.xcorr_coarse_step_ms)
+
+    # Pre-resample live signals onto a fine grid covering the full search range.
+    # Coarse + fine shifts are integer multiples of _XCORR_BIN_MS, so per-shift
+    # signal extraction reduces to integer slicing — no per-shift np.interp.
+    # That eliminates 720+ interp calls per window (was the dominant cost).
+    grid_start = win_start - search_ms
+    grid_end   = win_end   + search_ms + _XCORR_BIN_MS
+    grid_ts    = np.arange(grid_start, grid_end, _XCORR_BIN_MS, dtype=float)
+    n_grid     = len(grid_ts)
+    live_grid: dict[int, np.ndarray] = {}
+    for band_idx, _ in band_info:
+        live_grid[band_idx] = np.interp(
+            grid_ts, live_ts, live_arrays[band_idx], left=0.0, right=0.0
+        )
+    # Anchor: bins[0] sits at this index in the grid; shift adds shift/_XCORR_BIN_MS bins.
+    base_idx_at_zero = int(round((win_start - grid_start) / _XCORR_BIN_MS))
+
     def score_at(shift: int) -> Optional[float]:
-        live_bins = bins + shift
+        offset = base_idx_at_zero + int(shift // _XCORR_BIN_MS)
+        # Out-of-range shifts shouldn't happen (grid sized for ±search_ms) but
+        # guard defensively to avoid a numpy slice that silently underfills.
+        if offset < 0 or offset + n_bins > n_grid:
+            return None
         r_sum = 0.0
         n_valid = 0
         for band_idx, template_norm in band_info:
-            signal = np.interp(live_bins, live_ts, live_arrays[band_idx], left=0.0, right=0.0)
+            signal = live_grid[band_idx][offset : offset + n_bins]
             if signal.std() < 1e-6:
                 continue
             signal_norm = (signal - signal.mean()) / signal.std()
             r_sum += float(np.dot(template_norm, signal_norm)) / n_bins
             n_valid += 1
         return (r_sum / n_valid) if n_valid else None
-
-    search_ms   = _xcorr_search_ms(captured_duration_ms)
-    coarse_step = max(_XCORR_BIN_MS, settings.xcorr_coarse_step_ms)
 
     # ── Coarse pass ──────────────────────────────────────────────────────────
     coarse_results: list[tuple[float, int]] = []

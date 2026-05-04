@@ -57,16 +57,46 @@ def get_analysis(meta: AudioShapeMeta) -> Optional[LibrosaAnalysis]:
         return None
 
 
-def get_analysis_by_uri(spotify_uri: str) -> Optional[LibrosaAnalysis]:
-    """Find and load librosa analysis for a URI without requiring a loaded meta."""
+# Lookup index for librosa analysis files. Built lazily and updated when
+# `analyze_async` saves a new analysis. The previous implementation globbed
+# every `*.librosa.json` and parsed each on every Spotify poll — same
+# anti-pattern as the audio_shape sidecar lookup, contributing to the
+# json.decoder.raw_decode at the top of py-spy.
+_librosa_index: dict[str, str] = {}
+_librosa_index_built: list[bool] = [False]
+
+
+def _build_librosa_index() -> None:
+    _librosa_index.clear()
     for p in AUDIO_SHAPES_DIR.glob("*.librosa.json"):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-            if data.get("spotify_uri") == spotify_uri:
-                return LibrosaAnalysis(**data)
         except Exception:
-            pass
-    return None
+            continue
+        uri = data.get("spotify_uri") or ""
+        if uri:
+            # Strip the ".librosa" suffix so the stem matches the audio shape
+            # filename — handy for joining with `librosa_json_path(meta)`.
+            _librosa_index[uri] = p.name
+    _librosa_index_built[0] = True
+    logger.info("Librosa index built: %d URIs", len(_librosa_index))
+
+
+def get_analysis_by_uri(spotify_uri: str) -> Optional[LibrosaAnalysis]:
+    """Find and load librosa analysis for a URI without requiring a loaded meta."""
+    if not _librosa_index_built[0]:
+        _build_librosa_index()
+    fname = _librosa_index.get(spotify_uri)
+    if fname is None:
+        _build_librosa_index()
+        fname = _librosa_index.get(spotify_uri)
+        if fname is None:
+            return None
+    p = AUDIO_SHAPES_DIR / fname
+    try:
+        return LibrosaAnalysis(**json.loads(p.read_text(encoding="utf-8")))
+    except Exception:
+        return None
 
 
 # ── WAV retention ─────────────────────────────────────────────────────────────
@@ -241,6 +271,10 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
 
     jpath = librosa_json_path(meta)
     jpath.write_text(analysis.model_dump_json(indent=2), encoding="utf-8")
+    # Keep the URI index in sync so the next get_analysis_by_uri call hits
+    # the cached path instead of rescanning the audio_shapes directory.
+    if meta.spotify_uri:
+        _librosa_index[meta.spotify_uri] = jpath.name
 
     # Stamp the sidecar with librosa version (2 = has MFCC)
     meta.librosa_version = 2

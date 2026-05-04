@@ -42,6 +42,10 @@ class AudioShapeService:
         self._last_capture_status: Optional[str] = None
         self._last_capture_reason: str = ""
         self._last_capture_uri: Optional[str] = None
+        # Acoustic-boundary monotonic instant computed once per track-change in
+        # on_track_change. Consumed by _stop_and_save (trim prev tail) and
+        # _start (origin for new pre-roll). Cleared after both consume it.
+        self._pending_boundary_monotonic: Optional[float] = None
 
     # How far into a song (ms) counts as "restarted from the beginning"
     _RESTART_THRESHOLD_MS = 10000
@@ -62,6 +66,13 @@ class AudioShapeService:
                 # Transient API blip during song skip — ignore
                 logger.debug("Capture grace period: ignoring transient None URI (%.1fs old)", age)
                 return
+            # Compute one acoustic boundary that BOTH the prev capture's
+            # _stop_and_save (tail trim) and the new song's _start (pre-roll
+            # origin) will use. None when no new track is playing (pause /
+            # device-off) so _stop_and_save skips the trim path.
+            self._pending_boundary_monotonic = (
+                self._compute_acoustic_boundary(track) if track and track.is_playing else None
+            )
             await self._stop_and_save()
 
         # Clear block when a blocked URI is detected restarting from the beginning
@@ -222,6 +233,46 @@ class AudioShapeService:
         self._blocked_uris.add(uri)
         logger.info("Re-learn: capture blocked for %s until song restarts", uri)
 
+    def _compute_acoustic_boundary(self, track: SpotifyTrackInfo) -> Optional[float]:
+        """Locate the actual song boundary in the ring-buffer PCM around the
+        Spotify-derived hint. Returns the refined monotonic instant on
+        success, the hint instant on low-confidence (gapless transition),
+        or None when there is no PCM available to search.
+        """
+        try:
+            from api.pcm_ring_buffer import pcm_ring_buffer
+            from api.boundary_detect import (
+                find_track_boundary,
+                DEFAULT_SEARCH_WINDOW_S,
+                CONFIDENCE_THRESHOLD,
+            )
+            from config import settings as _cfg
+            sample_rate = _cfg.audio_sample_rate
+            hint_monotonic = track.fetched_at - (track.progress_ms / 1000.0)
+            pcm_wide = pcm_ring_buffer.snapshot_since(hint_monotonic - DEFAULT_SEARCH_WINDOW_S)
+            if pcm_wide.size == 0:
+                logger.info("Acoustic boundary: no PCM available, using Spotify estimate for %s", track.title)
+                return hint_monotonic
+            hint_offset_samples = int(DEFAULT_SEARCH_WINDOW_S * sample_rate)
+            best_offset, confidence = find_track_boundary(
+                pcm_wide, sample_rate, hint_offset_samples, DEFAULT_SEARCH_WINDOW_S,
+            )
+            delta_s = (best_offset - hint_offset_samples) / sample_rate
+            if confidence >= CONFIDENCE_THRESHOLD:
+                logger.info(
+                    "Acoustic boundary: snapped %+d ms (confidence %.1f) for %s",
+                    int(delta_s * 1000), confidence, track.title,
+                )
+                return hint_monotonic + delta_s
+            logger.info(
+                "Acoustic boundary: no peak above threshold (confidence %.1f), using Spotify estimate for %s",
+                confidence, track.title,
+            )
+            return hint_monotonic
+        except Exception as exc:
+            logger.warning("Acoustic boundary: detection failed (%s), falling back to None", exc)
+            return None
+
     async def _start(self, track: SpotifyTrackInfo, force_recapture: bool = False) -> None:
         """Open capture stream and kick off the ingest loop.
 
@@ -233,9 +284,16 @@ class AudioShapeService:
         the full song. _stop_and_save honors `_force_recapture` to gate
         atomic commit on all four checks (coverage + WAV + librosa + anchor).
         """
-        # song_start_monotonic offset so frame timestamps are song-relative
-        progress_s = track.interpolated_progress_ms() / 1000.0
-        song_start = time.monotonic() - progress_s
+        # song_start_monotonic offset so frame timestamps are song-relative.
+        # Prefer the acoustic boundary computed in on_track_change when present
+        # (force-recapture symmetric trim). Fall back to Spotify's reported
+        # progress for the first capture of a session or when no PCM was
+        # available in the ring buffer.
+        if self._pending_boundary_monotonic is not None:
+            song_start = self._pending_boundary_monotonic
+        else:
+            progress_s = track.interpolated_progress_ms() / 1000.0
+            song_start = time.monotonic() - progress_s
 
         self._recording_uri = track.spotify_uri
         self._capture_started_at = time.monotonic()
@@ -289,6 +347,8 @@ class AudioShapeService:
             track.artist, track.title,
             " (force-recapture)" if force_recapture else "",
         )
+        # Boundary has now been consumed by both _stop_and_save (prev) and _start (new)
+        self._pending_boundary_monotonic = None
 
     async def _ingest_loop(self) -> None:
         """Consume frames from the capture stream into the recorder."""
@@ -320,6 +380,33 @@ class AudioShapeService:
         # capture starts with a clean default.
         force_recapture = bool(getattr(self, "_force_recapture", False))
         self._force_recapture = False
+
+        # Acoustic-boundary trim: if a boundary was computed in
+        # on_track_change, drop frames + WAV PCM whose timestamp is past
+        # the actual track boundary so the previous song's saved shape
+        # doesn't include the head of the next song.
+        boundary = self._pending_boundary_monotonic
+        if (
+            boundary is not None
+            and self._capture is not None
+            and self._recorder is not None
+        ):
+            try:
+                from config import settings as _cfg_b
+                prev_song_start = self._capture._song_start
+                boundary_song_rel_ms = int((boundary - prev_song_start) * 1000)
+                if boundary_song_rel_ms > 0:
+                    dropped_frames = self._recorder.trim_after(boundary_song_rel_ms)
+                    boundary_samples = int((boundary - prev_song_start) * _cfg_b.audio_sample_rate)
+                    dropped_samples = self._capture.truncate_pcm_to(boundary_samples)
+                    if dropped_frames or dropped_samples:
+                        logger.info(
+                            "Acoustic trim: prev song tail trimmed at %d ms (-%d frames, -%d samples) for %s",
+                            boundary_song_rel_ms, dropped_frames, dropped_samples,
+                            self._recorder.meta.npz_file,
+                        )
+            except Exception as exc:
+                logger.warning("Acoustic trim: prev tail trim failed (%s)", exc)
 
         if self._recorder and self._recorder._timestamps:
             try:
@@ -548,6 +635,10 @@ class AudioShapeService:
         self._recorder = None
         self._capture = None
         self._recording_uri = None
+        # If no _start follows (pause / device-off), make sure a stale boundary
+        # doesn't leak into the next transition. _start clears it as well after
+        # consuming it.
+        self._pending_boundary_monotonic = None
 
     def get_live_data(self, uri: str) -> dict | None:
         """Return in-progress frame data if currently recording this URI."""

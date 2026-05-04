@@ -152,14 +152,34 @@ class Settings(BaseSettings):
                                               # the rise-detector anchor — more early sweep
                                               # windows give the cluster gate enough data to
                                               # confirm or reject the song-start lock)
-    xcorr_csv_logging: bool = True            # DIAGNOSTIC CSV — write per-play CSV log
+    xcorr_csv_logging: bool = False           # DIAGNOSTIC CSV — write per-play CSV log
+                                              # (off by default — the per-band detail sweep
+                                              # doubles xcorr CPU; flip on only when tuning)
+    # Lock-and-stop: halt this play's xcorr loop once the engine has snapped
+    # at high Q with several agreeing windows. The trailing windows would
+    # only ratify the existing lock — burning worker-thread CPU on
+    # diminishing returns. Tune `xcorr_lock_q` down for stricter locks (more
+    # confident before halting) or `xcorr_lock_agree_windows` up to require
+    # broader cross-window agreement.
+    xcorr_lock_q: float = 0.70                # engine play-best-Q threshold to consider "locked"
+                                              # 0.55 was too eager — a single high-r sweep
+                                              # window (sometimes a beat-tile twin) could
+                                              # snap the engine to the wrong offset and
+                                              # then lock-and-stop halted xcorr before more
+                                              # windows could correct the bad lock. 0.70
+                                              # requires a confident match before halting.
+    xcorr_lock_agree_windows: int = 3         # weighted confirmation_shifts within tol of best_offset
     # Mix-aware search range: total search window per side =
     #   xcorr_search_ms_base + max(0, captured_duration - polled_duration) + xcorr_cut_buffer_ms
     # The buffer absorbs small inaccuracies in capture vs. poll duration; the
     # delta term grows the search when a Spotify mix transition has trimmed the
     # song's reported duration. Per-Set-List override on Setlist.xcorr_cut_buffer_ms.
     xcorr_search_ms_base: int = 2000
-    xcorr_cut_buffer_ms: int = 5000
+    xcorr_cut_buffer_ms: int = 1500           # was 5000 — that bloated search to ±7s on
+                                              # zero-cut songs, ~720 score_at calls per
+                                              # fire even when r=0.15 (clear miss).
+                                              # 1500 keeps plenty of slack while halving
+                                              # the per-fire CPU on the common case.
     # When the search range exceeds this width (one-sided), tighten thresholds
     # to reject ambiguous matches: raise acceptance to >=0.55 r and require
     # top1-top2 r margin >= 0.08.

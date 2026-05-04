@@ -85,13 +85,14 @@ def _get_client() -> httpx.AsyncClient:
         _client = httpx.AsyncClient(
             base_url=settings.ledfx_url,
             timeout=5.0,
-            # LedFX's HTTP server starts ConnectTimeout-ing under concurrent load
-            # (observed during trigger-chain bursts: flip + revert + snapshot-warm
-            # fire 10+ requests simultaneously and LedFX drops connections).
-            # Cap the pool so httpx queues instead of flooding LedFX.
-            # 8 gives room for ~a flare chain (flip + revert + warm) without
-            # letting a true flood reach LedFX.
-            limits=httpx.Limits(max_connections=8, max_keepalive_connections=8),
+            # 8 was too small under bursty load: a flare chain (4-8 patches at
+            # once) plus the periodic latency probe + virtual-state poll +
+            # snapshot-warm fans out faster than the pool can recycle, and
+            # observed pool degradation pinned conns at 1 with steady
+            # ConnectTimeouts. 32 gives headroom for parallel bursts;
+            # localhost handles many concurrent loopback sockets cheaply,
+            # and httpx still queues writes per-connection.
+            limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
         )
     return _client
 

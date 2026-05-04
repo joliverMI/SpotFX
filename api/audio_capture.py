@@ -210,6 +210,23 @@ class AudioCaptureStream:
         self._pcm_chunks.clear()
         return pcm
 
+    def truncate_pcm_to(self, max_samples: int) -> int:
+        """Truncate the buffered PCM to at most `max_samples` samples,
+        counted from the start of the buffer (song-relative t=0).
+
+        Used by audio_shape_service to drop the previous song's tail at the
+        acoustic track boundary so the saved WAV stops at the boundary
+        instead of bleeding into the new song. Returns samples dropped.
+        """
+        if not self._pcm_chunks or max_samples < 0:
+            return 0
+        pcm = np.concatenate(self._pcm_chunks)
+        if max_samples >= len(pcm):
+            return 0
+        dropped = len(pcm) - max_samples
+        self._pcm_chunks = [pcm[:max_samples].copy()] if max_samples > 0 else []
+        return dropped
+
     def __aiter__(self):
         return self
 

@@ -26,43 +26,101 @@ def _profile_path(profile: SongProfile) -> Path:
     return PROFILES_DIR / f"{profile.filename}.json"
 
 
-def save_profile(profile: SongProfile) -> Path:
-    """Serialize a SongProfile to its canonical JSON file."""
-    path = _profile_path(profile)
-    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
-    logger.debug("Saved profile: %s", path.name)
-    return path
-
-
-def load_profile_by_uri(spotify_uri: str) -> Optional[SongProfile]:
-    """Find and load a profile by Spotify URI (primary key)."""
-    for path in PROFILES_DIR.glob("*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("spotify_uri") == spotify_uri:
-                return SongProfile(**data)
-        except Exception as exc:
-            logger.warning("Could not parse profile %s: %s", path.name, exc)
-    return None
+# Lookup indices populated lazily and kept in sync via save_profile. The
+# Spotify poll calls load_profile_by_uri on EVERY tick (~1-2s), and before
+# this index a single call globbed and JSON-parsed the entire profiles
+# directory (600+ files) until it found the match — accounting for ~80% of
+# total CPU during playback (json.decoder.raw_decode dominated py-spy).
+# A simple {uri: filename} dict turns the lookup into one parse per call.
+_uri_to_filename: dict[str, str] = {}
+_titleartist_to_filename: dict[str, str] = {}
+_index_built: bool = False
 
 
 def _title_artist_key(artist: str, title: str) -> str:
     return f"{artist.lower().strip()}::{title.lower().strip()}"
 
 
-def load_profile_by_title_artist(title: str, artist: str) -> Optional[SongProfile]:
-    """Fallback lookup by normalized title + artist (cross-mode: spotify: ↔ ledfx: URIs)."""
-    target = _title_artist_key(artist, title)
+def _build_index() -> None:
+    """Scan every profile JSON once and populate the URI / title-artist
+    indices. Re-run when a lookup misses (a profile may have been added by
+    a sibling process or dropped in manually) — same cost as the legacy
+    full-scan, but at miss time only, not per call."""
+    global _index_built
+    _uri_to_filename.clear()
+    _titleartist_to_filename.clear()
     for path in PROFILES_DIR.glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            key = _title_artist_key(data.get("artist", ""), data.get("title", ""))
-            if key == target:
-                return SongProfile(**data)
         except Exception as exc:
             logger.warning("Could not parse profile %s: %s", path.name, exc)
-    return None
+            continue
+        uri = data.get("spotify_uri") or ""
+        if uri:
+            _uri_to_filename[uri] = path.stem
+        ta_key = _title_artist_key(data.get("artist", ""), data.get("title", ""))
+        if ta_key != "::":
+            _titleartist_to_filename[ta_key] = path.stem
+    _index_built = True
+    logger.info(
+        "Profile index built: %d URIs, %d title+artist keys",
+        len(_uri_to_filename), len(_titleartist_to_filename),
+    )
+
+
+def _load_one(filename: str) -> Optional[SongProfile]:
+    path = PROFILES_DIR / f"{filename}.json"
+    if not path.exists():
+        return None
+    try:
+        return SongProfile(**json.loads(path.read_text(encoding="utf-8")))
+    except Exception as exc:
+        logger.warning("Could not parse profile %s: %s", path.name, exc)
+        return None
+
+
+def save_profile(profile: SongProfile) -> Path:
+    """Serialize a SongProfile to its canonical JSON file."""
+    path = _profile_path(profile)
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
+    # Keep indices in sync so the next lookup hits the cache immediately.
+    if profile.spotify_uri:
+        _uri_to_filename[profile.spotify_uri] = profile.filename
+    ta_key = _title_artist_key(profile.artist or "", profile.title or "")
+    if ta_key != "::":
+        _titleartist_to_filename[ta_key] = profile.filename
+    logger.debug("Saved profile: %s", path.name)
+    return path
+
+
+def load_profile_by_uri(spotify_uri: str) -> Optional[SongProfile]:
+    """Find and load a profile by Spotify URI (primary key)."""
+    if not _index_built:
+        _build_index()
+    filename = _uri_to_filename.get(spotify_uri)
+    if filename is None:
+        # Possible new file dropped in by hand or via another tool — rescan
+        # once. If still missing, the profile genuinely doesn't exist.
+        _build_index()
+        filename = _uri_to_filename.get(spotify_uri)
+        if filename is None:
+            return None
+    return _load_one(filename)
+
+
+def load_profile_by_title_artist(title: str, artist: str) -> Optional[SongProfile]:
+    """Fallback lookup by normalized title + artist (cross-mode: spotify: ↔ ledfx: URIs)."""
+    if not _index_built:
+        _build_index()
+    target = _title_artist_key(artist, title)
+    filename = _titleartist_to_filename.get(target)
+    if filename is None:
+        _build_index()
+        filename = _titleartist_to_filename.get(target)
+        if filename is None:
+            return None
+    return _load_one(filename)
 
 
 def load_profile_by_filename(filename: str) -> Optional[SongProfile]:

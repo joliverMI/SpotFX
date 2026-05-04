@@ -5,6 +5,7 @@ Maintains all active browser connections and broadcasts state updates.
 The frontend interpolates timestamps between broadcasts.
 """
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from typing import Any
@@ -59,14 +60,29 @@ class WebSocketManager:
         logger.debug("WS client disconnected. Total: %d", len(self._connections))
 
     async def broadcast(self, payload: dict) -> None:
-        dead = []
-        for ws in list(self._connections):
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.disconnect(ws)
+        # Fan-out in parallel with a per-client write deadline. Dead/stale
+        # client sockets (closed-but-not-yet-cleaned, mobile gone to sleep)
+        # would otherwise hang send_json on the TCP send buffer indefinitely
+        # and pin every broadcast at the OS-level TCP timeout. We give each
+        # client 1s to ack; misses are disconnected so they stop poisoning
+        # subsequent broadcasts.
+        conns = list(self._connections)
+        if not conns:
+            return
+        async def _send(ws):
+            # 250 ms is plenty for any healthy client (localhost ≪10 ms, LAN
+            # ≪50 ms). Anything past this is almost certainly a stale tab or
+            # a remote on flaky wifi — drop to keep the loop snappy.
+            await asyncio.wait_for(ws.send_json(payload), timeout=0.25)
+        results = await asyncio.gather(
+            *(_send(ws) for ws in conns),
+            return_exceptions=True,
+        )
+        for ws, result in zip(conns, results):
+            if isinstance(result, Exception):
+                if isinstance(result, asyncio.TimeoutError):
+                    logger.info("WS client send timeout — disconnecting stale client")
+                self.disconnect(ws)
 
     async def broadcast_state(self, state: AppState) -> None:
         """Serialize AppState and broadcast to all clients."""
