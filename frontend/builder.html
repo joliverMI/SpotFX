@@ -231,6 +231,8 @@
                style="width:62px;font-size:11px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
         <span style="font-size:11px;color:var(--text-muted);">ms</span>
         <button class="btn-sm" id="btn-trigger-shift-commit" disabled>Commit</button>
+        <button class="btn-sm" id="btn-trigger-shift-commit-all" disabled
+                title="Apply shift to default + every Set List override on this song">Commit to All</button>
         <button class="btn-sm" id="btn-trigger-shift-reset" style="display:none;">Reset</button>
       </div>
       <div class="trigger-list-wrap" id="trigger-list-wrap" style="max-height:280px;overflow-y:auto;scroll-behavior:auto;">
@@ -1849,14 +1851,16 @@ document.getElementById('btn-relearn').addEventListener('click', async () => {
 
 // ── Trigger shift slider ─────────────────────────────────────────────────────
 function _resetTriggerShift() {
-  const slider  = document.getElementById('trigger-shift-slider');
+  const slider   = document.getElementById('trigger-shift-slider');
   const numInput = document.getElementById('trigger-shift-display');
-  const btnC    = document.getElementById('btn-trigger-shift-commit');
-  const btnR    = document.getElementById('btn-trigger-shift-reset');
+  const btnC     = document.getElementById('btn-trigger-shift-commit');
+  const btnCA    = document.getElementById('btn-trigger-shift-commit-all');
+  const btnR     = document.getElementById('btn-trigger-shift-reset');
   slider.value = 0;
   numInput.value = 0;
   shapeCanvas.setTriggerOffset(0);
   btnC.disabled = true;
+  btnCA.disabled = true;
   btnR.style.display = 'none';
 }
 
@@ -1864,11 +1868,13 @@ function _applyTriggerShiftValue(ms) {
   const slider   = document.getElementById('trigger-shift-slider');
   const numInput = document.getElementById('trigger-shift-display');
   const btnC     = document.getElementById('btn-trigger-shift-commit');
+  const btnCA    = document.getElementById('btn-trigger-shift-commit-all');
   const btnR     = document.getElementById('btn-trigger-shift-reset');
   slider.value   = Math.max(-5000, Math.min(5000, ms));
   numInput.value = ms;
   shapeCanvas.setTriggerOffset(ms);
   btnC.disabled = ms === 0;
+  btnCA.disabled = ms === 0;
   btnR.style.display = ms === 0 ? 'none' : '';
   renderTriggers();
 }
@@ -1877,6 +1883,7 @@ function _applyTriggerShiftValue(ms) {
   const slider   = document.getElementById('trigger-shift-slider');
   const numInput = document.getElementById('trigger-shift-display');
   const btnC     = document.getElementById('btn-trigger-shift-commit');
+  const btnCA    = document.getElementById('btn-trigger-shift-commit-all');
   const btnR     = document.getElementById('btn-trigger-shift-reset');
 
   slider.addEventListener('input', () => {
@@ -1897,6 +1904,36 @@ function _applyTriggerShiftValue(ms) {
     await POST('/profiles', profile);
     _resetTriggerShift();
     renderTriggers();
+  });
+
+  // Commit the shift to BOTH the default trigger list AND every Set List
+  // override stored on this profile. Each list exists once on the profile
+  // object — _defaultTriggers points at profile.triggers when the editor
+  // is on the Default slot, or at the original default array when a
+  // Set List slot is selected (profile.triggers is then a reference to
+  // setlist_triggers[id]). Iterating over a deduplicated set of arrays
+  // means the currently-selected slot still shifts exactly once.
+  btnCA.addEventListener('click', async () => {
+    const ms = parseInt(numInput.value, 10);
+    if (!ms || !profile) return;
+    const lists = new Set();
+    if (Array.isArray(_defaultTriggers)) lists.add(_defaultTriggers);
+    if (Array.isArray(profile.triggers)) lists.add(profile.triggers);
+    for (const arr of Object.values(profile.setlist_triggers || {})) {
+      if (Array.isArray(arr)) lists.add(arr);
+    }
+    let shifted = 0;
+    for (const arr of lists) {
+      arr.forEach(t => { t.timestamp_ms += ms; });
+      shifted += arr.length;
+    }
+    if (!shifted) return;
+    await POST('/profiles', profile);
+    _resetTriggerShift();
+    renderTriggers();
+    if (typeof showToast === 'function') {
+      showToast(`Shifted ${lists.size} trigger list(s) by ${ms > 0 ? '+' : ''}${ms} ms`, 'success');
+    }
   });
 }
 
