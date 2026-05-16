@@ -226,9 +226,9 @@
     },
     {
       "label": "manual smoke test",
-      "detail": "Claude updates this task's command whenever it wants the user to run a test. Never creates a new task for tests — always overwrites this one.",
+      "detail": "Claude updates this task's command whenever it wants the user to run a test. Never creates a new task for tests — always overwrites this one. Currently: Phase 3 demo — switches radial-dummy melt→power and on the same step sets BG color, brightness, and reactivity. Pre-Phase-3 those last three would have silently dropped (melt doesn't expose them).",
       "type": "shell",
-      "command": ".venv/bin/python scripts/smoke_morph_step.py",
+      "command": ".venv/bin/python scripts/smoke_morph_step.py examples/morph_phase3_switch_and_bg.json",
       "options": {
         "cwd": "${workspaceFolder}"
       },

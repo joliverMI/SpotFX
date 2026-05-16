@@ -19,13 +19,13 @@
   "effects": {
     "power": {
       "params": {
-        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness" },
+        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "background_color":      { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
-        "sparks_color":          { "label":"Accent Color",         "type":"color",  "smooth":true },
-        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness" },
-        "blur":                  { "label":"Blur",                 "type":"numeric","smooth":true, "min":0,"max":10,"aspect":"blur" },
-        "bass_decay_rate":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity" },
-        "sparks_decay_rate":     { "label":"Sparks Decay Rate",    "type":"numeric","smooth":true, "min":0,"max":1 },
+        "sparks_color":          { "label":"Accent Color",         "type":"color",  "smooth":true,                  "aspect":"reactivity" },
+        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
+        "blur":                  { "label":"Blur",                 "type":"numeric","smooth":true, "min":0,"max":10,"aspect":"blur",       "aspect_scale":1.0 },
+        "bass_decay_rate":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity", "aspect_scale":1.0 },
+        "sparks_decay_rate":     { "label":"Sparks Decay Rate",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity", "aspect_scale":0.6 },
         "flip":                  { "label":"Flip",                 "type":"toggle", "smooth":false,                 "aspect":"shape" },
         "gradient_roll":         { "label":"Gradient Roll",        "type":"numeric","smooth":false,"min":1,"max":10 },
         "gradient":              { "label":"Gradient",             "type":"gradient","smooth":true,                 "aspect":"color" }
@@ -46,12 +46,12 @@
     "melt": {
       "params": {
         "bg_color":      { "label":"BG Color",          "type":"color",  "smooth":true,                  "aspect":"bg_color" },
-        "brightness":    { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness" },
+        "brightness":    { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "gradient_roll": { "label":"Gradient Roll",     "type":"numeric","smooth":false,"min":1,"max":10 },
         "flip":          { "label":"Flip",              "type":"toggle", "smooth":false,                 "aspect":"shape" },
-        "blur":          { "label":"Blur",              "type":"numeric","smooth":true, "min":0,"max":10,"aspect":"blur" },
+        "blur":          { "label":"Blur",              "type":"numeric","smooth":true, "min":0,"max":10,"aspect":"blur",       "aspect_scale":1.0 },
         "speed":         { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":1 },
-        "reactivity":    { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity" },
+        "reactivity":    { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity", "aspect_scale":1.0 },
         "gradient":      { "label":"Gradient",          "type":"gradient","smooth":true,                 "aspect":"color" }
       },
       "defaults": {
@@ -89,12 +89,12 @@
     "equalizer2d": {
       "params": {
         "bg_color":              { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
-        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness" },
-        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness" },
+        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
+        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "peak_color":            { "label":"Accent Color",         "type":"color",  "smooth":true },
         "gradient_roll":         { "label":"Gradient Roll",        "type":"numeric","smooth":false,"min":1,"max":10 },
         "ring":                  { "label":"Flip",                 "type":"toggle", "smooth":true,                  "aspect":"shape" },
-        "spin_multiplier":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":5, "aspect":"reactivity" },
+        "spin_multiplier":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":5, "aspect":"reactivity", "aspect_scale":1.0 },
         "spin":                  { "label":"Spin",                 "type":"toggle", "smooth":false }
       },
       "defaults": {

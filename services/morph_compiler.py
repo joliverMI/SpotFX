@@ -76,8 +76,8 @@ def resolve_scope(scope: MorphScope) -> list[str]:
 # ─── Aspect → patch translation ──────────────────────────────────────────────
 
 def _scale_to_param_range(value: float, effect_type: str, param_name: str) -> float:
-    """Treat numeric aspect values as 0..1 and scale to the param's own [min, max] range.
-    Falls back to the raw value if metadata is missing or already-bounded."""
+    """Map a 0..1 aspect value into the param's own [min, max] range.
+    Falls back to the raw value if metadata is missing or already-bounded 0..1."""
     meta = _ep.get_param_meta(effect_type, param_name)
     if not meta:
         return value
@@ -89,12 +89,30 @@ def _scale_to_param_range(value: float, effect_type: str, param_name: str) -> fl
 
 
 def _patch_numeric(effect_type: str, aspect_id: str, val: AspectValue) -> dict:
-    """brightness / reactivity / blur — apply a 0..1 number to every raw param the aspect maps."""
+    """Distribute one AspectValue.number across every numeric param tagged with
+    `aspect_id` on `effect_type`. Each param's `aspect_scale` (default 1.0) caps
+    how much of the aspect's full range it gets — e.g. on power, `bass_decay_rate`
+    at scale 1.0 reaches the top of its range when Reactivity=1.0, while
+    `sparks_decay_rate` at scale 0.6 only reaches 0.6 of its range.
+
+    Non-numeric params with the same aspect tag (e.g. `sparks_color` under
+    `aspect: reactivity`) are intentionally skipped here — they are in the
+    aspect's UI category but aren't driven by the numeric slider; the builder
+    UI will let the user set them explicitly via separate sub-fields when
+    that lands.
+    """
     if val.number is None:
         return {}
     out: dict = {}
     for pname in morph_aspects.params_for_aspect(effect_type, aspect_id):
-        out[pname] = _scale_to_param_range(val.number, effect_type, pname)
+        meta = _ep.get_param_meta(effect_type, pname) or {}
+        if meta.get("type") not in ("numeric", "integer"):
+            continue
+        scale = meta.get("aspect_scale")
+        if scale is None:
+            scale = 1.0
+        scaled = max(0.0, min(1.0, val.number * scale))
+        out[pname] = _scale_to_param_range(scaled, effect_type, pname)
     return out
 
 

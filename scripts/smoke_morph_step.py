@@ -131,6 +131,26 @@ async def main() -> None:
         if isinstance(data, dict):
             print(_summary(vid, data))
 
+    # Show the persisted (virtual, effect) state file — proves Phase 3 captured
+    # both the pre-switch snapshot and the post-action snapshot.
+    state_path = Path("storage/morph_effect_state.json")
+    if state_path.exists():
+        print(f"\nPERSISTED STATE ({state_path}):")
+        try:
+            store = json.loads(state_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"  (could not read: {exc})")
+        else:
+            for vid in sorted(store):
+                effects = store[vid]
+                if not isinstance(effects, dict):
+                    continue
+                for etype in sorted(effects):
+                    keys = sorted((effects[etype] or {}).keys())
+                    print(f"  {vid:24s}  {etype:12s}  params={keys[:8]}{'…' if len(keys) > 8 else ''}")
+    else:
+        print(f"\nPERSISTED STATE: (no file yet at {state_path})")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

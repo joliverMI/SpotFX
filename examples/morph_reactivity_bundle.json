@@ -1,0 +1,11 @@
+{
+  "type": "morph_step",
+  "ramp_ms": 500,
+  "targets": [
+    {
+      "scope": {"virtual_ids": ["radial-dummy"]},
+      "aspect": "reactivity",
+      "absolute_value": {"number": 0.7}
+    }
+  ]
+}

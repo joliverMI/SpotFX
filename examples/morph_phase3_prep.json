@@ -1,0 +1,11 @@
+{
+  "type": "morph_step",
+  "ramp_ms": 0,
+  "targets": [
+    {
+      "scope": {"virtual_ids": ["radial-dummy"]},
+      "aspect": "effect",
+      "absolute_value": {"effect_type": "melt"}
+    }
+  ]
+}
