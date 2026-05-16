@@ -15,6 +15,7 @@ venv/
 # User data (profiles, audio shapes, settings, tokens)
 storage/profiles/*.json
 storage/audio_shapes/*
+storage/analyzed_triggers/*
 storage/ai_suggestions/
 storage/backup_ai_suggestions/
 storage/backups/
@@ -27,10 +28,12 @@ storage/palettes.json
 storage/settings.json
 storage/training_profiles.json
 storage/triggerless_profiles.json
+storage/setlists.json
 storage/xcorr_diagnostic.csv
 storage/device_categories.json
 !storage/profiles/.gitkeep
 !storage/audio_shapes/.gitkeep
+!storage/analyzed_triggers/.gitkeep
 
 # Claude local settings
 .claude/settings.local.json

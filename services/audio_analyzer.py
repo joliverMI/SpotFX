@@ -51,11 +51,48 @@ class AudioShapeRecorder:
         return f"{safe(artist)} - {safe(title)}.npz"
 
     def ingest(self, frame: AudioFrame) -> None:
+        # Per-ingest gap diagnostic: when an inter-sample gap exceeds half the
+        # discard threshold, log it immediately with the song-position so we
+        # can correlate gaps to specific moments (track transitions, CPU
+        # spikes, etc.) without waiting for the post-capture discard.
+        if self._timestamps:
+            from config import settings as _s
+            gap = frame.timestamp_ms - self._timestamps[-1]
+            warn_at = max(60, int(_s.audio_max_gap_ms * 0.5))
+            if gap >= warn_at:
+                logger.warning(
+                    "Capture gap %dms at song-time=%dms in %s — %s",
+                    gap, frame.timestamp_ms, self.meta.npz_file,
+                    "WILL DISCARD" if gap > _s.audio_max_gap_ms else "still under limit",
+                )
         self._timestamps.append(frame.timestamp_ms)
         self._rms_total.append(frame.rms_total)
         self._rms_low.append(frame.rms_low)
         self._rms_mid.append(frame.rms_mid)
         self._rms_high.append(frame.rms_high)
+
+    def trim_after(self, boundary_ms: int) -> int:
+        """Drop frames whose song-relative timestamp_ms > boundary_ms.
+
+        Used by audio_shape_service to trim the previous song's tail at the
+        acoustic track boundary. Returns the number of frames dropped.
+        """
+        if not self._timestamps:
+            return 0
+        keep = 0
+        for t in self._timestamps:
+            if t > boundary_ms:
+                break
+            keep += 1
+        dropped = len(self._timestamps) - keep
+        if dropped <= 0:
+            return 0
+        del self._timestamps[keep:]
+        del self._rms_total[keep:]
+        del self._rms_low[keep:]
+        del self._rms_mid[keep:]
+        del self._rms_high[keep:]
+        return dropped
 
     def save(self) -> Path:
         """Compute rolling averages and persist to disk."""
@@ -75,6 +112,15 @@ class AudioShapeRecorder:
         avg_1s = _rolling_mean(rms_t, win_1s)
         avg_5s = _rolling_mean(rms_t, win_5s)
 
+        # Pre-compute signed-square bands (`x · |x|`) so xcorr at session
+        # start doesn't have to redo them on every play. auto_offset_service
+        # falls back to live computation when these keys are missing (legacy
+        # shapes), so this is purely a cache.
+        rms_t_sq = (rms_t * np.abs(rms_t)).astype(np.float32)
+        rms_l_sq = (rms_l * np.abs(rms_l)).astype(np.float32)
+        rms_m_sq = (rms_m * np.abs(rms_m)).astype(np.float32)
+        rms_h_sq = (rms_h * np.abs(rms_h)).astype(np.float32)
+
         np.savez_compressed(
             npz_path,
             timestamps_ms=ts,
@@ -84,10 +130,18 @@ class AudioShapeRecorder:
             rms_high=rms_h,
             avg_rms_1s=avg_1s,
             avg_rms_5s=avg_5s,
+            rms_total_sq=rms_t_sq,
+            rms_low_sq=rms_l_sq,
+            rms_mid_sq=rms_m_sq,
+            rms_high_sq=rms_h_sq,
         )
 
         self.meta.capture_complete = True
         meta_path.write_text(self.meta.model_dump_json(indent=2), encoding="utf-8")
+        # Keep the URI index in sync so the next load_audio_shape_meta()
+        # hits the cached path without rescanning the directory.
+        if self.meta.spotify_uri:
+            _audio_shape_index[self.meta.spotify_uri] = meta_path.stem
         logger.info("Audio shape saved: %s", npz_path.name)
         return npz_path
 
@@ -341,16 +395,120 @@ class MusicMarkDetector:
         return marks
 
 
+def _build_shape_index() -> None:
+    """Scan every audio_shape sidecar JSON once and populate the URI →
+    filename index. Re-run on miss so newly-added files are picked up
+    without rebooting. The previous implementation globbed-and-parsed all
+    437+ files on every call (called once per Spotify poll AND once per
+    xcorr window), which was the dominant CPU cost of the worker process
+    (json.decoder.raw_decode at 85% in py-spy)."""
+    _audio_shape_index.clear()
+    for path in AUDIO_SHAPES_DIR.glob("*.json"):
+        # `*.json` ALSO matches `*.librosa.json` — those have the same
+        # spotify_uri field and would silently overwrite the audio-shape
+        # index entry, causing load_audio_shape_meta to point at a librosa
+        # file and fail to parse as AudioShapeMeta (returning None and
+        # spuriously triggering a fresh capture for songs that already have
+        # complete shapes). Skip them.
+        if path.name.endswith(".librosa.json"):
+            continue
+        try:
+            # We only need the spotify_uri field — but json.loads parses
+            # the whole document. There's no compelling-enough win to
+            # parse-by-prefix here since the index is built once per session.
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        uri = data.get("spotify_uri") or ""
+        if uri:
+            _audio_shape_index[uri] = path.stem
+    _audio_shape_index_built[0] = True
+    logger.info("Audio shape index built: %d URIs", len(_audio_shape_index))
+
+
+# Lookup index for audio shape metadata. Populated lazily; mutated by
+# AudioShapeRecorder.save() and the *_needs_recapture helpers below so
+# subsequent lookups stay O(1). Mirror of the profile_manager pattern.
+_audio_shape_index: dict[str, str] = {}
+_audio_shape_index_built: list[bool] = [False]
+
+
 def load_audio_shape_meta(spotify_uri: str) -> Optional[AudioShapeMeta]:
     """Find and load the sidecar JSON for a given Spotify URI."""
-    for path in AUDIO_SHAPES_DIR.glob("*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("spotify_uri") == spotify_uri:
-                return AudioShapeMeta(**data)
-        except Exception:
-            pass
-    return None
+    if not _audio_shape_index_built[0]:
+        _build_shape_index()
+    filename = _audio_shape_index.get(spotify_uri)
+    if filename is None:
+        # Maybe a new shape file was dropped in — rescan once.
+        _build_shape_index()
+        filename = _audio_shape_index.get(spotify_uri)
+        if filename is None:
+            return None
+    path = AUDIO_SHAPES_DIR / f"{filename}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return AudioShapeMeta(**data)
+    except Exception:
+        return None
+
+
+def flag_needs_recapture(spotify_uri: str, reason: str) -> bool:
+    """Mark an audio shape as suggested-for-recapture. Called by runtime
+    detectors (anti-corr persistence, repeated low Q, etc.) to record that
+    this captured shape is no longer aligning reliably and should be
+    re-recorded. An external script scans for shapes with
+    `needs_recapture=True` and triggers fresh captures.
+
+    `reason` is a short tag, e.g. "anti_corr_persistent",
+    "low_q_streak", "no_uscore_windows", "section_twin_dominant".
+
+    Returns True on success. Idempotent: if already flagged, only
+    `needs_recapture_flag_count` and `needs_recapture_flagged_at` update.
+    """
+    import datetime
+    if not _audio_shape_index_built[0]:
+        _build_shape_index()
+    filename = _audio_shape_index.get(spotify_uri)
+    if filename is None:
+        _build_shape_index()
+        filename = _audio_shape_index.get(spotify_uri)
+        if filename is None:
+            return False
+    path = AUDIO_SHAPES_DIR / f"{filename}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    data["needs_recapture"] = True
+    data["needs_recapture_reason"] = reason
+    data["needs_recapture_flagged_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+    data["needs_recapture_flag_count"] = int(data.get("needs_recapture_flag_count") or 0) + 1
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return True
+
+
+def clear_needs_recapture(spotify_uri: str) -> bool:
+    """Reset the recapture-suggested flag. Called by audio_shape_service after
+    a fresh capture saves over the same URI. Returns True on success."""
+    if not _audio_shape_index_built[0]:
+        _build_shape_index()
+    filename = _audio_shape_index.get(spotify_uri)
+    if filename is None:
+        _build_shape_index()
+        filename = _audio_shape_index.get(spotify_uri)
+        if filename is None:
+            return False
+    path = AUDIO_SHAPES_DIR / f"{filename}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    data["needs_recapture"] = False
+    data["needs_recapture_reason"] = ""
+    data["needs_recapture_flagged_at"] = ""
+    # keep flag_count as a historical record so the script can prioritize chronic offenders
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return True
 
 
 def _librosa_path_for_uri(spotify_uri: str):

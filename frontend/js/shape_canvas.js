@@ -97,6 +97,9 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   let _shapeData    = null;
   let _shapeMeta    = null;
   let _shapeAvgData = null;
+  let _liveData     = null;    // optional: in-progress xcorr capture for the Debug page,
+                                // rendered downward from the midline. Same shape as
+                                // _shapeData ({timestamps_ms, rms_total, rms_low, rms_mid, rms_high}).
   let _maxRms       = null;    // null = window-based; number = pinned raw max
 
   // Exposed by reference so callers can mutate directly
@@ -113,6 +116,10 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   let _zoomStartMs  = 0;
   let _zoomEndMs    = 20000;
   let _playheadMs   = null;    // null = no playhead drawn; caller applies latency offset
+  let _trimMs       = 0;       // perception trim — drawn as a secondary playhead when non-zero
+  let _onTrimChange = null;    // (newTrimMs, isFinal:boolean) — called while dragging the orange playhead
+  let _trimDragging = false;
+  let _trimViewport = { startMs: 0, endMs: 1, W: 1 };  // updated each draw, used by drag handler
 
   // Custom markers override profile trigger markers (used by ai_triggers.html)
   // Each: { timestamp_ms, color, shape: 'triangle'|'diamond', event_color? }
@@ -121,7 +128,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   // Librosa analysis overlay
   let _librosaAnalysis = null;
   let _librosaOffsetMs = 0;
-  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true, mfcc: false };
+  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true, mfcc: true };
   let _mfccDistances = null;  // pre-computed MFCC timbral distances per beat (0-1 normalised)
 
   // Profile triggers (used by builder.html when no custom markers set)
@@ -136,6 +143,20 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
 
   let _calibrationTargetMs  = null;  // primary auto-offset target spike, null = none
   let _calibrationCandidates = [];   // [{ms, confidence, rank}, ...] up to 3
+
+  // ── Advanced overlays (anchor candidates, live match, beat twins) ────────
+  // Visibility is gated by `body.advanced-mode`. Pure additions; no impact on
+  // the default render path.
+  let _anchorCandidates = [];        // [{timestamp_ms, band, uniqueness, rise_magnitude}, ...]
+  let _anchorTempoBpm   = null;      // tempo for ±1..4 beat twin lines
+  let _liveMatch        = null;      // {offset_ms, r, q, candidate_idx, band}
+  let _xcorrWindows     = [];        // [{win_start, win_end, new_offset_ms, new_r, new_quality, old_r, winner, failed}, ...]
+  const ANCHOR_BAND_COLOR = {
+    rms_total: '#ffffff',
+    rms_low:   '#3aa0ff',
+    rms_high:  '#ffd84a',
+    rms_mid:   '#3ddc87',
+  };
 
   let _loopId       = null;
   let _onZoomChange = null;
@@ -173,16 +194,24 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     if (!inWindow.length) return;
 
     const timeToX = t => ((t - startMs) / (endMs - startMs)) * W;
+    _trimViewport = { startMs, endMs, W };
     const rawMax  = _maxRms ?? Math.max(...inWindow.map(i => rmsT[i]), 1e-9);
     const maxRms  = rawMax * _scales.total * _scaleOverall;
-    const rmsToY  = v => mainH - (v / maxRms) * mainH * 0.9;
+
+    // When live xcorr-frame data is present (Debug page), squeeze the saved
+    // shape into the upper half and draw the live overlay mirrored in the
+    // lower half. The existing overlays (anchors, librosa beats, xcorr
+    // windows, playhead) keep using full mainH and remain unchanged.
+    const hasLive   = !!(_liveData?.timestamps_ms?.length);
+    const savedBase = hasLive ? mainH / 2 : mainH;     // y at which saved bands sit (baseline)
+    const rmsToY    = v => savedBase - (v / maxRms) * savedBase * 0.9;
 
     // Fill bands
     function drawFill(values, scale, fillStyle) {
       ctx.beginPath();
-      ctx.moveTo(timeToX(ts[inWindow[0]]), mainH);
+      ctx.moveTo(timeToX(ts[inWindow[0]]), savedBase);
       for (const i of inWindow) ctx.lineTo(timeToX(ts[i]), rmsToY(values[i] * scale * _scaleOverall));
-      ctx.lineTo(timeToX(ts[inWindow[inWindow.length - 1]]), mainH);
+      ctx.lineTo(timeToX(ts[inWindow[inWindow.length - 1]]), savedBase);
       ctx.closePath();
       ctx.fillStyle = fillStyle;
       ctx.fill();
@@ -191,6 +220,48 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     if (_filters.bass)  drawFill(rmsL, _scales.bass,  'rgba(46,204,113,0.45)');
     if (_filters.mid)   drawFill(rmsM, _scales.mid,   'rgba(230,126,34,0.4)');
     if (_filters.high)  drawFill(rmsH, _scales.high,  'rgba(52,152,219,0.35)');
+
+    // Down-mirrored live overlay: same band colors, lower alpha, baseline at midline,
+    // values increase downward. Uses its own per-band max (live capture levels can
+    // differ substantially from the saved shape).
+    if (hasLive) {
+      const liveTs = _liveData.timestamps_ms;
+      const liveT  = _liveData.rms_total || [];
+      const liveL  = _liveData.rms_low   || [];
+      const liveM  = _liveData.rms_mid   || [];
+      const liveH  = _liveData.rms_high  || [];
+      const liveInWindow = [];
+      for (let i = 0; i < liveTs.length; i++) {
+        if (liveTs[i] >= startMs && liveTs[i] <= endMs) liveInWindow.push(i);
+      }
+      // Divider line at the midline so the eye separates saved (up) from live (down).
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, savedBase);
+      ctx.lineTo(W, savedBase);
+      ctx.stroke();
+      ctx.restore();
+      if (liveInWindow.length) {
+        const liveMax  = Math.max(...liveInWindow.map(i => liveT[i] || 0), maxRms, 1e-9);
+        const lowerH   = mainH - savedBase;
+        const liveYDown = v => savedBase + (v / liveMax) * lowerH * 0.9;
+        function drawFillDown(values, fillStyle) {
+          ctx.beginPath();
+          ctx.moveTo(timeToX(liveTs[liveInWindow[0]]), savedBase);
+          for (const i of liveInWindow) ctx.lineTo(timeToX(liveTs[i]), liveYDown(values[i] || 0));
+          ctx.lineTo(timeToX(liveTs[liveInWindow[liveInWindow.length - 1]]), savedBase);
+          ctx.closePath();
+          ctx.fillStyle = fillStyle;
+          ctx.fill();
+        }
+        if (_filters.total) drawFillDown(liveT, 'rgba(150,150,150,0.32)');
+        if (_filters.bass)  drawFillDown(liveL, 'rgba(46,204,113,0.36)');
+        if (_filters.mid)   drawFillDown(liveM, 'rgba(230,126,34,0.32)');
+        if (_filters.high)  drawFillDown(liveH, 'rgba(52,152,219,0.30)');
+      }
+    }
 
     // Time diamonds — small at 15s, larger at 60s
     {
@@ -491,17 +562,156 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
       }
     }
 
-    // Playhead — caller applies audio_latency_ms; _offsetMs corrects capture timing
+    // Anchor overlays — only drawn when the user has enabled advanced mode.
+    // Renders:
+    //   • each anchor candidate at its stored timestamp (color = band, opacity
+    //     scaled by uniqueness),
+    //   • for the live-matched candidate, dashed faint lines at ±1..4 beats
+    //     using the librosa tempo, so beat-tile traps are visible,
+    //   • the live match position with its r/Q label.
+    if (typeof document !== 'undefined' &&
+        document.body.classList.contains('advanced-mode') &&
+        _anchorCandidates.length) {
+      ctx.save();
+      for (let i = 0; i < _anchorCandidates.length; i++) {
+        const c = _anchorCandidates[i];
+        const tMs = (c.timestamp_ms || 0) + _offsetMs;
+        if (tMs < startMs || tMs > endMs) continue;
+        const x = timeToX(tMs);
+        const u = Math.max(0, Math.min(1, +c.uniqueness || 0));
+        ctx.globalAlpha = 0.25 + 0.55 * u;
+        ctx.strokeStyle = ANCHOR_BAND_COLOR[c.band] || '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = ANCHOR_BAND_COLOR[c.band] || '#ffffff';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`#${i + 1} u=${u.toFixed(2)}`, x + 3, 22 + i * 11);
+      }
+
+      if (_liveMatch && _anchorTempoBpm > 0) {
+        const idx = +_liveMatch.candidate_idx;
+        const beatMs = 60000 / +_anchorTempoBpm;
+        const cand = _anchorCandidates[idx];
+        if (cand && beatMs > 0) {
+          const matchTime = (cand.timestamp_ms || 0) + (_liveMatch.offset_ms || 0) + _offsetMs;
+          ctx.save();
+          ctx.strokeStyle = ANCHOR_BAND_COLOR[cand.band] || '#ffffff';
+          ctx.globalAlpha = 0.20;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([1, 5]);
+          for (const n of [1, 2, 3, 4]) {
+            for (const sign of [-1, 1]) {
+              const tw = matchTime + sign * n * beatMs;
+              if (tw < startMs || tw > endMs) continue;
+              const xt = timeToX(tw);
+              ctx.beginPath(); ctx.moveTo(xt, 0); ctx.lineTo(xt, mainH); ctx.stroke();
+            }
+          }
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      }
+
+      if (_liveMatch) {
+        const idx = +_liveMatch.candidate_idx;
+        const cand = _anchorCandidates[idx];
+        if (cand) {
+          const matchTime = (cand.timestamp_ms || 0) + (_liveMatch.offset_ms || 0) + _offsetMs;
+          if (matchTime >= startMs && matchTime <= endMs) {
+            const x = timeToX(matchTime);
+            ctx.save();
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.9;
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
+            ctx.fillStyle = '#00ff88';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'left';
+            const r = (+_liveMatch.r || 0).toFixed(2);
+            const q = (+_liveMatch.q || 0).toFixed(2);
+            const off = +_liveMatch.offset_ms || 0;
+            ctx.fillText(`match ${off >= 0 ? '+' : ''}${off}ms r=${r} Q=${q}`, x + 4, mainH - 4);
+            ctx.restore();
+          }
+        }
+      }
+
+      // Per-window xcorr overlay — one bracket per evaluated window. Color
+      // encodes outcome: green = NEW won, blue = OLD won, red = window
+      // failed (no shift cleared threshold). The bracket's vertical offset
+      // shows `new_offset_ms` so visually-misaligned windows stand out.
+      if (_xcorrWindows.length) {
+        ctx.save();
+        for (const w of _xcorrWindows) {
+          const ws = (w.win_start || 0) + _offsetMs;
+          const we = (w.win_end || 0) + _offsetMs;
+          if (we < startMs || ws > endMs) continue;
+          const xs = timeToX(Math.max(ws, startMs));
+          const xe = timeToX(Math.min(we, endMs));
+          let color = '#888';
+          if (w.failed) color = '#e74c3c';
+          else if (w.winner === 'new') color = '#00ff88';
+          else if (w.winner === 'old') color = '#3aa0ff';
+          const yTop = 36;
+          ctx.globalAlpha = 0.7;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(xs, yTop);
+          ctx.lineTo(xs, yTop + 6);
+          ctx.lineTo(xe, yTop + 6);
+          ctx.lineTo(xe, yTop);
+          ctx.stroke();
+          if (!w.failed && w.new_offset_ms != null) {
+            ctx.fillStyle = color;
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'left';
+            const r = w.new_r != null ? (+w.new_r).toFixed(2) : '—';
+            ctx.fillText(`${w.new_offset_ms >= 0 ? '+' : ''}${w.new_offset_ms}ms r=${r}`, xs + 2, yTop + 17);
+          }
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    // Playhead — caller applies audio_latency_ms; _offsetMs corrects capture timing.
+    // When a perception trim is active, draw a second (orange) playhead at
+    // _offsetMs + _trimMs so the user can see the effective firing position
+    // alongside the xcorr-only baseline.
     if (_playheadMs !== null) {
-      const displayMs = _playheadMs + _offsetMs;
-      if (displayMs >= startMs && displayMs <= endMs) {
-        const x = timeToX(displayMs);
+      const xcorrMs = _playheadMs + _offsetMs;
+      if (xcorrMs >= startMs && xcorrMs <= endMs) {
+        const x = timeToX(xcorrMs);
         ctx.globalAlpha = 0.85;
         ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
         ctx.setLineDash([4, 3]);
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
         ctx.setLineDash([]);
         ctx.globalAlpha = 1;
+      }
+      if (_trimMs) {
+        const trimDisplayMs = _playheadMs + _offsetMs + _trimMs;
+        if (trimDisplayMs >= startMs && trimDisplayMs <= endMs) {
+          const x = timeToX(trimDisplayMs);
+          ctx.globalAlpha = 0.95;
+          ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 2;
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
+          ctx.setLineDash([]);
+          // Small label above the line so the user knows what it is
+          ctx.fillStyle = '#ff9800';
+          ctx.font = '10px monospace';
+          ctx.textAlign = 'left';
+          const label = `trim ${_trimMs > 0 ? '+' : ''}${_trimMs}ms`;
+          ctx.fillText(label, x + 3, 11);
+          ctx.globalAlpha = 1;
+        }
       }
     }
 
@@ -593,6 +803,54 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     window.addEventListener('mouseup', () => { _resizing = false; });
   }
 
+  // ── Perception-trim playhead drag ─────────────────────────────────────────
+  // Click within ±6px of the orange (trim) playhead and drag horizontally;
+  // each move updates _trimMs and notifies the caller. mouseup fires a final
+  // notification so the caller can persist.
+  function _xToTime(x) {
+    const v = _trimViewport;
+    return v.startMs + (x / v.W) * (v.endMs - v.startMs);
+  }
+  function _trimPlayheadX() {
+    if (_playheadMs == null) return null;
+    const xcorrMs = _playheadMs + _offsetMs;
+    const v = _trimViewport;
+    return ((xcorrMs + _trimMs) - v.startMs) / (v.endMs - v.startMs) * v.W;
+  }
+  canvasEl.addEventListener('mousedown', e => {
+    if (!_onTrimChange || _playheadMs == null) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    const tx = _trimPlayheadX();
+    if (tx == null) return;
+    if (Math.abs(x - tx) > 8) return;
+    _trimDragging = true;
+    e.preventDefault();
+  });
+  canvasEl.addEventListener('mousemove', e => {
+    if (_trimDragging || !_onTrimChange || _playheadMs == null) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    const tx = _trimPlayheadX();
+    canvasEl.style.cursor = (tx != null && Math.abs(x - tx) <= 8) ? 'ew-resize' : '';
+  });
+  window.addEventListener('mousemove', e => {
+    if (!_trimDragging || !_onTrimChange || _playheadMs == null) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    const t = _xToTime(x);
+    const xcorrMs = _playheadMs + _offsetMs;
+    const newTrim = Math.round(t - xcorrMs);
+    _trimMs = newTrim;
+    draw();
+    _onTrimChange(newTrim, false);
+  });
+  window.addEventListener('mouseup', () => {
+    if (!_trimDragging) return;
+    _trimDragging = false;
+    if (_onTrimChange) _onTrimChange(_trimMs, true);
+  });
+
   // ── Zoom handle drag (simple non-follow-mode) ─────────────────────────────────
   /**
    * Wire zoom handle drag for a simple timeline bar.
@@ -664,6 +922,12 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
       _shapeMeta    = meta;
       _shapeAvgData = data ? computeAverages(data, avgWindowMs) : null;
     },
+    /** Optional in-progress xcorr capture overlay rendered downward from the
+     *  midline. Pass null to clear. Saved data automatically squeezes to the
+     *  upper half whenever live data is present so both fit on one canvas. */
+    setLiveShape(data) {
+      _liveData = (data && Array.isArray(data.timestamps_ms) && data.timestamps_ms.length) ? data : null;
+    },
 
     // ── View ──────────────────────────────────────────────────────────────────
     setZoom(startMs, endMs) {
@@ -691,11 +955,34 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     setMaxRms(v) { _maxRms = v ?? null; },
     /** Shift shape data (RMS + marks) by ms to align capture timing with playhead. Triggers/playhead unaffected. */
     setOffset(ms) { _offsetMs = ms ?? 0; draw(); },
+    /** Perception trim — drawn as a secondary (orange) playhead at offset+trim when non-zero. */
+    setTrim(ms) { _trimMs = ms ?? 0; draw(); },
+    /** Register a callback fired while the user drags the orange playhead.
+     *  Signature: (newTrimMs, isFinal:boolean) — isFinal=true on mouseup. */
+    setOnTrimChange(fn) { _onTrimChange = fn || null; },
     /** Set auto-offset calibration target. Pass null/[] to clear. */
     setCalibrationTarget(ms, candidates) {
       _calibrationTargetMs   = ms ?? null;
       _calibrationCandidates = candidates ?? [];
     },
+    /** Anchor candidates from AudioShapeMeta.anchor_candidates. Drawn only
+     *  in advanced mode. Pass [] to clear. tempoBpm enables ±1..4 beat twins. */
+    setAnchorCandidates(candidates, tempoBpm) {
+      _anchorCandidates = Array.isArray(candidates) ? candidates : [];
+      _anchorTempoBpm = (typeof tempoBpm === 'number' && tempoBpm > 0) ? tempoBpm : null;
+    },
+    /** Live anchor-match info from the WS broadcast. Drawn in advanced mode.
+     *  match: {offset_ms, r, q, candidate_idx}. Pass null to clear. */
+    setLiveMatch(match) { _liveMatch = match || null; },
+    /** Append one per-window xcorr result (advanced overlay).
+     *  msg: {win_start, win_end, new_offset_ms, new_r, new_quality, old_r, winner, failed} */
+    addXcorrWindow(msg) {
+      _xcorrWindows.push(msg);
+      if (_xcorrWindows.length > 30) _xcorrWindows.shift();
+    },
+    /** Clear all per-window xcorr overlay results. Caller should invoke this
+     *  on track change so the previous song's windows don't stay visible. */
+    clearXcorrWindows() { _xcorrWindows = []; },
     /** Supply profile triggers + events for drawing trigger markers. */
     setProfile(profile, events) {
       _profile = profile;

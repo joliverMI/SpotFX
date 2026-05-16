@@ -96,12 +96,26 @@ async def set_analyzed_trigger_override(enabled: bool):
             "count": len(engine._analyzed_triggers) if engine._analyzed_triggers else 0}
 
 
-@router.post("/recapture-wavs")
-async def set_recapture_wavs(enabled: bool):
-    """Temporarily enable WAV recapture for songs that have librosa data but no WAV."""
-    state.recapture_wavs = enabled
+@router.post("/recapture")
+async def set_recapture(enabled: bool, count: int = 0):
+    """Force-recapture mode. While `recapture_active` is true, every song that
+    plays gets recaptured with pre-roll PCM from the always-on ring buffer.
+    The counter (1-999) decrements on every song-change poll; reaches 0 →
+    auto-disables. Existing shape is preserved unless the new capture passes
+    all four atomic-save checks (coverage, WAV write, librosa, anchor count).
+    """
+    if enabled:
+        n = max(1, min(999, int(count or 50)))
+        state.recapture_active = True
+        state.recapture_remaining = n
+    else:
+        state.recapture_active = False
+        state.recapture_remaining = 0
     await ws_manager.broadcast_state(state)
-    return {"recapture_wavs": enabled}
+    return {
+        "recapture_active": state.recapture_active,
+        "recapture_remaining": state.recapture_remaining,
+    }
 
 
 @router.post("/auto-generate")
@@ -142,6 +156,22 @@ async def active_triggers():
         return {"source": "triggerless", "triggers": [t.model_dump() for t in engine._triggerless_triggers]}
     if state.analyzed_trigger_override and engine._analyzed_triggers:
         return {"source": "analyzed_override", "triggers": [t.model_dump() for t in engine._analyzed_triggers]}
+    # User-defined triggers, honouring active Set List override. The frontend
+    # already has profile.triggers (the default list) on hand from the WS
+    # state broadcast — but when a Set List has its own override on this
+    # song, the engine fires THOSE timestamps, not the default ones. Without
+    # this branch the Now Playing markers showed default trigger positions
+    # while triggers fired at setlist positions, looking like every trigger
+    # was "early" (or late) by the position delta.
+    sl_id = state.active_setlist_id
+    if (engine._profile and sl_id
+            and engine._profile.setlist_triggers.get(sl_id)
+            and any(t.enabled for t in engine._profile.setlist_triggers[sl_id])):
+        return {
+            "source": "setlist",
+            "setlist_id": sl_id,
+            "triggers": [t.model_dump() for t in engine._profile.setlist_triggers[sl_id]],
+        }
     if engine._profile and any(t.enabled for t in engine._profile.triggers):
         return {"source": "user", "triggers": []}  # user triggers — frontend already has them
     if state.use_analyzed_triggerless and engine._analyzed_triggers:

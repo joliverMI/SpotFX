@@ -4,7 +4,10 @@ SpotFX — Settings API router.
 Exposes runtime-adjustable settings. Changes take effect immediately and are
 persisted to storage/settings.json so they survive server restarts.
 """
+import asyncio
 import json
+import os
+import signal
 from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -63,6 +66,13 @@ class SettingsPatch(BaseModel):
     auto_generate_mode: Optional[str] = None   # "embedded" | "claude"
     show_ai_triggers: Optional[bool] = None
     show_advanced: Optional[bool] = None
+    genre_blending_enabled: Optional[bool] = None
+    song_source: Optional[str] = None          # "spotify" | "ledfx"
+    lastfm_api_key: Optional[str] = None
+    lastfm_username: Optional[str] = None
+    spotipy_client_id: Optional[str] = None
+    spotipy_client_secret: Optional[str] = None
+    spotipy_redirect_uri: Optional[str] = None
 
 
 @router.get("")
@@ -96,7 +106,24 @@ async def get_settings():
         "auto_generate_mode": settings.auto_generate_mode,
         "show_ai_triggers": settings.show_ai_triggers,
         "show_advanced": settings.show_advanced,
+        "genre_blending_enabled": settings.genre_blending_enabled,
+        "song_source": settings.song_source,
+        "lastfm_api_key": settings.lastfm_api_key,
+        "lastfm_username": settings.lastfm_username,
+        "spotipy_client_id": settings.spotipy_client_id,
+        "spotipy_client_secret": settings.spotipy_client_secret,
+        "spotipy_redirect_uri": settings.spotipy_redirect_uri,
     }
+
+
+@router.post("/restart")
+async def restart_server():
+    """Kill the whole process group so systemd restarts SpotFX cleanly."""
+    async def _kill():
+        await asyncio.sleep(0.15)  # let the response flush first
+        os.killpg(os.getpgid(os.getpid()), signal.SIGTERM)
+    asyncio.create_task(_kill())
+    return {"status": "restarting"}
 
 
 @router.patch("")

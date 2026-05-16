@@ -96,8 +96,13 @@
         <span style="width:1px;height:18px;background:var(--border);"></span>
         <button id="btn-analysis" class="toggle-btn">Capture</button>
         <button id="btn-auto-gen" class="toggle-btn">Analyze</button>
+        <button id="btn-genre-blend" class="toggle-btn" title="Skip song start when the next song shares a genre and the previous song ended naturally">Genre Blending</button>
         <button class="btn-sm" id="btn-verify">Mark Verified</button>
-        <button id="btn-recapture-wavs" class="toggle-btn advanced-only" title="Recapture WAV files for songs with librosa data but no WAV">Recapture</button>
+        <button id="btn-recapture-wavs" class="toggle-btn advanced-only" title="Force-recapture every song that plays. Counter limits how many songs.">Recapture</button>
+        <input id="input-recapture-count" type="number" min="1" max="999" value="50"
+               class="advanced-only"
+               style="width:54px;padding:4px 6px;font-size:12px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;"
+               title="Songs to recapture before auto-disable (1-999)" />
         <span id="embedded-tag" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:#1a237e;color:#90caf9;font-weight:600;">⚙ Embedded</span>
         <div class="search-wrap">
           <input id="song-search" type="text" placeholder="Search song profiles…" style="display:none" autocomplete="off">
@@ -117,12 +122,14 @@
     <div class="card">
       <div class="card-title">Triggers</div>
       <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
-        <button class="btn-sm btn-accent" id="btn-zoom">Follow</button>
-        <button class="btn-sm" id="btn-zoom-out">Full Song</button>
-        <div style="margin-left:auto;display:flex;gap:6px;">
-          <button class="btn-sm" id="btn-add-trigger">+ Trigger</button>
-          <button class="btn-sm" id="btn-analyze-scenes" title="Import analyzed scene triggers" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">+ Scenes</button>
-          <button class="btn-sm" id="btn-analyze-flares" title="Import analyzed flare triggers" style="background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">+ Flares</button>
+        <button class="btn-sm btn-accent" id="btn-zoom" style="white-space:nowrap;">Follow</button>
+        <button class="btn-sm" id="btn-zoom-out" style="white-space:nowrap;">Full Song</button>
+        <select id="setlist-select" title="Trigger set being edited" style="font-size:12px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);width:auto;max-width:160px;flex:0 0 auto;">
+          <option value="">Default</option>
+        </select>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <button class="btn-sm" id="btn-add-trigger" style="white-space:nowrap;">+ Trigger</button>
+          <button class="btn-sm" id="btn-import-triggers" title="Import triggers from analysis or copy from another set" style="background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;white-space:nowrap;padding:5px 10px;">Import</button>
         </div>
       </div>
       <div class="timeline-wrap">
@@ -170,14 +177,14 @@
         <button class="librosa-filter-btn active" data-lf="onsets" style="background:rgba(255,136,0,0.5);">Onsets</button>
         <button class="librosa-filter-btn active" data-lf="harmonic" style="background:rgba(204,102,255,0.5);">Harmonic</button>
         <button class="librosa-filter-btn active" data-lf="bass"    style="background:rgba(68,221,136,0.5);">Bass</button>
-        <button class="librosa-filter-btn" data-lf="mfcc" style="background:rgba(255,102,51,0.5);">MFCC</button>
+        <button class="librosa-filter-btn active" data-lf="mfcc" style="background:rgba(255,102,51,0.5);">MFCC</button>
         <span id="librosa-summary" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
         <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Offset:</span>
         <input type="range" id="librosa-offset-slider" min="-5000" max="5000" step="50" value="0"
                style="width:90px;accent-color:#4488ff;">
         <span id="librosa-offset-display" style="font-size:11px;color:var(--text-muted);min-width:44px;text-align:right;">0 ms</span>
       </div>
-      <canvas id="shape-canvas" style="height:120px;"></canvas>
+      <canvas id="shape-canvas" style="height:141px;"></canvas>
       <div id="shape-resize-handle" title="Drag to resize"></div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
         <span style="font-size:11px;color:var(--text-muted);" id="shape-status">No audio shape captured yet.</span>
@@ -224,6 +231,8 @@
                style="width:62px;font-size:11px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
         <span style="font-size:11px;color:var(--text-muted);">ms</span>
         <button class="btn-sm" id="btn-trigger-shift-commit" disabled>Commit</button>
+        <button class="btn-sm" id="btn-trigger-shift-commit-all" disabled
+                title="Apply shift to default + every Set List override on this song">Commit to All</button>
         <button class="btn-sm" id="btn-trigger-shift-reset" style="display:none;">Reset</button>
       </div>
       <div class="trigger-list-wrap" id="trigger-list-wrap" style="max-height:280px;overflow-y:auto;scroll-behavior:auto;">
@@ -260,7 +269,9 @@
     </div>
     <div class="field">
       <label>Filter Labels (comma separated)</label>
-      <input type="text" id="edit-labels" placeholder="e.g. blue, -red">
+      <input type="text" id="edit-labels"
+             placeholder="e.g. blue, -red, =brightness:0.5, =transition:1.5"
+             title="Comma-separated label filters (case-insensitive).&#10;&#10;Filter syntax:&#10;  foo     include actions tagged &quot;foo&quot;&#10;  -foo    exclude actions tagged &quot;foo&quot;&#10;&#10;An action must match at least one positive label (if any are given) and no negative labels.&#10;Weight-0 actions are label-only: included only when a positive label matches.&#10;If no actions match, the filter is ignored and all actions are used.&#10;&#10;Pre-command overrides (applied once, not cascaded to nested events):&#10;  -brightness           skip this event's pre-brightness&#10;  -transition           skip this event's pre-transition&#10;  =brightness:0.5       override pre-brightness to 0.5 (0..1)&#10;  =transition:1.5       override pre-transition to 1.5 seconds&#10;  =ramp:500             override brightness ramp to 500 ms&#10;&#10;Common convention labels authors tag actions with:&#10;  colors:      blue, red, warm, cool&#10;  intensity:   bright, dim, subtle&#10;  transition:  fast, slow, smooth, snap">
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button id="popup-save" class="btn-accent">Save</button>
@@ -396,12 +407,25 @@ onMessage('state', async msg => {
     analysisBtn.classList.toggle('active', !!msg.audio_analysis_enabled);
   }
   const recapBtn = document.getElementById('btn-recapture-wavs');
-  if (recapBtn && msg.recapture_wavs !== undefined) {
-    recapBtn.classList.toggle('active', !!msg.recapture_wavs);
+  const recapCount = document.getElementById('input-recapture-count');
+  if (recapBtn && msg.recapture_active !== undefined) {
+    recapBtn.classList.toggle('active', !!msg.recapture_active);
+  }
+  // Live-update counter as it ticks down server-side, but ONLY when the
+  // user isn't actively editing the input (otherwise the broadcast clobbers
+  // their typed value mid-edit).
+  if (recapCount && msg.recapture_remaining !== undefined
+        && msg.recapture_remaining > 0
+        && document.activeElement !== recapCount) {
+    recapCount.value = msg.recapture_remaining;
   }
   const autoBtn = document.getElementById('btn-auto-gen');
   if (autoBtn && msg.auto_generate_enabled !== undefined) {
     autoBtn.classList.toggle('active', !!msg.auto_generate_enabled);
+  }
+  const blendBtn = document.getElementById('btn-genre-blend');
+  if (blendBtn && msg.genre_blending_enabled !== undefined) {
+    blendBtn.classList.toggle('active', !!msg.genre_blending_enabled);
   }
   if (!liveMode) return;
 
@@ -1236,13 +1260,42 @@ document.getElementById('btn-analysis').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-recapture-wavs').addEventListener('click', async () => {
-  const curOn = document.getElementById('btn-recapture-wavs').classList.contains('active');
-  await POST(`/control/recapture-wavs?enabled=${!curOn}`);
+  const btn = document.getElementById('btn-recapture-wavs');
+  const countInput = document.getElementById('input-recapture-count');
+  const curOn = btn.classList.contains('active');
+  if (curOn) {
+    await POST(`/control/recapture?enabled=false`);
+  } else {
+    let n = parseInt(countInput.value, 10);
+    if (isNaN(n) || n < 1) n = 50;
+    if (n > 999) n = 999;
+    countInput.value = n;
+    await POST(`/control/recapture?enabled=true&count=${n}`);
+  }
+});
+
+// Live-update the server-side counter when user changes the input while
+// the toggle is active. Fires on blur or Enter (the standard `change`
+// event timing) so per-keystroke POSTs don't flood the server.
+document.getElementById('input-recapture-count').addEventListener('change', async () => {
+  const btn = document.getElementById('btn-recapture-wavs');
+  const countInput = document.getElementById('input-recapture-count');
+  if (!btn.classList.contains('active')) return;   // toggle off → nothing to update
+  let n = parseInt(countInput.value, 10);
+  if (isNaN(n) || n < 1) n = 1;
+  if (n > 999) n = 999;
+  countInput.value = n;
+  await POST(`/control/recapture?enabled=true&count=${n}`);
 });
 
 document.getElementById('btn-auto-gen').addEventListener('click', async () => {
   const curOn = document.getElementById('btn-auto-gen').classList.contains('active');
   await POST(`/control/auto-generate?enabled=${!curOn}`);
+});
+
+document.getElementById('btn-genre-blend').addEventListener('click', async () => {
+  const res = await POST('/genre-blending/toggle', {});
+  document.getElementById('btn-genre-blend').classList.toggle('active', !!res.genre_blending_enabled);
 });
 
 onMessage('auto_generate_started', msg => {
@@ -1798,14 +1851,16 @@ document.getElementById('btn-relearn').addEventListener('click', async () => {
 
 // ── Trigger shift slider ─────────────────────────────────────────────────────
 function _resetTriggerShift() {
-  const slider  = document.getElementById('trigger-shift-slider');
+  const slider   = document.getElementById('trigger-shift-slider');
   const numInput = document.getElementById('trigger-shift-display');
-  const btnC    = document.getElementById('btn-trigger-shift-commit');
-  const btnR    = document.getElementById('btn-trigger-shift-reset');
+  const btnC     = document.getElementById('btn-trigger-shift-commit');
+  const btnCA    = document.getElementById('btn-trigger-shift-commit-all');
+  const btnR     = document.getElementById('btn-trigger-shift-reset');
   slider.value = 0;
   numInput.value = 0;
   shapeCanvas.setTriggerOffset(0);
   btnC.disabled = true;
+  btnCA.disabled = true;
   btnR.style.display = 'none';
 }
 
@@ -1813,11 +1868,13 @@ function _applyTriggerShiftValue(ms) {
   const slider   = document.getElementById('trigger-shift-slider');
   const numInput = document.getElementById('trigger-shift-display');
   const btnC     = document.getElementById('btn-trigger-shift-commit');
+  const btnCA    = document.getElementById('btn-trigger-shift-commit-all');
   const btnR     = document.getElementById('btn-trigger-shift-reset');
   slider.value   = Math.max(-5000, Math.min(5000, ms));
   numInput.value = ms;
   shapeCanvas.setTriggerOffset(ms);
   btnC.disabled = ms === 0;
+  btnCA.disabled = ms === 0;
   btnR.style.display = ms === 0 ? 'none' : '';
   renderTriggers();
 }
@@ -1826,6 +1883,7 @@ function _applyTriggerShiftValue(ms) {
   const slider   = document.getElementById('trigger-shift-slider');
   const numInput = document.getElementById('trigger-shift-display');
   const btnC     = document.getElementById('btn-trigger-shift-commit');
+  const btnCA    = document.getElementById('btn-trigger-shift-commit-all');
   const btnR     = document.getElementById('btn-trigger-shift-reset');
 
   slider.addEventListener('input', () => {
@@ -1847,81 +1905,279 @@ function _applyTriggerShiftValue(ms) {
     _resetTriggerShift();
     renderTriggers();
   });
-}
 
-// ── Analyze Scenes / Flares import buttons ──────────────────────────────────
-async function analyzeAndImport(category) {
-  const uri = getActiveUri();
-  if (!uri || !profile) { showToast('No song loaded', 'error'); return; }
-
-  // Ask how to handle existing triggers
-  const hasExisting = profile.triggers.length > 0;
-  let mode = 'keep'; // 'keep' or 'clear'
-  if (hasExisting) {
-    const choice = await showImportDialog(category);
-    if (choice === 'cancel') return;
-    mode = choice; // 'clear' or 'keep'
-  }
-
-  const btn = document.getElementById(category === 'scenes' ? 'btn-analyze-scenes' : 'btn-analyze-flares');
-  const origText = btn.textContent;
-  btn.textContent = '...';
-  btn.disabled = true;
-
-  try {
-    const resp = await GET(`/ai-triggers/analyze-triggers?uri=${encodeURIComponent(uri)}&category=${category}`);
-    if (!resp.triggers?.length) { showToast(`No ${category} triggers generated`); return; }
-
-    const imported = resp.triggers.map(t => ({
-      id:           uuid(),
-      timestamp_ms: t.timestamp_ms,
-      event_id:     t.event_id,
-      labels:       [],
-      enabled:      true,
-    }));
-
-    if (mode === 'clear') {
-      profile.triggers = imported;
-    } else {
-      profile.triggers = [...profile.triggers, ...imported].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+  // Commit the shift to BOTH the default trigger list AND every Set List
+  // override stored on this profile. Each list exists once on the profile
+  // object — _defaultTriggers points at profile.triggers when the editor
+  // is on the Default slot, or at the original default array when a
+  // Set List slot is selected (profile.triggers is then a reference to
+  // setlist_triggers[id]). Iterating over a deduplicated set of arrays
+  // means the currently-selected slot still shifts exactly once.
+  btnCA.addEventListener('click', async () => {
+    const ms = parseInt(numInput.value, 10);
+    if (!ms || !profile) return;
+    const lists = new Set();
+    if (Array.isArray(_defaultTriggers)) lists.add(_defaultTriggers);
+    if (Array.isArray(profile.triggers)) lists.add(profile.triggers);
+    for (const arr of Object.values(profile.setlist_triggers || {})) {
+      if (Array.isArray(arr)) lists.add(arr);
     }
+    let shifted = 0;
+    for (const arr of lists) {
+      arr.forEach(t => { t.timestamp_ms += ms; });
+      shifted += arr.length;
+    }
+    if (!shifted) return;
     await POST('/profiles', profile);
+    _resetTriggerShift();
     renderTriggers();
-    showToast(`Imported ${imported.length} ${category} (profile: ${resp.training_profile})`, 'success');
-  } catch (e) {
-    showToast(`Analyze ${category} failed: ${e.message || e}`, 'error');
-  } finally {
-    btn.textContent = origText;
-    btn.disabled = false;
-  }
-}
-
-function showImportDialog(category) {
-  return new Promise(resolve => {
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;';
-    overlay.innerHTML = `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;width:360px;max-width:90vw;">
-        <div style="font-size:15px;font-weight:600;margin-bottom:12px;">Import ${category}</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
-          This song already has triggers. How should the new ${category} triggers be added?
-        </div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <button class="btn-sm" id="import-keep" style="padding:8px;">Keep existing + add new</button>
-          <button class="btn-sm btn-danger" id="import-clear" style="padding:8px;">Clear all existing, replace with new</button>
-          <button class="btn-sm" id="import-cancel" style="padding:8px;">Cancel</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    overlay.querySelector('#import-keep').addEventListener('click', () => { overlay.remove(); resolve('keep'); });
-    overlay.querySelector('#import-clear').addEventListener('click', () => { overlay.remove(); resolve('clear'); });
-    overlay.querySelector('#import-cancel').addEventListener('click', () => { overlay.remove(); resolve('cancel'); });
-    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve('cancel'); } });
+    if (typeof showToast === 'function') {
+      showToast(`Shifted ${lists.size} trigger list(s) by ${ms > 0 ? '+' : ''}${ms} ms`, 'success');
+    }
   });
 }
 
-document.getElementById('btn-analyze-scenes').addEventListener('click', () => analyzeAndImport('scenes'));
-document.getElementById('btn-analyze-flares').addEventListener('click', () => analyzeAndImport('flares'));
+// ── Set List slot management + Import popup ────────────────────────────────
+//
+// `profile.triggers` is always the authoritative *default* list and the
+// editor's current working buffer. When the user selects a Set List slot
+// from the dropdown, we re-point `profile.triggers` at
+// `profile.setlist_triggers[id]` (creating it lazily). All existing
+// trigger-mutation code keeps working unchanged because it operates on the
+// live array reference.
+let _defaultTriggers = null;        // canonical reference to the default list
+let _activeSlotId    = '';          // '' = default; otherwise setlist id
+let _setlistsCache   = [];          // populated from /api/setlists
+
+async function _refreshSetlists() {
+  try { _setlistsCache = await GET('/setlists'); } catch { _setlistsCache = []; }
+  _renderSetlistDropdown();
+}
+
+function _renderSetlistDropdown() {
+  const sel = document.getElementById('setlist-select');
+  if (!sel) return;
+  const cur = sel.value || '';
+  sel.innerHTML = `<option value="">Default</option>` +
+    _setlistsCache.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  sel.value = cur;
+}
+
+function _bindSlotsForCurrentProfile() {
+  if (!profile) return;
+  if (!profile.setlist_triggers || typeof profile.setlist_triggers !== 'object') {
+    profile.setlist_triggers = {};
+  }
+  // The default list is whatever profile.triggers currently is, captured by reference.
+  _defaultTriggers = profile.triggers;
+  _activeSlotId = '';
+}
+
+function _switchToSlot(slotId) {
+  if (!profile) return;
+  _activeSlotId = slotId || '';
+  if (_activeSlotId === '') {
+    profile.triggers = _defaultTriggers;
+  } else {
+    if (!profile.setlist_triggers) profile.setlist_triggers = {};
+    if (!Array.isArray(profile.setlist_triggers[_activeSlotId])) {
+      profile.setlist_triggers[_activeSlotId] = [];
+    }
+    profile.triggers = profile.setlist_triggers[_activeSlotId];
+  }
+  _lastFiredIdx = -1;
+  renderTriggers();
+  updateTriggerBtnState();
+  if (typeof drawShape === 'function') drawShape();
+}
+
+// Persist edits to the right slot before any POST /profiles. The payload
+// must always carry `triggers` = default list and `setlist_triggers` =
+// per-slot overrides — independent of which slot was being edited.
+async function _saveProfile() {
+  if (!profile) return;
+  const live = profile.triggers;
+  if (_activeSlotId) {
+    profile.setlist_triggers[_activeSlotId] = live;
+  } else {
+    _defaultTriggers = live;
+  }
+  // Build the payload with `triggers` always pointing at the default list.
+  const payload = { ...profile, triggers: _defaultTriggers };
+  await POST('/profiles', payload);
+  // Restore the working reference (it may have been replaced if defaults were saved).
+  _switchToSlot(_activeSlotId);
+}
+
+// Run at page load and when profiles are reloaded; replaces direct
+// `await POST('/profiles', profile)` calls in the import flow.
+async function _persistAfterEdit() { await _saveProfile(); }
+
+// ── Import popup ───────────────────────────────────────────────────────────
+//
+// Merge semantics: "add on top with same-timestamp overwrite". Incoming
+// triggers append to the current slot; if a new trigger lands at exactly the
+// same timestamp_ms as an existing one, the new one replaces it.
+function _mergeAddTriggers(newOnes) {
+  if (!profile) return 0;
+  const byTs = new Map();
+  for (const t of profile.triggers) byTs.set(t.timestamp_ms, t);
+  for (const t of newOnes) byTs.set(t.timestamp_ms, t);
+  profile.triggers.length = 0;
+  for (const t of [...byTs.values()].sort((a, b) => a.timestamp_ms - b.timestamp_ms)) {
+    profile.triggers.push(t);
+  }
+  return newOnes.length;
+}
+
+async function _runAnalyzeImport(category) {
+  const uri = getActiveUri();
+  if (!uri || !profile) { showToast('No song loaded', 'error'); return; }
+  try {
+    const resp = await GET(`/ai-triggers/analyze-triggers?uri=${encodeURIComponent(uri)}&category=${category}`);
+    if (!resp.triggers?.length) { showToast(`No ${category} triggers generated`); return; }
+    const imported = resp.triggers.map(t => ({
+      id: uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id, labels: [], enabled: true,
+    }));
+    const added = _mergeAddTriggers(imported);
+    await _persistAfterEdit();
+    renderTriggers();
+    showToast(`Added ${added} ${category} (profile: ${resp.training_profile})`, 'success');
+  } catch (e) {
+    showToast(`Analyze ${category} failed: ${e.message || e}`, 'error');
+  }
+}
+
+async function _runAnalyzeImportBoth() {
+  await _runAnalyzeImport('scenes');
+  const uri = getActiveUri();
+  if (!uri || !profile) return;
+  try {
+    const resp = await GET(`/ai-triggers/analyze-triggers?uri=${encodeURIComponent(uri)}&category=flares`);
+    if (!resp.triggers?.length) return;
+    const imported = resp.triggers.map(t => ({
+      id: uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id, labels: [], enabled: true,
+    }));
+    _mergeAddTriggers(imported);
+    await _persistAfterEdit();
+    renderTriggers();
+  } catch (e) { showToast(`Import flares failed: ${e.message || e}`, 'error'); }
+}
+
+function _slotLabel(id) {
+  if (!id) return 'Default';
+  const sl = _setlistsCache.find(s => s.id === id);
+  return sl ? sl.name : id;
+}
+
+function _availableCopySources() {
+  if (!profile) return [];
+  const sources = [];
+  // Default first if we're not editing it.
+  if (_activeSlotId !== '' && Array.isArray(_defaultTriggers) && _defaultTriggers.length) {
+    sources.push({ id: '', label: 'Default', count: _defaultTriggers.length });
+  }
+  // Set Lists with overrides for this song.
+  for (const [sid, arr] of Object.entries(profile.setlist_triggers || {})) {
+    if (sid === _activeSlotId) continue;
+    if (Array.isArray(arr) && arr.length) {
+      sources.push({ id: sid, label: _slotLabel(sid), count: arr.length });
+    }
+  }
+  return sources;
+}
+
+async function _copyFromSlot(sourceId) {
+  if (!profile) return;
+  const source = sourceId === '' ? _defaultTriggers : (profile.setlist_triggers?.[sourceId] || []);
+  // Deep-clone with fresh UUIDs so trigger ids don't collide; merge on top.
+  const cloned = source.map(t => ({
+    id: uuid(),
+    timestamp_ms: t.timestamp_ms,
+    event_id: t.event_id,
+    labels: [...(t.labels || [])],
+    enabled: t.enabled !== false,
+  }));
+  const added = _mergeAddTriggers(cloned);
+  await _persistAfterEdit();
+  renderTriggers();
+  showToast(`Added ${added} triggers from ${_slotLabel(sourceId)}`, 'success');
+}
+
+function openImportPopup() {
+  if (!profile) { showToast('No song loaded', 'error'); return; }
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;';
+  const sources = _availableCopySources();
+  // Match the +Scenes/+Flares/+Both palette: cycle through the same three colours.
+  const _slotColors = [
+    'background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;',
+    'background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;',
+    'background:rgba(255,152,0,0.15);color:#ff9800;border-color:#ff9800;',
+    'background:rgba(156,39,176,0.15);color:#9c27b0;border-color:#9c27b0;',
+    'background:rgba(0,188,212,0.15);color:#00bcd4;border-color:#00bcd4;',
+  ];
+  const copyHtml = sources.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">` + sources.map((s, i) =>
+        `<button class="btn-sm ip-copy-btn" data-id="${s.id}" style="white-space:nowrap;${_slotColors[i % _slotColors.length]}">
+          ${s.label} <span style="opacity:0.7;font-weight:400;">(${s.count})</span>
+        </button>`
+      ).join('') + `</div>`
+    : '<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">No other slots have triggers for this song yet.</div>';
+
+  overlay.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;width:440px;max-width:90vw;">
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Import Triggers</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">Adds to the currently-selected set: <b>${_slotLabel(_activeSlotId)}</b>. Triggers at the same timestamp are replaced.</div>
+
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Pull from Analysis</div>
+      <div style="display:flex;gap:6px;margin-bottom:18px;">
+        <button class="btn-sm" id="ip-scenes" style="white-space:nowrap;background:rgba(33,150,243,0.15);color:#2196f3;border-color:#2196f3;">+ Scenes</button>
+        <button class="btn-sm" id="ip-flares" style="white-space:nowrap;background:rgba(76,175,80,0.15);color:#4caf50;border-color:#4caf50;">+ Flares</button>
+        <button class="btn-sm" id="ip-both"   style="white-space:nowrap;background:rgba(255,152,0,0.15);color:#ff9800;border-color:#ff9800;">+ Both</button>
+      </div>
+
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Copy from Set List</div>
+      ${copyHtml}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:14px;">
+        <button class="btn-sm" id="ip-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('#ip-cancel').addEventListener('click', close);
+  overlay.querySelector('#ip-scenes').addEventListener('click', async () => { close(); await _runAnalyzeImport('scenes'); });
+  overlay.querySelector('#ip-flares').addEventListener('click', async () => { close(); await _runAnalyzeImport('flares'); });
+  overlay.querySelector('#ip-both'  ).addEventListener('click', async () => { close(); await _runAnalyzeImportBoth(); });
+  overlay.querySelectorAll('.ip-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      close();
+      await _copyFromSlot(id);
+    });
+  });
+}
+
+document.getElementById('btn-import-triggers').addEventListener('click', openImportPopup);
+
+document.getElementById('setlist-select').addEventListener('change', (e) => {
+  _switchToSlot(e.target.value || '');
+});
+
+// Set List dropdown is populated on page load and refreshed whenever the
+// /api/setlists list might have changed (we simply refresh on profile load).
+_refreshSetlists();
+const _origLoadProfile = window.loadProfile || null;
+// Hook into the existing loadProfile flow without forking it: bind slot
+// state every time a profile is set on `profile`.
+const _profileSlotObserver = setInterval(() => {
+  if (profile && _defaultTriggers !== profile.triggers && _activeSlotId === '') {
+    _bindSlotsForCurrentProfile();
+    _renderSetlistDropdown();
+    document.getElementById('setlist-select').value = '';
+  }
+}, 250);
 
 // ── Librosa button + filter toggles + offset slider ─────────────────────────
 {

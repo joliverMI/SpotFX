@@ -21,6 +21,9 @@ class SpotifyTrackInfo:
     fetched_at: float          # time.monotonic() when progress_ms was fetched
     device_name: str = ""
     genres: list = field(default_factory=list)
+    # ── Spotify playback context (playlist / album / artist) ──────────────────
+    context_uri: str = ""      # e.g. "spotify:playlist:abc123" or "" if no context
+    context_type: str = ""     # "playlist" | "album" | "artist" | ""
 
     def interpolated_progress_ms(self) -> int:
         """Estimate current progress without an extra API call."""
@@ -31,6 +34,20 @@ class SpotifyTrackInfo:
 
 
 @dataclass
+class PrevTrackSnapshot:
+    """Snapshot of the outgoing track captured at the moment a new URI arrives.
+
+    Used by Genre Blending to decide whether the previous song ended naturally
+    (progress within a few seconds of duration) and whether its genres overlap
+    with the incoming song's genres.
+    """
+    spotify_uri: str
+    genres: list
+    duration_ms: int
+    last_known_progress_ms: int
+
+
+@dataclass
 class AppState:
     # ── Spotify ───────────────────────────────────────────────────────────────
     current_track: Optional[SpotifyTrackInfo] = None
@@ -38,15 +55,23 @@ class AppState:
     last_activity_time: float = field(default_factory=time.monotonic)
 
     # ── Service control ───────────────────────────────────────────────────────
-    paused: bool = True           # True = triggers suppressed, polling continues
+    paused: bool = False          # True = triggers suppressed, polling continues
     on_target_device: bool = False  # True = playing on settings.spotify_device_name
     audio_analysis_enabled: bool = False  # True = capture audio shapes for new songs
-    recapture_wavs: bool = False          # True = recapture WAVs for songs that have librosa but no WAV
+    # Force-recapture mode (was recapture_wavs — now force-recaptures every song
+    # that plays while active, with a session-bound counter that auto-disables
+    # the toggle at zero).
+    recapture_active: bool = False        # True = force-recapture every song that plays
+    recapture_remaining: int = 0          # 0 = inactive; >0 = N songs left to recapture
     use_unreviewed_ai_triggers: bool = False  # True = use saved AI suggestion set instead of profile triggers
     use_analyzed_triggerless: bool = True      # True = use embedded pipeline triggers instead of synthetic triggerless
     analyzed_trigger_override: bool = False    # True = override user triggers with analyzed (debug/testing)
     auto_generate_enabled: bool = False       # True = auto-generate triggers after shape capture
     dinner_party_mode: bool = False            # True = ignore song triggers, use Dinner Party triggerless profile
+
+    # ── Genre Blending ────────────────────────────────────────────────────────
+    # Snapshot of the outgoing track captured just before current_track is replaced.
+    last_ended_track: Optional[PrevTrackSnapshot] = None
 
     # ── LedFX latency ────────────────────────────────────────────────────────
     ledfx_rtt_ms: float = 0.0    # calculated round-trip time to LedFX
@@ -56,6 +81,19 @@ class AppState:
 
     # ── Live sync timing info (updated each tick by TriggerEngine) ────────────
     timing: dict = field(default_factory=dict)
+
+    # ── Set List context ─────────────────────────────────────────────────────
+    next_track_uri: str = ""           # spotify URI of queue[0] after the current track
+    next_track_title: str = ""         # display label for the next track
+    active_setlist_id: str = ""        # id of the Set List matching current_track.context_uri
+    active_setlist_xcorr_enabled: bool = True   # mirrored from Setlist.xcorr_enabled (False → skip per-play xcorr)
+    # Snapshot of toggles before a Set List override took effect, so we can
+    # restore them when leaving the Set List context.
+    pre_setlist_state: dict = field(default_factory=dict)
+    # Recently observed context URIs → last-known display name. Lets the Set List
+    # page offer "track this playlist" without the user pasting URIs. Bounded
+    # to the most recent ~20 entries.
+    observed_context_uris: dict = field(default_factory=dict)
 
 
 # Singleton instance — import this everywhere

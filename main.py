@@ -5,7 +5,7 @@ Startup sequence:
   1. Mount static frontend files
   2. Register API routers
   3. Start background tasks:
-       - Spotify polling loop
+       - Song source loop (Spotify polling or LedFX WebSocket, per settings)
        - LedFX latency probe loop
        - Trigger engine loop
   4. WebSocket endpoint for real-time browser updates
@@ -22,13 +22,13 @@ from fastapi.responses import FileResponse
 
 from config import settings, PROFILES_DIR, AUDIO_SHAPES_DIR
 from models.state import state
-from api import spotify_client, ledfx_client
+from api import ledfx_client
 from services.trigger_engine import TriggerEngine
 from services.websocket_manager import ws_manager
-from services.profile_manager import load_profile_by_uri, save_profile
+from services.profile_manager import load_profile_by_uri, load_profile_by_title_artist, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
-from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager
+from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router
 from routers.settings_router import apply_settings_override
 from services import effect_params
 
@@ -50,6 +50,10 @@ async def _on_state_update(app_state) -> None:
     track = app_state.current_track
     if track:
         profile = load_profile_by_uri(track.spotify_uri)
+        if profile is None and track.title and track.artist:
+            profile = load_profile_by_title_artist(track.title, track.artist)
+            if profile:
+                logger.info("Profile matched by title/artist fallback: %s", profile.filename)
         if profile is None:
             # Auto-create a blank profile for any new song
             profile = SongProfile(
@@ -100,9 +104,24 @@ async def lifespan(app: FastAPI):
     if "use_analyzed_triggerless" in _saved:
         state.use_analyzed_triggerless = bool(_saved["use_analyzed_triggerless"])
 
+    # Select song source based on settings
+    if settings.song_source == "ledfx":
+        from api.ledfx_song_client import polling_loop as _song_polling_loop
+        _song_task_name = "ledfx-song-source"
+        logger.info("Song source: LedFX (event-driven)")
+    else:
+        from api.spotify_client import polling_loop as _song_polling_loop
+        _song_task_name = "spotify-poll"
+        logger.info("Song source: Spotify API")
+
+    # Always-on PCM ring buffer — fills continuously so force-recapture can
+    # backfill song-start audio even when URI detection lags.
+    from api.pcm_ring_buffer import pcm_ring_buffer
+    pcm_ring_buffer.start()
+
     # Launch background tasks
     tasks = [
-        asyncio.create_task(spotify_client.polling_loop(_on_state_update), name="spotify-poll"),
+        asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
         asyncio.create_task(engine.run(), name="trigger-engine"),
@@ -114,6 +133,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     await audio_shape_service.on_track_change(None)  # flush any in-progress capture
+    pcm_ring_buffer.stop()
     logger.info("SpotFX shutdown complete.")
 
 
@@ -135,6 +155,9 @@ app.include_router(gradients_router.router)
 app.include_router(palettes_router.router)
 app.include_router(triggerless.router)
 app.include_router(device_manager.router)
+app.include_router(setlist_router.router)
+app.include_router(timing_viz_router.router)
+app.include_router(debug_router.router)
 
 
 # ── Service status (health check for external callers) ────────────────────────
@@ -159,6 +182,18 @@ async def toggle_analysis():
     _save_settings_file(saved)
     await ws_manager.broadcast_state(state)
     return {"audio_analysis_enabled": state.audio_analysis_enabled}
+
+
+@app.post("/api/genre-blending/toggle")
+async def toggle_genre_blending():
+    from config import settings as _settings
+    object.__setattr__(_settings, "genre_blending_enabled", not _settings.genre_blending_enabled)
+    from routers.settings_router import _load_settings_file, _save_settings_file
+    saved = _load_settings_file()
+    saved["genre_blending_enabled"] = _settings.genre_blending_enabled
+    _save_settings_file(saved)
+    await ws_manager.broadcast_state(state)
+    return {"genre_blending_enabled": _settings.genre_blending_enabled}
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────

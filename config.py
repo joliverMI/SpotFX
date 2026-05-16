@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     poll_interval_end_song_ms: int = 500  # max burst near end of song
     poll_end_song_burst_duration_ms: int = 3000  # how long to burst at end
     poll_start_burst_duration_ms: int = 4000  # burst after new song detected
+    # When the remaining time to song-end is less than this, drop to the
+    # end-song fast poll rate. Wider than poll_end_song_burst_duration_ms
+    # because mix-playlist transitions flip the URI well before the
+    # song would have ended naturally.
+    pretransition_burst_window_ms: int = 8000
 
     # ── UI / timeline ─────────────────────────────────────────────────────────
     timeline_update_interval_ms: int = 250
@@ -83,6 +88,11 @@ class Settings(BaseSettings):
     audio_analysis_max_songs: int = 0
     # Maximum allowed gap between consecutive audio samples; larger gaps discard the shape
     audio_max_gap_ms: int = 200
+    # Always-on PCM ring buffer depth (seconds). Held in memory continuously so
+    # force-recapture mode can backfill song-start audio that played before the
+    # URI-change handler realized a new song started. Memory cost at 44.1kHz
+    # mono float32: ~5.3 MB for 30s.
+    pcm_ring_buffer_seconds: int = 30
 
     # ── Audio shape display averages ──────────────────────────────────────────
     # Sliding-window average width for the smoothed overlay lines (ms)
@@ -96,7 +106,7 @@ class Settings(BaseSettings):
 
     # ── Shape save threshold ───────────────────────────────────────────────────
     # Minimum fraction of song duration captured before shape is saved (0.0–1.0)
-    audio_shape_min_capture_pct: float = 0.90
+    audio_shape_min_capture_pct: float = 0.80
 
     # ── Auto-offset detection ─────────────────────────────────────────────────
     # Bass onset must exceed this multiple of the 1-second rolling mean
@@ -137,8 +147,170 @@ class Settings(BaseSettings):
     xcorr_starting_threshold: float = 0.15    # min difficulty to accept a window (except early mandate)
     xcorr_global_threshold: float = 0.50      # min Pearson r to accept a measurement
     xcorr_max_windows: int = 10               # cap on total windows per song
-    xcorr_min_early_windows: int = 2          # mandate: at least N windows in first 20s
-    xcorr_csv_logging: bool = True            # DIAGNOSTIC CSV — write per-play CSV log
+    xcorr_min_early_windows: int = 3          # mandate: at least N windows in first 20s
+                                              # (round 6: bumped 2→3 to compensate for retiring
+                                              # the rise-detector anchor — more early sweep
+                                              # windows give the cluster gate enough data to
+                                              # confirm or reject the song-start lock)
+    xcorr_csv_logging: bool = False           # DIAGNOSTIC CSV — write per-play CSV log
+                                              # (off by default — the per-band detail sweep
+                                              # doubles xcorr CPU; flip on only when tuning)
+    # Lock-and-stop: halt this play's xcorr loop once the engine has snapped
+    # at high Q with several agreeing windows. The trailing windows would
+    # only ratify the existing lock — burning worker-thread CPU on
+    # diminishing returns. Tune `xcorr_lock_q` down for stricter locks (more
+    # confident before halting) or `xcorr_lock_agree_windows` up to require
+    # broader cross-window agreement.
+    xcorr_lock_q: float = 0.70                # engine play-best-Q threshold to consider "locked"
+                                              # 0.55 was too eager — a single high-r sweep
+                                              # window (sometimes a beat-tile twin) could
+                                              # snap the engine to the wrong offset and
+                                              # then lock-and-stop halted xcorr before more
+                                              # windows could correct the bad lock. 0.70
+                                              # requires a confident match before halting.
+    xcorr_lock_agree_windows: int = 3         # weighted confirmation_shifts within tol of best_offset
+    # Mix-aware search range: total search window per side =
+    #   xcorr_search_ms_base + max(0, captured_duration - polled_duration) + xcorr_cut_buffer_ms
+    # The buffer absorbs small inaccuracies in capture vs. poll duration; the
+    # delta term grows the search when a Spotify mix transition has trimmed the
+    # song's reported duration. Per-Set-List override on Setlist.xcorr_cut_buffer_ms.
+    xcorr_search_ms_base: int = 2000
+    xcorr_cut_buffer_ms: int = 1500           # was 5000 — that bloated search to ±7s on
+                                              # zero-cut songs, ~720 score_at calls per
+                                              # fire even when r=0.15 (clear miss).
+                                              # 1500 keeps plenty of slack while halving
+                                              # the per-fire CPU on the common case.
+    # When the search range exceeds this width (one-sided), tighten thresholds
+    # to reject ambiguous matches: raise acceptance to >=0.55 r and require
+    # top1-top2 r margin >= 0.08.
+    xcorr_wide_threshold_ms: int = 4000
+    xcorr_wide_min_r: float = 0.50  # was 0.55 — too strict, save-gate handles noise downstream
+    xcorr_wide_top1_margin: float = 0.08
+    # Above this single-window r, skip the margin (twin-peak) gate — strong
+    # peaks shouldn't be discarded just because periodic music produces
+    # near-twin coincidences.
+    xcorr_high_confidence_r: float = 0.65  # was 0.70
+    # Beat-twin rejection. When a per-window xcorr's best peak has a competitor
+    # within `xcorr_beat_twin_margin` r at exactly ±1..4 beats (using librosa
+    # tempo), the window is genuinely ambiguous between beat-aligned offsets
+    # and we reject it. Mirrors the anchor's beat-twin penalty so both
+    # calibrators agree on what counts as ambiguous in periodic music.
+    xcorr_beat_twin_margin: float = 0.10
+    # Single-window high-r escape hatch for the disk-save gate. When the cluster
+    # gate (xcorr_save_min_confirm) doesn't fire because no second window
+    # confirms, allow a save anyway if this *one* window has very high r AND
+    # quality. Justified because the squared-signal correlator + beat-twin
+    # gate make r ≥ xcorr_single_window_save_r false matches very rare.
+    xcorr_single_window_save_r: float = 0.78
+    xcorr_single_window_save_q: float = 0.70
+    # Round 8: far-jump tier — when a proposed single-window save is more than
+    # `xcorr_far_jump_ms` away from the sweep's current converged best offset,
+    # require much stronger evidence before committing. Local refinements
+    # stay easy; section-twin section-coincidences at +/-5s away from the
+    # truth need to clear a high bar. Closes Pepas (+5200) / Contra (-2275)
+    # / 7vFKcXQ (-1875) holes from round 7.
+    xcorr_single_window_save_far_r: float = 0.90
+    xcorr_single_window_save_far_q: float = 0.85
+    # Round 9: dropped 2000 → 1000 to catch Bad Con Nicky's 1150ms shift that
+    # slipped under the old gate. Pairs with the engine-snap stickiness gate
+    # (engine_snap_far_jump_ms below) so disk and engine paths agree on what
+    # "far" means.
+    xcorr_far_jump_ms: int = 1000
+    # Round 8: OLD-aware displacement floor. When OLD r ≥ xcorr_old_correlating_floor,
+    # the loaded baseline is structurally agreeing with this window, so a NEW
+    # candidate at a different offset must beat OLD by at least
+    # xcorr_old_correlating_margin r-units before it's allowed to displace.
+    # Section-twins in periodic music score r=0.85-0.95 against the wrong
+    # alignment; without this floor they easily clear the 0.10 default
+    # threshold and override correct locks (Pepas, Contra, 7vFKcXQ).
+    xcorr_old_correlating_floor: float = 0.50
+    xcorr_old_correlating_margin: float = 0.20
+    # Anti-correlated baseline rescue threshold. When the stored offset shows
+    # OLD r<0 across 3+ consecutive windows, the loaded baseline is provably
+    # wrong for this play; lower the cluster save requirement so a single
+    # sweep window plus the anchor's weight (or two weak sweep windows) can
+    # fire the save and unstick the song.
+    xcorr_save_min_confirm_anti: float = 1.5
+    # Coarse-then-fine: coarse step (ms) and number of top candidates to refine.
+    xcorr_coarse_step_ms: int = 100
+    xcorr_top_k_refine: int = 3
+    # Song-start sniff: fire a dedicated start-window xcorr after this much
+    # accumulated live audio at song load.
+    xcorr_start_sniff_ms: int = 5000
+
+    # ── Early-feature anchor alignment ─────────────────────────────────────────
+    # At capture time we scan the first `anchor_scan_window_ms` for steep RMS
+    # rises and pick the most-unique candidates. At song start the live capture
+    # is matched against those candidates to snap-align before the per-window
+    # sweep runs.
+    # Round 7: rise-detector anchor reinstated as a cold-start fallback. The
+    # actual gate is per-Set-List `coarse_locked` (set on `setlist_offsets[id]`):
+    # when False (no save has fired for this slot, OR `anti_corr_count >= 3`),
+    # anchor runs as a safety net at song start. When True (a confirmed save
+    # exists), sweep alone handles calibration. This global flag is a master
+    # override; flip to False to disable anchor everywhere regardless of slot
+    # state.
+    anchor_enabled: bool = True
+    anchor_scan_window_ms: int = 90000        # offline scan covers first 90s — wider pool
+                                              # ensures candidates are spread across the song,
+                                              # not clustered near the start where mix lag and
+                                              # transitions can disqualify them all
+    anchor_template_radius_ms: int = 1000     # ± slice for template (1s either side of rise)
+    anchor_min_uniqueness: float = 0.15       # offline candidate accept threshold (best - second)
+    anchor_min_rise_ratio: float = 1.4        # rise magnitude vs local baseline
+    anchor_max_candidates: int = 8            # how many to store per song (paired with the
+                                              # 90s scan, gives 8 well-spread chances for the
+                                              # online matcher to find ≥2 agreeing candidates)
+    anchor_search_radius_ms: int = 5000       # ± window during live match
+    anchor_min_match_q: float = 0.30          # online match accept threshold (r × uniqueness)
+    # Hard floor on the match's raw correlation. Beat-tile false matches in
+    # periodic music can score r≈0.75–0.80 against the wrong beat; raising
+    # this threshold rejects those and lets the per-window sweep handle them.
+    # Confirmed-good matches (CANCIÓN, BAD CON NICKY in mixed playlist) score
+    # r≈0.85–0.95, well above the floor.
+    anchor_min_match_r: float = 0.75
+    # Cross-candidate validation. Single-candidate high-r matches in periodic
+    # music can be off by 1-4 beats. Requiring N candidates to agree on the
+    # same offset within ±tolerance is much harder for beat-tile twins to
+    # spoof: each candidate's twin sits at a different per-candidate shift,
+    # so they don't all converge on the same wrong offset.
+    anchor_min_agreeing_candidates: int = 2
+    anchor_agree_tolerance_ms: int = 200
+    # Skip the first `anchor_min_timestamp_ms` of every song in BOTH calibrators
+    # (anchor candidate detection AND live-frame matching). Captured intros and
+    # live intros frequently diverge due to mix variance / transition carryover,
+    # so we don't trust the first few seconds for alignment.
+    anchor_min_timestamp_ms: int = 5000
+
+    # In-song engine drift cap. Once a song's baseline offset is loaded
+    # (median of recent saves + perception trim), mid-play snaps in the
+    # trigger engine are limited to within this many ms of that loaded value.
+    # Bigger jumps are almost always beat-tile false matches. Disk writes are
+    # NOT affected — large corrections still accumulate in history and shift
+    # next play's median across plays. Set to 0 to disable.
+    engine_in_song_drift_cap_ms: int = 2000
+    # Drift cap bypass: snaps with quality at or above this threshold ignore
+    # the cap. Beat-twin / ambiguous gates upstream make Q≥0.70 false matches
+    # very rare, so a high-confidence correction is trusted to displace a
+    # potentially-wrong loaded baseline.
+    engine_drift_bypass_q: float = 0.70
+    # Round 8: anti-correlated baseline drift-cap bypass requires this Q floor.
+    # Previously, anti-corr unconditionally bypassed the cap; multiple plays
+    # showed Q=0.55-0.79 anti-corr-bypass snaps overriding correct locks.
+    # With this floor, only really-confident measurements (Q ≥ 0.85) are
+    # trusted to far-jump even when the loaded baseline appears anti-correlated.
+    engine_anti_corr_bypass_q: float = 0.85
+    # Round 9: stickiness gate on the engine-snap path. A per-window measurement
+    # whose offset is more than `engine_snap_far_jump_ms` away from the engine's
+    # CURRENT offset (not the loaded baseline) is suppressed unless one of:
+    # (a) a prior window in this play landed within ±xcorr_save_confirm_tol_ms
+    #     of the new offset (cluster-style agreement),
+    # (b) the new measurement clears `engine_snap_far_jump_q` on its own,
+    # (c) cold-start with anti-corr baseline (loaded median provably wrong).
+    # Closes the round-8 ping-pong observed on `3pm4Xtcs…` where four
+    # mutually inconsistent offsets each beat the play-best in succession.
+    engine_snap_far_jump_ms: int = 1000
+    engine_snap_far_jump_q: float = 0.85
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)
@@ -196,9 +368,18 @@ class Settings(BaseSettings):
     show_ai_triggers: bool = False
     # Show advanced controls across all pages
     show_advanced: bool = False
+    # Genre Blending — when ON, suppress song-start triggers if the previous song
+    # ended naturally and the new song shares any genre with it.
+    genre_blending_enabled: bool = True
 
-    # ── Last.fm (genre fallback) ──────────────────────────────────────────────
+    # ── Last.fm (genre fallback / primary in LedFX mode) ─────────────────────
     lastfm_api_key: str = ""
+    lastfm_username: str = ""
+
+    # ── Song source ───────────────────────────────────────────────────────────
+    # "spotify" — Spotify Web API polling (default)
+    # "ledfx"   — LedFX song_detected WebSocket events (event-driven, faster)
+    song_source: str = "spotify"
 
 
 settings = Settings()

@@ -16,55 +16,20 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import settings, PROFILES_DIR
-from models.state import state, SpotifyTrackInfo
+from models.state import state, SpotifyTrackInfo, PrevTrackSnapshot
+from api.lastfm import fetch_lastfm_genres
 
 logger = logging.getLogger(__name__)
 
-SCOPES = "user-read-playback-state user-read-currently-playing"
+SCOPES = (
+    "user-read-playback-state user-read-currently-playing "
+    "user-modify-playback-state "
+    "playlist-read-private playlist-modify-private playlist-modify-public"
+)
 
 _sp: Optional[spotipy.Spotify] = None
 _artist_genre_cache: dict[str, list[str]] = {}
 _burst_until: float = 0.0  # monotonic timestamp until which to use burst poll rate
-
-# Tags that are not genres — filtered out from Last.fm results
-_LASTFM_JUNK = {
-    "seen live", "favourite", "favorites", "loved", "love", "owned",
-    "under 2000 listeners", "my favorites", "beautiful", "awesome",
-    "amazing", "great", "good", "cool", "best", "classic",
-}
-
-
-def _fetch_lastfm_genres(artist_name: str) -> list[str]:
-    """Fetch genre tags from Last.fm for an artist (fallback when Spotify has none)."""
-    if not settings.lastfm_api_key:
-        return []
-    import json as _json
-    import urllib.request
-    import urllib.parse
-    url = (
-        "http://ws.audioscrobbler.com/2.0/"
-        f"?method=artist.getTopTags"
-        f"&artist={urllib.parse.quote(artist_name)}"
-        f"&api_key={settings.lastfm_api_key}"
-        f"&format=json"
-    )
-    try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            data = _json.loads(resp.read().decode())
-        tags = data.get("toptags", {}).get("tag", [])
-        genres: list[str] = []
-        for tag in tags:
-            name = tag.get("name", "").lower().strip()
-            count = int(tag.get("count", 0))
-            if count < 10:
-                break  # sorted desc; low-count tail is noise
-            if name and name not in _LASTFM_JUNK:
-                genres.append(name)
-            if len(genres) >= 5:
-                break
-        return genres
-    except Exception:
-        return []
 
 
 def _fetch_artist_genres(sp: spotipy.Spotify, artist_id: str, artist_name: str = "") -> list[str]:
@@ -76,7 +41,7 @@ def _fetch_artist_genres(sp: spotipy.Spotify, artist_id: str, artist_name: str =
     except Exception:
         genres = []
     if not genres and artist_name:
-        genres = _fetch_lastfm_genres(artist_name)
+        genres = fetch_lastfm_genres(artist_name)
     _artist_genre_cache[artist_id] = genres
     return genres
 
@@ -115,8 +80,10 @@ def _poll_interval_ms() -> int:
 
     Rules:
     - If within the song-start burst window: use poll_interval_end_song_ms.
-    - If we're near the end of a song (within poll_end_song_burst_duration_ms),
-      use poll_interval_end_song_ms (max 500 ms).
+    - If we're near the end of a song (within max(poll_end_song_burst_duration_ms,
+      pretransition_burst_window_ms)), use poll_interval_end_song_ms.
+      The widened window covers Spotify-side mix transitions where the URI flip
+      happens earlier than a natural song end.
     - If idle for >10 min: poll_interval_idle_ms.
     - If paused: poll_interval_paused_ms.
     - Otherwise (playing): poll_interval_playing_ms.
@@ -127,7 +94,10 @@ def _poll_interval_ms() -> int:
     track = state.current_track
     if track and track.is_playing:
         remaining_ms = track.duration_ms - track.interpolated_progress_ms()
-        burst_window = settings.poll_end_song_burst_duration_ms
+        burst_window = max(
+            settings.poll_end_song_burst_duration_ms,
+            settings.pretransition_burst_window_ms,
+        )
         if remaining_ms <= burst_window:
             return settings.poll_interval_end_song_ms
 
@@ -170,6 +140,9 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
     artist_id   = first_artist.get("id", "")
     artist_name = first_artist.get("name", "")
     genres = _fetch_artist_genres(sp, artist_id, artist_name) if artist_id else []
+    ctx = data.get("context") or {}
+    context_uri = ctx.get("uri", "") or ""
+    context_type = ctx.get("type", "") or ""
     info = SpotifyTrackInfo(
         spotify_uri=item["uri"],
         title=item["name"],
@@ -180,17 +153,132 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
         fetched_at=time.monotonic(),
         device_name=device_name,
         genres=genres,
+        context_uri=context_uri,
+        context_type=context_type,
     )
     global _burst_until
-    old_uri = state.current_track.spotify_uri if state.current_track else None
-    if info.spotify_uri != old_uri and info.is_playing:
-        _burst_until = time.monotonic() + settings.poll_start_burst_duration_ms / 1000.0
-        logger.debug("New song detected — burst polling for %dms", settings.poll_start_burst_duration_ms)
+    old = state.current_track
+    old_uri = old.spotify_uri if old else None
+    old_context_uri = old.context_uri if old else ""
+    if info.spotify_uri != old_uri:
+        if old is not None:
+            state.last_ended_track = PrevTrackSnapshot(
+                spotify_uri=old.spotify_uri,
+                genres=list(old.genres or []),
+                duration_ms=old.duration_ms,
+                last_known_progress_ms=old.interpolated_progress_ms(),
+            )
+            logger.info(
+                "URI change: %s → %s (prev progress=%dms/%dms, playing=%s, context=%s)",
+                old_uri, info.spotify_uri,
+                state.last_ended_track.last_known_progress_ms,
+                old.duration_ms, info.is_playing, info.context_uri or "-",
+            )
+        if info.is_playing:
+            _burst_until = time.monotonic() + settings.poll_start_burst_duration_ms / 1000.0
+            logger.debug("New song detected — burst polling for %dms", settings.poll_start_burst_duration_ms)
+        # Refresh queue + apply Set List context overrides on URI change.
+        try:
+            _refresh_queue(sp)
+        except Exception as exc:
+            logger.debug("Queue fetch failed (non-fatal): %s", exc)
     state.current_track = info
     state.last_poll_time = time.monotonic()
     if info.is_playing:
         state.last_activity_time = time.monotonic()
+
+    # Track observed context URIs so the Set List page can offer them as
+    # discoverable. Resolve the friendly name lazily.
+    if context_uri:
+        if context_uri not in state.observed_context_uris:
+            state.observed_context_uris[context_uri] = _resolve_context_name(sp, context_uri, context_type)
+        # bound the dict to keep memory tiny
+        if len(state.observed_context_uris) > 30:
+            # drop the oldest insertion
+            first_key = next(iter(state.observed_context_uris))
+            state.observed_context_uris.pop(first_key, None)
+
+    # Apply or revert Set List runtime overrides whenever the context changes.
+    if info.spotify_uri != old_uri or info.context_uri != old_context_uri:
+        try:
+            from services import setlist_runtime
+            setlist_runtime.apply_for_context(info.context_uri)
+        except Exception as exc:
+            logger.debug("setlist_runtime.apply_for_context failed: %s", exc)
+
     return info
+
+
+# ── Queue + context helpers ──────────────────────────────────────────────────
+
+_context_name_cache: dict[str, str] = {}
+
+
+def _refresh_queue(sp: spotipy.Spotify) -> None:
+    """Read /me/player/queue and populate state.next_track_*. Cheap; only on URI change."""
+    try:
+        q = sp.queue() or {}
+    except Exception as exc:
+        logger.debug("Spotify queue fetch failed: %s", exc)
+        return
+    queue_items = q.get("queue") or []
+    if not queue_items:
+        state.next_track_uri = ""
+        state.next_track_title = ""
+        return
+    nxt = queue_items[0]
+    state.next_track_uri = nxt.get("uri", "") or ""
+    title = nxt.get("name", "") or ""
+    artists = nxt.get("artists") or []
+    artist_str = ", ".join(a.get("name", "") for a in artists)
+    state.next_track_title = f"{artist_str} — {title}" if artist_str else title
+
+    # Pre-warm analyzed-trigger cache for the next track if it has librosa data
+    # already. Background thread; never blocks. No-op when the song has no shape.
+    if state.next_track_uri:
+        try:
+            import asyncio as _aio
+            _aio.get_event_loop().run_in_executor(
+                None,
+                lambda uri=state.next_track_uri: _safe_prewarm(uri),
+            )
+        except Exception:
+            pass
+
+
+def _safe_prewarm(spotify_uri: str) -> None:
+    try:
+        from services import analyzed_trigger_store
+        from services.librosa_service import get_analysis_by_uri
+        if not get_analysis_by_uri(spotify_uri):
+            return  # no shape → nothing to pre-warm
+        analyzed_trigger_store.generate_for_uri(spotify_uri, save_cache=True)
+        logger.info("Pre-warming analyzed-triggers cache for next: %s", spotify_uri)
+    except Exception as exc:
+        logger.debug("Pre-warm failed for %s: %s", spotify_uri, exc)
+
+
+def _resolve_context_name(sp: spotipy.Spotify, context_uri: str, context_type: str) -> str:
+    """Best-effort friendly name for a context URI. Cached per session."""
+    if not context_uri:
+        return ""
+    if context_uri in _context_name_cache:
+        return _context_name_cache[context_uri]
+    name = ""
+    try:
+        if context_type == "playlist":
+            data = sp.playlist(context_uri.split(":")[-1], fields="name") or {}
+            name = data.get("name", "") or ""
+        elif context_type == "album":
+            data = sp.album(context_uri.split(":")[-1]) or {}
+            name = data.get("name", "") or ""
+        elif context_type == "artist":
+            data = sp.artist(context_uri.split(":")[-1]) or {}
+            name = data.get("name", "") or ""
+    except Exception:
+        pass
+    _context_name_cache[context_uri] = name
+    return name
 
 
 async def polling_loop(broadcast_fn) -> None:

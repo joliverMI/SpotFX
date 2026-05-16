@@ -17,6 +17,7 @@ from config import AUDIO_SHAPES_DIR
 from services.audio_analyzer import load_audio_shape_meta, MusicMarkDetector
 from services.audio_shape_service import audio_shape_service
 from models.audio_shape import AudioShapeMeta, MusicMark
+from models.state import state
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,67 @@ async def get_meta(uri: str = Query(...)):
     if meta is None:
         return None
     return meta.model_dump()
+
+
+@router.get("/status")
+async def get_status(uri: str = Query(...)):
+    """Combined shape-on-disk status + most recent in-memory capture attempt.
+    Used by the Debug page to render the Shape Status block. Returns a flat
+    dict even when no shape exists for the URI, so the frontend doesn't have
+    to special-case 404s."""
+    from datetime import datetime, timezone
+    meta = load_audio_shape_meta(uri)
+    captured_at = None
+    has_shape = False
+    if meta is not None:
+        npz_path = AUDIO_SHAPES_DIR / meta.npz_file
+        if npz_path.exists():
+            has_shape = True
+            try:
+                captured_at = datetime.fromtimestamp(
+                    npz_path.stat().st_mtime, tz=timezone.utc,
+                ).isoformat()
+            except Exception:
+                captured_at = None
+    last_attempt = None
+    last_attempt_global = None
+    try:
+        last_uri    = audio_shape_service._last_capture_uri
+        last_status = audio_shape_service._last_capture_status
+        last_reason = audio_shape_service._last_capture_reason
+        if last_uri and last_status:
+            # Look up the title/artist for the most-recent attempt's URI so the
+            # Debug page can render "Previous capture attempt: <song> ✓/✗".
+            last_meta = load_audio_shape_meta(last_uri)
+            last_title  = last_meta.title  if last_meta else ""
+            last_artist = last_meta.artist if last_meta else ""
+            last_attempt_global = {
+                "status":  last_status,
+                "reason":  last_reason,
+                "for_uri": last_uri,
+                "title":   last_title,
+                "artist":  last_artist,
+            }
+            if last_uri == uri:
+                last_attempt = last_attempt_global
+    except Exception:
+        last_attempt = None
+        last_attempt_global = None
+    return {
+        "has_shape":                  has_shape,
+        "captured_at":                captured_at,
+        "capture_complete":           bool(meta.capture_complete) if meta else False,
+        "capture_failed":             bool(meta.capture_failed) if meta else False,
+        "needs_recapture":            bool(meta.needs_recapture) if meta else False,
+        "needs_recapture_reason":     meta.needs_recapture_reason if meta else "",
+        "needs_recapture_flagged_at": meta.needs_recapture_flagged_at if meta else "",
+        "needs_recapture_flag_count": int(meta.needs_recapture_flag_count) if meta else 0,
+        "offset_quality":             float(meta.offset_quality) if meta else 0.0,
+        "offset_verification":        meta.offset_verification if meta else "unverified",
+        "librosa_version":            int(meta.librosa_version) if meta else 0,
+        "last_attempt":               last_attempt,         # only when last_uri == queried uri
+        "last_attempt_global":        last_attempt_global,  # most recent attempt for ANY uri
+    }
 
 
 @router.get("/data")
@@ -110,6 +172,24 @@ async def get_calibration_status(uri: str):
     return auto_offset_service.get_status(uri)
 
 
+@router.get("/auto-offset-stats")
+async def auto_offset_stats(uri: str):
+    """Return per-Set-List + default offset entries for the song's audio shape."""
+    meta = load_audio_shape_meta(uri)
+    if meta is None:
+        raise HTTPException(404, "No audio shape found")
+    return {
+        "uri": uri,
+        "default": {
+            "timestamp_offset_ms": meta.timestamp_offset_ms,
+            "offset_quality": meta.offset_quality,
+            "verification": meta.offset_verification,
+        },
+        "setlist_offsets": meta.setlist_offsets or {},
+        "captured_duration_ms": meta.duration_ms,
+    }
+
+
 @router.patch("/offset")
 async def update_offset(uri: str, timestamp_offset_ms: int,
                         offset_verification: str = "user_verified"):
@@ -129,6 +209,65 @@ async def update_offset(uri: str, timestamp_offset_ms: int,
         pass
     return {"status": "updated", "timestamp_offset_ms": timestamp_offset_ms,
             "offset_verification": offset_verification}
+
+
+@router.get("/perception-trim")
+async def get_perception_trim(uri: str):
+    """Read the current perception trim for the active scope (Set List slot
+    if one is active, otherwise the song's default slot)."""
+    meta = load_audio_shape_meta(uri)
+    if meta is None:
+        return {"uri": uri, "scope": "default", "perception_trim_ms": 0}
+    sl_id = state.active_setlist_id
+    if sl_id:
+        entry = (meta.setlist_offsets or {}).get(sl_id) or {}
+        return {"uri": uri, "scope": f"setlist:{sl_id}", "perception_trim_ms": int(entry.get("perception_trim_ms", 0))}
+    return {"uri": uri, "scope": "default", "perception_trim_ms": int(getattr(meta, "perception_trim_ms", 0) or 0)}
+
+
+@router.post("/perception-trim")
+async def update_perception_trim(uri: str, delta_ms: int = 0, value_ms: int | None = None):
+    """Adjust the per-(track, Set List) perception trim that layers on top
+    of the xcorr-derived offset. `delta_ms` nudges by that amount (additive);
+    pass `value_ms` to set an absolute value instead. Writes to the active
+    Set List slot when one is active, otherwise to the default slot.
+    """
+    meta = load_audio_shape_meta(uri)
+    if meta is None:
+        raise HTTPException(404, "No audio shape found")
+    sl_id = state.active_setlist_id
+    if sl_id:
+        if not isinstance(meta.setlist_offsets, dict):
+            meta.setlist_offsets = {}
+        entry = meta.setlist_offsets.get(sl_id) or {}
+        cur = int(entry.get("perception_trim_ms", 0))
+        new_trim = int(value_ms) if value_ms is not None else cur + int(delta_ms)
+        entry["perception_trim_ms"] = new_trim
+        meta.setlist_offsets[sl_id] = entry
+        scope = f"setlist:{sl_id}"
+    else:
+        cur = int(getattr(meta, "perception_trim_ms", 0) or 0)
+        new_trim = int(value_ms) if value_ms is not None else cur + int(delta_ms)
+        meta.perception_trim_ms = new_trim
+        scope = "default"
+    meta_path = AUDIO_SHAPES_DIR / meta.npz_file.replace(".npz", ".json")
+    meta_path.write_text(meta.model_dump_json(indent=2), encoding="utf-8")
+    try:
+        from main import engine
+        engine.reload_shape_offset(uri)
+    except Exception:
+        pass
+    try:
+        from services.websocket_manager import ws_manager
+        await ws_manager.broadcast({
+            "type": "perception_trim_updated",
+            "uri": uri,
+            "scope": scope,
+            "perception_trim_ms": new_trim,
+        })
+    except Exception:
+        pass
+    return {"uri": uri, "scope": scope, "perception_trim_ms": new_trim}
 
 
 @router.patch("/marks")

@@ -98,6 +98,10 @@
         <label>Audio Analysis Max Songs per Session (0 = unlimited)</label>
         <input type="number" id="s-analysis-max" min="0" step="1">
       </div>
+      <div class="field">
+        <label>WAV Files Retained (oldest deleted past this count; 0 = unlimited)</label>
+        <input type="number" id="s-wav-max-songs" min="0" step="1">
+      </div>
     </div>
 
     <div class="card advanced-only-block">
@@ -110,10 +114,80 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Spotify</div>
-      <div class="field">
-        <label>Target Device Name</label>
-        <input type="text" id="s-spotify-device">
+      <div class="card-title">Song Source</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <button type="button" class="toggle-btn" id="ss-btn-spotify" data-value="spotify">Spotify API</button>
+        <button type="button" class="toggle-btn" id="ss-btn-ledfx" data-value="ledfx">
+          LedFX
+          <span style="font-size:10px;opacity:0.7;">event-driven</span>
+        </button>
+      </div>
+      <p id="ss-restart-notice" style="display:none;font-size:12px;color:var(--warn,#e6a817);margin:0 0 10px;">
+        Restart SpotFX for this change to take effect.
+      </p>
+      <div id="spotify-only-fields">
+        <div class="field">
+          <label>Target Device Name</label>
+          <input type="text" id="s-spotify-device">
+        </div>
+        <div class="field">
+          <label>Client ID</label>
+          <input type="text" id="s-spotify-client-id" placeholder="From Spotify Developer Dashboard">
+        </div>
+        <div class="field">
+          <label>Client Secret</label>
+          <input type="password" id="s-spotify-client-secret" placeholder="From Spotify Developer Dashboard">
+        </div>
+        <div class="field">
+          <label>Redirect URI</label>
+          <input type="text" id="s-spotify-redirect-uri" placeholder="http://127.0.0.1:8000/api/spotify/callback">
+        </div>
+      </div>
+      <div id="lastfm-fields" style="display:none;">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+          Genres are sourced from Last.fm when not using the Spotify API.
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;">
+            Last.fm API Key
+            <button type="button" id="btn-lastfm-howto" style="padding:2px 8px;font-size:11px;height:auto;border-radius:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);cursor:pointer;">How to →</button>
+          </label>
+          <input type="text" id="s-lastfm-api-key" placeholder="Paste your API key here">
+        </div>
+        <div class="field">
+          <label>Last.fm Username <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
+          <input type="text" id="s-lastfm-username" placeholder="Your Last.fm username">
+        </div>
+      </div>
+    </div>
+
+    <!-- Last.fm How-To Modal -->
+    <div id="lastfm-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;">
+      <div style="background:#1a1a1a;border:1px solid var(--border);border-radius:10px;max-width:520px;width:90%;padding:28px;position:relative;max-height:85vh;overflow-y:auto;">
+        <button id="btn-lastfm-modal-close" type="button" style="position:absolute;top:14px;right:16px;background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0;line-height:1;">✕</button>
+        <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:16px;">Getting a Last.fm API Key</div>
+        <ol style="padding-left:18px;margin:0;line-height:1.9;font-size:13px;color:var(--text);">
+          <li>Go to <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener" style="color:var(--accent);">last.fm/api/account/create</a></li>
+          <li>Sign in or create a free Last.fm account if you don't have one</li>
+          <li>Fill in the form:
+            <ul style="margin-top:4px;margin-bottom:4px;">
+              <li><strong>Application name</strong> — anything you like, e.g. <em>SpotFX</em></li>
+              <li><strong>Application description</strong> — e.g. <em>Genre lookup for music lighting</em></li>
+              <li><strong>Callback URL</strong> — leave blank</li>
+              <li><strong>Application homepage</strong> — leave blank</li>
+            </ul>
+          </li>
+          <li>Click <strong>Submit</strong></li>
+          <li>You'll see your new <strong>API key</strong> on the next page — copy it</li>
+          <li>Paste it into the <em>Last.fm API Key</em> field in SpotFX settings and save</li>
+        </ol>
+        <div style="margin-top:16px;font-size:12px;color:var(--text-muted);">
+          The API key is free and rate-limited to 5 req/s — well within SpotFX's usage.
+          Your username is optional; SpotFX only uses it for future scrobbling features.
+        </div>
+        <div style="margin-top:18px;text-align:right;">
+          <button id="btn-lastfm-modal-close2" type="button" class="btn-accent" style="padding:7px 20px;">Done</button>
+        </div>
       </div>
     </div>
 
@@ -132,9 +206,13 @@
       </div>
     </div>
 
-    <div style="display:flex;gap:10px;align-items:center;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn-accent" id="btn-save">Save Settings</button>
       <span id="save-msg" style="font-size:13px;color:var(--accent);display:none;">Saved!</span>
+      <button id="btn-restart" class="btn btn-danger"
+              style="background-image:linear-gradient(var(--danger),var(--danger));background-size:0% 100%;background-repeat:no-repeat;user-select:none;">
+        Restart SpotFX
+      </button>
     </div>
 
     <!-- ── Gradient Profiles ──────────────────────────────────────────────── -->
@@ -200,7 +278,32 @@ document.getElementById('s-pre-transition-lead').value = settings.pre_transition
 document.getElementById('s-zoom-window').value    = settings.builder_zoom_window_s;
 document.getElementById('s-future-buffer').value  = settings.builder_future_buffer_s;
 document.getElementById('s-audio-device').value   = settings.audio_input_device;
-document.getElementById('s-spotify-device').value = settings.spotify_device_name;
+// Song source toggle buttons
+const _initialSongSource = settings.song_source ?? 'spotify';
+let _songSource = _initialSongSource;
+function setSongSource(src) {
+  _songSource = src;
+  document.getElementById('ss-btn-spotify').classList.toggle('active', src === 'spotify');
+  document.getElementById('ss-btn-ledfx').classList.toggle('active', src === 'ledfx');
+  document.getElementById('spotify-only-fields').style.display = src === 'spotify' ? '' : 'none';
+  document.getElementById('lastfm-fields').style.display       = src === 'ledfx'   ? '' : 'none';
+  document.getElementById('ss-restart-notice').style.display   = src !== _initialSongSource ? '' : 'none';
+}
+setSongSource(_songSource);
+document.getElementById('ss-btn-spotify').addEventListener('click', () => setSongSource('spotify'));
+document.getElementById('ss-btn-ledfx').addEventListener('click', () => setSongSource('ledfx'));
+// Last.fm how-to modal
+const lastfmModal = document.getElementById('lastfm-modal');
+document.getElementById('btn-lastfm-howto').addEventListener('click', () => { lastfmModal.style.display = 'flex'; });
+document.getElementById('btn-lastfm-modal-close').addEventListener('click', () => { lastfmModal.style.display = 'none'; });
+document.getElementById('btn-lastfm-modal-close2').addEventListener('click', () => { lastfmModal.style.display = 'none'; });
+lastfmModal.addEventListener('click', e => { if (e.target === lastfmModal) lastfmModal.style.display = 'none'; });
+document.getElementById('s-spotify-device').value         = settings.spotify_device_name;
+document.getElementById('s-spotify-client-id').value      = settings.spotipy_client_id ?? '';
+document.getElementById('s-spotify-client-secret').value  = settings.spotipy_client_secret ?? '';
+document.getElementById('s-spotify-redirect-uri').value   = settings.spotipy_redirect_uri ?? '';
+document.getElementById('s-lastfm-api-key').value  = settings.lastfm_api_key ?? '';
+document.getElementById('s-lastfm-username').value = settings.lastfm_username ?? '';
 document.getElementById('s-ledfx-host').value     = settings.ledfx_host;
 document.getElementById('s-ledfx-port').value     = settings.ledfx_port;
 document.getElementById('s-ledfx-url').textContent = settings.ledfx_base_url;
@@ -210,6 +313,7 @@ document.getElementById('s-scale-bass').value     = settings.shape_scale_bass   
 document.getElementById('s-scale-mid').value      = settings.shape_scale_mid     ?? 1;
 document.getElementById('s-scale-high').value     = settings.shape_scale_high    ?? 1;
 document.getElementById('s-analysis-max').value   = settings.audio_analysis_max_songs ?? 0;
+document.getElementById('s-wav-max-songs').value  = settings.audio_wav_max_songs ?? 50;
 document.getElementById('s-avg-window').value     = settings.shape_average_window_ms  ?? 500;
 document.getElementById('s-smooth-ramp').value    = settings.smooth_ramp_ms ?? 0;
 document.getElementById('s-auto-gen-mode').value  = settings.auto_generate_mode ?? 'embedded';
@@ -225,7 +329,13 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     builder_zoom_window_s:   parseInt(document.getElementById('s-zoom-window').value),
     builder_future_buffer_s: parseInt(document.getElementById('s-future-buffer').value),
     audio_input_device:      document.getElementById('s-audio-device').value,
-    spotify_device_name:     document.getElementById('s-spotify-device').value,
+    song_source:             _songSource,
+    spotify_device_name:       document.getElementById('s-spotify-device').value,
+    spotipy_client_id:         document.getElementById('s-spotify-client-id').value,
+    spotipy_client_secret:     document.getElementById('s-spotify-client-secret').value,
+    spotipy_redirect_uri:      document.getElementById('s-spotify-redirect-uri').value,
+    lastfm_api_key:          document.getElementById('s-lastfm-api-key').value,
+    lastfm_username:         document.getElementById('s-lastfm-username').value,
     ledfx_host:              document.getElementById('s-ledfx-host').value,
     ledfx_port:              parseInt(document.getElementById('s-ledfx-port').value),
     shape_scale_overall:     parseFloat(document.getElementById('s-scale-overall').value),
@@ -234,6 +344,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     shape_scale_mid:         parseFloat(document.getElementById('s-scale-mid').value),
     shape_scale_high:        parseFloat(document.getElementById('s-scale-high').value),
     audio_analysis_max_songs: parseInt(document.getElementById('s-analysis-max').value),
+    audio_wav_max_songs:      parseInt(document.getElementById('s-wav-max-songs').value),
     shape_average_window_ms:  parseInt(document.getElementById('s-avg-window').value),
     smooth_ramp_ms:           parseInt(document.getElementById('s-smooth-ramp').value),
     auto_generate_mode:       document.getElementById('s-auto-gen-mode').value,
@@ -381,6 +492,40 @@ document.getElementById('grad-delete').addEventListener('click', async () => {
   document.getElementById('grad-editor').style.display = 'none';
 });
 
+// ── Hold-to-restart button ───────────────────────────────────────────────────
+{
+  const btn = document.getElementById('btn-restart');
+  const HOLD_MS = 500;
+  let holdTimer = null;
+
+  function startHold() {
+    if (holdTimer) return;
+    btn.style.transition = `background-size ${HOLD_MS}ms linear`;
+    btn.style.backgroundSize = '100% 100%';
+    btn.style.color = '#fff';
+    holdTimer = setTimeout(async () => {
+      btn.textContent = 'Restarting…';
+      btn.disabled = true;
+      await POST('/settings/restart');
+    }, HOLD_MS);
+  }
+
+  function cancelHold() {
+    if (!holdTimer) return;
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    btn.style.transition = 'background-size 150ms linear';
+    btn.style.backgroundSize = '0% 100%';
+    btn.style.color = '';
+  }
+
+  btn.addEventListener('mousedown', startHold);
+  btn.addEventListener('touchstart', e => { e.preventDefault(); startHold(); }, { passive: false });
+  btn.addEventListener('mouseup', cancelHold);
+  btn.addEventListener('mouseleave', cancelHold);
+  btn.addEventListener('touchend', cancelHold);
+  btn.addEventListener('touchcancel', cancelHold);
+}
 </script>
 </body>
 </html>

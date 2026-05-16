@@ -5,6 +5,7 @@ Maintains all active browser connections and broadcasts state updates.
 The frontend interpolates timestamps between broadcasts.
 """
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from typing import Any
@@ -14,6 +15,31 @@ from fastapi import WebSocket
 from models.state import AppState
 
 logger = logging.getLogger(__name__)
+
+
+def _recording_active() -> bool:
+    """True when audio_shape_service is currently capturing a song. Read fresh
+    from the singleton on every broadcast; lazy import avoids circular load."""
+    try:
+        from services.audio_shape_service import audio_shape_service
+        return bool(audio_shape_service._recording_uri)
+    except Exception:
+        return False
+
+
+def _last_capture() -> dict:
+    """Snapshot of the most recent capture's terminal state (success or
+    failure with reason tag). Used by Now Playing to render a green/red
+    badge after a capture finishes."""
+    try:
+        from services.audio_shape_service import audio_shape_service
+        return {
+            "status": audio_shape_service._last_capture_status,
+            "reason": audio_shape_service._last_capture_reason,
+            "uri":    audio_shape_service._last_capture_uri,
+        }
+    except Exception:
+        return {"status": None, "reason": "", "uri": None}
 
 
 class WebSocketManager:
@@ -34,17 +60,33 @@ class WebSocketManager:
         logger.debug("WS client disconnected. Total: %d", len(self._connections))
 
     async def broadcast(self, payload: dict) -> None:
-        dead = []
-        for ws in list(self._connections):
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.disconnect(ws)
+        # Fan-out in parallel with a per-client write deadline. Dead/stale
+        # client sockets (closed-but-not-yet-cleaned, mobile gone to sleep)
+        # would otherwise hang send_json on the TCP send buffer indefinitely
+        # and pin every broadcast at the OS-level TCP timeout. We give each
+        # client 1s to ack; misses are disconnected so they stop poisoning
+        # subsequent broadcasts.
+        conns = list(self._connections)
+        if not conns:
+            return
+        async def _send(ws):
+            # 250 ms is plenty for any healthy client (localhost ≪10 ms, LAN
+            # ≪50 ms). Anything past this is almost certainly a stale tab or
+            # a remote on flaky wifi — drop to keep the loop snappy.
+            await asyncio.wait_for(ws.send_json(payload), timeout=0.25)
+        results = await asyncio.gather(
+            *(_send(ws) for ws in conns),
+            return_exceptions=True,
+        )
+        for ws, result in zip(conns, results):
+            if isinstance(result, Exception):
+                if isinstance(result, asyncio.TimeoutError):
+                    logger.info("WS client send timeout — disconnecting stale client")
+                self.disconnect(ws)
 
     async def broadcast_state(self, state: AppState) -> None:
         """Serialize AppState and broadcast to all clients."""
+        from config import settings as _settings
         track = state.current_track
         payload: dict[str, Any] = {
             "type": "state",
@@ -52,12 +94,16 @@ class WebSocketManager:
             "on_target_device": state.on_target_device,
             "ledfx_rtt_ms": round(state.ledfx_rtt_ms, 1),
             "audio_analysis_enabled": state.audio_analysis_enabled,
-            "recapture_wavs": state.recapture_wavs,
+            "recapture_active": state.recapture_active,
+            "recapture_remaining": state.recapture_remaining,
+            "recording_active": _recording_active(),
+            "last_capture": _last_capture(),
             "use_unreviewed_ai_triggers": state.use_unreviewed_ai_triggers,
             "use_analyzed_triggerless": state.use_analyzed_triggerless,
             "analyzed_trigger_override": state.analyzed_trigger_override,
             "auto_generate_enabled": state.auto_generate_enabled,
             "dinner_party_mode": state.dinner_party_mode,
+            "genre_blending_enabled": _settings.genre_blending_enabled,
             "track": None,
         }
         if track:
@@ -70,8 +116,30 @@ class WebSocketManager:
                 "is_playing": track.is_playing,
                 "device_name": track.device_name,
                 "genres": track.genres,
+                "context_uri": track.context_uri,
+                "context_type": track.context_type,
             }
         payload["timing"] = state.timing or {}
+        payload["next_track_uri"] = state.next_track_uri
+        payload["next_track_title"] = state.next_track_title
+        # Active Set List, if any
+        if state.active_setlist_id:
+            try:
+                from services import setlist_store
+                sl = setlist_store.get_by_id(state.active_setlist_id)
+                if sl:
+                    payload["active_setlist"] = {
+                        "id": sl.id,
+                        "name": sl.name,
+                        "auto_activate": sl.auto_activate,
+                        "auto_use_analyzed": sl.auto_use_analyzed,
+                        "genre_blending": sl.genre_blending,
+                    }
+            except Exception:
+                pass
+        # Friendly playlist name (when known) for "Playing from: ..." UI line
+        if track and track.context_uri and state.observed_context_uris:
+            payload["context_name"] = state.observed_context_uris.get(track.context_uri, "")
         await self.broadcast(payload)
 
     async def broadcast_trigger_fired(

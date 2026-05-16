@@ -207,7 +207,7 @@ class MusicEvent(BaseModel):
     beat_sequence_steps: list[BeatSequenceStep] = Field(default_factory=list)
     beat_revert: Optional[BeatRevertConfig] = None
     beat_sequence_fallback: Literal["skip", "fallback"] = "fallback"
-    beat_sequence_start_offset_ms: int = 0  # ms to shift entire sequence (negative = start earlier)
+    beat_sequence_start_offset_beats: int = 0  # beats to shift entire sequence (negative = earlier)
 
     # Timing offset: shift when this event fires (negative = earlier, positive = later)
     event_offset_ms: int = 0

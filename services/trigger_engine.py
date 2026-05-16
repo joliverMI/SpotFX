@@ -37,16 +37,108 @@ from api import ledfx_client
 logger = logging.getLogger(__name__)
 
 TICK_MS = 50  # engine resolution — 50 ms tick
+STALE_FIRE_MS = 2000  # any trigger whose anchor is more than this far behind song position is silently marked fired (covers startup/long seek, leaves room for normal playback jitter)
 
 
 @dataclass
-class _PreScheduledFire:
-    """A leaf event detached from the parent chain and scheduled at its own fire time."""
-    fire_at_ms: int           # absolute song-ms to fire
-    event: MusicEvent         # event to execute
-    trigger_ms: int           # original trigger timestamp (for beat grid anchor)
+class _PlanEntry:
+    """
+    One atomic fire in the planned trigger timeline.
+
+    The planner walks the resolved event tree from a trigger, compounds
+    `event_offset_ms` down the chain, turns sequence `step.delay_ms` and
+    beat-sequence step spacing into absolute song-ms, and emits one entry
+    per event body (not per event_ref — singles with event_ref are transparent).
+
+    Each entry's execution skips its `planned_descendant_ids` — those sub-events
+    already have their own entries so we don't double-fire them.
+    """
+    fire_at_ms: int                               # absolute song-ms to fire this event
+    event: MusicEvent                             # event whose body executes
     labels: list[str] = dc_field(default_factory=list)
+    trigger_ms: int = 0                           # root trigger timestamp (for logs)
+    trigger_id: str = ""                          # root trigger id (to check _pre_fired at exec time)
+    is_root: bool = False                         # True only for the root entry of a trigger's plan
+    planned_descendant_ids: set[str] = dc_field(default_factory=set)
+    preselected_action: Optional[Action] = None   # for "single" events — action chosen at plan time
+    preselected_steps: Optional[list] = None      # for "sequence" events — per-step action pre-selection
+    snapshot_task: Optional[asyncio.Task] = None  # pre-fire snapshot of the LedFX state this event will change
     fired: bool = False
+
+
+def _resolve_shape_offset(meta) -> tuple[int, float, str]:
+    """Pick the right offset slot for the current Set List context, then
+    layer the user's perception trim on top. Uses the median of recent
+    saved locks (when present) instead of the latest one alone — keeps a
+    single noisy save from displacing a stable baseline.
+
+    When no per-(track, Set List) entry exists yet, fall back to the
+    track's default offset PLUS the active Set List's recent-deltas bias
+    (median of the last few "lock − baseline" deltas observed in this
+    Set List), so the first play of an unseen track in a mix-warped
+    Set List doesn't start cold.
+
+    Returns (effective_offset_ms, quality, source_label).
+    """
+    if meta is None:
+        return 0, 0.0, "default"
+    sl_id = state.active_setlist_id
+    if sl_id:
+        sl_entry = (meta.setlist_offsets or {}).get(sl_id)
+        if sl_entry:
+            history = sl_entry.get("history") or []
+            base = _median_offset_local(history)
+            if base is None:
+                base = int(sl_entry.get("timestamp_offset_ms", 0))
+            quality = float(sl_entry.get("offset_quality", 0.0))
+            trim = int(sl_entry.get("perception_trim_ms", 0))
+            return base + trim, quality, f"setlist:{sl_id}"
+        # No entry yet — bias the default by the Set List's recent deltas.
+        bias = _setlist_delta_bias(sl_id)
+        if bias != 0:
+            base = int(meta.timestamp_offset_ms or 0) + bias
+            quality = float(meta.offset_quality or 0.0)
+            trim = int(getattr(meta, "perception_trim_ms", 0) or 0)
+            return base + trim, quality, f"default+setlist_bias:{bias:+d}"
+    base = int(meta.timestamp_offset_ms or 0)
+    quality = float(meta.offset_quality or 0.0)
+    trim = int(getattr(meta, "perception_trim_ms", 0) or 0)
+    return base + trim, quality, "default"
+
+
+def _perception_trim_for(meta) -> int:
+    """Return the perception trim that applies for the current Set List context."""
+    if meta is None:
+        return 0
+    sl_id = state.active_setlist_id
+    if sl_id:
+        sl_entry = (meta.setlist_offsets or {}).get(sl_id) or {}
+        return int(sl_entry.get("perception_trim_ms", 0))
+    return int(getattr(meta, "perception_trim_ms", 0) or 0)
+
+
+def _median_offset_local(history: list) -> int | None:
+    vals = sorted(int(h.get("offset_ms", 0)) for h in (history or []) if h)
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) // 2
+
+
+def _setlist_delta_bias(setlist_id: str) -> int:
+    """Median of recent (lock - baseline) deltas observed while this Set
+    List was active. Used as a starting bias for tracks the Set List
+    hasn't seen yet. Returns 0 when there's not enough history."""
+    try:
+        from services import setlist_store
+        sl = setlist_store.get_by_id(setlist_id)
+    except Exception:
+        return 0
+    if not sl or not sl.recent_offset_deltas or len(sl.recent_offset_deltas) < 2:
+        return 0
+    vals = sorted(int(d) for d in sl.recent_offset_deltas)
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) // 2
 
 
 class TriggerEngine:
@@ -66,12 +158,27 @@ class TriggerEngine:
         self._last_action: dict[str, str] = {}  # event_id -> action index/key
         self._shape_offset_ms: int = 0       # cached from AudioShapeMeta.timestamp_offset_ms
         self._shape_offset_quality: float = 0.0  # cached quality score (r × difficulty)
+        # Highest match-quality observed during the current play. Reset on URI
+        # change. Anchor and sweep saves only override the engine's live offset
+        # when their quality strictly beats this — gives priority to confident
+        # matches mid-play while still letting median (loaded at song start)
+        # be the floor when no match clears it.
+        self._play_best_quality: float = 0.0
+        # Loaded offset at song start (median + trim). Used as the reference
+        # for the in-song drift cap: mid-play saves more than
+        # `engine_in_song_drift_cap_ms` away from this are rejected as
+        # likely beat-tile false matches.
+        self._loaded_offset_ms: int = 0
+        # Per-song librosa cache — avoids re-reading the JSON every beat-sequence fire.
+        self._beats_cache: Optional[list] = None
+        self._tempo_cache: Optional[float] = None
         # Pre-selection state for trigger preview
         self._preselected: dict[str, Action] = {}           # trigger_id → pre-selected action (single events)
         self._preselected_steps: dict[str, list] = {}       # trigger_id → [Optional[Action], ...] (sequence steps)
         self._last_preview_id: Optional[str] = None         # id of last previewed trigger (dedup guard)
-        # Pre-scheduled early fires (detached from parent chain)
-        self._pre_scheduled: dict[str, list[_PreScheduledFire]] = {}  # trigger_id → entries
+        # Planned timeline for upcoming trigger — flat list of atomic fires
+        self._plan: dict[str, list[_PlanEntry]] = {}  # trigger_id → entries (absolute song-ms)
+        self._plan_desc: dict[str, str] = {}          # trigger_id → drill-down preview label
         # AI suggestion set triggers (cached per song, used when use_unreviewed_ai_triggers is on)
         self._ai_triggers: Optional[list[MusicTrigger]] = None
         # Analyzed triggers: generated by embedded pipeline from librosa data
@@ -80,6 +187,18 @@ class TriggerEngine:
         self._triggerless_triggers: Optional[list[MusicTrigger]] = None
         # Ramp task registry — tracked so they can be cancelled on song change
         self._ramp_tasks: set[asyncio.Task] = set()
+        # Pending revert state per target virtual — lets an overlapping flip
+        # steal the prior snapshot and cancel its revert, so the final revert
+        # always restores to the truly-clean pre-first-flip color regardless
+        # of how many flips interleave. See plan section "added, 4".
+        # {vid: (snapshot, revert_cfg, revert_task)}
+        self._pending_ambient_revert: dict[str, tuple[dict, object, asyncio.Task]] = {}
+        # Tracks the look-ahead _fire_pre_commands task per trigger, so when
+        # _execute_plan_entry runs with skip_pre_commands=True it can AWAIT
+        # the task before step 0 — guaranteeing the transition PUT reaches
+        # LedFX before the effect PUT (otherwise the httpx pool may dispatch
+        # them out of order and the transition won't apply to the change).
+        self._pre_cmd_tasks: dict[str, asyncio.Task] = {}
 
     def _spawn_ramp(self, coro) -> asyncio.Task:
         """Create a tracked ramp task. All ramp tasks should use this instead of create_task."""
@@ -90,6 +209,11 @@ class TriggerEngine:
 
     def load_profile(self, profile: SongProfile) -> None:
         self._profile = profile
+        logger.info(
+            "load_profile: uri=%s last_uri=%s (change=%s)",
+            profile.spotify_uri, self._last_uri,
+            profile.spotify_uri != self._last_uri,
+        )
         if profile.spotify_uri != self._last_uri:
             for task in list(self._ramp_tasks):
                 task.cancel()
@@ -97,15 +221,31 @@ class TriggerEngine:
             self._fired.clear()
             self._pre_fired.clear()
             self._pre_ramp_fired.clear()
+            self._pre_cmd_tasks.clear()
             self._last_action.clear()
             self._preselected.clear()
             self._preselected_steps.clear()
-            self._pre_scheduled.clear()
+            self._plan.clear()
+            self._plan_desc.clear()
             self._last_preview_id = None
             self._last_uri = profile.spotify_uri
+            # New song — clear the play-best floor so any anchor or sweep
+            # save this play can override the median-derived starting baseline.
+            self._play_best_quality = 0.0
             meta = load_audio_shape_meta(profile.spotify_uri)
-            self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
-            self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            # Resolve the offset from whichever slot fits the current context
+            # (Set List override or default), then layer the user's perception
+            # trim on top so subjective alignment persists across plays.
+            self._shape_offset_ms, self._shape_offset_quality, sl_source = _resolve_shape_offset(meta)
+            self._loaded_offset_ms = self._shape_offset_ms
+            logger.info(
+                "load_profile: shape_offset_ms=%+d Q=%.2f source=%s",
+                self._shape_offset_ms, self._shape_offset_quality, sl_source,
+            )
+            # Pre-load librosa beats/tempo once so beat-sequence fires don't
+            # each re-parse the JSON file from disk.
+            self._beats_cache = load_beats_for_uri(profile.spotify_uri)
+            self._tempo_cache = load_tempo_for_uri(profile.spotify_uri)
             # Cache AI suggestion set as MusicTrigger list for this song
             from services.suggestion_store import load_suggestion_set
             track_id = profile.spotify_uri.split(":")[-1]
@@ -124,10 +264,21 @@ class TriggerEngine:
                 self._ai_triggers = None
             # Generate analyzed triggers from embedded pipeline (if librosa data exists)
             self._analyzed_triggers = self._generate_analyzed_triggers(profile.spotify_uri)
-            # Generate synthetic triggerless triggers if needed
-            #   Skip if analyzed triggers are available and the user prefers them
+            # Generate synthetic triggerless triggers if needed.
+            # Dinner Party mode always wins — its synthetic triggers come from the
+            # "Dinner Party" profile regardless of whether analyzed triggers exist.
             if self._should_use_triggerless():
-                if state.use_analyzed_triggerless and self._analyzed_triggers:
+                if state.dinner_party_mode:
+                    tp = self._resolve_triggerless_profile()
+                    if tp:
+                        self._triggerless_triggers = self._generate_triggerless_triggers(
+                            tp, profile.duration_ms
+                        )
+                        logger.info("Triggerless: generated %d synthetic triggers from '%s' (dinner party)",
+                                    len(self._triggerless_triggers), tp.name)
+                    else:
+                        self._triggerless_triggers = None
+                elif state.use_analyzed_triggerless and self._analyzed_triggers:
                     self._triggerless_triggers = None
                     logger.info("Using analyzed triggers (%d) instead of synthetic triggerless",
                                 len(self._analyzed_triggers))
@@ -144,23 +295,181 @@ class TriggerEngine:
             else:
                 self._triggerless_triggers = None
 
+            # Genre Blending: if the previous song ended naturally and shares a
+            # genre with the incoming song, pre-mark any "start" triggers as
+            # fired so they won't fire on the first tick.
+            self._apply_genre_blend_on_load()
+
+            # Fire any near-start trigger immediately if the song is already
+            # past it. Covers mid-song skips: Spotify reports a non-zero
+            # position on skip, and by the time the main loop ticks, triggers
+            # at small timestamps (e.g. 0, 350ms) land past STALE_FIRE_MS and
+            # get silently suppressed. Users often anchor Song Start slightly
+            # off zero, so we can't rely on `== 0`. The `< now_ms` guard
+            # keeps fresh plays flowing through the main loop at the right
+            # moment instead of pre-firing here.
+            _now_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+            start_trig = next(
+                (
+                    t for t in self._get_active_triggers()
+                    if t.enabled
+                    and t.timestamp_ms <= STALE_FIRE_MS
+                    and t.timestamp_ms < _now_ms
+                    and t.id not in self._fired
+                ),
+                None,
+            )
+            if start_trig:
+                # Mark fired so the main loop doesn't try again; but only
+                # actually fire when the service is active. The main per-tick
+                # firing path also respects state.paused — this branch was
+                # bypassing it and firing Song Start regardless.
+                self._fired.add(start_trig.id)
+                self._pre_fired.add(start_trig.id)
+                self._pre_ramp_fired.add(start_trig.id)
+                if state.paused:
+                    logger.info(
+                        "load_profile: skipping Song Start trigger %s — service paused",
+                        start_trig.id,
+                    )
+                else:
+                    asyncio.create_task(
+                        self.fire_event_now(start_trig.event_id, start_trig.labels)
+                    )
+                    logger.info(
+                        "load_profile: firing Song Start trigger %s immediately (event=%s)",
+                        start_trig.id, start_trig.event_id,
+                    )
+
+    def _start_trigger_ids(self) -> list[str]:
+        """IDs of triggers whose resolved event name contains 'start' (case-insensitive).
+
+        Only considers the currently-active trigger source (user / analyzed /
+        triggerless / ai) so we don't suppress triggers that won't fire anyway.
+        """
+        ids: list[str] = []
+        for trig in self._get_active_triggers():
+            if not trig.enabled:
+                continue
+            ev = get_event(trig.event_id)
+            if ev and "start" in (ev.name or "").lower():
+                ids.append(trig.id)
+        return ids
+
+    def _genre_blend_should_suppress(self) -> tuple[bool, str]:
+        """Decide whether to suppress start triggers for the current song.
+
+        Returns (should_suppress, reason_for_log). The reason is always
+        populated so diagnostics are useful regardless of the outcome.
+        """
+        if not settings.genre_blending_enabled:
+            return False, "disabled"
+        prev = state.last_ended_track
+        if prev is None:
+            return False, "no prev track"
+        if prev.duration_ms <= 0:
+            return False, "prev duration unknown"
+        remaining = prev.duration_ms - prev.last_known_progress_ms
+        if remaining > 3000:
+            return False, f"skip (prev ended {remaining}ms early)"
+        new_genres = []
+        if state.current_track and state.current_track.genres:
+            new_genres = state.current_track.genres
+        a = {g.strip().lower() for g in (prev.genres or []) if g}
+        b = {g.strip().lower() for g in (new_genres or []) if g}
+        if not a or not b:
+            return False, f"genres missing (prev={sorted(a)}, new={sorted(b)})"
+        overlap = a & b
+        if not overlap:
+            return False, f"no genre overlap (prev={sorted(a)}, new={sorted(b)})"
+        return True, f"match={sorted(overlap)} (prev={sorted(a)}, new={sorted(b)})"
+
+    def _apply_genre_blend_on_load(self) -> None:
+        if state.dinner_party_mode:
+            logger.debug("Genre Blending: skipped (dinner party mode — Song Start always fires)")
+            return
+        suppress, reason = self._genre_blend_should_suppress()
+        if not suppress:
+            logger.debug("Genre Blending: no-op on load (%s)", reason)
+            return
+        ids = self._start_trigger_ids()
+        if not ids:
+            logger.debug("Genre Blending: %s but no start triggers in active source", reason)
+            return
+        self._fired.update(ids)
+        self._pre_fired.update(ids)
+        self._pre_ramp_fired.update(ids)
+        logger.info("Genre Blending: suppressing start trigger(s) %s — %s", ids, reason)
+
+    def reconsider_genre_blend(self) -> None:
+        """Re-evaluate genre blending after genres arrive asynchronously.
+
+        Used by the LedFX pipeline, which broadcasts a new track with empty
+        genres and then fills them in from Last.fm. If the blend now applies
+        and the start trigger hasn't fired yet, suppress it. If it already
+        fired, we accept the race.
+        """
+        if state.dinner_party_mode:
+            return
+        suppress, reason = self._genre_blend_should_suppress()
+        if not suppress:
+            return
+        ids = self._start_trigger_ids()
+        newly_suppressed = [i for i in ids if i not in self._fired]
+        if not newly_suppressed:
+            return
+        self._fired.update(newly_suppressed)
+        self._pre_fired.update(newly_suppressed)
+        self._pre_ramp_fired.update(newly_suppressed)
+        logger.info(
+            "Genre Blending (late): suppressing start trigger(s) %s — %s",
+            newly_suppressed, reason,
+        )
+
     def refresh_triggerless(self) -> None:
         """Re-evaluate triggerless state for the current song (e.g. after dinner party toggle)."""
         if not self._profile:
             return
 
         if state.dinner_party_mode:
-            if self._triggerless_triggers is not None:
-                return  # Dinner party triggers already active — don't regenerate/clear
-            # Turning ON: generate synthetic triggers
+            # Turning ON: regenerate synthetic triggers from the Dinner Party profile
+            # (even if triggerless triggers were already active from a genre-matched
+            # profile) and fire Song Start immediately.
             tp = self._resolve_triggerless_profile()
             if tp:
                 self._triggerless_triggers = self._generate_triggerless_triggers(
                     tp, self._profile.duration_ms
                 )
                 self._fired = {tid for tid in self._fired if not tid.startswith("tl_")}
+                self._pre_fired = {tid for tid in self._pre_fired if not tid.startswith("tl_")}
+                self._pre_ramp_fired = {tid for tid in self._pre_ramp_fired if not tid.startswith("tl_")}
                 logger.info("Triggerless: refreshed %d synthetic triggers from '%s'",
                             len(self._triggerless_triggers), tp.name)
+                # Fire the Song Start event now. The tl_start_0 trigger is at 0ms,
+                # so mid-song the stale-fire suppression would mark it fired
+                # without actually running it — call the event directly instead.
+                start_trig = next(
+                    (t for t in self._triggerless_triggers if "start" in t.labels),
+                    None,
+                )
+                if start_trig:
+                    self._fired.add(start_trig.id)
+                    self._pre_fired.add(start_trig.id)
+                    self._pre_ramp_fired.add(start_trig.id)
+                    if state.paused:
+                        logger.info(
+                            "Dinner Party on: skipping Song Start event %s — service paused",
+                            start_trig.event_id,
+                        )
+                    else:
+                        import asyncio as _asyncio
+                        _asyncio.create_task(
+                            self.fire_event_now(start_trig.event_id, start_trig.labels)
+                        )
+                        logger.info(
+                            "Dinner Party on: firing Song Start event %s immediately",
+                            start_trig.event_id,
+                        )
             else:
                 self._triggerless_triggers = None
         else:
@@ -185,12 +494,18 @@ class TriggerEngine:
                 self._pre_fired.update(skip_ids)
                 self._pre_ramp_fired.update(skip_ids)
                 self._fired.add(song_start.id)
-                logger.info(
-                    "Dinner Party off: firing Song Start trigger %s; suppressing %d triggers within 10s window",
-                    song_start.id, len(skip_ids),
-                )
-                import asyncio as _asyncio
-                _asyncio.create_task(self.fire_event_now(song_start.event_id, song_start.labels))
+                if state.paused:
+                    logger.info(
+                        "Dinner Party off: skipping Song Start trigger %s (suppressing %d triggers in 10s window) — service paused",
+                        song_start.id, len(skip_ids),
+                    )
+                else:
+                    logger.info(
+                        "Dinner Party off: firing Song Start trigger %s; suppressing %d triggers within 10s window",
+                        song_start.id, len(skip_ids),
+                    )
+                    import asyncio as _asyncio
+                    _asyncio.create_task(self.fire_event_now(song_start.event_id, song_start.labels))
             else:
                 # No real triggers: let Dinner Party synthetic triggers finish this song
                 logger.info(
@@ -198,6 +513,15 @@ class TriggerEngine:
                 )
                 # _triggerless_triggers unchanged; next song won't use Dinner Party
                 # because state.dinner_party_mode is already False
+
+    def _user_triggers(self) -> list[MusicTrigger]:
+        """User-defined triggers, picking the active Set List override if any."""
+        if not self._profile:
+            return []
+        sl_id = state.active_setlist_id
+        if sl_id and self._profile.setlist_triggers.get(sl_id):
+            return self._profile.setlist_triggers[sl_id]
+        return self._profile.triggers
 
     def _get_active_triggers(self) -> list[MusicTrigger]:
         """Return the trigger list to use, in priority order."""
@@ -207,79 +531,73 @@ class TriggerEngine:
         # 2. Debug override: analyzed triggers replace user triggers
         if state.analyzed_trigger_override and self._analyzed_triggers:
             return self._analyzed_triggers
-        # 3. User-defined triggers (if any are enabled)
-        if self._profile and any(t.enabled for t in self._profile.triggers):
-            return self._profile.triggers
+        # 3. User-defined triggers (if any are enabled), honouring active Set List override
+        user = self._user_triggers()
+        if user and any(t.enabled for t in user):
+            return user
         # 4. Analyzed triggerless (embedded pipeline output)
         if state.use_analyzed_triggerless and self._analyzed_triggers:
             return self._analyzed_triggers
         # 5. AI suggestion set (legacy)
         if state.use_unreviewed_ai_triggers and self._ai_triggers:
             return self._ai_triggers
-        return self._profile.triggers if self._profile else []
+        return self._user_triggers()
 
     # ── Analyzed trigger generation ──────────────────────────────────────────
 
     def _generate_analyzed_triggers(self, spotify_uri: str) -> Optional[list[MusicTrigger]]:
-        """Generate triggers using the embedded pipeline if librosa data exists.
-        Returns list of MusicTrigger or None if not available."""
+        """Return analyzed triggers for this URI, using the on-disk cache when
+        valid and regenerating + persisting only when the training profile
+        match or its content has changed. Skips entirely when analyzed mode
+        is not active — no point paying the cost if nothing will consume them.
+        """
+        from services import analyzed_trigger_store
         from services.librosa_service import get_analysis_by_uri
-        from services.embedded_trigger_service import suggest_triggers
         from services.audio_shape_service import _find_profile_for_genres
         from services.training_profile_manager import TrainingProfile
 
+        if not state.use_analyzed_triggerless and not state.analyzed_trigger_override:
+            return None
+
+        # Cheap pre-checks: bail early if librosa data or profile match is missing.
         la = get_analysis_by_uri(spotify_uri)
         if not la or not la.beats:
             return None
 
-        # Find training profile matching the song's genres
         genres = state.current_track.genres if state.current_track else []
-        # Also try profile genres if current_track genres are empty
         if not genres and self._profile:
             genres = getattr(self._profile, "genres", []) or []
         tp_data = _find_profile_for_genres(genres)
         if not tp_data:
             logger.info("Analyzed triggers: no matching training profile for genres %s", genres)
             return None
-
         tp = TrainingProfile(**tp_data)
 
-        # Build available event IDs
-        available: set[str] = set()
-        for attr in ["song_start_event_id", "beat_start_event_id", "song_end_event_id",
-                      "drop_event_id", "lull_event_id", "charge_event_id",
-                      "quiet_event_id", "scene_fill_event_id", "flare_event_id",
-                      "flare_low_event_id", "flare_mid_event_id", "flare_high_event_id"]:
-            eid = getattr(tp, attr, "")
-            if eid:
-                available.add(eid)
-
-        if not available:
-            return None
-
-        raw = suggest_triggers(
-            target_uri=spotify_uri,
-            all_training_uris=[],
-            available_event_ids=available,
-            training_profile=tp,
-            _cached_analysis=la,
-        )
-
-        if not raw:
-            return None
-
-        triggers = [
-            MusicTrigger(
-                id=f"analyzed_{r['event_id']}_{r['timestamp_ms']}",
-                timestamp_ms=r["timestamp_ms"],
-                event_id=r["event_id"],
-                labels=r.get("labels", []),
+        track_id = spotify_uri.split(":")[-1]
+        cached = analyzed_trigger_store.load(track_id)
+        if cached and analyzed_trigger_store.is_valid(cached, tp):
+            logger.info(
+                "Analyzed triggers: loaded %d cached for %s (profile: %s)",
+                len(cached.triggers), spotify_uri, tp.name,
             )
-            for r in raw
+            return [
+                MusicTrigger(
+                    id=t.id, timestamp_ms=t.timestamp_ms,
+                    event_id=t.event_id, labels=list(t.labels or []),
+                )
+                for t in cached.triggers
+            ]
+
+        generated = analyzed_trigger_store.generate_for_uri(spotify_uri, save_cache=True)
+        if not generated:
+            return None
+        return [
+            MusicTrigger(
+                id=t.id, timestamp_ms=t.timestamp_ms,
+                event_id=t.event_id, labels=list(t.labels or []),
+            )
+            for t in generated
         ]
-        logger.info("Analyzed triggers: generated %d for %s (profile: %s)",
-                     len(triggers), spotify_uri, tp.name)
-        return triggers
 
     # ── Triggerless play helpers ────────────────────────────────────────────
 
@@ -395,15 +713,81 @@ class TriggerEngine:
     # ── Shape offset ─────────────────────────────────────────────────────────
 
     def reload_shape_offset(self, uri: str) -> None:
-        """Hot-reload timestamp_offset_ms for the currently playing song."""
+        """Re-derive the engine offset from disk (median + trim). Used for
+        perception-trim updates and other context changes where we want to
+        force a re-resolve rather than apply a single new save."""
         if self._last_uri == uri:
             meta = load_audio_shape_meta(uri)
-            self._shape_offset_ms = meta.timestamp_offset_ms if meta else 0
-            self._shape_offset_quality = meta.offset_quality if meta else 0.0
+            self._shape_offset_ms, self._shape_offset_quality, src = _resolve_shape_offset(meta)
             logger.info(
-                "Shape offset reloaded: %+dms Q=%.2f for %s",
-                self._shape_offset_ms, self._shape_offset_quality, uri,
+                "Shape offset reloaded: %+dms Q=%.2f source=%s for %s",
+                self._shape_offset_ms, self._shape_offset_quality, src, uri,
             )
+
+    def apply_save(self, uri: str, raw_offset_ms: int, quality: float,
+                   source: str = "sweep", bypass_drift_cap: bool = False) -> bool:
+        """Apply a fresh save to the live engine if its quality beats the
+        best seen this play. Layers the current perception trim on top.
+
+        The disk write is handled separately by _save_offset; this only
+        updates the in-memory offset for the rest of the current play. At
+        song start, _play_best_quality is reset to 0 so the first save with
+        any quality wins. Subsequent saves must strictly improve to override.
+
+        Returns True if applied. False = ignored (lower quality than current).
+        """
+        if uri != self._last_uri:
+            return False
+        if quality <= self._play_best_quality:
+            logger.info(
+                "Engine: skip snap — %+dms Q=%.2f source=%s ≤ play-best Q=%.2f (current=%+d)",
+                raw_offset_ms, quality, source, self._play_best_quality, self._shape_offset_ms,
+            )
+            return False
+        meta = load_audio_shape_meta(uri)
+        trim = _perception_trim_for(meta)
+        new_effective = int(raw_offset_ms) + int(trim)
+        # In-song drift cap: once we have a loaded baseline, big mid-play
+        # jumps are almost always beat-tile false matches (observed: anchor
+        # locks at +5000ms then later corrects back). Reject saves that
+        # diverge more than `engine_in_song_drift_cap_ms` from the offset
+        # loaded at song start. The disk-write path is unaffected — large
+        # corrections still accumulate in history and influence next play's
+        # median.
+        # Drift cap: low-confidence mid-play snaps that diverge from the loaded
+        # baseline by more than `engine_in_song_drift_cap_ms` are rejected as
+        # likely beat-tile false matches. The beat-twin gates upstream already
+        # reject most such matches, so we let high-Q measurements bypass the cap
+        # — the loaded baseline is just a previous play's median, not ground
+        # truth, and a confident new measurement should be allowed to correct it.
+        drift_cap = int(getattr(settings, "engine_in_song_drift_cap_ms", 2000))
+        bypass_q = float(getattr(settings, "engine_drift_bypass_q", 0.70))
+        # Round 8: anti-correlated baseline relaxation no longer waives the cap
+        # for low-Q saves. Multiple plays showed Q=0.55-0.79 anti-corr-bypass
+        # snaps overriding correct locks (Pepas +5200, Contra -2275). Now the
+        # bypass requires Q ≥ engine_anti_corr_bypass_q (0.85 default) — i.e.
+        # only really-confident measurements are trusted to far-jump even
+        # when the loaded baseline appears anti-correlated.
+        anti_corr_bypass_q = float(getattr(settings, "engine_anti_corr_bypass_q", 0.85))
+        effective_bypass = bypass_drift_cap and quality >= anti_corr_bypass_q
+        if drift_cap > 0 and quality < bypass_q and not effective_bypass:
+            drift = abs(new_effective - self._loaded_offset_ms)
+            if drift > drift_cap:
+                logger.info(
+                    "Engine: reject snap — %+dms is %+dms from loaded %+dms (cap=%dms, source=%s, Q=%.2f<%.2f)",
+                    new_effective, new_effective - self._loaded_offset_ms,
+                    self._loaded_offset_ms, drift_cap, source, quality, bypass_q,
+                )
+                return False
+        logger.info(
+            "Engine: snap %+dms → %+dms (Q %.2f → %.2f, source=%s, trim=%+d) for %s",
+            self._shape_offset_ms, new_effective,
+            self._play_best_quality, quality, source, trim, uri,
+        )
+        self._shape_offset_ms = new_effective
+        self._shape_offset_quality = quality
+        self._play_best_quality = quality
+        return True
 
     def _effective_offset_ms(self) -> int:
         """
@@ -416,79 +800,186 @@ class TriggerEngine:
             + self._shape_offset_ms
         )
 
-    # ── Pre-schedule scanning ──────────────────────────────────────────────
+    # ── Plan-timeline builder ──────────────────────────────────────────────
 
-    def _scan_for_early_fires(
+    def _local_beat_interval_ms(self, at_ms: int) -> int:
+        """
+        Beat-to-beat interval at the given song position. Used to convert
+        `delay_beats` into ms without snapping steps to the grid.
+
+        Picks the two beats bracketing at_ms. Falls back to 60000/tempo_bpm
+        when we don't have librosa data yet, then to 500 (120 BPM).
+        """
+        beats = self._beats_cache
+        tempo = self._tempo_cache
+        fallback = int(round(60000 / tempo)) if tempo else 500
+        if not beats or len(beats) < 2:
+            return fallback
+        # Nearest beat index to at_ms
+        nearest = min(range(len(beats)), key=lambda i: abs(beats[i]["ms"] - at_ms))
+        if nearest + 1 < len(beats):
+            return max(1, int(beats[nearest + 1]["ms"] - beats[nearest]["ms"]))
+        return max(1, int(beats[nearest]["ms"] - beats[nearest - 1]["ms"]))
+
+    def _plan_timeline(
         self,
-        event: MusicEvent,
+        root_event: MusicEvent,
         trigger: MusicTrigger,
         labels: list[str],
-        pre_action: Optional[Action] = None,
-        _depth: int = 0,
-    ) -> list[_PreScheduledFire]:
-        """Walk resolved action tree to find events with negative event_offset_ms."""
-        if _depth > 5:
-            return []
+    ) -> tuple[list[_PlanEntry], str]:
+        """
+        Walk the resolved event tree and produce a flat list of _PlanEntry
+        with absolute song-ms fire times. Offsets (event_offset_ms,
+        sequence step.delay_ms, and beat-sequence step spacing) compound
+        through the walk. Also returns a drill-down preview string.
 
-        # This event itself needs early firing
-        if event.event_offset_ms < 0:
-            return [_PreScheduledFire(
-                fire_at_ms=trigger.timestamp_ms + event.event_offset_ms,
-                event=event,
-                trigger_ms=trigger.timestamp_ms,
-                labels=list(labels),
-            )]
+        Offset semantics:
+          - Every event has `event_offset_ms`: shifts this event's own start
+            relative to the time its parent would invoke it. Negative = earlier.
+          - `sequence_steps[i].delay_ms`: start this step this many ms after
+            the previous step's nominal start.
+          - `beat_sequence_steps[i].delay_beats`: start this step this many
+            +1 beat-intervals after the previous step's nominal start.
+          - `beat_sequence_start_offset_beats`: shift whole beat sequence.
+          - Singles with an event_ref action are transparent: the child takes
+            their place in the plan; no entry is emitted for the single itself.
+        """
+        entries: list[_PlanEntry] = []
 
-        results: list[_PreScheduledFire] = []
+        def _walk_step_body(
+            step, step_time: int, merged: list[str], depth: int, visited_next: frozenset,
+        ) -> tuple[str, set[str]]:
+            """
+            Expand one sequence/beat_sequence step into plan entries for any
+            event_ref sub-events it contains and return a description + the set
+            of sub-event ids the plan covers (so the parent can skip them).
 
-        if event.event_type == "single":
-            # Follow the pre-selected (or given) action
-            action = pre_action or self._preselected.get(trigger.id)
-            if action and action.type == "event_ref" and action.event_id:
-                child = get_event(action.event_id)
+            An action-type step may contain event_ref actions (that's how
+            "Flare - EDM" points at "Flare - EDM - Flash"). Those must be
+            planned with offset compounding too, not just event-type steps.
+            """
+            sub_ids: set[str] = set()
+            labels_here: list[str] = []
+            if step.step_type == "event" and step.event_id:
+                child = get_event(step.event_id)
+                if child and child.id not in visited_next:
+                    label = walk(child, step_time, merged, depth + 1, visited_next)
+                    sub_ids.add(child.id)
+                    return label, sub_ids
                 if child:
-                    results.extend(self._scan_for_early_fires(
-                        child, trigger, labels, _depth=_depth + 1,
-                    ))
+                    return child.name, sub_ids
+                return "", sub_ids
+            if step.step_type == "action":
+                resolved = self._resolve_step_actions(step)
+                ref_labels: list[str] = []
+                raw_labels: list[str] = []
+                for a in resolved:
+                    if a.type == "event_ref" and a.event_id:
+                        child = get_event(a.event_id)
+                        if child and child.id not in visited_next:
+                            a_merged = merged + list(a.labels or [])
+                            lbl = walk(child, step_time, a_merged, depth + 1, visited_next)
+                            ref_labels.append(lbl)
+                            sub_ids.add(child.id)
+                        elif child:
+                            ref_labels.append(child.name)
+                    else:
+                        raw_labels.append(self._describe_action(a))
+                parts = ref_labels + raw_labels
+                return (", ".join(parts) if parts else ""), sub_ids
+            return "", sub_ids
 
-        elif event.event_type == "sequence":
-            pre_steps = self._preselected_steps.get(trigger.id)
-            for step_idx, step in enumerate(event.sequence_steps):
-                merged = labels + (step.labels or [])
-                if step.step_type == "event" and step.event_id:
-                    child = get_event(step.event_id)
-                    if child:
-                        # Use pre-selected action for intermediate singles
-                        step_pre = pre_steps[step_idx] if pre_steps and step_idx < len(pre_steps) else None
-                        results.extend(self._scan_for_early_fires(
-                            child, trigger, merged, pre_action=step_pre, _depth=_depth + 1,
-                        ))
-                elif step.step_type == "action":
-                    # Check inline actions for event_refs
-                    for a in (step.actions or []):
-                        if a.type == "event_ref" and a.event_id:
-                            child = get_event(a.event_id)
-                            if child:
-                                results.extend(self._scan_for_early_fires(
-                                    child, trigger, merged, _depth=_depth + 1,
-                                ))
-                    if step.action and step.action.type == "event_ref" and step.action.event_id:
-                        child = get_event(step.action.event_id)
-                        if child:
-                            results.extend(self._scan_for_early_fires(
-                                child, trigger, merged, _depth=_depth + 1,
-                            ))
+        def walk(
+            event: MusicEvent,
+            invoke_at_ms: int,
+            lbls: list[str],
+            depth: int = 0,
+            visited: frozenset = frozenset(),
+        ) -> str:
+            """Recurse; return a drill-down description string for this node."""
+            if depth > 5:
+                return "…"
+            if event.id in visited:
+                return event.name  # cycle guard
+            visited_next = visited | {event.id}
 
-        elif event.event_type == "beat_sequence":
-            for step in event.beat_sequence_steps:
-                if step.step_type == "event" and step.event_id:
-                    child = get_event(step.event_id)
-                    if child:
-                        results.extend(self._scan_for_early_fires(
-                            child, trigger, labels, _depth=_depth + 1,
-                        ))
+            start_at = invoke_at_ms + event.event_offset_ms
 
-        return results
+            if event.event_type == "single":
+                action = self._select_action(event, lbls)
+                if action and action.type == "event_ref" and action.event_id:
+                    child = get_event(action.event_id)
+                    if child and child.id not in visited_next:
+                        merged = lbls + list(action.labels or [])
+                        return walk(child, start_at, merged, depth + 1, visited_next)
+                    # cycle / missing → fall through to emit entry
+                # Leaf single: emit entry with the pre-selected action
+                entries.append(_PlanEntry(
+                    fire_at_ms=start_at, event=event, labels=list(lbls),
+                    trigger_ms=trigger.timestamp_ms,
+                    trigger_id=trigger.id,
+                    is_root=(event.id == root_event.id),
+                    preselected_action=action,
+                ))
+                return self._describe_action(action) if action else event.name
+
+            if event.event_type == "sequence":
+                step_time = start_at
+                child_ids: set[str] = set()
+                preselected_steps: list = []
+                parts: list[str] = []
+                for step in event.sequence_steps:
+                    step_time += step.delay_ms
+                    merged = lbls + list(step.labels or [])
+                    label, step_child_ids = _walk_step_body(
+                        step, step_time, merged, depth, visited_next,
+                    )
+                    if label:
+                        parts.append(label)
+                    child_ids |= step_child_ids
+                    preselected_steps.append(None)
+                entries.append(_PlanEntry(
+                    fire_at_ms=start_at, event=event, labels=list(lbls),
+                    trigger_ms=trigger.timestamp_ms,
+                    trigger_id=trigger.id,
+                    is_root=(event.id == root_event.id),
+                    planned_descendant_ids=child_ids,
+                    preselected_steps=preselected_steps,
+                ))
+                return ", ".join(parts) if parts else event.name
+
+            if event.event_type == "beat_sequence":
+                # Use the local beat interval at the sequence's actual start time,
+                # so tempo changes within a song scale the spacing appropriately.
+                interval = self._local_beat_interval_ms(start_at)
+                anchor = start_at + event.beat_sequence_start_offset_beats * interval
+                step_time = anchor
+                child_ids = set()
+                parts = []
+                for i, step in enumerate(event.beat_sequence_steps):
+                    if i > 0:
+                        step_time += (1 + step.delay_beats) * interval
+                    merged = lbls + list(step.labels or [])
+                    label, step_child_ids = _walk_step_body(
+                        step, step_time, merged, depth, visited_next,
+                    )
+                    if label:
+                        parts.append(label)
+                    child_ids |= step_child_ids
+                entries.append(_PlanEntry(
+                    fire_at_ms=anchor, event=event, labels=list(lbls),
+                    trigger_ms=trigger.timestamp_ms,
+                    trigger_id=trigger.id,
+                    is_root=(event.id == root_event.id),
+                    planned_descendant_ids=child_ids,
+                ))
+                return " > ".join(parts) if parts else event.name
+
+            return event.name
+
+        description = walk(root_event, trigger.timestamp_ms, list(labels))
+        entries.sort(key=lambda e: e.fire_at_ms)
+        return entries, description
 
     @staticmethod
     def _resolve_step_actions(step) -> list:
@@ -565,6 +1056,11 @@ class TriggerEngine:
             return f"Brightness {int(action.brightness * 100)}%"
         elif action.type == "ledfx_global_transition":
             return f"Transition {action.transition_time}s"
+        elif action.type == "ledfx_effect_param":
+            scope = action.virtual_id or action.category or "all"
+            names = [p.param_label for p in action.params if p.param_label]
+            body = ", ".join(names) if names else "params"
+            return f"{body} ({scope})"
         elif action.type == "event_ref":
             if _depth < 3:
                 sub = get_event(action.event_id)
@@ -641,7 +1137,11 @@ class TriggerEngine:
     async def _fire_trigger(
         self, trigger: MusicTrigger, fired_at_ms: int = 0, effective_offset_ms: int = 0
     ) -> None:
-        """Resolve and execute the action(s) for a trigger."""
+        """
+        Fallback trigger execution for triggers that weren't planned
+        (e.g. fired before their preview tick ran). Plan-based firing is
+        preferred — see `_execute_plan_entry` above.
+        """
         if state.paused:
             logger.debug("Trigger %s skipped (service paused).", trigger.id)
             return
@@ -651,34 +1151,20 @@ class TriggerEngine:
             logger.warning("Trigger %s references unknown event %s.", trigger.id, trigger.event_id)
             return
 
-        # Build skip set from pre-scheduled entries that already fired
-        skip_ids: set[str] | None = None
-        if trigger.id in self._pre_scheduled:
-            skip_ids = {e.event.id for e in self._pre_scheduled.pop(trigger.id) if e.fired}
-            if not skip_ids:
-                skip_ids = None
-
         if event.event_type == "single":
-            # Use pre-selected action if available, else fall back to selecting now
             action = self._preselected.pop(trigger.id, None) or self._select_action(event, trigger.labels)
             if action is None:
                 return
-            await self._execute_action(action, trigger.labels, skip_event_ids=skip_ids)
-
+            await self._execute_action(action, trigger.labels)
         elif event.event_type == "sequence":
             pre_steps = self._preselected_steps.pop(trigger.id, None)
-            await self._execute_sequence(event, trigger.labels, pre_steps=pre_steps, skip_event_ids=skip_ids)
-
+            await self._execute_sequence(event, trigger.labels, pre_steps=pre_steps)
         elif event.event_type == "beat_sequence":
-            if skip_ids and event.id in skip_ids:
-                pass  # already pre-fired
-            else:
-                step1_prefired = trigger.id in self._pre_fired
-                asyncio.create_task(
-                    self._execute_beat_sequence(event, trigger.timestamp_ms, trigger.labels, step1_prefired)
-                )
+            step1_prefired = trigger.id in self._pre_fired
+            asyncio.create_task(
+                self._execute_beat_sequence(event, trigger.timestamp_ms, trigger.labels, step1_prefired)
+            )
 
-        # Broadcast trigger fired (flash animation + clear preview on client)
         asyncio.create_task(
             ws_manager.broadcast_trigger_fired(
                 trigger.id, event.name, event.color,
@@ -697,8 +1183,13 @@ class TriggerEngine:
         if not ov.get("skip_transition") and event.pre_transition_enabled:
             value = ov.get("transition_value", event.pre_transition_value)
             cfg = {"transition_time": value}
-            for vid in get_all_virtual_ids():
-                await ledfx_client.set_virtual_config(vid, cfg)
+            vids = get_all_virtual_ids()
+            logger.info("Pre-transition (look-ahead) '%s': set transition_time=%s on %d virtuals", event.name, value, len(vids))
+            if vids:
+                await asyncio.gather(
+                    *(ledfx_client.set_virtual_config(vid, cfg) for vid in vids),
+                    return_exceptions=True,
+                )
 
     async def _execute_action(
         self, action: Action, labels: list[str] | None = None,
@@ -710,17 +1201,25 @@ class TriggerEngine:
             if sub is None:
                 logger.warning("event_ref: unknown event %s", action.event_id)
                 return
-            # Skip if already pre-fired
+            # Skip if this event_ref's target was planned separately — the plan
+            # handles its offset-adjusted fire time, so we must not also fire it here.
             if skip_event_ids and sub.id in skip_event_ids:
                 return
-            # Positive offset: delay before executing
-            if sub.event_offset_ms > 0:
-                await asyncio.sleep(sub.event_offset_ms / 1000)
+            # Fallback path (reached only for sub-events the planner didn't cover —
+            # depth > 5, cycles, or new event_refs introduced after planning). In that
+            # case sub.event_offset_ms is applied inline as a best-effort shift.
+            if sub.event_offset_ms:
+                if sub.event_offset_ms > 0:
+                    await asyncio.sleep(sub.event_offset_ms / 1000)
+                # Negative offsets in the fallback path have already "passed" — fire immediately.
             if sub.event_type == "sequence":
                 await self._execute_sequence(sub, labels or [], skip_event_ids=skip_event_ids)
             elif sub.event_type == "beat_sequence":
                 trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
-                await self._execute_beat_sequence(sub, trigger_ms, labels or [], step1_prefired=False)
+                await self._execute_beat_sequence(
+                    sub, trigger_ms, labels or [],
+                    skip_event_ids=skip_event_ids,
+                )
             else:
                 sub_action = self._select_action(sub, labels or [])
                 if sub_action:
@@ -810,8 +1309,12 @@ class TriggerEngine:
             cfg: dict = {"transition_time": action.transition_time}
             if action.transition_mode:
                 cfg["transition_mode"] = action.transition_mode
-            for vid in get_all_virtual_ids():
-                await ledfx_client.set_virtual_config(vid, cfg)
+            vids = get_all_virtual_ids()
+            if vids:
+                await asyncio.gather(
+                    *(ledfx_client.set_virtual_config(vid, cfg) for vid in vids),
+                    return_exceptions=True,
+                )
 
         elif action.type == "ledfx_effect_param":
             from services.effect_params import get_virtuals_for_category, resolve_params, get_param_meta
@@ -1004,11 +1507,31 @@ class TriggerEngine:
 
         snapshot: dict = {}
 
+        # Collect virtuals that need warming (cache miss → missing effect type)
+        # then fetch them all concurrently before snapshotting. This prevents
+        # silent revert loss when the 5s poll hasn't populated a virtual yet
+        # (the root cause of "Ambient Flip" staying on its flipped color).
+        async def _warm(vids: list[str]) -> None:
+            missing = [
+                v for v in vids
+                if not state.ledfx_virtual_cache.get(v, {}).get("effect", {}).get("type")
+            ]
+            if not missing:
+                return
+            results = await asyncio.gather(
+                *(ledfx_client.get_virtual(v) for v in missing),
+                return_exceptions=True,
+            )
+            for vid, fresh in zip(missing, results):
+                if isinstance(fresh, dict) and fresh:
+                    state.ledfx_virtual_cache[vid] = fresh.get(vid, fresh)
+
         def _snap_effect(vid: str, param_names: list[str]) -> None:
             cached = state.ledfx_virtual_cache.get(vid, {})
             etype = cached.get("effect", {}).get("type")
             econfig = cached.get("effect", {}).get("config", {})
             if not etype:
+                logger.debug("snapshot: virtual %s has no cached effect; revert for this vid will be a no-op", vid)
                 return
             ve = snapshot.setdefault("virtual_effects", {})
             vsnap = ve.setdefault(vid, {"type": etype, "params": {}})
@@ -1023,6 +1546,27 @@ class TriggerEngine:
             for k in keys:
                 if k in vcfg and k not in entry:
                     entry[k] = vcfg[k]
+
+        # Gather every vid this event will touch so we can warm them concurrently.
+        target_vids: set[str] = set()
+        for _step in (event.beat_sequence_steps if event.event_type == "beat_sequence" else event.sequence_steps):
+            if _step.step_type != "action":
+                continue
+            for _a in self._resolve_step_actions(_step):
+                if _a.type in ("ledfx_ambient", "ledfx_ambient_color"):
+                    target_vids.update(get_virtuals_for_role("ambient"))
+                elif _a.type == "ledfx_global_transition":
+                    target_vids.update(get_all_virtual_ids())
+                elif _a.type == "ledfx_effect_param":
+                    from services.effect_params import get_virtuals_for_category as _gfc
+                    if _a.virtual_id:
+                        target_vids.add(_a.virtual_id)
+                    elif _a.category:
+                        target_vids.update(_gfc(_a.category))
+                    else:
+                        target_vids.update(get_all_virtual_ids())
+        if target_vids:
+            await _warm(list(target_vids))
 
         steps_to_check = (
             event.beat_sequence_steps if event.event_type == "beat_sequence"
@@ -1105,7 +1649,16 @@ class TriggerEngine:
             numeric     = {k: v for k, v in params.items() if isinstance(v, (int, float))}
             non_numeric = {k: v for k, v in params.items() if not isinstance(v, (int, float))}
             if non_numeric:
+                logger.info("Revert restore: vid=%s etype=%s params=%s", vid, etype, non_numeric)
                 await _lc.set_virtual_effect(vid, etype, non_numeric)
+                # Update the local cache to reflect the restored values.
+                # Without this, the next action that reads cached params
+                # (e.g. ledfx_ambient_color computing the complement from
+                # the *current* color) would see the pre-revert state and
+                # effectively re-flip, making the revert appear to fail.
+                cached_cfg = state.ledfx_virtual_cache.get(vid, {}).get("effect", {}).get("config")
+                if cached_cfg is not None:
+                    cached_cfg.update(non_numeric)
             if numeric and t_ms > 0:
                 # Refresh cache so ramp_effect_params starts from the post-sequence values
                 fresh = await _lc.get_virtual(vid)
@@ -1163,151 +1716,318 @@ class TriggerEngine:
         if not ov.get("skip_transition") and event.pre_transition_enabled:
             value = ov.get("transition_value", event.pre_transition_value)
             cfg = {"transition_time": value}
-            for vid in get_all_virtual_ids():
-                await ledfx_client.set_virtual_config(vid, cfg)
+            vids = get_all_virtual_ids()
+            logger.info("Pre-transition (inline) '%s': set transition_time=%s on %d virtuals", event.name, value, len(vids))
+            if vids:
+                await asyncio.gather(
+                    *(ledfx_client.set_virtual_config(vid, cfg) for vid in vids),
+                    return_exceptions=True,
+                )
             if labels:
                 labels[:] = [l for l in labels if not l.startswith("=transition:")]
+
+    def _event_touches_ambient(self, event: MusicEvent) -> list[str]:
+        """Return the list of ambient virtual ids this event will modify, or []
+        if it doesn't touch the ambient role. Used by the steal-snapshot path."""
+        steps = event.beat_sequence_steps if event.event_type == "beat_sequence" else event.sequence_steps
+        for step in steps:
+            if step.step_type != "action":
+                continue
+            for a in self._resolve_step_actions(step):
+                if a.type in ("ledfx_ambient", "ledfx_ambient_color"):
+                    return list(get_virtuals_for_role("ambient"))
+        return []
+
+    def _steal_pending_ambient_snapshot(self, vids: list[str]) -> Optional[dict]:
+        """If any of `vids` has a pending revert from an earlier flip, pop it,
+        cancel its task, and merge its snapshot into a single dict. This
+        preserves the TRUE pre-first-flip state across overlapping flips."""
+        stolen: dict = {}
+        for vid in vids:
+            entry = self._pending_ambient_revert.pop(vid, None)
+            if entry is None:
+                continue
+            prev_snap, _prev_cfg, prev_task = entry
+            if not prev_task.done():
+                prev_task.cancel()
+            logger.info("Ambient steal: vid=%s stole pending snapshot", vid)
+            # Merge the prior snapshot's virtual_effects / configs into ours.
+            for key in ("virtual_effects", "virtual_configs"):
+                if key not in prev_snap:
+                    continue
+                merged = stolen.setdefault(key, {})
+                for k, v in prev_snap[key].items():
+                    if k not in merged:
+                        merged[k] = v
+            if "global_brightness" in prev_snap and "global_brightness" not in stolen:
+                stolen["global_brightness"] = prev_snap["global_brightness"]
+        return stolen or None
+
+    async def _schedule_ambient_revert(
+        self, event: MusicEvent, snapshot: dict, revert_cfg, vids: list[str],
+    ) -> None:
+        """Fire revert as a cancellable task registered under each target vid.
+        An overlapping flip can cancel this task mid-sleep via the steal path."""
+        async def _revert_runner():
+            try:
+                logger.info(
+                    "Revert firing for '%s' (delay=%dms, transition=%dms)",
+                    event.name, revert_cfg.delay_ms, revert_cfg.transition_ms,
+                )
+                if revert_cfg.delay_ms > 0:
+                    await asyncio.sleep(revert_cfg.delay_ms / 1000)
+                await self._restore_from_snapshot(snapshot, revert_cfg)
+            except asyncio.CancelledError:
+                logger.info("Revert cancelled for '%s' — snapshot stolen by overlapping flip", event.name)
+                raise
+            finally:
+                # Clear the pending entry only if it's still pointing at us.
+                for vid in vids:
+                    current = self._pending_ambient_revert.get(vid)
+                    if current and current[2] is task:
+                        self._pending_ambient_revert.pop(vid, None)
+
+        task = asyncio.create_task(_revert_runner())
+        for vid in vids:
+            self._pending_ambient_revert[vid] = (snapshot, revert_cfg, task)
 
     async def _execute_sequence(
         self, event: MusicEvent, labels: list[str], pre_steps: list | None = None,
         skip_event_ids: set[str] | None = None,
+        skip_pre_commands: bool = False,
+        precomputed_snapshot: Optional[dict] = None,
     ) -> None:
         """Execute a sequence of steps, then optionally revert LedFX state."""
-        # Snapshot BEFORE pre-commands so revert restores the true pre-event state
         revert = event.revert
+        ambient_vids = self._event_touches_ambient(event) if revert and revert.enabled else []
         snapshot: dict = {}
         if revert and revert.enabled:
-            snapshot = await self._snapshot_for_revert(event)
-        await self._apply_pre_commands(event, labels)
+            # Overlap handling: if another Ambient Flip is mid-cycle on the same
+            # virtual, steal ITS snapshot and cancel its revert. Our revert will
+            # restore the truly-clean pre-first-flip state.
+            stolen = self._steal_pending_ambient_snapshot(ambient_vids) if ambient_vids else None
+            if stolen is not None:
+                snapshot = stolen
+            elif precomputed_snapshot is not None:
+                snapshot = precomputed_snapshot
+            else:
+                snapshot = await self._snapshot_for_revert(event)
+            if not snapshot:
+                logger.warning(
+                    "Revert skipped for '%s': snapshot is empty (target virtual cache may be missing effect info)",
+                    event.name,
+                )
+        if not skip_pre_commands:
+            await self._apply_pre_commands(event, labels)
 
-        for step_idx, step in enumerate(event.sequence_steps):
-            if step.delay_ms > 0:
-                await asyncio.sleep(step.delay_ms / 1000)
-            if step.step_type == "action":
-                resolved = self._resolve_step_actions(step)
-                if resolved:
-                    await asyncio.gather(*(
-                        self._execute_action(a, labels, await_ramps=True, skip_event_ids=skip_event_ids)
-                        for a in resolved
-                    ))
-            elif step.step_type == "event" and step.event_id:
-                sub_event = get_event(step.event_id)
-                if sub_event is None:
-                    continue
-                # Skip if already pre-fired
-                if skip_event_ids and sub_event.id in skip_event_ids:
-                    continue
-                # Apply step-level label filter (merge with caller labels)
-                merged_labels = labels + step.labels
-                if sub_event.event_type == "sequence":
-                    await self._execute_sequence(sub_event, merged_labels, skip_event_ids=skip_event_ids)
-                elif sub_event.event_type == "beat_sequence":
-                    trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
-                    await self._execute_beat_sequence(sub_event, trigger_ms, merged_labels, step1_prefired=False)
-                else:
-                    # Use pre-selected action if available (matches what was previewed)
-                    pre = pre_steps[step_idx] if pre_steps and step_idx < len(pre_steps) else None
-                    action = pre or self._select_action(sub_event, merged_labels)
-                    if action:
-                        await self._execute_action(action, merged_labels, await_ramps=True, skip_event_ids=skip_event_ids)
+        body_error: Optional[BaseException] = None
+        try:
+            for step_idx, step in enumerate(event.sequence_steps):
+                if step.delay_ms > 0:
+                    await asyncio.sleep(step.delay_ms / 1000)
+                if step.step_type == "action":
+                    resolved = self._resolve_step_actions(step)
+                    if resolved:
+                        await asyncio.gather(*(
+                            self._execute_action(a, labels, await_ramps=True, skip_event_ids=skip_event_ids)
+                            for a in resolved
+                        ))
+                elif step.step_type == "event" and step.event_id:
+                    sub_event = get_event(step.event_id)
+                    if sub_event is None:
+                        continue
+                    # Skip if already planned separately
+                    if skip_event_ids and sub_event.id in skip_event_ids:
+                        continue
+                    # Apply step-level label filter (merge with caller labels)
+                    merged_labels = labels + step.labels
+                    if sub_event.event_type == "sequence":
+                        await self._execute_sequence(sub_event, merged_labels, skip_event_ids=skip_event_ids)
+                    elif sub_event.event_type == "beat_sequence":
+                        trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+                        await self._execute_beat_sequence(
+                            sub_event, trigger_ms, merged_labels,
+                            skip_event_ids=skip_event_ids,
+                        )
+                    else:
+                        # Use pre-selected action if available (matches what was previewed)
+                        pre = pre_steps[step_idx] if pre_steps and step_idx < len(pre_steps) else None
+                        action = pre or self._select_action(sub_event, merged_labels)
+                        if action:
+                            await self._execute_action(action, merged_labels, await_ramps=True, skip_event_ids=skip_event_ids)
+        except asyncio.CancelledError:
+            logger.warning("Sequence '%s' cancelled; revert will still run if configured", event.name)
+            raise
+        except Exception as exc:
+            body_error = exc
+            logger.error("Sequence '%s' body raised: %r; revert will still run if configured", event.name, exc)
 
         if revert and revert.enabled and snapshot:
-            if revert.delay_ms > 0:
-                await asyncio.sleep(revert.delay_ms / 1000)
-            await self._restore_from_snapshot(snapshot, revert)
+            if ambient_vids:
+                # Ambient flips: schedule cancellable revert so overlapping flips
+                # can steal our snapshot. Returns immediately; revert runs in bg.
+                await self._schedule_ambient_revert(event, snapshot, revert, ambient_vids)
+            else:
+                logger.info(
+                    "Revert firing for '%s' (delay=%dms, transition=%dms)",
+                    event.name, revert.delay_ms, revert.transition_ms,
+                )
+                if revert.delay_ms > 0:
+                    await asyncio.sleep(revert.delay_ms / 1000)
+                await self._restore_from_snapshot(snapshot, revert)
+        elif revert and revert.enabled:
+            logger.warning(
+                "Revert NOT firing for '%s': snapshot empty (revert.enabled=%s snapshot=%s)",
+                event.name, revert.enabled, bool(snapshot),
+            )
+        if body_error:
+            raise body_error
+
+    async def _execute_plan_entry(self, entry: _PlanEntry) -> None:
+        """Execute one plan entry at its scheduled time."""
+        if state.paused:
+            return
+        evt = entry.event
+        skip_ids = entry.planned_descendant_ids or None
+        # If this is the root entry and pre-commands were fired by the
+        # look-ahead path (_pre_fired set), skip them inside the sequence
+        # so step 0 fires immediately instead of awaiting brightness ramps.
+        skip_pc = entry.is_root and entry.trigger_id in self._pre_fired
+        # Await the look-ahead pre-commands task if one is still running for
+        # this trigger. Without this await, the sequence's first effect PUT
+        # can reach LedFX before the transition PUT (both go through the same
+        # httpx pool concurrently), making the transition silently not apply.
+        if skip_pc:
+            _pc_task = self._pre_cmd_tasks.pop(entry.trigger_id, None)
+            if _pc_task is not None and not _pc_task.done():
+                try:
+                    await _pc_task
+                except Exception:
+                    pass
+        # If the planner kicked off a pre-fire snapshot task, await it now.
+        # Should already be complete (built seconds ago while the loop was idle).
+        snap: Optional[dict] = None
+        if entry.snapshot_task is not None:
+            try:
+                snap = await entry.snapshot_task
+            except Exception:
+                snap = None
+        if evt.event_type == "single":
+            action = entry.preselected_action or self._select_action(evt, entry.labels)
+            if action:
+                await self._execute_action(action, entry.labels, skip_event_ids=skip_ids)
+        elif evt.event_type == "sequence":
+            await self._execute_sequence(
+                evt, entry.labels,
+                pre_steps=entry.preselected_steps,
+                skip_event_ids=skip_ids,
+                skip_pre_commands=skip_pc,
+                precomputed_snapshot=snap,
+            )
+        elif evt.event_type == "beat_sequence":
+            # fire_at_ms is already the anchor, computed with compounded offsets.
+            await self._execute_beat_sequence(
+                evt, entry.fire_at_ms, entry.labels,
+                skip_event_ids=skip_ids,
+                anchor_override_ms=entry.fire_at_ms,
+                skip_pre_commands=skip_pc,
+                precomputed_snapshot=snap,
+            )
 
     async def _execute_beat_sequence(
         self,
         event: MusicEvent,
         trigger_ms: int,
         labels: list[str],
-        step1_prefired: bool,
+        step1_prefired: bool = False,
+        skip_event_ids: set[str] | None = None,
+        anchor_override_ms: int | None = None,
+        skip_pre_commands: bool = False,
+        precomputed_snapshot: Optional[dict] = None,
     ) -> None:
-        """Execute a beat-timed sequence of steps."""
-        import copy as _copy
+        """
+        Execute a beat-timed sequence of steps.
 
-        # Load beat timestamps
-        uri = state.current_track.spotify_uri if state.current_track else ""
-        beats_raw = load_beats_for_uri(uri) if uri else None
-        tempo_bpm = load_tempo_for_uri(uri) if uri else None
-        beat_interval_ms = round(60000 / tempo_bpm) if tempo_bpm else 500
+        Semantics (not grid-snapped):
+          - Step 0 fires at the anchor (= trigger_ms + beat_sequence_start_offset_beats * interval, or an explicit anchor when the planner pre-computed one).
+          - Step i fires at step_{i-1}_nominal + (1 + step_i.delay_beats) * interval.
+          - `interval` is the local beat-to-beat gap at the anchor, so the same
+            sequence on a 60 BPM section spaces 2x longer than on a 120 BPM section
+            without needing separate configs.
+          - `pre_ramp=True` on an action step shifts the *actual fire* earlier
+            by ramp_ms; the next step's spacing is still measured from the
+            nominal (non-shifted) time, so pre_ramp doesn't compress the chain.
+        """
+        have_beats = bool(self._beats_cache)
+        if not have_beats and event.beat_sequence_fallback == "skip":
+            uri = state.current_track.spotify_uri if state.current_track else ""
+            logger.warning("Beat sequence '%s': no beat data for %s — skipping", event.name, uri)
+            return
 
-        if beats_raw is None:
-            fallback = event.beat_sequence_fallback
-            if fallback == "skip":
-                logger.warning("Beat sequence '%s': no beat data for %s — skipping", event.name, uri)
-                return
-            logger.info("Beat sequence '%s': no beat data — using %.1f BPM fallback",
-                        event.name, tempo_bpm or 120)
-            beats_raw = [{"ms": trigger_ms + i * beat_interval_ms} for i in range(-20, 200)]
+        if anchor_override_ms is not None:
+            anchor_ms = anchor_override_ms
+            interval_ms = self._local_beat_interval_ms(anchor_ms)
         else:
-            beats_raw = list(beats_raw)  # mutable copy so we can extend on overflow
+            interval_ms = self._local_beat_interval_ms(trigger_ms)
+            anchor_ms = trigger_ms + event.beat_sequence_start_offset_beats * interval_ms
 
-        # Find trigger beat index (closest beat to trigger_ms, shifted by per-event offset)
-        anchor_ms = trigger_ms + event.beat_sequence_start_offset_ms
-        trigger_beat_idx = min(range(len(beats_raw)), key=lambda i: abs(beats_raw[i]["ms"] - anchor_ms))
-
-        # Pre-compute timeline with ramp compression
-        # timeline entry: (step | None, fire_time_ms, actual_ramp_ms, beat_idx, is_revert)
+        # Build timeline of (step, fire_time, actual_ramp, is_revert)
+        # where fire_time is the *actual* fire time (possibly pre-ramped earlier)
+        # and we track nominal_time separately for spacing.
         timeline: list[tuple] = []
-        current_beat = trigger_beat_idx
+        nominal_time = float(anchor_ms)
         prev_fire_time: float = float("-inf")
         prev_ramp_ms = 0
 
         for i, step in enumerate(event.beat_sequence_steps):
             if i > 0:
-                current_beat += 1 + step.delay_beats
-            while current_beat >= len(beats_raw):
-                beats_raw.append({"ms": beats_raw[-1]["ms"] + beat_interval_ms})
+                nominal_time += (1 + step.delay_beats) * interval_ms
 
-            beat_ms = beats_raw[current_beat]["ms"]
             resolved = self._resolve_step_actions(step) if step.step_type == "action" else []
             ramp_ms = 0
             if resolved:
-                # Use the longest ramp among all actions for compression purposes
+                # Respect ramp_ms=0 (instant) — only fall back to smooth_ramp_ms
+                # when the field is None. The previous `or` coerced 0 to the
+                # fallback, inflating the inter-step safety pad by ~500ms.
                 ramp_ms = max(
-                    (getattr(a, "ramp_ms", None) or settings.smooth_ramp_ms)
+                    (a.ramp_ms if getattr(a, "ramp_ms", None) is not None else settings.smooth_ramp_ms)
                     for a in resolved
                 )
 
-            raw_fire = (beat_ms - ramp_ms) if (step.pre_ramp and ramp_ms > 0) else beat_ms
-
-            # Ramp compression: ensure this step starts after previous action fully completes
+            raw_fire = (nominal_time - ramp_ms) if (step.pre_ramp and ramp_ms > 0) else nominal_time
+            # Safety pad: steps can't overlap their predecessor's ramp + 100 ms.
             earliest = prev_fire_time + prev_ramp_ms + 100
             if raw_fire < earliest:
                 fire_time = earliest
-                actual_ramp = max(0, beat_ms - int(earliest))
+                actual_ramp = max(0, int(nominal_time) - int(earliest))
             else:
                 fire_time = raw_fire
                 actual_ramp = ramp_ms
 
-            timeline.append((step, fire_time, actual_ramp, current_beat, False))
+            timeline.append((step, fire_time, actual_ramp, False))
             prev_fire_time = fire_time
             prev_ramp_ms = actual_ramp
 
-        # Revert entry
+        # Revert entry: delay_beats beats after the last nominal step time.
         revert = event.beat_revert
         if revert and revert.enabled and timeline:
-            last_beat = current_beat
-            revert_beat = last_beat + 1 + revert.delay_beats
-            while revert_beat >= len(beats_raw):
-                beats_raw.append({"ms": beats_raw[-1]["ms"] + beat_interval_ms})
-            rbeat_ms = beats_raw[revert_beat]["ms"]
-            raw_fire = (rbeat_ms - revert.transition_ms) if (revert.pre_ramp and revert.transition_ms > 0) else rbeat_ms
+            revert_nominal = nominal_time + (1 + revert.delay_beats) * interval_ms
+            raw_fire = (revert_nominal - revert.transition_ms) if (revert.pre_ramp and revert.transition_ms > 0) else revert_nominal
             earliest = prev_fire_time + prev_ramp_ms + 100
             revert_fire_time = max(raw_fire, earliest)
-            timeline.append((None, revert_fire_time, revert.transition_ms, revert_beat, True))
+            timeline.append((None, revert_fire_time, revert.transition_ms, True))
 
         # Snapshot BEFORE pre-commands so revert restores the true pre-event state.
-        # Refresh cache first so snapshot reflects actual LedFX state, not stale poll data.
+        # _snapshot_for_revert itself warms any missing target-virtual cache entries
+        # concurrently, so no separate sequential refresh is needed.
         snapshot: dict = {}
         if revert and revert.enabled:
-            for _vid in get_all_virtual_ids():
-                _fresh = await ledfx_client.get_virtual(_vid)
-                if _fresh:
-                    state.ledfx_virtual_cache[_vid] = _fresh.get(_vid, _fresh)
-            snapshot = await self._snapshot_for_revert(event)
-        await self._apply_pre_commands(event, labels)
+            if precomputed_snapshot is not None:
+                snapshot = precomputed_snapshot
+            else:
+                snapshot = await self._snapshot_for_revert(event)
+        if not skip_pre_commands:
+            await self._apply_pre_commands(event, labels)
 
         # Execute timeline — use monotonic clock for relative inter-step delays.
         # This keeps beat spacing correct even when the trigger fires late (e.g. negative
@@ -1315,18 +2035,31 @@ class TriggerEngine:
         import time as _time
         timeline_origin = int(timeline[0][1]) if timeline else 0  # fire_time of step 0
         exec_start = _time.monotonic()
+        # Diagnostics for "delayed / too fast" beat sequences: log planned offsets
+        # and the real-time gap between function entry and exec_start.
+        _song_now = state.current_track.interpolated_progress_ms() if state.current_track else 0
+        logger.info(
+            "beat_seq '%s': anchor=%d song_now=%d lag=%+dms interval=%dms steps=%s",
+            event.name, anchor_ms, _song_now, _song_now - anchor_ms, interval_ms,
+            [int(t[1]) - timeline_origin for t in timeline],
+        )
 
-        for i, (step, fire_time, actual_ramp, _beat_idx, is_revert) in enumerate(timeline):
+        for i, (step, fire_time, actual_ramp, is_revert) in enumerate(timeline):
             # Step 1 (i==0) may have been pre-fired as a pre-ramp command
             if i == 0 and step1_prefired:
                 continue
 
-            # Wait until this step's offset (from step-0's beat) has elapsed since exec_start
+            # Wait until this step's offset (from step-0's anchor) has elapsed since exec_start
             step_offset_ms = int(fire_time) - timeline_origin
             elapsed_ms = (_time.monotonic() - exec_start) * 1000
             wait_ms = step_offset_ms - elapsed_ms
             if wait_ms > 0:
                 await asyncio.sleep(wait_ms / 1000)
+            logger.info(
+                "  bs step %d/%d: planned_offset=%dms elapsed=%dms waited=%dms%s",
+                i, len(timeline), step_offset_ms, int(elapsed_ms), max(0, int(wait_ms)),
+                " [REVERT]" if is_revert else "",
+            )
 
             if is_revert:
                 if snapshot:
@@ -1344,26 +2077,30 @@ class TriggerEngine:
                         dispatch.append(action)
                     if dispatch:
                         await asyncio.gather(*(
-                            self._execute_action(a, labels, await_ramps=False)
+                            self._execute_action(a, labels, await_ramps=False, skip_event_ids=skip_event_ids)
                             for a in dispatch
                         ))
                 elif step.step_type == "event" and step.event_id:
                     sub_event = get_event(step.event_id)
-                    if sub_event:
+                    if sub_event and (not skip_event_ids or sub_event.id not in skip_event_ids):
                         merged_labels = labels + (step.labels or [])
                         if sub_event.event_type == "sequence":
-                            await self._execute_sequence(sub_event, merged_labels)
+                            await self._execute_sequence(sub_event, merged_labels, skip_event_ids=skip_event_ids)
                         elif sub_event.event_type == "beat_sequence":
-                            trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
-                            await self._execute_beat_sequence(sub_event, trigger_ms, merged_labels, step1_prefired=False)
+                            sub_trigger_ms = int(fire_time)
+                            await self._execute_beat_sequence(
+                                sub_event, sub_trigger_ms, merged_labels,
+                                skip_event_ids=skip_event_ids,
+                            )
                         else:
                             sub_action = self._select_action(sub_event, merged_labels)
                             if sub_action:
-                                await self._execute_action(sub_action, merged_labels, await_ramps=False)
+                                await self._execute_action(sub_action, merged_labels, await_ramps=False, skip_event_ids=skip_event_ids)
 
     async def run(self) -> None:
         """Main trigger loop — runs forever."""
         logger.info("Trigger engine started (tick=%dms).", TICK_MS)
+        _first_tick_logged_uri: str = ""
         while True:
             await asyncio.sleep(TICK_MS / 1000)
 
@@ -1375,6 +2112,17 @@ class TriggerEngine:
                 continue
 
             now_ms = state.current_track.interpolated_progress_ms()
+            if _first_tick_logged_uri != self._profile.spotify_uri:
+                _first_tick_logged_uri = self._profile.spotify_uri
+                logger.info(
+                    "first tick for %s: now_ms=%d, fired=%d preselected, "
+                    "effective_offset=%+dms (buffer=%d, rtt=%d, shape=%+d)",
+                    self._profile.spotify_uri, now_ms, len(self._fired),
+                    self._effective_offset_ms(),
+                    settings.ledfx_trigger_buffer_ms,
+                    int(state.ledfx_rtt_ms),
+                    self._shape_offset_ms,
+                )
 
             # ── Detect seek-back or song restart ──────────────────────────
             if now_ms < self._last_progress_ms - 10000:
@@ -1390,13 +2138,56 @@ class TriggerEngine:
                     for tid in re_enabled:
                         self._preselected.pop(tid, None)
                         self._preselected_steps.pop(tid, None)
-                        self._pre_scheduled.pop(tid, None)
+                        for _e in self._plan.get(tid, []):
+                            if _e.snapshot_task and not _e.snapshot_task.done():
+                                _e.snapshot_task.cancel()
+                        self._plan.pop(tid, None)
+                        self._plan_desc.pop(tid, None)
+                        self._pre_cmd_tasks.pop(tid, None)
                     logger.info("Seek-back detected (%dms → %dms): re-enabled %d triggers",
                                 self._last_progress_ms, now_ms, len(re_enabled))
             self._last_progress_ms = now_ms
 
             offset = self._effective_offset_ms()
             effective_now = now_ms + offset  # look ahead by offset
+
+            # ── Stale-fire suppression ─────────────────────────────────────
+            # Triggers more than STALE_FIRE_MS behind the current song position
+            # AND with no in-flight plan execution were already "missed"
+            # (service restart mid-song, long forward seek, dinner-party
+            # toggle). Firing them now spawns a burst of concurrent
+            # beat-sequences that saturates the event loop and delays later,
+            # legitimate triggers by seconds. Mark silently-fired here instead.
+            #
+            # Skip triggers whose plan has any fired entries — a beat sequence
+            # with a negative-offset child that already fired is mid-execution,
+            # and its root plan entry may still be ahead in time. Killing it
+            # here aborts the sequence mid-flight.
+            # Compare against effective_now, not raw now_ms: with negative
+            # shape_offset_ms the fire window opens later than the song
+            # position, so raw-now would mark triggers stale before they
+            # could fire.
+            _stale = [
+                t for t in self._get_active_triggers()
+                if t.enabled and t.id not in self._fired
+                and effective_now - t.timestamp_ms > STALE_FIRE_MS
+                and not any(e.fired for e in self._plan.get(t.id, []))
+            ]
+            if _stale:
+                for _t in _stale:
+                    self._fired.add(_t.id)
+                    for _e in self._plan.get(_t.id, []):
+                        if _e.snapshot_task and not _e.snapshot_task.done():
+                            _e.snapshot_task.cancel()
+                    self._plan.pop(_t.id, None)
+                    self._plan_desc.pop(_t.id, None)
+                    self._preselected.pop(_t.id, None)
+                    self._preselected_steps.pop(_t.id, None)
+                    self._pre_cmd_tasks.pop(_t.id, None)
+                logger.info(
+                    "Stale-fire suppression: skipped %d trigger(s) more than %dms behind effective_now=%d (raw song pos=%d, offset=%+d)",
+                    len(_stale), STALE_FIRE_MS, effective_now, now_ms, offset,
+                )
 
             # Keep live timing info in shared state for WS broadcast
             state.timing = {
@@ -1405,6 +2196,8 @@ class TriggerEngine:
                 "shape_offset_quality":  self._shape_offset_quality,
                 "ledfx_rtt_ms":          int(state.ledfx_rtt_ms),
                 "buffer_ms":             settings.ledfx_trigger_buffer_ms,
+                "shape_offset_source":   "setlist" if state.active_setlist_id else "default",
+                "active_setlist_id":     state.active_setlist_id,
             }
 
             # ── Pre-select next trigger action for preview ────────────────────
@@ -1421,64 +2214,42 @@ class TriggerEngine:
                 if next_t.id != self._last_preview_id:
                     self._last_preview_id = next_t.id
                     event = get_event(next_t.event_id)
-                    if event and event.event_type == "single":
-                        action = self._select_action(event, next_t.labels)
-                        if action:
-                            self._preselected[next_t.id] = action
-                            asyncio.create_task(ws_manager.broadcast({
-                                "type":         "trigger_preview",
-                                "trigger_id":   next_t.id,
-                                "event_name":   event.name,
-                                "event_color":  event.color,
-                                "action_label": self._describe_action(action),
-                                "locked":       False,
-                            }))
-                    elif event and event.event_type == "sequence":
-                        step_actions, action_label = self._preselect_sequence_steps(
-                            event, next_t.labels
-                        )
-                        self._preselected_steps[next_t.id] = step_actions
-                        asyncio.create_task(ws_manager.broadcast({
-                            "type":         "trigger_preview",
-                            "trigger_id":   next_t.id,
-                            "event_name":   event.name,
-                            "event_color":  event.color,
-                            "action_label": action_label or None,
-                            "locked":       False,
-                        }))
-                    elif event and event.event_type == "beat_sequence":
-                        n = len(event.beat_sequence_steps)
-                        asyncio.create_task(ws_manager.broadcast({
-                            "type":         "trigger_preview",
-                            "trigger_id":   next_t.id,
-                            "event_name":   event.name,
-                            "event_color":  event.color,
-                            "action_label": f"{n} beat step{'s' if n != 1 else ''}",
-                            "locked":       False,
-                        }))
-                    elif event:
-                        asyncio.create_task(ws_manager.broadcast({
-                            "type":         "trigger_preview",
-                            "trigger_id":   next_t.id,
-                            "event_name":   event.name,
-                            "event_color":  event.color,
-                            "action_label": None,
-                            "locked":       False,
-                        }))
+                    if event:
+                        # Build the full execution plan once per "next" trigger.
+                        # _plan_timeline also pre-selects actions (for singles it
+                        # resolves event_refs), so the preview and the firing use
+                        # the same choices.
+                        plan, desc = self._plan_timeline(event, next_t, list(next_t.labels))
+                        self._plan[next_t.id] = plan
+                        self._plan_desc[next_t.id] = desc
+                        # Pre-snapshot at plan-time was tried here and REMOVED:
+                        # each plan built spawned one get_virtual-gather per
+                        # revertable entry, piling concurrent httpx tasks onto
+                        # the event loop faster than they drained — lag grew
+                        # fire-by-fire (~1s → ~2s → stale burst). The snapshot
+                        # stays inline in _execute_{sequence,beat_sequence}.
+                        # Legacy preselection caches (kept for _fire_trigger fallback
+                        # and any code paths that still read them).
+                        for entry in plan:
+                            if entry.event.event_type == "single" and entry.preselected_action:
+                                self._preselected[entry.event.id] = entry.preselected_action
+                        # Remember the root's preselected action / steps for _fire_trigger
+                        root_entries = [e for e in plan if e.event.id == event.id]
+                        if root_entries:
+                            root_entry = root_entries[0]
+                            if root_entry.preselected_action:
+                                self._preselected[next_t.id] = root_entry.preselected_action
+                            if root_entry.preselected_steps:
+                                self._preselected_steps[next_t.id] = root_entry.preselected_steps
 
-
-                # Scan for events needing early fire (negative event_offset_ms).
-                # Re-scan each tick so offset changes take effect immediately.
-                if next_t.id not in self._pre_scheduled or not any(
-                    e.fired for e in self._pre_scheduled.get(next_t.id, [])
-                ):
-                    evt = get_event(next_t.event_id)
-                    if evt:
-                        early = self._scan_for_early_fires(evt, next_t, next_t.labels)
-                        if early:
-                            self._pre_scheduled[next_t.id] = early
-                        else:
-                            self._pre_scheduled.pop(next_t.id, None)
+                        asyncio.create_task(ws_manager.broadcast({
+                            "type":         "trigger_preview",
+                            "trigger_id":   next_t.id,
+                            "event_name":   event.name,
+                            "event_color":  event.color,
+                            "action_label": desc or None,
+                            "locked":       False,
+                        }))
 
             # ─────────────────────────────────────────────────────────────────
 
@@ -1523,60 +2294,108 @@ class TriggerEngine:
                             self._pre_fired.add(trigger.id)
                             asyncio.create_task(self._execute_action(step0.action, trigger.labels, await_ramps=False))
 
-                    # Pre-command look-ahead: fire brightness/transition lead_ms before main trigger
+                    # Pre-command look-ahead: fire brightness/transition lead_ms before main trigger.
+                    # Now applies to all event types — for sequence/beat_sequence we use the
+                    # plan's root fire_at_ms (which already accounts for cumulative offsets) so
+                    # pre-commands finish before step 0 and don't block its fire.
                     for trigger in self._get_active_triggers():
                         if not trigger.enabled or trigger.id in self._fired or trigger.id in self._pre_fired:
                             continue
                         event = get_event(trigger.event_id)
-                        if not event or event.event_type != "single":
+                        if not event:
                             continue
                         lead_ms = max(
                             settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
                             settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
                         )
-                        if lead_ms > 0 and trigger.timestamp_ms - lead_ms <= effective_now:
-                            self._pre_fired.add(trigger.id)
-                            asyncio.create_task(self._fire_pre_commands(event, trigger.id, trigger.labels))
-
-                # ── Pre-scheduled early fires (negative event_offset_ms) ─────
-                for _ps_tid, _ps_entries in list(self._pre_scheduled.items()):
-                    for _ps in _ps_entries:
-                        if _ps.fired or _ps.fire_at_ms > effective_now:
+                        if lead_ms <= 0:
                             continue
-                        _ps.fired = True
-                        logger.info(
-                            "Pre-scheduled fire: %s at ~%dms (trigger %s, offset %+dms)",
-                            _ps.event.name, now_ms, _ps_tid, _ps.event.event_offset_ms,
-                        )
-                        if _ps.event.event_type == "beat_sequence":
-                            asyncio.create_task(self._execute_beat_sequence(
-                                _ps.event, _ps.trigger_ms, _ps.labels, step1_prefired=False,
-                            ))
-                        elif _ps.event.event_type == "single":
-                            action = self._select_action(_ps.event, _ps.labels)
-                            if action:
-                                asyncio.create_task(self._execute_action(action, _ps.labels))
-                        elif _ps.event.event_type == "sequence":
-                            asyncio.create_task(self._execute_sequence(_ps.event, _ps.labels))
-                        # Broadcast so the UI shows the early dispatch
-                        asyncio.create_task(ws_manager.broadcast({
-                            "type": "pre_scheduled_fired",
-                            "trigger_id": _ps_tid,
-                            "event_name": _ps.event.name,
-                            "event_color": _ps.event.color,
-                            "fired_at_ms": now_ms,
-                        }))
+                        # For sequence/beat_sequence prefer the plan's root fire_at_ms so
+                        # pre-commands land relative to the actual (offset-adjusted) start.
+                        anchor_ms = trigger.timestamp_ms
+                        _plan_entries = self._plan.get(trigger.id) or []
+                        for _e in _plan_entries:
+                            if _e.event.id == trigger.event_id:
+                                anchor_ms = _e.fire_at_ms
+                                break
+                        _delta = anchor_ms - lead_ms - effective_now
+                        if _delta <= 0:
+                            logger.info(
+                                "Pre-cmd look-ahead: trigger=%s event='%s' type=%s pt_en=%s pb_en=%s lead=%d anchor=%d eff_now=%d delta=%d",
+                                trigger.id, event.name, event.event_type,
+                                event.pre_transition_enabled, event.pre_brightness_enabled,
+                                lead_ms, anchor_ms, effective_now, _delta,
+                            )
+                            self._pre_fired.add(trigger.id)
+                            _pc_task = asyncio.create_task(
+                                self._fire_pre_commands(event, trigger.id, trigger.labels)
+                            )
+                            self._pre_cmd_tasks[trigger.id] = _pc_task
 
-                # Main trigger firing loop (always runs — DP scenes fire here)
-                for trigger in self._get_active_triggers():
-                    if not trigger.enabled:
+                # ── Fire plan entries whose time has come ─────────────────
+                # Each entry is an atomic fire computed by _plan_timeline with
+                # compounded event_offset_ms. The root entry of each trigger
+                # also emits the trigger_fired WS broadcast so the UI clears
+                # the preview and shows the flash animation.
+                triggers_by_id = {t.id: t for t in self._get_active_triggers()}
+                for _tid, _entries in list(self._plan.items()):
+                    if _tid in self._fired:
                         continue
-                    if trigger.id in self._fired:
+                    _trigger = triggers_by_id.get(_tid)
+                    if _trigger is None:
+                        # Trigger was removed (profile edit) — drop its plan.
+                        self._plan.pop(_tid, None)
+                        self._plan_desc.pop(_tid, None)
+                        continue
+                    _all_fired = True
+                    for _entry in _entries:
+                        if _entry.fired:
+                            continue
+                        if _entry.fire_at_ms <= effective_now:
+                            _entry.fired = True
+                            _is_root = (_entry.event.id == _trigger.event_id)
+                            logger.info(
+                                "Plan fire: %s at ~%dms (trigger=%s, %s, plan_offset=%+dms)",
+                                _entry.event.name, now_ms, _tid,
+                                "root" if _is_root else "child",
+                                _entry.fire_at_ms - _trigger.timestamp_ms,
+                            )
+                            asyncio.create_task(self._execute_plan_entry(_entry))
+                            if _is_root:
+                                asyncio.create_task(
+                                    ws_manager.broadcast_trigger_fired(
+                                        _tid, _entry.event.name, _entry.event.color,
+                                        scheduled_ms=_trigger.timestamp_ms,
+                                        fired_at_ms=now_ms,
+                                        effective_offset_ms=offset,
+                                    )
+                                )
+                            else:
+                                # Non-root child fired early: signal UI so the timeline updates
+                                asyncio.create_task(ws_manager.broadcast({
+                                    "type": "pre_scheduled_fired",
+                                    "trigger_id": _tid,
+                                    "event_name": _entry.event.name,
+                                    "event_color": _entry.event.color,
+                                    "fired_at_ms": now_ms,
+                                }))
+                        else:
+                            _all_fired = False
+                    if _all_fired:
+                        self._fired.add(_tid)
+
+                # Fallback: a trigger that somehow wasn't planned yet (e.g. first
+                # tick after seek-back where the preview hasn't re-run) — fire it
+                # the legacy way so nothing gets stuck.
+                for trigger in self._get_active_triggers():
+                    if not trigger.enabled or trigger.id in self._fired:
+                        continue
+                    if trigger.id in self._plan:
                         continue
                     if trigger.timestamp_ms <= effective_now:
                         self._fired.add(trigger.id)
                         logger.info(
-                            "Firing trigger %s at song position ~%dms (event=%s)",
+                            "Firing unplanned trigger %s at ~%dms (event=%s)",
                             trigger.id, now_ms, trigger.event_id,
                         )
                         asyncio.create_task(self._fire_trigger(

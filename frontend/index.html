@@ -20,6 +20,10 @@
                       text-overflow: ellipsis; white-space: nowrap; text-align: right; }
     #np-canvas-wrap { margin-top: 8px; }
     #np-canvas { width: 100%; height: 250px; display: block; border-radius: 4px; }
+    /* Now Playing is the listener view — debug widgets (trim controls, sync
+       debug panel, [debug] toggle) live on /debug.html. Their DOM still
+       exists for the WS handlers' .textContent calls; we just hide them. */
+    .np-debug-only { display: none !important; }
   </style>
 </head>
 <body>
@@ -65,13 +69,13 @@
           <span id="countdown"></span>
         </div>
       </div>
-      <!-- Next trigger preview — always occupies space to prevent vertical jumping -->
-      <div id="next-action-row" style="visibility:hidden;margin-top:8px;min-height:22px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--text-muted);">Next:</span>
-        <span id="next-event-name" style="font-size:12px;font-weight:600;"></span>
-        <span id="next-action-arrow" style="font-size:11px;color:var(--text-muted);">▸</span>
-        <span id="next-action-label" style="font-size:12px;color:var(--text-muted);font-family:monospace;"></span>
-
+      <!-- Next trigger preview — always occupies space to prevent vertical jumping.
+           Label clamps to 3 lines so long drill-down chains don't resize the card. -->
+      <div id="next-action-row" style="visibility:hidden;margin-top:8px;height:calc(1.3em * 3 + 4px);display:flex;align-items:flex-start;gap:8px;overflow:hidden;">
+        <span style="font-size:11px;color:var(--text-muted);line-height:1.3;">Next:</span>
+        <span id="next-event-name" style="font-size:12px;font-weight:600;line-height:1.3;white-space:nowrap;"></span>
+        <span id="next-action-arrow" style="font-size:11px;color:var(--text-muted);line-height:1.3;">▸</span>
+        <span id="next-action-label" style="font-size:12px;color:var(--text-muted);font-family:monospace;flex:1 1 0;min-width:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3;white-space:normal;word-break:break-word;"></span>
       </div>
     </div>
 
@@ -93,13 +97,33 @@
 
     <!-- ── Audio Shape (expandable) ─────────────────────────────────────── -->
     <div class="card" style="padding:10px 16px;">
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <button id="shape-toggle-btn" class="btn" style="font-size:12px;padding:4px 12px;"
                 onclick="toggleShapeCanvas()">▲ Audio Shape</button>
         <span id="shape-np-status" style="font-size:11px;color:var(--text-muted);"></span>
+        <span id="np-recap-suggest" style="display:none;font-size:11px;font-weight:600;background:#9c4a00;color:#fff;padding:2px 8px;border-radius:10px;cursor:help;"
+              title="The stored offset for this song is anti-correlated with live audio across multiple plays. Recapturing typically fixes this."></span>
+        <button id="recapture-btn" class="btn advanced-only-inline" style="font-size:11px;padding:2px 8px;color:#f44336;border-color:#f44336;"
+                title="Delete the stored audio shape (NPZ + WAV + librosa + sidecar) so the song re-captures on next play.&#10;Use this to A/B test if a device change is causing poor xcorr matches."
+                onclick="recaptureShape()">Recapture</button>
+        <a id="timing-viz-link" class="btn advanced-only-inline" style="font-size:11px;padding:2px 8px;text-decoration:none;"
+           href="/timing-viz.html" title="Open timing-viz dump for this song.">Timing</a>
+        <span class="advanced-only np-debug-only" style="margin-left:auto;align-items:center;gap:4px;">
+          <span style="font-size:11px;color:var(--text-muted);" title="Per-track perception trim — layered on top of the xcorr-derived offset and persisted per (song, Set List). Negative = lighting fires earlier; positive = later.">trim</span>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-250)" title="−250ms (fires earlier)">−250</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-100)">−100</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-50)">−50</button>
+          <input id="perception-trim-input" type="number" step="50" value="0" title="Type a value (ms) and press Enter, or drag the orange playhead on the audio shape." style="width:60px;font-size:11px;padding:1px 4px;text-align:center;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+          <span style="font-size:10px;color:var(--text-muted);">ms</span>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(50)">+50</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(100)">+100</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(250)" title="+250ms (fires later)">+250</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(0, true)" title="Reset to 0">×</button>
+        </span>
       </div>
-      <div id="np-canvas-wrap" style="display:;">
+      <div id="np-canvas-wrap" style="display:;position:relative;">
         <canvas id="np-canvas"></canvas>
+        <canvas id="np-canvas-buf" style="display:none;position:absolute;left:0;top:0;width:100%;"></canvas>
       </div>
     </div>
 
@@ -122,11 +146,15 @@
       <span>LedFX RTT: <span id="ledfx-rtt">—</span> ms</span>
       <span>Offset: <span id="effective-offset">—</span> ms</span>
       <span>Service: <span id="service-status" class="badge badge-green">Active</span></span>
-      <span style="margin-left:auto;cursor:pointer;user-select:none;opacity:0.5;" onclick="toggleDebug()">[debug]</span>
+      <span class="np-debug-only" style="margin-left:auto;cursor:pointer;user-select:none;opacity:0.5;" onclick="toggleDebug()">[debug]</span>
     </div>
 
     <!-- ── Sync Debug Panel ──────────────────────────────────────────────── -->
-    <div id="debug-panel" style="display:none;font-size:12px;color:var(--text-muted);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;">
+    <!-- Hidden via .np-debug-only — DOM kept so existing WS handlers
+         (xcorr_window, shape_match_updated, updateDebugPanel, etc.) can
+         continue to .textContent these elements without errors. The
+         live-data home for these widgets is now /debug.html. -->
+    <div id="debug-panel" class="np-debug-only" style="display:none;font-size:12px;color:var(--text-muted);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;">
       <div style="font-weight:600;color:var(--text);margin-bottom:8px;">Sync Debug <span style="font-weight:400;font-size:11px;">(D to toggle)</span></div>
       <div style="display:grid;grid-template-columns:auto auto auto;gap:4px 16px;margin-bottom:10px;">
         <span>Buffer</span><span id="dbg-buffer">—</span><span style="opacity:0.5;">ms (manual setting)</span>
@@ -157,6 +185,17 @@
         <div id="dbg-cal-windows" style="margin-top:4px;font-family:monospace;font-size:11px;opacity:0.8;white-space:pre;"></div>
         <div id="dbg-cal-final" style="margin-top:4px;font-family:monospace;font-size:11px;font-weight:600;"></div>
       </div>
+      <!-- Anchor snap + per-window xcorr (visible whenever debug is open;
+           data is captured live and refreshed via WS broadcasts) -->
+      <div id="dbg-anchor" style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px;">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Anchor snap</div>
+        <div id="dbg-anchor-summary" style="font-family:monospace;font-size:11px;opacity:0.85;">no data</div>
+        <div id="dbg-anchor-match" style="margin-top:4px;font-family:monospace;font-size:11px;color:#00ff88;"></div>
+      </div>
+      <div id="dbg-xcorr" style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px;">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Per-window xcorr (this play)</div>
+        <div id="dbg-xcorr-windows" style="font-family:monospace;font-size:11px;opacity:0.85;white-space:pre;max-height:140px;overflow-y:auto;">no windows yet</div>
+      </div>
     </div>
   </main>
 </div>
@@ -183,17 +222,28 @@ let profile = null;   // { triggers: [{id, timestamp_ms, event_id, color, name}]
 let events = {};      // event_id -> event
 let paused = false;
 let onTargetDevice = false;
+let recording_active = false;
+let last_capture = null;   // { status: "ok"|"failed"|null, reason: str, uri: str|null }
 let nextPreview = null;  // { trigger_id, event_name, event_color, action_label, locked }
 let useAiTriggers = false;
 let useAnalyzedTriggerless = true;
 let analyzedTriggerOverride = false;
 let dinnerPartyMode = false;
 let _timing = {};         // latest timing info from WS state
+let _perceptionTrimMs = 0;  // current per-(track, Set List) trim — refreshed on song change
 let _lastFireInfo = null; // { event_name, scheduled_ms, fired_at_ms, effective_offset_ms }
 let _debugVisible = false;
 let _lastPollTime = 0;    // Date.now() when last state message arrived
 let _currentBuffer = 0;   // local copy for nudge
 let _calState = null;     // xcorr calibration state { uri, windows, windowResults, final }
+
+// Anchor + per-window xcorr live state for the +Debug panel and the canvas
+// overlays. Reset whenever the active track changes so we never mix data
+// from a previous song into the current debug view.
+let _anchorMeta = null;       // { uri, candidates: [...], tempo_bpm } for the active canvas
+const _anchorMetaByUri = new Map();  // uri → meta — survives buffer swaps
+let _anchorMatch = null;      // { uri, offset_ms, r, q, candidate_idx, band }
+let _xcorrWindows = [];       // [{ win_start, win_end, new_offset_ms, new_r, new_quality, old_r, old_quality, winner }, ...]
 
 // ── Trigger list follow state ───────────────────────────────────────────────
 let _lastFiredIdx    = -1;   // index in sorted trigger array of last-fired trigger
@@ -204,10 +254,24 @@ let _resolvedActions = {};        // trigger_id → action_label (shown in trigg
 let _pendingPreviewLabels = {};   // trigger_id → action_label cached as previews arrive
 
 // ── Audio shape canvas (now playing) ───────────────────────────────────────
-let _npCanvas       = null;
+// ── Audio shape: double-buffered canvases ─────────────────────────────────
+// We keep two canvas instances. The "active" canvas is the visible one,
+// painted with the currently playing song. The "buffer" canvas is hidden;
+// when we know the next track URI (from state.next_track_uri) we populate
+// the buffer ahead of time so the swap on URI change is instant. After
+// every swap, the now-stale active canvas becomes the new buffer slot.
+let _npCanvasA      = null;    // wraps <canvas id="np-canvas">
+let _npCanvasB      = null;    // wraps <canvas id="np-canvas-buf">
+let _npActive       = null;    // pointer to whichever of A/B is live
+let _npBuffer       = null;    // pointer to the hidden one
+let _npActiveEl     = null;    // <canvas> element for active (for visibility/style)
+let _npBufferEl     = null;    // <canvas> element for buffer
+let _npActiveUri    = null;    // URI loaded into active
+let _npBufferUri    = null;    // URI loaded (or being loaded) into buffer
+let _npBufferInflight = null;  // promise of in-flight buffer load (so we don't double-fetch)
+let _nextTrackUri   = null;    // latest state.next_track_uri seen in WS state updates
 let _npShapeVisible = true;
 let _npShapeLoaded  = false;
-let _npShapeUri     = null;    // URI of the last shape load attempt (prevents repeated 404s)
 let _npLoopId       = null;
 let appSettings     = null;
 GET('/settings').then(s => { appSettings = s; }).catch(() => {});
@@ -216,6 +280,8 @@ GET('/settings').then(s => { appSettings = s; }).catch(() => {});
 onMessage('state', msg => {
   paused = msg.paused;
   onTargetDevice = msg.on_target_device ?? false;
+  recording_active = msg.recording_active ?? false;
+  last_capture = msg.last_capture ?? null;
   document.getElementById('ledfx-rtt').textContent = msg.ledfx_rtt_ms;
   _lastPollTime = Date.now();
   if (msg.timing && Object.keys(msg.timing).length) {
@@ -224,6 +290,14 @@ onMessage('state', msg => {
     document.getElementById('effective-offset').textContent = _timing.effective_offset_ms ?? '—';
     updateDebugPanel();
     updateNpShapeStatus();
+    // Keep the white playhead in sync with the engine's actual xcorr offset
+    // (median of recent saves), so it matches the status number's xcorr part
+    // and the orange playhead's position is exactly the trim away.
+    if (_npActive?.setOffset) {
+      const newOff = _engineXcorrOffsetMs();
+      _logOffsetChange('state', newOff);
+      _npActive.setOffset(newOff);
+    }
   }
 
   const prevUseAi = useAiTriggers;
@@ -243,7 +317,20 @@ onMessage('state', msg => {
   // Update track FIRST so badge and renderTrack use fresh data
   if (msg.track) {
     const changed = !track || track.spotify_uri !== msg.track.spotify_uri;
-    if (changed) { _calState = null; updateCalPanel(); }
+    if (changed) {
+      _calState = null;
+      updateCalPanel();
+      _perceptionTrimMs = 0;
+      updatePerceptionTrimDisplay();
+      _npStartingOffsetMs = null;     // re-capture starting value on next state tick
+      _npStartingQuality = null;
+      // Reset anchor + per-window xcorr state so the +Debug panel doesn't
+      // carry stale entries from the previous song.
+      _anchorMatch = null;
+      _xcorrWindows = [];
+      _npActive?.clearXcorrWindows?.();
+      _npActive?.setLiveMatch?.(null);
+    }
     track = msg.track;
     updatePauseBtn();
     updateServiceBadge();
@@ -251,12 +338,21 @@ onMessage('state', msg => {
     // Reload profile if track changed, AI toggle changed, or dinner party toggled
     if (changed || prevUseAi !== useAiTriggers || prevDp !== dinnerPartyMode
         || prevAnalyzed !== useAnalyzedTriggerless || prevOverride !== analyzedTriggerOverride) loadProfile();
+    if (changed) loadPerceptionTrim();
+    if (changed) {
+      const tvLink = document.getElementById('timing-viz-link');
+      if (tvLink) tvLink.href = `/timing-viz.html?uri=${encodeURIComponent(track.spotify_uri)}`;
+    }
   } else {
     track = null;
     updatePauseBtn();
     updateServiceBadge();
     renderNoTrack();
   }
+  // Remember the next-track URI; the actual prefetch fires after loadNpShape
+  // finishes swapping (otherwise we'd race and clobber the buffer slot that
+  // holds the about-to-be-active track).
+  _nextTrackUri = msg.next_track_uri || null;
 });
 
 onMessage('trigger_fired', msg => {
@@ -319,9 +415,9 @@ onMessage('xcorr_start', msg => {
 });
 
 onMessage('xcorr_window', msg => {
-  if (_npCanvas && msg.uri === track?.spotify_uri && msg.applied) {
+  if (_npActive && msg.uri === track?.spotify_uri && msg.applied) {
     const offset = msg.winner === 'new' ? msg.new_offset_ms : msg.old_offset_ms;
-    _npCanvas.setOffset(offset);
+    _npActive.setOffset(offset);
   }
   if (_calState && _calState.uri === msg.uri) {
     _calState.windowResults[`${msg.win_start}-${msg.win_end}`] = msg;
@@ -329,9 +425,81 @@ onMessage('xcorr_window', msg => {
   }
 });
 
+onMessage('perception_trim_updated', msg => {
+  if (msg.uri === track?.spotify_uri) {
+    _perceptionTrimMs = msg.perception_trim_ms ?? 0;
+    updatePerceptionTrimDisplay();
+    showToast(`Trim: ${_perceptionTrimMs >= 0 ? '+' : ''}${_perceptionTrimMs}ms`, 'info');
+  }
+});
+
+// Update playhead + status the instant a save happens, instead of waiting
+// for the next 1Hz state broadcast. Applies to anchor snap + sweep saves.
+onMessage('shape_offset_updated', msg => {
+  if (msg.uri !== track?.spotify_uri) return;
+  if (_timing) {
+    _timing.shape_offset_ms = msg.offset_ms;
+    if (msg.quality != null) _timing.shape_offset_quality = msg.quality;
+  }
+  updateNpShapeStatus();
+  if (_npActive?.setOffset) {
+    const newOff = _engineXcorrOffsetMs();
+    _logOffsetChange('shape_offset_updated', newOff);
+    _npActive.setOffset(newOff);
+    _npActive.draw();
+  }
+});
+
+// Diagnostic: log every offset change so we can correlate canvas playhead
+// jumps with engine snaps and WS broadcasts. Big offset deltas are a likely
+// cause of multi-second visible playhead jumps.
+let _lastOffsetForDiag = null;
+function _logOffsetChange(source, newOffset) {
+  if (_lastOffsetForDiag !== null && Math.abs(newOffset - _lastOffsetForDiag) > 500) {
+    console.warn('[offset-jump]', source,
+      'delta=' + Math.round(newOffset - _lastOffsetForDiag) + 'ms',
+      'old=' + _lastOffsetForDiag + 'ms',
+      'new=' + newOffset + 'ms',
+    );
+  }
+  _lastOffsetForDiag = newOffset;
+}
+
+// Anchor live-match info — drives the green match marker + beat-twin lines on
+// the shape canvas (only visible when "show advanced" is enabled).
+onMessage('shape_match_updated', msg => {
+  if (msg.uri !== track?.spotify_uri) return;
+  _anchorMatch = { ...msg };
+  if (_npActive?.setLiveMatch) {
+    _npActive.setLiveMatch({
+      offset_ms:     msg.offset_ms,
+      r:             msg.r,
+      q:             msg.q,
+      candidate_idx: msg.candidate_idx,
+      band:          msg.band,
+    });
+    _npActive.draw();
+  }
+  updateDebugPanel();
+});
+
+// Per-window xcorr broadcasts — collect for both the debug panel list and the
+// advanced canvas overlay. Reset when track changes (handled in the track
+// switch path).
+onMessage('xcorr_window', msg => {
+  if (msg.uri !== track?.spotify_uri) return;
+  _xcorrWindows.push(msg);
+  if (_xcorrWindows.length > 30) _xcorrWindows.shift();
+  if (_npActive?.addXcorrWindow) {
+    _npActive.addXcorrWindow(msg);
+    _npActive.draw();
+  }
+  updateDebugPanel();
+});
+
 onMessage('xcorr_final', msg => {
-  if (_npCanvas && msg.uri === track?.spotify_uri) {
-    _npCanvas.setOffset(msg.offset_ms);
+  if (_npActive && msg.uri === track?.spotify_uri) {
+    _npActive.setOffset(msg.offset_ms);
   }
   if (_calState && _calState.uri === msg.uri) {
     _calState.final = msg;
@@ -432,9 +600,11 @@ function updatePreviewRow() {
     arrow.style.display = '';
     label.style.display = '';
     label.textContent = nextPreview.action_label;
+    label.title = nextPreview.action_label;
   } else {
     arrow.style.display = 'none';
     label.style.display = 'none';
+    label.title = '';
   }
 }
 
@@ -445,9 +615,21 @@ function renderTrack() {
   document.getElementById('track-artist').textContent = artist;
   document.getElementById('track-genre').textContent = (track.genres || []).join(' · ');
   const chipClass = onTargetDevice ? 'badge badge-green' : 'badge badge-red';
-  document.getElementById('track-device').innerHTML = track.device_name
+  const deviceChip = track.device_name
     ? `<span class="${chipClass}" style="font-size:10px;padding:1px 7px;">▶ on ${track.device_name}</span>`
     : '';
+  let recChip = '';
+  if (recording_active) {
+    recChip = ` <span class="badge badge-yellow" style="font-size:10px;padding:1px 7px;">● Recording Audio</span>`;
+  } else if (last_capture && last_capture.uri === track.spotify_uri) {
+    if (last_capture.status === 'ok') {
+      recChip = ` <span class="badge badge-green" style="font-size:10px;padding:1px 7px;">✓ Recorded</span>`;
+    } else if (last_capture.status === 'failed') {
+      const reason = (last_capture.reason || 'failed').replace(/_/g, ' ');
+      recChip = ` <span class="badge badge-red" style="font-size:10px;padding:1px 7px;" title="${reason}">✗ Capture failed</span>`;
+    }
+  }
+  document.getElementById('track-device').innerHTML = deviceChip + recChip;
   document.getElementById('time-total').textContent = fmtMs(track.duration_ms);
 }
 
@@ -709,70 +891,301 @@ document.getElementById('trigger-list-wrap').addEventListener('scroll', () => {
 }, { passive: true });
 
 // ── Audio shape canvas ─────────────────────────────────────────────────────
+let _npStartingOffsetMs = null;   // captured on first state update of each song
+let _npStartingQuality = null;
+
 function updateNpShapeStatus() {
   const el = document.getElementById('shape-np-status');
   if (!el) return;
   const offset = _timing.shape_offset_ms;
   if (offset == null) return;
-  const sign = offset >= 0 ? '+' : '';
   const q = _timing.shape_offset_quality;
-  const qStr = (q && q > 0) ? `  Q=${q.toFixed(2)}` : '';
-  el.textContent = `${sign}${offset}ms${qStr}`;
+
+  // Capture the starting offset the first time we see a value for the current
+  // song. _npStartingOffsetMs is reset to null on every URI change.
+  if (_npStartingOffsetMs == null) {
+    _npStartingOffsetMs = offset;
+    _npStartingQuality = q;
+  }
+
+  const fmt = (o, qv) => {
+    const s = o >= 0 ? '+' : '';
+    const qs = (qv && qv > 0) ? ` Q=${qv.toFixed(2)}` : '';
+    return `${s}${o}ms${qs}`;
+  };
+
+  // When the engine has snapped to a different offset than the starting one,
+  // show both: "start … → now …". Otherwise just the single value.
+  if (_npStartingOffsetMs !== offset) {
+    el.innerHTML =
+      `<span style="color:var(--text-muted);">start ${fmt(_npStartingOffsetMs, _npStartingQuality)}</span>` +
+      ` <span style="color:var(--text-muted);">→</span> ` +
+      `<span style="color:var(--text);font-weight:600;">now ${fmt(offset, q)}</span>`;
+  } else {
+    el.textContent = fmt(offset, q);
+  }
+  _refreshRecaptureSuggest();
 }
+
+// Recapture-suggested badge — visible when the active Set List slot's
+// anti_corr_count is ≥ 3 (loaded baseline anti-correlated for ≥3 consecutive
+// plays, signalling the captured shape is misaligned with current playback).
+async function _refreshRecaptureSuggest() {
+  const el = document.getElementById('np-recap-suggest');
+  if (!el || !track?.spotify_uri) return;
+  try {
+    const stats = await GET(`/audio-shape/auto-offset-stats?uri=${encodeURIComponent(track.spotify_uri)}`);
+    const slId = _timing?.active_setlist_id;
+    const slot = slId ? (stats?.setlist_offsets || {})[slId] : null;
+    const cnt = slot ? (+slot.anti_corr_count || 0) : 0;
+    if (cnt >= 3) {
+      el.style.display = '';
+      el.textContent = `recapture suggested (${cnt} drifts)`;
+    } else {
+      el.style.display = 'none';
+    }
+  } catch {
+    el.style.display = 'none';
+  }
+}
+
+async function loadPerceptionTrim() {
+  if (!track?.spotify_uri) return;
+  try {
+    const r = await GET(`/audio-shape/perception-trim?uri=${encodeURIComponent(track.spotify_uri)}`);
+    _perceptionTrimMs = r?.perception_trim_ms ?? 0;
+  } catch { _perceptionTrimMs = 0; }
+  updatePerceptionTrimDisplay();
+}
+
+function updatePerceptionTrimDisplay() {
+  const el = document.getElementById('perception-trim-input');
+  if (!el) return;
+  const v = _perceptionTrimMs || 0;
+  // Don't clobber the value while the field is focused (user is typing).
+  if (document.activeElement !== el) el.value = String(v);
+  el.style.color = v === 0 ? 'var(--text-muted)' : 'var(--text)';
+  if (_npActive?.setTrim) _npActive.setTrim(v);
+}
+
+async function setPerceptionTrim(absoluteMs) {
+  if (!track?.spotify_uri) return;
+  const params = new URLSearchParams({ uri: track.spotify_uri, value_ms: String(absoluteMs|0) });
+  try {
+    const r = await fetch(`/api/audio-shape/perception-trim?${params}`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    _perceptionTrimMs = data.perception_trim_ms ?? 0;
+    updatePerceptionTrimDisplay();
+  } catch (e) {
+    showToast('Trim failed: ' + (e.message || e), 'error');
+  }
+}
+
+(function wireTrimInput() {
+  const el = document.getElementById('perception-trim-input');
+  if (!el) return;
+  el.addEventListener('change', () => setPerceptionTrim(parseInt(el.value, 10) || 0));
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') el.blur(); });
+})();
+
+window.bumpPerceptionTrim = async function(deltaMs, reset) {
+  if (!track?.spotify_uri) return;
+  const params = new URLSearchParams({ uri: track.spotify_uri });
+  if (reset) params.set('value_ms', '0');
+  else params.set('delta_ms', String(deltaMs));
+  try {
+    const r = await fetch(`/api/audio-shape/perception-trim?${params}`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    _perceptionTrimMs = data.perception_trim_ms ?? 0;
+    updatePerceptionTrimDisplay();
+  } catch (e) {
+    showToast('Trim failed: ' + (e.message || e), 'error');
+  }
+};
+
+window.recaptureShape = async function() {
+  if (!track?.spotify_uri) { showToast('No track playing', 'error'); return; }
+  if (!confirm(`Delete the stored audio shape, WAV, and librosa data for:\n\n${track.title} — ${track.artist}\n\nThe song will re-capture on the next play. This is useful for testing whether a device change is causing poor xcorr matches.`)) return;
+  try {
+    const r = await fetch(`/api/audio-shape?uri=${encodeURIComponent(track.spotify_uri)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    showToast('Shape deleted — will re-capture on next play.', 'success');
+  } catch (e) {
+    showToast('Delete failed: ' + (e.message || e), 'error');
+  }
+};
 
 window.toggleShapeCanvas = function() {
   _npShapeVisible = !_npShapeVisible;
   document.getElementById('np-canvas-wrap').style.display = _npShapeVisible ? '' : 'none';
   document.getElementById('shape-toggle-btn').textContent = _npShapeVisible ? '▲ Audio Shape' : '▼ Audio Shape';
   if (_npShapeVisible && track) {
+    // loadNpShape() short-circuits when URI hasn't changed since it was
+    // last loaded — so on re-expand we also need to restart the render
+    // tick ourselves, otherwise the playhead stays frozen.
     loadNpShape(track.spotify_uri);
+    if (_npShapeLoaded) _startNpLoop();
   } else {
     _stopNpLoop();
   }
 };
 
+// The engine's actual xcorr offset (median of recent saves, no perception
+// trim). Falls back to the meta's last-saved timestamp_offset_ms when the
+// WS timing block hasn't arrived yet.
+function _engineXcorrOffsetMs(metaFallback) {
+  const tot = _timing?.shape_offset_ms;
+  if (tot != null) return tot - (_perceptionTrimMs || 0);
+  return metaFallback?.timestamp_offset_ms ?? 0;
+}
+
+function _ensureNpCanvases() {
+  if (_npCanvasA) return;
+  _npActiveEl = document.getElementById('np-canvas');
+  _npBufferEl = document.getElementById('np-canvas-buf');
+  const onTrim = (newTrim, isFinal) => {
+    _perceptionTrimMs = newTrim;
+    updatePerceptionTrimDisplay();
+    if (isFinal) setPerceptionTrim(newTrim);
+  };
+  _npCanvasA = createShapeCanvas(_npActiveEl); _npCanvasA.setOnTrimChange(onTrim);
+  _npCanvasB = createShapeCanvas(_npBufferEl); _npCanvasB.setOnTrimChange(onTrim);
+  _npActive = _npCanvasA; _npBuffer = _npCanvasB;
+}
+
+// Populate a canvas with all the data for one URI (meta + data + librosa).
+// Resolves to true on success, false if no audio shape is available.
+async function _populateCanvas(canvas, canvasEl, uri) {
+  const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`).catch(() => null);
+  if (!meta) return false;
+  const data = await GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`).catch(() => null);
+  if (!data) return false;
+  const avgWindow = appSettings?.shape_average_window_ms ?? 500;
+  canvas.setData(data, meta, avgWindow);
+  canvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);
+  canvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
+  // Use the engine's resolved xcorr offset (median of recent saves) so the
+  // white playhead matches the displayed status number's xcorr part.
+  canvas.setOffset(_engineXcorrOffsetMs(meta));
+  canvas.setTrim(0);                          // trim is per-track; live one re-applies after swap
+  const sc = canvas.scales;
+  sc.total = appSettings?.shape_scale_total   ?? 1;
+  sc.bass  = appSettings?.shape_scale_bass    ?? 1;
+  sc.mid   = appSettings?.shape_scale_mid     ?? 1;
+  sc.high  = appSettings?.shape_scale_high    ?? 1;
+  canvas.scaleOverall = appSettings?.shape_scale_overall ?? 1;
+  let tempoBpm = null;
+  try {
+    const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
+    canvas.setLibrosaMarkers(la);
+    tempoBpm = la?.tempo_bpm ?? null;
+    if (!canvas.librosaFilters.mfcc) {
+      canvas.librosaFilters.mfcc = true;
+      // Bump both canvases by one strip row so the swap stays the same size.
+      const curH = canvasEl.offsetHeight || 120;
+      const newH = (curH + 21) + 'px';
+      _npActiveEl.style.height = newH;
+      _npBufferEl.style.height = newH;
+    }
+  } catch { canvas.setLibrosaMarkers(null); }
+  // Advanced overlay data: anchor candidates from the meta + tempo from
+  // librosa. The canvas only draws these when body.advanced-mode is set.
+  if (canvas.setAnchorCandidates) {
+    canvas.setAnchorCandidates(meta?.anchor_candidates || [], tempoBpm);
+    canvas.setLiveMatch(null);   // cleared per-track; refilled by shape_match_updated WS
+  }
+  // Cache by URI so the +Debug panel survives buffer swaps; the active
+  // canvas's URI looks it up after each swap.
+  const anchorMeta = {
+    uri,
+    candidates: meta?.anchor_candidates || [],
+    tempo_bpm: tempoBpm || null,
+  };
+  _anchorMetaByUri.set(uri, anchorMeta);
+  if (canvas === _npActive) {
+    _anchorMeta = anchorMeta;
+    updateDebugPanel();
+  }
+  return true;
+}
+
+// Prefetch a future track into the hidden buffer canvas (idempotent).
+async function _prefetchBuffer(uri) {
+  if (!uri || uri === _npActiveUri) return;
+  if (uri === _npBufferUri) return;             // already loaded
+  if (_npBufferInflight) {
+    try { await _npBufferInflight; } catch {}
+    if (uri === _npBufferUri || uri === _npActiveUri) return;
+  }
+  _ensureNpCanvases();
+  _npBufferUri = uri;                            // claim slot before await
+  _npBufferInflight = (async () => {
+    const ok = await _populateCanvas(_npBuffer, _npBufferEl, uri);
+    if (!ok) _npBufferUri = null;
+    _npBufferInflight = null;
+  })();
+  await _npBufferInflight;
+}
+
+// Swap active ↔ buffer DOM elements + canvas instances.
+function _swapBuffers() {
+  [_npCanvasA, _npCanvasB] = [_npCanvasB, _npCanvasA];
+  [_npActiveEl, _npBufferEl] = [_npBufferEl, _npActiveEl];
+  [_npActiveUri, _npBufferUri] = [_npBufferUri, _npActiveUri];
+  _npActive = _npCanvasA; _npBuffer = _npCanvasB;
+  _npActiveEl.style.display  = _npShapeVisible ? '' : 'none';
+  _npBufferEl.style.display  = 'none';
+  _npActiveEl.style.position = '';
+  _npBufferEl.style.position = 'absolute';
+  // Pull cached anchor meta for the now-active URI so the +Debug panel
+  // reflects the new song immediately after the swap.
+  _anchorMeta = _anchorMetaByUri.get(_npActiveUri) || null;
+  updateDebugPanel();
+}
+
 async function loadNpShape(uri) {
   if (!uri) return;
-  if (uri === _npShapeUri) return; // already loaded or failed for this URI
-  _npShapeUri = uri;
+  _ensureNpCanvases();
+
+  // Buffer hit — instant swap, no fetch.
+  if (uri === _npBufferUri) {
+    _swapBuffers();
+    _npShapeLoaded = true;
+    updateNpShapeStatus();
+    _npActive.setTrim(_perceptionTrimMs || 0);
+    _startNpLoop();
+    _kickPrefetch();
+    return;
+  }
+  if (uri === _npActiveUri && _npShapeLoaded) {
+    // Same song — just make sure the loop is running.
+    _startNpLoop();
+    _kickPrefetch();
+    return;
+  }
+
   _npShapeLoaded = false;
   document.getElementById('shape-np-status').textContent = 'Loading…';
-  if (!_npCanvas) {
-    _npCanvas = createShapeCanvas(document.getElementById('np-canvas'));
-  }
+  _npActiveUri = uri;
   try {
-    const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`);
-    if (!meta) throw new Error('no shape');
-    const data = await GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`);
-    const avgWindow = appSettings?.shape_average_window_ms ?? 500;
-    _npCanvas.setData(data, meta, avgWindow);
-    _npCanvas.setFilters(null, { total: false, bass: false, mid: false, high: false }, null);
-    _npCanvas.setMaxRms(Math.max(...data.rms_total, 1e-9));
-    _npCanvas.setOffset(meta?.timestamp_offset_ms ?? 0);
-    // Apply saved scales from settings
-    const sc = _npCanvas.scales;
-    sc.total = appSettings?.shape_scale_total   ?? 1;
-    sc.bass  = appSettings?.shape_scale_bass    ?? 1;
-    sc.mid   = appSettings?.shape_scale_mid     ?? 1;
-    sc.high  = appSettings?.shape_scale_high    ?? 1;
-    _npCanvas.scaleOverall = appSettings?.shape_scale_overall ?? 1;
-    // Try loading librosa overlay
-    try {
-      const la = await GET(`/audio-shape/librosa?uri=${encodeURIComponent(uri)}`);
-      _npCanvas.setLibrosaMarkers(la);
-      // Enable MFCC strip always-on for now playing (after setLibrosaMarkers computed distances)
-      if (!_npCanvas.librosaFilters.mfcc) {
-        _npCanvas.librosaFilters.mfcc = true;
-        // Expand canvas by one strip row
-        const el = document.getElementById('np-canvas');
-        el.style.height = ((el.offsetHeight || 120) + 21) + 'px';
-      }
-    } catch { _npCanvas.setLibrosaMarkers(null); }
+    const ok = await _populateCanvas(_npActive, _npActiveEl, uri);
+    if (!ok) throw new Error('no shape');
+    _npActive.setTrim(_perceptionTrimMs || 0);
     _npShapeLoaded = true;
     updateNpShapeStatus();
     _startNpLoop();
+    _kickPrefetch();
   } catch {
     document.getElementById('shape-np-status').textContent = 'No audio shape for this song';
+  }
+}
+
+function _kickPrefetch() {
+  const next = _nextTrackUri;
+  if (next && next !== _npActiveUri && next !== _npBufferUri) {
+    _prefetchBuffer(next).catch(() => {});
   }
 }
 
@@ -780,20 +1193,37 @@ async function loadNpShape(uri) {
 function _stopNpLoop() {
   if (_npLoopId) { clearInterval(_npLoopId); _npLoopId = null; }
 }
+let _lastPlayheadMs = null;          // diagnostic: detects multi-second playhead jumps
 function _startNpLoop() {
   _stopNpLoop();
+  _lastPlayheadMs = null;
   _npLoopId = setInterval(() => {
-    if (!_npShapeLoaded || !_npCanvas || !track) return;
+    if (!_npShapeLoaded || !_npActive || !track) return;
     const progress = getInterpolatedProgress();
     const latency  = appSettings?.audio_latency_ms ?? 0;
     const futureMs = (appSettings?.builder_future_buffer_s ?? 5) * 1000;
     const windowMs = (appSettings?.builder_zoom_window_s  ?? 20) * 1000;
     const zEnd   = Math.min(track.duration_ms, progress + futureMs);
     const zStart = Math.max(0, zEnd - windowMs);
-    _npCanvas.setZoom(zStart, zEnd);
-    if (profile) _npCanvas.setProfile(profile, Object.values(events));
-    _npCanvas.setPlayhead(progress - latency);
-    _npCanvas.draw();
+    _npActive.setZoom(zStart, zEnd);
+    if (profile) _npActive.setProfile(profile, Object.values(events));
+    const playhead = progress - latency;
+    // Diagnostic: a 25ms tick should advance playhead ~25ms. Anything >500ms
+    // between consecutive ticks is a jump worth logging — drives the
+    // multi-second jump investigation. Logs progress, offset, and
+    // _lastUpdateTime so we can correlate to WS messages and engine snaps.
+    if (_lastPlayheadMs !== null && Math.abs(playhead - _lastPlayheadMs) > 500) {
+      console.warn('[playhead-jump]',
+        'delta=' + Math.round(playhead - _lastPlayheadMs) + 'ms',
+        'progress=' + Math.round(progress) + 'ms',
+        'offset=' + (_timing?.shape_offset_ms ?? '—') + 'ms',
+        'lastUpdate=' + (Date.now() - _lastUpdateTime) + 'ms ago',
+        'lastProgress=' + _lastProgressMs + 'ms',
+      );
+    }
+    _lastPlayheadMs = playhead;
+    _npActive.setPlayhead(playhead);
+    _npActive.draw();
   }, 25);
 }
 
@@ -877,6 +1307,52 @@ function updateDebugPanel() {
     document.getElementById('dbg-last-trigger').textContent = event_name || '(unknown)';
     document.getElementById('dbg-last-fire').textContent =
       `sched: ${fmtMs(scheduled_ms)}  fired@: ${fmtMs(fired_at_ms)}  Δ: ${sign}${delta} ms`;
+  }
+
+  // Anchor summary — list stored candidates + most recent live match.
+  const summaryEl = document.getElementById('dbg-anchor-summary');
+  const matchEl   = document.getElementById('dbg-anchor-match');
+  if (summaryEl) {
+    if (!_anchorMeta?.candidates?.length) {
+      summaryEl.textContent = 'no anchor candidates for this song';
+    } else {
+      const tempo = _anchorMeta.tempo_bpm ? ` tempo=${_anchorMeta.tempo_bpm.toFixed(1)}bpm` : '';
+      const lines = _anchorMeta.candidates.map((c, i) =>
+        `  #${i + 1}  ${String(c.timestamp_ms).padStart(6)}ms  ${(c.band || '').replace('rms_', '').padEnd(5)}  u=${(+c.uniqueness || 0).toFixed(2)}  rise=${(+c.rise_magnitude || 0).toFixed(2)}`
+      );
+      summaryEl.textContent = `${_anchorMeta.candidates.length} candidates${tempo}\n${lines.join('\n')}`;
+      summaryEl.style.whiteSpace = 'pre';
+    }
+  }
+  if (matchEl) {
+    if (_anchorMatch) {
+      const off = _anchorMatch.offset_ms || 0;
+      const sign = off >= 0 ? '+' : '';
+      matchEl.textContent = `live match: cand #${(_anchorMatch.candidate_idx ?? -1) + 1} (${(_anchorMatch.band || '').replace('rms_', '')}) → ${sign}${off}ms  r=${(+_anchorMatch.r || 0).toFixed(2)}  Q=${(+_anchorMatch.q || 0).toFixed(2)}`;
+    } else {
+      matchEl.textContent = '';
+    }
+  }
+
+  // Per-window xcorr list (this play). Newest first.
+  const winsEl = document.getElementById('dbg-xcorr-windows');
+  if (winsEl) {
+    if (!_xcorrWindows.length) {
+      winsEl.textContent = 'no windows yet';
+    } else {
+      const lines = [..._xcorrWindows].reverse().slice(0, 12).map(w => {
+        const ws = String(w.win_start).padStart(6);
+        const we = String(w.win_end).padStart(6);
+        if (w.failed) return `  ${ws}–${we}ms  failed (no shift cleared threshold)`;
+        const newOff = w.new_offset_ms != null ? `${w.new_offset_ms >= 0 ? '+' : ''}${w.new_offset_ms}` : '   none';
+        const newR = w.new_r != null ? (+w.new_r).toFixed(2) : '  — ';
+        const newQ = w.new_quality != null ? (+w.new_quality).toFixed(2) : '  — ';
+        const oldR = (+w.old_r || 0).toFixed(2);
+        const winnerTag = w.winner === 'new' ? '🟢NEW' : '🔵OLD';
+        return `  ${ws}–${we}ms  NEW ${newOff.padStart(7)}ms r=${newR} Q=${newQ}  OLD r=${oldR}  ${winnerTag}`;
+      });
+      winsEl.textContent = lines.join('\n');
+    }
   }
 }
 

@@ -58,13 +58,48 @@ class AudioShapeMeta(BaseModel):
     genres: list[str] = Field(default_factory=list)
     capture_complete: bool = False   # False while still being recorded
     capture_failed: bool = False     # True if capture was discarded (e.g. gap in data)
+    # Recapture-suggested flag: set by runtime detectors that observe the
+    # captured shape is no longer aligning well (chronic anti-corr baselines,
+    # repeated sweep-final Q < threshold, no usable U-Score windows, etc.).
+    # An external script will scan the audio_shapes directory for shapes with
+    # `needs_recapture=True` and recapture them. Once a fresh capture saves
+    # over the same npz, the flag is reset to False.
+    needs_recapture: bool = False
+    needs_recapture_reason: str = ""           # short tag, e.g. "anti_corr_persistent", "low_q_streak", "no_uscore_windows"
+    needs_recapture_flagged_at: str = ""       # ISO 8601 UTC timestamp when set
+    needs_recapture_flag_count: int = 0        # incremented on each flag event; lets the script prioritize chronic offenders
     timestamp_offset_ms: int = 0     # shift shape data to align capture timing with playhead
+    perception_trim_ms: int = 0      # user-applied nudge layered on top of timestamp_offset_ms
+                                      # (applies when no Set List is active; per-Set-List trims
+                                      # live in setlist_offsets[id].perception_trim_ms)
     offset_verification: Literal["unverified", "auto_verified", "user_verified"] = "unverified"
     offset_quality: float = 0.0      # best quality score: r × difficulty (0–1); 0 = not calibrated
     # Cached smart-window schedule (recomputed if params or shape change)
     xcorr_windows: list[dict] = Field(default_factory=list)   # [{start_ms, end_ms, difficulty}]
     xcorr_params_hash: str = ""                                # invalidation hash
+    # Pre-computed early-feature anchor candidates (computed at capture time).
+    # Each entry: {timestamp_ms, band, rise_magnitude, uniqueness, template: [float, ...]}
+    # Used at song start by anchor_detector.match_in_frames() to snap-align before
+    # the per-window xcorr sweep runs. Empty list = no anchor available, fall back
+    # to the regular sweep.
+    anchor_candidates: list[dict] = Field(default_factory=list)
     # Per-play offset history (most recent first, cap at 20)
     offset_history: list[dict] = Field(default_factory=list)   # [{iso_timestamp, offset_ms, quality, window_count}]
+    # Per-Set-List offset memory. Keyed by Setlist.id (UUID). Each entry is
+    # {
+    #   timestamp_offset_ms : int    — latest xcorr-derived offset (math)
+    #   offset_quality      : float  — Q score of latest lock
+    #   generated_at        : iso    — when latest lock was saved
+    #   observed_cut_ms     : int
+    #   perception_trim_ms  : int    — user-applied nudge layered on top of xcorr
+    #                                  (positive = fire later; negative = earlier)
+    #   history             : list   — last 5 saved locks, most-recent first:
+    #                                    [{offset_ms, quality, generated_at}]
+    #   anti_corr_count     : int    — consecutive plays where stored offset
+    #                                  was anti-correlated against captured audio
+    #   last_anti_corr_at   : iso
+    # }
+    # Legacy `timestamp_offset_ms` / `offset_quality` remain the no-Set-List baseline.
+    setlist_offsets: dict[str, dict] = Field(default_factory=dict)
     # Librosa analysis version: 0=none, 1=basic (no MFCC), 2=full (with MFCC)
     librosa_version: int = 0

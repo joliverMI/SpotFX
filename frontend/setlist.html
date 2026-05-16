@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpotFX — Set Lists</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .sl-layout { display: flex; gap: 16px; align-items: flex-start; }
+    .sl-list   { width: 280px; flex-shrink: 0; max-height: calc(100vh - 80px); display: flex; flex-direction: column; }
+    .sl-editor { flex: 1; min-width: 0; max-height: calc(100vh - 80px); overflow-y: auto; }
+    .sl-list-items { overflow-y: auto; flex: 1; min-height: 0; }
+    .sl-row { padding: 8px 10px; cursor: pointer; border-radius: 6px; border: 1px solid transparent; margin-bottom: 4px; }
+    .sl-row:hover { background: var(--surface2); }
+    .sl-row.active { border-color: var(--accent); background: var(--surface2); }
+    .sl-row .name { font-weight: 600; font-size: 14px; }
+    .sl-row .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; word-break: break-all; }
+    .field-group { margin-bottom: 14px; }
+    .field-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .field-group input[type="text"], .field-group input[type="number"], .field-group select, .field-group textarea {
+      width: 100%; padding: 6px 8px; font-size: 13px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+    }
+    .field-group input[type="number"] { width: 110px; }
+    .field-group textarea { resize: vertical; min-height: 40px; font-family: inherit; }
+    .check-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .check-row input[type="checkbox"] { transform: scale(1.1); }
+    .btn-bar { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    .section-title { font-size: 13px; font-weight: 600; color: var(--text); margin: 16px 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+    .discoverable { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+    .discoverable .pill { display: inline-block; padding: 2px 8px; margin: 2px 4px 2px 0; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+    .discoverable .pill:hover { border-color: var(--accent); color: var(--text); }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <div id="nav-root"></div>
+
+  <main>
+    <div class="sl-layout">
+      <!-- List panel -->
+      <div class="sl-list card">
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <input type="text" id="search" placeholder="Search..." style="flex:1;padding:4px 8px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+          <button class="btn btn-accent btn-sm" id="new-btn">+ New</button>
+        </div>
+        <div class="sl-list-items" id="list"></div>
+        <div class="discoverable" id="discoverable-box"></div>
+      </div>
+
+      <!-- Editor -->
+      <div class="sl-editor card" id="editor" style="display:none;">
+
+        <div class="btn-bar" style="margin-top:0;margin-bottom:14px;">
+          <button class="btn btn-accent" id="save-btn">Save</button>
+          <button class="btn btn-danger" id="del-btn">Delete</button>
+        </div>
+
+        <div class="field-group"><label>Name</label><input type="text" id="ed-name" placeholder="Friday Energy Mix"></div>
+        <div class="field-group">
+          <label>Spotify Context URI</label>
+          <input type="text" id="ed-context-uri" placeholder="spotify:playlist:abc123">
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Lookup key. Use the discovered list below to fill this in automatically.</div>
+        </div>
+
+        <div class="section-title">When this Set List is active</div>
+        <div class="check-row"><input type="checkbox" id="ed-auto-activate"><label for="ed-auto-activate" style="margin:0;">Auto-activate (unpause if paused)</label></div>
+        <div class="check-row"><input type="checkbox" id="ed-auto-analyzed"><label for="ed-auto-analyzed" style="margin:0;">Force "Use Analyzed Triggers" on</label></div>
+        <div class="field-group">
+          <label>Genre blending</label>
+          <select id="ed-genre-blending">
+            <option value="global">Use global setting</option>
+            <option value="on">Force on</option>
+            <option value="off">Force off</option>
+          </select>
+        </div>
+
+        <div class="section-title">xcorr / mix tolerance</div>
+        <div class="check-row">
+          <input type="checkbox" id="ed-xcorr-enabled" checked>
+          <label for="ed-xcorr-enabled" style="margin:0;">Run per-play xcorr while this Set List is active</label>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin:-6px 0 10px 24px;">
+          Disable for non-mixed playlists where you've already dialed in good per-song offsets — the stored offset is used as-is.
+        </div>
+        <div class="field-group">
+          <label>xcorr cut buffer (ms) — leave blank to use global default</label>
+          <input type="number" id="ed-cut-buffer" min="0" step="500" placeholder="(global)">
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">
+            Search range = base + max(0, captured − polled) + buffer. The buffer absorbs small inaccuracies in the duration delta.
+          </div>
+        </div>
+        <div id="anti-corr-warning" style="display:none;background:rgba(255,152,0,0.10);border:1px solid rgba(255,152,0,0.4);padding:8px 10px;border-radius:6px;font-size:12px;color:#ff9800;margin-bottom:10px;"></div>
+
+        <div class="section-title">Notes</div>
+        <div class="field-group"><textarea id="ed-notes" rows="3" placeholder="Anything to remember about this set list..."></textarea></div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { connectWS, GET, POST, DEL, showToast, uuid } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
+initNav();
+connectWS();
+
+let setlists = [];
+let selected = null;
+
+async function loadData() {
+  setlists = await GET('/setlists').catch(() => []);
+  renderList();
+  renderDiscoverable();
+}
+
+function renderList() {
+  const q = (document.getElementById('search').value || '').toLowerCase();
+  const el = document.getElementById('list');
+  const filtered = q
+    ? setlists.filter(s => (s.name || '').toLowerCase().includes(q) || (s.context_uri || '').toLowerCase().includes(q))
+    : setlists;
+  el.innerHTML = filtered.map(s => `
+    <div class="sl-row${selected?.id === s.id ? ' active' : ''}" data-id="${s.id}">
+      <div class="name">${s.name || '(unnamed)'}</div>
+      <div class="meta">${s.context_uri || 'no context uri'}</div>
+    </div>
+  `).join('') || '<div style="color:var(--text-muted);padding:8px;font-size:13px;">No Set Lists yet</div>';
+  el.querySelectorAll('.sl-row').forEach(row => {
+    row.addEventListener('click', () => selectSetlist(row.dataset.id));
+  });
+}
+
+async function renderDiscoverable() {
+  let pls = [];
+  try { pls = await GET('/setlists/discoverable'); } catch {}
+  const el = document.getElementById('discoverable-box');
+  if (!pls?.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="margin-top:8px;margin-bottom:4px;font-weight:600;">Recently observed:</div>'
+    + pls.map(p => `<span class="pill" data-uri="${p.context_uri}" title="${p.context_uri}">${p.name || p.context_uri.split(':').pop()}</span>`).join('');
+  el.querySelectorAll('.pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      newSetlistFromUri(pill.dataset.uri, pill.textContent);
+    });
+  });
+}
+
+function selectSetlist(id) {
+  selected = setlists.find(s => s.id === id) || null;
+  if (!selected) { document.getElementById('editor').style.display = 'none'; return; }
+  renderList();
+  document.getElementById('editor').style.display = '';
+  document.getElementById('ed-name').value = selected.name || '';
+  document.getElementById('ed-context-uri').value = selected.context_uri || '';
+  document.getElementById('ed-auto-activate').checked = !!selected.auto_activate;
+  document.getElementById('ed-auto-analyzed').checked = !!selected.auto_use_analyzed;
+  document.getElementById('ed-genre-blending').value = selected.genre_blending || 'global';
+  document.getElementById('ed-xcorr-enabled').checked = selected.xcorr_enabled !== false;
+  document.getElementById('ed-cut-buffer').value = selected.xcorr_cut_buffer_ms == null ? '' : selected.xcorr_cut_buffer_ms;
+  document.getElementById('ed-notes').value = selected.notes || '';
+  renderAntiCorrWarning();
+}
+
+async function renderAntiCorrWarning() {
+  const box = document.getElementById('anti-corr-warning');
+  if (!selected?.id) { box.style.display = 'none'; return; }
+  let drift = [];
+  try { drift = await GET(`/setlists/${selected.id}/drift`); } catch { drift = []; }
+  if (!drift.length) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML = `<strong>${drift.length} song${drift.length>1?'s':''} drifting</strong> — stored offset doesn't match recent playback:<br>`
+    + drift.slice(0, 5).map(d => `• ${d.title || d.uri.split(':').pop()} — ${d.anti_corr_count}× anti-correlated`).join('<br>')
+    + (drift.length > 5 ? `<br>+ ${drift.length - 5} more` : '');
+}
+
+function readEditor() {
+  const cutRaw = document.getElementById('ed-cut-buffer').value.trim();
+  return {
+    ...selected,
+    name: document.getElementById('ed-name').value.trim(),
+    context_uri: document.getElementById('ed-context-uri').value.trim(),
+    auto_activate: document.getElementById('ed-auto-activate').checked,
+    auto_use_analyzed: document.getElementById('ed-auto-analyzed').checked,
+    genre_blending: document.getElementById('ed-genre-blending').value,
+    xcorr_enabled: document.getElementById('ed-xcorr-enabled').checked,
+    xcorr_cut_buffer_ms: cutRaw === '' ? null : Math.max(0, parseInt(cutRaw, 10) || 0),
+    notes: document.getElementById('ed-notes').value,
+  };
+}
+
+document.getElementById('save-btn').addEventListener('click', async () => {
+  if (!selected) return;
+  try {
+    const payload = readEditor();
+    await POST('/setlists', payload);
+    showToast('Saved', 'success');
+    await loadData();
+    selectSetlist(payload.id);
+  } catch (e) { showToast('Error: ' + (e.message || e), 'error'); }
+});
+
+document.getElementById('del-btn').addEventListener('click', async () => {
+  if (!selected || !confirm(`Delete Set List "${selected.name}"?`)) return;
+  await DEL(`/setlists/${selected.id}`);
+  selected = null;
+  document.getElementById('editor').style.display = 'none';
+  showToast('Deleted', 'success');
+  await loadData();
+});
+
+document.getElementById('new-btn').addEventListener('click', async () => {
+  const id = uuid();
+  await POST('/setlists', { id, name: 'New Set List', context_uri: '', auto_activate: false, auto_use_analyzed: false, genre_blending: 'global', xcorr_cut_buffer_ms: null, notes: '' });
+  showToast('Created', 'success');
+  await loadData();
+  selectSetlist(id);
+});
+
+async function newSetlistFromUri(context_uri, name) {
+  const id = uuid();
+  await POST('/setlists', { id, name: name || context_uri.split(':').pop(), context_uri, auto_activate: false, auto_use_analyzed: false, genre_blending: 'global', xcorr_cut_buffer_ms: null, notes: '' });
+  showToast(`Tracking "${name}"`, 'success');
+  await loadData();
+  selectSetlist(id);
+}
+
+document.getElementById('search').addEventListener('input', renderList);
+
+loadData();
+</script>
+</body>
+</html>
