@@ -210,10 +210,37 @@ class AutoOffsetService:
         # Skip detection: previous track's state when it ended/was interrupted
         self._prev_track_end: Optional[tuple[str, int, int]] = None  # (uri, progress_ms, duration_ms)
         self._last_track_snapshot: Optional[tuple[str, int, int]] = None  # snapshot from previous poll
+        # Snapshot of recent xcorr capture frames (URI + timestamps + bands).
+        # Updated once per window iteration in _detect_loop_xcorr so the
+        # /api/debug/xcorr-frames endpoint can return what the matcher is
+        # currently working with without locking the live frames list.
+        self._frames_snapshot_uri: Optional[str] = None
+        self._frames_snapshot: list[tuple[int, float, float, float, float]] = []
 
     def get_status(self, uri: str) -> dict:
         """Return whether xcorr calibration is currently active for a URI."""
         return {"active": self._watching_uri == uri}
+
+    def get_live_frames(self, uri: str) -> dict:
+        """Return the most recent xcorr-captured frames for a URI in shape-data
+        format, or empty arrays if no xcorr is running for this URI. Used by
+        the Debug page to render a live overlay against the saved shape."""
+        if self._frames_snapshot_uri != uri or not self._frames_snapshot:
+            return {
+                "timestamps_ms": [],
+                "rms_total":     [],
+                "rms_low":       [],
+                "rms_mid":       [],
+                "rms_high":      [],
+            }
+        snap = self._frames_snapshot
+        return {
+            "timestamps_ms": [int(f[0]) for f in snap],
+            "rms_total":     [float(f[1]) for f in snap],
+            "rms_low":       [float(f[2]) for f in snap],
+            "rms_mid":       [float(f[3]) for f in snap],
+            "rms_high":      [float(f[4]) for f in snap],
+        }
 
     def _classify_play_type(self) -> str:
         """Classify how the current song started: 'natural', 'skip', or 'first'."""
@@ -937,6 +964,17 @@ class AutoOffsetService:
                     confirmation_shifts.append((stored_offset_ms, float(difficulty)))
 
                 n_measurements += 1
+
+                # Live-frame snapshot for the Debug page. Trim to the most
+                # recent ~30 s of frames so the snapshot stays small and the
+                # diff visualization focuses on the section xcorr just
+                # evaluated. List slicing is shallow-copy-safe — readers
+                # iterate by value.
+                self._frames_snapshot_uri = uri
+                _snap_cutoff = max(0, win_end - 30000)
+                self._frames_snapshot = [
+                    f for f in frames if f[0] >= _snap_cutoff
+                ]
 
                 logger.info(
                     "Auto-offset xcorr: [%d–%d]ms  NEW %+dms r=%.2f Q=%.2f  "

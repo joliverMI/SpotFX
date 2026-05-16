@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpotFX — Debug</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .audio-wrap { position:relative; }
+    canvas { display:block; width:100%; }
+    #shape-canvas, #diff-canvas { background:var(--surface2); border-radius:var(--radius); display:block; width:100%; height:240px; }
+    #shape-resize-handle, #diff-resize-handle {
+      height:6px; cursor:ns-resize; background:var(--surface2);
+      border-radius:0 0 var(--radius) var(--radius);
+      border-top:1px solid var(--border);
+      margin-top:2px;
+      display:flex; align-items:center; justify-content:center;
+    }
+    #shape-resize-handle::after, #diff-resize-handle::after {
+      content:''; width:32px; height:2px; border-radius:1px; background:var(--border);
+    }
+    #zoom-handle-center {
+      position:absolute; top:2px; bottom:2px; width:24px; transform:translateX(-50%);
+      background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.35);
+      border-radius:3px; cursor:grab; z-index:5; user-select:none; touch-action:none;
+    }
+    #zoom-handle-center:active { cursor:grabbing; }
+    .zoom-handle {
+      position:absolute; top:0; bottom:0; width:8px; transform:translateX(-50%);
+      background:rgba(255,255,255,0.85); border-radius:2px; cursor:ew-resize;
+      z-index:6; user-select:none; touch-action:none;
+    }
+    #zoom-region {
+      position:absolute; top:0; bottom:0; pointer-events:none; z-index:4;
+      background:rgba(255,255,255,0.1); border-left:1px solid rgba(255,255,255,0.3); border-right:1px solid rgba(255,255,255,0.3);
+    }
+    .dbg-section { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:10px 14px; margin-top:10px; }
+    .dbg-section h3 { font-size:13px; font-weight:600; margin-bottom:6px; color:var(--text); }
+    .dbg-grid { display:grid; grid-template-columns:auto auto auto; gap:4px 16px; font-size:12px; color:var(--text-muted); }
+    .dbg-grid b { color:var(--text); }
+    .dbg-mono { font-family:monospace; font-size:11px; opacity:0.85; white-space:pre; max-height:180px; overflow-y:auto; }
+    summary { cursor:pointer; user-select:none; padding:4px 0; font-size:13px; font-weight:600; color:var(--text); }
+    details[open] summary { margin-bottom:6px; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <div id="nav-root"></div>
+
+  <main>
+    <!-- ── Track header ─────────────────────────────────────────────────────── -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:14px;font-weight:600;" id="track-title">—</div>
+          <div style="font-size:12px;color:var(--text-muted);" id="track-artist"></div>
+        </div>
+        <span id="track-uri" style="margin-left:auto;font-size:10px;color:var(--text-muted);font-family:monospace;"></span>
+      </div>
+    </div>
+
+    <!-- ── Main shape canvas (saved up, live down) ─────────────────────────── -->
+    <div class="card" style="padding:10px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:13px;font-weight:600;">Audio Shape</span>
+        <span id="shape-status" style="font-size:11px;color:var(--text-muted);"></span>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">
+          <span style="font-size:11px;color:var(--text-muted);">trim</span>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-250)" title="−250ms (fires earlier)">−250</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-100)">−100</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(-50)">−50</button>
+          <input id="perception-trim-input" type="number" step="50" value="0"
+                 title="Type a value (ms) and press Enter, or drag the orange playhead on the audio shape."
+                 style="width:60px;font-size:11px;padding:1px 4px;text-align:center;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+          <span style="font-size:10px;color:var(--text-muted);">ms</span>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(50)">+50</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(100)">+100</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(250)" title="+250ms (fires later)">+250</button>
+          <button class="btn" style="font-size:11px;padding:2px 6px;" onclick="bumpPerceptionTrim(0, true)" title="Reset to 0">×</button>
+        </span>
+      </div>
+      <div class="audio-wrap">
+        <canvas id="shape-canvas"></canvas>
+        <div id="shape-resize-handle"></div>
+      </div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
+        Saved shape draws upward from the centerline. Live capture (when xcorr is running) draws downward.
+        Pan: middle-mouse drag on the canvas. Zoom: drag the timeline handles.
+      </div>
+    </div>
+
+    <!-- ── Diff canvas (collapsible) ───────────────────────────────────────── -->
+    <details class="card" style="padding:10px 16px;">
+      <summary>Live − Saved diff <span id="diff-status" style="font-weight:400;font-size:11px;color:var(--text-muted);margin-left:6px;"></span></summary>
+      <div class="audio-wrap">
+        <canvas id="diff-canvas"></canvas>
+        <div id="diff-resize-handle"></div>
+      </div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
+        Above center = live audio louder than saved at that timestamp. Below = saved louder.
+        When alignment is good and signal level matches, this hovers near zero.
+      </div>
+    </details>
+
+    <!-- ── Shape status + recapture controls ──────────────────────────────── -->
+    <div class="dbg-section">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <h3 style="margin:0;">Shape status</h3>
+        <span style="margin-left:auto;display:flex;gap:6px;">
+          <button class="btn" id="btn-recapture" style="font-size:11px;padding:3px 10px;color:#f44336;border-color:#f44336;"
+                  title="Delete the stored audio shape (NPZ + JSON + WAV + librosa) so the song re-captures on next play.">Recapture</button>
+          <button class="btn" id="btn-force-next" style="font-size:11px;padding:3px 10px;"
+                  title="Queue a force-recapture for the next song that plays. Captures over the existing shape atomically — original is preserved on rollback.">Force-recapture next play</button>
+        </span>
+      </div>
+      <div class="dbg-grid" style="grid-template-columns:120px 1fr;">
+        <span>Captured</span><span id="dbg-shape-captured">—</span>
+        <span>State</span><span id="dbg-shape-state">—</span>
+        <span>Needs recapture</span><span id="dbg-shape-needs">—</span>
+        <span>Last attempt</span><span id="dbg-shape-last">—</span>
+        <span>Previous attempt</span><span id="dbg-shape-prev">—</span>
+      </div>
+    </div>
+
+    <!-- ── Sync state ──────────────────────────────────────────────────────── -->
+    <div class="dbg-section">
+      <h3>Sync state</h3>
+      <div class="dbg-grid">
+        <span>Buffer</span><span id="dbg-buffer">—</span><span style="opacity:0.5;">ms (manual setting)</span>
+        <span>RTT</span><span id="dbg-rtt">—</span><span style="opacity:0.5;">ms (LedFX network)</span>
+        <span>Shape</span><span id="dbg-shape">—</span><span id="dbg-shape-quality" style="opacity:0.5;">ms (per-song xcorr)</span>
+        <b>Total offset</b><b id="dbg-total">—</b><span style="opacity:0.5;">ms — positive fires earlier</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        <span style="opacity:0.7;font-size:12px;">Live nudge:</span>
+        <button onclick="nudgeBuffer(-50)" style="font-size:11px;padding:2px 8px;">−50 ms</button>
+        <span id="dbg-buffer-live" style="font-weight:600;min-width:60px;text-align:center;">—</span>
+        <button onclick="nudgeBuffer(+50)" style="font-size:11px;padding:2px 8px;">+50 ms</button>
+        <span style="opacity:0.5;font-size:11px;">[ / ] keys</span>
+      </div>
+    </div>
+
+    <!-- ── Last fire ────────────────────────────────────────────────────────── -->
+    <div class="dbg-section">
+      <h3>Last trigger</h3>
+      <div style="font-size:12px;">
+        <span style="opacity:0.7;">Event:</span>
+        <span id="dbg-last-trigger" style="margin-left:8px;">—</span>
+        <div id="dbg-last-fire" style="margin-top:4px;font-family:monospace;font-size:11px;opacity:0.8;"></div>
+        <div style="margin-top:4px;font-size:12px;">Poll age: <span id="dbg-poll-age">—</span> ms</div>
+      </div>
+    </div>
+
+    <!-- ── Anchor snap ──────────────────────────────────────────────────────── -->
+    <div class="dbg-section">
+      <h3>Anchor snap</h3>
+      <div id="dbg-anchor-summary" class="dbg-mono">no data</div>
+      <div id="dbg-anchor-match" style="margin-top:4px;font-family:monospace;font-size:11px;color:#00ff88;"></div>
+    </div>
+
+    <!-- ── xcorr per-window ─────────────────────────────────────────────────── -->
+    <div class="dbg-section">
+      <h3>Per-window xcorr (this play)</h3>
+      <div id="dbg-xcorr-windows" class="dbg-mono">no windows yet</div>
+    </div>
+
+    <!-- ── Calibration target ───────────────────────────────────────────────── -->
+    <div id="dbg-cal" class="dbg-section" style="display:none;">
+      <h3>Calibration</h3>
+      <span id="dbg-cal-status" style="font-style:italic;font-size:12px;"></span>
+      <div id="dbg-cal-windows" style="margin-top:4px;font-family:monospace;font-size:11px;opacity:0.8;white-space:pre;"></div>
+      <div id="dbg-cal-final" style="margin-top:4px;font-family:monospace;font-size:11px;font-weight:600;"></div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { connectWS, onMessage, GET, POST, PATCH, showToast } from '/static/js/app.js';
+import { initNav } from '/static/js/nav.js';
+import { createShapeCanvas } from '/static/js/shape_canvas.js';
+
+initNav();
+connectWS();
+
+// ── Canvases ────────────────────────────────────────────────────────────────
+const shapeCanvas = createShapeCanvas(
+  document.getElementById('shape-canvas'),
+  document.getElementById('shape-resize-handle'),
+);
+shapeCanvas.wireResizeHandle();
+// Total RMS only — hide bass/mid/high bands so the saved-vs-live comparison
+// stays uncluttered. Average overlays also off.
+shapeCanvas.setFilters(
+  { total: true, bass: false, mid: false, high: false, marks: false },
+  { total: false, bass: false, mid: false, high: false },
+  null,
+);
+shapeCanvas.startLoop(25);   // 40 fps redraw — matches builder
+
+const diffCanvas = createShapeCanvas(
+  document.getElementById('diff-canvas'),
+  document.getElementById('diff-resize-handle'),
+);
+diffCanvas.wireResizeHandle();
+diffCanvas.setFilters(
+  { total: true, bass: false, mid: false, high: false, marks: false },
+  { total: false, bass: false, mid: false, high: false },
+  null,
+);
+diffCanvas.startLoop(25);
+
+// Follow-mode zoom: 25s of past + 5s of future around the playhead. The
+// canvas's middle-mouse-drag pan flips _userPanned=true so we stop
+// auto-following until the next track change.
+const FOLLOW_PAST_MS   = 8000;
+const FOLLOW_FUTURE_MS = 2000;
+let _userPanned = false;
+shapeCanvas.setOnZoomChange?.(() => { _userPanned = true; });
+diffCanvas.setOnZoomChange?.(() => { _userPanned = true; });
+shapeCanvas.setZoom(0, FOLLOW_PAST_MS + FOLLOW_FUTURE_MS);
+diffCanvas.setZoom(0, FOLLOW_PAST_MS + FOLLOW_FUTURE_MS);
+
+// ── State ───────────────────────────────────────────────────────────────────
+let track = null;
+let _perceptionTrimMs = 0;
+let _liveBufferNudge = 0;
+let _shapeOffsetMs = 0;
+let _shapeQuality = 0;
+let _ledfxRtt = 0;
+let _bufferMs = 0;
+let _lastFire = null;
+let _lastPollTime = Date.now();
+let _lastAdvancedOverride = false;
+let _xcorrPollTimer = null;
+
+// ── Live xcorr-frame polling ────────────────────────────────────────────────
+let _savedShape = null;   // cached saved shape data so we can compute the diff
+
+// Linear-interpolate `values` (sampled at `ts`) at the times in `targetTs`.
+// O(n+m) using a single forward sweep — both arrays are monotonically
+// increasing in the captured-shape format.
+function _interpAt(targetTs, ts, values) {
+  if (!ts?.length || !values?.length) return new Array(targetTs.length).fill(0);
+  const out = new Array(targetTs.length);
+  let j = 0;
+  for (let i = 0; i < targetTs.length; i++) {
+    const t = targetTs[i];
+    while (j < ts.length - 1 && ts[j + 1] < t) j++;
+    if (t <= ts[0]) { out[i] = values[0]; continue; }
+    if (t >= ts[ts.length - 1]) { out[i] = values[ts.length - 1]; continue; }
+    const t0 = ts[j], t1 = ts[j + 1];
+    const f = (t - t0) / (t1 - t0);
+    out[i] = values[j] * (1 - f) + values[j + 1] * f;
+  }
+  return out;
+}
+
+// Build the diff canvas data: positive (live louder) goes up, negative
+// (saved louder) goes down. Both halves are non-negative arrays so the
+// existing setData / setLiveShape rendering paths work unchanged.
+function _updateDiffCanvas(live) {
+  if (!_savedShape || !live || !live.timestamps_ms?.length) {
+    diffCanvas.setData?.(null, null);
+    diffCanvas.setLiveShape?.(null);
+    return;
+  }
+  const ts  = live.timestamps_ms;
+  const sT  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_total);
+  const sL  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_low);
+  const sM  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_mid || []);
+  const sH  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_high);
+  const pos = { timestamps_ms: ts, rms_total: [], rms_low: [], rms_mid: [], rms_high: [] };
+  const neg = { timestamps_ms: ts, rms_total: [], rms_low: [], rms_mid: [], rms_high: [] };
+  for (let i = 0; i < ts.length; i++) {
+    const dT = (live.rms_total[i] ?? 0) - (sT[i] ?? 0);
+    const dL = (live.rms_low[i]   ?? 0) - (sL[i] ?? 0);
+    const dM = (live.rms_mid[i]   ?? 0) - (sM[i] ?? 0);
+    const dH = (live.rms_high[i]  ?? 0) - (sH[i] ?? 0);
+    pos.rms_total.push(Math.max(0,  dT)); neg.rms_total.push(Math.max(0, -dT));
+    pos.rms_low.push  (Math.max(0,  dL)); neg.rms_low.push  (Math.max(0, -dL));
+    pos.rms_mid.push  (Math.max(0,  dM)); neg.rms_mid.push  (Math.max(0, -dM));
+    pos.rms_high.push (Math.max(0,  dH)); neg.rms_high.push (Math.max(0, -dH));
+  }
+  diffCanvas.setData(pos, null);
+  diffCanvas.setLiveShape(neg);
+}
+
+// Shift live frames by the engine's current shape_offset_ms so the live
+// overlay visually aligns with the saved shape — this is the whole job of
+// xcorr. Without the shift, a shape_offset of +1200 would make the live
+// capture render 1.2s out of sync with the saved peaks.
+function _shiftLive(data, offsetMs) {
+  if (!data || !data.timestamps_ms?.length || !offsetMs) return data;
+  return {
+    timestamps_ms: data.timestamps_ms.map(t => t + offsetMs),
+    rms_total:     data.rms_total,
+    rms_low:       data.rms_low,
+    rms_mid:       data.rms_mid,
+    rms_high:      data.rms_high,
+  };
+}
+
+async function _pollLiveFrames(uri) {
+  if (!uri) return;
+  try {
+    const data = await GET(`/debug/xcorr-frames?uri=${encodeURIComponent(uri)}`);
+    if (data && Array.isArray(data.timestamps_ms) && data.timestamps_ms.length > 0) {
+      const shifted = _shiftLive(data, _shapeOffsetMs);
+      shapeCanvas.setLiveShape?.(shifted);
+      _updateDiffCanvas(shifted);
+      document.getElementById('diff-status').textContent =
+        `${data.timestamps_ms.length} live frames · shifted by ${_shapeOffsetMs >= 0 ? '+' : ''}${_shapeOffsetMs}ms`;
+    } else {
+      shapeCanvas.setLiveShape?.(null);
+      _updateDiffCanvas(null);
+      document.getElementById('diff-status').textContent = 'xcorr idle — no live frames';
+    }
+  } catch (e) {
+    /* endpoint missing or error — fall through */
+  }
+}
+
+function _restartLivePoll(uri) {
+  if (_xcorrPollTimer) clearInterval(_xcorrPollTimer);
+  if (!uri) return;
+  _pollLiveFrames(uri);
+  _xcorrPollTimer = setInterval(() => _pollLiveFrames(uri), 1500);
+}
+
+// ── Track + shape loading ───────────────────────────────────────────────────
+async function _loadShape(uri) {
+  if (!uri) {
+    shapeCanvas.setData?.(null, null);
+    diffCanvas.setData?.(null, null);
+    document.getElementById('shape-status').textContent = 'No song.';
+    return;
+  }
+  try {
+    const meta = await GET(`/audio-shape/meta?uri=${encodeURIComponent(uri)}`).catch(() => null);
+    const data = await GET(`/audio-shape/data?uri=${encodeURIComponent(uri)}`).catch(() => null);
+    if (data && data.timestamps_ms?.length) {
+      _savedShape = data;
+      shapeCanvas.setData(data, meta);
+      const dur = meta?.duration_ms || data.timestamps_ms[data.timestamps_ms.length - 1] || 60000;
+      document.getElementById('shape-status').textContent =
+        `${data.timestamps_ms.length} samples · duration ${(dur/1000).toFixed(0)}s`;
+      // Anchor candidates overlay (advanced-only inside the canvas)
+      shapeCanvas.setAnchorCandidates?.(meta?.anchor_candidates || [], meta?.tempo_bpm || null);
+      // Librosa overlay intentionally omitted on Debug — keep the canvas focused
+      // on saved RMS vs live RMS. (Beats / MFCC live on /timing-viz if needed.)
+    } else {
+      _savedShape = null;
+      shapeCanvas.setData?.(null, null);
+      diffCanvas.setData?.(null, null);
+      diffCanvas.setLiveShape?.(null);
+      document.getElementById('shape-status').textContent = 'No saved shape for this song.';
+    }
+  } catch (e) {
+    document.getElementById('shape-status').textContent = `Load failed: ${e.message || e}`;
+  }
+  shapeCanvas.clearXcorrWindows?.();
+  _restartLivePoll(uri);
+}
+
+// ── State message handler ─────────────────────────────────────────────────────
+onMessage('state', (msg) => {
+  _lastPollTime = Date.now();
+  const newTrack = msg.track || null;
+  const uriChanged = (newTrack?.spotify_uri ?? null) !== (track?.spotify_uri ?? null);
+  track = newTrack;
+
+  document.getElementById('track-title').textContent = track?.title || '—';
+  document.getElementById('track-artist').textContent = track?.artist || '';
+  document.getElementById('track-uri').textContent = track?.spotify_uri || '';
+
+  _ledfxRtt = msg.ledfx_rtt_ms ?? 0;
+
+  // Sync state grid
+  document.getElementById('dbg-rtt').textContent = Math.round(_ledfxRtt);
+  document.getElementById('dbg-buffer').textContent = msg.timing?.buffer_ms ?? '—';
+  document.getElementById('dbg-shape').textContent = msg.timing?.shape_offset_ms ?? '—';
+  document.getElementById('dbg-shape-quality').textContent =
+    msg.timing?.shape_offset_quality != null
+      ? `ms (Q=${(+msg.timing.shape_offset_quality).toFixed(2)})`
+      : 'ms';
+  document.getElementById('dbg-total').textContent = msg.timing?.effective_offset_ms ?? '—';
+  document.getElementById('dbg-buffer-live').textContent = `${_liveBufferNudge >= 0 ? '+' : ''}${_liveBufferNudge}ms`;
+  _bufferMs = msg.timing?.buffer_ms ?? 0;
+  _shapeOffsetMs = msg.timing?.shape_offset_ms ?? 0;
+  _shapeQuality = msg.timing?.shape_offset_quality ?? 0;
+
+  if (uriChanged) {
+    _userPanned = false;   // re-enable follow window for the new song
+    _loadShape(track?.spotify_uri);
+    _fetchShapeStatus(track?.spotify_uri);
+    document.getElementById('dbg-anchor-summary').textContent = 'no data';
+    document.getElementById('dbg-anchor-match').textContent = '';
+    document.getElementById('dbg-xcorr-windows').textContent = 'no windows yet';
+  }
+
+  if (track) {
+    const p = track.progress_ms ?? 0;
+    shapeCanvas.setPlayhead?.(p);
+    diffCanvas.setPlayhead?.(p);
+    if (!_userPanned) {
+      // Slide the window so playhead sits FOLLOW_PAST_MS from the left edge.
+      const startMs = Math.max(0, p - FOLLOW_PAST_MS);
+      const endMs   = startMs + FOLLOW_PAST_MS + FOLLOW_FUTURE_MS;
+      shapeCanvas.setZoom(startMs, endMs);
+      diffCanvas.setZoom(startMs, endMs);
+    }
+  }
+});
+
+// ── Poll-age ticker ──────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('dbg-poll-age').textContent = Date.now() - _lastPollTime;
+}, 250);
+
+// ── xcorr_window / shape_match_updated ──────────────────────────────────────
+const _xcorrLines = [];
+onMessage('xcorr_window', (msg) => {
+  shapeCanvas.addXcorrWindow?.(msg);
+  diffCanvas.addXcorrWindow?.(msg);
+  const winner = msg.winner || (msg.failed ? 'fail' : '?');
+  const r = (msg.winner === 'new' ? msg.new_r : msg.old_r) ?? 0;
+  const off = (msg.winner === 'new' ? msg.new_offset_ms : msg.old_offset_ms) ?? 0;
+  _xcorrLines.unshift(
+    `[${msg.win_start}-${msg.win_end}] ${winner.padEnd(4)} ` +
+    `${off >= 0 ? '+' : ''}${off}ms r=${(+r).toFixed(2)} ` +
+    `Q=${(+(msg.new_quality ?? msg.old_quality ?? 0)).toFixed(2)} diff=${(+(msg.difficulty ?? 0)).toFixed(2)}` +
+    (msg.applied ? ' ★' : '') +
+    (msg.failed ? '  REJECT' : '')
+  );
+  if (_xcorrLines.length > 30) _xcorrLines.pop();
+  document.getElementById('dbg-xcorr-windows').textContent = _xcorrLines.join('\n');
+});
+
+onMessage('shape_match_updated', (msg) => {
+  shapeCanvas.setLiveMatch?.(msg);
+  diffCanvas.setLiveMatch?.(msg);
+  if (msg.source === 'anchor') {
+    document.getElementById('dbg-anchor-match').textContent =
+      `Anchor matched: ${msg.offset_ms >= 0 ? '+' : ''}${msg.offset_ms}ms ` +
+      `r=${(+msg.r).toFixed(2)} Q=${(+msg.q).toFixed(2)} band=${msg.band}`;
+  }
+});
+
+onMessage('trigger_fired', (msg) => {
+  _lastFire = msg;
+  document.getElementById('dbg-last-trigger').textContent = msg.event_name || msg.trigger_id || '—';
+  const delta = (msg.fired_at_ms ?? 0) - (msg.scheduled_ms ?? 0);
+  document.getElementById('dbg-last-fire').textContent =
+    `scheduled ${msg.scheduled_ms}ms · fired ${msg.fired_at_ms}ms · Δ ${delta >= 0 ? '+' : ''}${delta}ms · effective_offset ${msg.effective_offset_ms ?? '—'}ms`;
+});
+
+// ── xcorr_start: anchor candidates listing ──────────────────────────────────
+onMessage('xcorr_start', (msg) => {
+  // Anchor-summary text comes from meta on shape load; xcorr_start gives us the play_type.
+  // The anchor list itself lives in the canvas overlay.
+});
+
+// ── Trim controls ──────────────────────────────────────────────────────────
+window.bumpPerceptionTrim = async (deltaMs, reset = false) => {
+  if (!track?.spotify_uri) return;
+  const url = '/audio-shape/perception-trim';
+  const body = reset ? { uri: track.spotify_uri, value_ms: 0 }
+                     : { uri: track.spotify_uri, delta_ms: deltaMs };
+  try {
+    const res = await POST(url, body);
+    _perceptionTrimMs = res?.value_ms ?? 0;
+    document.getElementById('perception-trim-input').value = _perceptionTrimMs;
+    shapeCanvas.setTrim?.(_perceptionTrimMs);
+    diffCanvas.setTrim?.(_perceptionTrimMs);
+  } catch (e) { /* ignore */ }
+};
+
+document.getElementById('perception-trim-input').addEventListener('change', async (e) => {
+  if (!track?.spotify_uri) return;
+  const ms = parseInt(e.target.value, 10);
+  if (!isNaN(ms)) {
+    const res = await POST('/audio-shape/perception-trim', { uri: track.spotify_uri, value_ms: ms });
+    _perceptionTrimMs = res?.value_ms ?? ms;
+    shapeCanvas.setTrim?.(_perceptionTrimMs);
+    diffCanvas.setTrim?.(_perceptionTrimMs);
+  }
+});
+
+// ── Live buffer nudge ([ / ] keys) ──────────────────────────────────────────
+window.nudgeBuffer = (deltaMs) => {
+  _liveBufferNudge += deltaMs;
+  document.getElementById('dbg-buffer-live').textContent =
+    `${_liveBufferNudge >= 0 ? '+' : ''}${_liveBufferNudge}ms`;
+  PATCH('/control/live-buffer-nudge', { delta_ms: deltaMs }).catch(() => {});
+};
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === '[') window.nudgeBuffer(-50);
+  if (e.key === ']') window.nudgeBuffer(+50);
+});
+
+// ── Shape status section ────────────────────────────────────────────────────
+function _fmtRelative(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (isNaN(t)) return '';
+  const dSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (dSec < 60)    return `${dSec} s ago`;
+  if (dSec < 3600)  return `${Math.floor(dSec / 60)} min ago`;
+  if (dSec < 86400) return `${Math.floor(dSec / 3600)} hr ago`;
+  return `${Math.floor(dSec / 86400)} d ago`;
+}
+
+async function _fetchShapeStatus(uri) {
+  const elCap   = document.getElementById('dbg-shape-captured');
+  const elState = document.getElementById('dbg-shape-state');
+  const elNeeds = document.getElementById('dbg-shape-needs');
+  const elLast  = document.getElementById('dbg-shape-last');
+  if (!uri) {
+    elCap.textContent = '—'; elState.textContent = '—';
+    elNeeds.textContent = '—'; elLast.textContent = '—';
+    return;
+  }
+  let s;
+  try { s = await GET(`/audio-shape/status?uri=${encodeURIComponent(uri)}`); }
+  catch { return; }
+  if (s.has_shape) {
+    // Captured-at
+    if (s.captured_at) {
+      const local = new Date(s.captured_at).toLocaleString();
+      elCap.innerHTML = `${local} <span style="color:var(--text-muted);">(${_fmtRelative(s.captured_at)})</span>`;
+      elCap.style.color = '';
+    } else {
+      elCap.textContent = 'unknown'; elCap.style.color = 'var(--text-muted)';
+    }
+    // State chips
+    const chips = [];
+    chips.push(s.capture_complete ? 'complete' : 'incomplete');
+    chips.push(s.offset_verification);
+    chips.push(`librosa v${s.librosa_version}`);
+    if (s.offset_quality > 0) chips.push(`Q=${s.offset_quality.toFixed(2)}`);
+    elState.textContent = chips.join(' · ');
+    elState.style.color = '';
+    // Needs recapture
+    if (s.needs_recapture) {
+      elNeeds.style.color = '#f44336';
+      elNeeds.textContent = `yes — ${s.needs_recapture_reason || '(no reason)'} ` +
+        `· flag count ${s.needs_recapture_flag_count}` +
+        (s.needs_recapture_flagged_at ? ` · flagged ${_fmtRelative(s.needs_recapture_flagged_at)}` : '');
+    } else {
+      elNeeds.style.color = '';
+      elNeeds.textContent = 'no';
+    }
+    // Last attempt (this URI)
+    if (s.last_attempt) {
+      if (s.last_attempt.status === 'ok') {
+        elLast.style.color = '#4caf50';
+        elLast.textContent = '✓ ok (this URI)';
+      } else {
+        elLast.style.color = '#f44336';
+        elLast.textContent = `✗ failed: ${s.last_attempt.reason || 'unknown'} (this URI)`;
+      }
+    } else {
+      elLast.style.color = 'var(--text-muted)';
+      elLast.textContent = 'idle (no recent attempt for this URI)';
+    }
+  } else {
+    elCap.textContent = 'no shape captured';
+    elCap.style.color = 'var(--text-muted)';
+    elState.textContent = '—'; elState.style.color = '';
+    elNeeds.textContent = '—'; elNeeds.style.color = '';
+    if (s.last_attempt) {
+      if (s.last_attempt.status === 'ok') {
+        elLast.style.color = '#4caf50';
+        elLast.textContent = '✓ ok (this URI)';
+      } else {
+        elLast.style.color = '#f44336';
+        elLast.textContent = `✗ failed: ${s.last_attempt.reason || 'unknown'} (this URI)`;
+      }
+    } else {
+      elLast.style.color = 'var(--text-muted)';
+      elLast.textContent = 'idle';
+    }
+  }
+  // Previous attempt — most recent attempt for ANY URI. Show only when it's
+  // for a different song than the current one (otherwise it duplicates "Last
+  // attempt"). Lets the user see "the song before this one ✓ ok" / "✗ failed
+  // — too_short" without leaving the Debug page.
+  const elPrev = document.getElementById('dbg-shape-prev');
+  const g = s.last_attempt_global;
+  if (g && g.for_uri && g.for_uri !== uri) {
+    const songLabel = (g.title || g.artist)
+      ? `${g.artist ? g.artist + ' — ' : ''}${g.title || g.for_uri}`
+      : g.for_uri;
+    if (g.status === 'ok') {
+      elPrev.style.color = '#4caf50';
+      elPrev.textContent = `✓ ${songLabel}: capture ok`;
+    } else {
+      elPrev.style.color = '#f44336';
+      elPrev.textContent = `✗ ${songLabel}: ${g.reason || 'failed'}`;
+    }
+  } else {
+    elPrev.style.color = 'var(--text-muted)';
+    elPrev.textContent = '—';
+  }
+}
+
+document.getElementById('btn-recapture').addEventListener('click', async () => {
+  if (!track?.spotify_uri) {
+    showToast?.('No track loaded', 'error');
+    return;
+  }
+  if (!confirm(`Delete the stored audio shape, WAV, and librosa data for:\n\n${track.title} — ${track.artist}\n\nThe song will re-capture on the next play.`)) return;
+  try {
+    const r = await fetch(`/api/audio-shape?uri=${encodeURIComponent(track.spotify_uri)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    showToast?.('Shape deleted — will re-capture on next play.', 'success');
+    _fetchShapeStatus(track.spotify_uri);
+  } catch (e) {
+    showToast?.('Delete failed: ' + (e.message || e), 'error');
+  }
+});
+
+document.getElementById('btn-force-next').addEventListener('click', async () => {
+  try {
+    await POST('/control/recapture', { enabled: true, count: 1 });
+    showToast?.('Force-recapture queued for the next song.', 'success');
+  } catch (e) {
+    showToast?.('Failed: ' + (e.message || e), 'error');
+  }
+});
+
+// Auto-refetch shape status when a new high-Q xcorr lock is applied so Q
+// updates without a page reload.
+onMessage('xcorr_window', (msg) => {
+  if (msg.applied && track?.spotify_uri === msg.uri) {
+    _fetchShapeStatus(track.spotify_uri);
+  }
+});
+
+// ── Init: pull current state ────────────────────────────────────────────────
+(async () => {
+  try {
+    const status = await GET('/spotify/status');
+    if (status?.track) {
+      track = status.track;
+      document.getElementById('track-title').textContent = track.title || '—';
+      document.getElementById('track-artist').textContent = track.artist || '';
+      document.getElementById('track-uri').textContent = track.spotify_uri || '';
+      _loadShape(track.spotify_uri);
+      _fetchShapeStatus(track.spotify_uri);
+    }
+  } catch {}
+})();
+</script>
+</body>
+</html>

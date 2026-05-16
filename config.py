@@ -106,7 +106,7 @@ class Settings(BaseSettings):
 
     # ── Shape save threshold ───────────────────────────────────────────────────
     # Minimum fraction of song duration captured before shape is saved (0.0–1.0)
-    audio_shape_min_capture_pct: float = 0.90
+    audio_shape_min_capture_pct: float = 0.80
 
     # ── Auto-offset detection ─────────────────────────────────────────────────
     # Bass onset must exceed this multiple of the 1-second rolling mean

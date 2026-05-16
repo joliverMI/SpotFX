@@ -97,6 +97,9 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   let _shapeData    = null;
   let _shapeMeta    = null;
   let _shapeAvgData = null;
+  let _liveData     = null;    // optional: in-progress xcorr capture for the Debug page,
+                                // rendered downward from the midline. Same shape as
+                                // _shapeData ({timestamps_ms, rms_total, rms_low, rms_mid, rms_high}).
   let _maxRms       = null;    // null = window-based; number = pinned raw max
 
   // Exposed by reference so callers can mutate directly
@@ -194,14 +197,21 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     _trimViewport = { startMs, endMs, W };
     const rawMax  = _maxRms ?? Math.max(...inWindow.map(i => rmsT[i]), 1e-9);
     const maxRms  = rawMax * _scales.total * _scaleOverall;
-    const rmsToY  = v => mainH - (v / maxRms) * mainH * 0.9;
+
+    // When live xcorr-frame data is present (Debug page), squeeze the saved
+    // shape into the upper half and draw the live overlay mirrored in the
+    // lower half. The existing overlays (anchors, librosa beats, xcorr
+    // windows, playhead) keep using full mainH and remain unchanged.
+    const hasLive   = !!(_liveData?.timestamps_ms?.length);
+    const savedBase = hasLive ? mainH / 2 : mainH;     // y at which saved bands sit (baseline)
+    const rmsToY    = v => savedBase - (v / maxRms) * savedBase * 0.9;
 
     // Fill bands
     function drawFill(values, scale, fillStyle) {
       ctx.beginPath();
-      ctx.moveTo(timeToX(ts[inWindow[0]]), mainH);
+      ctx.moveTo(timeToX(ts[inWindow[0]]), savedBase);
       for (const i of inWindow) ctx.lineTo(timeToX(ts[i]), rmsToY(values[i] * scale * _scaleOverall));
-      ctx.lineTo(timeToX(ts[inWindow[inWindow.length - 1]]), mainH);
+      ctx.lineTo(timeToX(ts[inWindow[inWindow.length - 1]]), savedBase);
       ctx.closePath();
       ctx.fillStyle = fillStyle;
       ctx.fill();
@@ -210,6 +220,48 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     if (_filters.bass)  drawFill(rmsL, _scales.bass,  'rgba(46,204,113,0.45)');
     if (_filters.mid)   drawFill(rmsM, _scales.mid,   'rgba(230,126,34,0.4)');
     if (_filters.high)  drawFill(rmsH, _scales.high,  'rgba(52,152,219,0.35)');
+
+    // Down-mirrored live overlay: same band colors, lower alpha, baseline at midline,
+    // values increase downward. Uses its own per-band max (live capture levels can
+    // differ substantially from the saved shape).
+    if (hasLive) {
+      const liveTs = _liveData.timestamps_ms;
+      const liveT  = _liveData.rms_total || [];
+      const liveL  = _liveData.rms_low   || [];
+      const liveM  = _liveData.rms_mid   || [];
+      const liveH  = _liveData.rms_high  || [];
+      const liveInWindow = [];
+      for (let i = 0; i < liveTs.length; i++) {
+        if (liveTs[i] >= startMs && liveTs[i] <= endMs) liveInWindow.push(i);
+      }
+      // Divider line at the midline so the eye separates saved (up) from live (down).
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, savedBase);
+      ctx.lineTo(W, savedBase);
+      ctx.stroke();
+      ctx.restore();
+      if (liveInWindow.length) {
+        const liveMax  = Math.max(...liveInWindow.map(i => liveT[i] || 0), maxRms, 1e-9);
+        const lowerH   = mainH - savedBase;
+        const liveYDown = v => savedBase + (v / liveMax) * lowerH * 0.9;
+        function drawFillDown(values, fillStyle) {
+          ctx.beginPath();
+          ctx.moveTo(timeToX(liveTs[liveInWindow[0]]), savedBase);
+          for (const i of liveInWindow) ctx.lineTo(timeToX(liveTs[i]), liveYDown(values[i] || 0));
+          ctx.lineTo(timeToX(liveTs[liveInWindow[liveInWindow.length - 1]]), savedBase);
+          ctx.closePath();
+          ctx.fillStyle = fillStyle;
+          ctx.fill();
+        }
+        if (_filters.total) drawFillDown(liveT, 'rgba(150,150,150,0.32)');
+        if (_filters.bass)  drawFillDown(liveL, 'rgba(46,204,113,0.36)');
+        if (_filters.mid)   drawFillDown(liveM, 'rgba(230,126,34,0.32)');
+        if (_filters.high)  drawFillDown(liveH, 'rgba(52,152,219,0.30)');
+      }
+    }
 
     // Time diamonds — small at 15s, larger at 60s
     {
@@ -869,6 +921,12 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
       _shapeData    = data;
       _shapeMeta    = meta;
       _shapeAvgData = data ? computeAverages(data, avgWindowMs) : null;
+    },
+    /** Optional in-progress xcorr capture overlay rendered downward from the
+     *  midline. Pass null to clear. Saved data automatically squeezes to the
+     *  upper half whenever live data is present so both fit on one canvas. */
+    setLiveShape(data) {
+      _liveData = (data && Array.isArray(data.timestamps_ms) && data.timestamps_ms.length) ? data : null;
     },
 
     // ── View ──────────────────────────────────────────────────────────────────

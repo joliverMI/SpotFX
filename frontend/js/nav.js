@@ -14,6 +14,7 @@ const NAV_HTML = `<nav>
   <a href="/triggerless.html">Triggerless</a>
   <a href="/setlist.html">Set Lists</a>
   <a href="/timing-viz.html" class="nav-timing-viz advanced-only-inline">Timing</a>
+  <a href="/debug.html" class="nav-debug advanced-only-inline">Debug</a>
   <a href="/settings.html">Settings</a>
   <div id="ws-status"><div id="ws-dot"></div> Live</div>
 </nav>`;
