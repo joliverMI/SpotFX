@@ -194,6 +194,16 @@ Action = Annotated[
 ]
 
 
+class MorphLane(BaseModel):
+    """One lane in a `morph_set` MusicEvent. Each lane is a pool of alternative
+    Actions; at fire time the engine picks ONE per lane (weighted random, with
+    label filtering) and fires all picks concurrently. Lane labels merge with
+    the trigger-level filter labels before selection."""
+    name:         str = ""
+    labels:       list[str] = Field(default_factory=list)
+    alternatives: list[Action] = Field(default_factory=list)
+
+
 class SequenceStep(BaseModel):
     """One step in a MusicEvent sequence — either an event reference or a raw action."""
     step_type: Literal["event", "action"] = "event"
@@ -243,7 +253,7 @@ class MusicEvent(BaseModel):
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    event_type: Literal["single", "sequence", "beat_sequence"] = "single"
+    event_type: Literal["single", "sequence", "beat_sequence", "morph_set"] = "single"
     color: str = "#FFD700"     # hex color shown on timeline
     labels: list[str] = Field(default_factory=list)
     energy_level: int | None = None    # 1–10; None = energy-agnostic
@@ -268,6 +278,12 @@ class MusicEvent(BaseModel):
     beat_revert: Optional[BeatRevertConfig] = None
     beat_sequence_fallback: Literal["skip", "fallback"] = "fallback"
     beat_sequence_start_offset_beats: int = 0  # beats to shift entire sequence (negative = earlier)
+
+    # For event_type == "morph_set" — each lane independently picks one Action
+    # to fire; all picks fire concurrently. pre_brightness_* / pre_transition_*
+    # are intentionally NOT applied to morph_set events (brightness now lives
+    # on the Morph Step targets themselves and global scene transitions are gone).
+    morph_lanes: list[MorphLane] = Field(default_factory=list)
 
     # Timing offset: shift when this event fires (negative = earlier, positive = later)
     event_offset_ms: int = 0

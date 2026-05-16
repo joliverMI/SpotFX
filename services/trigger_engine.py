@@ -991,52 +991,57 @@ class TriggerEngine:
         return []
 
     def _select_action(self, event: MusicEvent, labels: list[str]) -> Optional[Action]:
+        """Pick an action from event.actions (delegates to _pick_from_actions).
+        Kept as a thin wrapper for the existing `event.actions` call sites."""
+        return self._pick_from_actions(
+            event.actions, labels, dedupe_key=event.id, desc=f"event '{event.name}'"
+        )
+
+    def _pick_from_actions(
+        self,
+        actions: list[Action],
+        labels: list[str],
+        dedupe_key: str,
+        desc: str = "",
+    ) -> Optional[Action]:
+        """Weighted random pick from a list of Actions, honoring positive/
+        negative label filters and de-weighting whatever was picked last under
+        the same `dedupe_key`. Used by both `_select_action` (single-event
+        action pool) and `_execute_morph_set` (per-lane alternatives pool).
         """
-        Pick an action from event.actions respecting label filters and weights.
-        De-weights the last-used action to avoid consecutive repeats.
-        """
-        if not event.actions:
+        if not actions:
             return None
 
         pos_labels = [l.lower() for l in labels if not l.startswith("-")]
         neg_labels = [l[1:].lower() for l in labels if l.startswith("-")]
 
-        # Candidates are (original_index, action) pairs so identical actions are distinct
         candidates: list[tuple[int, Action]] = []
-        for i, action in enumerate(event.actions):
+        for i, action in enumerate(actions):
             action_labels_lower = [l.lower() for l in action.labels]
-            # Positive filter: if any pos labels given, action must match at least one
             if pos_labels and not any(pl in action_labels_lower for pl in pos_labels):
                 continue
-            # Negative filter
             if any(nl in action_labels_lower for nl in neg_labels):
                 continue
-            # Weight-0 actions are label-only: skip them unless a positive label matched
             if action.weight == 0 and not pos_labels:
                 continue
             candidates.append((i, action))
 
         if not candidates:
-            # Fall back to all actions (ignore labels) and log low-level alert
-            logger.info("No actions matched labels %s for event '%s'; ignoring filter.", labels, event.name)
-            candidates = list(enumerate(event.actions))
+            logger.info("No actions matched labels %s for %s; ignoring filter.", labels, desc or dedupe_key)
+            candidates = list(enumerate(actions))
 
         if not candidates:
             return None
 
-        # Zero out the weight of the last-fired action (by index) to avoid consecutive repeats
-        last_idx = self._last_action.get(event.id)  # int index or None
+        last_idx = self._last_action.get(dedupe_key)
         weights = [0.0 if i == last_idx else a.weight for i, a in candidates]
-
-        # If all weights are 0 (last-action de-weight or weight-0 label-only actions), allow repeat
         if sum(weights) == 0:
             weights = [a.weight for _, a in candidates]
-        # Still zero (all candidates are weight-0 label-only) — use uniform weights
         if sum(weights) == 0:
             weights = [1.0] * len(candidates)
 
         chosen_i, selected = random.choices(candidates, weights=weights, k=1)[0]
-        self._last_action[event.id] = chosen_i
+        self._last_action[dedupe_key] = chosen_i
         return selected
 
     def _describe_action(self, action: Action, _depth: int = 0) -> str:
@@ -1136,6 +1141,8 @@ class TriggerEngine:
             # Test fire: use current song position or 0; fallback beats used if no librosa data
             trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
             await self._execute_beat_sequence(event, trigger_ms, labels or [], step1_prefired=False)
+        elif event.event_type == "morph_set":
+            await self._execute_morph_set(event, labels or [])
         return True
 
     async def _fire_trigger(
@@ -1168,6 +1175,8 @@ class TriggerEngine:
             asyncio.create_task(
                 self._execute_beat_sequence(event, trigger.timestamp_ms, trigger.labels, step1_prefired)
             )
+        elif event.event_type == "morph_set":
+            asyncio.create_task(self._execute_morph_set(event, trigger.labels))
 
         asyncio.create_task(
             ws_manager.broadcast_trigger_fired(
@@ -1224,6 +1233,8 @@ class TriggerEngine:
                     sub, trigger_ms, labels or [],
                     skip_event_ids=skip_event_ids,
                 )
+            elif sub.event_type == "morph_set":
+                await self._execute_morph_set(sub, labels or [], skip_event_ids=skip_event_ids)
             else:
                 sub_action = self._select_action(sub, labels or [])
                 if sub_action:
@@ -1635,6 +1646,40 @@ class TriggerEngine:
                     updates.append((vid, etype, dict(cfg)))
             if updates:
                 morph_effect_state.save_many(updates)
+
+    async def _execute_morph_set(
+        self,
+        event: MusicEvent,
+        labels: list[str],
+        skip_event_ids: Optional[set] = None,
+    ) -> None:
+        """Fire a `morph_set` MusicEvent: for each lane, pick one Action from
+        its alternatives (weighted random + label-filtered) and fire all picks
+        concurrently. Pre-fire commands (`pre_brightness_*`, `pre_transition_*`)
+        are intentionally not applied — brightness lives on Morph Step targets
+        now and global scene transitions are gone."""
+        if not event.morph_lanes:
+            return
+
+        picks: list[tuple[str, Action]] = []  # (lane_name_for_log, action)
+        for li, lane in enumerate(event.morph_lanes):
+            merged_labels = list(labels or []) + list(lane.labels or [])
+            dedupe_key = f"{event.id}:lane:{li}"
+            picked = self._pick_from_actions(
+                lane.alternatives, merged_labels,
+                dedupe_key=dedupe_key, desc=f"lane '{lane.name or li}' of '{event.name}'",
+            )
+            if picked is not None:
+                picks.append((lane.name or f"lane-{li}", picked))
+
+        if not picks:
+            return
+
+        await asyncio.gather(
+            *(self._execute_action(a, labels or [], skip_event_ids=skip_event_ids)
+              for _, a in picks),
+            return_exceptions=True,
+        )
 
     async def _ensure_virtuals_cached(self, targets: list) -> None:
         """For every virtual reachable from any target's scope, ensure the cache
@@ -2095,6 +2140,8 @@ class TriggerEngine:
                 skip_pre_commands=skip_pc,
                 precomputed_snapshot=snap,
             )
+        elif evt.event_type == "morph_set":
+            await self._execute_morph_set(evt, entry.labels, skip_event_ids=skip_ids)
 
     async def _execute_beat_sequence(
         self,
