@@ -86,6 +86,65 @@ class EventRefAction(BaseModel):
     weight: float = 1.0
 
 
+class MorphScope(BaseModel):
+    """Where a Morph target lands. Union semantics: any virtual matched by any field is in scope.
+    Empty across all three = global (all known virtuals)."""
+    virtual_ids: list[str] = Field(default_factory=list)
+    categories:  list[str] = Field(default_factory=list)
+    roles:       list[str] = Field(default_factory=list)
+
+
+class AspectValue(BaseModel):
+    """Polymorphic value for one MorphTarget. Only the fields relevant to the
+    target's aspect are inspected by the compiler; the rest are ignored.
+
+      aspect=brightness | reactivity | blur  → number
+      aspect=color                            → color_kind + color_value
+      aspect=bg_color                         → bg_color
+      aspect=shape                            → any subset of {polygon, star, edges, twist, flip}
+      aspect=effect                           → effect_type
+    """
+    number:       float | None = None
+    color_kind:   Optional[Literal["gradient", "solid"]] = None
+    color_value:  str | None = None
+    bg_color:     str | None = None
+    polygon:      bool | None = None
+    star:         float | None = None
+    edges:        int | None = None
+    twist:        float | None = None
+    flip:         bool | None = None
+    effect_type:  str | None = None
+
+
+MorphAspect = Literal[
+    "shape", "effect", "color", "bg_color", "reactivity", "brightness", "blur",
+]
+
+
+class MorphTarget(BaseModel):
+    """One aspect change on one scope. A MorphStepAction has a list of these."""
+    scope:            MorphScope = Field(default_factory=MorphScope)
+    aspect:           MorphAspect
+    mode:             Literal["absolute", "nudge"] = "absolute"
+    absolute_value:   AspectValue = Field(default_factory=AspectValue)
+    nudge_amount:     float = 0.0
+    intensity_scale:  float = 0.0       # 0 = ignore beat intensity, 1 = full RMS scaling
+    intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
+    ramp_ms:          int | None = None  # overrides MorphStepAction.ramp_ms when set
+
+
+class MorphStepAction(BaseModel):
+    """A composable, multi-target change across Aspects (Shape/Effect/Color/BG Color/
+    Reactivity/Brightness/Blur). Replaces the need for pre-configured LedFX scenes for
+    parameter-level transitions. See `services/morph_compiler.py` for the per-target
+    Aspect-to-raw-param translation."""
+    type:    Literal["morph_step"] = "morph_step"
+    labels:  list[str] = Field(default_factory=list)
+    weight:  float = 1.0
+    ramp_ms: int | None = None  # default for targets that don't override
+    targets: list[MorphTarget] = Field(default_factory=list)
+
+
 class EffectParamChange(BaseModel):
     """One parameter change within a LedFxEffectParamAction."""
     param_label: str          # unified label e.g. "Reactivity", "Effect Brightness"
@@ -129,7 +188,8 @@ Action = Annotated[
     | LedFxAmbientColorAction
     | LedFxGlobalBrightnessAction
     | LedFxGlobalTransitionAction
-    | LedFxEffectParamAction,
+    | LedFxEffectParamAction
+    | MorphStepAction,
     Field(discriminator="type"),
 ]
 

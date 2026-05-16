@@ -1061,6 +1061,10 @@ class TriggerEngine:
             names = [p.param_label for p in action.params if p.param_label]
             body = ", ".join(names) if names else "params"
             return f"{body} ({scope})"
+        elif action.type == "morph_step":
+            n = len(action.targets)
+            aspects = sorted({t.aspect for t in action.targets})
+            return f"Morph {n}× ({', '.join(aspects) if aspects else 'no targets'})"
         elif action.type == "event_ref":
             if _depth < 3:
                 sub = get_event(action.event_id)
@@ -1488,8 +1492,128 @@ class TriggerEngine:
                 if polar_instant_coros:
                     await asyncio.gather(*polar_instant_coros)
 
+        elif action.type == "morph_step":
+            await self._execute_morph_step(action, await_ramps=await_ramps)
+
         else:
             logger.warning("Unknown action type: %s", action.type)
+
+    async def _execute_morph_step(self, action, await_ramps: bool = False) -> None:
+        """Dispatch a MorphStepAction by compiling each target into ConcreteWrites,
+        firing effect-type switches first (instant), then patching params using
+        the same instant/string-ramp/numeric-ramp split as `ledfx_effect_param`.
+
+        Targets whose scope resolves to a virtual not in the cache are topped up
+        once via a live `get_virtual()` call so first-fire after startup still works.
+        """
+        from services.morph_compiler import compile_target
+        from services.effect_params import get_param_meta
+
+        # Top up cache for any virtual in any target's scope that isn't yet cached.
+        await self._ensure_virtuals_cached(action.targets)
+
+        writes = []
+        for target in action.targets:
+            try:
+                writes.extend(compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms))
+            except NotImplementedError:
+                logger.warning("Morph nudge mode not yet implemented; skipping target on aspect=%s", target.aspect)
+
+        if not writes:
+            return
+
+        # 1) Effect-type switches first — instant; LedFX has no in-band effect-switch fade.
+        switch_coros = []
+        for w in writes:
+            if w.kind != "switch":
+                continue
+            switch_coros.append(
+                ledfx_client.set_virtual_effect(w.virtual_id, w.new_effect_type, w.starter_config or {})
+            )
+            # Update cache to reflect the new effect so the param-patch step below
+            # reads the right effect_type. We mirror starter_config wholesale.
+            state.ledfx_virtual_cache.setdefault(w.virtual_id, {})["effect"] = {
+                "type": w.new_effect_type,
+                "config": dict(w.starter_config or {}),
+            }
+        if switch_coros:
+            await asyncio.gather(*switch_coros, return_exceptions=True)
+
+        # 2) Param patches — same instant-vs-ramp split the ledfx_effect_param branch uses.
+        default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+
+        instant_coros: list = []
+        for w in writes:
+            if w.kind != "patch":
+                continue
+            ramp_ms = w.ramp_ms if w.ramp_ms is not None else default_ramp_ms
+            patch = dict(w.patch or {})
+            if not patch:
+                continue
+
+            bool_patch = {k: v for k, v in patch.items() if isinstance(v, bool)}
+            str_patch  = {k: v for k, v in patch.items() if isinstance(v, str)}
+            num_patch  = {k: v for k, v in patch.items() if not isinstance(v, (bool, str))}
+
+            # Strings split into instant vs ramp by `smooth` metadata + ramp_ms>0
+            instant_str: dict = {}
+            ramp_str: dict = {}
+            for k, v in str_patch.items():
+                pmeta = get_param_meta(w.effect_type, k)
+                if pmeta and pmeta.get("smooth") and ramp_ms > 0:
+                    ramp_str[k] = v
+                else:
+                    instant_str[k] = v
+
+            effect_cfg = state.ledfx_virtual_cache.setdefault(w.virtual_id, {}).setdefault("effect", {}).setdefault("config", {})
+
+            if bool_patch or instant_str:
+                instant_coros.append(
+                    ledfx_client.set_virtual_effect(w.virtual_id, w.effect_type, {**bool_patch, **instant_str})
+                )
+                effect_cfg.update({**bool_patch, **instant_str})
+
+            if num_patch:
+                if ramp_ms > 0:
+                    if await_ramps:
+                        await ledfx_client.ramp_effect_params(w.virtual_id, w.effect_type, num_patch, ramp_ms)
+                        effect_cfg.update(num_patch)
+                    else:
+                        self._spawn_ramp(
+                            ledfx_client.ramp_effect_params(w.virtual_id, w.effect_type, num_patch, ramp_ms)
+                        )
+                else:
+                    instant_coros.append(
+                        ledfx_client.set_virtual_effect(w.virtual_id, w.effect_type, num_patch)
+                    )
+                    effect_cfg.update(num_patch)
+
+            if ramp_str:
+                if await_ramps:
+                    await ledfx_client.ramp_gradient_params(w.virtual_id, w.effect_type, ramp_str, ramp_ms)
+                else:
+                    self._spawn_ramp(
+                        ledfx_client.ramp_gradient_params(w.virtual_id, w.effect_type, ramp_str, ramp_ms)
+                    )
+
+        if instant_coros:
+            await asyncio.gather(*instant_coros, return_exceptions=True)
+
+    async def _ensure_virtuals_cached(self, targets: list) -> None:
+        """For every virtual reachable from any target's scope, ensure the cache
+        has an `effect.type`. Tops up missing entries via a single `get_virtual()` each."""
+        from services.morph_compiler import resolve_scope
+        needed: set[str] = set()
+        for t in targets:
+            for vid in resolve_scope(t.scope):
+                if not (state.ledfx_virtual_cache.get(vid) or {}).get("effect", {}).get("type"):
+                    needed.add(vid)
+        for vid in needed:
+            live = await ledfx_client.get_virtual(vid)
+            if live:
+                # ledfx_client.get_virtual returns {vid: {...}} per existing code
+                payload = live.get(vid, live)
+                state.ledfx_virtual_cache[vid] = payload
 
     async def _snapshot_for_revert(self, event: MusicEvent) -> dict:
         """
