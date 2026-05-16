@@ -102,17 +102,19 @@ class AspectValue(BaseModel):
       aspect=color                            → color_kind + color_value
       aspect=bg_color                         → bg_color
       aspect=shape                            → any subset of {polygon, star, edges, twist, flip}
+                                                Booleans (polygon, flip) accept True, False,
+                                                or "toggle" (flip the current cached value).
       aspect=effect                           → effect_type
     """
     number:       float | None = None
     color_kind:   Optional[Literal["gradient", "solid"]] = None
     color_value:  str | None = None
     bg_color:     str | None = None
-    polygon:      bool | None = None
+    polygon:      Optional[bool | Literal["toggle"]] = None
     star:         float | None = None
     edges:        int | None = None
     twist:        float | None = None
-    flip:         bool | None = None
+    flip:         Optional[bool | Literal["toggle"]] = None
     effect_type:  str | None = None
 
 

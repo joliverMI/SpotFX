@@ -529,6 +529,38 @@ window.msShapeEnToggle = function(btn) {
   }
 };
 
+// Tri-state pill: cycles "on" → "off" → "toggle" → "on". Used for polygon/flip
+// where "toggle" means "flip the current cached value at fire time".
+const MS_TRI_LABELS = { on: 'On', off: 'Off', toggle: 'Toggle' };
+function msTriPillStyle(state) {
+  if (state === 'on')     return { bg: 'var(--accent)',  fg: '#fff',           border: '1px solid var(--border)' };
+  if (state === 'toggle') return { bg: 'transparent',    fg: 'var(--accent)',  border: '1px dashed var(--accent)' };
+  return                          { bg: 'var(--surface)', fg: 'var(--text-muted)', border: '1px solid var(--border)' };
+}
+function msTriPill(cls, state) {
+  const s = msTriPillStyle(state);
+  return `<button type="button" class="${cls} ms-tri-pill" data-state="${state}"
+    onclick="msTriPillClick(this)"
+    style="height:28px;padding:0 10px;font-size:11px;border-radius:4px;
+           border:${s.border}; background:${s.bg}; color:${s.fg};
+           cursor:pointer;white-space:nowrap;min-width:64px;">${MS_TRI_LABELS[state]}</button>`;
+}
+window.msTriPillClick = function(btn) {
+  const cur = btn.dataset.state || 'off';
+  const next = cur === 'on' ? 'off' : cur === 'off' ? 'toggle' : 'on';
+  btn.dataset.state = next;
+  btn.textContent = MS_TRI_LABELS[next];
+  const s = msTriPillStyle(next);
+  btn.style.background = s.bg;
+  btn.style.color      = s.fg;
+  btn.style.border     = s.border;
+};
+function msTriStateFromValue(v) {
+  if (v === 'toggle') return 'toggle';
+  if (v === true)     return 'on';
+  return 'off';
+}
+
 function defaultMorphTarget() {
   return {
     scope:           { virtual_ids: [], categories: [], roles: [] },
@@ -605,11 +637,11 @@ function msAspectValueHtml(aspect, val) {
         <span style="font-size:12px;color:var(--text-muted);width:64px;">${labelText}</span>
         <span class="ms-shape-val-wrap" style="${val[key] != null ? '' : 'opacity:0.45;pointer-events:none;'}">${valHtml}</span>
       </div>`;
-    const boolPill = (cls, current) =>
-      msPillToggle('ms-shape-val ' + cls, current === true, 'On', 'Off', '');
+    const triPill = (cls, current) =>
+      msTriPill('ms-shape-val ' + cls, msTriStateFromValue(current));
     return `<div class="ms-val ms-val-shape" style="display:flex;flex-direction:column;">
-      ${row('polygon', 'Polygon', boolPill('ms-shape-polygon', val.polygon))}
-      ${row('flip',    'Flip',    boolPill('ms-shape-flip',    val.flip))}
+      ${row('polygon', 'Polygon', triPill('ms-shape-polygon', val.polygon))}
+      ${row('flip',    'Flip',    triPill('ms-shape-flip',    val.flip))}
       ${row('star',    'Star',    `<input type="number" class="ms-shape-val ms-shape-star"  min="-1" max="1"  step="0.05" value="${val.star  ?? 0}" style="width:80px;">`)}
       ${row('edges',   'Edges',   `<input type="number" class="ms-shape-val ms-shape-edges" min="0"  max="8"  step="1"    value="${val.edges ?? 6}" style="width:80px;">`)}
       ${row('twist',   'Twist',   `<input type="number" class="ms-shape-val ms-shape-twist" min="0"  max="10" step="0.1"  value="${val.twist ?? 0}" style="width:80px;">`)}
@@ -733,7 +765,8 @@ function syncMorphTarget(row) {
       const key = srow.dataset.key;
       if (key === 'polygon' || key === 'flip') {
         const valBtn = srow.querySelector('.ms-shape-val.ms-shape-' + key);
-        absolute_value[key] = valBtn?.dataset.active === 'true';
+        const state = valBtn?.dataset.state || 'off';
+        absolute_value[key] = state === 'toggle' ? 'toggle' : (state === 'on');
       } else {
         const valEl = srow.querySelector('.ms-shape-val');
         const num = parseFloat(valEl?.value);

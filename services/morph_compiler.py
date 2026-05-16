@@ -134,7 +134,18 @@ def _patch_bg_color(effect_type: str, val: AspectValue) -> dict:
     return {pname: val.bg_color for pname in morph_aspects.params_for_aspect(effect_type, "bg_color")}
 
 
-def _patch_shape(effect_type: str, val: AspectValue) -> dict:
+def _resolve_bool_aspect(value, current) -> bool:
+    """Translate the polygon/flip tri-state into a final bool.
+      True / False  → as-is
+      "toggle"      → flip the current cached value
+    Caller guarantees `value` is not None.
+    """
+    if value == "toggle":
+        return not bool(current)
+    return bool(value)
+
+
+def _patch_shape(effect_type: str, val: AspectValue, current_config: dict) -> dict:
     """shape aspect — write only the sub-fields the user set AND only those the effect supports.
 
     Sub-field → param mapping (resolved via the `aspect` tag in effect_params.json):
@@ -143,14 +154,16 @@ def _patch_shape(effect_type: str, val: AspectValue) -> dict:
       edges   → `edges`    (radial only)
       twist   → `twist`    (radial only)
       flip    → `flip` (power/melt) or `ring` (equalizer2d) or `spin_sign` (radial)
+
+    Booleans (polygon, flip) accept True / False / "toggle"; "toggle" reads
+    the matching raw-param's current value from `current_config` and flips it.
     """
     out: dict = {}
-    # The fields' canonical raw-param names per effect:
     shape_params = morph_aspects.params_for_aspect(effect_type, "shape")
     name_set = set(shape_params)
 
     if val.polygon is not None and "polygon" in name_set:
-        out["polygon"] = val.polygon
+        out["polygon"] = _resolve_bool_aspect(val.polygon, current_config.get("polygon", False))
     if val.star is not None and "star" in name_set:
         out["star"] = val.star
     if val.edges is not None and "edges" in name_set:
@@ -161,12 +174,12 @@ def _patch_shape(effect_type: str, val: AspectValue) -> dict:
         # power / melt use "flip"; equalizer2d uses "ring"; radial uses "spin_sign"
         for candidate in ("flip", "ring", "spin_sign"):
             if candidate in name_set:
-                out[candidate] = val.flip
+                out[candidate] = _resolve_bool_aspect(val.flip, current_config.get(candidate, False))
                 break
     return out
 
 
-def _patch_for_aspect(effect_type: str, aspect_id: str, val: AspectValue) -> dict:
+def _patch_for_aspect(effect_type: str, aspect_id: str, val: AspectValue, current_config: dict) -> dict:
     if aspect_id in ("brightness", "reactivity", "blur"):
         return _patch_numeric(effect_type, aspect_id, val)
     if aspect_id == "color":
@@ -174,7 +187,7 @@ def _patch_for_aspect(effect_type: str, aspect_id: str, val: AspectValue) -> dic
     if aspect_id == "bg_color":
         return _patch_bg_color(effect_type, val)
     if aspect_id == "shape":
-        return _patch_shape(effect_type, val)
+        return _patch_shape(effect_type, val, current_config)
     return {}
 
 
@@ -203,9 +216,11 @@ def compile_target(target: MorphTarget, virtual_cache: dict, default_ramp_ms: Op
         # like a virtual record.
         if not isinstance(cached, dict):
             continue
-        cur_type = (cached.get("effect") or {}).get("type")
+        cur_eff = cached.get("effect") or {}
+        cur_type = cur_eff.get("type")
         if not cur_type:
             continue
+        cur_cfg = cur_eff.get("config") or {}
 
         # Effect-aspect: switch effect type (or no-op if already on it)
         if target.aspect == "effect":
@@ -229,7 +244,7 @@ def compile_target(target: MorphTarget, virtual_cache: dict, default_ramp_ms: Op
             continue
 
         # Param-patch aspects
-        patch = _patch_for_aspect(cur_type, target.aspect, target.absolute_value)
+        patch = _patch_for_aspect(cur_type, target.aspect, target.absolute_value, cur_cfg)
         if not patch:
             continue
         writes.append(ConcreteWrite(
