@@ -485,6 +485,50 @@ function epGradientInputHtml(p) {
 
 // ── Morph Step helpers ─────────────────────────────────────────────────────
 
+// Pill-style toggle button. data-active="true"/"false"; clicking flips state
+// and updates the visible text from data-on / data-off.
+function msPillToggle(cls, active, onText, offText, onClickHandler) {
+  return `<button type="button" class="${cls} ms-pill" data-active="${active}"
+    data-on="${onText}" data-off="${offText}"
+    ${onClickHandler ? `onclick="${onClickHandler}(this)"` : 'onclick="msPillToggleClick(this)"'}
+    style="height:28px;padding:0 10px;font-size:11px;border-radius:4px;
+           border:1px solid var(--border);
+           background:${active ? 'var(--accent)' : 'var(--surface)'};
+           color:${active ? '#fff' : 'var(--text-muted)'};
+           cursor:pointer;white-space:nowrap;min-width:54px;">
+    ${active ? onText : offText}</button>`;
+}
+
+window.msPillToggleClick = function(btn) {
+  const next = btn.dataset.active !== 'true';
+  btn.dataset.active = next;
+  btn.textContent = next ? (btn.dataset.on || 'On') : (btn.dataset.off || 'Off');
+  btn.style.background = next ? 'var(--accent)' : 'var(--surface)';
+  btn.style.color      = next ? '#fff' : 'var(--text-muted)';
+};
+
+// Color "Gradient/Solid" kind toggle — swaps the visible picker
+window.msColorKindToggle = function(btn) {
+  msPillToggleClick(btn);
+  const row = btn.closest('.ms-target-row');
+  const isGradient = btn.dataset.active === 'true';
+  const kind = isGradient ? 'gradient' : 'solid';
+  row.querySelector('.ms-val-color-kind').value = kind;
+  row.querySelector('.ms-val-color-gradient').style.display = isGradient ? '' : 'none';
+  row.querySelector('.ms-val-color-solid').style.display    = isGradient ? 'none' : '';
+};
+
+// Shape sub-field Set/(off) toggle — gates whether the sub-field's value is sent
+window.msShapeEnToggle = function(btn) {
+  msPillToggleClick(btn);
+  const wrap = btn.parentElement.querySelector('.ms-shape-val-wrap');
+  if (wrap) {
+    const on = btn.dataset.active === 'true';
+    wrap.style.opacity = on ? '1' : '0.45';
+    wrap.style.pointerEvents = on ? '' : 'none';
+  }
+};
+
 function defaultMorphTarget() {
   return {
     scope:           { virtual_ids: [], categories: [], roles: [] },
@@ -519,32 +563,28 @@ function msAspectValueHtml(aspect, val) {
       <input type="number" class="ms-val-number" min="0" max="1" step="0.01" value="${n}" style="width:60px;">
     </div>`;
   }
-  // BG Color: solid hex
+  // BG Color: solid hex (larger picker, hex mirror)
   if (aspect === 'bg_color') {
     const c = val.bg_color || '#000000';
-    return `<div class="ms-val ms-val-bg" style="display:flex;align-items:center;gap:6px;">
-      <input type="color" class="ms-val-bg-color" value="${c}" style="width:36px;height:24px;padding:1px;">
-      <input type="text" class="ms-val-bg-hex" value="${c}" style="width:80px;font-family:monospace;">
+    return `<div class="ms-val ms-val-bg" style="display:flex;align-items:center;gap:8px;">
+      <input type="color" class="ms-val-bg-color" value="${c}" style="width:64px;height:36px;padding:2px;cursor:pointer;">
+      <input type="text" class="ms-val-bg-hex" value="${c}" style="width:88px;font-family:monospace;">
     </div>`;
   }
-  // Color: gradient OR solid hex (mode toggle)
+  // Color: gradient OR solid hex (mode toggle button instead of select)
   if (aspect === 'color') {
     const kind = val.color_kind || 'gradient';
     const value = val.color_value || '';
+    const isSolid = kind === 'solid';
     const gradOptsHtml = (savedGradients || []).map(g =>
       `<option value="${g.value}"${g.value === value ? ' selected' : ''}>${g.name}</option>`
     ).join('');
-    const isSolid = kind === 'solid';
     const solidVal = isSolid ? value : '#ffffff';
-    return `<div class="ms-val ms-val-color" style="display:flex;flex-direction:column;gap:4px;">
-      <div style="display:flex;align-items:center;gap:6px;">
-        <select class="ms-val-color-kind" onchange="msColorKindChange(this)">
-          <option value="gradient"${kind === 'gradient' ? ' selected' : ''}>Gradient</option>
-          <option value="solid"${kind === 'solid' ? ' selected' : ''}>Solid</option>
-        </select>
-        <select class="ms-val-color-gradient" style="flex:1;${isSolid ? 'display:none' : ''}">${gradOptsHtml}</select>
-        <input type="color" class="ms-val-color-solid" value="${solidVal}" style="width:36px;height:24px;padding:1px;${isSolid ? '' : 'display:none'}">
-      </div>
+    return `<div class="ms-val ms-val-color" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      ${msPillToggle('ms-val-color-kind-btn', kind === 'gradient', 'Gradient', 'Solid', 'msColorKindToggle')}
+      <input type="hidden" class="ms-val-color-kind" value="${kind}">
+      <select class="ms-val-color-gradient" style="width:220px;${isSolid ? 'display:none' : ''}">${gradOptsHtml}</select>
+      <input type="color" class="ms-val-color-solid" value="${solidVal}" style="width:64px;height:36px;padding:2px;cursor:pointer;${isSolid ? '' : 'display:none'}">
     </div>`;
   }
   // Effect: dropdown of supported effects
@@ -554,21 +594,25 @@ function msAspectValueHtml(aspect, val) {
     const opts = supported.map(e =>
       `<option value="${e}"${e === cur ? ' selected' : ''}>${e}</option>`
     ).join('');
-    return `<select class="ms-val-effect">${opts}</select>`;
+    return `<select class="ms-val-effect" style="width:160px;">${opts}</select>`;
   }
-  // Shape: collapsible sub-fields (all optional)
+  // Shape: vertical sub-field list. Each row = [Set/(off) pill][label][value control].
+  // The Set pill gates whether this sub-field is sent at all (None vs. value).
   if (aspect === 'shape') {
-    return `<div class="ms-val ms-val-shape" style="display:grid;grid-template-columns:auto auto auto auto auto;gap:4px 8px;font-size:11px;">
-      <label><input type="checkbox" class="ms-shape-polygon-en"${val.polygon != null ? ' checked' : ''}>
-        polygon <input type="checkbox" class="ms-shape-polygon"${val.polygon === true ? ' checked' : ''} style="margin-left:2px;"></label>
-      <label><input type="checkbox" class="ms-shape-flip-en"${val.flip != null ? ' checked' : ''}>
-        flip <input type="checkbox" class="ms-shape-flip"${val.flip === true ? ' checked' : ''} style="margin-left:2px;"></label>
-      <label><input type="checkbox" class="ms-shape-star-en"${val.star != null ? ' checked' : ''}>
-        star <input type="number" class="ms-shape-star" min="-1" max="1" step="0.05" value="${val.star ?? 0}" style="width:48px;"></label>
-      <label><input type="checkbox" class="ms-shape-edges-en"${val.edges != null ? ' checked' : ''}>
-        edges <input type="number" class="ms-shape-edges" min="0" max="8" step="1" value="${val.edges ?? 6}" style="width:40px;"></label>
-      <label><input type="checkbox" class="ms-shape-twist-en"${val.twist != null ? ' checked' : ''}>
-        twist <input type="number" class="ms-shape-twist" min="0" max="10" step="0.1" value="${val.twist ?? 0}" style="width:48px;"></label>
+    const row = (key, labelText, valHtml) => `
+      <div class="ms-shape-row" data-key="${key}" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        ${msPillToggle('ms-shape-en', val[key] != null, 'Set', '(off)', 'msShapeEnToggle')}
+        <span style="font-size:12px;color:var(--text-muted);width:64px;">${labelText}</span>
+        <span class="ms-shape-val-wrap" style="${val[key] != null ? '' : 'opacity:0.45;pointer-events:none;'}">${valHtml}</span>
+      </div>`;
+    const boolPill = (cls, current) =>
+      msPillToggle('ms-shape-val ' + cls, current === true, 'On', 'Off', '');
+    return `<div class="ms-val ms-val-shape" style="display:flex;flex-direction:column;">
+      ${row('polygon', 'Polygon', boolPill('ms-shape-polygon', val.polygon))}
+      ${row('flip',    'Flip',    boolPill('ms-shape-flip',    val.flip))}
+      ${row('star',    'Star',    `<input type="number" class="ms-shape-val ms-shape-star"  min="-1" max="1"  step="0.05" value="${val.star  ?? 0}" style="width:80px;">`)}
+      ${row('edges',   'Edges',   `<input type="number" class="ms-shape-val ms-shape-edges" min="0"  max="8"  step="1"    value="${val.edges ?? 6}" style="width:80px;">`)}
+      ${row('twist',   'Twist',   `<input type="number" class="ms-shape-val ms-shape-twist" min="0"  max="10" step="0.1"  value="${val.twist ?? 0}" style="width:80px;">`)}
     </div>`;
   }
   return `<span class="action-hint">(unknown aspect: ${aspect})</span>`;
@@ -681,15 +725,21 @@ function syncMorphTarget(row) {
   } else if (aspect === 'effect') {
     absolute_value.effect_type = row.querySelector('.ms-val-effect')?.value || null;
   } else if (aspect === 'shape') {
-    const en = (cls) => row.querySelector(cls)?.checked;
-    const setIf = (key, valCls, enCls, parser) => {
-      if (en(enCls)) absolute_value[key] = parser(row.querySelector(valCls));
-    };
-    if (en('.ms-shape-polygon-en')) absolute_value.polygon = !!row.querySelector('.ms-shape-polygon')?.checked;
-    if (en('.ms-shape-flip-en'))    absolute_value.flip    = !!row.querySelector('.ms-shape-flip')?.checked;
-    setIf('star',  '.ms-shape-star',  '.ms-shape-star-en',  el => parseFloat(el.value) || 0);
-    setIf('edges', '.ms-shape-edges', '.ms-shape-edges-en', el => parseInt(el.value) || 0);
-    setIf('twist', '.ms-shape-twist', '.ms-shape-twist-en', el => parseFloat(el.value) || 0);
+    // Each row carries its key + an "enable" pill button (.ms-shape-en); only
+    // rows where the pill is active contribute a sub-field to the patch.
+    row.querySelectorAll('.ms-shape-row').forEach(srow => {
+      const enBtn = srow.querySelector('.ms-shape-en');
+      if (!enBtn || enBtn.dataset.active !== 'true') return;
+      const key = srow.dataset.key;
+      if (key === 'polygon' || key === 'flip') {
+        const valBtn = srow.querySelector('.ms-shape-val.ms-shape-' + key);
+        absolute_value[key] = valBtn?.dataset.active === 'true';
+      } else {
+        const valEl = srow.querySelector('.ms-shape-val');
+        const num = parseFloat(valEl?.value);
+        if (Number.isFinite(num)) absolute_value[key] = key === 'edges' ? Math.round(num) : num;
+      }
+    });
   }
 
   return { scope, aspect, mode: 'absolute', absolute_value, ramp_ms };
@@ -1095,7 +1145,7 @@ function renderStepActionRow(a, i) {
 }
 
 function renderStepActionBody(actions) {
-  const list = (actions && actions.length) ? actions : [{ type: 'ledfx_scene' }];
+  const list = (actions && actions.length) ? actions : [{ type: 'morph_step', targets: [defaultMorphTarget()] }];
   return `<div class="step-actions-list">
     ${list.map((a, i) => renderStepActionRow(a, i)).join('')}
     <button class="btn-sm btn-add-step-action" style="margin-top:4px">+ Action</button>
@@ -1110,7 +1160,7 @@ function wireStepActionButtons(container, syncAndRerender) {
       const actionRows = [...stepRow.querySelectorAll('.step-action-row')];
       // Temporarily inject a new default action row so syncAndRerender picks it up
       const count = actionRows.length;
-      btn.insertAdjacentHTML('beforebegin', renderStepActionRow({ type: 'ledfx_scene' }, count));
+      btn.insertAdjacentHTML('beforebegin', renderStepActionRow({ type: 'morph_step', targets: [defaultMorphTarget()] }, count));
       syncAndRerender();
     });
   });
@@ -1583,7 +1633,7 @@ document.getElementById('btn-add-action').addEventListener('click', () => {
   if (!e) return;
   syncActionsFromDOM(e);
   e.actions = e.actions || [];
-  e.actions.push({ type: 'event_ref', event_id: events.find(ev => ev.id !== selectedId)?.id || '', weight: 1, labels: [] });
+  e.actions.push({ type: 'morph_step', weight: 1, labels: [], ramp_ms: null, targets: [defaultMorphTarget()] });
   renderActions(e);
 });
 
@@ -1622,8 +1672,14 @@ document.getElementById('btn-add-step').addEventListener('click', () => {
   const e = events.find(e => e.id === selectedId);
   if (!e) return;
   e.sequence_steps = e.sequence_steps || [];
-  const other = events.find(ev => ev.id !== selectedId);
-  e.sequence_steps.push({ step_type: 'event', event_id: other?.id || '', delay_ms: 0, labels: [] });
+  // Default new step: action containing a single Morph Step (matches the
+  // most common authoring path now that we're moving away from scenes)
+  e.sequence_steps.push({
+    step_type: 'action',
+    actions: [{ type: 'morph_step', weight: 1, labels: [], ramp_ms: null, targets: [defaultMorphTarget()] }],
+    delay_ms: 0,
+    labels: [],
+  });
   renderSequence(e);
 });
 
@@ -1772,7 +1828,7 @@ async function seedDefaultEvent() {
 
 // ── New ────────────────────────────────────────────────────────────────────
 document.getElementById('btn-new').addEventListener('click', async () => {
-  const e = { id: uuid(), name: 'New Event', event_type: 'single', color: '#FFD700', labels: [], energy_level: null, pre_brightness_enabled: true, pre_brightness_value: 1.0, pre_brightness_ramp_ms: null, pre_transition_enabled: true, pre_transition_value: 0.5, actions: [], sequence_steps: [], beat_sequence_steps: [], beat_revert: null, beat_sequence_fallback: 'fallback' };
+  const e = { id: uuid(), name: 'New Event', event_type: 'sequence', color: '#FFD700', labels: [], energy_level: null, pre_brightness_enabled: true, pre_brightness_value: 1.0, pre_brightness_ramp_ms: null, pre_transition_enabled: true, pre_transition_value: 0.5, actions: [], sequence_steps: [], beat_sequence_steps: [], beat_revert: null, beat_sequence_fallback: 'fallback' };
   events.push(e);
   await POST('/events', e);
   selectEvent(e.id);
