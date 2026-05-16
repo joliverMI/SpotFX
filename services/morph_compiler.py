@@ -21,6 +21,7 @@ from typing import Literal, Optional
 from models.music_event import MorphTarget, AspectValue, MorphScope
 from services import effect_params as _ep
 from services import morph_aspects
+from services import morph_effect_state
 
 
 # ─── Output type ─────────────────────────────────────────────────────────────
@@ -40,9 +41,16 @@ class ConcreteWrite:
 
 def resolve_scope(scope: MorphScope) -> list[str]:
     """Union of virtual_ids ∪ virtuals in categories ∪ virtuals in roles.
-    Empty scope = all known virtuals (global)."""
+    Empty scope = all imported virtuals (global).
+
+    Always intersected with the set of virtuals SpotFX has imported into device
+    categories. virtual_ids that name an un-imported LedFX virtual are silently
+    dropped — SpotFX never writes to virtuals it doesn't own.
+    """
+    imported = set(_ep.get_all_virtual_ids())
+
     if not scope.virtual_ids and not scope.categories and not scope.roles:
-        return _ep.get_all_virtual_ids()
+        return list(imported)
 
     from services.device_category_service import get_virtuals_for_role
 
@@ -50,7 +58,7 @@ def resolve_scope(scope: MorphScope) -> list[str]:
     seen: set[str] = set()
 
     def _add(vid: str) -> None:
-        if vid and vid not in seen:
+        if vid and vid not in seen and vid in imported:
             seen.add(vid)
             out.append(vid)
 
@@ -171,7 +179,12 @@ def compile_target(target: MorphTarget, virtual_cache: dict, default_ramp_ms: Op
     virtuals = resolve_scope(target.scope)
 
     for vid in virtuals:
-        cached = virtual_cache.get(vid) or {}
+        cached = virtual_cache.get(vid)
+        # Defensive: LedFX bulk responses can carry non-dict scalar fields
+        # under top-level keys ("paused", etc.). Skip anything not shaped
+        # like a virtual record.
+        if not isinstance(cached, dict):
+            continue
         cur_type = (cached.get("effect") or {}).get("type")
         if not cur_type:
             continue
@@ -183,12 +196,16 @@ def compile_target(target: MorphTarget, virtual_cache: dict, default_ramp_ms: Op
                 continue
             if new_type not in morph_aspects.supported_effects():
                 continue
+            # Resume the user's last-known config for this (virtual, effect)
+            # pair if we have one; otherwise fall back to taste-neutral defaults
+            # from effect_params.json.
+            starter = morph_effect_state.get(vid, new_type) or morph_aspects.effect_defaults(new_type) or {}
             writes.append(ConcreteWrite(
                 virtual_id=vid,
                 effect_type=cur_type,
                 kind="switch",
                 new_effect_type=new_type,
-                starter_config=morph_aspects.effect_defaults(new_type) or {},
+                starter_config=starter,
                 ramp_ms=effective_ramp,
             ))
             continue

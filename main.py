@@ -84,6 +84,10 @@ async def lifespan(app: FastAPI):
     # Load effect parameter registry
     effect_params.load()
 
+    # Load Morph last-known (virtual, effect) configs — empty file = fresh start
+    from services import morph_effect_state
+    morph_effect_state.load()
+
     # Seed device categories from static config (first-run migration)
     from services.device_category_service import seed_from_effect_params, migrate_roles
     seed_from_effect_params()

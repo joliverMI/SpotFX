@@ -223,6 +223,22 @@
         "clear": true
       },
       "problemMatcher": []
+    },
+    {
+      "label": "manual smoke test",
+      "detail": "Claude updates this task's command whenever it wants the user to run a test. Never creates a new task for tests — always overwrites this one.",
+      "type": "shell",
+      "command": ".venv/bin/python scripts/smoke_morph_step.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "group": "test",
+      "problemMatcher": []
     }
   ]
 }

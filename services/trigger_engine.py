@@ -1499,39 +1499,53 @@ class TriggerEngine:
             logger.warning("Unknown action type: %s", action.type)
 
     async def _execute_morph_step(self, action, await_ramps: bool = False) -> None:
-        """Dispatch a MorphStepAction by compiling each target into ConcreteWrites,
-        firing effect-type switches first (instant), then patching params using
-        the same instant/string-ramp/numeric-ramp split as `ledfx_effect_param`.
+        """Dispatch a MorphStepAction in two compile passes so an in-step effect
+        switch is visible to subsequent param targets on the same virtual.
 
-        Targets whose scope resolves to a virtual not in the cache are topped up
-        once via a live `get_virtual()` call so first-fire after startup still works.
+        Pass 1: compile effect-switch targets against the current cache. Fire
+        switches (instant). Snapshot each virtual's pre-switch (effect, config)
+        to persisted morph_effect_state so a later switch-back can resume it.
+        Mutate the cache to reflect the new effect + its starter config.
+
+        Pass 2: compile non-effect targets against the now-updated cache. Patch
+        params using the same instant/string-ramp/numeric-ramp split as
+        `ledfx_effect_param`.
+
+        Finally, persist the post-action (effect, config) for every touched
+        virtual so future switch-backs resume the right state.
         """
         from services.morph_compiler import compile_target
         from services.effect_params import get_param_meta
+        from services import morph_effect_state
 
         # Top up cache for any virtual in any target's scope that isn't yet cached.
         await self._ensure_virtuals_cached(action.targets)
 
-        writes = []
+        # ── Pass 1: effect-switch targets ─────────────────────────────────────
+        switch_writes = []
         for target in action.targets:
-            try:
-                writes.extend(compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms))
-            except NotImplementedError:
-                logger.warning("Morph nudge mode not yet implemented; skipping target on aspect=%s", target.aspect)
-
-        if not writes:
-            return
-
-        # 1) Effect-type switches first — instant; LedFX has no in-band effect-switch fade.
-        switch_coros = []
-        for w in writes:
-            if w.kind != "switch":
+            if target.aspect != "effect":
                 continue
+            try:
+                switch_writes.extend(
+                    compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms)
+                )
+            except NotImplementedError:
+                logger.warning("Morph nudge mode not yet implemented; skipping effect-switch target")
+
+        switch_coros = []
+        for w in switch_writes:
+            # Snapshot the pre-switch (effect, config) before we lose it, so
+            # future switch-backs to that effect resume the user's prior state.
+            pre = state.ledfx_virtual_cache.get(w.virtual_id) or {}
+            pre_eff = (pre.get("effect") or {})
+            if pre_eff.get("type") and pre_eff.get("type") != w.new_effect_type:
+                morph_effect_state.save(w.virtual_id, pre_eff["type"], dict(pre_eff.get("config") or {}))
+
             switch_coros.append(
                 ledfx_client.set_virtual_effect(w.virtual_id, w.new_effect_type, w.starter_config or {})
             )
-            # Update cache to reflect the new effect so the param-patch step below
-            # reads the right effect_type. We mirror starter_config wholesale.
+            # Mirror the switch into the cache so Pass 2 sees the new effect.
             state.ledfx_virtual_cache.setdefault(w.virtual_id, {})["effect"] = {
                 "type": w.new_effect_type,
                 "config": dict(w.starter_config or {}),
@@ -1539,23 +1553,33 @@ class TriggerEngine:
         if switch_coros:
             await asyncio.gather(*switch_coros, return_exceptions=True)
 
-        # 2) Param patches — same instant-vs-ramp split the ledfx_effect_param branch uses.
-        default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
-
-        instant_coros: list = []
-        for w in writes:
-            if w.kind != "patch":
+        # ── Pass 2: non-effect targets, compiled against the post-switch cache ─
+        patch_writes = []
+        for target in action.targets:
+            if target.aspect == "effect":
                 continue
+            try:
+                patch_writes.extend(
+                    compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms)
+                )
+            except NotImplementedError:
+                logger.warning("Morph nudge mode not yet implemented; skipping target on aspect=%s", target.aspect)
+
+        default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+        touched: set[str] = {w.virtual_id for w in switch_writes}
+        instant_coros: list = []
+
+        for w in patch_writes:
             ramp_ms = w.ramp_ms if w.ramp_ms is not None else default_ramp_ms
             patch = dict(w.patch or {})
             if not patch:
                 continue
+            touched.add(w.virtual_id)
 
             bool_patch = {k: v for k, v in patch.items() if isinstance(v, bool)}
             str_patch  = {k: v for k, v in patch.items() if isinstance(v, str)}
             num_patch  = {k: v for k, v in patch.items() if not isinstance(v, (bool, str))}
 
-            # Strings split into instant vs ramp by `smooth` metadata + ramp_ms>0
             instant_str: dict = {}
             ramp_str: dict = {}
             for k, v in str_patch.items():
@@ -1599,6 +1623,19 @@ class TriggerEngine:
         if instant_coros:
             await asyncio.gather(*instant_coros, return_exceptions=True)
 
+        # ── Persist post-action state for every touched virtual ───────────────
+        if touched:
+            updates = []
+            for vid in touched:
+                entry = state.ledfx_virtual_cache.get(vid) or {}
+                eff = entry.get("effect") or {}
+                etype = eff.get("type")
+                cfg = eff.get("config") or {}
+                if etype and cfg:
+                    updates.append((vid, etype, dict(cfg)))
+            if updates:
+                morph_effect_state.save_many(updates)
+
     async def _ensure_virtuals_cached(self, targets: list) -> None:
         """For every virtual reachable from any target's scope, ensure the cache
         has an `effect.type`. Tops up missing entries via a single `get_virtual()` each."""
@@ -1606,7 +1643,8 @@ class TriggerEngine:
         needed: set[str] = set()
         for t in targets:
             for vid in resolve_scope(t.scope):
-                if not (state.ledfx_virtual_cache.get(vid) or {}).get("effect", {}).get("type"):
+                entry = state.ledfx_virtual_cache.get(vid)
+                if not isinstance(entry, dict) or not (entry.get("effect") or {}).get("type"):
                     needed.add(vid)
         for vid in needed:
             live = await ledfx_client.get_virtual(vid)
