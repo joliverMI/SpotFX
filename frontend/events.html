@@ -117,6 +117,7 @@
             <option value="single">Single (random from list)</option>
             <option value="sequence">Sequence</option>
             <option value="beat_sequence">Beat Sequence</option>
+            <option value="morph_set">Morph Set (parallel lanes)</option>
           </select>
         </div>
         <div class="field" style="display:flex;align-items:center;gap:8px;">
@@ -129,6 +130,16 @@
         <div id="actions-section">
           <div class="card-title" style="margin-top:8px;">Actions <button class="btn-sm" id="btn-add-action">+ Action</button></div>
           <div id="action-list"></div>
+        </div>
+
+        <!-- Morph Set lanes -->
+        <div id="morph-set-section" style="display:none">
+          <div class="card-title" style="margin-top:8px;">
+            Morph Lanes
+            <span style="font-size:11px;font-weight:400;opacity:0.55;margin-left:6px;">one action picked per lane, all fired in parallel</span>
+            <button class="btn-sm" id="btn-add-lane" style="margin-left:auto;">+ Lane</button>
+          </div>
+          <div id="lane-list"></div>
         </div>
 
         <!-- Sequence steps list -->
@@ -222,7 +233,7 @@ let scenes = [];
 let selectedId = null;
 let typeFilter    = null;
 let aiExFilter    = false;
-const _RAMP_TYPES = new Set(['ledfx_global_brightness', 'ledfx_effect_param']);
+const _RAMP_TYPES = new Set(['ledfx_global_brightness', 'ledfx_effect_param', 'morph_step']);
 let allParamLabels = [];
 let effectParamsConfig = {};
 let savedGradients = [];
@@ -235,6 +246,8 @@ try { allParamLabels = await GET('/effect-params/labels'); } catch {}
 try { effectParamsConfig = await GET('/effect-params/config'); } catch {}
 try { savedGradients = await GET('/gradients'); } catch {}
 try { appSettings = await GET('/settings'); } catch {}
+let morphAspects = { aspect_ids: [], aspect_labels: {}, supported_effects: [], per_effect_params: {}, effect_defaults: {} };
+try { morphAspects = await GET('/morph/aspects'); } catch (e) { console.warn('[Events] /morph/aspects unavailable:', e); }
 renderList();
 
 // ── Searchable select helper ───────────────────────────────────────────────
@@ -286,6 +299,7 @@ const ACTION_TYPES = [
   { value: 'ledfx_global_brightness', label: 'Global Brightness' },
   { value: 'ledfx_global_transition', label: 'Global Transition' },
   { value: 'ledfx_effect_param',      label: 'Effect Parameter'  },
+  { value: 'morph_step',              label: 'Morph Step'        },
 ];
 
 function typeOptions(selected) {
@@ -344,6 +358,20 @@ function actionFields(a) {
           ${['Add','Dissolve','Fade','Wipe','Slide'].map(m =>
             `<option value="${m}"${a.transition_mode === m ? ' selected' : ''}>${m}</option>`).join('')}
         </select></label>`;
+
+    case 'morph_step': {
+      const targets = (a.targets?.length ? a.targets : [defaultMorphTarget()]);
+      const targetsHtml = targets.map((t, ti) => morphTargetRowHtml(t, ti)).join('');
+      const rampVal = a.ramp_ms != null ? a.ramp_ms : '';
+      return `<div class="ms-root">
+        <div class="ms-targets">${targetsHtml}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+          <button class="btn-sm" onclick="msAddTarget(this.closest('.ms-root').querySelector('.ms-targets'))">+ Add Target</button>
+          <span style="font-size:11px;color:var(--text-muted);margin-left:auto">Ramp (ms)</span>
+          <input type="number" class="ms-ramp" value="${rampVal}" min="0" step="50" placeholder="global" style="width:80px">
+        </div>
+      </div>`;
+    }
 
     case 'ledfx_effect_param': {
       const cats = Object.keys(effectParamsConfig.categories || {});
@@ -455,6 +483,218 @@ function epGradientInputHtml(p) {
     <div class="ep-grad-preview" style="width:36px;height:28px;border-radius:3px;border:1px solid var(--border);${preview}"></div>`;
 }
 
+// ── Morph Step helpers ─────────────────────────────────────────────────────
+
+function defaultMorphTarget() {
+  return {
+    scope:           { virtual_ids: [], categories: [], roles: [] },
+    aspect:          (morphAspects.aspect_ids && morphAspects.aspect_ids[0]) || 'brightness',
+    mode:            'absolute',
+    absolute_value:  { number: 0.5 },
+    ramp_ms:         null,
+  };
+}
+
+function msAspectOptions(selected) {
+  const ids    = morphAspects.aspect_ids || ['brightness'];
+  const labels = morphAspects.aspect_labels || {};
+  return ids.map(id =>
+    `<option value="${id}"${id === selected ? ' selected' : ''}>${labels[id] || id}</option>`
+  ).join('');
+}
+
+function msScopeMode(scope) {
+  if (scope?.virtual_ids?.length) return 'virtual';
+  if (scope?.categories?.length)  return 'category';
+  return 'all';
+}
+
+function msAspectValueHtml(aspect, val) {
+  val = val || {};
+  // Numeric aspects (brightness / reactivity / blur): slider + number
+  if (aspect === 'brightness' || aspect === 'reactivity' || aspect === 'blur') {
+    const n = val.number != null ? val.number : 0.5;
+    return `<div class="ms-val ms-val-num" style="display:flex;align-items:center;gap:6px;">
+      <input type="range" class="ms-val-range" min="0" max="1" step="0.01" value="${n}" style="flex:1;accent-color:var(--accent);">
+      <input type="number" class="ms-val-number" min="0" max="1" step="0.01" value="${n}" style="width:60px;">
+    </div>`;
+  }
+  // BG Color: solid hex
+  if (aspect === 'bg_color') {
+    const c = val.bg_color || '#000000';
+    return `<div class="ms-val ms-val-bg" style="display:flex;align-items:center;gap:6px;">
+      <input type="color" class="ms-val-bg-color" value="${c}" style="width:36px;height:24px;padding:1px;">
+      <input type="text" class="ms-val-bg-hex" value="${c}" style="width:80px;font-family:monospace;">
+    </div>`;
+  }
+  // Color: gradient OR solid hex (mode toggle)
+  if (aspect === 'color') {
+    const kind = val.color_kind || 'gradient';
+    const value = val.color_value || '';
+    const gradOptsHtml = (savedGradients || []).map(g =>
+      `<option value="${g.value}"${g.value === value ? ' selected' : ''}>${g.name}</option>`
+    ).join('');
+    const isSolid = kind === 'solid';
+    const solidVal = isSolid ? value : '#ffffff';
+    return `<div class="ms-val ms-val-color" style="display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <select class="ms-val-color-kind" onchange="msColorKindChange(this)">
+          <option value="gradient"${kind === 'gradient' ? ' selected' : ''}>Gradient</option>
+          <option value="solid"${kind === 'solid' ? ' selected' : ''}>Solid</option>
+        </select>
+        <select class="ms-val-color-gradient" style="flex:1;${isSolid ? 'display:none' : ''}">${gradOptsHtml}</select>
+        <input type="color" class="ms-val-color-solid" value="${solidVal}" style="width:36px;height:24px;padding:1px;${isSolid ? '' : 'display:none'}">
+      </div>
+    </div>`;
+  }
+  // Effect: dropdown of supported effects
+  if (aspect === 'effect') {
+    const supported = morphAspects.supported_effects || [];
+    const cur = val.effect_type || supported[0] || '';
+    const opts = supported.map(e =>
+      `<option value="${e}"${e === cur ? ' selected' : ''}>${e}</option>`
+    ).join('');
+    return `<select class="ms-val-effect">${opts}</select>`;
+  }
+  // Shape: collapsible sub-fields (all optional)
+  if (aspect === 'shape') {
+    return `<div class="ms-val ms-val-shape" style="display:grid;grid-template-columns:auto auto auto auto auto;gap:4px 8px;font-size:11px;">
+      <label><input type="checkbox" class="ms-shape-polygon-en"${val.polygon != null ? ' checked' : ''}>
+        polygon <input type="checkbox" class="ms-shape-polygon"${val.polygon === true ? ' checked' : ''} style="margin-left:2px;"></label>
+      <label><input type="checkbox" class="ms-shape-flip-en"${val.flip != null ? ' checked' : ''}>
+        flip <input type="checkbox" class="ms-shape-flip"${val.flip === true ? ' checked' : ''} style="margin-left:2px;"></label>
+      <label><input type="checkbox" class="ms-shape-star-en"${val.star != null ? ' checked' : ''}>
+        star <input type="number" class="ms-shape-star" min="-1" max="1" step="0.05" value="${val.star ?? 0}" style="width:48px;"></label>
+      <label><input type="checkbox" class="ms-shape-edges-en"${val.edges != null ? ' checked' : ''}>
+        edges <input type="number" class="ms-shape-edges" min="0" max="8" step="1" value="${val.edges ?? 6}" style="width:40px;"></label>
+      <label><input type="checkbox" class="ms-shape-twist-en"${val.twist != null ? ' checked' : ''}>
+        twist <input type="number" class="ms-shape-twist" min="0" max="10" step="0.1" value="${val.twist ?? 0}" style="width:48px;"></label>
+    </div>`;
+  }
+  return `<span class="action-hint">(unknown aspect: ${aspect})</span>`;
+}
+
+function morphTargetRowHtml(t, ti) {
+  const cats = Object.keys(effectParamsConfig.categories || {});
+  const allVirts = cats.flatMap(c =>
+    (effectParamsConfig.categories[c].virtuals || []).map(v => ({ v, c }))
+  );
+  const scopeMode = msScopeMode(t.scope);
+  const catSel    = t.scope?.categories?.[0] || cats[0] || '';
+  const vidSel    = t.scope?.virtual_ids?.[0] || allVirts[0]?.v || '';
+  const catOpts   = cats.map(c => `<option value="${c}"${c === catSel ? ' selected' : ''}>${c}</option>`).join('');
+  const vidOpts   = allVirts.map(({ v, c }) =>
+    `<option value="${v}"${v === vidSel ? ' selected' : ''}>${v} (${c})</option>`).join('');
+  const rampVal   = t.ramp_ms != null ? t.ramp_ms : '';
+  return `<div class="ms-target-row" data-idx="${ti}" style="background:var(--surface);padding:6px 8px;border-radius:var(--radius);margin-bottom:6px;border:1px solid var(--border);">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <select class="ms-scope-mode" onchange="msScopeModeChange(this)">
+        <option value="all"${scopeMode === 'all' ? ' selected' : ''}>All Devices</option>
+        <option value="category"${scopeMode === 'category' ? ' selected' : ''}>Category</option>
+        <option value="virtual"${scopeMode === 'virtual' ? ' selected' : ''}>Specific Device</option>
+      </select>
+      <select class="ms-scope-cat" style="${scopeMode === 'category' ? '' : 'display:none'}">${catOpts}</select>
+      <select class="ms-scope-vid" style="${scopeMode === 'virtual' ? '' : 'display:none'}">${vidOpts}</select>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">Aspect</span>
+      <select class="ms-aspect" onchange="msAspectChange(this)">${msAspectOptions(t.aspect)}</select>
+      <button class="btn-sm btn-danger" onclick="this.closest('.ms-target-row').remove()" title="Remove target">✕</button>
+    </div>
+    <div class="ms-value" style="margin-top:6px;">${msAspectValueHtml(t.aspect, t.absolute_value)}</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text-muted);">
+      <span style="margin-left:auto;">Per-target ramp (ms)</span>
+      <input type="number" class="ms-target-ramp" value="${rampVal}" min="0" step="50" placeholder="step default" style="width:80px;">
+    </div>
+  </div>`;
+}
+
+window.msAddTarget = function(list) {
+  const div = document.createElement('div');
+  div.innerHTML = morphTargetRowHtml(defaultMorphTarget(), list.children.length);
+  const row = div.firstElementChild;
+  list.appendChild(row);
+  msWireValueSync(row);
+};
+
+window.msScopeModeChange = function(sel) {
+  const row = sel.closest('.ms-target-row');
+  row.querySelector('.ms-scope-cat').style.display = sel.value === 'category' ? '' : 'none';
+  row.querySelector('.ms-scope-vid').style.display = sel.value === 'virtual'  ? '' : 'none';
+};
+
+window.msAspectChange = function(sel) {
+  const row = sel.closest('.ms-target-row');
+  const valDiv = row.querySelector('.ms-value');
+  valDiv.innerHTML = msAspectValueHtml(sel.value, {});
+  msWireValueSync(row);
+};
+
+window.msColorKindChange = function(sel) {
+  const row = sel.closest('.ms-target-row');
+  const isSolid = sel.value === 'solid';
+  row.querySelector('.ms-val-color-gradient').style.display = isSolid ? 'none' : '';
+  row.querySelector('.ms-val-color-solid').style.display    = isSolid ? '' : 'none';
+};
+
+// Keep slider/number + color/hex pairs in sync inside a target row
+function msWireValueSync(row) {
+  const range  = row.querySelector('.ms-val-range');
+  const number = row.querySelector('.ms-val-number');
+  if (range && number) {
+    range.addEventListener('input', () => { number.value = parseFloat(range.value).toFixed(2); });
+    number.addEventListener('input', () => { if (number.value !== '') range.value = number.value; });
+  }
+  const bgColor = row.querySelector('.ms-val-bg-color');
+  const bgHex   = row.querySelector('.ms-val-bg-hex');
+  if (bgColor && bgHex) {
+    bgColor.addEventListener('input', () => { bgHex.value = bgColor.value; });
+    bgHex.addEventListener('input',   () => { if (/^#[0-9a-fA-F]{6}$/.test(bgHex.value)) bgColor.value = bgHex.value; });
+  }
+}
+
+// Read one target row back to a MorphTarget object
+function syncMorphTarget(row) {
+  const scopeMode = row.querySelector('.ms-scope-mode')?.value || 'all';
+  const scope = { virtual_ids: [], categories: [], roles: [] };
+  if (scopeMode === 'category') {
+    const c = row.querySelector('.ms-scope-cat')?.value;
+    if (c) scope.categories = [c];
+  } else if (scopeMode === 'virtual') {
+    const v = row.querySelector('.ms-scope-vid')?.value;
+    if (v) scope.virtual_ids = [v];
+  }
+  const aspect = row.querySelector('.ms-aspect')?.value || 'brightness';
+  const rampStr = row.querySelector('.ms-target-ramp')?.value;
+  const ramp_ms = rampStr !== '' && rampStr != null ? parseInt(rampStr) : null;
+
+  const absolute_value = {};
+  if (aspect === 'brightness' || aspect === 'reactivity' || aspect === 'blur') {
+    const n = parseFloat(row.querySelector('.ms-val-number')?.value);
+    absolute_value.number = Number.isFinite(n) ? n : 0.5;
+  } else if (aspect === 'bg_color') {
+    absolute_value.bg_color = row.querySelector('.ms-val-bg-color')?.value || '#000000';
+  } else if (aspect === 'color') {
+    const kind = row.querySelector('.ms-val-color-kind')?.value || 'gradient';
+    absolute_value.color_kind = kind;
+    absolute_value.color_value = kind === 'solid'
+      ? (row.querySelector('.ms-val-color-solid')?.value || '#ffffff')
+      : (row.querySelector('.ms-val-color-gradient')?.value || '');
+  } else if (aspect === 'effect') {
+    absolute_value.effect_type = row.querySelector('.ms-val-effect')?.value || null;
+  } else if (aspect === 'shape') {
+    const en = (cls) => row.querySelector(cls)?.checked;
+    const setIf = (key, valCls, enCls, parser) => {
+      if (en(enCls)) absolute_value[key] = parser(row.querySelector(valCls));
+    };
+    if (en('.ms-shape-polygon-en')) absolute_value.polygon = !!row.querySelector('.ms-shape-polygon')?.checked;
+    if (en('.ms-shape-flip-en'))    absolute_value.flip    = !!row.querySelector('.ms-shape-flip')?.checked;
+    setIf('star',  '.ms-shape-star',  '.ms-shape-star-en',  el => parseFloat(el.value) || 0);
+    setIf('edges', '.ms-shape-edges', '.ms-shape-edges-en', el => parseInt(el.value) || 0);
+    setIf('twist', '.ms-shape-twist', '.ms-shape-twist-en', el => parseFloat(el.value) || 0);
+  }
+
+  return { scope, aspect, mode: 'absolute', absolute_value, ramp_ms };
+}
+
 function epParamRowHtml(p) {
   const selectedLabel = allParamLabels.find(o => o.label === p?.param_label) || allParamLabels[0];
   const ptype = selectedLabel?.type || 'numeric';
@@ -552,6 +792,8 @@ function wireSliders(container) {
   if (gbRange) gbRange.addEventListener('input', () => {
     container.querySelector('.action-gb-display').textContent = parseFloat(gbRange.value).toFixed(2);
   });
+  // Morph Step per-target value inputs
+  container.querySelectorAll('.ms-target-row').forEach(row => msWireValueSync(row));
 }
 
 // Change action type: rebuild dynamic section only, preserve weight/labels
@@ -625,6 +867,17 @@ function syncActionFromRow(row) {
         type, weight, labels,
         transition_time: parseFloat(row.querySelector('.action-gt-time')?.value) || 0.5,
         transition_mode: mode || null,
+      };
+    }
+
+    case 'morph_step': {
+      const dyn = row.querySelector('.action-dynamic');
+      const targets = [...dyn.querySelectorAll('.ms-target-row')].map(syncMorphTarget);
+      const rampStr = dyn.querySelector('.ms-ramp')?.value;
+      return {
+        type, weight, labels,
+        ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
+        targets,
       };
     }
 
@@ -738,6 +991,87 @@ function renderActions(e) {
       renderActions(e);
     })
   );
+}
+
+// ── Morph Set lane renderers ────────────────────────────────────────────────
+
+function renderLaneActions(lane, container) {
+  container.innerHTML = (lane.alternatives || []).map((a, i) => renderActionRow(a, i)).join('')
+    || '<div style="color:var(--text-muted);font-size:12px;font-style:italic;">No alternatives. Add one with + Alt.</div>';
+  container.querySelectorAll('.action-row').forEach(row => wireSliders(row));
+  container.querySelectorAll('.action-dup').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const laneIdx = parseInt(container.closest('.morph-lane').dataset.laneIdx);
+      syncLanesFromDOM(currentEvent());
+      const lanes = currentEvent().morph_lanes;
+      const lane = lanes[laneIdx];
+      const idx = parseInt(btn.dataset.idx);
+      lane.alternatives.splice(idx + 1, 0, JSON.parse(JSON.stringify(lane.alternatives[idx])));
+      renderLanes(currentEvent());
+    })
+  );
+  container.querySelectorAll('.action-del').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const laneIdx = parseInt(container.closest('.morph-lane').dataset.laneIdx);
+      syncLanesFromDOM(currentEvent());
+      const lane = currentEvent().morph_lanes[laneIdx];
+      lane.alternatives.splice(parseInt(btn.dataset.idx), 1);
+      renderLanes(currentEvent());
+    })
+  );
+}
+
+function currentEvent() { return events.find(e => e.id === selectedId); }
+
+function defaultLaneAlternative() {
+  return { type: 'morph_step', weight: 1, labels: [], ramp_ms: null, targets: [defaultMorphTarget()] };
+}
+
+function renderLanes(e) {
+  const list = document.getElementById('lane-list');
+  const lanes = e.morph_lanes || [];
+  if (!lanes.length) {
+    list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No lanes. Add one with + Lane.</div>';
+    return;
+  }
+  list.innerHTML = lanes.map((lane, li) => `
+    <div class="morph-lane" data-lane-idx="${li}" style="background:var(--surface2);padding:8px;border-radius:var(--radius);margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:11px;color:var(--text-muted);">Lane ${li + 1}</span>
+        <input type="text" class="lane-name" value="${(lane.name || '').replace(/"/g, '&quot;')}" placeholder="lane name" style="flex:1;min-width:120px;">
+        <input type="text" class="lane-labels" value="${(lane.labels || []).join(', ')}" placeholder="lane filter labels" style="width:140px;">
+        <button class="btn-sm lane-add-alt" title="Add alternative">+ Alt</button>
+        <button class="btn-sm btn-danger lane-del" title="Remove lane">✕</button>
+      </div>
+      <div class="lane-alternatives"></div>
+    </div>
+  `).join('');
+  lanes.forEach((lane, li) => {
+    const root = list.querySelector(`.morph-lane[data-lane-idx="${li}"]`);
+    renderLaneActions(lane, root.querySelector('.lane-alternatives'));
+    root.querySelector('.lane-add-alt').addEventListener('click', () => {
+      syncLanesFromDOM(e);
+      e.morph_lanes[li].alternatives.push(defaultLaneAlternative());
+      renderLanes(e);
+    });
+    root.querySelector('.lane-del').addEventListener('click', () => {
+      syncLanesFromDOM(e);
+      e.morph_lanes.splice(li, 1);
+      renderLanes(e);
+    });
+  });
+}
+
+function syncLanesFromDOM(e) {
+  const laneEls = [...document.querySelectorAll('#lane-list .morph-lane')];
+  e.morph_lanes = laneEls.map(root => {
+    const name = root.querySelector('.lane-name')?.value || '';
+    const labels = (root.querySelector('.lane-labels')?.value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const alts = [...root.querySelectorAll('.lane-alternatives .action-row')]
+      .map(syncActionFromRow);
+    return { name, labels, alternatives: alts };
+  });
 }
 
 // ── Sequence step body renderers ───────────────────────────────────────────
@@ -1050,6 +1384,15 @@ function calcEventDuration(event, visited = new Set()) {
     const ramps = (event.actions || []).filter(a => _RAMP_TYPES.has(a.type)).map(a => a.ramp_ms ?? defaultRamp);
     return ramps.length ? Math.max(...ramps) : 0;
   }
+  if (event.event_type === 'morph_set') {
+    // All lanes fire in parallel; duration is the max across lanes' candidate ramps
+    const laneMax = (event.morph_lanes || []).map(lane =>
+      Math.max(0, ...(lane.alternatives || [])
+        .filter(a => _RAMP_TYPES.has(a.type))
+        .map(a => a.ramp_ms ?? defaultRamp))
+    );
+    return laneMax.length ? Math.max(...laneMax) : 0;
+  }
   let total = 0;
   for (const step of (event.sequence_steps || [])) {
     total += step.delay_ms || 0;
@@ -1193,6 +1536,7 @@ function selectEvent(id) {
   loadRevertIntoDOM(e.revert);
   renderBeatSequence(e);
   loadBsRevertIntoDOM(e.beat_revert);
+  renderLanes(e);
   toggleSections(e.event_type);
   renderList();
 }
@@ -1205,6 +1549,7 @@ function toggleSections(type) {
   document.getElementById('actions-section').style.display = type === 'single' ? '' : 'none';
   document.getElementById('sequence-section').style.display = type === 'sequence' ? '' : 'none';
   document.getElementById('beat-sequence-section').style.display = type === 'beat_sequence' ? '' : 'none';
+  document.getElementById('morph-set-section').style.display = type === 'morph_set' ? '' : 'none';
   document.getElementById('single-pre-commands').style.display = '';
 }
 
@@ -1240,6 +1585,15 @@ document.getElementById('btn-add-action').addEventListener('click', () => {
   e.actions = e.actions || [];
   e.actions.push({ type: 'event_ref', event_id: events.find(ev => ev.id !== selectedId)?.id || '', weight: 1, labels: [] });
   renderActions(e);
+});
+
+document.getElementById('btn-add-lane').addEventListener('click', () => {
+  const e = events.find(e => e.id === selectedId);
+  if (!e) return;
+  syncLanesFromDOM(e);
+  e.morph_lanes = e.morph_lanes || [];
+  e.morph_lanes.push({ name: '', labels: [], alternatives: [defaultLaneAlternative()] });
+  renderLanes(e);
 });
 
 // ── Revert helpers ──────────────────────────────────────────────────────────
@@ -1304,6 +1658,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     e.beat_revert = readBsRevertFromDOM();
     e.beat_sequence_fallback = document.getElementById('bs-fallback').value;
     e.beat_sequence_start_offset_beats = parseInt(document.getElementById('bs-start-offset').value) || 0;
+  } else if (e.event_type === 'morph_set') {
+    syncLanesFromDOM(e);
   }
 
   await POST('/events', e);
@@ -1348,6 +1704,8 @@ document.getElementById('btn-duplicate').addEventListener('click', async () => {
     src.beat_sequence_steps = syncBsStepsFromDOM();
     src.beat_revert = readBsRevertFromDOM();
     src.beat_sequence_fallback = document.getElementById('bs-fallback').value;
+  } else if (src.event_type === 'morph_set') {
+    syncLanesFromDOM(src);
   }
   await POST('/events', src);
 
