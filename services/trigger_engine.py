@@ -1117,6 +1117,11 @@ class TriggerEngine:
         Directly fire a MusicEvent by id, bypassing song-position checks.
         Used by the test/fire endpoint in the UI. Returns True on success.
 
+        Wraps the whole body in `ledfx_client.force_allow()` so the user's
+        explicit fire always reaches LedFX even mid-capture (when the audio-
+        shape gate would otherwise mute writes). Pause is not consulted —
+        manual fires intentionally work regardless of `state.paused`.
+
         For single events: applies pre-brightness (ramp awaited) and pre-transition,
         waits the configured lead time, then fires the main action.
         """
@@ -1124,26 +1129,30 @@ class TriggerEngine:
         if event is None:
             logger.warning("fire_event_now: unknown event %s", event_id)
             return False
-        if event.event_type == "single":
-            await self._apply_pre_commands(event, list(labels or []))
-            lead_ms = max(
-                settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
-                settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
-            )
-            if lead_ms > 0:
-                await asyncio.sleep(lead_ms / 1000)
-            action = self._select_action(event, labels or [])
-            if action is None:
-                return False
-            await self._execute_action(action, labels or [])
-        elif event.event_type == "sequence":
-            await self._execute_sequence(event, labels or [])
-        elif event.event_type == "beat_sequence":
-            # Test fire: use current song position or 0; fallback beats used if no librosa data
-            trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
-            await self._execute_beat_sequence(event, trigger_ms, labels or [], step1_prefired=False)
-        elif event.event_type == "morph_set":
-            await self._execute_morph_set(event, labels or [])
+        with ledfx_client.force_allow():
+            if event.event_type == "single":
+                await self._apply_pre_commands(event, list(labels or []))
+                lead_ms = max(
+                    settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
+                    settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
+                )
+                if lead_ms > 0:
+                    await asyncio.sleep(lead_ms / 1000)
+                action = self._select_action(event, labels or [])
+                if action is None:
+                    return False
+                await self._execute_action(action, labels or [])
+            elif event.event_type == "sequence":
+                await self._execute_sequence(event, labels or [])
+            elif event.event_type == "beat_sequence":
+                # Test fire: use current song position or 0; fallback beats used if no librosa data
+                trigger_ms = state.current_track.interpolated_progress_ms() if state.current_track else 0
+                await self._execute_beat_sequence(event, trigger_ms, labels or [], step1_prefired=False)
+            elif event.event_type == "morph_set":
+                await self._execute_morph_set(event, labels or [])
+            # Wait for any pending coalesce-bus flush so the writes land before
+            # we exit force_allow and the capture gate closes again.
+            await ledfx_client.drain_bus()
         return True
 
     async def _fire_trigger(

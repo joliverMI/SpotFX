@@ -53,6 +53,12 @@ BUS_WINDOW_MS = 8  # coalesce window; must be << ramp step_ms (25 ms)
 
 
 _capture_gate_diag_logged = False
+# Counter-based "force allow" so callers can temporarily bypass the capture
+# gate. Used by manual fire paths (events.html → POST /events/{id}/fire) so
+# the user's explicit action always reaches LedFX even mid-capture. Counter
+# (not bool) so nested usage and concurrent fires don't fight.
+_force_allow_count = 0
+
 
 def _capture_in_progress() -> bool:
     """Return True when audio_shape_service is recording any URI. Used to
@@ -60,7 +66,12 @@ def _capture_in_progress() -> bool:
     LedFX writes for event-loop time / PulseAudio frames. Re-enables
     automatically when capture finishes (audio_shape_service clears its
     `_recording_uri` and the next call dispatches normally).
+
+    Returns False whenever `_force_allow_count > 0`, so manual-fire paths
+    wrapped in `force_allow()` always pass through.
     """
+    if _force_allow_count > 0:
+        return False
     global _capture_gate_diag_logged
     try:
         from services.audio_shape_service import audio_shape_service
@@ -77,6 +88,37 @@ def _capture_in_progress() -> bool:
             logger.warning("LedFX gate: could not read audio_shape_service: %r", exc)
             _capture_gate_diag_logged = True
         return False
+
+
+from contextlib import contextmanager
+
+@contextmanager
+def force_allow():
+    """Temporarily disable the capture gate for the wrapped block. Used by
+    fire_event_now so manual test-fires from the UI always reach LedFX,
+    capture in progress or not. Callers should `await drain_bus()` before
+    leaving the context if their writes go through the coalesce bus — the
+    bus flush task fires 8 ms later, and if it lands after the context
+    exits the writes will hit the closed gate again."""
+    global _force_allow_count
+    _force_allow_count += 1
+    try:
+        yield
+    finally:
+        _force_allow_count -= 1
+
+
+async def drain_bus() -> None:
+    """Await any in-flight coalesce-bus flush so writes queued during the
+    surrounding `force_allow()` block actually reach LedFX before the gate
+    closes again. Safe to call when no flush is pending (no-op)."""
+    task = _bus_task
+    if task is None or task.done():
+        return
+    try:
+        await task
+    except Exception:
+        pass
 
 
 def _get_client() -> httpx.AsyncClient:
