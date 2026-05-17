@@ -88,22 +88,45 @@ def _scale_to_param_range(value: float, effect_type: str, param_name: str) -> fl
     return round(lo + (hi - lo) * max(0.0, min(1.0, value)), 4)
 
 
-def _patch_numeric(effect_type: str, aspect_id: str, val: AspectValue) -> dict:
-    """Distribute one AspectValue.number across every numeric param tagged with
-    `aspect_id` on `effect_type`. Each param's `aspect_scale` (default 1.0) caps
-    how much of the aspect's full range it gets — e.g. on power, `bass_decay_rate`
-    at scale 1.0 reaches the top of its range when Reactivity=1.0, while
-    `sparks_decay_rate` at scale 0.6 only reaches 0.6 of its range.
+def _patch_numeric(
+    effect_type: str,
+    aspect_id: str,
+    target: MorphTarget,
+    current_config: dict,
+    intensity: Optional[float],
+) -> dict:
+    """Distribute one AspectValue.number (mode=absolute) or one nudge_amount
+    (mode=nudge, modulated by beat intensity) across every NUMERIC param
+    tagged with `aspect_id` on `effect_type`.
+
+    Per-param `aspect_scale` (default 1.0) caps each contributor's reach: on
+    power, `bass_decay_rate` at scale 1.0 reaches the top of its range when
+    Reactivity=1.0, while `sparks_decay_rate` at scale 0.6 only reaches 0.6.
 
     Non-numeric params with the same aspect tag (e.g. `sparks_color` under
-    `aspect: reactivity`) are intentionally skipped here — they are in the
-    aspect's UI category but aren't driven by the numeric slider; the builder
-    UI will let the user set them explicitly via separate sub-fields when
-    that lands.
+    `aspect: reactivity`) are filtered — they're in the aspect's UI bucket
+    but aren't driven by the numeric slider.
+
+    Nudge math:
+        eff_intensity = intensity if intensity is not None else 0.5
+        factor        = 1.0 + (eff_intensity - 0.5) * intensity_scale
+        # nudge_amount is in abstract 0..1 space; scale to each param's range
+        param_delta   = nudge_amount * aspect_scale * (hi - lo) * factor
+        new_value     = clamp(current + param_delta, lo, hi)
+
+    A factor of 1.0 keeps the raw nudge; (intensity - 0.5) lets intensity_scale
+    bias the delta both up (loud beats) and down (quiet beats) symmetrically.
     """
-    if val.number is None:
-        return {}
+    val = target.absolute_value
     out: dict = {}
+    is_nudge = target.mode == "nudge"
+
+    if not is_nudge and val.number is None:
+        return {}
+
+    eff_intensity = intensity if intensity is not None else 0.5
+    factor = 1.0 + (eff_intensity - 0.5) * (target.intensity_scale or 0.0)
+
     for pname in morph_aspects.params_for_aspect(effect_type, aspect_id):
         meta = _ep.get_param_meta(effect_type, pname) or {}
         if meta.get("type") not in ("numeric", "integer"):
@@ -111,8 +134,21 @@ def _patch_numeric(effect_type: str, aspect_id: str, val: AspectValue) -> dict:
         scale = meta.get("aspect_scale")
         if scale is None:
             scale = 1.0
-        scaled = max(0.0, min(1.0, val.number * scale))
-        out[pname] = _scale_to_param_range(scaled, effect_type, pname)
+        lo = meta.get("min", 0.0)
+        hi = meta.get("max", 1.0)
+
+        if is_nudge:
+            param_delta = (target.nudge_amount or 0.0) * scale * (hi - lo) * factor
+            current = current_config.get(pname)
+            if current is None:
+                current = (lo + hi) / 2  # neutral fallback if cache lacks the param
+            new_val = float(current) + param_delta
+        else:
+            scaled = max(0.0, min(1.0, val.number * scale))
+            new_val = lo + (hi - lo) * scaled
+
+        new_val = max(lo, min(hi, new_val))
+        out[pname] = round(new_val, 4)
     return out
 
 
@@ -179,9 +215,17 @@ def _patch_shape(effect_type: str, val: AspectValue, current_config: dict) -> di
     return out
 
 
-def _patch_for_aspect(effect_type: str, aspect_id: str, val: AspectValue, current_config: dict) -> dict:
+def _patch_for_aspect(
+    effect_type: str,
+    aspect_id: str,
+    target: MorphTarget,
+    current_config: dict,
+    intensity: Optional[float],
+) -> dict:
+    val = target.absolute_value
     if aspect_id in ("brightness", "reactivity", "blur"):
-        return _patch_numeric(effect_type, aspect_id, val)
+        return _patch_numeric(effect_type, aspect_id, target, current_config, intensity)
+    # Non-numeric aspects: nudge has no meaning, silently behave as absolute.
     if aspect_id == "color":
         return _patch_color(effect_type, val)
     if aspect_id == "bg_color":
@@ -193,7 +237,12 @@ def _patch_for_aspect(effect_type: str, aspect_id: str, val: AspectValue, curren
 
 # ─── Compile ─────────────────────────────────────────────────────────────────
 
-def compile_target(target: MorphTarget, virtual_cache: dict, default_ramp_ms: Optional[int] = None) -> list[ConcreteWrite]:
+def compile_target(
+    target: MorphTarget,
+    virtual_cache: dict,
+    default_ramp_ms: Optional[int] = None,
+    intensity: Optional[float] = None,
+) -> list[ConcreteWrite]:
     """Translate one MorphTarget into per-virtual concrete writes.
 
     `virtual_cache` is `state.ledfx_virtual_cache` (or equivalent shape). Virtuals
@@ -201,10 +250,12 @@ def compile_target(target: MorphTarget, virtual_cache: dict, default_ramp_ms: Op
     cache via `ledfx_client.get_virtual()` before calling this when needed.
 
     `default_ramp_ms` is the MorphStepAction.ramp_ms; target.ramp_ms overrides it.
-    """
-    if target.mode == "nudge":
-        raise NotImplementedError("Morph nudge mode lands in Phase 7")
 
+    `intensity` is a pre-resolved 0..1 beat-level value matching
+    `target.intensity_source`; only consulted when `target.mode == "nudge"`.
+    Pass None when no beat data is available (e.g. test fires) — nudge falls
+    back to a neutral 0.5 so the result is still well-defined.
+    """
     effective_ramp = target.ramp_ms if target.ramp_ms is not None else default_ramp_ms
     writes: list[ConcreteWrite] = []
     virtuals = resolve_scope(target.scope)
@@ -244,7 +295,7 @@ def compile_target(target: MorphTarget, virtual_cache: dict, default_ramp_ms: Op
             continue
 
         # Param-patch aspects
-        patch = _patch_for_aspect(cur_type, target.aspect, target.absolute_value, cur_cfg)
+        patch = _patch_for_aspect(cur_type, target.aspect, target, cur_cfg, intensity)
         if not patch:
             continue
         writes.append(ConcreteWrite(

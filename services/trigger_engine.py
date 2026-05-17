@@ -1532,17 +1532,14 @@ class TriggerEngine:
         # Top up cache for any virtual in any target's scope that isn't yet cached.
         await self._ensure_virtuals_cached(action.targets)
 
-        # ── Pass 1: effect-switch targets ─────────────────────────────────────
+        # ── Pass 1: effect-switch targets (no nudge — effect switches are absolute) ─
         switch_writes = []
         for target in action.targets:
             if target.aspect != "effect":
                 continue
-            try:
-                switch_writes.extend(
-                    compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms)
-                )
-            except NotImplementedError:
-                logger.warning("Morph nudge mode not yet implemented; skipping effect-switch target")
+            switch_writes.extend(
+                compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms)
+            )
 
         switch_coros = []
         for w in switch_writes:
@@ -1565,16 +1562,22 @@ class TriggerEngine:
             await asyncio.gather(*switch_coros, return_exceptions=True)
 
         # ── Pass 2: non-effect targets, compiled against the post-switch cache ─
+        # Resolve per-target beat intensity once before compilation. Nudge
+        # targets only — absolute targets pass None and ignore it.
         patch_writes = []
         for target in action.targets:
             if target.aspect == "effect":
                 continue
-            try:
-                patch_writes.extend(
-                    compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms)
+            intensity = None
+            if target.mode == "nudge":
+                intensity = self._beat_intensity_now(target.intensity_source)
+            patch_writes.extend(
+                compile_target(
+                    target, state.ledfx_virtual_cache,
+                    default_ramp_ms=action.ramp_ms,
+                    intensity=intensity,
                 )
-            except NotImplementedError:
-                logger.warning("Morph nudge mode not yet implemented; skipping target on aspect=%s", target.aspect)
+            )
 
         default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
         touched: set[str] = {w.virtual_id for w in switch_writes}
@@ -1680,6 +1683,34 @@ class TriggerEngine:
               for _, a in picks),
             return_exceptions=True,
         )
+
+    def _beat_intensity_now(self, source: str) -> Optional[float]:
+        """Resolve the current beat-level intensity for a nudge target.
+
+        Looks up the nearest beat to `state.current_track.interpolated_progress_ms()`
+        in the engine's cached `_beats_cache` (or `load_beats_for_uri(uri)` fallback)
+        and returns the requested `source` field clamped to [0, 1]. Returns None
+        when no track is playing or no beat data is available — the compiler
+        falls back to a neutral 0.5 in that case.
+        """
+        if not state.current_track or not state.current_track.spotify_uri:
+            return None
+        beats = self._beats_cache or load_beats_for_uri(state.current_track.spotify_uri)
+        if not beats:
+            return None
+        try:
+            now_ms = state.current_track.interpolated_progress_ms()
+        except Exception:
+            return None
+        # Beats are ms-sorted; nearest is fine for sub-second granularity needs.
+        nearest = min(beats, key=lambda b: abs(int(b.get("ms", 0)) - now_ms))
+        val = nearest.get(source)
+        if val is None:
+            return None
+        try:
+            return max(0.0, min(1.0, float(val)))
+        except (TypeError, ValueError):
+            return None
 
     async def _ensure_virtuals_cached(self, targets: list) -> None:
         """For every virtual reachable from any target's scope, ensure the cache
