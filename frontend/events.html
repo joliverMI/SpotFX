@@ -38,9 +38,10 @@
     <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start;">
       <!-- ── Event list ─────────────────────────────────────────────────── -->
       <div class="card" style="min-width:0;max-height:calc(100vh - 80px);display:flex;flex-direction:column;">
-        <div class="card-title" style="display:flex;align-items:center;">
+        <div class="card-title" style="display:flex;align-items:center;gap:6px;">
           Events
-          <button class="btn-sm btn-accent" id="btn-new" style="margin-left:auto">+ New</button>
+          <button class="btn-sm" id="btn-import-scene" style="margin-left:auto" title="Import a LedFX scene as a starter Morph Set">⤓ Scene</button>
+          <button class="btn-sm btn-accent" id="btn-new">+ New</button>
         </div>
         <div class="field">
           <input id="event-search" type="text" placeholder="Search / filter by label…">
@@ -1936,6 +1937,44 @@ document.getElementById('btn-new').addEventListener('click', async () => {
   events.push(e);
   await POST('/events', e);
   selectEvent(e.id);
+});
+
+// ── Import LedFX scene ─────────────────────────────────────────────────────
+// Reuses the scenes list already loaded into `scenes`. Prompts the user to
+// pick one, calls POST /api/morph/import-scene/{id}, then selects the new event.
+document.getElementById('btn-import-scene').addEventListener('click', async () => {
+  if (!scenes || !scenes.length) {
+    alert('No LedFX scenes available.\n(Is LedFX running?)');
+    return;
+  }
+  // Build a simple labeled prompt — opening a native modal here would be heavy.
+  // Use the scene list with id + name in a window.prompt for v1.
+  const lines = scenes.map((s, i) => `${i + 1}. ${s.name || s.id}  (${s.id})`).join('\n');
+  const pick = window.prompt(
+    `Type the number or scene id of the scene to import as a Morph Set:\n\n${lines}`,
+    '1',
+  );
+  if (!pick) return;
+  let scene = null;
+  const asNum = parseInt(pick, 10);
+  if (Number.isFinite(asNum) && asNum >= 1 && asNum <= scenes.length) {
+    scene = scenes[asNum - 1];
+  } else {
+    scene = scenes.find(s => s.id === pick.trim());
+  }
+  if (!scene) {
+    alert(`Could not match "${pick}" to any scene.`);
+    return;
+  }
+  try {
+    const result = await POST(`/morph/import-scene/${encodeURIComponent(scene.id)}`, {});
+    const newEvent = result.event;
+    events.push(newEvent);
+    renderList();
+    selectEvent(newEvent.id);
+  } catch (err) {
+    alert(`Import failed: ${err}\n(The scene may have no active virtuals in scope.)`);
+  }
 });
 </script>
 </body>
