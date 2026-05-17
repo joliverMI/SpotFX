@@ -612,7 +612,16 @@ function msAspectValueHtml(aspect, val) {
     const kind = val.color_kind || 'gradient';
     const value = val.color_value || '';
     const isSolid = kind === 'solid';
-    const gradOptsHtml = (savedGradients || []).map(g =>
+    // If the current gradient value isn't in our library, prepend an
+    // "(unsaved)" synthetic option so save round-trips cleanly and the user
+    // can see the value exists. The label shows a truncated preview.
+    const inLibrary = (savedGradients || []).some(g => g.value === value);
+    let gradOptsHtml = '';
+    if (value && !isSolid && !inLibrary) {
+      const preview = value.length > 40 ? value.slice(0, 37) + '…' : value;
+      gradOptsHtml += `<option value="${value.replace(/"/g, '&quot;')}" selected>(unsaved) ${preview}</option>`;
+    }
+    gradOptsHtml += (savedGradients || []).map(g =>
       `<option value="${g.value}"${g.value === value ? ' selected' : ''}>${g.name}</option>`
     ).join('');
     const solidVal = isSolid ? value : '#ffffff';
@@ -2088,12 +2097,23 @@ document.getElementById('btn-import-scene').addEventListener('click', async () =
     const result = await POST(`/morph/import-scene/${encodeURIComponent(scene.id)}`, {});
     const newEvent = result.event;
     events.push(newEvent);
+    // Scene-absorb may have auto-registered new gradients into the library;
+    // refresh so the Color dropdown picks them up without a page reload.
+    try { savedGradients = await GET('/gradients'); } catch {}
     renderList();
     selectEvent(newEvent.id);
   } catch (err) {
     alert(`Import failed: ${err}\n(The scene may have no active virtuals in scope.)`);
   }
 });
+
+// Mirror the convert-scene handler: refresh gradients after the import that
+// `msConvertScene` triggers behind the scenes.
+const _msConvertScene_orig = window.msConvertScene;
+window.msConvertScene = async function(btn) {
+  await _msConvertScene_orig(btn);
+  try { savedGradients = await GET('/gradients'); } catch {}
+};
 </script>
 </body>
 </html>

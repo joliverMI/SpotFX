@@ -25,7 +25,10 @@ Numeric aspect reconstruction:
 """
 from __future__ import annotations
 
+import json
 import logging
+import uuid
+from pathlib import Path
 from typing import Optional
 
 from api import ledfx_client
@@ -35,6 +38,44 @@ from models.music_event import (
 from services import effect_params, morph_aspects
 
 logger = logging.getLogger(__name__)
+
+_GRADIENTS_FILE = Path(__file__).parent.parent / "storage" / "gradients.json"
+
+
+def _load_gradients() -> list[dict]:
+    if not _GRADIENTS_FILE.exists():
+        return []
+    try:
+        data = json.loads(_GRADIENTS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_gradients(data: list[dict]) -> None:
+    _GRADIENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _GRADIENTS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _register_scene_gradients(scene_name: str, gradient_strings: set[str]) -> None:
+    """Append any gradient strings not already in storage/gradients.json under
+    auto-generated names ('From <scene>: 1', '… : 2', …). Dedup by `value`."""
+    if not gradient_strings:
+        return
+    existing = _load_gradients()
+    existing_values = {g.get("value") for g in existing}
+    new_strings = [s for s in sorted(gradient_strings) if s not in existing_values]
+    if not new_strings:
+        return
+    for idx, val in enumerate(new_strings, start=1):
+        existing.append({
+            "id":    str(uuid.uuid4()),
+            "name":  f"From {scene_name}: {idx}",
+            "value": val,
+        })
+    _save_gradients(existing)
+    logger.info("scene_absorb: added %d gradient(s) to library from scene '%s'",
+                len(new_strings), scene_name)
 
 
 def _numeric_aspect_target(vid: str, etype: str, aspect_id: str, cfg: dict) -> Optional[MorphTarget]:
@@ -175,9 +216,11 @@ async def import_scene(scene_id: str) -> Optional[MusicEvent]:
 
     supported = set(morph_aspects.supported_effects())
     imported = set(effect_params.get_all_virtual_ids())
+    scene_name = match.get("name") or scene_id
 
     lanes: list[MorphLane] = []
     skipped: list[str] = []
+    seen_gradients: set[str] = set()
     for vid, v in (match.get("virtuals") or {}).items():
         if not isinstance(v, dict):
             continue
@@ -193,6 +236,13 @@ async def import_scene(scene_id: str) -> Optional[MusicEvent]:
             skipped.append(f"{vid}(not-imported)")
             continue
         cfg = v.get("config") or {}
+        # Collect every gradient string this virtual's config uses so we can
+        # auto-register them into SpotFX's gradient library. Skip solid hex
+        # strings — those don't live in the library.
+        for p in morph_aspects.params_for_aspect(etype, "color"):
+            cv = cfg.get(p)
+            if isinstance(cv, str) and "gradient(" in cv:
+                seen_gradients.add(cv)
         targets = _targets_for_virtual(vid, etype, cfg)
         if not targets:
             continue
@@ -203,9 +253,12 @@ async def import_scene(scene_id: str) -> Optional[MusicEvent]:
         logger.info("scene_absorb: scene '%s' had no importable virtuals (skipped: %s)", scene_id, skipped)
         return None
 
-    name = f"Import: {match.get('name') or scene_id}"
+    # Auto-register any gradient strings the scene used that aren't already in
+    # the SpotFX library, so the Color editor's dropdown can show them.
+    _register_scene_gradients(scene_name, seen_gradients)
+
     return MusicEvent(
-        name=name,
+        name=f"Import: {scene_name}",
         event_type="morph_set",
         color="#FFD700",
         labels=["imported-scene"],
