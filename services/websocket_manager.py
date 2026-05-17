@@ -145,9 +145,16 @@ class WebSocketManager:
     async def broadcast_trigger_fired(
         self, trigger_id: str, event_name: str, color: str,
         scheduled_ms: int = 0, fired_at_ms: int = 0, effective_offset_ms: int = 0,
+        event_type: str = "", summary: str = "",
     ) -> None:
-        """Notify the UI that a trigger just fired (for the flash indicator)."""
-        await self.broadcast({
+        """Notify the UI that a trigger just fired (for the flash indicator).
+
+        `event_type` lets the UI distinguish single/sequence/beat_sequence/morph_set
+        for display purposes. `summary` is an optional short human string
+        describing what concretely fired — used for morph_set lane picks so the
+        Now Playing chip can show e.g. "Brightness: Strips → 0.6 · Color: hot".
+        """
+        payload = {
             "type":                "trigger_fired",
             "trigger_id":          trigger_id,
             "event_name":          event_name,
@@ -155,7 +162,12 @@ class WebSocketManager:
             "scheduled_ms":        scheduled_ms,
             "fired_at_ms":         fired_at_ms,
             "effective_offset_ms": effective_offset_ms,
-        })
+        }
+        if event_type:
+            payload["event_type"] = event_type
+        if summary:
+            payload["summary"] = summary
+        await self.broadcast(payload)
 
 
 ws_manager = WebSocketManager()

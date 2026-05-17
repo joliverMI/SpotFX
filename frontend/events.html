@@ -1105,11 +1105,39 @@ function syncActionsFromDOM(e) {
   e.actions = rows.map(syncActionFromRow);
 }
 
+// Deprecated action types: drive UI pills + convert-buttons. ledfx_global_brightness
+// → "Convert to Morph Step" (per-virtual Brightness aspect). ledfx_scene → "Convert
+// to Morph Set" (calls the Phase 6 scene-import endpoint, replaces this action with
+// an event_ref into the new event). Both old types remain executable.
+const DEPRECATED_TYPES = {
+  ledfx_global_brightness: { label: 'Use Morph Step',  convert: 'msConvertGlobalBrightness' },
+  ledfx_scene:             { label: 'Use Morph Set',   convert: 'msConvertScene'            },
+};
+
+function deprecationChipHtml(actionType, i) {
+  const meta = DEPRECATED_TYPES[actionType];
+  if (!meta) return '';
+  return `<span class="action-deprecated" style="display:inline-flex;align-items:center;gap:6px;
+            font-size:10px;padding:2px 6px;border-radius:3px;
+            background:rgba(255,152,0,0.15);color:#ff9800;border:1px solid rgba(255,152,0,0.35);
+            white-space:nowrap;"
+            title="This action type is deprecated. Click 'Convert' to migrate.">
+    deprecated
+    <button class="action-convert" data-idx="${i}"
+      onclick="${meta.convert}(this)"
+      style="font-size:10px;padding:1px 6px;border-radius:3px;border:none;
+             background:rgba(255,152,0,0.25);color:#ff9800;cursor:pointer;">
+      ${meta.label} →
+    </button>
+  </span>`;
+}
+
 function renderActionRow(a, i) {
   return `
     <div class="action-row" data-idx="${i}" data-type="${a.type}">
       <div class="action-row-header">
         <select class="action-type" onchange="changeActionType(this)">${typeOptions(a.type)}</select>
+        ${deprecationChipHtml(a.type, i)}
         <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;margin-left:auto">
           Wt <input type="number" class="action-weight" value="${a.weight ?? 1}" style="width:64px">
         </span>
@@ -1120,6 +1148,96 @@ function renderActionRow(a, i) {
       <div class="action-dynamic">${actionFields(a)}</div>
     </div>`;
 }
+
+// ── Convert handlers ────────────────────────────────────────────────────────
+// These walk up to .action-row, find the action's index, read the current
+// (unsynced) action object from the DOM, and produce a replacement action in
+// place. After replacement we re-render the host (main action list OR a lane
+// alternatives list) so the new editor is wired up correctly.
+
+function _hostAndIndex(btn) {
+  const row = btn.closest('.action-row');
+  const idx = parseInt(row.dataset.idx, 10);
+  const lane = btn.closest('.morph-lane');
+  return { row, idx, lane };
+}
+
+function _replaceActionInModel(btn, replacement) {
+  const { idx, lane } = _hostAndIndex(btn);
+  const e = events.find(ev => ev.id === selectedId);
+  if (!e) return false;
+  if (lane) {
+    // Inside a morph_set lane
+    const laneIdx = parseInt(lane.dataset.laneIdx, 10);
+    syncLanesFromDOM(e);
+    e.morph_lanes[laneIdx].alternatives[idx] = replacement;
+    renderLanes(e);
+  } else {
+    // Top-level actions list (single-event)
+    syncActionsFromDOM(e);
+    e.actions[idx] = replacement;
+    renderActions(e);
+  }
+  return true;
+}
+
+// Convert ledfx_global_brightness → a Morph Step that sets brightness across
+// every imported virtual (global scope), preserving weight/labels/ramp_ms.
+window.msConvertGlobalBrightness = function(btn) {
+  const row = btn.closest('.action-row');
+  const dyn = row.querySelector('.action-dynamic');
+  const brightness = parseFloat(row.querySelector('.action-gb-val')?.value ?? 1);
+  const rampStr = row.querySelector('.action-gb-ramp')?.value;
+  const ramp_ms = rampStr !== '' && rampStr != null ? parseInt(rampStr) : null;
+  const weight = parseFloat(row.querySelector('.action-weight')?.value) || 1;
+  const labels = (row.querySelector('.action-labels')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const replacement = {
+    type: 'morph_step', weight, labels, ramp_ms,
+    targets: [{
+      scope: { virtual_ids: [], categories: [], roles: [] },  // empty = all imported
+      aspect: 'brightness',
+      mode: 'absolute',
+      absolute_value: { number: brightness },
+      nudge_amount: 0, intensity_scale: 0, intensity_source: 'rms_total',
+      ramp_ms: null,
+    }],
+  };
+  _replaceActionInModel(btn, replacement);
+};
+
+// Convert ledfx_scene → call the import endpoint, then replace this action with
+// an event_ref pointing at the new morph_set event. Preserves weight/labels.
+window.msConvertScene = async function(btn) {
+  const row = btn.closest('.action-row');
+  // Scene id may be inside a searchable select wrapper
+  const sceneId = row.querySelector('.action-scene')?.value;
+  if (!sceneId) {
+    alert('No scene selected on this action.');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  try {
+    const result = await POST(`/morph/import-scene/${encodeURIComponent(sceneId)}`, {});
+    const newEvent = result.event;
+    // Push the new event into our local list so renderList sees it.
+    events.push(newEvent);
+    // Replace the scene action with an event_ref to the new morph_set event.
+    const weight = parseFloat(row.querySelector('.action-weight')?.value) || 1;
+    const labels = (row.querySelector('.action-labels')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+    const replacement = {
+      type: 'event_ref',
+      event_id: newEvent.id,
+      weight, labels,
+    };
+    _replaceActionInModel(btn, replacement);
+    renderList();
+  } catch (err) {
+    alert(`Import failed: ${err}\n(The scene may have no active virtuals in SpotFX's imported set.)`);
+    btn.disabled = false;
+    btn.textContent = 'Use Morph Set →';
+  }
+};
 
 function renderActions(e) {
   const list = document.getElementById('action-list');

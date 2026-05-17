@@ -65,6 +65,12 @@
         <button id="analyzed-toggle-btn" class="toggle-btn" title="Use analyzed triggers for songs without user triggers">Analyzed</button>
         <span id="ai-indicator" style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;display:none;"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+          <!-- Morph-fire summary chip: fades in for ~2.5s when a morph_set/morph_step
+               trigger fires, showing the per-lane outcomes (e.g. "Strips: brightness=0.6 · Matrix: Color"). -->
+          <span id="morph-fire-summary"
+                style="font-size:11px;color:var(--accent);background:rgba(33,150,243,0.12);
+                       padding:2px 8px;border-radius:10px;display:none;
+                       max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
           <span id="trigger-flash"></span>
           <span id="countdown"></span>
         </div>
@@ -355,8 +361,22 @@ onMessage('state', msg => {
   _nextTrackUri = msg.next_track_uri || null;
 });
 
+// Tiny helper: pop the morph summary chip for ~2.5s when a morph_set fires.
+let _morphChipTimer = null;
+function showMorphSummary(summary) {
+  const el = document.getElementById('morph-fire-summary');
+  if (!el || !summary) return;
+  el.textContent = summary;
+  el.style.display = '';
+  if (_morphChipTimer) clearTimeout(_morphChipTimer);
+  _morphChipTimer = setTimeout(() => { el.style.display = 'none'; el.textContent = ''; }, 2500);
+}
+
 onMessage('trigger_fired', msg => {
   flashTrigger(msg.color || '#FFD700');
+  if (msg.summary && (msg.event_type === 'morph_set' || msg.event_type === undefined)) {
+    showMorphSummary(msg.summary);
+  }
   // Highlight the row
   const row = document.querySelector(`.trigger-row[data-id="${msg.trigger_id}"]`);
   if (row) {

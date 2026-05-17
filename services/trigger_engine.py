@@ -62,6 +62,7 @@ class _PlanEntry:
     planned_descendant_ids: set[str] = dc_field(default_factory=set)
     preselected_action: Optional[Action] = None   # for "single" events — action chosen at plan time
     preselected_steps: Optional[list] = None      # for "sequence" events — per-step action pre-selection
+    preselected_morph_picks: Optional[list] = None  # for "morph_set" events — per-lane pre-picks
     snapshot_task: Optional[asyncio.Task] = None  # pre-fire snapshot of the LedFX state this event will change
     fired: bool = False
 
@@ -1162,6 +1163,7 @@ class TriggerEngine:
             logger.warning("Trigger %s references unknown event %s.", trigger.id, trigger.event_id)
             return
 
+        morph_summary = ""
         if event.event_type == "single":
             action = self._preselected.pop(trigger.id, None) or self._select_action(event, trigger.labels)
             if action is None:
@@ -1176,7 +1178,11 @@ class TriggerEngine:
                 self._execute_beat_sequence(event, trigger.timestamp_ms, trigger.labels, step1_prefired)
             )
         elif event.event_type == "morph_set":
-            asyncio.create_task(self._execute_morph_set(event, trigger.labels))
+            # Pick synchronously so we can include the lane outcomes in the
+            # trigger_fired broadcast, then fire the picks asynchronously.
+            morph_picks = self._pick_morph_lanes(event, trigger.labels)
+            asyncio.create_task(self._fire_morph_picks(morph_picks, trigger.labels))
+            morph_summary = self._morph_picks_summary(morph_picks)
 
         asyncio.create_task(
             ws_manager.broadcast_trigger_fired(
@@ -1184,6 +1190,8 @@ class TriggerEngine:
                 scheduled_ms=trigger.timestamp_ms,
                 fired_at_ms=fired_at_ms,
                 effective_offset_ms=effective_offset_ms,
+                event_type=event.event_type,
+                summary=morph_summary,
             )
         )
 
@@ -1650,6 +1658,52 @@ class TriggerEngine:
             if updates:
                 morph_effect_state.save_many(updates)
 
+    def _pick_morph_lanes(
+        self,
+        event: MusicEvent,
+        labels: list[str],
+    ) -> list[tuple[str, Action]]:
+        """Synchronously pick one Action per lane (weighted random + label
+        filter). Returns [(lane_name, picked_action), ...]. Separated from
+        the fire step so callers can build a Now Playing summary string
+        without waiting on the actual LedFX writes."""
+        out: list[tuple[str, Action]] = []
+        for li, lane in enumerate(event.morph_lanes):
+            merged_labels = list(labels or []) + list(lane.labels or [])
+            dedupe_key = f"{event.id}:lane:{li}"
+            picked = self._pick_from_actions(
+                lane.alternatives, merged_labels,
+                dedupe_key=dedupe_key, desc=f"lane '{lane.name or li}' of '{event.name}'",
+            )
+            if picked is not None:
+                out.append((lane.name or f"lane-{li}", picked))
+        return out
+
+    async def _fire_morph_picks(
+        self,
+        picks: list[tuple[str, Action]],
+        labels: list[str],
+        skip_event_ids: Optional[set] = None,
+    ) -> None:
+        """Fire the picks from `_pick_morph_lanes` concurrently."""
+        if not picks:
+            return
+        await asyncio.gather(
+            *(self._execute_action(a, labels or [], skip_event_ids=skip_event_ids)
+              for _, a in picks),
+            return_exceptions=True,
+        )
+
+    def _morph_picks_summary(self, picks: list[tuple[str, Action]]) -> str:
+        """Build the short Now Playing string for a morph_set fire, e.g.
+        'Strips: Morph 1× (brightness) · Matrix: Color: hot'.
+        Reuses _describe_action so the format matches the rest of the UI."""
+        parts: list[str] = []
+        for lane_name, action in picks:
+            desc = self._describe_action(action)
+            parts.append(f"{lane_name}: {desc}" if lane_name else desc)
+        return " · ".join(parts)
+
     async def _execute_morph_set(
         self,
         event: MusicEvent,
@@ -1663,26 +1717,8 @@ class TriggerEngine:
         now and global scene transitions are gone."""
         if not event.morph_lanes:
             return
-
-        picks: list[tuple[str, Action]] = []  # (lane_name_for_log, action)
-        for li, lane in enumerate(event.morph_lanes):
-            merged_labels = list(labels or []) + list(lane.labels or [])
-            dedupe_key = f"{event.id}:lane:{li}"
-            picked = self._pick_from_actions(
-                lane.alternatives, merged_labels,
-                dedupe_key=dedupe_key, desc=f"lane '{lane.name or li}' of '{event.name}'",
-            )
-            if picked is not None:
-                picks.append((lane.name or f"lane-{li}", picked))
-
-        if not picks:
-            return
-
-        await asyncio.gather(
-            *(self._execute_action(a, labels or [], skip_event_ids=skip_event_ids)
-              for _, a in picks),
-            return_exceptions=True,
-        )
+        picks = self._pick_morph_lanes(event, labels)
+        await self._fire_morph_picks(picks, labels, skip_event_ids=skip_event_ids)
 
     def _beat_intensity_now(self, source: str) -> Optional[float]:
         """Resolve the current beat-level intensity for a nudge target.
@@ -2172,7 +2208,10 @@ class TriggerEngine:
                 precomputed_snapshot=snap,
             )
         elif evt.event_type == "morph_set":
-            await self._execute_morph_set(evt, entry.labels, skip_event_ids=skip_ids)
+            picks = entry.preselected_morph_picks
+            if picks is None:
+                picks = self._pick_morph_lanes(evt, entry.labels)
+            await self._fire_morph_picks(picks, entry.labels, skip_event_ids=skip_ids)
 
     async def _execute_beat_sequence(
         self,
@@ -2600,6 +2639,13 @@ class TriggerEngine:
                                 "root" if _is_root else "child",
                                 _entry.fire_at_ms - _trigger.timestamp_ms,
                             )
+                            # For morph_set: pick lanes synchronously so the broadcast
+                            # carries the per-lane outcome summary. _execute_plan_entry
+                            # honors the preselected picks instead of re-rolling.
+                            _morph_summary = ""
+                            if _entry.event.event_type == "morph_set":
+                                _entry.preselected_morph_picks = self._pick_morph_lanes(_entry.event, _entry.labels)
+                                _morph_summary = self._morph_picks_summary(_entry.preselected_morph_picks)
                             asyncio.create_task(self._execute_plan_entry(_entry))
                             if _is_root:
                                 asyncio.create_task(
@@ -2608,6 +2654,8 @@ class TriggerEngine:
                                         scheduled_ms=_trigger.timestamp_ms,
                                         fired_at_ms=now_ms,
                                         effective_offset_ms=offset,
+                                        event_type=_entry.event.event_type,
+                                        summary=_morph_summary,
                                     )
                                 )
                             else:
