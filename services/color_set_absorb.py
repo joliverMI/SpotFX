@@ -19,7 +19,7 @@ from api import ledfx_client
 from models.color_set import ColorSetCard, ColorSetEntry
 from models.music_event import MorphScope
 from models.state import state
-from services import effect_params, morph_aspects
+from services import morph_aspects
 from services.effect_params import get_param_meta
 from services.scene_absorb import _register_scene_gradients
 
@@ -60,44 +60,32 @@ async def _read_virtual(vid: str) -> dict:
 
 
 async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
-    """Build a starter Color Set from the live state of the given virtuals.
-    Returns None if none of them are importable (active + supported effect +
-    in a SpotFX device category) or yield no color data."""
-    supported = set(morph_aspects.supported_effects())
-    imported = set(effect_params.get_all_virtual_ids())
+    """Build a starter Color Set with one entry per selected virtual.
 
+    Each entry is pre-filled with whatever FG/BG color the device is currently
+    showing; devices with no current color (e.g. a radial effect) still get an
+    empty scaffold entry so the user can assign colors to them. Returns None
+    only if no virtuals were selected. One entry is created per selected id
+    regardless of whether it currently has color data, so the user gets a
+    full scaffold to edit."""
     entries: list[ColorSetEntry] = []
-    skipped: list[str] = []
     seen_gradients: set[str] = set()
 
     for vid in virtual_ids:
-        if vid not in imported:
-            skipped.append(f"{vid}(not-imported)")
-            continue
         rec = await _read_virtual(vid)
-        if not isinstance(rec, dict) or not rec:
-            skipped.append(f"{vid}(no-live-state)")
-            continue
-        eff = rec.get("effect") or {}
+        eff = (rec or {}).get("effect") or {}
         etype = eff.get("type")
-        if not etype:
-            skipped.append(f"{vid}(no-effect)")
-            continue
-        if etype not in supported:
-            skipped.append(f"{vid}:{etype}(unsupported)")
-            continue
         cfg = eff.get("config") or {}
 
-        color_kind, color_value = _color_for_cfg(etype, cfg)
-        bg_color = _bg_color_for_cfg(etype, cfg)
-        # Only capture background_mode for effects that actually expose it as a
-        # controllable param — otherwise radial/noise produce noise-only entries.
-        bg_mode = None
-        if get_param_meta(etype, "background_mode") is not None:
-            bg_mode = cfg.get("background_mode") if cfg.get("background_mode") in ("additive", "overwrite") else None
-        if color_value is None and bg_color is None and bg_mode is None:
-            skipped.append(f"{vid}(no-color)")
-            continue
+        # Read current color data when the active effect exposes it; leave
+        # unset otherwise. Either way we still emit an entry for this device.
+        color_kind = color_value = bg_color = bg_mode = None
+        if etype:
+            color_kind, color_value = _color_for_cfg(etype, cfg)
+            bg_color = _bg_color_for_cfg(etype, cfg)
+            if get_param_meta(etype, "background_mode") is not None:
+                cur = cfg.get("background_mode")
+                bg_mode = cur if cur in ("additive", "overwrite") else None
 
         if color_kind == "gradient" and color_value:
             seen_gradients.add(color_value)
@@ -111,7 +99,6 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
         ))
 
     if not entries:
-        logger.info("color_set_absorb: nothing importable (skipped: %s)", skipped)
         return None
 
     _register_scene_gradients("Import", seen_gradients)
