@@ -157,6 +157,11 @@ class TriggerEngine:
         self._last_progress_ms: int = 0
         # Track last called action per event id to avoid immediate repeat
         self._last_action: dict[str, str] = {}  # event_id -> action index/key
+        # Color Group selection state (in-memory, reset on track change like
+        # _last_action). Cursor = last index served per group; dir = +1/-1 for
+        # bounce traversal.
+        self._color_cursor: dict[str, int] = {}
+        self._color_cursor_dir: dict[str, int] = {}
         self._shape_offset_ms: int = 0       # cached from AudioShapeMeta.timestamp_offset_ms
         self._shape_offset_quality: float = 0.0  # cached quality score (r × difficulty)
         # Highest match-quality observed during the current play. Reset on URI
@@ -224,6 +229,8 @@ class TriggerEngine:
             self._pre_ramp_fired.clear()
             self._pre_cmd_tasks.clear()
             self._last_action.clear()
+            self._color_cursor.clear()
+            self._color_cursor_dir.clear()
             self._preselected.clear()
             self._preselected_steps.clear()
             self._plan.clear()
@@ -1071,6 +1078,11 @@ class TriggerEngine:
             n = len(action.targets)
             aspects = sorted({t.aspect for t in action.targets})
             return f"Morph {n}× ({', '.join(aspects) if aspects else 'no targets'})"
+        elif action.type == "morph_color":
+            from services import color_set_store
+            card = color_set_store.get_by_id(action.ref_id)
+            name = card.name if card else "?"
+            return f"Color → {name}"
         elif action.type == "event_ref":
             if _depth < 3:
                 sub = get_event(action.event_id)
@@ -1523,6 +1535,9 @@ class TriggerEngine:
         elif action.type == "morph_step":
             await self._execute_morph_step(action, await_ramps=await_ramps)
 
+        elif action.type == "morph_color":
+            await self._execute_morph_color(action, await_ramps=await_ramps)
+
         else:
             logger.warning("Unknown action type: %s", action.type)
 
@@ -1579,20 +1594,21 @@ class TriggerEngine:
             await asyncio.gather(*switch_coros, return_exceptions=True)
 
         # ── Pass 2: non-effect targets, compiled against the post-switch cache ─
-        # Resolve per-target beat intensity once before compilation. Nudge
-        # targets only — absolute targets pass None and ignore it.
+        # Resolve beat intensity once per step (action.intensity_source). Every
+        # nudge target — and every per-Shape-sub-field nudge spec — reads the
+        # same value, keeping the step's audio response coherent.
         patch_writes = []
+        step_source = getattr(action, "intensity_source", None) or "rms_total"
+        any_nudge = any(t.mode == "nudge" and t.aspect != "effect" for t in action.targets)
+        intensity = self._beat_intensity_now(step_source) if any_nudge else None
         for target in action.targets:
             if target.aspect == "effect":
                 continue
-            intensity = None
-            if target.mode == "nudge":
-                intensity = self._beat_intensity_now(target.intensity_source)
             patch_writes.extend(
                 compile_target(
                     target, state.ledfx_virtual_cache,
                     default_ramp_ms=action.ramp_ms,
-                    intensity=intensity,
+                    intensity=intensity if target.mode == "nudge" else None,
                 )
             )
 
@@ -1666,6 +1682,136 @@ class TriggerEngine:
                     updates.append((vid, etype, dict(cfg)))
             if updates:
                 morph_effect_state.save_many(updates)
+
+    def _select_color_set_member(self, group, pick_mode: str) -> Optional[str]:
+        """Pick one member Color Set id from a Group, updating in-memory cursor
+        state. `pick_mode` ("default"|"cycle"|"weighted") overrides the group's
+        own `mode` unless "default". Returns the chosen color_set_id or None."""
+        members = group.members or []
+        if not members:
+            return None
+        n = len(members)
+        mode = group.mode if pick_mode == "default" else pick_mode
+        cur = self._color_cursor.get(group.id)
+
+        if mode == "cycle":
+            if cur is None:
+                idx = 0
+                self._color_cursor_dir[group.id] = 1
+            elif group.cycle_behavior == "bounce" and n > 1:
+                direction = self._color_cursor_dir.get(group.id, 1)
+                nxt = cur + direction
+                if nxt >= n:
+                    direction, nxt = -1, cur - 1
+                elif nxt < 0:
+                    direction, nxt = 1, cur + 1
+                self._color_cursor_dir[group.id] = direction
+                idx = max(0, min(n - 1, nxt))
+            else:  # wrap (or single-member bounce)
+                idx = (cur + 1) % n
+        else:  # weighted
+            last_idx = cur if group.exclude_current else None
+            weights = [0.0 if i == last_idx else m.weight for i, m in enumerate(members)]
+            if sum(weights) == 0:
+                weights = [m.weight for m in members]
+            if sum(weights) == 0:
+                weights = [1.0] * n
+            idx = random.choices(range(n), weights=weights, k=1)[0]
+
+        self._color_cursor[group.id] = idx
+        return members[idx].color_set_id
+
+    async def _execute_morph_color(self, action, await_ramps: bool = False) -> None:
+        """Apply a Color Set (or a Group's currently-selected Color Set) across
+        every scoped device. FG/BG colors compile through the existing Morph
+        Step machinery (reusing ramps + cache + persistence); the optional
+        per-entry background_mode is written as a direct instant patch since it
+        isn't part of the morph aspect taxonomy."""
+        from models.music_event import AspectValue, MorphStepAction, MorphTarget
+        from services import color_set_store
+        from services.morph_compiler import resolve_scope
+        from services.effect_params import get_param_meta
+
+        card = color_set_store.get_by_id(action.ref_id)
+        if card is None:
+            logger.warning("morph_color: unknown Color Set ref %s", action.ref_id)
+            return
+
+        if card.kind == "group":
+            chosen_id = self._select_color_set_member(card, action.pick_mode)
+            if not chosen_id:
+                logger.info("morph_color: group '%s' has no members", card.name)
+                return
+            card = color_set_store.get_by_id(chosen_id)
+            if card is None or card.kind != "set":
+                logger.warning("morph_color: group member %s missing or not a set", chosen_id)
+                return
+
+        if not card.entries:
+            return
+
+        # Build transient color/bg_color MorphTargets and run them through the
+        # shared morph step executor (entry.ramp_ms overrides the step ramp).
+        targets: list = []
+        for entry in card.entries:
+            if entry.color_value:
+                targets.append(MorphTarget(
+                    scope=entry.scope,
+                    aspect="color",
+                    mode="absolute",
+                    absolute_value=AspectValue(
+                        color_kind=entry.color_kind or "gradient",
+                        color_value=entry.color_value,
+                    ),
+                    ramp_ms=entry.ramp_ms,
+                ))
+            if entry.bg_color:
+                targets.append(MorphTarget(
+                    scope=entry.scope,
+                    aspect="bg_color",
+                    mode="absolute",
+                    absolute_value=AspectValue(bg_color=entry.bg_color),
+                    ramp_ms=entry.ramp_ms,
+                ))
+
+        if targets:
+            step = MorphStepAction(ramp_ms=action.ramp_ms, targets=targets)
+            await self._execute_morph_step(step, await_ramps=await_ramps)
+
+        # Background mode — direct instant patch on any scoped virtual whose
+        # active effect actually supports `background_mode`.
+        mode_coros = []
+        for entry in card.entries:
+            if not entry.bg_mode:
+                continue
+            for vid in resolve_scope(entry.scope):
+                eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+                etype = eff.get("type")
+                if not etype or get_param_meta(etype, "background_mode") is None:
+                    continue
+                mode_coros.append(
+                    ledfx_client.set_virtual_effect(vid, etype, {"background_mode": entry.bg_mode})
+                )
+                eff.setdefault("config", {})["background_mode"] = entry.bg_mode
+        if mode_coros:
+            await asyncio.gather(*mode_coros, return_exceptions=True)
+
+    async def fire_color_set_now(self, card_id: str) -> bool:
+        """Preview-fire a Color Set or Group immediately, bypassing the audio-
+        capture gate (mirrors fire_event_now's force_allow wrapper)."""
+        from models.music_event import MorphColorAction
+        from services import color_set_store
+        card = color_set_store.get_by_id(card_id)
+        if card is None:
+            logger.warning("fire_color_set_now: unknown card %s", card_id)
+            return False
+        with ledfx_client.force_allow():
+            await self._execute_morph_color(
+                MorphColorAction(ref_id=card_id, pick_mode="default"),
+                await_ramps=True,
+            )
+            await ledfx_client.drain_bus()
+        return True
 
     def _pick_morph_lanes(
         self,

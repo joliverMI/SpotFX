@@ -364,11 +364,22 @@ function actionFields(a) {
       const targets = (a.targets?.length ? a.targets : [defaultMorphTarget()]);
       const targetsHtml = targets.map((t, ti) => morphTargetRowHtml(t, ti)).join('');
       const rampVal = a.ramp_ms != null ? a.ramp_ms : '';
+      const src = a.intensity_source || 'rms_total';
+      const srcOpts = [
+        ['rms_total',   'RMS Total'],
+        ['rms_bass',    'RMS Bass'],
+        ['onset_score', 'Onset Score'],
+      ].map(([v, l]) => `<option value="${v}"${v === src ? ' selected' : ''}>${l}</option>`).join('');
       return `<div class="ms-root">
         <div class="ms-targets">${targetsHtml}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
           <button class="btn-sm" onclick="msAddTarget(this.closest('.ms-root').querySelector('.ms-targets'))">+ Add Target</button>
-          <span style="font-size:11px;color:var(--text-muted);margin-left:auto">Ramp (ms)</span>
+          <span style="font-size:11px;color:var(--text-muted);margin-left:auto;"
+                title="Beat-level signal that scales every nudge target in this Morph Step.">
+            Intensity source
+          </span>
+          <select class="ms-step-source" style="width:130px;font-size:11px;">${srcOpts}</select>
+          <span style="font-size:11px;color:var(--text-muted);">Ramp (ms)</span>
           <input type="number" class="ms-ramp" value="${rampVal}" min="0" step="50" placeholder="global" style="width:80px">
         </div>
       </div>`;
@@ -699,7 +710,11 @@ function morphTargetRowHtml(t, ti) {
       <button class="btn-sm btn-danger" onclick="this.closest('.ms-target-row').remove()" title="Remove target">✕</button>
     </div>
     <div class="ms-value-abs"   style="margin-top:6px;${mode === 'nudge' ? 'display:none;' : ''}">${msAspectValueHtml(t.aspect, t.absolute_value)}</div>
-    <div class="ms-value-nudge" style="margin-top:6px;${mode === 'absolute' ? 'display:none;' : ''}">${msNudgeEditorHtml(t)}</div>
+    <div class="ms-value-nudge" style="margin-top:6px;${mode === 'absolute' ? 'display:none;' : ''}">${
+      t.aspect === 'shape'
+        ? msShapeNudgeEditorHtml(t.absolute_value || {})
+        : msNudgeEditorHtml(t)
+    }</div>
     <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text-muted);">
       <span style="margin-left:auto;">Per-target ramp (ms)</span>
       <input type="number" class="ms-target-ramp" value="${rampVal}" min="0" step="50" placeholder="step default" style="width:80px;">
@@ -708,14 +723,10 @@ function morphTargetRowHtml(t, ti) {
 }
 
 function msNudgeEditorHtml(t) {
+  // Used for non-Shape numeric aspects (brightness / reactivity / blur).
+  // Source dropdown lives at the Morph Step level now, not per target.
   const amt = t.nudge_amount ?? 0.0;
   const scale = t.intensity_scale ?? 0.0;
-  const src = t.intensity_source || 'rms_total';
-  const srcOpts = [
-    ['rms_total',   'RMS Total'],
-    ['rms_bass',    'RMS Bass'],
-    ['onset_score', 'Onset Score'],
-  ].map(([v, l]) => `<option value="${v}"${v === src ? ' selected' : ''}>${l}</option>`).join('');
   return `<div style="display:grid;grid-template-columns:100px 1fr 64px;gap:6px 10px;align-items:center;font-size:11px;color:var(--text-muted);">
     <span>Nudge amount</span>
     <input type="range" class="ms-nudge-amt-range" min="-1" max="1" step="0.05" value="${amt}" style="accent-color:var(--accent);">
@@ -723,11 +734,47 @@ function msNudgeEditorHtml(t) {
     <span>Intensity scale</span>
     <input type="range" class="ms-intensity-scale-range" min="0" max="2" step="0.05" value="${scale}" style="accent-color:var(--accent);">
     <input type="number" class="ms-intensity-scale" min="0" max="2" step="0.05" value="${scale}" style="width:60px;">
-    <span>Source</span>
-    <select class="ms-intensity-source" style="grid-column:2 / span 2;width:160px;">${srcOpts}</select>
     <span style="grid-column:1 / span 3;font-style:italic;opacity:0.7;line-height:1.3;">
-      Numeric aspects only (brightness / reactivity / blur). Nudge = current + amount × (hi−lo) × per-param scale × (1 + (intensity − 0.5) × scale). Clamped to the param's range.
+      Nudge = current + amount × (hi−lo) × per-param scale × (1 + (intensity − 0.5) × scale). Clamped to range.
+      Intensity source is set at the Morph Step level.
     </span>
+  </div>`;
+}
+
+// Shape + Nudge mode: per-sub-field nudge controls for the numeric sub-fields.
+// Bool sub-fields (polygon, flip) stay tri-state regardless of mode.
+function msShapeNudgeEditorHtml(val) {
+  const numericRow = (key, label, min, max, step) => {
+    const n = val[key + '_nudge'] || {};
+    const amt = (n.amount ?? 0).toFixed(2);
+    const scl = (n.scale  ?? 0).toFixed(2);
+    return `<div class="ms-shape-nudge-row" data-key="${key}" style="display:grid;grid-template-columns:64px 56px 1fr 56px 56px 1fr 56px;gap:6px;align-items:center;margin-bottom:4px;font-size:11px;">
+      <span style="color:var(--text-muted);">${label}</span>
+      <span style="color:var(--text-muted);text-align:right;">amount</span>
+      <input type="range" class="ms-shape-nudge-amt-range" min="${min}" max="${max}" step="${step}" value="${amt}" style="accent-color:var(--accent);">
+      <input type="number" class="ms-shape-nudge-amt" min="${min}" max="${max}" step="${step}" value="${amt}" style="width:56px;">
+      <span style="color:var(--text-muted);text-align:right;">scale</span>
+      <input type="range" class="ms-shape-nudge-scale-range" min="0" max="2" step="0.05" value="${scl}" style="accent-color:var(--accent);">
+      <input type="number" class="ms-shape-nudge-scale" min="0" max="2" step="0.05" value="${scl}" style="width:56px;">
+    </div>`;
+  };
+  // Booleans: same tri-state pills as absolute mode (no nudge semantic for bools).
+  const triState = (v) => v === 'toggle' ? 'toggle' : v === true ? 'on' : 'off';
+  const triPill = (cls, current) => msTriPill('ms-shape-val ' + cls, triState(current));
+  const enPill = (active) =>
+    msPillToggle('ms-shape-en', active, 'Set', '(off)', 'msShapeEnToggle');
+  const boolRow = (key, label, current) => `
+    <div class="ms-shape-row" data-key="${key}" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+      ${enPill(current != null)}
+      <span style="font-size:12px;color:var(--text-muted);width:64px;">${label}</span>
+      <span class="ms-shape-val-wrap" style="${current != null ? '' : 'opacity:0.45;pointer-events:none;'}">${triPill('ms-shape-' + key, current)}</span>
+    </div>`;
+  return `<div class="ms-val ms-val-shape-nudge" style="display:flex;flex-direction:column;">
+    ${boolRow('polygon', 'Polygon', val.polygon)}
+    ${boolRow('flip',    'Flip',    val.flip)}
+    ${numericRow('star',  'Star',  -1, 1,  0.05)}
+    ${numericRow('edges', 'Edges', -8, 8,  1)}
+    ${numericRow('twist', 'Twist', -1, 1,  0.05)}
   </div>`;
 }
 
@@ -760,6 +807,13 @@ window.msAspectChange = function(sel) {
   const row = sel.closest('.ms-target-row');
   const absDiv = row.querySelector('.ms-value-abs');
   if (absDiv) absDiv.innerHTML = msAspectValueHtml(sel.value, {});
+  // Nudge editor depends on aspect too (Shape gets per-sub-field nudges).
+  const nudgeDiv = row.querySelector('.ms-value-nudge');
+  if (nudgeDiv) {
+    nudgeDiv.innerHTML = (sel.value === 'shape')
+      ? msShapeNudgeEditorHtml({})
+      : msNudgeEditorHtml({});
+  }
   msWireValueSync(row);
 };
 
@@ -784,7 +838,7 @@ function msWireValueSync(row) {
     bgColor.addEventListener('input', () => { bgHex.value = bgColor.value; });
     bgHex.addEventListener('input',   () => { if (/^#[0-9a-fA-F]{6}$/.test(bgHex.value)) bgColor.value = bgHex.value; });
   }
-  // Nudge: keep range/number pairs synced
+  // Nudge: keep target-level range/number pairs synced (single per row)
   const pairs = [
     ['.ms-nudge-amt-range',       '.ms-nudge-amt'],
     ['.ms-intensity-scale-range', '.ms-intensity-scale'],
@@ -796,6 +850,20 @@ function msWireValueSync(row) {
     r.addEventListener('input', () => { n.value = parseFloat(r.value).toFixed(2); });
     n.addEventListener('input', () => { if (n.value !== '') r.value = n.value; });
   }
+  // Shape per-sub-field nudge pairs (multiple per row, one per sub-field)
+  row.querySelectorAll('.ms-shape-nudge-row').forEach(nrow => {
+    const pairs = [
+      ['.ms-shape-nudge-amt-range',   '.ms-shape-nudge-amt'],
+      ['.ms-shape-nudge-scale-range', '.ms-shape-nudge-scale'],
+    ];
+    for (const [rangeSel, numSel] of pairs) {
+      const r = nrow.querySelector(rangeSel);
+      const n = nrow.querySelector(numSel);
+      if (!r || !n) continue;
+      r.addEventListener('input', () => { n.value = parseFloat(r.value).toFixed(2); });
+      n.addEventListener('input', () => { if (n.value !== '') r.value = n.value; });
+    }
+  });
 }
 
 // Read one target row back to a MorphTarget object
@@ -815,9 +883,11 @@ function syncMorphTarget(row) {
   const mode = row.querySelector('.ms-mode-btn')?.dataset.mode === 'nudge' ? 'nudge' : 'absolute';
   const nudge_amount = parseFloat(row.querySelector('.ms-nudge-amt')?.value);
   const intensity_scale = parseFloat(row.querySelector('.ms-intensity-scale')?.value);
-  const intensity_source = row.querySelector('.ms-intensity-source')?.value || 'rms_total';
 
   const absolute_value = {};
+  // Always read the bool sub-fields from the absolute-mode Shape editor so
+  // they round-trip whether the row's current mode is absolute or nudge.
+  // (Bool sub-fields don't have a nudge form — they stay tri-state always.)
   if (aspect === 'brightness' || aspect === 'reactivity' || aspect === 'blur') {
     const n = parseFloat(row.querySelector('.ms-val-number')?.value);
     absolute_value.number = Number.isFinite(n) ? n : 0.5;
@@ -832,29 +902,56 @@ function syncMorphTarget(row) {
   } else if (aspect === 'effect') {
     absolute_value.effect_type = row.querySelector('.ms-val-effect')?.value || null;
   } else if (aspect === 'shape') {
-    // Each row carries its key + an "enable" pill button (.ms-shape-en); only
-    // rows where the pill is active contribute a sub-field to the patch.
-    row.querySelectorAll('.ms-shape-row').forEach(srow => {
-      const enBtn = srow.querySelector('.ms-shape-en');
-      if (!enBtn || enBtn.dataset.active !== 'true') return;
-      const key = srow.dataset.key;
-      if (key === 'polygon' || key === 'flip') {
-        const valBtn = srow.querySelector('.ms-shape-val.ms-shape-' + key);
-        const state = valBtn?.dataset.state || 'off';
-        absolute_value[key] = state === 'toggle' ? 'toggle' : (state === 'on');
-      } else {
-        const valEl = srow.querySelector('.ms-shape-val');
-        const num = parseFloat(valEl?.value);
-        if (Number.isFinite(num)) absolute_value[key] = key === 'edges' ? Math.round(num) : num;
-      }
-    });
+    // ABSOLUTE-mode rows live in .ms-value-abs and use .ms-shape-row[data-key].
+    // NUDGE-mode rows live in .ms-value-nudge and use .ms-shape-nudge-row[data-key]
+    // for numeric sub-fields; bool sub-fields (polygon/flip) duplicate the
+    // absolute-mode tri-state pill there too.
+    // Read whichever container the mode resolves to so the value lines up.
+    const useNudge = (mode === 'nudge');
+    const container = useNudge
+      ? row.querySelector('.ms-value-nudge')
+      : row.querySelector('.ms-value-abs');
+
+    // Booleans (polygon, flip) — same shape in both editors
+    if (container) {
+      container.querySelectorAll('.ms-shape-row').forEach(srow => {
+        const enBtn = srow.querySelector('.ms-shape-en');
+        if (!enBtn || enBtn.dataset.active !== 'true') return;
+        const key = srow.dataset.key;
+        if (key === 'polygon' || key === 'flip') {
+          const valBtn = srow.querySelector('.ms-shape-val.ms-shape-' + key);
+          const state = valBtn?.dataset.state || 'off';
+          absolute_value[key] = state === 'toggle' ? 'toggle' : (state === 'on');
+        } else if (!useNudge) {
+          // absolute-mode numeric sub-field
+          const valEl = srow.querySelector('.ms-shape-val');
+          const num = parseFloat(valEl?.value);
+          if (Number.isFinite(num)) absolute_value[key] = key === 'edges' ? Math.round(num) : num;
+        }
+      });
+    }
+
+    if (useNudge && container) {
+      container.querySelectorAll('.ms-shape-nudge-row').forEach(nrow => {
+        const key = nrow.dataset.key;  // star | edges | twist
+        const amt = parseFloat(nrow.querySelector('.ms-shape-nudge-amt')?.value);
+        const scl = parseFloat(nrow.querySelector('.ms-shape-nudge-scale')?.value);
+        const haveAmt = Number.isFinite(amt) && amt !== 0;
+        const haveScl = Number.isFinite(scl) && scl !== 0;
+        if (haveAmt || haveScl) {
+          absolute_value[key + '_nudge'] = {
+            amount: Number.isFinite(amt) ? amt : 0,
+            scale:  Number.isFinite(scl) ? scl : 0,
+          };
+        }
+      });
+    }
   }
 
   return {
     scope, aspect, mode, absolute_value,
     nudge_amount:     Number.isFinite(nudge_amount) ? nudge_amount : 0,
     intensity_scale:  Number.isFinite(intensity_scale) ? intensity_scale : 0,
-    intensity_source,
     ramp_ms,
   };
 }
@@ -1038,9 +1135,11 @@ function syncActionFromRow(row) {
       const dyn = row.querySelector('.action-dynamic');
       const targets = [...dyn.querySelectorAll('.ms-target-row')].map(syncMorphTarget);
       const rampStr = dyn.querySelector('.ms-ramp')?.value;
+      const intensity_source = dyn.querySelector('.ms-step-source')?.value || 'rms_total';
       return {
         type, weight, labels,
         ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
+        intensity_source,
         targets,
       };
     }

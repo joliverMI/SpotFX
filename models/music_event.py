@@ -94,16 +94,27 @@ class MorphScope(BaseModel):
     roles:       list[str] = Field(default_factory=list)
 
 
+class NumericNudge(BaseModel):
+    """Per-element nudge spec used in Shape sub-fields when mode='nudge'.
+    amount: nudge magnitude in abstract 0..1 space (negative ok)
+    scale:  intensity_scale — 0 ignores intensity, 1 fully modulates."""
+    amount: float = 0.0
+    scale:  float = 0.0
+
+
 class AspectValue(BaseModel):
     """Polymorphic value for one MorphTarget. Only the fields relevant to the
     target's aspect are inspected by the compiler; the rest are ignored.
 
-      aspect=brightness | reactivity | blur  → number
+      aspect=brightness | reactivity | blur  → number (target.mode controls nudge vs absolute)
       aspect=color                            → color_kind + color_value
       aspect=bg_color                         → bg_color
       aspect=shape                            → any subset of {polygon, star, edges, twist, flip}
                                                 Booleans (polygon, flip) accept True, False,
                                                 or "toggle" (flip the current cached value).
+                                                When target.mode='nudge', the numeric sub-fields
+                                                (star, edges, twist) use their *_nudge specs
+                                                instead of their absolute value.
       aspect=effect                           → effect_type
     """
     number:       float | None = None
@@ -116,6 +127,12 @@ class AspectValue(BaseModel):
     twist:        float | None = None
     flip:         Optional[bool | Literal["toggle"]] = None
     effect_type:  str | None = None
+    # Per-shape-sub-field nudge specs (consulted only when target.mode == "nudge"
+    # and target.aspect == "shape"). Booleans (polygon, flip) don't have nudge —
+    # their tri-state already gives an intensity-independent flip semantic.
+    star_nudge:   NumericNudge | None = None
+    edges_nudge:  NumericNudge | None = None
+    twist_nudge:  NumericNudge | None = None
 
 
 MorphAspect = Literal[
@@ -124,13 +141,21 @@ MorphAspect = Literal[
 
 
 class MorphTarget(BaseModel):
-    """One aspect change on one scope. A MorphStepAction has a list of these."""
+    """One aspect change on one scope. A MorphStepAction has a list of these.
+
+    target-level `nudge_amount` + `intensity_scale` apply to single-value
+    aspects (brightness, reactivity, blur). For Shape, nudge specs live
+    per-sub-field on AspectValue (star_nudge, edges_nudge, twist_nudge).
+    `intensity_source` is read from the parent MorphStepAction; the field
+    is kept here only for backwards compatibility and is ignored at fire time.
+    """
     scope:            MorphScope = Field(default_factory=MorphScope)
     aspect:           MorphAspect
     mode:             Literal["absolute", "nudge"] = "absolute"
     absolute_value:   AspectValue = Field(default_factory=AspectValue)
     nudge_amount:     float = 0.0
     intensity_scale:  float = 0.0       # 0 = ignore beat intensity, 1 = full RMS scaling
+    # Legacy — superseded by MorphStepAction.intensity_source. Kept so old data parses.
     intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
     ramp_ms:          int | None = None  # overrides MorphStepAction.ramp_ms when set
 
@@ -139,12 +164,32 @@ class MorphStepAction(BaseModel):
     """A composable, multi-target change across Aspects (Shape/Effect/Color/BG Color/
     Reactivity/Brightness/Blur). Replaces the need for pre-configured LedFX scenes for
     parameter-level transitions. See `services/morph_compiler.py` for the per-target
-    Aspect-to-raw-param translation."""
-    type:    Literal["morph_step"] = "morph_step"
-    labels:  list[str] = Field(default_factory=list)
-    weight:  float = 1.0
-    ramp_ms: int | None = None  # default for targets that don't override
-    targets: list[MorphTarget] = Field(default_factory=list)
+    Aspect-to-raw-param translation.
+
+    `intensity_source` is shared across every nudge target in this step — one
+    beat-level signal feeds every per-target / per-sub-field nudge math.
+    """
+    type:             Literal["morph_step"] = "morph_step"
+    labels:           list[str] = Field(default_factory=list)
+    weight:           float = 1.0
+    ramp_ms:          int | None = None  # default for targets that don't override
+    intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
+    targets:          list[MorphTarget] = Field(default_factory=list)
+
+
+class MorphColorAction(BaseModel):
+    """Apply a saved Color Set — or pick one from a Color Group — across many
+    devices at once, setting FG color, BG color, and (optionally) background
+    mode. `ref_id` points at a ColorSetCard (kind="set" or "group"). For a
+    group, `pick_mode` overrides the group's default selection; "default" uses
+    the group's own `mode`. `ramp_ms` is the step default; each Color Set entry
+    may override it. See `services/trigger_engine._execute_morph_color`."""
+    type:      Literal["morph_color"] = "morph_color"
+    labels:    list[str] = Field(default_factory=list)
+    weight:    float = 1.0
+    ref_id:    str = ""
+    pick_mode: Literal["default", "cycle", "weighted"] = "default"
+    ramp_ms:   int | None = None
 
 
 class EffectParamChange(BaseModel):
@@ -191,7 +236,8 @@ Action = Annotated[
     | LedFxGlobalBrightnessAction
     | LedFxGlobalTransitionAction
     | LedFxEffectParamAction
-    | MorphStepAction,
+    | MorphStepAction
+    | MorphColorAction,
     Field(discriminator="type"),
 ]
 

@@ -181,7 +181,40 @@ def _resolve_bool_aspect(value, current) -> bool:
     return bool(value)
 
 
-def _patch_shape(effect_type: str, val: AspectValue, current_config: dict) -> dict:
+def _nudged_numeric(
+    effect_type: str,
+    param_name: str,
+    nudge,
+    current_config: dict,
+    intensity: Optional[float],
+):
+    """Resolve a per-Shape-sub-field nudge for one numeric raw param.
+    Returns the clamped new value, rounded to 4 decimals.
+
+    factor = 1 + (intensity - 0.5) * nudge.scale
+    delta  = nudge.amount * (hi - lo) * factor
+    new    = clamp(current + delta, lo, hi)
+    """
+    meta = _ep.get_param_meta(effect_type, param_name) or {}
+    lo = meta.get("min", 0.0)
+    hi = meta.get("max", 1.0)
+    eff_intensity = intensity if intensity is not None else 0.5
+    factor = 1.0 + (eff_intensity - 0.5) * float(nudge.scale or 0.0)
+    delta = float(nudge.amount or 0.0) * (hi - lo) * factor
+    current = current_config.get(param_name)
+    if current is None:
+        current = (lo + hi) / 2.0
+    new_val = max(lo, min(hi, float(current) + delta))
+    return round(new_val, 4)
+
+
+def _patch_shape(
+    effect_type: str,
+    val: AspectValue,
+    current_config: dict,
+    mode: str = "absolute",
+    intensity: Optional[float] = None,
+) -> dict:
     """shape aspect — write only the sub-fields the user set AND only those the effect supports.
 
     Sub-field → param mapping (resolved via the `aspect` tag in effect_params.json):
@@ -191,27 +224,41 @@ def _patch_shape(effect_type: str, val: AspectValue, current_config: dict) -> di
       twist   → `twist`    (radial only)
       flip    → `flip` (power/melt) or `ring` (equalizer2d) or `spin_sign` (radial)
 
-    Booleans (polygon, flip) accept True / False / "toggle"; "toggle" reads
-    the matching raw-param's current value from `current_config` and flips it.
+    Booleans (polygon, flip): tri-state True / False / "toggle" regardless of mode —
+    "toggle" reads current cached value and flips it; nudge doesn't have a natural
+    meaning for booleans, so they always use absolute_value's polygon/flip slots.
+
+    Numeric sub-fields (star, edges, twist): when mode == "nudge" AND the matching
+    *_nudge spec is present, compute current + amount * (hi - lo) * factor (clamped).
+    Otherwise write the absolute_value sub-field if set.
     """
     out: dict = {}
     shape_params = morph_aspects.params_for_aspect(effect_type, "shape")
     name_set = set(shape_params)
+    is_nudge = (mode == "nudge")
 
+    # Booleans (polygon, flip) — always absolute-mode tri-state regardless of target.mode
     if val.polygon is not None and "polygon" in name_set:
         out["polygon"] = _resolve_bool_aspect(val.polygon, current_config.get("polygon", False))
-    if val.star is not None and "star" in name_set:
-        out["star"] = val.star
-    if val.edges is not None and "edges" in name_set:
-        out["edges"] = int(val.edges)
-    if val.twist is not None and "twist" in name_set:
-        out["twist"] = val.twist
     if val.flip is not None:
         # power / melt use "flip"; equalizer2d uses "ring"; radial uses "spin_sign"
         for candidate in ("flip", "ring", "spin_sign"):
             if candidate in name_set:
                 out[candidate] = _resolve_bool_aspect(val.flip, current_config.get(candidate, False))
                 break
+
+    # Numerics: nudge if mode=nudge AND nudge spec present; else absolute
+    for key in ("star", "edges", "twist"):
+        if key not in name_set:
+            continue
+        nudge_spec = getattr(val, f"{key}_nudge", None)
+        if is_nudge and nudge_spec is not None:
+            v = _nudged_numeric(effect_type, key, nudge_spec, current_config, intensity)
+            out[key] = int(v) if key == "edges" else v
+        else:
+            abs_val = getattr(val, key, None)
+            if abs_val is not None:
+                out[key] = int(abs_val) if key == "edges" else abs_val
     return out
 
 
@@ -231,7 +278,8 @@ def _patch_for_aspect(
     if aspect_id == "bg_color":
         return _patch_bg_color(effect_type, val)
     if aspect_id == "shape":
-        return _patch_shape(effect_type, val, current_config)
+        return _patch_shape(effect_type, val, current_config,
+                            mode=target.mode, intensity=intensity)
     return {}
 
 
