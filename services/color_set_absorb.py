@@ -18,7 +18,9 @@ from typing import Optional
 from api import ledfx_client
 from models.color_set import ColorSetCard, ColorSetEntry
 from models.music_event import MorphScope
+from models.state import state
 from services import effect_params, morph_aspects
+from services.effect_params import get_param_meta
 from services.scene_absorb import _register_scene_gradients
 
 logger = logging.getLogger(__name__)
@@ -43,11 +45,24 @@ def _bg_color_for_cfg(etype: str, cfg: dict) -> Optional[str]:
     return None
 
 
+async def _read_virtual(vid: str) -> dict:
+    """Current state for one virtual, working even while audio capture is in
+    progress (when get_all_virtuals() returns nothing). Prefers the engine's
+    polled cache, then falls back to a single get_virtual() — which itself
+    returns the cache during capture."""
+    rec = state.ledfx_virtual_cache.get(vid)
+    if isinstance(rec, dict) and (rec.get("effect") or {}).get("type"):
+        return rec
+    live = await ledfx_client.get_virtual(vid) or {}
+    # get_virtual returns {vid: record} when read live, or the bare record
+    # (from cache) during capture.
+    return live.get(vid, live) if isinstance(live, dict) else {}
+
+
 async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
     """Build a starter Color Set from the live state of the given virtuals.
     Returns None if none of them are importable (active + supported effect +
     in a SpotFX device category) or yield no color data."""
-    live = (await ledfx_client.get_all_virtuals() or {}).get("virtuals") or {}
     supported = set(morph_aspects.supported_effects())
     imported = set(effect_params.get_all_virtual_ids())
 
@@ -59,8 +74,8 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
         if vid not in imported:
             skipped.append(f"{vid}(not-imported)")
             continue
-        rec = live.get(vid)
-        if not isinstance(rec, dict):
+        rec = await _read_virtual(vid)
+        if not isinstance(rec, dict) or not rec:
             skipped.append(f"{vid}(no-live-state)")
             continue
         eff = rec.get("effect") or {}
@@ -75,7 +90,11 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
 
         color_kind, color_value = _color_for_cfg(etype, cfg)
         bg_color = _bg_color_for_cfg(etype, cfg)
-        bg_mode = cfg.get("background_mode") if cfg.get("background_mode") in ("additive", "overwrite") else None
+        # Only capture background_mode for effects that actually expose it as a
+        # controllable param — otherwise radial/noise produce noise-only entries.
+        bg_mode = None
+        if get_param_meta(etype, "background_mode") is not None:
+            bg_mode = cfg.get("background_mode") if cfg.get("background_mode") in ("additive", "overwrite") else None
         if color_value is None and bg_color is None and bg_mode is None:
             skipped.append(f"{vid}(no-color)")
             continue
