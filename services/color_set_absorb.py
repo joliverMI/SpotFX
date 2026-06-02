@@ -13,6 +13,7 @@ of a saved scene, and produces ColorSetEntry objects rather than MorphTargets.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from api import ledfx_client
@@ -21,9 +22,31 @@ from models.music_event import MorphScope
 from models.state import state
 from services import morph_aspects
 from services.effect_params import get_param_meta
-from services.scene_absorb import _register_scene_gradients
+from services.scene_absorb import _register_scene_gradients, _load_gradients
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_gradient(css: str) -> Optional[tuple]:
+    """Canonical, comparable form of a CSS gradient so visually-identical
+    gradients match across formats (LedFX emits hex stops + 'NN.00%'; the
+    SpotFX library saves rgb() stops + integer '%'). Returns (direction,
+    ((r,g,b,pos), …)) or None if `css` isn't a gradient we can parse."""
+    if not css or "gradient(" not in css:
+        return None
+    dm = re.search(r"linear-gradient\(\s*(\d+)deg", css)
+    direction = int(dm.group(1)) if dm else 90
+    stops: list[tuple] = []
+    for m in re.finditer(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*([\d.]+)?%?", css):
+        pos = round(float(m.group(4))) if m.group(4) else None
+        stops.append((int(m.group(1)), int(m.group(2)), int(m.group(3)), pos))
+    for m in re.finditer(r"#([0-9a-fA-F]{6})\s*([\d.]+)?%?", css):
+        h = m.group(1)
+        pos = round(float(m.group(2))) if m.group(2) else None
+        stops.append((int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), pos))
+    if not stops:
+        return None
+    return (direction, tuple(stops))
 
 
 def _color_for_cfg(etype: str, cfg: dict) -> tuple[Optional[str], Optional[str]]:
@@ -69,7 +92,6 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
     regardless of whether it currently has color data, so the user gets a
     full scaffold to edit."""
     entries: list[ColorSetEntry] = []
-    seen_gradients: set[str] = set()
 
     for vid in virtual_ids:
         rec = await _read_virtual(vid)
@@ -87,9 +109,6 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
                 cur = cfg.get("background_mode")
                 bg_mode = cur if cur in ("additive", "overwrite") else None
 
-        if color_kind == "gradient" and color_value:
-            seen_gradients.add(color_value)
-
         entries.append(ColorSetEntry(
             scope=MorphScope(virtual_ids=[vid]),
             color_kind=color_kind,
@@ -101,7 +120,31 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
     if not entries:
         return None
 
-    _register_scene_gradients("Import", seen_gradients)
+    # Reuse a matching library gradient when one exists (normalized compare),
+    # otherwise register the imported gradient as new — once per distinct
+    # gradient so multiple devices sharing a gradient all reference one entry.
+    existing_by_canon: dict[tuple, str] = {}
+    for g in _load_gradients():
+        canon = _normalize_gradient(g.get("value", ""))
+        if canon and canon not in existing_by_canon:
+            existing_by_canon[canon] = g["value"]
+
+    new_by_canon: dict[tuple, str] = {}
+    to_register: set[str] = set()
+    for entry in entries:
+        if entry.color_kind != "gradient" or not entry.color_value:
+            continue
+        canon = _normalize_gradient(entry.color_value)
+        if canon and canon in existing_by_canon:
+            entry.color_value = existing_by_canon[canon]      # reference existing
+        elif canon and canon in new_by_canon:
+            entry.color_value = new_by_canon[canon]           # share a freshly-seen one
+        else:
+            if canon:
+                new_by_canon[canon] = entry.color_value
+            to_register.add(entry.color_value)
+
+    _register_scene_gradients("Import", to_register)
 
     return ColorSetCard(
         name="Imported Colors",
