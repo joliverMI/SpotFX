@@ -126,13 +126,19 @@ class AspectValue(BaseModel):
     edges:        int | None = None
     twist:        float | None = None
     flip:         Optional[bool | Literal["toggle"]] = None
+    # x_offset / y_offset live in the FRONTEND −1..1 space. The compiler converts
+    # to LedFX's 0..1 storage via the `scale_offset` flag in effect_params.json.
+    x_offset:     float | None = None
+    y_offset:     float | None = None
     effect_type:  str | None = None
     # Per-shape-sub-field nudge specs (consulted only when target.mode == "nudge"
     # and target.aspect == "shape"). Booleans (polygon, flip) don't have nudge —
     # their tri-state already gives an intensity-independent flip semantic.
-    star_nudge:   NumericNudge | None = None
-    edges_nudge:  NumericNudge | None = None
-    twist_nudge:  NumericNudge | None = None
+    star_nudge:     NumericNudge | None = None
+    edges_nudge:    NumericNudge | None = None
+    twist_nudge:    NumericNudge | None = None
+    x_offset_nudge: NumericNudge | None = None
+    y_offset_nudge: NumericNudge | None = None
 
 
 MorphAspect = Literal[

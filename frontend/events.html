@@ -234,7 +234,7 @@ let scenes = [];
 let selectedId = null;
 let typeFilter    = null;
 let aiExFilter    = false;
-const _RAMP_TYPES = new Set(['ledfx_global_brightness', 'ledfx_effect_param', 'morph_step']);
+const _RAMP_TYPES = new Set(['ledfx_global_brightness', 'ledfx_effect_param', 'morph_step', 'morph_color']);
 let allParamLabels = [];
 let effectParamsConfig = {};
 let savedGradients = [];
@@ -249,6 +249,8 @@ try { savedGradients = await GET('/gradients'); } catch {}
 try { appSettings = await GET('/settings'); } catch {}
 let morphAspects = { aspect_ids: [], aspect_labels: {}, supported_effects: [], per_effect_params: {}, effect_defaults: {} };
 try { morphAspects = await GET('/morph/aspects'); } catch (e) { console.warn('[Events] /morph/aspects unavailable:', e); }
+let colorSets = [];
+try { colorSets = await GET('/color-sets'); } catch (e) { console.warn('[Events] /color-sets unavailable:', e); }
 renderList();
 
 // ── Searchable select helper ───────────────────────────────────────────────
@@ -301,6 +303,7 @@ const ACTION_TYPES = [
   { value: 'ledfx_global_transition', label: 'Global Transition' },
   { value: 'ledfx_effect_param',      label: 'Effect Parameter'  },
   { value: 'morph_step',              label: 'Morph Step'        },
+  { value: 'morph_color',             label: 'Morph Color'       },
 ];
 
 function typeOptions(selected) {
@@ -382,6 +385,27 @@ function actionFields(a) {
           <span style="font-size:11px;color:var(--text-muted);">Ramp (ms)</span>
           <input type="number" class="ms-ramp" value="${rampVal}" min="0" step="50" placeholder="global" style="width:80px">
         </div>
+      </div>`;
+    }
+
+    case 'morph_color': {
+      const rampVal = a.ramp_ms != null ? a.ramp_ms : '';
+      const refId = a.ref_id || '';
+      const inLib = (colorSets || []).some(c => c.id === refId);
+      let csOpts = '<option value=""' + (refId ? '' : ' selected') + '>— select a Color Set / Group —</option>';
+      if (refId && !inLib) csOpts += `<option value="${refId}" selected>(missing: ${refId})</option>`;
+      csOpts += (colorSets || []).map(c =>
+        `<option value="${c.id}"${c.id === refId ? ' selected' : ''}>${c.kind === 'group' ? '▦ ' : '🎨 '}${c.name}</option>`
+      ).join('');
+      const pm = a.pick_mode || 'default';
+      const pmOpts = [['default','Group default'],['cycle','Cycle'],['weighted','Weighted']]
+        .map(([v,l]) => `<option value="${v}"${v === pm ? ' selected' : ''}>${l}</option>`).join('');
+      return `<div class="mc-root" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <select class="mc-ref" style="min-width:200px;flex:1;">${csOpts}</select>
+        <span style="font-size:11px;color:var(--text-muted);" title="For Groups only: override how the next Color Set is picked.">Pick</span>
+        <select class="mc-pick-mode" style="width:130px;font-size:11px;">${pmOpts}</select>
+        <span style="font-size:11px;color:var(--text-muted);">Ramp (ms)</span>
+        <input type="number" class="mc-ramp" value="${rampVal}" min="0" step="50" placeholder="global" style="width:80px">
       </div>`;
     }
 
@@ -664,11 +688,13 @@ function msAspectValueHtml(aspect, val) {
     const triPill = (cls, current) =>
       msTriPill('ms-shape-val ' + cls, msTriStateFromValue(current));
     return `<div class="ms-val ms-val-shape" style="display:flex;flex-direction:column;">
-      ${row('polygon', 'Polygon', triPill('ms-shape-polygon', val.polygon))}
-      ${row('flip',    'Flip',    triPill('ms-shape-flip',    val.flip))}
-      ${row('star',    'Star',    `<input type="number" class="ms-shape-val ms-shape-star"  min="-1" max="1"  step="0.05" value="${val.star  ?? 0}" style="width:80px;">`)}
-      ${row('edges',   'Edges',   `<input type="number" class="ms-shape-val ms-shape-edges" min="0"  max="8"  step="1"    value="${val.edges ?? 6}" style="width:80px;">`)}
-      ${row('twist',   'Twist',   `<input type="number" class="ms-shape-val ms-shape-twist" min="0"  max="10" step="0.1"  value="${val.twist ?? 0}" style="width:80px;">`)}
+      ${row('polygon',  'Polygon',  triPill('ms-shape-polygon', val.polygon))}
+      ${row('flip',     'Flip',     triPill('ms-shape-flip',    val.flip))}
+      ${row('star',     'Star',     `<input type="number" class="ms-shape-val ms-shape-star"     min="-1" max="1"  step="0.05" value="${val.star     ?? 0}" style="width:80px;">`)}
+      ${row('edges',    'Edges',    `<input type="number" class="ms-shape-val ms-shape-edges"    min="0"  max="8"  step="1"    value="${val.edges    ?? 6}" style="width:80px;">`)}
+      ${row('twist',    'Twist',    `<input type="number" class="ms-shape-val ms-shape-twist"    min="0"  max="10" step="0.1"  value="${val.twist    ?? 0}" style="width:80px;">`)}
+      ${row('x_offset', 'X Offset', `<input type="number" class="ms-shape-val ms-shape-x_offset" min="-1" max="1"  step="0.05" value="${val.x_offset ?? 0}" style="width:80px;">`)}
+      ${row('y_offset', 'Y Offset', `<input type="number" class="ms-shape-val ms-shape-y_offset" min="-1" max="1"  step="0.05" value="${val.y_offset ?? 0}" style="width:80px;">`)}
     </div>`;
   }
   return `<span class="action-hint">(unknown aspect: ${aspect})</span>`;
@@ -772,9 +798,11 @@ function msShapeNudgeEditorHtml(val) {
   return `<div class="ms-val ms-val-shape-nudge" style="display:flex;flex-direction:column;">
     ${boolRow('polygon', 'Polygon', val.polygon)}
     ${boolRow('flip',    'Flip',    val.flip)}
-    ${numericRow('star',  'Star',  -1, 1,  0.05)}
-    ${numericRow('edges', 'Edges', -8, 8,  1)}
-    ${numericRow('twist', 'Twist', -1, 1,  0.05)}
+    ${numericRow('star',     'Star',     -1, 1, 0.05)}
+    ${numericRow('edges',    'Edges',    -8, 8, 1)}
+    ${numericRow('twist',    'Twist',    -1, 1, 0.05)}
+    ${numericRow('x_offset', 'X Offset', -1, 1, 0.05)}
+    ${numericRow('y_offset', 'Y Offset', -1, 1, 0.05)}
   </div>`;
 }
 
@@ -1141,6 +1169,17 @@ function syncActionFromRow(row) {
         ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
         intensity_source,
         targets,
+      };
+    }
+
+    case 'morph_color': {
+      const dyn = row.querySelector('.action-dynamic');
+      const rampStr = dyn.querySelector('.mc-ramp')?.value;
+      return {
+        type, weight, labels,
+        ref_id: dyn.querySelector('.mc-ref')?.value || '',
+        pick_mode: dyn.querySelector('.mc-pick-mode')?.value || 'default',
+        ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
       };
     }
 

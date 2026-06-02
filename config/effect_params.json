@@ -21,6 +21,7 @@
       "params": {
         "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "background_color":      { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
+        "background_mode":       { "label":"BG Mode",              "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
         "sparks_color":          { "label":"Accent Color",         "type":"color",  "smooth":true,                  "aspect":"reactivity" },
         "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "blur":                  { "label":"Blur",                 "type":"numeric","smooth":true, "min":0,"max":10,"aspect":"blur",       "aspect_scale":1.0 },
@@ -46,6 +47,7 @@
     "melt": {
       "params": {
         "bg_color":      { "label":"BG Color",          "type":"color",  "smooth":true,                  "aspect":"bg_color" },
+        "background_mode":{ "label":"BG Mode",          "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
         "brightness":    { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "gradient_roll": { "label":"Gradient Roll",     "type":"numeric","smooth":false,"min":1,"max":10 },
         "flip":          { "label":"Flip",              "type":"toggle", "smooth":false,                 "aspect":"shape" },
@@ -89,6 +91,7 @@
     "equalizer2d": {
       "params": {
         "bg_color":              { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
+        "background_mode":       { "label":"BG Mode",              "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
         "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "peak_color":            { "label":"Accent Color",         "type":"color",  "smooth":true },
@@ -119,8 +122,8 @@
         "twist":     { "label":"Twist",    "type":"numeric", "smooth":true,  "min":0,"max":10, "flip_sign":true, "aspect":"shape" },
         "star":      { "label":"Star",     "type":"numeric", "smooth":true,  "min":-1,"max":1, "flip_sign":true, "aspect":"shape" },
         "edges":     { "label":"Edges",    "type":"integer", "smooth":false, "min":0,"max":8,                    "aspect":"shape" },
-        "x_offset":     { "label":"X Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true },
-        "y_offset":     { "label":"Y Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true },
+        "x_offset":     { "label":"X Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true, "aspect":"shape" },
+        "y_offset":     { "label":"Y Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true, "aspect":"shape" },
         "offset_polar": { "label":"Polar Offset", "type":"polar",  "smooth":true, "maps_x":"x_offset","maps_y":"y_offset" },
         "move_xy":      { "label":"Move by XY",    "type":"move_xy",    "smooth":true },
         "move_polar":   { "label":"Move by Polar", "type":"move_polar", "smooth":true }

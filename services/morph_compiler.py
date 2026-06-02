@@ -192,20 +192,37 @@ def _nudged_numeric(
     Returns the clamped new value, rounded to 4 decimals.
 
     factor = 1 + (intensity - 0.5) * nudge.scale
-    delta  = nudge.amount * (hi - lo) * factor
-    new    = clamp(current + delta, lo, hi)
+    delta  = nudge.amount * (hi - lo) * factor          # in frontend space
+    new    = clamp(current + delta, lo, hi)             # in frontend space
+
+    For `scale_offset` params (x_offset / y_offset), the schema's [min, max]
+    is the FRONTEND −1..1 range while LedFX stores 0..1. The current cached
+    value is converted into frontend space before the math runs, and the
+    result is converted back at the end.
     """
     meta = _ep.get_param_meta(effect_type, param_name) or {}
     lo = meta.get("min", 0.0)
     hi = meta.get("max", 1.0)
+    scale_offset = bool(meta.get("scale_offset"))
     eff_intensity = intensity if intensity is not None else 0.5
     factor = 1.0 + (eff_intensity - 0.5) * float(nudge.scale or 0.0)
     delta = float(nudge.amount or 0.0) * (hi - lo) * factor
-    current = current_config.get(param_name)
-    if current is None:
-        current = (lo + hi) / 2.0
-    new_val = max(lo, min(hi, float(current) + delta))
-    return round(new_val, 4)
+
+    cur_raw = current_config.get(param_name)
+    if cur_raw is None:
+        current_fe = (lo + hi) / 2.0
+    elif scale_offset:
+        # LedFX 0..1 → frontend −1..1
+        current_fe = (float(cur_raw) - 0.5) * 2.0
+    else:
+        current_fe = float(cur_raw)
+
+    new_fe = max(lo, min(hi, current_fe + delta))
+
+    if scale_offset:
+        # frontend −1..1 → LedFX 0..1
+        return round(new_fe / 2.0 + 0.5, 4)
+    return round(new_fe, 4)
 
 
 def _patch_shape(
@@ -247,17 +264,27 @@ def _patch_shape(
                 out[candidate] = _resolve_bool_aspect(val.flip, current_config.get(candidate, False))
                 break
 
-    # Numerics: nudge if mode=nudge AND nudge spec present; else absolute
-    for key in ("star", "edges", "twist"):
+    # Numerics: nudge if mode=nudge AND nudge spec present; else absolute.
+    # `scale_offset` params (x_offset / y_offset) live in frontend −1..1 space
+    # on the AspectValue but in LedFX 0..1 space on the wire — convert at write.
+    for key in ("star", "edges", "twist", "x_offset", "y_offset"):
         if key not in name_set:
             continue
+        meta = _ep.get_param_meta(effect_type, key) or {}
+        scale_offset = bool(meta.get("scale_offset"))
         nudge_spec = getattr(val, f"{key}_nudge", None)
         if is_nudge and nudge_spec is not None:
+            # _nudged_numeric already returns LedFX-space when scale_offset is set
             v = _nudged_numeric(effect_type, key, nudge_spec, current_config, intensity)
             out[key] = int(v) if key == "edges" else v
         else:
             abs_val = getattr(val, key, None)
-            if abs_val is not None:
+            if abs_val is None:
+                continue
+            if scale_offset:
+                # frontend −1..1 → LedFX 0..1
+                out[key] = round(float(abs_val) / 2.0 + 0.5, 4)
+            else:
                 out[key] = int(abs_val) if key == "edges" else abs_val
     return out
 
