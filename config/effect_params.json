@@ -46,7 +46,7 @@
     },
     "melt": {
       "params": {
-        "bg_color":      { "label":"BG Color",          "type":"color",  "smooth":true,                  "aspect":"bg_color" },
+        "background_color":{ "label":"BG Color",        "type":"color",  "smooth":true,                  "aspect":"bg_color" },
         "background_mode":{ "label":"BG Mode",          "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
         "brightness":    { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "gradient_roll": { "label":"Gradient Roll",     "type":"numeric","smooth":false,"min":1,"max":10 },
@@ -57,7 +57,7 @@
         "gradient":      { "label":"Gradient",          "type":"gradient","smooth":true,                 "aspect":"color" }
       },
       "defaults": {
-        "bg_color":      "#000000",
+        "background_color": "#000000",
         "brightness":    0.8,
         "gradient_roll": 1,
         "flip":          false,
@@ -90,7 +90,7 @@
     },
     "equalizer2d": {
       "params": {
-        "bg_color":              { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
+        "background_color":      { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
         "background_mode":       { "label":"BG Mode",              "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
         "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
         "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
@@ -101,7 +101,7 @@
         "spin":                  { "label":"Spin",                 "type":"toggle", "smooth":false }
       },
       "defaults": {
-        "bg_color":              "#000000",
+        "background_color":      "#000000",
         "background_brightness": 0.3,
         "brightness":            0.8,
         "peak_color":            "#FFFFFF",
