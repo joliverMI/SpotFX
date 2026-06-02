@@ -32,6 +32,7 @@ storage/setlists.json
 storage/xcorr_diagnostic.csv
 storage/device_categories.json
 storage/morph_effect_state.json
+storage/color_sets.json
 !storage/profiles/.gitkeep
 !storage/audio_shapes/.gitkeep
 !storage/analyzed_triggers/.gitkeep

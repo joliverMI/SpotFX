@@ -9,6 +9,7 @@ const NAV_HTML = `<nav>
   <a href="/">Now Playing</a>
   <a href="/builder.html">Profile Builder</a>
   <a href="/events.html">Events</a>
+  <a href="/color-sets.html">Color Sets</a>
   <a href="/devices.html">Devices</a>
   <a href="/ai_triggers.html" class="nav-ai-triggers">AI Triggers</a>
   <a href="/triggerless.html">Triggerless</a>
