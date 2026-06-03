@@ -97,9 +97,12 @@ class MorphScope(BaseModel):
 class NumericNudge(BaseModel):
     """Per-element nudge spec used in Shape sub-fields when mode='nudge'.
     amount: nudge magnitude in abstract 0..1 space (negative ok)
-    scale:  intensity_scale — 0 ignores intensity, 1 fully modulates."""
+    scale:  intensity_scale — 0 ignores intensity, 1 fully modulates.
+    wrap:   when True, reflect off min/max and reverse direction on future
+            fires so the value bounces instead of sticking at a boundary."""
     amount: float = 0.0
     scale:  float = 0.0
+    wrap:   bool = False
 
 
 class AspectValue(BaseModel):

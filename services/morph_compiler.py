@@ -187,6 +187,8 @@ def _nudged_numeric(
     nudge,
     current_config: dict,
     intensity: Optional[float],
+    vid: Optional[str] = None,
+    nudge_dir: Optional[dict] = None,
 ):
     """Resolve a per-Shape-sub-field nudge for one numeric raw param.
     Returns the clamped new value, rounded to 4 decimals.
@@ -198,6 +200,11 @@ def _nudged_numeric(
     Integer params (e.g. radial `edges`): `nudge.amount` is an absolute unit
     delta (1 = ±1 edge), NOT a fraction of the range, and the result is rounded
     to the nearest integer.
+
+    Wrap (`nudge.wrap` + a `nudge_dir` state dict): instead of clamping at a
+    boundary, reflect the overshoot back into range and reverse the per-(vid,
+    param) direction stored in `nudge_dir`, so repeated fires bounce back and
+    forth. No-op (plain clamp) when wrap is off or no state dict is provided.
 
     For `scale_offset` params (x_offset / y_offset), the schema's [min, max]
     is the FRONTEND −1..1 range while LedFX stores 0..1. The current cached
@@ -211,11 +218,17 @@ def _nudged_numeric(
     scale_offset = bool(meta.get("scale_offset"))
     eff_intensity = intensity if intensity is not None else 0.5
     factor = 1.0 + (eff_intensity - 0.5) * float(nudge.scale or 0.0)
+
+    wrap = bool(getattr(nudge, "wrap", False)) and nudge_dir is not None
+    dir_key = f"{vid}::{param_name}"
+    direction = nudge_dir.get(dir_key, 1) if wrap else 1
+
     # Integer params nudge in raw units; everything else in fractions of range.
     if is_integer:
         delta = float(nudge.amount or 0.0) * factor
     else:
         delta = float(nudge.amount or 0.0) * (hi - lo) * factor
+    delta *= direction
 
     cur_raw = current_config.get(param_name)
     if cur_raw is None:
@@ -226,7 +239,19 @@ def _nudged_numeric(
     else:
         current_fe = float(cur_raw)
 
-    new_fe = max(lo, min(hi, current_fe + delta))
+    raw_new = current_fe + delta
+    if wrap and hi > lo:
+        if raw_new > hi:
+            new_fe = hi - (raw_new - hi)      # reflect off the top
+            nudge_dir[dir_key] = -direction
+        elif raw_new < lo:
+            new_fe = lo + (lo - raw_new)      # reflect off the bottom
+            nudge_dir[dir_key] = -direction
+        else:
+            new_fe = raw_new
+        new_fe = max(lo, min(hi, new_fe))     # guard against a >range overshoot
+    else:
+        new_fe = max(lo, min(hi, raw_new))
 
     if scale_offset:
         # frontend −1..1 → LedFX 0..1
@@ -242,6 +267,8 @@ def _patch_shape(
     current_config: dict,
     mode: str = "absolute",
     intensity: Optional[float] = None,
+    vid: Optional[str] = None,
+    nudge_dir: Optional[dict] = None,
 ) -> dict:
     """shape aspect — write only the sub-fields the user set AND only those the effect supports.
 
@@ -286,7 +313,8 @@ def _patch_shape(
         nudge_spec = getattr(val, f"{key}_nudge", None)
         if is_nudge and nudge_spec is not None:
             # _nudged_numeric already returns LedFX-space when scale_offset is set
-            v = _nudged_numeric(effect_type, key, nudge_spec, current_config, intensity)
+            v = _nudged_numeric(effect_type, key, nudge_spec, current_config, intensity,
+                                vid=vid, nudge_dir=nudge_dir)
             out[key] = int(v) if key == "edges" else v
         else:
             abs_val = getattr(val, key, None)
@@ -306,6 +334,8 @@ def _patch_for_aspect(
     target: MorphTarget,
     current_config: dict,
     intensity: Optional[float],
+    vid: Optional[str] = None,
+    nudge_dir: Optional[dict] = None,
 ) -> dict:
     val = target.absolute_value
     if aspect_id in ("brightness", "reactivity", "blur"):
@@ -317,7 +347,8 @@ def _patch_for_aspect(
         return _patch_bg_color(effect_type, val)
     if aspect_id == "shape":
         return _patch_shape(effect_type, val, current_config,
-                            mode=target.mode, intensity=intensity)
+                            mode=target.mode, intensity=intensity,
+                            vid=vid, nudge_dir=nudge_dir)
     return {}
 
 
@@ -328,6 +359,7 @@ def compile_target(
     virtual_cache: dict,
     default_ramp_ms: Optional[int] = None,
     intensity: Optional[float] = None,
+    nudge_dir: Optional[dict] = None,
 ) -> list[ConcreteWrite]:
     """Translate one MorphTarget into per-virtual concrete writes.
 
@@ -381,7 +413,8 @@ def compile_target(
             continue
 
         # Param-patch aspects
-        patch = _patch_for_aspect(cur_type, target.aspect, target, cur_cfg, intensity)
+        patch = _patch_for_aspect(cur_type, target.aspect, target, cur_cfg, intensity,
+                                  vid=vid, nudge_dir=nudge_dir)
         if not patch:
             continue
         writes.append(ConcreteWrite(

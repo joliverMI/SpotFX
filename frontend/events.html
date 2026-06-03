@@ -780,14 +780,20 @@ function msShapeNudgeEditorHtml(val) {
     const n = val[key + '_nudge'] || {};
     const amt = (n.amount ?? 0).toFixed(2);
     const scl = (n.scale  ?? 0).toFixed(2);
-    return `<div class="ms-shape-nudge-row" data-key="${key}" style="display:grid;grid-template-columns:64px 56px 1fr 56px 56px 1fr 56px;gap:6px;align-items:center;margin-bottom:4px;font-size:11px;">
+    const wrapOn = !!n.wrap;
+    const wrapStyle = wrapOn
+      ? 'background:var(--accent);color:#fff;'
+      : 'background:var(--surface);color:var(--text-muted);';
+    return `<div class="ms-shape-nudge-row" data-key="${key}" style="display:grid;grid-template-columns:58px 1fr 66px 32px 36px 1fr 66px;gap:6px;align-items:center;margin-bottom:4px;font-size:11px;">
       <span style="color:var(--text-muted);">${label}</span>
-      <span style="color:var(--text-muted);text-align:right;">amount</span>
       <input type="range" class="ms-shape-nudge-amt-range" min="${min}" max="${max}" step="${step}" value="${amt}" style="accent-color:var(--accent);">
-      <input type="number" class="ms-shape-nudge-amt" min="${min}" max="${max}" step="${step}" value="${amt}" style="width:56px;">
+      <input type="number" class="ms-shape-nudge-amt" min="${min}" max="${max}" step="${step}" value="${amt}" style="width:66px;">
+      <button type="button" class="ms-shape-nudge-wrap" data-wrap="${wrapOn ? '1' : '0'}" onclick="msWrapToggle(this)"
+        title="Wrap: bounce off min/max instead of sticking at the limit"
+        style="height:24px;padding:0;font-size:13px;line-height:1;border-radius:4px;cursor:pointer;border:1px solid var(--border);${wrapStyle}">↔</button>
       <span style="color:var(--text-muted);text-align:right;">scale</span>
       <input type="range" class="ms-shape-nudge-scale-range" min="0" max="2" step="0.05" value="${scl}" style="accent-color:var(--accent);">
-      <input type="number" class="ms-shape-nudge-scale" min="0" max="2" step="0.05" value="${scl}" style="width:56px;">
+      <input type="number" class="ms-shape-nudge-scale" min="0" max="2" step="0.05" value="${scl}" style="width:66px;">
     </div>`;
   };
   // Booleans: same tri-state pills as absolute mode (no nudge semantic for bools).
@@ -811,6 +817,13 @@ function msShapeNudgeEditorHtml(val) {
     ${numericRow('y_offset', 'Y Offset', -1, 1, 0.05)}
   </div>`;
 }
+
+window.msWrapToggle = function(btn) {
+  const on = btn.dataset.wrap !== '1';
+  btn.dataset.wrap = on ? '1' : '0';
+  btn.style.background = on ? 'var(--accent)' : 'var(--surface)';
+  btn.style.color      = on ? '#fff' : 'var(--text-muted)';
+};
 
 window.msModeToggle = function(btn) {
   const next = btn.dataset.mode === 'nudge' ? 'absolute' : 'nudge';
@@ -970,12 +983,14 @@ function syncMorphTarget(row) {
         const key = nrow.dataset.key;  // star | edges | twist
         const amt = parseFloat(nrow.querySelector('.ms-shape-nudge-amt')?.value);
         const scl = parseFloat(nrow.querySelector('.ms-shape-nudge-scale')?.value);
+        const wrap = nrow.querySelector('.ms-shape-nudge-wrap')?.dataset.wrap === '1';
         const haveAmt = Number.isFinite(amt) && amt !== 0;
         const haveScl = Number.isFinite(scl) && scl !== 0;
         if (haveAmt || haveScl) {
           absolute_value[key + '_nudge'] = {
             amount: Number.isFinite(amt) ? amt : 0,
             scale:  Number.isFinite(scl) ? scl : 0,
+            wrap,
           };
         }
       });

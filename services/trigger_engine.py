@@ -166,6 +166,9 @@ class TriggerEngine:
         # bounce traversal.
         self._color_cursor: dict[str, int] = {}
         self._color_cursor_dir: dict[str, int] = {}
+        # Shape-nudge bounce direction per "{virtual_id}::{param}" (in-memory,
+        # reset on track change). Used when a Shape sub-field nudge has wrap=True.
+        self._nudge_dir: dict[str, int] = {}
         self._shape_offset_ms: int = 0       # cached from AudioShapeMeta.timestamp_offset_ms
         self._shape_offset_quality: float = 0.0  # cached quality score (r × difficulty)
         # Highest match-quality observed during the current play. Reset on URI
@@ -235,6 +238,7 @@ class TriggerEngine:
             self._last_action.clear()
             self._color_cursor.clear()
             self._color_cursor_dir.clear()
+            self._nudge_dir.clear()
             self._preselected.clear()
             self._preselected_steps.clear()
             self._plan.clear()
@@ -1749,6 +1753,7 @@ class TriggerEngine:
                     target, state.ledfx_virtual_cache,
                     default_ramp_ms=action.ramp_ms,
                     intensity=intensity if target.mode == "nudge" else None,
+                    nudge_dir=self._nudge_dir,
                 )
             )
 
