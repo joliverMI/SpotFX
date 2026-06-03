@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
+from datetime import datetime
 from typing import Optional
 
 from api import ledfx_client
@@ -21,9 +23,34 @@ from models.color_set import ColorSetCard, ColorSetEntry
 from models.music_event import MorphScope
 from models.state import state
 from services import morph_aspects
-from services.scene_absorb import _register_scene_gradients, _load_gradients
+from services.scene_absorb import _load_gradients, _save_gradients
 
 logger = logging.getLogger(__name__)
+
+_IMPORT_PREFIX = "Last Import:"
+_KEEP_IMPORTS = 3   # only retain the most recent N auto-saved import gradients
+
+
+def _register_import_gradients(values: list[str]) -> None:
+    """Add freshly-imported gradient strings to the library under 'Last Import:'
+    names (dedup by exact value), then prune so only the most recent
+    `_KEEP_IMPORTS` auto-saved import gradients remain. Named library gradients
+    (anything without the prefix) are never touched."""
+    existing = _load_gradients()
+    existing_values = {g.get("value") for g in existing}
+    stamp = datetime.now().strftime("%m-%d %H:%M:%S")
+    new = [v for v in values if v and v not in existing_values]
+    for i, val in enumerate(new):
+        label = stamp if len(new) == 1 else f"{stamp} #{i + 1}"
+        existing.append({"id": str(uuid.uuid4()), "name": f"{_IMPORT_PREFIX} {label}", "value": val})
+
+    imports = [g for g in existing if g.get("name", "").startswith(_IMPORT_PREFIX)]
+    if len(imports) > _KEEP_IMPORTS:
+        keep_ids = {g["id"] for g in imports[-_KEEP_IMPORTS:]}
+        existing = [g for g in existing
+                    if not g.get("name", "").startswith(_IMPORT_PREFIX) or g["id"] in keep_ids]
+
+    _save_gradients(existing)
 
 
 def _normalize_gradient(css: str) -> Optional[tuple]:
@@ -148,7 +175,7 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
                 new_by_canon[canon] = entry.color_value
             to_register.add(entry.color_value)
 
-    _register_scene_gradients("Import", to_register)
+    _register_import_gradients(list(to_register))
 
     return ColorSetCard(
         name="Imported Colors",
