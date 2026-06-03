@@ -21,7 +21,6 @@ from models.color_set import ColorSetCard, ColorSetEntry
 from models.music_event import MorphScope
 from models.state import state
 from services import morph_aspects
-from services.effect_params import get_param_meta
 from services.scene_absorb import _register_scene_gradients, _load_gradients
 
 logger = logging.getLogger(__name__)
@@ -51,8 +50,10 @@ def _normalize_gradient(css: str) -> Optional[tuple]:
 
 def _color_for_cfg(etype: str, cfg: dict) -> tuple[Optional[str], Optional[str]]:
     """Return (color_kind, color_value) from the effect's color param, or
-    (None, None) when absent."""
-    for p in morph_aspects.params_for_aspect(etype, "color"):
+    (None, None) when absent. Falls back to LedFX's canonical `gradient` key
+    so effects SpotFX doesn't model (e.g. crawler) still import their color."""
+    candidates = list(morph_aspects.params_for_aspect(etype, "color")) + ["gradient"]
+    for p in candidates:
         val = cfg.get(p)
         if isinstance(val, str) and val:
             kind = "gradient" if "gradient(" in val else "solid"
@@ -61,7 +62,10 @@ def _color_for_cfg(etype: str, cfg: dict) -> tuple[Optional[str], Optional[str]]
 
 
 def _bg_color_for_cfg(etype: str, cfg: dict) -> Optional[str]:
-    for p in morph_aspects.params_for_aspect(etype, "bg_color"):
+    """BG color from the effect's bg param, falling back to LedFX's canonical
+    `background_color` key for unmodeled effects."""
+    candidates = list(morph_aspects.params_for_aspect(etype, "bg_color")) + ["background_color"]
+    for p in candidates:
         val = cfg.get(p)
         if isinstance(val, str) and val:
             return val
@@ -105,9 +109,9 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
         if etype:
             color_kind, color_value = _color_for_cfg(etype, cfg)
             bg_color = _bg_color_for_cfg(etype, cfg)
-            if get_param_meta(etype, "background_mode") is not None:
-                cur = cfg.get("background_mode")
-                bg_mode = cur if cur in ("additive", "overwrite") else None
+            # background_mode is a LedFX base param present on most effects.
+            cur = cfg.get("background_mode")
+            bg_mode = cur if cur in ("additive", "overwrite") else None
 
         entries.append(ColorSetEntry(
             scope=MorphScope(virtual_ids=[vid]),
