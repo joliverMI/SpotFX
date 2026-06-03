@@ -195,6 +195,10 @@ def _nudged_numeric(
     delta  = nudge.amount * (hi - lo) * factor          # in frontend space
     new    = clamp(current + delta, lo, hi)             # in frontend space
 
+    Integer params (e.g. radial `edges`): `nudge.amount` is an absolute unit
+    delta (1 = ±1 edge), NOT a fraction of the range, and the result is rounded
+    to the nearest integer.
+
     For `scale_offset` params (x_offset / y_offset), the schema's [min, max]
     is the FRONTEND −1..1 range while LedFX stores 0..1. The current cached
     value is converted into frontend space before the math runs, and the
@@ -203,10 +207,15 @@ def _nudged_numeric(
     meta = _ep.get_param_meta(effect_type, param_name) or {}
     lo = meta.get("min", 0.0)
     hi = meta.get("max", 1.0)
+    is_integer = meta.get("type") == "integer"
     scale_offset = bool(meta.get("scale_offset"))
     eff_intensity = intensity if intensity is not None else 0.5
     factor = 1.0 + (eff_intensity - 0.5) * float(nudge.scale or 0.0)
-    delta = float(nudge.amount or 0.0) * (hi - lo) * factor
+    # Integer params nudge in raw units; everything else in fractions of range.
+    if is_integer:
+        delta = float(nudge.amount or 0.0) * factor
+    else:
+        delta = float(nudge.amount or 0.0) * (hi - lo) * factor
 
     cur_raw = current_config.get(param_name)
     if cur_raw is None:
@@ -222,6 +231,8 @@ def _nudged_numeric(
     if scale_offset:
         # frontend −1..1 → LedFX 0..1
         return round(new_fe / 2.0 + 0.5, 4)
+    if is_integer:
+        return int(round(new_fe))   # nearest integer
     return round(new_fe, 4)
 
 
