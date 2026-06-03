@@ -312,6 +312,12 @@ class MusicEvent(BaseModel):
     labels: list[str] = Field(default_factory=list)
     energy_level: int | None = None    # 1–10; None = energy-agnostic
     ai_exposed: bool = False           # True = include in AI trigger generation prompts
+    # When True, this event's morph actions are pre-staged into a shared LedFX
+    # scene ("spotfx-morph-temp") by the planner ahead of fire, and dispatched
+    # at fire time via a single `PUT /api/scenes {action: activate}` so every
+    # virtual changes atomically. Honored for event_type == "single" or
+    # "morph_set"; ignored (with a warning log) for "sequence" / "beat_sequence".
+    scene_override: bool = False
 
     # Pre-commands — fired before the main action (single) or before the first step (sequence / beat_sequence)
     pre_brightness_enabled: bool = True

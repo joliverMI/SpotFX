@@ -289,6 +289,82 @@ async def trigger_scene(scene_id: str) -> bool:
         return False
 
 
+async def ensure_scene(scene_id: str, name: str) -> bool:
+    """Make sure a scene with `scene_id` exists on LedFX. No-op if present;
+    otherwise POST a fresh empty scene with `name`. The caller is responsible
+    for choosing a `name` whose LedFX-normalized id (lowercase, spaces and
+    underscores → hyphens) matches `scene_id` — e.g. name='SpotFX Morph Temp'
+    normalizes to id='spotfx-morph-temp'.
+
+    Used at SpotFX startup to guarantee the shared scene-override temp scene
+    exists before any morph tries to update + activate it. Direct-fire
+    (bypasses the 8 ms bus)."""
+    if _capture_in_progress():
+        return True
+    client = _get_client()
+    try:
+        resp = await client.get("/api/scenes")
+        resp.raise_for_status()
+        scenes = (resp.json() or {}).get("scenes") or {}
+        if scene_id in scenes:
+            return True
+        resp = await client.post(
+            "/api/scenes",
+            json={"name": name, "virtuals": {}, "scene_image": ""},
+        )
+        resp.raise_for_status()
+        # Re-fetch and confirm the id we wanted is what LedFX created.
+        resp2 = await client.get("/api/scenes")
+        scenes2 = (resp2.json() or {}).get("scenes") or {}
+        if scene_id not in scenes2:
+            logger.warning(
+                "ensure_scene: posted name '%s' but LedFX did not create id '%s' (got: %s)",
+                name, scene_id, sorted(scenes2.keys())[-5:],
+            )
+            return False
+        logger.info("ensure_scene: created '%s' on LedFX", scene_id)
+        return True
+    except Exception as exc:
+        logger.warning("ensure_scene: could not ensure '%s' (%r) — scene-override morphs will fail loudly at fire time", scene_id, exc)
+        return False
+
+
+async def update_scene_virtuals(scene_id: str, virtuals: dict) -> bool:
+    """Update a scene's `virtuals` dict via POST. The caller passes the COMPLETE
+    desired virtuals payload (LedFX merges at the virtual level, so any virtual
+    omitted here keeps its previous entry from a prior update). Direct-fire."""
+    if _capture_in_progress():
+        return True
+    client = _get_client()
+    try:
+        resp = await client.post(
+            "/api/scenes",
+            json={"id": scene_id, "virtuals": virtuals},
+        )
+        resp.raise_for_status()
+        return True
+    except Exception as exc:
+        logger.error("update_scene_virtuals('%s') failed: %r", scene_id, exc)
+        return False
+
+
+async def delete_scene(scene_id: str) -> bool:
+    """Remove a scene from LedFX. Direct-fire. Not used in the morph fire path —
+    kept so a future 'reset temp scene' control can call it."""
+    if _capture_in_progress():
+        return True
+    client = _get_client()
+    try:
+        # httpx's `delete()` shorthand doesn't take `json=`; use the explicit
+        # request form so we can attach a JSON body the way LedFX expects.
+        resp = await client.request("DELETE", "/api/scenes", json={"id": scene_id})
+        resp.raise_for_status()
+        return True
+    except Exception as exc:
+        logger.error("delete_scene('%s') failed: %r", scene_id, exc)
+        return False
+
+
 async def get_scenes() -> list[dict]:
     """
     Fetch the list of available LedFX scenes.

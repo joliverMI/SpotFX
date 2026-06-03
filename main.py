@@ -88,6 +88,12 @@ async def lifespan(app: FastAPI):
     from services import morph_effect_state
     morph_effect_state.load()
 
+    # Ensure the shared scene-override temp scene exists on LedFX (idempotent).
+    # Scene-override morphs (event.scene_override=True) rewrite + activate this
+    # one scene rather than streaming individual virtual effect writes.
+    # Canonical id uses hyphens because LedFX normalizes underscores → hyphens.
+    asyncio.create_task(ledfx_client.ensure_scene("spotfx-morph-temp", "SpotFX Morph Temp"))
+
     # Seed device categories from static config (first-run migration)
     from services.device_category_service import seed_from_effect_params, migrate_roles
     seed_from_effect_params()

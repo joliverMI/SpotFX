@@ -64,6 +64,10 @@ class _PlanEntry:
     preselected_steps: Optional[list] = None      # for "sequence" events — per-step action pre-selection
     preselected_morph_picks: Optional[list] = None  # for "morph_set" events — per-lane pre-picks
     snapshot_task: Optional[asyncio.Task] = None  # pre-fire snapshot of the LedFX state this event will change
+    # Scene-override lookahead: planner pre-stages the temp scene + transition_times
+    # ahead of fire_at_ms; fire-time just activates the prepared scene.
+    scene_override_prepared: bool = False
+    scene_override_payload: Optional[dict] = None
     fired: bool = False
 
 
@@ -1150,12 +1154,23 @@ class TriggerEngine:
 
         For single events: applies pre-brightness (ramp awaited) and pre-transition,
         waits the configured lead time, then fires the main action.
+
+        When `event.scene_override == True` and the event has morph_step actions,
+        skips the per-virtual write path entirely: builds the post-morph scene,
+        pushes it + per-virtual transition_time to LedFX, then activates the
+        shared `spotfx-morph-temp` scene so every device changes atomically.
         """
         event = get_event(event_id)
         if event is None:
             logger.warning("fire_event_now: unknown event %s", event_id)
             return False
+
         with ledfx_client.force_allow():
+            # ── Scene-override fast path (manual fire = prepare inline + fire) ──
+            if await self._maybe_fire_scene_override(event, labels=labels):
+                await ledfx_client.drain_bus()
+                return True
+
             if event.event_type == "single":
                 await self._apply_pre_commands(event, list(labels or []))
                 lead_ms = max(
@@ -1179,6 +1194,117 @@ class TriggerEngine:
             # Wait for any pending coalesce-bus flush so the writes land before
             # we exit force_allow and the capture gate closes again.
             await ledfx_client.drain_bus()
+        return True
+
+    # ── Scene-override helpers ──────────────────────────────────────────────
+    SCENE_OVERRIDE_TEMP_ID = "spotfx-morph-temp"
+
+    def _event_eligible_for_scene_override(self, event) -> bool:
+        """Phase 1 scope: honor scene_override only for `single` and `morph_set`.
+        For sequence / beat_sequence the flag is parsed and saved but ignored
+        at fire time (per-step lookahead not implemented yet)."""
+        if not getattr(event, "scene_override", False):
+            return False
+        if event.event_type in ("single", "morph_set"):
+            return True
+        logger.warning(
+            "Event '%s' has scene_override=True but event_type=%s — not honored in Phase 1; "
+            "falling back to the bus dispatch.",
+            event.name, event.event_type,
+        )
+        return False
+
+    def _collect_morph_actions_for_event(self, event, labels: list[str] | None = None) -> list:
+        """For scene-override fires: gather the MorphStepActions that would land.
+        For morph_set events, pre-picks lanes via the existing `_pick_morph_lanes`
+        so the scene reflects the chosen picks."""
+        from models.music_event import MorphStepAction
+        if event.event_type == "single":
+            return [a for a in (event.actions or []) if isinstance(a, MorphStepAction)]
+        if event.event_type == "morph_set":
+            picks = self._pick_morph_lanes(event, labels or [])
+            return [a for _, a in picks if isinstance(a, MorphStepAction)]
+        return []
+
+    def _build_scene_payload(self, morph_actions: list) -> Optional[dict]:
+        """Wrap `morph_scene.build_scene_state` with a cache copy + an
+        intensity resolver tied to `self._beat_intensity_now`. Returns None
+        if the morph produced no touched virtuals (scene-override pointless)."""
+        if not morph_actions:
+            return None
+        import copy
+        from services.morph_scene import build_scene_state
+        working_cache = copy.deepcopy(dict(state.ledfx_virtual_cache))
+        payload = build_scene_state(
+            morph_actions,
+            virtual_cache=working_cache,
+            intensity_resolver=lambda src: self._beat_intensity_now(src),
+        )
+        if not payload.get("touched_virtuals"):
+            return None
+        return payload
+
+    async def _push_scene_override_prep(self, payload: dict) -> bool:
+        """POST the temp scene's virtuals + set per-virtual transition_time.
+        Wrapped in force_allow by the caller; returns True if both succeeded."""
+        scene_id = self.SCENE_OVERRIDE_TEMP_ID
+        scene_virtuals = payload["scene_virtuals"]
+        transition_times_ms = payload["transition_times_ms"]
+
+        scene_ok = await ledfx_client.update_scene_virtuals(scene_id, scene_virtuals)
+        if not scene_ok:
+            return False
+
+        # Set transition_time on every touched virtual concurrently. LedFX uses
+        # this as the cross-fade duration during the upcoming scene activate.
+        cfg_coros = [
+            ledfx_client.set_virtual_config(vid, {"transition_time": (ms or 0) / 1000})
+            for vid, ms in transition_times_ms.items()
+        ]
+        if cfg_coros:
+            await asyncio.gather(*cfg_coros, return_exceptions=True)
+        return True
+
+    async def _fire_scene_override(self, payload: dict, event) -> None:
+        """Activate the temp scene, update cache, persist post-state, broadcast."""
+        scene_id = self.SCENE_OVERRIDE_TEMP_ID
+        await ledfx_client.trigger_scene(scene_id)
+
+        # Update the local cache so subsequent compiles see the new state.
+        from services import morph_effect_state
+        updates = []
+        for vid, post in payload["post_state_per_vid"].items():
+            entry = state.ledfx_virtual_cache.setdefault(vid, {})
+            entry["effect"] = {"type": post["type"], "config": dict(post["config"])}
+            updates.append((vid, post["type"], dict(post["config"])))
+        if updates:
+            morph_effect_state.save_many(updates)
+
+    async def _maybe_fire_scene_override(self, event, labels=None, picks=None) -> bool:
+        """Combined prepare + fire for the manual / fallback path. Returns True
+        iff scene-override was eligible AND actually completed (so the caller
+        skips the regular dispatch). False if not eligible, no morph actions
+        produced writes, or the LedFX prep call failed (caller falls back)."""
+        if not self._event_eligible_for_scene_override(event):
+            return False
+        if picks is not None:
+            morph_actions = [a for _, a in picks if a is not None]
+        else:
+            morph_actions = self._collect_morph_actions_for_event(event, labels)
+        payload = self._build_scene_payload(morph_actions)
+        if payload is None:
+            return False
+        if not await self._push_scene_override_prep(payload):
+            logger.warning(
+                "scene-override prep failed for event '%s' — falling back to bus dispatch",
+                event.name,
+            )
+            return False
+        await self._fire_scene_override(payload, event)
+        logger.info(
+            "scene-override fired '%s' atomically (touched=%s)",
+            event.name, payload["touched_virtuals"],
+        )
         return True
 
     async def _fire_trigger(
@@ -2373,6 +2499,26 @@ class TriggerEngine:
             return
         evt = entry.event
         skip_ids = entry.planned_descendant_ids or None
+
+        # Scene-override fast path: planner pre-staged the temp scene + per-virtual
+        # transition_time. Just activate it.
+        if entry.scene_override_prepared and entry.scene_override_payload:
+            await self._fire_scene_override(entry.scene_override_payload, evt)
+            entry.scene_override_prepared = False  # consumed
+            return
+
+        # Eligible but planner missed the lookahead window — prepare inline
+        # (best effort) and fire. Logs a warning.
+        if self._event_eligible_for_scene_override(evt):
+            picks = entry.preselected_morph_picks if evt.event_type == "morph_set" else None
+            with ledfx_client.force_allow():
+                fired = await self._maybe_fire_scene_override(evt, labels=entry.labels, picks=picks)
+            if fired:
+                logger.warning(
+                    "scene-override fell back to inline prep at fire time for '%s' (lookahead missed)",
+                    evt.name,
+                )
+                return
         # If this is the root entry and pre-commands were fired by the
         # look-ahead path (_pre_fired set), skip them inside the sequence
         # so step 0 fires immediately instead of awaiting brightness ramps.
@@ -2820,6 +2966,58 @@ class TriggerEngine:
                                 self._fire_pre_commands(event, trigger.id, trigger.labels)
                             )
                             self._pre_cmd_tasks[trigger.id] = _pc_task
+
+                # ── Scene-override look-ahead ─────────────────────────────
+                # For any root entry with event.scene_override eligible, pre-stage
+                # the temp scene + per-virtual transition_time some lead_ms before
+                # fire_at_ms. At fire time the dispatch is just a single PUT
+                # /api/scenes activate. Skipped while paused (no LedFX writes).
+                if not state.paused:
+                    lead_ms = getattr(settings, "scene_override_lead_ms", 500) or 500
+                    for _tid, _entries in list(self._plan.items()):
+                        if _tid in self._fired:
+                            continue
+                        for _entry in _entries:
+                            if _entry.fired or _entry.scene_override_prepared:
+                                continue
+                            if not _entry.is_root:
+                                continue
+                            if not self._event_eligible_for_scene_override(_entry.event):
+                                continue
+                            if _entry.fire_at_ms - effective_now > lead_ms:
+                                continue
+                            picks = _entry.preselected_morph_picks
+                            if _entry.event.event_type == "morph_set" and picks is None:
+                                picks = self._pick_morph_lanes(_entry.event, _entry.labels)
+                                _entry.preselected_morph_picks = picks
+                            morph_actions = (
+                                [a for _, a in (picks or []) if a is not None]
+                                if _entry.event.event_type == "morph_set"
+                                else self._collect_morph_actions_for_event(_entry.event, _entry.labels)
+                            )
+                            payload = self._build_scene_payload(morph_actions)
+                            if payload is None:
+                                _entry.scene_override_prepared = True  # nothing to do, skip lookahead retries
+                                continue
+                            _entry.scene_override_payload = payload
+                            # Push prep async — completion before fire is best-effort;
+                            # _execute_plan_entry's "eligible but not prepared" path
+                            # provides the inline-prep fallback if prep isn't done.
+                            async def _prep_and_mark(entry=_entry, payload=payload):
+                                with ledfx_client.force_allow():
+                                    ok = await self._push_scene_override_prep(payload)
+                                if ok:
+                                    entry.scene_override_prepared = True
+                                    logger.info(
+                                        "scene-override prepared '%s' at T-%dms (touched=%s)",
+                                        entry.event.name,
+                                        entry.fire_at_ms - effective_now,
+                                        payload["touched_virtuals"],
+                                    )
+                                else:
+                                    # Mark as "tried" so we don't retry every tick — fire-time fallback will handle it
+                                    logger.warning("scene-override prep failed for '%s'; will retry inline at fire time", entry.event.name)
+                            asyncio.create_task(_prep_and_mark())
 
                 # ── Fire plan entries whose time has come ─────────────────
                 # Each entry is an atomic fire computed by _plan_timeline with

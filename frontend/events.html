@@ -82,6 +82,12 @@
             style="flex-shrink:0;height:34px;padding:0 10px;font-size:11px;border-radius:4px;
                    border:1px solid var(--border);background:var(--surface);color:var(--text-muted);
                    cursor:pointer;white-space:nowrap;">AI Ex</button>
+          <button id="e-scene-override-btn" type="button"
+            title="When on, this event's morph actions are pre-staged in a temporary LedFX scene and applied atomically at fire time. Lookahead lets every device transition in unison; per-virtual transition_time is set from the morph's ramp_ms."
+            onclick="toggleSceneOverride()"
+            style="flex-shrink:0;height:34px;padding:0 10px;font-size:11px;border-radius:4px;
+                   border:1px solid var(--border);background:var(--surface);color:var(--text-muted);
+                   cursor:pointer;white-space:nowrap;">Scene Override</button>
         </div>
         <div class="field" style="display:flex;align-items:center;gap:12px;">
           <label style="white-space:nowrap;font-size:12px;display:flex;align-items:center;gap:6px;">
@@ -1910,6 +1916,19 @@ window.toggleAiExposed = function() {
   document.getElementById('btn-save').click();
 };
 
+function setSceneOverrideBtn(active) {
+  const btn = document.getElementById('e-scene-override-btn');
+  btn.dataset.active    = active ? 'true' : 'false';
+  btn.style.background  = active ? 'var(--accent)'    : 'var(--surface)';
+  btn.style.color       = active ? '#fff'             : 'var(--text-muted)';
+  btn.style.borderColor = active ? 'var(--accent)'    : 'var(--border)';
+}
+window.toggleSceneOverride = function() {
+  const btn = document.getElementById('e-scene-override-btn');
+  setSceneOverrideBtn(btn.dataset.active !== 'true');
+  document.getElementById('btn-save').click();
+};
+
 document.getElementById('filter-ai-ex').addEventListener('click', () => {
   aiExFilter = !aiExFilter;
   document.getElementById('filter-ai-ex').classList.toggle('btn-accent', aiExFilter);
@@ -1927,6 +1946,7 @@ function selectEvent(id) {
   document.getElementById('e-labels').value = (e.labels || []).join(', ');
   document.getElementById('e-type').value = e.event_type;
   setAiExposedBtn(!!e.ai_exposed);
+  setSceneOverrideBtn(!!e.scene_override);
   // Energy level
   const en = e.energy_level != null;
   document.getElementById('e-energy-en').checked = en;
@@ -2061,7 +2081,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   e.color = document.getElementById('e-color').value;
   e.labels = document.getElementById('e-labels').value.split(',').map(s => s.trim()).filter(Boolean);
   e.event_type = document.getElementById('e-type').value;
-  e.ai_exposed  = document.getElementById('e-ai-exposed-btn').dataset.active === 'true';
+  e.ai_exposed     = document.getElementById('e-ai-exposed-btn').dataset.active === 'true';
+  e.scene_override = document.getElementById('e-scene-override-btn').dataset.active === 'true';
   const energyEn = document.getElementById('e-energy-en').checked;
   e.energy_level = energyEn ? parseInt(document.getElementById('e-energy-val').value) : null;
 
@@ -2115,6 +2136,7 @@ document.getElementById('btn-duplicate').addEventListener('click', async () => {
   src.energy_level = document.getElementById('e-energy-en').checked
     ? parseInt(document.getElementById('e-energy-val').value) : null;
   src.event_offset_ms = parseInt(document.getElementById('e-offset').value) || 0;
+  src.scene_override  = document.getElementById('e-scene-override-btn').dataset.active === 'true';
   if (src.event_type === 'single') {
     syncActionsFromDOM(src);
     src.pre_brightness_enabled = document.getElementById('e-pre-brightness-en').checked;
