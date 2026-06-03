@@ -790,7 +790,7 @@ function msShapeNudgeEditorHtml(val) {
       <input type="number" class="ms-shape-nudge-amt" min="${min}" max="${max}" step="${step}" value="${amt}" style="width:66px;">
       <button type="button" class="ms-shape-nudge-wrap" data-wrap="${wrapOn ? '1' : '0'}" onclick="msWrapToggle(this)"
         title="Wrap: bounce off min/max instead of sticking at the limit"
-        style="height:24px;padding:0;font-size:13px;line-height:1;border-radius:4px;cursor:pointer;border:1px solid var(--border);${wrapStyle}">↔</button>
+        style="height:24px;width:100%;padding:0;font-size:13px;line-height:1;border-radius:4px;cursor:pointer;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;${wrapStyle}">↔</button>
       <span style="color:var(--text-muted);text-align:right;">scale</span>
       <input type="range" class="ms-shape-nudge-scale-range" min="0" max="2" step="0.05" value="${scl}" style="accent-color:var(--accent);">
       <input type="number" class="ms-shape-nudge-scale" min="0" max="2" step="0.05" value="${scl}" style="width:66px;">

@@ -1938,6 +1938,7 @@ class TriggerEngine:
 
                 instant: dict = {}
                 ramp_str: dict = {}
+                ramp_num: dict = {}
 
                 def _place(param: str, value: str):
                     meta = get_param_meta(etype, param) or {}
@@ -1948,6 +1949,16 @@ class TriggerEngine:
                     else:
                         instant[param] = value
 
+                def _place_num(param: str, value: float):
+                    meta = get_param_meta(etype, param) or {}
+                    if meta.get("smooth", True) and ramp_ms > 0:
+                        ramp_num[param] = value
+                    else:
+                        instant[param] = value
+
+                def _has(param: str) -> bool:
+                    return get_param_meta(etype, param) is not None or param in cfg
+
                 if entry.color_value:
                     pc = self._color_param_for(etype, "color", "gradient", cfg)
                     if pc:
@@ -1956,11 +1967,19 @@ class TriggerEngine:
                     pb = self._color_param_for(etype, "bg_color", "background_color", cfg)
                     if pb:
                         _place(pb, entry.bg_color)
-                if entry.bg_mode and (get_param_meta(etype, "background_mode") is not None
-                                      or "background_mode" in cfg):
+                if entry.accent_color:
+                    from services import morph_aspects
+                    ap = morph_aspects.accent_param_for(etype)
+                    if ap:
+                        _place(ap, entry.accent_color)
+                if entry.brightness is not None and _has("brightness"):
+                    _place_num("brightness", entry.brightness)
+                if entry.background_brightness is not None and _has("background_brightness"):
+                    _place_num("background_brightness", entry.background_brightness)
+                if entry.bg_mode and _has("background_mode"):
                     instant["background_mode"] = entry.bg_mode
 
-                if not instant and not ramp_str:
+                if not instant and not ramp_str and not ramp_num:
                     continue
                 touched.add(vid)
 
@@ -1974,6 +1993,14 @@ class TriggerEngine:
                     else:
                         self._spawn_ramp(
                             ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
+                        )
+                if ramp_num:
+                    if await_ramps:
+                        await ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
+                        cfg.update(ramp_num)
+                    else:
+                        self._spawn_ramp(
+                            ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
                         )
 
         if instant_coros:

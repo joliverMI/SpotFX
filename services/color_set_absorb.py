@@ -132,13 +132,23 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
 
         # Read current color data when the active effect exposes it; leave
         # unset otherwise. Either way we still emit an entry for this device.
-        color_kind = color_value = bg_color = bg_mode = None
+        color_kind = color_value = bg_color = bg_mode = accent_color = None
+        brightness = background_brightness = None
         if etype:
             color_kind, color_value = _color_for_cfg(etype, cfg)
             bg_color = _bg_color_for_cfg(etype, cfg)
             # background_mode is a LedFX base param present on most effects.
             cur = cfg.get("background_mode")
             bg_mode = cur if cur in ("additive", "overwrite") else None
+            # Optional numerics (canonical LedFX keys) when present in live cfg.
+            if isinstance(cfg.get("brightness"), (int, float)):
+                brightness = float(cfg["brightness"])
+            if isinstance(cfg.get("background_brightness"), (int, float)):
+                background_brightness = float(cfg["background_brightness"])
+            # Third / accent color — whichever param the effect tags as accent.
+            ap = morph_aspects.accent_param_for(etype)
+            if ap and isinstance(cfg.get(ap), str) and cfg[ap]:
+                accent_color = cfg[ap]
 
         entries.append(ColorSetEntry(
             scope=MorphScope(virtual_ids=[vid]),
@@ -146,6 +156,9 @@ async def import_color_set(virtual_ids: list[str]) -> Optional[ColorSetCard]:
             color_value=color_value,
             bg_color=bg_color,
             bg_mode=bg_mode,
+            brightness=brightness,
+            background_brightness=background_brightness,
+            accent_color=accent_color,
         ))
 
     if not entries:

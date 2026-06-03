@@ -270,6 +270,13 @@ function entryRowHtml(entry, idx) {
   const modeEn = entry.bg_mode != null;
   const modeVal = entry.bg_mode || 'overwrite';
 
+  const briEn = entry.brightness != null;
+  const briVal = entry.brightness != null ? entry.brightness : 0.8;
+  const bgbEn = entry.background_brightness != null;
+  const bgbVal = entry.background_brightness != null ? entry.background_brightness : 0.3;
+  const accEn = entry.accent_color != null;
+  const accVal = entry.accent_color || '#000000';
+
   const rampVal = entry.ramp_ms != null ? entry.ramp_ms : '';
 
   return `<div class="cs-entry" data-idx="${idx}">
@@ -303,6 +310,14 @@ function entryRowHtml(entry, idx) {
       </select>
       <span class="cs-sub" style="margin-left:auto;">Color ramp (ms)</span>
       <input type="number" class="e-ramp" value="${rampVal}" min="0" step="50" placeholder="step default" style="width:90px;">
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
+      <label class="cs-sub" style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="e-bri-en"${briEn ? ' checked' : ''} onchange="csBriToggle(this)"> Brightness</label>
+      <input type="range" class="e-bri" min="0" max="1" step="0.01" value="${briVal}" style="width:110px;accent-color:var(--accent);${briEn ? '' : 'display:none'}">
+      <label class="cs-sub" style="display:flex;align-items:center;gap:4px;margin-left:12px;"><input type="checkbox" class="e-bgb-en"${bgbEn ? ' checked' : ''} onchange="csBgbToggle(this)"> BG Brightness</label>
+      <input type="range" class="e-bgb" min="0" max="1" step="0.01" value="${bgbVal}" style="width:110px;accent-color:var(--accent);${bgbEn ? '' : 'display:none'}">
+      <label class="cs-sub" style="display:flex;align-items:center;gap:4px;margin-left:12px;"><input type="checkbox" class="e-acc-en"${accEn ? ' checked' : ''} onchange="csAccToggle(this)"> Third Color</label>
+      <input type="color" class="e-acc" value="${accVal}" style="width:48px;height:30px;padding:1px;${accEn ? '' : 'display:none'}">
     </div>
   </div>`;
 }
@@ -341,6 +356,15 @@ window.csBgToggle = function(cb) {
 window.csModeToggle = function(cb) {
   cb.closest('.cs-entry').querySelector('.e-mode-val').style.display = cb.checked ? '' : 'none';
 };
+window.csBriToggle = function(cb) {
+  cb.closest('.cs-entry').querySelector('.e-bri').style.display = cb.checked ? '' : 'none';
+};
+window.csBgbToggle = function(cb) {
+  cb.closest('.cs-entry').querySelector('.e-bgb').style.display = cb.checked ? '' : 'none';
+};
+window.csAccToggle = function(cb) {
+  cb.closest('.cs-entry').querySelector('.e-acc').style.display = cb.checked ? '' : 'none';
+};
 
 function readEntries() {
   return [...document.querySelectorAll('#entry-list .cs-entry')].map(row => {
@@ -361,9 +385,16 @@ function readEntries() {
     const bg_color = bgEn ? row.querySelector('.e-bg-color').value : null;
     const modeEn = row.querySelector('.e-mode-en').checked;
     const bg_mode = modeEn ? row.querySelector('.e-mode-val').value : null;
+    const briEn = row.querySelector('.e-bri-en').checked;
+    const brightness = briEn ? parseFloat(row.querySelector('.e-bri').value) : null;
+    const bgbEn = row.querySelector('.e-bgb-en').checked;
+    const background_brightness = bgbEn ? parseFloat(row.querySelector('.e-bgb').value) : null;
+    const accEn = row.querySelector('.e-acc-en').checked;
+    const accent_color = accEn ? row.querySelector('.e-acc').value : null;
     const rampStr = row.querySelector('.e-ramp').value;
     const ramp_ms = rampStr !== '' && rampStr != null ? parseInt(rampStr) : null;
-    return { scope, color_kind, color_value, bg_color, bg_mode, ramp_ms };
+    return { scope, color_kind, color_value, bg_color, bg_mode,
+             brightness, background_brightness, accent_color, ramp_ms };
   });
 }
 

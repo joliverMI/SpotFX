@@ -30,6 +30,10 @@ class ColorSetEntry(BaseModel):
     color_value: str | None = None
     bg_color:    str | None = None
     bg_mode:     Optional[Literal["additive", "overwrite"]] = None
+    # Optional numeric / accent params (None = leave the device's value alone).
+    brightness:            float | None = None  # effect brightness 0..1
+    background_brightness: float | None = None  # bg brightness 0..1
+    accent_color:          str | None = None    # "third color" (sparks/peak), hex
     ramp_ms:     int | None = None
 
 
