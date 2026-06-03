@@ -1721,14 +1721,31 @@ class TriggerEngine:
         self._color_cursor[group.id] = idx
         return members[idx].color_set_id
 
+    @staticmethod
+    def _color_param_for(etype: str, aspect: str, fallback: str, cfg: dict) -> Optional[str]:
+        """Raw param name to write for a Color Set aspect on `etype`. Uses the
+        effect's mapped aspect param when SpotFX models it, else falls back to
+        LedFX's canonical key (`gradient` / `background_color`) when the live
+        effect actually exposes it — so unmodeled effects (e.g. crawler) still
+        receive colors."""
+        from services import morph_aspects
+        from services.effect_params import get_param_meta
+        params = morph_aspects.params_for_aspect(etype, aspect)
+        if params:
+            return params[0]
+        if get_param_meta(etype, fallback) is not None or fallback in cfg:
+            return fallback
+        return None
+
     async def _execute_morph_color(self, action, await_ramps: bool = False) -> None:
         """Apply a Color Set (or a Group's currently-selected Color Set) across
-        every scoped device. FG/BG colors compile through the existing Morph
-        Step machinery (reusing ramps + cache + persistence); the optional
-        per-entry background_mode is written as a direct instant patch since it
-        isn't part of the morph aspect taxonomy."""
-        from models.music_event import AspectValue, MorphStepAction, MorphTarget
+        every scoped device. Writes FG color, BG color, and background mode
+        directly per virtual — resolving each param against the device's CURRENT
+        effect with a canonical-key fallback — so it works regardless of which
+        effect a device is running (modeled or not). Color/BG strings ramp via
+        gradient interpolation; background mode is instant."""
         from services import color_set_store
+        from services import morph_effect_state
         from services.morph_compiler import resolve_scope
         from services.effect_params import get_param_meta
 
@@ -1750,51 +1767,75 @@ class TriggerEngine:
         if not card.entries:
             return
 
-        # Build transient color/bg_color MorphTargets and run them through the
-        # shared morph step executor (entry.ramp_ms overrides the step ramp).
-        targets: list = []
-        for entry in card.entries:
-            if entry.color_value:
-                targets.append(MorphTarget(
-                    scope=entry.scope,
-                    aspect="color",
-                    mode="absolute",
-                    absolute_value=AspectValue(
-                        color_kind=entry.color_kind or "gradient",
-                        color_value=entry.color_value,
-                    ),
-                    ramp_ms=entry.ramp_ms,
-                ))
-            if entry.bg_color:
-                targets.append(MorphTarget(
-                    scope=entry.scope,
-                    aspect="bg_color",
-                    mode="absolute",
-                    absolute_value=AspectValue(bg_color=entry.bg_color),
-                    ramp_ms=entry.ramp_ms,
-                ))
+        # Make sure every scoped virtual has its current effect type cached.
+        await self._ensure_virtuals_cached(card.entries)
 
-        if targets:
-            step = MorphStepAction(ramp_ms=action.ramp_ms, targets=targets)
-            await self._execute_morph_step(step, await_ramps=await_ramps)
+        default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+        instant_coros: list = []
+        touched: set[str] = set()
 
-        # Background mode — direct instant patch on any scoped virtual whose
-        # active effect actually supports `background_mode`.
-        mode_coros = []
         for entry in card.entries:
-            if not entry.bg_mode:
-                continue
+            ramp_ms = entry.ramp_ms if entry.ramp_ms is not None else default_ramp_ms
             for vid in resolve_scope(entry.scope):
                 eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
                 etype = eff.get("type")
-                if not etype or get_param_meta(etype, "background_mode") is None:
+                if not etype:
                     continue
-                mode_coros.append(
-                    ledfx_client.set_virtual_effect(vid, etype, {"background_mode": entry.bg_mode})
-                )
-                eff.setdefault("config", {})["background_mode"] = entry.bg_mode
-        if mode_coros:
-            await asyncio.gather(*mode_coros, return_exceptions=True)
+                cfg = eff.setdefault("config", {})
+
+                instant: dict = {}
+                ramp_str: dict = {}
+
+                def _place(param: str, value: str):
+                    meta = get_param_meta(etype, param) or {}
+                    # gradients/colors are smooth by default; only skip the ramp
+                    # when explicitly marked non-smooth or no ramp requested.
+                    if meta.get("smooth", True) and ramp_ms > 0:
+                        ramp_str[param] = value
+                    else:
+                        instant[param] = value
+
+                if entry.color_value:
+                    pc = self._color_param_for(etype, "color", "gradient", cfg)
+                    if pc:
+                        _place(pc, entry.color_value)
+                if entry.bg_color:
+                    pb = self._color_param_for(etype, "bg_color", "background_color", cfg)
+                    if pb:
+                        _place(pb, entry.bg_color)
+                if entry.bg_mode and (get_param_meta(etype, "background_mode") is not None
+                                      or "background_mode" in cfg):
+                    instant["background_mode"] = entry.bg_mode
+
+                if not instant and not ramp_str:
+                    continue
+                touched.add(vid)
+
+                if instant:
+                    instant_coros.append(ledfx_client.set_virtual_effect(vid, etype, instant))
+                    cfg.update(instant)
+                if ramp_str:
+                    if await_ramps:
+                        await ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
+                        cfg.update(ramp_str)
+                    else:
+                        self._spawn_ramp(
+                            ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
+                        )
+
+        if instant_coros:
+            await asyncio.gather(*instant_coros, return_exceptions=True)
+
+        # Persist post-action state so a later effect switch-back resumes colors.
+        if touched:
+            updates = []
+            for vid in touched:
+                eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+                et, c = eff.get("type"), eff.get("config") or {}
+                if et and c:
+                    updates.append((vid, et, dict(c)))
+            if updates:
+                morph_effect_state.save_many(updates)
 
     async def fire_color_set_now(self, card_id: str) -> bool:
         """Preview-fire a Color Set or Group immediately, bypassing the audio-
