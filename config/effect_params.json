@@ -129,14 +129,15 @@
         "move_polar":   { "label":"Move by Polar", "type":"move_polar", "smooth":true }
       },
       "defaults": {
-        "polygon":      false,
-        "spin":         0.2,
-        "spin_sign":    true,
-        "twist":        0.0,
-        "star":         0.0,
-        "edges":        6,
-        "x_offset":     0.0,
-        "y_offset":     0.0
+        "polygon":        false,
+        "spin":           0.2,
+        "spin_sign":      true,
+        "twist":          0.0,
+        "star":           0.0,
+        "edges":          6,
+        "x_offset":       0.0,
+        "y_offset":       0.0,
+        "source_virtual": "radial-dummy"
       }
     },
     "blender": {}
