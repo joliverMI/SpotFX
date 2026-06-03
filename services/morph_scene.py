@@ -22,7 +22,7 @@ from typing import Optional
 
 from models.music_event import Action, MorphStepAction
 from services import effect_params as _ep
-from services.morph_compiler import compile_target
+from services.morph_compiler import collect_bg_color_per_vid, compile_target
 
 
 def _final_state_for_virtual(vid: str, switches: list, patches: list, virtual_cache: dict) -> Optional[dict]:
@@ -73,11 +73,16 @@ def _collect_writes(actions: list[MorphStepAction], virtual_cache: dict, intensi
         if any(t.mode == "nudge" and t.aspect != "effect" for t in action.targets):
             intensity = intensity_resolver(step_source)
 
+        # Pre-scan bg_color targets so effect-switch starter_config can carry
+        # the auto-derived accent color (same hint the bus path uses).
+        bg_color_per_vid = collect_bg_color_per_vid(action)
+
         # Pass 1: effect-switch targets compile against current cache
         for target in action.targets:
             if target.aspect != "effect":
                 continue
-            switches.extend(compile_target(target, virtual_cache, default_ramp_ms=ramp_ms))
+            switches.extend(compile_target(target, virtual_cache, default_ramp_ms=ramp_ms,
+                                           bg_color_per_vid=bg_color_per_vid))
 
         # Mutate the working cache with the post-switch state so Pass 2 sees it
         # — same mechanic as the executor. We don't touch the real

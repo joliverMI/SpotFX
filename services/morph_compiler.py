@@ -73,6 +73,31 @@ def resolve_scope(scope: MorphScope) -> list[str]:
     return out
 
 
+# ─── Cross-target helpers ────────────────────────────────────────────────────
+
+def collect_bg_color_per_vid(action) -> dict[str, str]:
+    """Pre-scan a MorphStepAction's non-effect targets and build a
+    {virtual_id: hex_string} map of the bg_color value implied for each vid.
+
+    Used by the engine's _execute_morph_step (and the scene builder) to pass a
+    hint into compile_target so effect-switch targets can auto-derive the new
+    effect's accent / third color from the bg_color the same step is setting.
+
+    If multiple bg_color targets land on the same vid, the last one in
+    target order wins — matches the executor's eventual write order.
+    """
+    out: dict[str, str] = {}
+    for t in (action.targets or []):
+        if t.aspect != "bg_color":
+            continue
+        hex_val = (t.absolute_value.bg_color or "").strip() if t.absolute_value else ""
+        if not hex_val:
+            continue
+        for vid in resolve_scope(t.scope):
+            out[vid] = hex_val
+    return out
+
+
 # ─── Aspect → patch translation ──────────────────────────────────────────────
 
 def _scale_to_param_range(value: float, effect_type: str, param_name: str) -> float:
@@ -360,6 +385,8 @@ def compile_target(
     default_ramp_ms: Optional[int] = None,
     intensity: Optional[float] = None,
     nudge_dir: Optional[dict] = None,
+    *,
+    bg_color_per_vid: Optional[dict[str, str]] = None,
 ) -> list[ConcreteWrite]:
     """Translate one MorphTarget into per-virtual concrete writes.
 
@@ -373,6 +400,13 @@ def compile_target(
     `target.intensity_source`; only consulted when `target.mode == "nudge"`.
     Pass None when no beat data is available (e.g. test fires) — nudge falls
     back to a neutral 0.5 so the result is still well-defined.
+
+    `bg_color_per_vid` (keyword-only): for effect-switch targets, callers can
+    pre-scan the parent MorphStepAction's other targets for an aspect=bg_color
+    value that lands on this virtual, and pass it in. The compiler auto-sets
+    the new effect's accent param (sparks_color on power, peak_color on eq2d)
+    to the matching hex unless `target.absolute_value.accent_color` is set
+    explicitly. Built by `collect_bg_color_per_vid(action)`.
     """
     effective_ramp = target.ramp_ms if target.ramp_ms is not None else default_ramp_ms
     writes: list[ConcreteWrite] = []
@@ -402,6 +436,17 @@ def compile_target(
             # pair if we have one; otherwise fall back to taste-neutral defaults
             # from effect_params.json.
             starter = morph_effect_state.get(vid, new_type) or morph_aspects.effect_defaults(new_type) or {}
+
+            # Auto-derive the new effect's accent / third color from this
+            # morph step's bg_color (or use an explicit override if present).
+            # Effects without an accent param (melt, radial) silently skip.
+            accent_param = morph_aspects.accent_param_for(new_type)
+            if accent_param:
+                if target.absolute_value.accent_color:
+                    starter[accent_param] = target.absolute_value.accent_color
+                elif bg_color_per_vid and bg_color_per_vid.get(vid):
+                    starter[accent_param] = bg_color_per_vid[vid]
+
             writes.append(ConcreteWrite(
                 virtual_id=vid,
                 effect_type=cur_type,

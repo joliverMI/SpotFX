@@ -124,6 +124,11 @@ class AspectValue(BaseModel):
     color_kind:   Optional[Literal["gradient", "solid"]] = None
     color_value:  str | None = None
     bg_color:     str | None = None
+    # Explicit override for an effect's "third / accent color" (sparks_color on
+    # power, peak_color on equalizer2d). When set on a target of any aspect,
+    # the morph compiler uses this on effect-switch instead of auto-deriving
+    # from bg_color. None = use bg_color (or starter default if no bg_color set).
+    accent_color: str | None = None
     polygon:      Optional[bool | Literal["toggle"]] = None
     star:         float | None = None
     edges:        int | None = None

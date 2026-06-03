@@ -1708,13 +1708,21 @@ class TriggerEngine:
         # Top up cache for any virtual in any target's scope that isn't yet cached.
         await self._ensure_virtuals_cached(action.targets)
 
+        # Pre-scan: collect the bg_color value implied for each virtual by
+        # other targets in this step. Effect-switch writes use this so the new
+        # effect's accent / third color tracks the morph's bg_color instead of
+        # stale per-effect defaults.
+        from services.morph_compiler import collect_bg_color_per_vid
+        bg_color_per_vid = collect_bg_color_per_vid(action)
+
         # ── Pass 1: effect-switch targets (no nudge — effect switches are absolute) ─
         switch_writes = []
         for target in action.targets:
             if target.aspect != "effect":
                 continue
             switch_writes.extend(
-                compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms)
+                compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms,
+                               bg_color_per_vid=bg_color_per_vid)
             )
 
         switch_coros = []

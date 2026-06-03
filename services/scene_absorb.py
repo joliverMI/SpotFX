@@ -185,12 +185,21 @@ def _targets_for_virtual(vid: str, etype: str, cfg: dict) -> list[MorphTarget]:
     out: list[MorphTarget] = []
 
     # Always include the effect-type itself so re-firing the import puts the
-    # virtual back on this effect even if it had drifted away.
+    # virtual back on this effect even if it had drifted away. If this effect
+    # has a third / accent color in the captured config, carry it on the
+    # effect target's absolute_value so the compiler's bg_color auto-derive
+    # doesn't override the scene's actual accent at fire time.
+    accent_hex: Optional[str] = None
+    accent_param = morph_aspects.accent_param_for(etype)
+    if accent_param:
+        raw = cfg.get(accent_param)
+        if isinstance(raw, str) and raw:
+            accent_hex = raw
     out.append(MorphTarget(
         scope=MorphScope(virtual_ids=[vid]),
         aspect="effect",
         mode="absolute",
-        absolute_value=AspectValue(effect_type=etype),
+        absolute_value=AspectValue(effect_type=etype, accent_color=accent_hex),
     ))
 
     for aspect_id in ("brightness", "reactivity", "blur"):
