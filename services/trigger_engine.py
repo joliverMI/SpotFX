@@ -983,6 +983,20 @@ class TriggerEngine:
                 ))
                 return " > ".join(parts) if parts else event.name
 
+            if event.event_type == "morph_set":
+                # Pre-pick one alternative per lane so the plan has a Now Playing
+                # summary; the color-group cycle cursor still advances at fire
+                # time (inside _execute_morph_color), not here.
+                picks = self._pick_morph_lanes(event, lbls)
+                entries.append(_PlanEntry(
+                    fire_at_ms=start_at, event=event, labels=list(lbls),
+                    trigger_ms=trigger.timestamp_ms,
+                    trigger_id=trigger.id,
+                    is_root=(event.id == root_event.id),
+                    preselected_morph_picks=picks,
+                ))
+                return self._morph_picks_summary(picks) if picks else event.name
+
             return event.name
 
         description = walk(root_event, trigger.timestamp_ms, list(labels))
