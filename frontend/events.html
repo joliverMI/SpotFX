@@ -125,6 +125,7 @@
             <option value="sequence">Sequence</option>
             <option value="beat_sequence">Beat Sequence</option>
             <option value="morph_set">Morph Set (parallel lanes)</option>
+            <option value="scene_update">Scene Update (First / Rest)</option>
           </select>
         </div>
         <div class="field" style="display:flex;align-items:center;gap:8px;">
@@ -1470,19 +1471,25 @@ function defaultLaneAlternative() {
 
 function renderLanes(e) {
   const list = document.getElementById('lane-list');
+  const isScene = e.event_type === 'scene_update';
   const lanes = e.morph_lanes || [];
   if (!lanes.length) {
     list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No lanes. Add one with + Lane.</div>';
     return;
   }
+  // Scene Update: fixed First/Rest lanes — read-only names, no delete.
+  const nameCell = (lane, li) => isScene
+    ? `<span style="flex:1;min-width:120px;font-weight:600;">${li === 0 ? 'First' : 'Rest'}</span>
+       <input type="hidden" class="lane-name" value="${li === 0 ? 'First' : 'Rest'}">`
+    : `<input type="text" class="lane-name" value="${(lane.name || '').replace(/"/g, '&quot;')}" placeholder="lane name" style="flex:1;min-width:120px;">`;
   list.innerHTML = lanes.map((lane, li) => `
     <div class="morph-lane" data-lane-idx="${li}" style="background:var(--surface2);padding:8px;border-radius:var(--radius);margin-bottom:8px;">
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-        <span style="font-size:11px;color:var(--text-muted);">Lane ${li + 1}</span>
-        <input type="text" class="lane-name" value="${(lane.name || '').replace(/"/g, '&quot;')}" placeholder="lane name" style="flex:1;min-width:120px;">
+        <span style="font-size:11px;color:var(--text-muted);">${isScene ? (li === 0 ? 'Lane' : 'Lane') : 'Lane ' + (li + 1)}</span>
+        ${nameCell(lane, li)}
         <input type="text" class="lane-labels" value="${(lane.labels || []).join(', ')}" placeholder="lane filter labels" style="width:140px;">
         <button class="btn-sm lane-add-alt" title="Add alternative">+ Alt</button>
-        <button class="btn-sm btn-danger lane-del" title="Remove lane">✕</button>
+        ${isScene ? '' : '<button class="btn-sm btn-danger lane-del" title="Remove lane">✕</button>'}
       </div>
       <div class="lane-alternatives"></div>
     </div>
@@ -1495,7 +1502,7 @@ function renderLanes(e) {
       e.morph_lanes[li].alternatives.push(defaultLaneAlternative());
       renderLanes(e);
     });
-    root.querySelector('.lane-del').addEventListener('click', () => {
+    root.querySelector('.lane-del')?.addEventListener('click', () => {
       syncLanesFromDOM(e);
       e.morph_lanes.splice(li, 1);
       renderLanes(e);
@@ -1950,12 +1957,67 @@ document.getElementById('filter-ai-ex').addEventListener('click', () => {
   renderList();
 });
 
+// Scene Update always has exactly two lanes named First / Rest.
+function ensureSceneLanes(e) {
+  if (e.event_type !== 'scene_update') return;
+  if (!Array.isArray(e.morph_lanes) || e.morph_lanes.length !== 2) {
+    e.morph_lanes = [
+      { name: 'First', labels: [], alternatives: [defaultLaneAlternative()] },
+      { name: 'Rest',  labels: [], alternatives: [defaultLaneAlternative()] },
+    ];
+  } else {
+    e.morph_lanes[0].name = 'First';
+    e.morph_lanes[1].name = 'Rest';
+  }
+}
+
+// Hide the "+ Lane" button for Scene Update (fixed at two lanes).
+function updateLaneControls(e) {
+  const addLane = document.getElementById('btn-add-lane');
+  if (addLane) addLane.style.display = (e.event_type === 'scene_update') ? 'none' : '';
+}
+
+// Built-in events (Update/Reset Scene) are read-only: hide Save/Delete/Duplicate,
+// disable inputs (Fire stays usable), and show a one-line description.
+function applyFixedReadonly(e) {
+  const fixed = !!e.fixed;
+  document.querySelectorAll('.action-save, .action-delete, .action-duplicate')
+    .forEach(b => { b.style.display = fixed ? 'none' : ''; });
+  if (fixed) {
+    // Disable every editor control (Fire is a button, stays usable). Non-fixed
+    // events keep their own per-control disabled logic (set earlier).
+    document.querySelectorAll('#editor input, #editor select, #editor textarea')
+      .forEach(el => { el.disabled = true; });
+  }
+  let note = document.getElementById('fixed-note');
+  if (fixed) {
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'fixed-note';
+      note.style.cssText = 'font-size:12px;color:var(--text-muted);margin:4px 0 10px;font-style:italic;';
+      const editor = document.getElementById('editor');
+      editor.insertBefore(note, editor.children[1] || null);
+    }
+    note.textContent = e.event_type === 'update_scene'
+      ? 'Built-in: re-runs the Rest lane of the last Scene Update fired.'
+      : 'Built-in: re-runs the First lane of the last Scene Update fired.';
+    note.style.display = '';
+  } else if (note) {
+    note.style.display = 'none';
+  }
+}
+
 // ── Editor ─────────────────────────────────────────────────────────────────
 function selectEvent(id) {
   selectedId = id;
   const e = events.find(e => e.id === id);
   if (!e) return;
+  ensureSceneLanes(e);
   document.getElementById('editor').classList.add('open');
+  // Reset any read-only disabling from a previously-selected fixed event;
+  // per-control disabled state is re-applied below.
+  document.querySelectorAll('#editor input, #editor select, #editor textarea')
+    .forEach(el => { el.disabled = false; });
   document.getElementById('e-name').value = e.name;
   document.getElementById('e-color').value = e.color || '#FFD700';
   document.getElementById('e-labels').value = (e.labels || []).join(', ');
@@ -1993,19 +2055,31 @@ function selectEvent(id) {
   loadBsRevertIntoDOM(e.beat_revert);
   renderLanes(e);
   toggleSections(e.event_type);
+  updateLaneControls(e);
+  applyFixedReadonly(e);
   renderList();
 }
 
 document.getElementById('e-type').addEventListener('change', () => {
-  toggleSections(document.getElementById('e-type').value);
+  const type = document.getElementById('e-type').value;
+  const e = events.find(x => x.id === selectedId);
+  if (e) {
+    e.event_type = type;
+    ensureSceneLanes(e);
+    renderLanes(e);
+    updateLaneControls(e);
+  }
+  toggleSections(type);
 });
 
 function toggleSections(type) {
+  const isFixedScene = (type === 'update_scene' || type === 'reset_scene');
   document.getElementById('actions-section').style.display = type === 'single' ? '' : 'none';
   document.getElementById('sequence-section').style.display = type === 'sequence' ? '' : 'none';
   document.getElementById('beat-sequence-section').style.display = type === 'beat_sequence' ? '' : 'none';
-  document.getElementById('morph-set-section').style.display = type === 'morph_set' ? '' : 'none';
-  document.getElementById('single-pre-commands').style.display = '';
+  // Scene Update reuses the morph lanes editor (constrained to First/Rest).
+  document.getElementById('morph-set-section').style.display = (type === 'morph_set' || type === 'scene_update') ? '' : 'none';
+  document.getElementById('single-pre-commands').style.display = isFixedScene ? 'none' : '';
 }
 
 // Energy level controls
@@ -2120,8 +2194,9 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     e.beat_revert = readBsRevertFromDOM();
     e.beat_sequence_fallback = document.getElementById('bs-fallback').value;
     e.beat_sequence_start_offset_beats = parseInt(document.getElementById('bs-start-offset').value) || 0;
-  } else if (e.event_type === 'morph_set') {
+  } else if (e.event_type === 'morph_set' || e.event_type === 'scene_update') {
     syncLanesFromDOM(e);
+    if (e.event_type === 'scene_update') ensureSceneLanes(e);
   }
 
   await POST('/events', e);

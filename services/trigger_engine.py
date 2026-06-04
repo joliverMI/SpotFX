@@ -169,6 +169,10 @@ class TriggerEngine:
         # Shape-nudge bounce direction per "{virtual_id}::{param}" (in-memory,
         # reset on track change). Used when a Shape sub-field nudge has wrap=True.
         self._nudge_dir: dict[str, int] = {}
+        # Id of the last fired scene_update event. Decides First vs Rest and is the
+        # target for the fixed Update/Reset Scene events. Persists across songs
+        # (intentionally NOT cleared on track change).
+        self._last_scene_update_id: Optional[str] = None
         self._shape_offset_ms: int = 0       # cached from AudioShapeMeta.timestamp_offset_ms
         self._shape_offset_quality: float = 0.0  # cached quality score (r × difficulty)
         # Highest match-quality observed during the current play. Reset on URI
@@ -1005,6 +1009,17 @@ class TriggerEngine:
                 ))
                 return self._morph_picks_summary(picks) if picks else event.name
 
+            if event.event_type in ("scene_update", "update_scene", "reset_scene"):
+                # Which lane runs depends on live state at fire time, so emit a
+                # plain entry and resolve it in _execute_plan_entry.
+                entries.append(_PlanEntry(
+                    fire_at_ms=start_at, event=event, labels=list(lbls),
+                    trigger_ms=trigger.timestamp_ms,
+                    trigger_id=trigger.id,
+                    is_root=(event.id == root_event.id),
+                ))
+                return event.name
+
             return event.name
 
         description = walk(root_event, trigger.timestamp_ms, list(labels))
@@ -1195,6 +1210,8 @@ class TriggerEngine:
                 await self._execute_beat_sequence(event, trigger_ms, labels or [], step1_prefired=False)
             elif event.event_type == "morph_set":
                 await self._execute_morph_set(event, labels or [])
+            elif event.event_type in ("scene_update", "update_scene", "reset_scene"):
+                await self._execute_scene_event(event, labels or [])
             # Wait for any pending coalesce-bus flush so the writes land before
             # we exit force_allow and the capture gate closes again.
             await ledfx_client.drain_bus()
@@ -1348,6 +1365,9 @@ class TriggerEngine:
             morph_picks = self._pick_morph_lanes(event, trigger.labels)
             asyncio.create_task(self._fire_morph_picks(morph_picks, trigger.labels))
             morph_summary = self._morph_picks_summary(morph_picks)
+        elif event.event_type in ("scene_update", "update_scene", "reset_scene"):
+            # Lane choice depends on live scene state; resolve + fire async.
+            asyncio.create_task(self._execute_scene_event(event, trigger.labels))
 
         asyncio.create_task(
             ws_manager.broadcast_trigger_fired(
@@ -1362,6 +1382,8 @@ class TriggerEngine:
 
     async def _fire_pre_commands(self, event: MusicEvent, trigger_id: str, labels: list[str] | None = None) -> None:
         """Fire global brightness/transition ahead of a single event's main action."""
+        if event.event_type in ("scene_update", "update_scene", "reset_scene"):
+            return  # scene morphs control their own ramps; no pre-set transition
         ov = self._parse_label_overrides(labels or [])
         if not ov.get("skip_brightness") and event.pre_brightness_enabled and trigger_id not in self._pre_ramp_fired:
             value = ov.get("brightness_value", event.pre_brightness_value)
@@ -1408,6 +1430,8 @@ class TriggerEngine:
                 )
             elif sub.event_type == "morph_set":
                 await self._execute_morph_set(sub, labels or [], skip_event_ids=skip_event_ids)
+            elif sub.event_type in ("scene_update", "update_scene", "reset_scene"):
+                await self._execute_scene_event(sub, labels or [], skip_event_ids=skip_event_ids)
             else:
                 sub_action = self._select_action(sub, labels or [])
                 if sub_action:
@@ -2096,6 +2120,70 @@ class TriggerEngine:
         picks = self._pick_morph_lanes(event, labels)
         await self._fire_morph_picks(picks, labels, skip_event_ids=skip_event_ids)
 
+    # ── Scene events (scene_update / update_scene / reset_scene) ───────────────
+    async def _run_one_lane(
+        self,
+        event: MusicEvent,
+        lane_index: int,
+        labels: list[str],
+        skip_event_ids: Optional[set] = None,
+    ) -> Optional[Action]:
+        """Pick one alternative from `event.morph_lanes[lane_index]` (weighted,
+        like a morph lane) and fire it. Returns the picked Action (for the
+        Now-Playing summary) or None."""
+        lanes = event.morph_lanes or []
+        if lane_index < 0 or lane_index >= len(lanes):
+            return None
+        lane = lanes[lane_index]
+        merged = list(labels or []) + list(lane.labels or [])
+        picked = self._pick_from_actions(
+            lane.alternatives, merged,
+            dedupe_key=f"{event.id}:lane:{lane_index}",
+            desc=f"lane '{lane.name or lane_index}' of '{event.name}'",
+        )
+        if picked is not None:
+            await self._execute_action(picked, labels or [], skip_event_ids=skip_event_ids)
+        return picked
+
+    async def _execute_scene_update(
+        self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
+    ) -> str:
+        """Run First (lane 0) when this isn't the last Scene Update fired, else
+        Rest (lane 1). Always becomes the new 'last scene update'."""
+        repeat = self._last_scene_update_id == event.id
+        lane_index = 1 if repeat else 0
+        picked = await self._run_one_lane(event, lane_index, labels, skip_event_ids)
+        self._last_scene_update_id = event.id
+        tag = "Rest" if repeat else "First"
+        return f"{tag}: {self._describe_action(picked)}" if picked else tag
+
+    async def _run_last_scene_lane(
+        self, which: str, labels: list[str], skip_event_ids: Optional[set] = None,
+    ) -> str:
+        """Re-run the last Scene Update's Rest (which='rest') or First
+        (which='first') lane. No-op when no Scene Update has fired yet."""
+        last = get_event(self._last_scene_update_id) if self._last_scene_update_id else None
+        if last is None or last.event_type != "scene_update":
+            logger.info("scene: no active Scene Update to %s", which)
+            return "(no active scene)"
+        lane_index = 1 if which == "rest" else 0
+        picked = await self._run_one_lane(last, lane_index, labels, skip_event_ids)
+        verb = "Update" if which == "rest" else "Reset"
+        return f"{verb} → {last.name}: {self._describe_action(picked)}" if picked else f"{verb} → {last.name}"
+
+    async def _execute_scene_event(
+        self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
+    ) -> str:
+        """Dispatch any of the three scene event types. Returns a short summary
+        string for the Now-Playing broadcast."""
+        if event.event_type == "scene_update":
+            return await self._execute_scene_update(event, labels, skip_event_ids)
+        if event.event_type == "update_scene":
+            return await self._run_last_scene_lane("rest", labels, skip_event_ids)
+        if event.event_type == "reset_scene":
+            return await self._run_last_scene_lane("first", labels, skip_event_ids)
+        return ""
+
     def _beat_intensity_now(self, source: str) -> Optional[float]:
         """Resolve the current beat-level intensity for a nudge target.
 
@@ -2349,6 +2437,8 @@ class TriggerEngine:
         Special labels: -brightness/-transition skip; =brightness:/=transition:/=ramp: override.
         = overrides are consumed (removed from labels) after use so nested events use their own values.
         """
+        if event.event_type in ("scene_update", "update_scene", "reset_scene"):
+            return  # scene morphs control their own ramps; no pre-set transition
         ov = self._parse_label_overrides(labels or [])
         if not ov.get("skip_brightness") and event.pre_brightness_enabled:
             value = ov.get("brightness_value", event.pre_brightness_value)
@@ -2608,6 +2698,8 @@ class TriggerEngine:
             if picks is None:
                 picks = self._pick_morph_lanes(evt, entry.labels)
             await self._fire_morph_picks(picks, entry.labels, skip_event_ids=skip_ids)
+        elif evt.event_type in ("scene_update", "update_scene", "reset_scene"):
+            await self._execute_scene_event(evt, entry.labels, skip_event_ids=skip_ids)
 
     async def _execute_beat_sequence(
         self,

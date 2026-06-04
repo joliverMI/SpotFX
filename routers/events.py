@@ -13,7 +13,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 
 from models.music_event import MusicEvent
-from services.profile_manager import list_events, get_event, save_event, delete_event
+from services.profile_manager import list_events, get_event, save_event, delete_event, FIXED_EVENT_IDS
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -33,12 +33,16 @@ async def get_event_by_id(event_id: str):
 
 @router.post("")
 async def upsert_event(event: MusicEvent):
+    if event.id in FIXED_EVENT_IDS:
+        raise HTTPException(403, "Built-in event cannot be edited")
     save_event(event)
     return {"status": "saved", "id": event.id}
 
 
 @router.delete("/{event_id}")
 async def remove_event(event_id: str):
+    if event_id in FIXED_EVENT_IDS:
+        raise HTTPException(403, "Built-in event cannot be deleted")
     ok = delete_event(event_id)
     if not ok:
         raise HTTPException(404, "Event not found")

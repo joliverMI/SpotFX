@@ -168,6 +168,26 @@ def delete_profile(spotify_uri: str) -> bool:
 
 # ── Music Events ──────────────────────────────────────────────────────────────
 
+# Fixed / built-in events. Synthesized on read, never persisted to events.json,
+# and refused by save/delete. They drive the "active scene" — the last fired
+# scene_update event — by re-running its Rest (Update Scene) or First (Reset
+# Scene) lane. See trigger_engine._execute_scene_event.
+FIXED_EVENT_IDS = {"fixed-update-scene", "fixed-reset-scene"}
+
+
+def _fixed_events() -> dict[str, MusicEvent]:
+    return {
+        "fixed-update-scene": MusicEvent(
+            id="fixed-update-scene", name="Update Scene", color="#FF00FF",
+            event_type="update_scene", fixed=True,
+        ),
+        "fixed-reset-scene": MusicEvent(
+            id="fixed-reset-scene", name="Reset Scene", color="#FF0000",
+            event_type="reset_scene", fixed=True,
+        ),
+    }
+
+
 def _load_events_raw() -> dict:
     if EVENTS_FILE.exists():
         try:
@@ -183,10 +203,13 @@ def _save_events_raw(data: dict) -> None:
 
 
 def list_events() -> list[MusicEvent]:
-    return [MusicEvent(**v) for v in _load_events_raw().values()]
+    stored = [MusicEvent(**v) for v in _load_events_raw().values()]
+    return stored + list(_fixed_events().values())
 
 
 def get_event(event_id: str) -> Optional[MusicEvent]:
+    if event_id in FIXED_EVENT_IDS:
+        return _fixed_events().get(event_id)
     raw = _load_events_raw()
     if event_id in raw:
         return MusicEvent(**raw[event_id])
@@ -194,6 +217,8 @@ def get_event(event_id: str) -> Optional[MusicEvent]:
 
 
 def save_event(event: MusicEvent) -> None:
+    if event.id in FIXED_EVENT_IDS:
+        return  # built-in events are synthesized, never persisted
     raw = _load_events_raw()
     raw[event.id] = json.loads(event.model_dump_json())
     _save_events_raw(raw)
@@ -211,6 +236,8 @@ def get_event_map() -> dict[str, dict]:
 
 
 def delete_event(event_id: str) -> bool:
+    if event_id in FIXED_EVENT_IDS:
+        return False  # built-in events can't be deleted
     raw = _load_events_raw()
     if event_id not in raw:
         return False

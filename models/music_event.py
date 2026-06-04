@@ -315,11 +315,19 @@ class MusicEvent(BaseModel):
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    event_type: Literal["single", "sequence", "beat_sequence", "morph_set"] = "single"
+    event_type: Literal[
+        "single", "sequence", "beat_sequence", "morph_set",
+        # Stateful "scene" events. scene_update has exactly two morph_lanes
+        # (First/Rest); the engine runs First when this isn't the last Scene
+        # Update fired, else Rest. update_scene/reset_scene are the fixed
+        # built-ins that re-run the last Scene Update's Rest/First lane.
+        "scene_update", "update_scene", "reset_scene",
+    ] = "single"
     color: str = "#FFD700"     # hex color shown on timeline
     labels: list[str] = Field(default_factory=list)
     energy_level: int | None = None    # 1–10; None = energy-agnostic
     ai_exposed: bool = False           # True = include in AI trigger generation prompts
+    fixed: bool = False                # True = built-in, non-editable / non-deletable
     # When True, this event's morph actions are pre-staged into a shared LedFX
     # scene ("spotfx-morph-temp") by the planner ahead of fire, and dispatched
     # at fire time via a single `PUT /api/scenes {action: activate}` so every
