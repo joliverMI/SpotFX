@@ -50,6 +50,8 @@
           <button class="btn-sm" id="filter-single">Single</button>
           <button class="btn-sm" id="filter-sequence">Sequence</button>
           <button class="btn-sm" id="filter-beat-seq">Beat Seq</button>
+          <button class="btn-sm" id="filter-scenes" title="Scene Updates + the Update/Reset/Flare built-ins">Scenes</button>
+          <button class="btn-sm" id="filter-morphs" title="Morph Set events">Morphs</button>
           <button class="btn-sm" id="filter-ai-ex" title="Show only events exposed to AI generation">AI Ex</button>
         </div>
         <div id="event-list" style="overflow-y:auto;flex:1;min-height:0;"></div>
@@ -1861,10 +1863,22 @@ function fmtDuration(ms) {
 }
 
 // ── List ───────────────────────────────────────────────────────────────────
+// typeFilter is an exact event_type, or a group: 'scene' (Scene Update + the
+// fixed Update/Reset/Flare built-ins) or 'morph' (morph_set).
+function matchesTypeFilter(t) {
+  if (!typeFilter) return true;
+  if (typeFilter === 'scene') return [
+    'scene_update', 'update_scene', 'reset_scene',
+    'shape_flare', 'color_flare', 'combo_flare',
+  ].includes(t);
+  if (typeFilter === 'morph') return t === 'morph_set';
+  return t === typeFilter;
+}
+
 function renderList() {
   const q = document.getElementById('event-search').value.toLowerCase();
   const filtered = events.filter(e =>
-    (!typeFilter || e.event_type === typeFilter) &&
+    (!typeFilter || matchesTypeFilter(e.event_type)) &&
     (!aiExFilter || e.ai_exposed) &&
     (e.name.toLowerCase().includes(q) ||
     (e.labels || []).some(l => l.toLowerCase().includes(q)))
@@ -1904,28 +1918,23 @@ function renderList() {
 
 document.getElementById('event-search').addEventListener('input', renderList);
 
-// Filter buttons
-document.getElementById('filter-single').addEventListener('click', () => {
-  typeFilter = typeFilter === 'single' ? null : 'single';
-  document.getElementById('filter-single').classList.toggle('btn-accent', typeFilter === 'single');
-  document.getElementById('filter-sequence').classList.remove('btn-accent');
-  document.getElementById('filter-beat-seq').classList.remove('btn-accent');
+// Filter buttons — mutually-exclusive type filter (click again to clear).
+const TYPE_FILTER_BTNS = [
+  ['filter-single',   'single'],
+  ['filter-sequence', 'sequence'],
+  ['filter-beat-seq', 'beat_sequence'],
+  ['filter-scenes',   'scene'],
+  ['filter-morphs',   'morph'],
+];
+function setTypeFilter(val) {
+  typeFilter = (typeFilter === val) ? null : val;
+  for (const [id, v] of TYPE_FILTER_BTNS) {
+    document.getElementById(id).classList.toggle('btn-accent', typeFilter === v);
+  }
   renderList();
-});
-document.getElementById('filter-sequence').addEventListener('click', () => {
-  typeFilter = typeFilter === 'sequence' ? null : 'sequence';
-  document.getElementById('filter-sequence').classList.toggle('btn-accent', typeFilter === 'sequence');
-  document.getElementById('filter-single').classList.remove('btn-accent');
-  document.getElementById('filter-beat-seq').classList.remove('btn-accent');
-  renderList();
-});
-document.getElementById('filter-beat-seq').addEventListener('click', () => {
-  typeFilter = typeFilter === 'beat_sequence' ? null : 'beat_sequence';
-  document.getElementById('filter-beat-seq').classList.toggle('btn-accent', typeFilter === 'beat_sequence');
-  document.getElementById('filter-single').classList.remove('btn-accent');
-  document.getElementById('filter-sequence').classList.remove('btn-accent');
-  renderList();
-});
+}
+TYPE_FILTER_BTNS.forEach(([id, v]) =>
+  document.getElementById(id).addEventListener('click', () => setTypeFilter(v)));
 function setAiExposedBtn(active) {
   const btn = document.getElementById('e-ai-exposed-btn');
   btn.dataset.active = active ? 'true' : 'false';
