@@ -317,11 +317,13 @@ class MusicEvent(BaseModel):
     name: str
     event_type: Literal[
         "single", "sequence", "beat_sequence", "morph_set",
-        # Stateful "scene" events. scene_update has exactly two morph_lanes
-        # (First/Rest); the engine runs First when this isn't the last Scene
-        # Update fired, else Rest. update_scene/reset_scene are the fixed
-        # built-ins that re-run the last Scene Update's Rest/First lane.
+        # Stateful "scene" events. scene_update has four morph_lanes
+        # (First/Rest/Shape/Color); the engine runs First when this isn't the
+        # last Scene Update fired, else Rest. The fixed built-ins re-run a lane
+        # of the last Scene Update: update_scene→Rest, reset_scene→First,
+        # shape_flare→Shape, color_flare→Color, combo_flare→Shape+Color.
         "scene_update", "update_scene", "reset_scene",
+        "shape_flare", "color_flare", "combo_flare",
     ] = "single"
     color: str = "#FFD700"     # hex color shown on timeline
     labels: list[str] = Field(default_factory=list)

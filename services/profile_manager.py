@@ -170,9 +170,13 @@ def delete_profile(spotify_uri: str) -> bool:
 
 # Fixed / built-in events. Synthesized on read, never persisted to events.json,
 # and refused by save/delete. They drive the "active scene" — the last fired
-# scene_update event — by re-running its Rest (Update Scene) or First (Reset
-# Scene) lane. See trigger_engine._execute_scene_event.
-FIXED_EVENT_IDS = {"fixed-update-scene", "fixed-reset-scene"}
+# scene_update event — by re-running one of its lanes: Update→Rest, Reset→First,
+# Shape Flare→Shape, Color Flare→Color, Combo Flare→Shape+Color (parallel).
+# See trigger_engine._execute_scene_event.
+FIXED_EVENT_IDS = {
+    "fixed-update-scene", "fixed-reset-scene",
+    "fixed-shape-flare", "fixed-color-flare", "fixed-combo-flare",
+}
 
 
 def _fixed_events() -> dict[str, MusicEvent]:
@@ -184,6 +188,18 @@ def _fixed_events() -> dict[str, MusicEvent]:
         "fixed-reset-scene": MusicEvent(
             id="fixed-reset-scene", name="Reset Scene", color="#FF0000",
             event_type="reset_scene", fixed=True,
+        ),
+        "fixed-shape-flare": MusicEvent(
+            id="fixed-shape-flare", name="Shape Flare", color="#00E5FF",
+            event_type="shape_flare", fixed=True,
+        ),
+        "fixed-color-flare": MusicEvent(
+            id="fixed-color-flare", name="Color Flare", color="#FF8C00",
+            event_type="color_flare", fixed=True,
+        ),
+        "fixed-combo-flare": MusicEvent(
+            id="fixed-combo-flare", name="Combo Flare", color="#FFFFFF",
+            event_type="combo_flare", fixed=True,
         ),
     }
 

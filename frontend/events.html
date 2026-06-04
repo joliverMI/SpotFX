@@ -1477,10 +1477,11 @@ function renderLanes(e) {
     list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No lanes. Add one with + Lane.</div>';
     return;
   }
-  // Scene Update: fixed First/Rest lanes — read-only names, no delete.
+  // Scene Update: fixed lanes (First/Rest/Shape/Color) — read-only names, no delete.
+  const sceneName = (li) => SCENE_LANE_NAMES[li] || `Lane ${li + 1}`;
   const nameCell = (lane, li) => isScene
-    ? `<span style="flex:1;min-width:120px;font-weight:600;">${li === 0 ? 'First' : 'Rest'}</span>
-       <input type="hidden" class="lane-name" value="${li === 0 ? 'First' : 'Rest'}">`
+    ? `<span style="flex:1;min-width:120px;font-weight:600;">${sceneName(li)}</span>
+       <input type="hidden" class="lane-name" value="${sceneName(li)}">`
     : `<input type="text" class="lane-name" value="${(lane.name || '').replace(/"/g, '&quot;')}" placeholder="lane name" style="flex:1;min-width:120px;">`;
   list.innerHTML = lanes.map((lane, li) => `
     <div class="morph-lane" data-lane-idx="${li}" style="background:var(--surface2);padding:8px;border-radius:var(--radius);margin-bottom:8px;">
@@ -1957,21 +1958,21 @@ document.getElementById('filter-ai-ex').addEventListener('click', () => {
   renderList();
 });
 
-// Scene Update always has exactly two lanes named First / Rest.
+// Scene Update has exactly four fixed lanes: First / Rest / Shape / Color.
+// Upgrade-safe: preserves any existing lane alternatives and appends missing ones.
+const SCENE_LANE_NAMES = ['First', 'Rest', 'Shape', 'Color'];
 function ensureSceneLanes(e) {
   if (e.event_type !== 'scene_update') return;
-  if (!Array.isArray(e.morph_lanes) || e.morph_lanes.length !== 2) {
-    e.morph_lanes = [
-      { name: 'First', labels: [], alternatives: [defaultLaneAlternative()] },
-      { name: 'Rest',  labels: [], alternatives: [defaultLaneAlternative()] },
-    ];
-  } else {
-    e.morph_lanes[0].name = 'First';
-    e.morph_lanes[1].name = 'Rest';
-  }
+  const existing = Array.isArray(e.morph_lanes) ? e.morph_lanes : [];
+  e.morph_lanes = SCENE_LANE_NAMES.map((nm, i) => {
+    const ex = existing[i];
+    return ex
+      ? { ...ex, name: nm }
+      : { name: nm, labels: [], alternatives: [defaultLaneAlternative()] };
+  });
 }
 
-// Hide the "+ Lane" button for Scene Update (fixed at two lanes).
+// Hide the "+ Lane" button for Scene Update (fixed set of lanes).
 function updateLaneControls(e) {
   const addLane = document.getElementById('btn-add-lane');
   if (addLane) addLane.style.display = (e.event_type === 'scene_update') ? 'none' : '';
@@ -1998,9 +1999,14 @@ function applyFixedReadonly(e) {
       const editor = document.getElementById('editor');
       editor.insertBefore(note, editor.children[1] || null);
     }
-    note.textContent = e.event_type === 'update_scene'
-      ? 'Built-in: re-runs the Rest lane of the last Scene Update fired.'
-      : 'Built-in: re-runs the First lane of the last Scene Update fired.';
+    const FLARE_NOTE = {
+      update_scene: 'Built-in: re-runs the Rest lane of the last Scene Update fired.',
+      reset_scene:  'Built-in: re-runs the First lane of the last Scene Update fired.',
+      shape_flare:  'Built-in: re-runs the Shape lane of the last Scene Update fired.',
+      color_flare:  'Built-in: re-runs the Color lane of the last Scene Update fired.',
+      combo_flare:  'Built-in: re-runs the Shape and Color lanes of the last Scene Update, in parallel.',
+    };
+    note.textContent = FLARE_NOTE[e.event_type] || 'Built-in event.';
     note.style.display = '';
   } else if (note) {
     note.style.display = 'none';
@@ -2073,7 +2079,7 @@ document.getElementById('e-type').addEventListener('change', () => {
 });
 
 function toggleSections(type) {
-  const isFixedScene = (type === 'update_scene' || type === 'reset_scene');
+  const isFixedScene = ['update_scene', 'reset_scene', 'shape_flare', 'color_flare', 'combo_flare'].includes(type);
   document.getElementById('actions-section').style.display = type === 'single' ? '' : 'none';
   document.getElementById('sequence-section').style.display = type === 'sequence' ? '' : 'none';
   document.getElementById('beat-sequence-section').style.display = type === 'beat_sequence' ? '' : 'none';
