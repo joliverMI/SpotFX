@@ -47,6 +47,21 @@ SCENE_EVENT_TYPES = (
     "scene_update", "update_scene", "reset_scene",
     "shape_flare", "color_flare", "combo_flare",
 )
+# Params whose value change makes LedFX re-instantiate (reset) the effect.
+# These must be written instantly (ramping them flickers/restarts the effect),
+# and Morph Color's "preserve effect" mode skips them entirely. The canonical
+# key covers unmodeled effects; effect_params may also flag `resets_effect`.
+RESET_EFFECT_PARAMS = {"background_color"}
+
+
+def _param_resets_effect(effect_type: str, param: str) -> bool:
+    if param in RESET_EFFECT_PARAMS:
+        return True
+    from services.effect_params import get_param_meta
+    meta = get_param_meta(effect_type, param) or {}
+    return bool(meta.get("resets_effect"))
+
+
 # fixed-event type → lane indices to run against the last scene_update.
 _FLARE_LANES = {
     "update_scene": [1],     # Rest
@@ -1897,7 +1912,9 @@ class TriggerEngine:
             ramp_str: dict = {}
             for k, v in str_patch.items():
                 pmeta = get_param_meta(w.effect_type, k)
-                if pmeta and pmeta.get("smooth") and ramp_ms > 0:
+                # Effect-resetting params (e.g. background_color) must be instant —
+                # ramming them through the frame ramp restarts the effect.
+                if pmeta and pmeta.get("smooth") and ramp_ms > 0 and not _param_resets_effect(w.effect_type, k):
                     ramp_str[k] = v
                 else:
                     instant_str[k] = v
@@ -2072,6 +2089,15 @@ class TriggerEngine:
 
                 def _place(param: str, value: str):
                     if _unchanged(param, value):
+                        return
+                    # Effect-resetting params (e.g. background_color): with
+                    # preserve_effect (default) skip them entirely to keep the
+                    # running effect; otherwise apply them but always instantly
+                    # (never ramped, which would restart the effect).
+                    if _param_resets_effect(etype, param):
+                        if getattr(action, "preserve_effect", True):
+                            return
+                        instant[param] = value
                         return
                     meta = get_param_meta(etype, param) or {}
                     # gradients/colors are smooth by default; only skip the ramp

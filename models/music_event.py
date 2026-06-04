@@ -209,6 +209,10 @@ class MorphColorAction(BaseModel):
     ref_id:    str = ""
     pick_mode: Literal["default", "cycle", "weighted"] = "default"
     ramp_ms:   int | None = None
+    # When True (default), skip any color-set value that would reset the LedFX
+    # effect (e.g. background_color), preserving the running effect. When False,
+    # those values are still applied — but always instantly, never ramped.
+    preserve_effect: bool = True
 
 
 class DeviceSettingTarget(BaseModel):
