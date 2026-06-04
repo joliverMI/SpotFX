@@ -314,10 +314,10 @@ function entryRowHtml(entry, idx) {
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
       <label class="cs-sub" style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="e-bri-en"${briEn ? ' checked' : ''} onchange="csBriToggle(this)"> Brightness</label>
       <input type="range" class="e-bri" min="0" max="1" step="0.01" value="${briVal}" style="width:96px;accent-color:var(--accent);${briEn ? '' : 'display:none'}" oninput="this.closest('.cs-entry').querySelector('.e-bri-num').value=(+this.value).toFixed(2)">
-      <input type="number" class="e-bri-num" min="0" max="1" step="0.01" value="${(+briVal).toFixed(2)}" style="width:60px;${briEn ? '' : 'display:none'}" oninput="this.closest('.cs-entry').querySelector('.e-bri').value=this.value">
+      <input type="number" class="e-bri-num" min="0" max="1" step="0.01" value="${(+briVal).toFixed(2)}" style="width:72px;${briEn ? '' : 'display:none'}" oninput="this.closest('.cs-entry').querySelector('.e-bri').value=this.value">
       <label class="cs-sub" style="display:flex;align-items:center;gap:4px;margin-left:12px;"><input type="checkbox" class="e-bgb-en"${bgbEn ? ' checked' : ''} onchange="csBgbToggle(this)"> BG Brightness</label>
       <input type="range" class="e-bgb" min="0" max="1" step="0.01" value="${bgbVal}" style="width:96px;accent-color:var(--accent);${bgbEn ? '' : 'display:none'}" oninput="this.closest('.cs-entry').querySelector('.e-bgb-num').value=(+this.value).toFixed(2)">
-      <input type="number" class="e-bgb-num" min="0" max="1" step="0.01" value="${(+bgbVal).toFixed(2)}" style="width:60px;${bgbEn ? '' : 'display:none'}" oninput="this.closest('.cs-entry').querySelector('.e-bgb').value=this.value">
+      <input type="number" class="e-bgb-num" min="0" max="1" step="0.01" value="${(+bgbVal).toFixed(2)}" style="width:72px;${bgbEn ? '' : 'display:none'}" oninput="this.closest('.cs-entry').querySelector('.e-bgb').value=this.value">
       <label class="cs-sub" style="display:flex;align-items:center;gap:4px;margin-left:12px;"><input type="checkbox" class="e-acc-en"${accEn ? ' checked' : ''} onchange="csAccToggle(this)"> Third Color</label>
       <input type="color" class="e-acc" value="${accVal}" style="width:48px;height:30px;padding:1px;${accEn ? '' : 'display:none'}">
     </div>
