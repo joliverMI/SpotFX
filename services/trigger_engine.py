@@ -1972,7 +1972,23 @@ class TriggerEngine:
                 ramp_str: dict = {}
                 ramp_num: dict = {}
 
+                def _unchanged(param: str, value) -> bool:
+                    # Skip params already at the target value. Critical for
+                    # non-pixels effects (melt/power/…): they have no color_blend
+                    # option, so LedFX RECREATES (restarts + transition) the
+                    # effect whenever a "color"-named key is in the PUT — even if
+                    # the value didn't change. Dropping an unchanged
+                    # background_color keeps a gradient-only change in-place.
+                    cur = cfg.get(param)
+                    if cur is None:
+                        return False
+                    if isinstance(value, (int, float)) and isinstance(cur, (int, float)):
+                        return abs(float(cur) - float(value)) < 1e-4
+                    return str(cur).strip().lower() == str(value).strip().lower()
+
                 def _place(param: str, value: str):
+                    if _unchanged(param, value):
+                        return
                     meta = get_param_meta(etype, param) or {}
                     # gradients/colors are smooth by default; only skip the ramp
                     # when explicitly marked non-smooth or no ramp requested.
@@ -1982,6 +1998,8 @@ class TriggerEngine:
                         instant[param] = value
 
                 def _place_num(param: str, value: float):
+                    if _unchanged(param, value):
+                        return
                     meta = get_param_meta(etype, param) or {}
                     if meta.get("smooth", True) and ramp_ms > 0:
                         ramp_num[param] = value
@@ -2008,7 +2026,7 @@ class TriggerEngine:
                     _place_num("brightness", entry.brightness)
                 if entry.background_brightness is not None and _has("background_brightness"):
                     _place_num("background_brightness", entry.background_brightness)
-                if entry.bg_mode and _has("background_mode"):
+                if entry.bg_mode and _has("background_mode") and not _unchanged("background_mode", entry.bg_mode):
                     instant["background_mode"] = entry.bg_mode
 
                 if not instant and not ramp_str and not ramp_num:
