@@ -1725,12 +1725,17 @@ class TriggerEngine:
         Finally, persist the post-action (effect, config) for every touched
         virtual so future switch-backs resume the right state.
         """
-        from services.morph_compiler import compile_target
+        from services.morph_compiler import compile_target, resolve_scope
         from services.effect_params import get_param_meta
         from services import morph_effect_state
 
-        # Top up cache for any virtual in any target's scope that isn't yet cached.
-        await self._ensure_virtuals_cached(action.targets)
+        # Refresh each scoped virtual's LIVE effect type so param patches address
+        # the device's current effect (not a stale cached one, which would make
+        # the write switch the effect). Explicit aspect=effect targets still
+        # switch as intended.
+        await self._refresh_effect_types(
+            [vid for t in action.targets for vid in resolve_scope(t.scope)]
+        )
 
         # Pre-scan: collect the bg_color value implied for each virtual by
         # other targets in this step. Effect-switch writes use this so the new
@@ -1944,8 +1949,11 @@ class TriggerEngine:
         if not card.entries:
             return
 
-        # Make sure every scoped virtual has its current effect type cached.
-        await self._ensure_virtuals_cached(card.entries)
+        # Address each device by its LIVE active effect (not a stale cached one)
+        # so these color writes update config in place instead of switching the
+        # effect back to whatever was last polled.
+        scoped = [vid for entry in card.entries for vid in resolve_scope(entry.scope)]
+        await self._refresh_effect_types(scoped)
 
         default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
         instant_coros: list = []
@@ -2228,6 +2236,42 @@ class TriggerEngine:
                 # ledfx_client.get_virtual returns {vid: {...}} per existing code
                 payload = live.get(vid, live)
                 state.ledfx_virtual_cache[vid] = payload
+
+    async def _refresh_effect_types(self, vids: list[str]) -> None:
+        """Re-fetch the CURRENT effect type + config for each virtual so morph
+        writes address the device's *live* active effect, not a possibly stale
+        cached one.
+
+        Morph color/param writes are effect-agnostic, but LedFX's effects PUT
+        switches the effect whenever the sent `type` differs from the active
+        one. If the 5s state poll is behind (or muted during capture), the
+        cached type can be wrong and the write flips the device back to it
+        (e.g. a user's manual `melt` → last-polled `crawler`). Refreshing here
+        keeps writes in-place. Best-effort + time-bounded so a slow/unreachable
+        LedFX falls back to the cache instead of stalling the fire."""
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for v in vids:
+            if v and v not in seen:
+                seen.add(v)
+                ordered.append(v)
+        if not ordered:
+            return
+
+        async def _one(vid: str) -> None:
+            live = await ledfx_client.get_virtual(vid)
+            if live:
+                payload = live.get(vid, live)
+                if isinstance(payload, dict) and (payload.get("effect") or {}).get("type"):
+                    state.ledfx_virtual_cache[vid] = payload
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(_one(v) for v in ordered), return_exceptions=True),
+                timeout=1.5,
+            )
+        except asyncio.TimeoutError:
+            logger.debug("morph: effect-type refresh timed out; using cached types")
 
     async def _snapshot_for_revert(self, event: MusicEvent) -> dict:
         """
