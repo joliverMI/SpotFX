@@ -211,6 +211,27 @@ class MorphColorAction(BaseModel):
     ramp_ms:   int | None = None
 
 
+class DeviceSettingTarget(BaseModel):
+    """One scoped change to LedFX *virtual-config* settings (not effect params).
+    Each field is optional — None means 'leave that setting alone'. Applied
+    instantly via ledfx_client.set_virtual_config. See
+    services/trigger_engine._apply_device_targets."""
+    scope:          MorphScope = Field(default_factory=MorphScope)
+    max_brightness: float | None = None   # 0..1
+    frequency_min:  int | None = None     # Hz
+    frequency_max:  int | None = None     # Hz
+
+
+class DeviceSettingsAction(BaseModel):
+    """Apply virtual-config Device Settings (max_brightness / frequency band)
+    across one or more scoped targets. Embeddable like any other Action and also
+    the payload of the `device_settings` event type. Applied instantly."""
+    type:    Literal["device_settings"] = "device_settings"
+    labels:  list[str] = Field(default_factory=list)
+    weight:  float = 1.0
+    targets: list[DeviceSettingTarget] = Field(default_factory=list)
+
+
 class EffectParamChange(BaseModel):
     """One parameter change within a LedFxEffectParamAction."""
     param_label: str          # unified label e.g. "Reactivity", "Effect Brightness"
@@ -256,7 +277,8 @@ Action = Annotated[
     | LedFxGlobalTransitionAction
     | LedFxEffectParamAction
     | MorphStepAction
-    | MorphColorAction,
+    | MorphColorAction
+    | DeviceSettingsAction,
     Field(discriminator="type"),
 ]
 
@@ -329,6 +351,8 @@ class MusicEvent(BaseModel):
         # shape_flare→Shape, color_flare→Color, combo_flare→Shape+Color.
         "scene_update", "update_scene", "reset_scene",
         "shape_flare", "color_flare", "combo_flare",
+        # Sets LedFX virtual-config Device Settings (max_brightness / freq band).
+        "device_settings",
     ] = "single"
     color: str = "#FFD700"     # hex color shown on timeline
     labels: list[str] = Field(default_factory=list)
@@ -367,6 +391,9 @@ class MusicEvent(BaseModel):
     # are intentionally NOT applied to morph_set events (brightness now lives
     # on the Morph Step targets themselves and global scene transitions are gone).
     morph_lanes: list[MorphLane] = Field(default_factory=list)
+
+    # For event_type == "device_settings" — virtual-config changes applied instantly.
+    device_targets: list[DeviceSettingTarget] = Field(default_factory=list)
 
     # Timing offset: shift when this event fires (negative = earlier, positive = later)
     event_offset_ms: int = 0

@@ -1037,6 +1037,15 @@ class TriggerEngine:
                 ))
                 return event.name
 
+            if event.event_type == "device_settings":
+                entries.append(_PlanEntry(
+                    fire_at_ms=start_at, event=event, labels=list(lbls),
+                    trigger_ms=trigger.timestamp_ms,
+                    trigger_id=trigger.id,
+                    is_root=(event.id == root_event.id),
+                ))
+                return f"Device settings ({len(event.device_targets)}×)"
+
             return event.name
 
         description = walk(root_event, trigger.timestamp_ms, list(labels))
@@ -1137,6 +1146,8 @@ class TriggerEngine:
             card = color_set_store.get_by_id(action.ref_id)
             name = card.name if card else "?"
             return f"Color → {name}"
+        elif action.type == "device_settings":
+            return f"Device settings ({len(action.targets)}×)"
         elif action.type == "event_ref":
             if _depth < 3:
                 sub = get_event(action.event_id)
@@ -1227,6 +1238,8 @@ class TriggerEngine:
                 await self._execute_beat_sequence(event, trigger_ms, labels or [], step1_prefired=False)
             elif event.event_type == "morph_set":
                 await self._execute_morph_set(event, labels or [])
+            elif event.event_type == "device_settings":
+                await self._apply_device_targets(event.device_targets)
             elif event.event_type in SCENE_EVENT_TYPES:
                 await self._execute_scene_event(event, labels or [])
             # Wait for any pending coalesce-bus flush so the writes land before
@@ -1263,6 +1276,26 @@ class TriggerEngine:
             picks = self._pick_morph_lanes(event, labels or [])
             return [a for _, a in picks if isinstance(a, MorphStepAction)]
         return []
+
+    def _collect_device_settings_for_event(self, event, labels: list[str] | None = None,
+                                           picks: list | None = None) -> list:
+        """Scene-override fires: gather DeviceSettingTargets embedded in the prep
+        event. The temp scene can't store virtual config (max_brightness /
+        frequency band), so these are applied directly at activation. When the
+        morph_set lane picks are already known, pass them so the device settings
+        match the chosen picks."""
+        from models.music_event import DeviceSettingsAction
+        actions: list = []
+        if event.event_type == "single":
+            actions = [a for a in (event.actions or []) if isinstance(a, DeviceSettingsAction)]
+        elif event.event_type == "morph_set":
+            if picks is None:
+                picks = self._pick_morph_lanes(event, labels or [])
+            actions = [a for _, a in picks if isinstance(a, DeviceSettingsAction)]
+        out: list = []
+        for a in actions:
+            out.extend(a.targets or [])
+        return out
 
     def _build_scene_payload(self, morph_actions: list) -> Optional[dict]:
         """Wrap `morph_scene.build_scene_state` with a cache copy + an
@@ -1306,6 +1339,11 @@ class TriggerEngine:
     async def _fire_scene_override(self, payload: dict, event) -> None:
         """Activate the temp scene, update cache, persist post-state, broadcast."""
         scene_id = self.SCENE_OVERRIDE_TEMP_ID
+        # Device settings (virtual config) can't ride in the scene — apply them
+        # directly at activation so the prep event's settings land.
+        dev_targets = payload.get("device_targets")
+        if dev_targets:
+            await self._apply_device_targets(dev_targets)
         await ledfx_client.trigger_scene(scene_id)
 
         # Update the local cache so subsequent compiles see the new state.
@@ -1332,6 +1370,7 @@ class TriggerEngine:
         payload = self._build_scene_payload(morph_actions)
         if payload is None:
             return False
+        payload["device_targets"] = self._collect_device_settings_for_event(event, labels, picks=picks)
         if not await self._push_scene_override_prep(payload):
             logger.warning(
                 "scene-override prep failed for event '%s' — falling back to bus dispatch",
@@ -1382,6 +1421,8 @@ class TriggerEngine:
             morph_picks = self._pick_morph_lanes(event, trigger.labels)
             asyncio.create_task(self._fire_morph_picks(morph_picks, trigger.labels))
             morph_summary = self._morph_picks_summary(morph_picks)
+        elif event.event_type == "device_settings":
+            asyncio.create_task(self._apply_device_targets(event.device_targets))
         elif event.event_type in SCENE_EVENT_TYPES:
             # Lane choice depends on live scene state; resolve + fire async.
             asyncio.create_task(self._execute_scene_event(event, trigger.labels))
@@ -1723,8 +1764,34 @@ class TriggerEngine:
         elif action.type == "morph_color":
             await self._execute_morph_color(action, await_ramps=await_ramps)
 
+        elif action.type == "device_settings":
+            await self._apply_device_targets(action.targets)
+
         else:
             logger.warning("Unknown action type: %s", action.type)
+
+    async def _apply_device_targets(self, targets: list) -> None:
+        """Apply Device Settings (virtual-config: max_brightness / frequency band)
+        to every scoped virtual. Each target field is optional — only set fields
+        are written. Instant (set_virtual_config); also mirrored into the cache."""
+        from services.morph_compiler import resolve_scope
+        coros = []
+        for t in (targets or []):
+            cfg: dict = {}
+            if t.max_brightness is not None:
+                cfg["max_brightness"] = t.max_brightness
+            if t.frequency_min is not None:
+                cfg["frequency_min"] = int(t.frequency_min)
+            if t.frequency_max is not None:
+                cfg["frequency_max"] = int(t.frequency_max)
+            if not cfg:
+                continue
+            for vid in resolve_scope(t.scope):
+                coros.append(ledfx_client.set_virtual_config(vid, dict(cfg)))
+                vc = state.ledfx_virtual_cache.setdefault(vid, {}).setdefault("config", {})
+                vc.update(cfg)
+        if coros:
+            await asyncio.gather(*coros, return_exceptions=True)
 
     async def _execute_morph_step(self, action, await_ramps: bool = False) -> None:
         """Dispatch a MorphStepAction in two compile passes so an in-step effect
@@ -2785,6 +2852,8 @@ class TriggerEngine:
             if picks is None:
                 picks = self._pick_morph_lanes(evt, entry.labels)
             await self._fire_morph_picks(picks, entry.labels, skip_event_ids=skip_ids)
+        elif evt.event_type == "device_settings":
+            await self._apply_device_targets(evt.device_targets)
         elif evt.event_type in SCENE_EVENT_TYPES:
             await self._execute_scene_event(evt, entry.labels, skip_event_ids=skip_ids)
 
@@ -3218,6 +3287,8 @@ class TriggerEngine:
                             if payload is None:
                                 _entry.scene_override_prepared = True  # nothing to do, skip lookahead retries
                                 continue
+                            payload["device_targets"] = self._collect_device_settings_for_event(
+                                _entry.event, _entry.labels, picks=picks)
                             _entry.scene_override_payload = payload
                             # Push prep async — completion before fire is best-effort;
                             # _execute_plan_entry's "eligible but not prepared" path

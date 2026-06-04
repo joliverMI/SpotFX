@@ -134,6 +134,7 @@
             <option value="beat_sequence">Beat Sequence</option>
             <option value="morph_set">Morph Set (parallel lanes)</option>
             <option value="scene_update">Scene Update (First / Rest)</option>
+            <option value="device_settings">Device Settings (max brightness / freq)</option>
           </select>
         </div>
         <div class="field" style="display:flex;align-items:center;gap:8px;">
@@ -156,6 +157,16 @@
             <button class="btn-sm" id="btn-add-lane" style="margin-left:auto;">+ Lane</button>
           </div>
           <div id="lane-list"></div>
+        </div>
+
+        <!-- Device Settings targets -->
+        <div id="device-settings-section" style="display:none">
+          <div class="card-title" style="margin-top:8px;">
+            Device Settings
+            <span style="font-size:11px;font-weight:400;opacity:0.55;margin-left:6px;">virtual config: max brightness / frequency band</span>
+            <button class="btn-sm" id="btn-add-device-target" style="margin-left:auto;">+ Target</button>
+          </div>
+          <div id="device-target-list"></div>
         </div>
 
         <!-- Sequence steps list -->
@@ -319,6 +330,7 @@ const ACTION_TYPES = [
   { value: 'ledfx_effect_param',      label: 'Effect Parameter'  },
   { value: 'morph_step',              label: 'Morph Step'        },
   { value: 'morph_color',             label: 'Morph Color'       },
+  { value: 'device_settings',         label: 'Device Settings'   },
 ];
 
 function typeOptions(selected) {
@@ -421,6 +433,15 @@ function actionFields(a) {
         <select class="mc-pick-mode" style="width:130px;font-size:11px;">${pmOpts}</select>
         <span style="font-size:11px;color:var(--text-muted);">Ramp (ms)</span>
         <input type="number" class="mc-ramp" value="${rampVal}" min="0" step="50" placeholder="global" style="width:80px">
+      </div>`;
+    }
+
+    case 'device_settings': {
+      const targets = (a.targets?.length ? a.targets : [defaultDeviceTarget()]);
+      const rows = targets.map((t, ti) => deviceTargetRowHtml(t, ti)).join('');
+      return `<div class="ds-root">
+        <div class="ds-targets">${rows}</div>
+        <button class="btn-sm" onclick="dsAddTarget(this.closest('.ds-root').querySelector('.ds-targets'))">+ Add Target</button>
       </div>`;
     }
 
@@ -638,6 +659,113 @@ function msScopeMode(scope) {
   if (scope?.categories?.length)  return 'category';
   return 'all';
 }
+
+// ── Device Settings target rows (shared by the event type + the action) ───────
+const DS_FREQ_MIN = 20, DS_FREQ_MAX = 20000;
+
+function deviceTargetRowHtml(t, ti) {
+  t = t || {};
+  const cats = Object.keys(effectParamsConfig.categories || {});
+  const allVirts = cats.flatMap(c => (effectParamsConfig.categories[c].virtuals || []).map(v => ({ v, c })));
+  const sm = msScopeMode(t.scope);
+  const catSel = t.scope?.categories?.[0] || cats[0] || '';
+  const vidSel = t.scope?.virtual_ids?.[0] || allVirts[0]?.v || '';
+  const catOpts = cats.map(c => `<option value="${c}"${c === catSel ? ' selected' : ''}>${c}</option>`).join('');
+  const vidOpts = allVirts.map(({ v, c }) => `<option value="${v}"${v === vidSel ? ' selected' : ''}>${v} (${c})</option>`).join('');
+  const briEn = t.max_brightness != null;
+  const briVal = t.max_brightness != null ? t.max_brightness : 1.0;
+  const freqEn = t.frequency_min != null || t.frequency_max != null;
+  const fmin = t.frequency_min != null ? t.frequency_min : DS_FREQ_MIN;
+  const fmax = t.frequency_max != null ? t.frequency_max : DS_FREQ_MAX;
+  return `<div class="ds-target-row" data-idx="${ti}" style="background:var(--surface);padding:6px 8px;border-radius:var(--radius);margin-bottom:6px;border:1px solid var(--border);">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <select class="ds-scope-mode" onchange="dsScopeModeChange(this)">
+        <option value="all"${sm === 'all' ? ' selected' : ''}>All Devices</option>
+        <option value="category"${sm === 'category' ? ' selected' : ''}>Category</option>
+        <option value="virtual"${sm === 'virtual' ? ' selected' : ''}>Specific Device</option>
+      </select>
+      <select class="ds-scope-cat" style="${sm === 'category' ? '' : 'display:none'}">${catOpts}</select>
+      <select class="ds-scope-vid" style="${sm === 'virtual' ? '' : 'display:none'}">${vidOpts}</select>
+      <button class="btn-sm btn-danger" onclick="this.closest('.ds-target-row').remove()" style="margin-left:auto;" title="Remove target">✕</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;">
+      <label style="display:flex;align-items:center;gap:4px;color:var(--text-muted);width:118px;flex-shrink:0;"><input type="checkbox" class="ds-bri-en"${briEn ? ' checked' : ''} onchange="dsBriToggle(this)"> Max Brightness</label>
+      <input type="range" class="ds-bri-range" min="0" max="1" step="0.01" value="${briVal}" style="flex:1;accent-color:var(--accent);${briEn ? '' : 'display:none'}" oninput="this.closest('.ds-target-row').querySelector('.ds-bri-num').value=(+this.value).toFixed(2)">
+      <input type="number" class="ds-bri-num" min="0" max="1" step="0.01" value="${(+briVal).toFixed(2)}" style="width:64px;${briEn ? '' : 'display:none'}" oninput="this.closest('.ds-target-row').querySelector('.ds-bri-range').value=this.value">
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;">
+      <label style="display:flex;align-items:center;gap:4px;color:var(--text-muted);width:118px;flex-shrink:0;"><input type="checkbox" class="ds-freq-en"${freqEn ? ' checked' : ''} onchange="dsFreqToggle(this)"> Frequency (Hz)</label>
+      <div class="ds-freq-wrap" style="display:${freqEn ? 'flex' : 'none'};align-items:center;gap:8px;flex:1;">
+        <input type="number" class="ds-freq-min-num" min="${DS_FREQ_MIN}" max="${DS_FREQ_MAX}" step="1" value="${fmin}" style="width:66px;" oninput="dsFreqNum(this)">
+        <div class="ms-dr" style="flex:1;">
+          <div class="ms-dr-track"></div>
+          <input type="range" class="ds-freq-min" min="${DS_FREQ_MIN}" max="${DS_FREQ_MAX}" step="10" value="${fmin}" oninput="dsFreqInput(this)">
+          <input type="range" class="ds-freq-max" min="${DS_FREQ_MIN}" max="${DS_FREQ_MAX}" step="10" value="${fmax}" oninput="dsFreqInput(this)">
+        </div>
+        <input type="number" class="ds-freq-max-num" min="${DS_FREQ_MIN}" max="${DS_FREQ_MAX}" step="1" value="${fmax}" style="width:66px;" oninput="dsFreqNum(this)">
+      </div>
+    </div>
+  </div>`;
+}
+
+window.dsScopeModeChange = function(sel) {
+  const row = sel.closest('.ds-target-row');
+  row.querySelector('.ds-scope-cat').style.display = sel.value === 'category' ? '' : 'none';
+  row.querySelector('.ds-scope-vid').style.display = sel.value === 'virtual' ? '' : 'none';
+};
+window.dsBriToggle = function(cb) {
+  const row = cb.closest('.ds-target-row'), on = cb.checked;
+  row.querySelector('.ds-bri-range').style.display = on ? '' : 'none';
+  row.querySelector('.ds-bri-num').style.display = on ? '' : 'none';
+};
+window.dsFreqToggle = function(cb) {
+  cb.closest('.ds-target-row').querySelector('.ds-freq-wrap').style.display = cb.checked ? 'flex' : 'none';
+};
+window.dsFreqInput = function(inp) {  // dual slider knob moved
+  const dr = inp.closest('.ms-dr');
+  const lo = dr.querySelector('.ds-freq-min'), hi = dr.querySelector('.ds-freq-max');
+  let loV = parseInt(lo.value), hiV = parseInt(hi.value);
+  if (loV > hiV) {
+    if (inp.classList.contains('ds-freq-min')) { hiV = loV; hi.value = hiV; }
+    else { loV = hiV; lo.value = loV; }
+  }
+  const wrap = inp.closest('.ds-freq-wrap');
+  wrap.querySelector('.ds-freq-min-num').value = loV;
+  wrap.querySelector('.ds-freq-max-num').value = hiV;
+};
+window.dsFreqNum = function(inp) {  // number box edited directly
+  const wrap = inp.closest('.ds-freq-wrap');
+  let loV = parseInt(wrap.querySelector('.ds-freq-min-num').value);
+  let hiV = parseInt(wrap.querySelector('.ds-freq-max-num').value);
+  if (!Number.isFinite(loV)) loV = DS_FREQ_MIN;
+  if (!Number.isFinite(hiV)) hiV = DS_FREQ_MAX;
+  if (loV > hiV) { if (inp.classList.contains('ds-freq-min-num')) hiV = loV; else loV = hiV; }
+  wrap.querySelector('.ds-freq-min').value = loV;
+  wrap.querySelector('.ds-freq-max').value = hiV;
+};
+
+function syncDeviceTarget(row) {
+  const sm = row.querySelector('.ds-scope-mode').value;
+  const scope = { virtual_ids: [], categories: [], roles: [] };
+  if (sm === 'category') scope.categories = [row.querySelector('.ds-scope-cat').value];
+  else if (sm === 'virtual') scope.virtual_ids = [row.querySelector('.ds-scope-vid').value];
+  const briEn = row.querySelector('.ds-bri-en').checked;
+  const max_brightness = briEn ? parseFloat(row.querySelector('.ds-bri-num').value) : null;
+  const freqEn = row.querySelector('.ds-freq-en').checked;
+  const frequency_min = freqEn ? parseInt(row.querySelector('.ds-freq-min-num').value) : null;
+  const frequency_max = freqEn ? parseInt(row.querySelector('.ds-freq-max-num').value) : null;
+  return { scope, max_brightness, frequency_min, frequency_max };
+}
+
+function defaultDeviceTarget() {
+  return { scope: { virtual_ids: [], categories: [], roles: [] }, max_brightness: 1.0, frequency_min: null, frequency_max: null };
+}
+
+window.dsAddTarget = function(list) {
+  const div = document.createElement('div');
+  div.innerHTML = deviceTargetRowHtml(defaultDeviceTarget(), list.children.length);
+  list.appendChild(div.firstElementChild);
+};
 
 function msAspectValueHtml(aspect, val) {
   val = val || {};
@@ -1249,6 +1377,12 @@ function syncActionFromRow(row) {
         pick_mode: dyn.querySelector('.mc-pick-mode')?.value || 'default',
         ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
       };
+    }
+
+    case 'device_settings': {
+      const dyn = row.querySelector('.action-dynamic');
+      const targets = [...dyn.querySelectorAll('.ds-target-row')].map(syncDeviceTarget);
+      return { type, weight, labels, targets };
     }
 
     case 'ledfx_effect_param': {
@@ -2113,6 +2247,7 @@ function selectEvent(id) {
   renderBeatSequence(e);
   loadBsRevertIntoDOM(e.beat_revert);
   renderLanes(e);
+  renderDeviceTargets(e);
   toggleSections(e.event_type);
   updateLaneControls(e);
   applyFixedReadonly(e);
@@ -2127,8 +2262,18 @@ document.getElementById('e-type').addEventListener('change', () => {
     ensureSceneLanes(e);
     renderLanes(e);
     updateLaneControls(e);
+    if (type === 'device_settings') { e.device_targets = e.device_targets || []; renderDeviceTargets(e); }
   }
   toggleSections(type);
+});
+
+document.getElementById('btn-add-device-target').addEventListener('click', () => {
+  const list = document.getElementById('device-target-list');
+  const placeholder = list.querySelector('.ds-target-row');
+  if (!placeholder) list.innerHTML = '';
+  const div = document.createElement('div');
+  div.innerHTML = deviceTargetRowHtml(defaultDeviceTarget(), list.children.length);
+  list.appendChild(div.firstElementChild);
 });
 
 function toggleSections(type) {
@@ -2138,7 +2283,16 @@ function toggleSections(type) {
   document.getElementById('beat-sequence-section').style.display = type === 'beat_sequence' ? '' : 'none';
   // Scene Update reuses the morph lanes editor (constrained to First/Rest).
   document.getElementById('morph-set-section').style.display = (type === 'morph_set' || type === 'scene_update') ? '' : 'none';
+  document.getElementById('device-settings-section').style.display = type === 'device_settings' ? '' : 'none';
   document.getElementById('single-pre-commands').style.display = isFixedScene ? 'none' : '';
+}
+
+function renderDeviceTargets(e) {
+  const list = document.getElementById('device-target-list');
+  const targets = e.device_targets || [];
+  list.innerHTML = targets.length
+    ? targets.map((t, i) => deviceTargetRowHtml(t, i)).join('')
+    : '<div style="color:var(--text-muted);font-size:12px;font-style:italic;">No targets. Add one with + Target.</div>';
 }
 
 // Energy level controls
@@ -2256,6 +2410,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   } else if (e.event_type === 'morph_set' || e.event_type === 'scene_update') {
     syncLanesFromDOM(e);
     if (e.event_type === 'scene_update') ensureSceneLanes(e);
+  } else if (e.event_type === 'device_settings') {
+    e.device_targets = [...document.querySelectorAll('#device-target-list .ds-target-row')].map(syncDeviceTarget);
   }
 
   await POST('/events', e);
