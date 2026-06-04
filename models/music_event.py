@@ -99,10 +99,15 @@ class NumericNudge(BaseModel):
     amount: nudge magnitude in abstract 0..1 space (negative ok)
     scale:  intensity_scale — 0 ignores intensity, 1 fully modulates.
     wrap:   when True, reflect off min/max and reverse direction on future
-            fires so the value bounces instead of sticking at a boundary."""
+            fires so the value bounces instead of sticking at a boundary.
+    lo/hi:  optional custom nudge range (None = the effect param's full range);
+            clamping/bounce use these bounds. For x/y offset they are in the
+            frontend −1..1 space."""
     amount: float = 0.0
     scale:  float = 0.0
     wrap:   bool = False
+    lo:     float | None = None
+    hi:     float | None = None
 
 
 class AspectValue(BaseModel):

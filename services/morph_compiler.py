@@ -239,6 +239,14 @@ def _nudged_numeric(
     meta = _ep.get_param_meta(effect_type, param_name) or {}
     lo = meta.get("min", 0.0)
     hi = meta.get("max", 1.0)
+    # Per-nudge min/max override (None = use the effect param's full range). For
+    # scale_offset params the override is in frontend −1..1 space, matching `lo`/`hi`.
+    if getattr(nudge, "lo", None) is not None:
+        lo = float(nudge.lo)
+    if getattr(nudge, "hi", None) is not None:
+        hi = float(nudge.hi)
+    if hi < lo:
+        lo, hi = hi, lo
     is_integer = meta.get("type") == "integer"
     scale_offset = bool(meta.get("scale_offset"))
     eff_intensity = intensity if intensity is not None else 0.5

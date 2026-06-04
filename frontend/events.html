@@ -28,6 +28,12 @@
     .step-body { margin-top:4px; }
     .step-action-row + .step-action-row { border-top:1px solid var(--border); padding-top:6px; margin-top:6px; }
     .ep-param-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+    /* Dual-knob range slider (shape nudge min/max) — two overlaid range inputs */
+    .ms-dr { position:relative; height:22px; flex:1; }
+    .ms-dr .ms-dr-track { position:absolute; top:9px; left:0; width:100%; height:4px; background:var(--border); border-radius:2px; }
+    .ms-dr input[type=range] { position:absolute; top:0; left:0; width:100%; height:22px; margin:0; background:none; -webkit-appearance:none; appearance:none; pointer-events:none; }
+    .ms-dr input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; pointer-events:auto; height:14px; width:14px; border-radius:50%; background:var(--accent); border:1px solid #fff; cursor:pointer; }
+    .ms-dr input[type=range]::-moz-range-thumb { pointer-events:auto; height:14px; width:14px; border-radius:50%; background:var(--accent); border:1px solid #fff; cursor:pointer; }
   </style>
 </head>
 <body>
@@ -779,7 +785,7 @@ function msNudgeEditorHtml(t) {
 // Shape + Nudge mode: per-sub-field nudge controls for the numeric sub-fields.
 // Bool sub-fields (polygon, flip) stay tri-state regardless of mode.
 function msShapeNudgeEditorHtml(val) {
-  const numericRow = (key, label, min, max, step) => {
+  const numericRow = (key, label, min, max, step, valMin, valMax, valStep) => {
     const n = val[key + '_nudge'] || {};
     const amt = (n.amount ?? 0).toFixed(2);
     const scl = (n.scale  ?? 0).toFixed(2);
@@ -787,16 +793,30 @@ function msShapeNudgeEditorHtml(val) {
     const wrapStyle = wrapOn
       ? 'background:var(--accent);color:#fff;'
       : 'background:var(--surface);color:var(--text-muted);';
-    return `<div class="ms-shape-nudge-row" data-key="${key}" style="display:grid;grid-template-columns:58px 1fr 66px 32px 36px 1fr 66px;gap:6px;align-items:center;margin-bottom:4px;font-size:11px;">
-      <span style="color:var(--text-muted);">${label}</span>
-      <input type="range" class="ms-shape-nudge-amt-range" min="${min}" max="${max}" step="${step}" value="${amt}" style="accent-color:var(--accent);">
-      <input type="number" class="ms-shape-nudge-amt" min="${min}" max="${max}" step="${step}" value="${amt}" style="width:66px;">
-      <button type="button" class="ms-shape-nudge-wrap" data-wrap="${wrapOn ? '1' : '0'}" onclick="msWrapToggle(this)"
-        title="Wrap: bounce off min/max instead of sticking at the limit"
-        style="height:24px;width:100%;padding:0;font-size:13px;line-height:1;border-radius:4px;cursor:pointer;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;${wrapStyle}">↔</button>
-      <span style="color:var(--text-muted);text-align:right;">scale</span>
-      <input type="range" class="ms-shape-nudge-scale-range" min="0" max="2" step="0.05" value="${scl}" style="accent-color:var(--accent);">
-      <input type="number" class="ms-shape-nudge-scale" min="0" max="2" step="0.05" value="${scl}" style="width:66px;">
+    const lo = n.lo != null ? n.lo : valMin;
+    const hi = n.hi != null ? n.hi : valMax;
+    return `<div class="ms-shape-nudge-row" data-key="${key}" data-vmin="${valMin}" data-vmax="${valMax}" style="margin-bottom:6px;font-size:11px;">
+      <div style="display:grid;grid-template-columns:58px 1fr 66px 32px 36px 1fr 66px;gap:6px;align-items:center;">
+        <span style="color:var(--text-muted);">${label}</span>
+        <input type="range" class="ms-shape-nudge-amt-range" min="${min}" max="${max}" step="${step}" value="${amt}" style="accent-color:var(--accent);">
+        <input type="number" class="ms-shape-nudge-amt" min="${min}" max="${max}" step="${step}" value="${amt}" style="width:66px;">
+        <button type="button" class="ms-shape-nudge-wrap" data-wrap="${wrapOn ? '1' : '0'}" onclick="msWrapToggle(this)"
+          title="Wrap: bounce off min/max instead of sticking at the limit"
+          style="height:24px;width:100%;padding:0;font-size:13px;line-height:1;border-radius:4px;cursor:pointer;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;${wrapStyle}">↔</button>
+        <span style="color:var(--text-muted);text-align:right;">scale</span>
+        <input type="range" class="ms-shape-nudge-scale-range" min="0" max="2" step="0.05" value="${scl}" style="accent-color:var(--accent);">
+        <input type="number" class="ms-shape-nudge-scale" min="0" max="2" step="0.05" value="${scl}" style="width:66px;">
+      </div>
+      <div style="display:grid;grid-template-columns:58px 40px 1fr 40px;gap:6px;align-items:center;margin-top:3px;">
+        <span style="color:var(--text-muted);text-align:right;" title="Constrain the nudge range">range</span>
+        <span class="ms-dr-lo-val" style="text-align:right;color:var(--text-muted);">${(+lo).toFixed(2)}</span>
+        <div class="ms-dr">
+          <div class="ms-dr-track"></div>
+          <input type="range" class="ms-shape-nudge-lo" min="${valMin}" max="${valMax}" step="${valStep}" value="${lo}" oninput="msDrInput(this)">
+          <input type="range" class="ms-shape-nudge-hi" min="${valMin}" max="${valMax}" step="${valStep}" value="${hi}" oninput="msDrInput(this)">
+        </div>
+        <span class="ms-dr-hi-val" style="color:var(--text-muted);">${(+hi).toFixed(2)}</span>
+      </div>
     </div>`;
   };
   // Booleans: same tri-state pills as absolute mode (no nudge semantic for bools).
@@ -813,11 +833,11 @@ function msShapeNudgeEditorHtml(val) {
   return `<div class="ms-val ms-val-shape-nudge" style="display:flex;flex-direction:column;">
     ${boolRow('polygon', 'Polygon', val.polygon)}
     ${boolRow('flip',    'Flip',    val.flip)}
-    ${numericRow('star',     'Star',     -1, 1, 0.05)}
-    ${numericRow('edges',    'Edges',    -8, 8, 1)}
-    ${numericRow('twist',    'Twist',    -1, 1, 0.05)}
-    ${numericRow('x_offset', 'X Offset', -1, 1, 0.05)}
-    ${numericRow('y_offset', 'Y Offset', -1, 1, 0.05)}
+    ${numericRow('star',     'Star',     -1, 1, 0.05,  -1,  1, 0.05)}
+    ${numericRow('edges',    'Edges',    -8, 8, 1,      0,  8, 1)}
+    ${numericRow('twist',    'Twist',    -1, 1, 0.05,   0, 10, 0.1)}
+    ${numericRow('x_offset', 'X Offset', -1, 1, 0.05,  -1,  1, 0.05)}
+    ${numericRow('y_offset', 'Y Offset', -1, 1, 0.05,  -1,  1, 0.05)}
   </div>`;
 }
 
@@ -826,6 +846,21 @@ window.msWrapToggle = function(btn) {
   btn.dataset.wrap = on ? '1' : '0';
   btn.style.background = on ? 'var(--accent)' : 'var(--surface)';
   btn.style.color      = on ? '#fff' : 'var(--text-muted)';
+};
+
+// Dual-knob range slider: keep lo <= hi and update the numeric readouts.
+window.msDrInput = function(inp) {
+  const dr = inp.closest('.ms-dr');
+  const loEl = dr.querySelector('.ms-shape-nudge-lo');
+  const hiEl = dr.querySelector('.ms-shape-nudge-hi');
+  let loV = parseFloat(loEl.value), hiV = parseFloat(hiEl.value);
+  if (loV > hiV) {
+    if (inp.classList.contains('ms-shape-nudge-lo')) { hiV = loV; hiEl.value = hiV; }
+    else { loV = hiV; loEl.value = loV; }
+  }
+  const row = inp.closest('.ms-shape-nudge-row');
+  row.querySelector('.ms-dr-lo-val').textContent = loV.toFixed(2);
+  row.querySelector('.ms-dr-hi-val').textContent = hiV.toFixed(2);
 };
 
 window.msModeToggle = function(btn) {
@@ -987,13 +1022,22 @@ function syncMorphTarget(row) {
         const amt = parseFloat(nrow.querySelector('.ms-shape-nudge-amt')?.value);
         const scl = parseFloat(nrow.querySelector('.ms-shape-nudge-scale')?.value);
         const wrap = nrow.querySelector('.ms-shape-nudge-wrap')?.dataset.wrap === '1';
+        const vmin = parseFloat(nrow.dataset.vmin);
+        const vmax = parseFloat(nrow.dataset.vmax);
+        const loV = parseFloat(nrow.querySelector('.ms-shape-nudge-lo')?.value);
+        const hiV = parseFloat(nrow.querySelector('.ms-shape-nudge-hi')?.value);
+        // null when at the param's full extreme (= "use full range")
+        const lo = Number.isFinite(loV) && loV !== vmin ? loV : null;
+        const hi = Number.isFinite(hiV) && hiV !== vmax ? hiV : null;
         const haveAmt = Number.isFinite(amt) && amt !== 0;
         const haveScl = Number.isFinite(scl) && scl !== 0;
-        if (haveAmt || haveScl) {
+        if (haveAmt || haveScl || lo != null || hi != null) {
           absolute_value[key + '_nudge'] = {
             amount: Number.isFinite(amt) ? amt : 0,
             scale:  Number.isFinite(scl) ? scl : 0,
             wrap,
+            lo,
+            hi,
           };
         }
       });
