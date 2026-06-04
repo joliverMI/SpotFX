@@ -2266,12 +2266,15 @@ class TriggerEngine:
                     state.ledfx_virtual_cache[vid] = payload
 
         try:
+            # Tight cap: a healthy localhost read is ~1-5 ms, so 25 ms leaves
+            # ample headroom yet stays imperceptible if LedFX is slow/down — we
+            # just fall back to the cached effect type rather than stall the fire.
             await asyncio.wait_for(
                 asyncio.gather(*(_one(v) for v in ordered), return_exceptions=True),
-                timeout=1.5,
+                timeout=0.025,
             )
         except asyncio.TimeoutError:
-            logger.debug("morph: effect-type refresh timed out; using cached types")
+            logger.debug("morph: effect-type refresh exceeded 25ms; using cached types")
 
     async def _snapshot_for_revert(self, event: MusicEvent) -> dict:
         """
