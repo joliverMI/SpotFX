@@ -1977,7 +1977,7 @@ function ensureSceneLanes(e) {
     const ex = existing[i];
     return ex
       ? { ...ex, name: nm }
-      : { name: nm, labels: [], alternatives: [defaultLaneAlternative()] };
+      : { name: nm, labels: [], alternatives: [] };
   });
 }
 
