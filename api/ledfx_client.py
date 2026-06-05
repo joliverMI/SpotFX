@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from typing import Optional
 
 import httpx
@@ -126,17 +127,165 @@ def _get_client() -> httpx.AsyncClient:
     if _client is None or _client.is_closed:
         _client = httpx.AsyncClient(
             base_url=settings.ledfx_url,
-            timeout=5.0,
+            # Split timeout instead of a blanket 5.0s. LedFX is on localhost and
+            # answers in ~1ms, so a 5s *read* meant one stalled request camped on
+            # its connection for 5 full seconds — long enough for 40fps ramps to
+            # exhaust the pool during a brief LedFX hiccup. read/write 1.5s still
+            # leaves huge margin but releases a hung conn 3x sooner. pool=0.5s
+            # makes a saturated pool fail fast (shed the frame) rather than queue.
+            timeout=httpx.Timeout(connect=2.0, read=1.5, write=1.5, pool=0.5),
             # 8 was too small under bursty load: a flare chain (4-8 patches at
             # once) plus the periodic latency probe + virtual-state poll +
             # snapshot-warm fans out faster than the pool can recycle, and
             # observed pool degradation pinned conns at 1 with steady
             # ConnectTimeouts. 32 gives headroom for parallel bursts;
             # localhost handles many concurrent loopback sockets cheaply,
-            # and httpx still queues writes per-connection.
+            # and httpx still queues writes per-connection. The in-flight
+            # semaphore (24) is the real bound — it binds before the pool does,
+            # so backpressure queues gracefully instead of raising PoolTimeout.
             limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
         )
     return _client
+
+
+# ── Load governor: in-flight semaphore + circuit breaker ────────────────────────
+# Background: a brief LedFX stall used to spiral into a pool-exhaustion storm.
+# Ramps fire frames at 40fps across every virtual and the bus flush overlaps
+# under stall, so concurrent connection demand climbed without bound until the
+# pool saturated and every call raised PoolTimeout — pinning a CPU and flooding
+# the log. There was no backpressure. These two mechanisms add it:
+#   1. Semaphore caps SpotFX's *total* concurrent LedFX requests, so overlapping
+#      ramps/flushes queue on the slot instead of racing for connections.
+#   2. Circuit breaker: after N consecutive failures it opens for a short
+#      cooldown, during which calls short-circuit (frames shed) instead of
+#      hammering a dead/slow LedFX. Auto-closes on the first success.
+_LEDFX_MAX_INFLIGHT = 24          # < pool max_connections (32) so we bind here first
+_HELD_THRESHOLD_MS = 30.0         # record a "held" event when a frame waits >this for a slot
+_BREAKER_FAIL_THRESHOLD = 5       # consecutive failures before the circuit opens
+_BREAKER_COOLDOWN_S = 2.0         # how long the circuit stays open before a half-open probe
+
+_inflight_sem: Optional[asyncio.Semaphore] = None
+_consecutive_failures = 0
+_breaker_open_until = 0.0         # time.monotonic() deadline; circuit open while now < this
+
+# Rate-limit the failure log so a stall produces one line/sec, not a storm.
+_last_fail_log = 0.0
+_FAIL_LOG_INTERVAL_S = 1.0
+_suppressed_fail_logs = 0
+
+# ── Load-shed event ring buffer ─────────────────────────────────────────────────
+# Server-side so the Debug page shows the last several events even if it wasn't
+# open when they happened. Survives page reloads (not service restarts). Events
+# of the same kind within _EVENT_COALESCE_S collapse into one row with a count,
+# so a burst reads as "held ×312" rather than 312 rows.
+_events: deque = deque(maxlen=60)
+_event_counters: dict = {"held": 0, "shed": 0, "breaker_open": 0, "recovered": 0}
+_EVENT_COALESCE_S = 2.0
+
+
+def _record_event(kind: str, detail: str = "", held_ms: Optional[float] = None) -> None:
+    now_wall = time.time()
+    _event_counters[kind] = _event_counters.get(kind, 0) + 1
+    if _events:
+        last = _events[-1]
+        if last["kind"] == kind and (now_wall - last["ts"]) < _EVENT_COALESCE_S:
+            last["count"] += 1
+            last["ts"] = now_wall
+            last["detail"] = detail
+            if held_ms is not None:
+                last["max_held_ms"] = max(last.get("max_held_ms", 0.0), held_ms)
+            return
+    ev = {"ts": now_wall, "kind": kind, "detail": detail, "count": 1}
+    if held_ms is not None:
+        ev["max_held_ms"] = held_ms
+    _events.append(ev)
+
+
+def _get_sem() -> asyncio.Semaphore:
+    # Constructed lazily on first use so it binds to the running event loop.
+    global _inflight_sem
+    if _inflight_sem is None:
+        _inflight_sem = asyncio.Semaphore(_LEDFX_MAX_INFLIGHT)
+    return _inflight_sem
+
+
+def _breaker_is_open() -> bool:
+    return _breaker_open_until > time.monotonic()
+
+
+def _on_success() -> None:
+    global _consecutive_failures, _breaker_open_until
+    if _breaker_open_until:                 # was open or half-open → recovered
+        _breaker_open_until = 0.0
+        _record_event("recovered")
+        logger.info("LedFX circuit recovered after %d consecutive failures", _consecutive_failures)
+    _consecutive_failures = 0
+
+
+def _on_failure(exc: Exception, label: str) -> None:
+    global _consecutive_failures, _breaker_open_until, _last_fail_log, _suppressed_fail_logs
+    _consecutive_failures += 1
+    now = time.monotonic()
+    if now - _last_fail_log >= _FAIL_LOG_INTERVAL_S:
+        extra = f" (+{_suppressed_fail_logs} suppressed)" if _suppressed_fail_logs else ""
+        logger.error("LedFX request failed [%s]: %r%s", label, exc, extra)
+        _last_fail_log = now
+        _suppressed_fail_logs = 0
+    else:
+        _suppressed_fail_logs += 1
+    if _consecutive_failures >= _BREAKER_FAIL_THRESHOLD:
+        was_open = _breaker_open_until > now
+        _breaker_open_until = now + _BREAKER_COOLDOWN_S   # (re)arm cooldown on each failure
+        if not was_open:
+            _record_event("breaker_open", f"{_consecutive_failures} consecutive fails")
+            logger.warning(
+                "LedFX circuit OPEN: %d consecutive failures, shedding for %.1fs",
+                _consecutive_failures, _BREAKER_COOLDOWN_S,
+            )
+
+
+async def _request(method: str, path: str, *, label: str, **kwargs):
+    """Single choke point for every LedFX call on the main client. Applies the
+    circuit breaker and in-flight semaphore, then sends the request.
+
+    Returns the httpx.Response on success, or None when the call was shed
+    (circuit open) or failed (logged + recorded). Never raises — callers map
+    None to their own empty/false fallback. measure_latency() deliberately does
+    NOT go through here: it uses the isolated probe client so its RTT reflects
+    true server latency, not queue time."""
+    if _breaker_is_open():
+        _record_event("shed", label)
+        return None
+    sem = _get_sem()
+    t0 = time.monotonic()
+    await sem.acquire()
+    held_ms = (time.monotonic() - t0) * 1000
+    if held_ms >= _HELD_THRESHOLD_MS:
+        _record_event("held", label, held_ms=held_ms)
+    try:
+        resp = await _get_client().request(method, path, **kwargs)
+        resp.raise_for_status()
+        _on_success()
+        return resp
+    except Exception as exc:
+        _on_failure(exc, label)
+        return None
+    finally:
+        sem.release()
+
+
+def get_health() -> dict:
+    """Snapshot of LedFX load-governor state for the Debug page. `now` is the
+    server wall-clock so the client can render relative times without clock
+    skew. Events are newest-first."""
+    return {
+        "now": time.time(),
+        "breaker_open": _breaker_is_open(),
+        "consecutive_failures": _consecutive_failures,
+        "max_inflight": _LEDFX_MAX_INFLIGHT,
+        "counters": dict(_event_counters),
+        "events": list(reversed(_events)),
+    }
 
 
 def _get_probe_client() -> httpx.AsyncClient:
@@ -162,35 +311,19 @@ def _get_probe_client() -> httpx.AsyncClient:
 async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: dict) -> bool:
     if _capture_in_progress():
         return True   # capture-in-progress mute (acts like success so callers don't error)
-    client = _get_client()
-    try:
-        resp = await client.put(
-            f"/api/virtuals/{virtual_id}/effects",
-            json={"type": effect_type, "config": config},
-        )
-        logger.debug(
-            "LedFX PUT /api/virtuals/%s/effects (type=%s) → %d: %s",
-            virtual_id, effect_type, resp.status_code, resp.text[:300],
-        )
-        resp.raise_for_status()
-        return True
-    except Exception as exc:
-        logger.error("Failed to patch LedFX virtual '%s' effect: %r", virtual_id, exc)
-        return False
+    resp = await _request(
+        "PUT", f"/api/virtuals/{virtual_id}/effects",
+        json={"type": effect_type, "config": config},
+        label=f"effect:{virtual_id}",
+    )
+    return resp is not None
 
 
 async def _set_config_direct(patch: dict) -> bool:
     if _capture_in_progress():
         return True   # capture-in-progress mute
-    client = _get_client()
-    try:
-        resp = await client.put("/api/config", json=patch)
-        logger.debug("LedFX PUT /api/config → %d: %s", resp.status_code, resp.text[:300])
-        resp.raise_for_status()
-        return True
-    except Exception as exc:
-        logger.error("Failed to update LedFX config %s: %r", patch, exc)
-        return False
+    resp = await _request("PUT", "/api/config", json=patch, label="config")
+    return resp is not None
 
 
 # ── Bus flush ─────────────────────────────────────────────────────────────────
@@ -275,18 +408,15 @@ async def trigger_scene(scene_id: str) -> bool:
     """
     if _capture_in_progress():
         return True   # capture-in-progress mute
-    client = _get_client()
-    try:
-        resp = await client.put(
-            "/api/scenes",
-            json={"id": scene_id, "action": "activate"},
-        )
-        resp.raise_for_status()
+    resp = await _request(
+        "PUT", "/api/scenes",
+        json={"id": scene_id, "action": "activate"},
+        label=f"scene:{scene_id}",
+    )
+    if resp is not None:
         logger.info("LedFX scene triggered: %s", scene_id)
         return True
-    except Exception as exc:
-        logger.error("Failed to trigger LedFX scene '%s': %r", scene_id, exc)
-        return False
+    return False
 
 
 async def ensure_scene(scene_id: str, name: str) -> bool:
@@ -301,32 +431,31 @@ async def ensure_scene(scene_id: str, name: str) -> bool:
     (bypasses the 8 ms bus)."""
     if _capture_in_progress():
         return True
-    client = _get_client()
-    try:
-        resp = await client.get("/api/scenes")
-        resp.raise_for_status()
-        scenes = (resp.json() or {}).get("scenes") or {}
-        if scene_id in scenes:
-            return True
-        resp = await client.post(
-            "/api/scenes",
-            json={"name": name, "virtuals": {}, "scene_image": ""},
-        )
-        resp.raise_for_status()
-        # Re-fetch and confirm the id we wanted is what LedFX created.
-        resp2 = await client.get("/api/scenes")
-        scenes2 = (resp2.json() or {}).get("scenes") or {}
-        if scene_id not in scenes2:
-            logger.warning(
-                "ensure_scene: posted name '%s' but LedFX did not create id '%s' (got: %s)",
-                name, scene_id, sorted(scenes2.keys())[-5:],
-            )
-            return False
-        logger.info("ensure_scene: created '%s' on LedFX", scene_id)
-        return True
-    except Exception as exc:
-        logger.warning("ensure_scene: could not ensure '%s' (%r) — scene-override morphs will fail loudly at fire time", scene_id, exc)
+    resp = await _request("GET", "/api/scenes", label="ensure_scene:list")
+    if resp is None:
+        logger.warning("ensure_scene: could not list scenes — scene-override morphs will fail loudly at fire time")
         return False
+    scenes = (resp.json() or {}).get("scenes") or {}
+    if scene_id in scenes:
+        return True
+    if await _request(
+        "POST", "/api/scenes",
+        json={"name": name, "virtuals": {}, "scene_image": ""},
+        label="ensure_scene:create",
+    ) is None:
+        logger.warning("ensure_scene: could not create '%s' — scene-override morphs will fail loudly at fire time", scene_id)
+        return False
+    # Re-fetch and confirm the id we wanted is what LedFX created.
+    resp2 = await _request("GET", "/api/scenes", label="ensure_scene:confirm")
+    scenes2 = (resp2.json() or {}).get("scenes") or {} if resp2 is not None else {}
+    if scene_id not in scenes2:
+        logger.warning(
+            "ensure_scene: posted name '%s' but LedFX did not create id '%s' (got: %s)",
+            name, scene_id, sorted(scenes2.keys())[-5:],
+        )
+        return False
+    logger.info("ensure_scene: created '%s' on LedFX", scene_id)
+    return True
 
 
 async def update_scene_virtuals(scene_id: str, virtuals: dict) -> bool:
@@ -335,17 +464,12 @@ async def update_scene_virtuals(scene_id: str, virtuals: dict) -> bool:
     omitted here keeps its previous entry from a prior update). Direct-fire."""
     if _capture_in_progress():
         return True
-    client = _get_client()
-    try:
-        resp = await client.post(
-            "/api/scenes",
-            json={"id": scene_id, "virtuals": virtuals},
-        )
-        resp.raise_for_status()
-        return True
-    except Exception as exc:
-        logger.error("update_scene_virtuals('%s') failed: %r", scene_id, exc)
-        return False
+    resp = await _request(
+        "POST", "/api/scenes",
+        json={"id": scene_id, "virtuals": virtuals},
+        label=f"update_scene:{scene_id}",
+    )
+    return resp is not None
 
 
 async def delete_scene(scene_id: str) -> bool:
@@ -353,16 +477,9 @@ async def delete_scene(scene_id: str) -> bool:
     kept so a future 'reset temp scene' control can call it."""
     if _capture_in_progress():
         return True
-    client = _get_client()
-    try:
-        # httpx's `delete()` shorthand doesn't take `json=`; use the explicit
-        # request form so we can attach a JSON body the way LedFX expects.
-        resp = await client.request("DELETE", "/api/scenes", json={"id": scene_id})
-        resp.raise_for_status()
-        return True
-    except Exception as exc:
-        logger.error("delete_scene('%s') failed: %r", scene_id, exc)
-        return False
+    # DELETE with a JSON body the way LedFX expects.
+    resp = await _request("DELETE", "/api/scenes", json={"id": scene_id}, label=f"delete_scene:{scene_id}")
+    return resp is not None
 
 
 async def get_scenes() -> list[dict]:
@@ -372,58 +489,35 @@ async def get_scenes() -> list[dict]:
     """
     if _capture_in_progress():
         return []
-    client = _get_client()
-    try:
-        resp = await client.get("/api/scenes")
-        resp.raise_for_status()
-        data = resp.json()
-        scenes_dict = data.get("scenes", {})
-        return [{"id": sid, **meta} for sid, meta in scenes_dict.items()]
-    except Exception as exc:
-        logger.warning("Could not fetch LedFX scenes: %r", exc)
+    resp = await _request("GET", "/api/scenes", label="get_scenes")
+    if resp is None:
         return []
+    scenes_dict = (resp.json() or {}).get("scenes", {})
+    return [{"id": sid, **meta} for sid, meta in scenes_dict.items()]
 
 
 async def get_config() -> dict:
     """Fetch LedFX global config (GET /api/config). Returns {} on failure."""
     if _capture_in_progress():
         return {}
-    client = _get_client()
-    try:
-        resp = await client.get("/api/config")
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        logger.warning("Could not fetch LedFX config: %r", exc)
-        return {}
+    resp = await _request("GET", "/api/config", label="get_config")
+    return resp.json() if resp is not None else {}
 
 
 async def get_virtual(virtual_id: str) -> dict:
     """Fetch a single LedFX virtual's current state. Returns {} on failure."""
     if _capture_in_progress():
         return state.ledfx_virtual_cache.get(virtual_id, {})
-    client = _get_client()
-    try:
-        resp = await client.get(f"/api/virtuals/{virtual_id}")
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        logger.warning("Could not fetch LedFX virtual '%s': %r", virtual_id, exc)
-        return {}
+    resp = await _request("GET", f"/api/virtuals/{virtual_id}", label=f"get_virtual:{virtual_id}")
+    return resp.json() if resp is not None else {}
 
 
 async def get_all_virtuals() -> dict:
     """Fetch all LedFX virtuals. Returns {} on failure."""
     if _capture_in_progress():
         return {}
-    client = _get_client()
-    try:
-        resp = await client.get("/api/virtuals")
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        logger.warning("Could not fetch LedFX virtuals: %r", exc)
-        return {}
+    resp = await _request("GET", "/api/virtuals", label="get_all_virtuals")
+    return resp.json() if resp is not None else {}
 
 
 async def set_virtual_config(virtual_id: str, config: dict) -> bool:
@@ -434,22 +528,15 @@ async def set_virtual_config(virtual_id: str, config: dict) -> bool:
     """
     if _capture_in_progress():
         return True   # capture-in-progress mute
-    client = _get_client()
-    try:
-        resp = await client.post(
-            "/api/virtuals",
-            json={"id": virtual_id, "config": config},
-        )
-        logger.debug(
-            "LedFX POST /api/virtuals (id=%s) → %d: %s",
-            virtual_id, resp.status_code, resp.text[:300],
-        )
-        resp.raise_for_status()
+    resp = await _request(
+        "POST", "/api/virtuals",
+        json={"id": virtual_id, "config": config},
+        label=f"virtual_config:{virtual_id}",
+    )
+    if resp is not None:
         logger.debug("LedFX virtual config patched on '%s': %s", virtual_id, config)
         return True
-    except Exception as exc:
-        logger.error("Failed to patch LedFX virtual '%s' config: %r", virtual_id, exc)
-        return False
+    return False
 
 
 def get_virtual_cache(virtual_id: str) -> dict:

@@ -141,6 +141,18 @@
       </div>
     </div>
 
+    <!-- ── LedFX load governor ──────────────────────────────────────────────── -->
+    <div class="dbg-section">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        LedFX load
+        <span id="dbg-ledfx-badge" style="font-size:10px;font-weight:600;padding:1px 8px;border-radius:10px;background:#1b3a1b;color:#00ff88;">OK</span>
+      </h3>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
+        <span id="dbg-ledfx-counters">held 0 · shed 0 · trips 0</span>
+      </div>
+      <div id="dbg-ledfx-events" class="dbg-mono" style="max-height:160px;overflow-y:auto;">no load-shed events</div>
+    </div>
+
     <!-- ── Last fire ────────────────────────────────────────────────────────── -->
     <div class="dbg-section">
       <h3>Last trigger</h3>
@@ -417,6 +429,56 @@ onMessage('state', (msg) => {
 setInterval(() => {
   document.getElementById('dbg-poll-age').textContent = Date.now() - _lastPollTime;
 }, 250);
+
+// ── LedFX load governor ──────────────────────────────────────────────────────
+// Polls the server-side ring buffer so the panel shows the last several
+// load-shed events even if the page wasn't open when they happened. Relative
+// times are computed against the server's `now` to avoid client clock skew.
+const _LEDFX_EVENT_STYLE = {
+  held:         { label: 'HELD',     color: '#ffb300' },
+  shed:         { label: 'SHED',     color: '#ff5252' },
+  breaker_open: { label: 'BREAKER',  color: '#ff5252' },
+  recovered:    { label: 'RECOVERED', color: '#00ff88' },
+};
+function _agoStr(deltaSec) {
+  const d = Math.max(0, Math.floor(deltaSec));
+  if (d < 60)   return `${d}s ago`;
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  return `${Math.floor(d / 3600)}h ago`;
+}
+async function _pollLedfxHealth() {
+  let h;
+  try { h = await GET('/debug/ledfx-health'); } catch (e) { return; }
+  if (!h) return;
+  const badge = document.getElementById('dbg-ledfx-badge');
+  if (h.breaker_open) {
+    badge.textContent = 'CIRCUIT OPEN';
+    badge.style.background = '#3a1b1b'; badge.style.color = '#ff5252';
+  } else if (h.consecutive_failures > 0) {
+    badge.textContent = `${h.consecutive_failures} fail`;
+    badge.style.background = '#3a331b'; badge.style.color = '#ffb300';
+  } else {
+    badge.textContent = 'OK';
+    badge.style.background = '#1b3a1b'; badge.style.color = '#00ff88';
+  }
+  const c = h.counters || {};
+  document.getElementById('dbg-ledfx-counters').textContent =
+    `held ${c.held || 0} · shed ${c.shed || 0} · trips ${c.breaker_open || 0} · recovered ${c.recovered || 0}`;
+  const el = document.getElementById('dbg-ledfx-events');
+  const events = h.events || [];
+  if (!events.length) { el.textContent = 'no load-shed events'; return; }
+  el.innerHTML = events.map(ev => {
+    const st = _LEDFX_EVENT_STYLE[ev.kind] || { label: ev.kind.toUpperCase(), color: '#aaa' };
+    const ago = _agoStr((h.now || 0) - ev.ts);
+    const count = ev.count > 1 ? ` ×${ev.count}` : '';
+    const held = ev.max_held_ms != null ? ` (${Math.round(ev.max_held_ms)}ms wait)` : '';
+    const detail = ev.detail ? ` ${ev.detail}` : '';
+    return `<div><span style="color:${st.color};font-weight:600;">${st.label}${count}</span>` +
+           `<span style="opacity:0.55;">${held}${detail} · ${ago}</span></div>`;
+  }).join('');
+}
+_pollLedfxHealth();
+setInterval(_pollLedfxHealth, 2000);
 
 // ── xcorr_window / shape_match_updated ──────────────────────────────────────
 const _xcorrLines = [];

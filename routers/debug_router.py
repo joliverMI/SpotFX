@@ -7,9 +7,19 @@ in non-advanced installs) is a one-import change in main.py.
 """
 from fastapi import APIRouter, Query
 
+from api import ledfx_client
 from services.auto_offset_service import auto_offset_service
 
 router = APIRouter(prefix="/api/debug", tags=["debug"])
+
+
+@router.get("/ledfx-health")
+async def ledfx_health():
+    """LedFX load-governor state: circuit-breaker status, counters, and the
+    recent load-shed event ring buffer (frames held by the semaphore, breaker
+    trips, recoveries). The buffer lives server-side so the Debug page shows
+    the last several events even if it wasn't open when they happened."""
+    return ledfx_client.get_health()
 
 
 @router.get("/xcorr-frames")
