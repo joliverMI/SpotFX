@@ -142,6 +142,39 @@ async def drain_bus() -> None:
         pass
 
 
+# ── Server-side param-tween capability ───────────────────────────────────────
+# Does the connected LedFX interpolate config params for us (the `transition_ms`
+# field on PUT /api/virtuals/{id}/effects)? None = not yet probed. Populated by
+# refresh_capabilities() at startup. We must NOT send transition_ms to a LedFX
+# that lacks the feature: it would silently ignore it and apply an instant jump
+# (worse than the client-side ramp), so the legacy loops stay the fallback.
+_server_tween_supported: Optional[bool] = None
+
+
+async def refresh_capabilities() -> None:
+    """Probe GET /api/info once and cache whether LedFX supports server-side
+    param tweening. Safe to call repeatedly (e.g. after reconnect)."""
+    global _server_tween_supported
+    resp = await _request("GET", "/api/info", label="info")
+    if resp is None:
+        return
+    try:
+        feats = (resp.json() or {}).get("features", {}) or {}
+        _server_tween_supported = bool(feats.get("param_transition", False))
+    except Exception:
+        _server_tween_supported = False
+    logger.info(
+        "LedFX server-side param tween: %s",
+        "supported" if _server_tween_supported else "not supported",
+    )
+
+
+def server_tween_enabled() -> bool:
+    """True only when the user setting AND the live LedFX capability both allow
+    server-side tweening."""
+    return bool(settings.server_side_tween) and _server_tween_supported is True
+
+
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
@@ -391,6 +424,50 @@ async def _set_config_direct(patch: dict) -> bool:
         return True   # capture-in-progress mute
     resp = await _request("PUT", "/api/config", json=patch, label="config")
     return resp is not None
+
+
+async def _set_virtual_effect_tween_direct(
+    virtual_id: str, effect_type: str, config: dict, transition_ms: int, easing: str
+) -> bool:
+    """Single PUT asking LedFX to interpolate `config` params to target over
+    transition_ms (server-side, per render frame). Same gating as
+    _set_virtual_effect_direct."""
+    if virtual_id in _ambient_excluded:
+        return True
+    if _capture_in_progress():
+        return True
+    resp = await _request(
+        "PUT", f"/api/virtuals/{virtual_id}/effects",
+        json={
+            "type": effect_type,
+            "config": config,
+            "transition_ms": int(transition_ms),
+            "easing": easing,
+        },
+        label=f"tween:{virtual_id}",
+    )
+    return resp is not None
+
+
+async def set_virtual_effect_tween(
+    virtual_id: str, effect_type: str, config: dict,
+    transition_ms: int, easing: str = "linear",
+) -> None:
+    """Ask LedFX to smoothly interpolate `config` params to their targets over
+    transition_ms, advanced server-side per render frame — one PUT instead of a
+    ~40fps client loop. Drains the coalesce bus first so this lands after any
+    queued instant writes, and commits the target into the local cache (the
+    target is committed to LedFX now, so subsequent compiles should see it)."""
+    await drain_bus()
+    await _set_virtual_effect_tween_direct(
+        virtual_id, effect_type, dict(config), transition_ms, easing
+    )
+    effect_cfg = (
+        state.ledfx_virtual_cache.get(virtual_id, {})
+        .get("effect", {})
+        .get("config", {})
+    )
+    effect_cfg.update(config)
 
 
 # ── Bus flush ─────────────────────────────────────────────────────────────────
@@ -722,11 +799,24 @@ async def ramp_brightness(target: float, ramp_ms: int, step_ms: int = 25) -> Non
 async def ramp_effect_params(
     virtual_id: str, effect_type: str, patch: dict, ramp_ms: int, step_ms: int = 25
 ) -> None:
-    """Smoothly ramp one or more effect params from their cached values to targets over ramp_ms.
+    """Smoothly ramp one or more numeric effect params from their cached values
+    to targets over ramp_ms.
 
     patch: {param_name: target_value, ...}
-    Each step sends a single batched set_virtual_effect call with all interpolated values.
+
+    When the connected LedFX supports server-side tweening, this is ONE PUT with
+    transition_ms (LedFX interpolates per render frame — smooth, no network per
+    frame); the call then holds for ramp_ms so callers that await the ramp keep
+    their existing sequencing/choreography. Otherwise it falls back to the
+    legacy client-side loop (one batched PUT per ~25ms step).
     """
+    if ramp_ms > 0 and server_tween_enabled():
+        await set_virtual_effect_tween(virtual_id, effect_type, patch, ramp_ms)
+        # Preserve the wall-clock contract: awaited callers (await_ramps=True,
+        # sequences) expect this to span the ramp; background spawns just idle.
+        await asyncio.sleep(ramp_ms / 1000)
+        return
+
     starts = {p: (get_cached_param(virtual_id, p) or 0.0) for p in patch}
     steps = max(1, ramp_ms // step_ms)
     for i in range(1, steps + 1):
@@ -811,7 +901,12 @@ def _get_polled_virtuals() -> list[str]:
 
 async def poll_virtual_states() -> None:
     """Poll key LedFX virtuals every 5 s and cache results in state."""
+    # Probe server-side tween support once at startup (re-probes if LedFX was
+    # unreachable on the first pass, until a definite answer lands).
+    await refresh_capabilities()
     while True:
+        if _server_tween_supported is None:
+            await refresh_capabilities()
         for vid in _get_polled_virtuals():
             data = await get_virtual(vid)
             if data:

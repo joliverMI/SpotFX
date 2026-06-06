@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     pre_transition_lead_ms: int = 200
     # Global default ramp duration for brightness/effect param changes; 0 = instant
     smooth_ramp_ms: int = 500
+    # Prefer LedFX server-side param interpolation (one PUT + transition_ms) over
+    # the client-side 40fps PUT loop, when the connected LedFX advertises support
+    # (GET /api/info → features.param_transition). Kill-switch: set False to force
+    # the legacy client-side ramps. Effective only when LedFX actually supports it.
+    server_side_tween: bool = True
 
     # ── Polling intervals (ms) ─────────────────────────────────────────────────
     poll_interval_playing_ms: int = 5000
