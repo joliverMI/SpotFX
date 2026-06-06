@@ -1982,11 +1982,17 @@ class TriggerEngine:
 
             instant_str: dict = {}
             ramp_str: dict = {}
+            # Server-side tweens bypass LedFX's color-recreation path, so
+            # effect-resetting colour params (e.g. background_color) CAN be
+            # tweened smoothly there. On the legacy client loop they must stay
+            # instant — ramming them through 40 frames restarts the effect.
+            _allow_reset_ramp = ledfx_client.server_tween_enabled()
             for k, v in str_patch.items():
                 pmeta = get_param_meta(w.effect_type, k)
-                # Effect-resetting params (e.g. background_color) must be instant —
-                # ramming them through the frame ramp restarts the effect.
-                if pmeta and pmeta.get("smooth") and ramp_ms > 0 and not _param_resets_effect(w.effect_type, k):
+                if (
+                    pmeta and pmeta.get("smooth") and ramp_ms > 0
+                    and (_allow_reset_ramp or not _param_resets_effect(w.effect_type, k))
+                ):
                     ramp_str[k] = v
                 else:
                     instant_str[k] = v
@@ -2167,19 +2173,25 @@ class TriggerEngine:
                 def _place(param: str, value: str):
                     if _unchanged(param, value):
                         return
-                    # Effect-resetting params (e.g. background_color): with
-                    # preserve_effect (default) skip them entirely to keep the
-                    # running effect; otherwise apply them but always instantly
-                    # (never ramped, which would restart the effect).
-                    if _param_resets_effect(etype, param):
-                        if getattr(action, "preserve_effect", True):
-                            return
-                        instant[param] = value
-                        return
                     meta = get_param_meta(etype, param) or {}
                     # gradients/colors are smooth by default; only skip the ramp
                     # when explicitly marked non-smooth or no ramp requested.
-                    if meta.get("smooth", True) and ramp_ms > 0:
+                    smooth = meta.get("smooth", True) and ramp_ms > 0
+                    # Effect-resetting params (e.g. background_color): with
+                    # preserve_effect (default) skip them entirely to keep the
+                    # running effect. When the user wants them applied
+                    # (preserve_effect=False), a server-side tween can ramp them
+                    # smoothly (its PUT bypasses LedFX's effect-recreation); the
+                    # legacy path must be instant (ramping would restart it).
+                    if _param_resets_effect(etype, param):
+                        if getattr(action, "preserve_effect", True):
+                            return
+                        if smooth and ledfx_client.server_tween_enabled():
+                            ramp_str[param] = value
+                        else:
+                            instant[param] = value
+                        return
+                    if smooth:
                         ramp_str[param] = value
                     else:
                         instant[param] = value

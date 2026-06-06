@@ -833,11 +833,21 @@ async def ramp_effect_params(
 async def ramp_gradient_params(
     virtual_id: str, effect_type: str, patch: dict, ramp_ms: int, step_ms: int = 25
 ) -> None:
-    """Smoothly interpolate gradient/color string params from their cached values to targets.
+    """Smoothly interpolate gradient/color string params from their cached values
+    to targets over ramp_ms.
 
     patch: {param_name: target_css_string, ...}
-    Uses gradient_interpolation.interpolate_gradient() for each step.
+
+    When the connected LedFX supports server-side tweening it interpolates solid
+    colours (RGB lerp) and gradients (LUT lerp) for us — ONE PUT with
+    transition_ms, then hold for ramp_ms to keep caller sequencing. Otherwise
+    falls back to the legacy client-side loop using interpolate_gradient().
     """
+    if ramp_ms > 0 and server_tween_enabled():
+        await set_virtual_effect_tween(virtual_id, effect_type, patch, ramp_ms)
+        await asyncio.sleep(ramp_ms / 1000)
+        return
+
     from services.gradient_interpolation import interpolate_gradient
     cfg = state.ledfx_virtual_cache.get(virtual_id, {}).get("effect", {}).get("config", {})
     starts = {p: (cfg.get(p) or "") for p in patch}
