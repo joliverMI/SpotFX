@@ -60,8 +60,8 @@ def aspect_for_param(effect_type: str, param_name: str) -> str | None:
 def accent_param_for(effect_type: str) -> str | None:
     """Raw param name that holds the 'third / accent color' for an effect, or
     None if the effect doesn't have one (melt / radial). Used by the morph
-    compiler to auto-derive the accent from a morph step's bg_color on an
-    effect switch — see _patch_for_aspect / compile_target's switch branch."""
+    compiler to set the accent from the last Color Set's 3rd color (else black)
+    on an effect switch — see compile_target's switch branch."""
     params = _ep._CONFIG.get("effects", {}).get(effect_type, {}).get("params", {})
     for name, meta in params.items():
         if meta.get("accent"):

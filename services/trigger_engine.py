@@ -210,6 +210,13 @@ class TriggerEngine:
         # bounce traversal.
         self._color_cursor: dict[str, int] = {}
         self._color_cursor_dir: dict[str, int] = {}
+        # Last fired Color Set's 3rd (accent) color per virtual, recorded as a
+        # Color Set is applied. value may be None when that set's entry left the
+        # accent undefined. On an effect switch to an accent-capable effect
+        # (power/eq2d) the new effect's accent is sourced from here, else black.
+        # Persists across songs (intentionally NOT cleared on track change) —
+        # it tracks the most recent Color Set fired, not per-track selection.
+        self._last_accent_by_vid: dict[str, Optional[str]] = {}
         # Shape-nudge bounce direction per "{virtual_id}::{param}" (in-memory,
         # reset on track change). Used when a Shape sub-field nudge has wrap=True.
         self._nudge_dir: dict[str, int] = {}
@@ -1365,6 +1372,7 @@ class TriggerEngine:
             morph_actions,
             virtual_cache=working_cache,
             intensity_resolver=lambda src: self._beat_intensity_now(src),
+            accent_per_vid=self._last_accent_by_vid,
         )
         if not payload.get("touched_virtuals"):
             return None
@@ -1905,21 +1913,16 @@ class TriggerEngine:
             [vid for t in action.targets for vid in resolve_scope(t.scope)]
         )
 
-        # Pre-scan: collect the bg_color value implied for each virtual by
-        # other targets in this step. Effect-switch writes use this so the new
-        # effect's accent / third color tracks the morph's bg_color instead of
-        # stale per-effect defaults.
-        from services.morph_compiler import collect_bg_color_per_vid
-        bg_color_per_vid = collect_bg_color_per_vid(action)
-
         # ── Pass 1: effect-switch targets (no nudge — effect switches are absolute) ─
+        # Effect-switch writes source the new effect's accent / third color from
+        # the last fired Color Set's 3rd color per virtual (else black).
         switch_writes = []
         for target in action.targets:
             if target.aspect != "effect":
                 continue
             switch_writes.extend(
                 compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms,
-                               bg_color_per_vid=bg_color_per_vid)
+                               accent_per_vid=self._last_accent_by_vid)
             )
 
         switch_coros = []
@@ -2132,6 +2135,11 @@ class TriggerEngine:
         for entry in card.entries:
             ramp_ms = entry.ramp_ms if entry.ramp_ms is not None else default_ramp_ms
             for vid in resolve_scope(entry.scope):
+                # Remember this set's 3rd color for the vid so a later effect
+                # switch can source the new effect's accent from it (None →
+                # black). Recorded for every scoped vid even if its current
+                # effect has no accent slot to write right now.
+                self._last_accent_by_vid[vid] = entry.accent_color
                 eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
                 etype = eff.get("type")
                 if not etype:
@@ -2196,11 +2204,15 @@ class TriggerEngine:
                     pb = self._color_param_for(etype, "bg_color", "background_color", cfg)
                     if pb:
                         _place(pb, entry.bg_color)
-                if entry.accent_color:
-                    from services import morph_aspects
-                    ap = morph_aspects.accent_param_for(etype)
-                    if ap:
-                        _place(ap, entry.accent_color)
+                # 3rd / accent color (sparks_color on power, peak_color on
+                # eq2d): write the set's 3rd color, or black when the set
+                # leaves it undefined — so an accent-capable effect never keeps
+                # a stale accent from a prior set. Effects without an accent
+                # param (melt, radial) silently skip.
+                from services import morph_aspects
+                ap = morph_aspects.accent_param_for(etype)
+                if ap:
+                    _place(ap, entry.accent_color or "#000000")
                 if entry.brightness is not None and _has("brightness"):
                     _place_num("brightness", entry.brightness)
                 if entry.background_brightness is not None and _has("background_brightness"):
