@@ -206,6 +206,39 @@
       </div>
     </div>
 
+    <!-- ── Ambient Mode ───────────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-title">Ambient Mode</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+        When the front-page (or Home Assistant) "Ambient" toggle is on, the chosen
+        device category is held at this color at full brightness via the Hue REST
+        API and excluded from music triggers.
+      </div>
+      <div class="field">
+        <label>Target device category</label>
+        <select id="s-ambient-category"></select>
+      </div>
+      <div class="field">
+        <label>Color mode</label>
+        <select id="s-ambient-color-mode">
+          <option value="white">White temperature</option>
+          <option value="color">Color</option>
+        </select>
+      </div>
+      <div class="field" id="s-ambient-kelvin-field">
+        <label>White temperature (K): <span id="s-ambient-kelvin-val"></span></label>
+        <input type="range" id="s-ambient-kelvin" min="2000" max="6500" step="100">
+      </div>
+      <div class="field" id="s-ambient-color-field" style="display:none;">
+        <label>Color</label>
+        <input type="color" id="s-ambient-color" style="width:48px;height:30px;padding:1px;">
+      </div>
+      <div class="field">
+        <label>Brightness (%): <span id="s-ambient-brightness-val"></span></label>
+        <input type="range" id="s-ambient-brightness" min="1" max="100" step="1">
+      </div>
+    </div>
+
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn-accent" id="btn-save">Save Settings</button>
       <span id="save-msg" style="font-size:13px;color:var(--accent);display:none;">Saved!</span>
@@ -320,6 +353,31 @@ document.getElementById('s-auto-gen-mode').value  = settings.auto_generate_mode 
 document.getElementById('s-show-ai-triggers').checked = settings.show_ai_triggers ?? false;
 document.getElementById('s-show-advanced').checked = settings.show_advanced ?? false;
 
+// ── Ambient Mode ──────────────────────────────────────────────────────────────
+const _ambCats = await GET('/device-categories');
+const _ambCatSel = document.getElementById('s-ambient-category');
+_ambCatSel.innerHTML = '<option value="">— none —</option>' +
+  (_ambCats || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+// Stored value may be a category id or (legacy) name — match either.
+const _ambStored = settings.ambient_target_category ?? '';
+const _ambMatch = (_ambCats || []).find(c => c.id === _ambStored || c.name === _ambStored);
+_ambCatSel.value = _ambMatch ? _ambMatch.id : '';
+document.getElementById('s-ambient-color-mode').value  = settings.ambient_color_mode ?? 'white';
+document.getElementById('s-ambient-kelvin').value      = settings.ambient_kelvin ?? 2700;
+document.getElementById('s-ambient-color').value       = settings.ambient_color ?? '#ffffff';
+document.getElementById('s-ambient-brightness').value  = settings.ambient_brightness ?? 100;
+function _ambSync() {
+  const mode = document.getElementById('s-ambient-color-mode').value;
+  document.getElementById('s-ambient-kelvin-field').style.display = mode === 'white' ? '' : 'none';
+  document.getElementById('s-ambient-color-field').style.display  = mode === 'color' ? '' : 'none';
+  document.getElementById('s-ambient-kelvin-val').textContent     = document.getElementById('s-ambient-kelvin').value;
+  document.getElementById('s-ambient-brightness-val').textContent = document.getElementById('s-ambient-brightness').value;
+}
+document.getElementById('s-ambient-color-mode').addEventListener('change', _ambSync);
+document.getElementById('s-ambient-kelvin').addEventListener('input', _ambSync);
+document.getElementById('s-ambient-brightness').addEventListener('input', _ambSync);
+_ambSync();
+
 document.getElementById('btn-save').addEventListener('click', async () => {
   await PATCH('/settings', {
     audio_latency_ms:        parseInt(document.getElementById('s-audio-latency').value),
@@ -350,6 +408,11 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     auto_generate_mode:       document.getElementById('s-auto-gen-mode').value,
     show_ai_triggers:         document.getElementById('s-show-ai-triggers').checked,
     show_advanced:            document.getElementById('s-show-advanced').checked,
+    ambient_target_category:  document.getElementById('s-ambient-category').value,
+    ambient_color_mode:       document.getElementById('s-ambient-color-mode').value,
+    ambient_kelvin:           parseInt(document.getElementById('s-ambient-kelvin').value),
+    ambient_color:            document.getElementById('s-ambient-color').value,
+    ambient_brightness:       parseInt(document.getElementById('s-ambient-brightness').value),
   });
   const msg = document.getElementById('save-msg');
   msg.style.display = 'inline';

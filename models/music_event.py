@@ -291,10 +291,16 @@ class MorphLane(BaseModel):
     """One lane in a `morph_set` MusicEvent. Each lane is a pool of alternative
     Actions; at fire time the engine picks ONE per lane (weighted random, with
     label filtering) and fires all picks concurrently. Lane labels merge with
-    the trigger-level filter labels before selection."""
+    the trigger-level filter labels before selection.
+
+    `offset_ms` staggers this lane relative to the scheduled trigger point
+    (negative = earlier, positive = later). It compounds with the event-level
+    `MusicEvent.event_offset_ms`. Lanes sharing one offset still fire together;
+    differing offsets fall back to bus dispatch (see trigger_engine)."""
     name:         str = ""
     labels:       list[str] = Field(default_factory=list)
     alternatives: list[Action] = Field(default_factory=list)
+    offset_ms:    int = 0
 
 
 class SequenceStep(BaseModel):

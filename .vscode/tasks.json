@@ -226,9 +226,9 @@
     },
     {
       "label": "manual smoke test",
-      "detail": "Claude updates this task's command whenever it wants the user to run a test. Never creates a new task for tests — always overwrites this one. Currently: Phase 3 demo — switches radial-dummy melt→power and on the same step sets BG color, brightness, and reactivity. Pre-Phase-3 those last three would have silently dropped (melt doesn't expose them).",
+      "detail": "Claude updates this task's command whenever it wants the user to run a test. Never creates a new task for tests — always overwrites this one. Currently: Hue white-brightness — sets hue-lights to Single Color 'White temperature' 2700K at full brightness via the new effect schema, streamed in the Hue device's new xy+brightness mode. Watch the bulbs reach high warm-white ambient brightness (white LEDs engaged). To compare against the old dim path, set the hue-lights DEVICE config color_mode to 'rgb' and re-run.",
       "type": "shell",
-      "command": ".venv/bin/python scripts/smoke_morph_step.py examples/morph_phase3_switch_and_bg.json",
+      "command": "curl -s -X POST http://localhost:8888/api/virtuals/hue-lights/effects -H 'Content-Type: application/json' -d '{\"type\":\"singleColor\",\"config\":{\"color_mode\":\"White temperature\",\"kelvin\":2700,\"brightness\":1.0}}' | .venv/bin/python -m json.tool",
       "options": {
         "cwd": "${workspaceFolder}"
       },

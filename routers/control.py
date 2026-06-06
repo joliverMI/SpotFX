@@ -43,6 +43,7 @@ async def status():
         "paused": state.paused,
         "ledfx_rtt_ms": round(state.ledfx_rtt_ms, 1),
         "dinner_party_mode": state.dinner_party_mode,
+        "ambient_mode_enabled": state.ambient_mode_enabled,
     }
 
 
@@ -145,6 +146,30 @@ async def set_dinner_party(enabled: bool):
     engine.refresh_triggerless()
     await ws_manager.broadcast_state(state)
     return {"dinner_party_mode": enabled}
+
+
+@router.post("/ambient-mode")
+async def set_ambient_mode(enabled: bool):
+    """Enable/disable Ambient Mode: hold the configured device category at a
+    static full-brightness color (via Hue REST) and exclude it from triggers.
+    HA-callable, same shape as /dinner-party and /pause.
+
+    The actual Hue work (REST light writes, LedFX virtual park/reactivate) runs
+    in a BACKGROUND task: activating a Hue-spanning virtual triggers a slow
+    LedFX entertainment handshake, so awaiting it here would hang the toggle (and
+    pile up if toggled repeatedly). The task is serialized by a lock in
+    ambient_mode, so rapid toggles can't overlap. The endpoint returns
+    immediately; lights follow within a few seconds."""
+    import asyncio
+    state.ambient_mode_enabled = enabled
+    from routers.settings_router import _load_settings_file, _save_settings_file
+    saved = _load_settings_file()
+    saved["ambient_mode_enabled"] = enabled
+    _save_settings_file(saved)
+    from services import ambient_mode
+    asyncio.create_task(ambient_mode.enable() if enabled else ambient_mode.disable())
+    await ws_manager.broadcast_state(state)
+    return {"ambient_mode_enabled": enabled, "status": "applying"}
 
 
 @router.get("/active-triggers")

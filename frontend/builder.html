@@ -343,7 +343,7 @@ function updateVerifyBtn() {
 document.getElementById('btn-verify').addEventListener('click', async () => {
   if (!profile) return;
   profile.verified = !profile.verified;
-  await POST('/profiles', profile);
+  await _saveProfile();
   updateVerifyBtn();
 });
 
@@ -353,7 +353,7 @@ document.getElementById('btn-delete-all-triggers').addEventListener('click', asy
   if (!confirm(`Delete all ${profile.triggers?.length ?? 0} triggers for "${profile.title}"?`)) return;
   profile.triggers = [];
   profile.embedded_generated = false;
-  await POST('/profiles', profile);
+  await _saveProfile();
   renderTriggers();
   updateVerifyBtn();
 });
@@ -796,11 +796,19 @@ function fmtMsEdit(ms) {
   return `${m}:${String(s).padStart(2, '0')}.${t}`;
 }
 
+// Returns milliseconds, or null when the input can't be parsed. Callers must
+// treat null as "invalid — don't save" rather than silently falling back, so a
+// legitimate value of 0 (start of song) is distinguishable from a parse error.
 function parseMsEdit(str) {
-  const match = str.trim().match(/^(\d+):(\d{1,2})(?:\.(\d+))?$/);
-  if (!match) return parseInt(str) || 0;
-  const frac = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3)) : 0;
-  return parseInt(match[1]) * 60000 + parseInt(match[2]) * 1000 + frac;
+  const s = str.trim();
+  const match = s.match(/^(\d+):(\d{1,2})(?:\.(\d+))?$/);
+  if (match) {
+    const frac = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3)) : 0;
+    return parseInt(match[1]) * 60000 + parseInt(match[2]) * 1000 + frac;
+  }
+  // Bare integer milliseconds (e.g. "12345"); reject anything else.
+  if (/^\d+$/.test(s)) return parseInt(s);
+  return null;
 }
 
 // ── Searchable select helpers ───────────────────────────────────────────────
@@ -851,10 +859,15 @@ function openEdit(triggerId) {
 document.getElementById('popup-save').addEventListener('click', async () => {
   const t = profile.triggers.find(t => t.id === editingTriggerId);
   if (!t) return;
-  t.timestamp_ms = parseMsEdit(document.getElementById('edit-ts').value) || t.timestamp_ms;
+  const parsedTs = parseMsEdit(document.getElementById('edit-ts').value);
+  if (parsedTs === null) {
+    showToast('Invalid timestamp — use M:SS.mmm or milliseconds', 'error');
+    return;  // abort: don't silently keep the old value
+  }
+  t.timestamp_ms = parsedTs;
   t.event_id = document.querySelector('#edit-event-container .edit-event')?.value || t.event_id;
   t.labels = document.getElementById('edit-labels').value.split(',').map(s => s.trim()).filter(Boolean);
-  await POST('/profiles', profile);
+  await _saveProfile();
   _recentEventIds = [t.event_id, ..._recentEventIds.filter(id => id !== t.event_id)];
   closePopup();
   renderTriggers();
@@ -862,7 +875,7 @@ document.getElementById('popup-save').addEventListener('click', async () => {
 
 document.getElementById('popup-delete').addEventListener('click', async () => {
   profile.triggers = profile.triggers.filter(t => t.id !== editingTriggerId);
-  await POST('/profiles', profile);
+  await _saveProfile();
   closePopup();
   renderTriggers();
 });
@@ -1075,7 +1088,7 @@ document.getElementById('btn-pal-delete').addEventListener('click', async () => 
 });
 
 // ── Palette keyboard listener ──────────────────────────────────────────────
-document.addEventListener('keydown', e => {
+document.addEventListener('keydown', async e => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   const key = e.key.toLowerCase();
@@ -1097,7 +1110,9 @@ document.addEventListener('keydown', e => {
     const t = profile.triggers.find(t => t.id === editingTriggerId);
     if (!t) return;
     t.event_id = eventId;
-    POST('/profiles', profile).then(() => { closePopup(); renderTriggers(); });
+    await _saveProfile();
+    closePopup();
+    renderTriggers();
     return;
   }
   // Otherwise set active key for next right-click
@@ -1112,7 +1127,7 @@ document.getElementById('btn-add-trigger').addEventListener('click', async () =>
   const newTrigger = { id: uuid(), timestamp_ms: Math.round(ts),
     event_id: events[0]?.id || '', labels: [], enabled: true };
   profile.triggers.push(newTrigger);
-  await POST('/profiles', profile);
+  await _saveProfile();
   renderTriggers();
   openEdit(newTrigger.id);
 });
@@ -1172,10 +1187,10 @@ window.addEventListener('mouseup', async e => {
     const outsideY = e.clientY < barRect.top - 20 || e.clientY > barRect.bottom + 20;
     if (outsideY && profile) {
       profile.triggers = profile.triggers.filter(t => t.id !== id);
-      await POST('/profiles', profile);
+      await _saveProfile();
       renderTriggers();
     } else if (profile) {
-      await POST('/profiles', profile);
+      await _saveProfile();
       renderTriggers();
     }
   } else {
@@ -1183,7 +1198,7 @@ window.addEventListener('mouseup', async e => {
   }
 });
 
-_bar.addEventListener('dblclick', e => {
+_bar.addEventListener('dblclick', async e => {
   if (!profile || e.target.closest('.trigger-marker') || e.target.closest('.zoom-handle')) return;
   const rect = _bar.getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -1191,10 +1206,11 @@ _bar.addEventListener('dblclick', e => {
   const newTrigger = { id: uuid(), timestamp_ms: ts,
     event_id: events[0]?.id || '', labels: [], enabled: true };
   profile.triggers.push(newTrigger);
-  POST('/profiles', profile).then(() => renderTriggers());
+  await _saveProfile();
+  renderTriggers();
 });
 
-_bar.addEventListener('contextmenu', e => {
+_bar.addEventListener('contextmenu', async e => {
   e.preventDefault();
   if (!profile || e.target.closest('.zoom-handle')) return;
   const eventId = getActiveEventId();
@@ -1205,7 +1221,8 @@ _bar.addEventListener('contextmenu', e => {
     const t = profile.triggers.find(t => t.id === marker.dataset.id);
     if (!t) return;
     t.event_id = eventId;
-    POST('/profiles', profile).then(() => renderTriggers());
+    await _saveProfile();
+    renderTriggers();
     return;
   }
   // Empty space → place new trigger
@@ -1215,7 +1232,8 @@ _bar.addEventListener('contextmenu', e => {
   const newTrigger = { id: uuid(), timestamp_ms: ts,
     event_id: eventId, labels: [], enabled: true };
   profile.triggers.push(newTrigger);
-  POST('/profiles', profile).then(() => renderTriggers());
+  await _saveProfile();
+  renderTriggers();
 });
 
 // ── Zoom follow toggle ──────────────────────────────────────────────────────
@@ -1584,12 +1602,12 @@ _canvas.addEventListener('dblclick', async e => {
   const newTrigger = { id: uuid(), timestamp_ms: ts,
     event_id: events[0]?.id || '', labels: [], enabled: true };
   profile.triggers.push(newTrigger);
-  await POST('/profiles', profile);
+  await _saveProfile();
   renderTriggers();
   openEdit(newTrigger.id);
 });
 
-_canvas.addEventListener('contextmenu', e => {
+_canvas.addEventListener('contextmenu', async e => {
   e.preventDefault();
   if (!profile || !shapeCanvas.hasData) return;
   const eventId = getActiveEventId();
@@ -1603,7 +1621,8 @@ _canvas.addEventListener('contextmenu', e => {
     const txCss = ((t.timestamp_ms - startMs) / (endMs - startMs)) * rect.width;
     if (Math.abs(mouseCssX - txCss) <= 10) {
       t.event_id = eventId;
-      POST('/profiles', profile).then(() => renderTriggers());
+      await _saveProfile();
+      renderTriggers();
       return;
     }
   }
@@ -1614,7 +1633,8 @@ _canvas.addEventListener('contextmenu', e => {
   const newTrigger = { id: uuid(), timestamp_ms: ts,
     event_id: eventId, labels: [], enabled: true };
   profile.triggers.push(newTrigger);
-  POST('/profiles', profile).then(() => renderTriggers());
+  await _saveProfile();
+  renderTriggers();
 });
 
 // ── Heatmap beat tooltip (click-only, dismiss on ~20px drift) ─────────────────
@@ -1696,7 +1716,7 @@ window.addEventListener('mouseup', async e => {
     if (outsideY) {
       profile.triggers = profile.triggers.filter(t => t.id !== triggerId);
     }
-    await POST('/profiles', profile);
+    await _saveProfile();
     renderTriggers();
   }
   // Click (no move) does nothing
@@ -1901,7 +1921,7 @@ function _applyTriggerShiftValue(ms) {
     const ms = parseInt(numInput.value, 10);
     if (!ms || !profile?.triggers?.length) return;
     profile.triggers.forEach(t => { t.timestamp_ms += ms; });
-    await POST('/profiles', profile);
+    await _saveProfile();
     _resetTriggerShift();
     renderTriggers();
   });
@@ -1928,7 +1948,7 @@ function _applyTriggerShiftValue(ms) {
       shifted += arr.length;
     }
     if (!shifted) return;
-    await POST('/profiles', profile);
+    await _saveProfile();
     _resetTriggerShift();
     renderTriggers();
     if (typeof showToast === 'function') {

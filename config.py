@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     home_assistant_host: str = "http://homeassistant.local"
     home_assistant_token: str = ""
 
+    # ── Ambient Mode ──────────────────────────────────────────────────────────
+    # Front-page / HA toggle: switch a device category to a static, full-brightness
+    # color (via Hue REST) and drop those devices from music triggers. The on/off
+    # flag itself lives on AppState (persisted like dinner_party_mode); these are
+    # the configurable target + color the toggle applies.
+    ambient_target_category: str = ""        # device-category id or name to switch
+    ambient_color_mode: str = "white"        # "white" (kelvin) | "color" (hex)
+    ambient_color: str = "#ffffff"           # hex, used when ambient_color_mode == "color"
+    ambient_kelvin: int = 2700               # used when ambient_color_mode == "white"
+    ambient_brightness: int = 100            # 1..100 percent
+
     # ── App ───────────────────────────────────────────────────────────────────
     app_host: str = "0.0.0.0"
     app_port: int = 8000

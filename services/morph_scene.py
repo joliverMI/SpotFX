@@ -178,14 +178,15 @@ def morph_actions_from_event(event, preselected_morph_picks=None) -> list[MorphS
     - single: event.actions (filter to MorphStepActions; the picker has already
               run, but for scene-override we accept all morph_step alternatives
               since the planner pre-pick is what really matters at fire time).
-    - morph_set: derived from `preselected_morph_picks` (list of (lane_name, Action))
-              if provided; otherwise empty (caller should pre-pick before building).
+    - morph_set: derived from `preselected_morph_picks` (list of MorphPick, i.e.
+              (lane_name, action, offset_ms)) if provided; otherwise empty
+              (caller should pre-pick before building).
     - sequence / beat_sequence: returns empty list — caller (planner) should
               detect this and warn that scene_override is currently unsupported
               for sequenced events.
     """
     if preselected_morph_picks:
-        return [a for _name, a in preselected_morph_picks if isinstance(a, MorphStepAction)]
+        return [p.action for p in preselected_morph_picks if isinstance(p.action, MorphStepAction)]
 
     if event.event_type == "single":
         return [a for a in (event.actions or []) if isinstance(a, MorphStepAction)]

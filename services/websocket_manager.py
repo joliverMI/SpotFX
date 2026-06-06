@@ -103,6 +103,7 @@ class WebSocketManager:
             "analyzed_trigger_override": state.analyzed_trigger_override,
             "auto_generate_enabled": state.auto_generate_enabled,
             "dinner_party_mode": state.dinner_party_mode,
+            "ambient_mode_enabled": state.ambient_mode_enabled,
             "genre_blending_enabled": _settings.genre_blending_enabled,
             "track": None,
         }

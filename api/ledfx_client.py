@@ -53,6 +53,26 @@ _bus_task: Optional[asyncio.Task] = None
 BUS_WINDOW_MS = 8  # coalesce window; must be << ramp step_ms (25 ms)
 
 
+# ── Ambient-mode trigger exclusion ──────────────────────────────────────────────
+# When SpotFX Ambient Mode is on, the targeted virtuals are driven to a static
+# full-brightness color via the Hue REST API (see services/ambient_mode.py) and
+# must be ignored by the trigger engine. Rather than filter at every action type,
+# we drop their writes at the single choke point all effect/config writes pass
+# through (_set_virtual_effect_direct + set_virtual_config). Updated on toggle.
+_ambient_excluded: set[str] = set()
+
+
+def set_ambient_excluded(virtual_ids) -> None:
+    """Replace the set of virtuals whose trigger-driven writes should be dropped."""
+    global _ambient_excluded
+    _ambient_excluded = set(virtual_ids or ())
+    logger.info("Ambient-mode excluded virtuals: %s", sorted(_ambient_excluded) or "(none)")
+
+
+def is_ambient_excluded(virtual_id: str) -> bool:
+    return virtual_id in _ambient_excluded
+
+
 _capture_gate_diag_logged = False
 # Counter-based "force allow" so callers can temporarily bypass the capture
 # gate. Used by manual fire paths (events.html → POST /events/{id}/fire) so
@@ -164,9 +184,22 @@ _HELD_THRESHOLD_MS = 30.0         # record a "held" event when a frame waits >th
 _BREAKER_FAIL_THRESHOLD = 5       # consecutive failures before the circuit opens
 _BREAKER_COOLDOWN_S = 2.0         # how long the circuit stays open before a half-open probe
 
+# Pool self-heal: the breaker handles a slow/dead LedFX, but it can't escape a
+# *wedged pool* — leaked CLOSE-WAIT sockets (e.g. seeded by a LedFX restart that
+# severs SpotFX's keepalive connections) squat on all 32 pool slots, so every
+# request — including the breaker's half-open probe — raises PoolTimeout forever.
+# When failures persist past this many seconds, recycle the httpx client: close
+# it and rebuild a fresh pool, dropping the dead sockets so the next probe can
+# actually connect. Duration-based (not a raw count) so it fires whether the
+# failures arrived in one burst or one-per-cooldown-probe.
+_RECYCLE_AFTER_FAIL_S = 5.0       # continuous-failure duration before recycling the client
+_RECYCLE_MIN_INTERVAL_S = 5.0     # don't recycle more than once per this window
+
 _inflight_sem: Optional[asyncio.Semaphore] = None
 _consecutive_failures = 0
 _breaker_open_until = 0.0         # time.monotonic() deadline; circuit open while now < this
+_first_failure_at = 0.0           # time.monotonic() of the first failure in the current streak (0 = none)
+_last_recycle = 0.0               # time.monotonic() of the last client recycle
 
 # Rate-limit the failure log so a stall produces one line/sec, not a storm.
 _last_fail_log = 0.0
@@ -179,7 +212,7 @@ _suppressed_fail_logs = 0
 # of the same kind within _EVENT_COALESCE_S collapse into one row with a count,
 # so a burst reads as "held ×312" rather than 312 rows.
 _events: deque = deque(maxlen=60)
-_event_counters: dict = {"held": 0, "shed": 0, "breaker_open": 0, "recovered": 0}
+_event_counters: dict = {"held": 0, "shed": 0, "breaker_open": 0, "recovered": 0, "recycled": 0}
 _EVENT_COALESCE_S = 2.0
 
 
@@ -214,18 +247,21 @@ def _breaker_is_open() -> bool:
 
 
 def _on_success() -> None:
-    global _consecutive_failures, _breaker_open_until
+    global _consecutive_failures, _breaker_open_until, _first_failure_at
     if _breaker_open_until:                 # was open or half-open → recovered
         _breaker_open_until = 0.0
         _record_event("recovered")
         logger.info("LedFX circuit recovered after %d consecutive failures", _consecutive_failures)
     _consecutive_failures = 0
+    _first_failure_at = 0.0
 
 
 def _on_failure(exc: Exception, label: str) -> None:
-    global _consecutive_failures, _breaker_open_until, _last_fail_log, _suppressed_fail_logs
+    global _consecutive_failures, _breaker_open_until, _last_fail_log, _suppressed_fail_logs, _first_failure_at
     _consecutive_failures += 1
     now = time.monotonic()
+    if _first_failure_at == 0.0:            # mark the start of this failure streak
+        _first_failure_at = now
     if now - _last_fail_log >= _FAIL_LOG_INTERVAL_S:
         extra = f" (+{_suppressed_fail_logs} suppressed)" if _suppressed_fail_logs else ""
         logger.error("LedFX request failed [%s]: %r%s", label, exc, extra)
@@ -242,6 +278,34 @@ def _on_failure(exc: Exception, label: str) -> None:
                 "LedFX circuit OPEN: %d consecutive failures, shedding for %.1fs",
                 _consecutive_failures, _BREAKER_COOLDOWN_S,
             )
+
+
+async def _maybe_recycle_client() -> None:
+    """Self-heal a wedged connection pool. When requests have been failing
+    continuously for longer than _RECYCLE_AFTER_FAIL_S — the signature of leaked
+    CLOSE-WAIT sockets the breaker's cooldown can't clear — close the httpx
+    client and drop the reference so the next _get_client() builds a fresh pool.
+    Rate-limited to once per _RECYCLE_MIN_INTERVAL_S. Called from the failure
+    path, so it runs on a half-open probe once the streak is old enough."""
+    global _client, _last_recycle
+    now = time.monotonic()
+    if _first_failure_at == 0.0 or (now - _first_failure_at) < _RECYCLE_AFTER_FAIL_S:
+        return
+    if (now - _last_recycle) < _RECYCLE_MIN_INTERVAL_S:
+        return
+    _last_recycle = now
+    old = _client
+    _client = None                          # next _get_client() rebuilds a clean pool
+    _record_event("recycled", f"{_consecutive_failures} fails over {now - _first_failure_at:.0f}s")
+    logger.warning(
+        "LedFX client recycled after %.0fs of failures (%d consecutive) — rebuilding connection pool",
+        now - _first_failure_at, _consecutive_failures,
+    )
+    if old is not None:
+        try:
+            await old.aclose()              # close leaked sockets; safe — breaker is open, ~no in-flight
+        except Exception:
+            pass
 
 
 async def _request(method: str, path: str, *, label: str, **kwargs):
@@ -269,6 +333,7 @@ async def _request(method: str, path: str, *, label: str, **kwargs):
         return resp
     except Exception as exc:
         _on_failure(exc, label)
+        await _maybe_recycle_client()
         return None
     finally:
         sem.release()
@@ -309,6 +374,8 @@ def _get_probe_client() -> httpx.AsyncClient:
 # ── Internal direct-fire helpers (bypass bus) ─────────────────────────────────
 
 async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: dict) -> bool:
+    if virtual_id in _ambient_excluded:
+        return True   # Ambient Mode owns this virtual via Hue REST; drop trigger writes
     if _capture_in_progress():
         return True   # capture-in-progress mute (acts like success so callers don't error)
     resp = await _request(
@@ -401,13 +468,50 @@ async def measure_latency() -> float:
         return 0.0
 
 
+async def _activate_scene_per_virtual(scene_id: str) -> bool:
+    """Apply a scene by writing each virtual's effect individually, so the
+    ambient-excluded virtuals are skipped (the per-virtual write guard drops
+    them). Used while Ambient Mode is on, because LedFX's native scene-activate
+    is atomic and would re-drive the Hue bulbs we're holding static.
+
+    Replicates the visible result of activate for the NON-ambient virtuals:
+    each scene entry carries its effect `type` + `config`."""
+    resp = await _request("GET", "/api/scenes", label=f"scene_fetch:{scene_id}")
+    if resp is None:
+        return False
+    scene = ((resp.json() or {}).get("scenes") or {}).get(scene_id)
+    if not scene:
+        logger.warning("trigger_scene: scene '%s' not found for per-virtual apply", scene_id)
+        return False
+    coros = []
+    for vid, entry in (scene.get("virtuals") or {}).items():
+        if vid in _ambient_excluded:
+            continue  # held static by Ambient Mode — never re-drive it
+        if not isinstance(entry, dict) or entry.get("action", "activate") != "activate":
+            continue
+        etype = entry.get("type")
+        if etype:
+            coros.append(_set_virtual_effect_direct(vid, etype, entry.get("config") or {}))
+    if coros:
+        await asyncio.gather(*coros)
+    return True
+
+
 async def trigger_scene(scene_id: str) -> bool:
     """
     Activate a LedFX scene by its scene_id.
     Returns True on success.
+
+    While Ambient Mode is on, apply the scene per-virtual (skipping the held Hue
+    virtuals) instead of the atomic activate that would override them.
     """
     if _capture_in_progress():
         return True   # capture-in-progress mute
+    if _ambient_excluded:
+        ok = await _activate_scene_per_virtual(scene_id)
+        if ok:
+            logger.info("LedFX scene applied per-virtual (ambient hold): %s", scene_id)
+        return ok
     resp = await _request(
         "PUT", "/api/scenes",
         json={"id": scene_id, "action": "activate"},
@@ -512,12 +616,61 @@ async def get_virtual(virtual_id: str) -> dict:
     return resp.json() if resp is not None else {}
 
 
-async def get_all_virtuals() -> dict:
-    """Fetch all LedFX virtuals. Returns {} on failure."""
-    if _capture_in_progress():
+async def get_all_virtuals(force: bool = False) -> dict:
+    """Fetch all LedFX virtuals. Returns {} on failure.
+
+    force=True bypasses the capture gate — used by deliberate user actions
+    (e.g. Ambient Mode discovery) that must read virtual topology even while an
+    audio capture is muting the per-frame trigger writes."""
+    if not force and _capture_in_progress():
         return {}
     resp = await _request("GET", "/api/virtuals", label="get_all_virtuals")
     return resp.json() if resp is not None else {}
+
+
+async def get_device(device_id: str) -> dict:
+    """Fetch a single LedFX device's record (incl. config). Returns {} on failure.
+    Used by Ambient Mode to read a Hue device's bridge ip/key/entertainment id."""
+    resp = await _request("GET", f"/api/devices/{device_id}", label=f"get_device:{device_id}")
+    return resp.json() if resp is not None else {}
+
+
+async def clear_virtual_effect(virtual_id: str) -> bool:
+    """Clear the active effect on a virtual (DELETE /api/virtuals/{id}/effects).
+    For Hue this stops the entertainment stream so REST state changes stick.
+    Bypasses the ambient-exclusion guard (this IS the ambient path)."""
+    resp = await _request(
+        "DELETE", f"/api/virtuals/{virtual_id}/effects",
+        label=f"clear_effect:{virtual_id}",
+    )
+    return resp is not None
+
+
+async def set_virtual_active(virtual_id: str, active: bool) -> bool:
+    """Activate/deactivate a virtual (PUT /api/virtuals/{id} {"active": bool}).
+
+    Deactivating stops the virtual streaming to its devices but PRESERVES its
+    effect; reactivating resumes that exact effect. Ambient Mode uses this to
+    park/un-park Hue-backed virtuals without losing what they were showing.
+
+    Single-shot, best-effort: activating a Hue-spanning virtual makes LedFX run
+    a blocking entertainment handshake (several seconds) that can exceed our HTTP
+    read timeout. We do NOT retry — retries pile up behind the still-processing
+    activation and wedge the client. LedFX completes the activation server-side
+    regardless of whether we read the response in time, so a timeout here is
+    harmless; the virtual still comes up a moment later. Returns True only on a
+    confirmed success body."""
+    resp = await _request(
+        "PUT", f"/api/virtuals/{virtual_id}",
+        json={"active": bool(active)},
+        label=f"active:{virtual_id}",
+    )
+    if resp is not None:
+        try:
+            return (resp.json() or {}).get("status") == "success"
+        except Exception:
+            pass
+    return False
 
 
 async def set_virtual_config(virtual_id: str, config: dict) -> bool:
@@ -526,6 +679,8 @@ async def set_virtual_config(virtual_id: str, config: dict) -> bool:
     POST /api/virtuals  body: {"id": virtual_id, "config": config}
     This merges with the existing virtual config — only specified fields are changed.
     """
+    if virtual_id in _ambient_excluded:
+        return True   # Ambient Mode owns this virtual via Hue REST; drop trigger writes
     if _capture_in_progress():
         return True   # capture-in-progress mute
     resp = await _request(

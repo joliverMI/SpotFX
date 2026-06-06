@@ -62,6 +62,7 @@
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <button id="pause-btn" class="toggle-btn" title="Activate / pause trigger firing">Activate</button>
         <button id="dinner-party-btn" class="toggle-btn" title="Ignore song triggers, use automatic ambient lighting">Dinner Party</button>
+        <button id="ambient-mode-btn" class="toggle-btn" title="Hold the configured devices at a static full-brightness color (Hue REST) and skip them in triggers">Ambient</button>
         <button id="analyzed-toggle-btn" class="toggle-btn" title="Use analyzed triggers for songs without user triggers">Analyzed</button>
         <span id="ai-indicator" style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;display:none;"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
@@ -235,6 +236,7 @@ let useAiTriggers = false;
 let useAnalyzedTriggerless = true;
 let analyzedTriggerOverride = false;
 let dinnerPartyMode = false;
+let ambientModeEnabled = false;
 let _timing = {};         // latest timing info from WS state
 let _perceptionTrimMs = 0;  // current per-(track, Set List) trim — refreshed on song change
 let _lastFireInfo = null; // { event_name, scheduled_ms, fired_at_ms, effective_offset_ms }
@@ -319,6 +321,9 @@ onMessage('state', msg => {
   const prevDp = dinnerPartyMode;
   dinnerPartyMode = msg.dinner_party_mode ?? false;
   updateDinnerPartyBtn();
+
+  ambientModeEnabled = msg.ambient_mode_enabled ?? false;
+  updateAmbientBtn();
 
   // Update track FIRST so badge and renderTrack use fresh data
   if (msg.track) {
@@ -675,6 +680,12 @@ function updateDinnerPartyBtn() {
   const btn = document.getElementById('dinner-party-btn');
   if (!btn) return;
   btn.classList.toggle('active', dinnerPartyMode);
+}
+
+function updateAmbientBtn() {
+  const btn = document.getElementById('ambient-mode-btn');
+  if (!btn) return;
+  btn.classList.toggle('active', ambientModeEnabled);
 }
 
 function updateAiIndicator() {
@@ -1293,6 +1304,11 @@ document.getElementById('pause-btn').addEventListener('click', async () => {
 // ── Dinner Party toggle ────────────────────────────────────────────────────
 document.getElementById('dinner-party-btn').addEventListener('click', async () => {
   await POST(`/control/dinner-party?enabled=${!dinnerPartyMode}`);
+});
+
+// ── Ambient Mode toggle ────────────────────────────────────────────────────
+document.getElementById('ambient-mode-btn').addEventListener('click', async () => {
+  await POST(`/control/ambient-mode?enabled=${!ambientModeEnabled}`);
 });
 
 // ── Analyzed Triggerless toggle ─────────────────────────────────────────────

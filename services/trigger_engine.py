@@ -21,7 +21,7 @@ import random
 import re
 import time
 from dataclasses import dataclass, field as dc_field
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from config import settings
 from models.state import state
@@ -72,6 +72,17 @@ _FLARE_LANES = {
 }
 
 
+class MorphPick(NamedTuple):
+    """One lane's resolved pick for a morph_set fire: the picked Action plus the
+    lane's timing offset (ms; negative = earlier, positive = later). Carrying
+    `offset_ms` per pick lets the dispatch stagger lanes relative to the trigger
+    point. `offset_ms` is a property of the LANE, not the picked alternative, so
+    it's stable across re-rolls of which alternative a lane chooses."""
+    lane_name: str
+    action: Action
+    offset_ms: int = 0
+
+
 @dataclass
 class _PlanEntry:
     """
@@ -94,7 +105,8 @@ class _PlanEntry:
     planned_descendant_ids: set[str] = dc_field(default_factory=set)
     preselected_action: Optional[Action] = None   # for "single" events — action chosen at plan time
     preselected_steps: Optional[list] = None      # for "sequence" events — per-step action pre-selection
-    preselected_morph_picks: Optional[list] = None  # for "morph_set" events — per-lane pre-picks
+    preselected_morph_picks: Optional[list] = None  # for "morph_set" events — per-lane pre-picks (list[MorphPick])
+    morph_anchor_offset_ms: int = 0               # earliest lane offset; fire_at_ms is start_at + this (lanes sleep offset - anchor)
     snapshot_task: Optional[asyncio.Task] = None  # pre-fire snapshot of the LedFX state this event will change
     # Scene-override lookahead: planner pre-stages the temp scene + transition_times
     # ahead of fire_at_ms; fire-time just activates the prepared scene.
@@ -1032,12 +1044,19 @@ class TriggerEngine:
                 # summary; the color-group cycle cursor still advances at fire
                 # time (inside _execute_morph_color), not here.
                 picks = self._pick_morph_lanes(event, lbls)
+                # Anchor the entry at the EARLIEST lane: fire_at = start_at +
+                # min(offset). Each lane then sleeps (offset - anchor) >= 0 at
+                # dispatch. All-equal offsets (incl. all-zero) → anchor == that
+                # value, no relative sleeps. Offsets live on the lane, so the
+                # anchor is stable across the fire-time re-roll of alternatives.
+                morph_anchor = min((p.offset_ms for p in picks), default=0)
                 entries.append(_PlanEntry(
-                    fire_at_ms=start_at, event=event, labels=list(lbls),
+                    fire_at_ms=start_at + morph_anchor, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
                     is_root=(event.id == root_event.id),
                     preselected_morph_picks=picks,
+                    morph_anchor_offset_ms=morph_anchor,
                 ))
                 return self._morph_picks_summary(picks) if picks else event.name
 
@@ -1265,13 +1284,34 @@ class TriggerEngine:
     # ── Scene-override helpers ──────────────────────────────────────────────
     SCENE_OVERRIDE_TEMP_ID = "spotfx-morph-temp"
 
-    def _event_eligible_for_scene_override(self, event) -> bool:
+    def _event_eligible_for_scene_override(self, event, picks=None) -> bool:
         """Phase 1 scope: honor scene_override only for `single` and `morph_set`.
         For sequence / beat_sequence the flag is parsed and saved but ignored
-        at fire time (per-step lookahead not implemented yet)."""
+        at fire time (per-step lookahead not implemented yet).
+
+        A morph_set with MIXED per-lane offsets is NOT eligible: a single atomic
+        scene activate fires all virtuals at once and can't stagger lanes in
+        time, so we fall back to bus dispatch (which honors each lane's offset).
+        Uniform offsets stay eligible — the whole activate just shifts, since
+        the entry's fire_at_ms was already moved by that shared offset. When
+        `picks` are known we check the picked lanes; otherwise we check the
+        lanes directly (a conservative superset — mixed lanes always fall back)."""
         if not getattr(event, "scene_override", False):
             return False
-        if event.event_type in ("single", "morph_set"):
+        if event.event_type == "single":
+            return True
+        if event.event_type == "morph_set":
+            if picks is not None:
+                offsets = {p.offset_ms for p in picks}
+            else:
+                offsets = {int(l.offset_ms or 0) for l in (event.morph_lanes or [])}
+            if len(offsets) > 1:
+                logger.info(
+                    "Event '%s' has mixed per-lane offsets %s — bus dispatch "
+                    "(scene-override can't stagger an atomic activate).",
+                    event.name, sorted(offsets),
+                )
+                return False
             return True
         logger.warning(
             "Event '%s' has scene_override=True but event_type=%s — not honored in Phase 1; "
@@ -1289,7 +1329,7 @@ class TriggerEngine:
             return [a for a in (event.actions or []) if isinstance(a, MorphStepAction)]
         if event.event_type == "morph_set":
             picks = self._pick_morph_lanes(event, labels or [])
-            return [a for _, a in picks if isinstance(a, MorphStepAction)]
+            return [p.action for p in picks if isinstance(p.action, MorphStepAction)]
         return []
 
     def _collect_device_settings_for_event(self, event, labels: list[str] | None = None,
@@ -1306,7 +1346,7 @@ class TriggerEngine:
         elif event.event_type == "morph_set":
             if picks is None:
                 picks = self._pick_morph_lanes(event, labels or [])
-            actions = [a for _, a in picks if isinstance(a, DeviceSettingsAction)]
+            actions = [p.action for p in picks if isinstance(p.action, DeviceSettingsAction)]
         out: list = []
         for a in actions:
             out.extend(a.targets or [])
@@ -1371,15 +1411,41 @@ class TriggerEngine:
         if updates:
             morph_effect_state.save_many(updates)
 
+    async def _fire_color_lanes_alongside(
+        self,
+        picks,
+        labels,
+        anchor_offset_ms: int = 0,
+        skip_event_ids: Optional[set] = None,
+    ) -> None:
+        """Fire only the `MorphColorAction` picks from a morph_set's lanes.
+
+        The scene-override payload is built from MorphStepActions only (see
+        `build_scene_state` / `_collect_morph_actions_for_event`), so a Color Set
+        lane would otherwise be silently dropped when the event uses
+        scene-override. We run those color lanes through the normal bus path
+        right alongside the atomic scene activate. The event is only on this
+        path when its lane offsets are uniform, so the color picks share the
+        same offset as the activate and fire with it (rel == 0)."""
+        if not picks:
+            return
+        from models.music_event import MorphColorAction
+        color_picks = [p for p in picks if isinstance(p.action, MorphColorAction)]
+        if color_picks:
+            await self._fire_morph_picks(
+                color_picks, labels or [], skip_event_ids=skip_event_ids,
+                anchor_offset_ms=anchor_offset_ms,
+            )
+
     async def _maybe_fire_scene_override(self, event, labels=None, picks=None) -> bool:
         """Combined prepare + fire for the manual / fallback path. Returns True
         iff scene-override was eligible AND actually completed (so the caller
         skips the regular dispatch). False if not eligible, no morph actions
         produced writes, or the LedFX prep call failed (caller falls back)."""
-        if not self._event_eligible_for_scene_override(event):
+        if not self._event_eligible_for_scene_override(event, picks=picks):
             return False
         if picks is not None:
-            morph_actions = [a for _, a in picks if a is not None]
+            morph_actions = [p.action for p in picks if p.action is not None]
         else:
             morph_actions = self._collect_morph_actions_for_event(event, labels)
         payload = self._build_scene_payload(morph_actions)
@@ -1393,6 +1459,9 @@ class TriggerEngine:
             )
             return False
         await self._fire_scene_override(payload, event)
+        # Color Set lanes aren't in the step-only scene payload — fire them too.
+        if picks is not None:
+            await self._fire_color_lanes_alongside(picks, labels)
         logger.info(
             "scene-override fired '%s' atomically (touched=%s)",
             event.name, payload["touched_virtuals"],
@@ -2198,12 +2267,12 @@ class TriggerEngine:
         self,
         event: MusicEvent,
         labels: list[str],
-    ) -> list[tuple[str, Action]]:
+    ) -> list[MorphPick]:
         """Synchronously pick one Action per lane (weighted random + label
-        filter). Returns [(lane_name, picked_action), ...]. Separated from
-        the fire step so callers can build a Now Playing summary string
-        without waiting on the actual LedFX writes."""
-        out: list[tuple[str, Action]] = []
+        filter). Returns [MorphPick(lane_name, action, offset_ms), ...].
+        Separated from the fire step so callers can build a Now Playing summary
+        string without waiting on the actual LedFX writes."""
+        out: list[MorphPick] = []
         for li, lane in enumerate(event.morph_lanes):
             merged_labels = list(labels or []) + list(lane.labels or [])
             dedupe_key = f"{event.id}:lane:{li}"
@@ -2212,32 +2281,49 @@ class TriggerEngine:
                 dedupe_key=dedupe_key, desc=f"lane '{lane.name or li}' of '{event.name}'",
             )
             if picked is not None:
-                out.append((lane.name or f"lane-{li}", picked))
+                out.append(MorphPick(lane.name or f"lane-{li}", picked, int(lane.offset_ms or 0)))
         return out
 
     async def _fire_morph_picks(
         self,
-        picks: list[tuple[str, Action]],
+        picks: list[MorphPick],
         labels: list[str],
         skip_event_ids: Optional[set] = None,
+        anchor_offset_ms: Optional[int] = None,
     ) -> None:
-        """Fire the picks from `_pick_morph_lanes` concurrently."""
+        """Fire the picks from `_pick_morph_lanes`, staggering each lane by its
+        per-lane offset. Every lane sleeps `offset_ms - anchor` (always >= 0)
+        before its dispatch; `anchor` is the earliest lane offset. When the
+        planner shifted the entry's fire_at_ms by the same anchor, the earliest
+        lane fires on time and the rest sleep forward. All-equal offsets (the
+        common all-zero case) yield zero sleeps — identical to firing them
+        concurrently. The planner passes its stored anchor so plan-time and
+        fire-time agree; ad-hoc callers let it default to the picks' minimum."""
         if not picks:
             return
-        await asyncio.gather(
-            *(self._execute_action(a, labels or [], skip_event_ids=skip_event_ids)
-              for _, a in picks),
-            return_exceptions=True,
-        )
+        anchor = anchor_offset_ms if anchor_offset_ms is not None else min(p.offset_ms for p in picks)
+
+        async def _one(p: MorphPick) -> None:
+            rel = p.offset_ms - anchor  # >= 0
+            if rel > 0:
+                await asyncio.sleep(rel / 1000)
+                # A long stagger can outlast a pause/seek — don't fire into stale state.
+                if state.paused:
+                    return
+            await self._execute_action(p.action, labels or [], skip_event_ids=skip_event_ids)
+
+        await asyncio.gather(*(_one(p) for p in picks), return_exceptions=True)
 
     def _morph_picks_summary(self, picks: list[tuple[str, Action]]) -> str:
         """Build the short Now Playing string for a morph_set fire, e.g.
         'Strips: Morph 1× (brightness) · Matrix: Color: hot'.
         Reuses _describe_action so the format matches the rest of the UI."""
         parts: list[str] = []
-        for lane_name, action in picks:
-            desc = self._describe_action(action)
-            parts.append(f"{lane_name}: {desc}" if lane_name else desc)
+        for pick in picks:
+            desc = self._describe_action(pick.action)
+            if pick.offset_ms:
+                desc = f"{desc} ({pick.offset_ms:+d}ms)"
+            parts.append(f"{pick.lane_name}: {desc}" if pick.lane_name else desc)
         return " · ".join(parts)
 
     async def _execute_morph_set(
@@ -2811,18 +2897,23 @@ class TriggerEngine:
         skip_ids = entry.planned_descendant_ids or None
 
         # Scene-override fast path: planner pre-staged the temp scene + per-virtual
-        # transition_time. Just activate it.
+        # transition_time. Just activate it — then fire any Color Set lanes, which
+        # the step-only scene payload doesn't carry.
         if entry.scene_override_prepared and entry.scene_override_payload:
             await self._fire_scene_override(entry.scene_override_payload, evt)
             entry.scene_override_prepared = False  # consumed
+            await self._fire_color_lanes_alongside(
+                entry.preselected_morph_picks, entry.labels,
+                anchor_offset_ms=entry.morph_anchor_offset_ms, skip_event_ids=skip_ids,
+            )
             return
 
         # Eligible but planner missed the lookahead window — prepare inline
         # (best effort) and fire. Logs a warning.
-        if self._event_eligible_for_scene_override(evt):
-            picks = entry.preselected_morph_picks if evt.event_type == "morph_set" else None
+        _so_picks = entry.preselected_morph_picks if evt.event_type == "morph_set" else None
+        if self._event_eligible_for_scene_override(evt, picks=_so_picks):
             with ledfx_client.force_allow():
-                fired = await self._maybe_fire_scene_override(evt, labels=entry.labels, picks=picks)
+                fired = await self._maybe_fire_scene_override(evt, labels=entry.labels, picks=_so_picks)
             if fired:
                 logger.warning(
                     "scene-override fell back to inline prep at fire time for '%s' (lookahead missed)",
@@ -2877,7 +2968,12 @@ class TriggerEngine:
             picks = entry.preselected_morph_picks
             if picks is None:
                 picks = self._pick_morph_lanes(evt, entry.labels)
-            await self._fire_morph_picks(picks, entry.labels, skip_event_ids=skip_ids)
+            # Pass the planner's anchor so fire-time sleeps line up with the
+            # fire_at_ms shift (the earliest lane fires now, others sleep forward).
+            await self._fire_morph_picks(
+                picks, entry.labels, skip_event_ids=skip_ids,
+                anchor_offset_ms=entry.morph_anchor_offset_ms,
+            )
         elif evt.event_type == "device_settings":
             await self._apply_device_targets(evt.device_targets)
         elif evt.event_type in SCENE_EVENT_TYPES:
@@ -3305,7 +3401,7 @@ class TriggerEngine:
                                 picks = self._pick_morph_lanes(_entry.event, _entry.labels)
                                 _entry.preselected_morph_picks = picks
                             morph_actions = (
-                                [a for _, a in (picks or []) if a is not None]
+                                [p.action for p in (picks or []) if p.action is not None]
                                 if _entry.event.event_type == "morph_set"
                                 else self._collect_morph_actions_for_event(_entry.event, _entry.labels)
                             )
@@ -3363,12 +3459,15 @@ class TriggerEngine:
                                 "root" if _is_root else "child",
                                 _entry.fire_at_ms - _trigger.timestamp_ms,
                             )
-                            # For morph_set: pick lanes synchronously so the broadcast
-                            # carries the per-lane outcome summary. _execute_plan_entry
-                            # honors the preselected picks instead of re-rolling.
+                            # For morph_set: ensure lanes are picked so the broadcast
+                            # carries the per-lane outcome summary. Reuse the planner's
+                            # pre-picks when present — re-rolling here would diverge from
+                            # the summary already shown in preview and waste a roll (the
+                            # anchor offset is the same either way since it's per-lane).
                             _morph_summary = ""
                             if _entry.event.event_type == "morph_set":
-                                _entry.preselected_morph_picks = self._pick_morph_lanes(_entry.event, _entry.labels)
+                                if _entry.preselected_morph_picks is None:
+                                    _entry.preselected_morph_picks = self._pick_morph_lanes(_entry.event, _entry.labels)
                                 _morph_summary = self._morph_picks_summary(_entry.preselected_morph_picks)
                             asyncio.create_task(self._execute_plan_entry(_entry))
                             if _is_root:

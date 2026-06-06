@@ -1684,6 +1684,8 @@ function renderLanes(e) {
         <span style="font-size:11px;color:var(--text-muted);">${isScene ? (li === 0 ? 'Lane' : 'Lane') : 'Lane ' + (li + 1)}</span>
         ${nameCell(lane, li)}
         <input type="text" class="lane-labels" value="${(lane.labels || []).join(', ')}" placeholder="lane filter labels" style="width:140px;">
+        ${isScene ? '' : `<span style="font-size:11px;color:var(--text-muted);" title="Stagger this lane relative to the trigger point. Negative = earlier, positive = later. Compounds with the event offset.">offset</span>
+        <input type="number" class="lane-offset" value="${lane.offset_ms || 0}" step="50" title="Lane offset (ms). Negative = fire earlier, positive = later." style="width:72px;">`}
         <button class="btn-sm lane-add-alt" title="Add alternative">+ Alt</button>
         ${isScene ? '' : '<button class="btn-sm btn-danger lane-del" title="Remove lane">✕</button>'}
       </div>
@@ -1714,7 +1716,8 @@ function syncLanesFromDOM(e) {
       .split(',').map(s => s.trim()).filter(Boolean);
     const alts = [...root.querySelectorAll('.lane-alternatives .action-row')]
       .map(syncActionFromRow);
-    return { name, labels, alternatives: alts };
+    const offset_ms = parseInt(root.querySelector('.lane-offset')?.value) || 0;
+    return { name, labels, alternatives: alts, offset_ms };
   });
 }
 
@@ -2349,7 +2352,7 @@ document.getElementById('btn-add-lane').addEventListener('click', () => {
   if (!e) return;
   syncLanesFromDOM(e);
   e.morph_lanes = e.morph_lanes || [];
-  e.morph_lanes.push({ name: '', labels: [], alternatives: [defaultLaneAlternative()] });
+  e.morph_lanes.push({ name: '', labels: [], alternatives: [defaultLaneAlternative()], offset_ms: 0 });
   renderLanes(e);
 });
 
