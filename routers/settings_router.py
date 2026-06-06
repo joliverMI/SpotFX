@@ -73,6 +73,11 @@ class SettingsPatch(BaseModel):
     spotipy_client_id: Optional[str] = None
     spotipy_client_secret: Optional[str] = None
     spotipy_redirect_uri: Optional[str] = None
+    ambient_target_category: Optional[str] = None
+    ambient_color_mode: Optional[str] = None
+    ambient_color: Optional[str] = None
+    ambient_kelvin: Optional[int] = None
+    ambient_brightness: Optional[int] = None
 
 
 @router.get("")
@@ -113,15 +118,33 @@ async def get_settings():
         "spotipy_client_id": settings.spotipy_client_id,
         "spotipy_client_secret": settings.spotipy_client_secret,
         "spotipy_redirect_uri": settings.spotipy_redirect_uri,
+        "ambient_target_category": settings.ambient_target_category,
+        "ambient_color_mode": settings.ambient_color_mode,
+        "ambient_color": settings.ambient_color,
+        "ambient_kelvin": settings.ambient_kelvin,
+        "ambient_brightness": settings.ambient_brightness,
     }
 
 
 @router.post("/restart")
 async def restart_server():
-    """Kill the whole process group so systemd restarts SpotFX cleanly."""
+    """Signal the process group so systemd (Restart=always) brings SpotFX back.
+
+    SIGTERM first for a clean shutdown — uvicorn's timeout_graceful_shutdown=3
+    guarantees it can't hang on open WebSockets the way it used to. A SIGKILL
+    fallback 5s later is a hard backstop in case graceful shutdown is wedged for
+    any other reason, so the restart button can never leave the server in the
+    half-down limbo we hit before."""
     async def _kill():
+        pgid = os.getpgid(os.getpid())
         await asyncio.sleep(0.15)  # let the response flush first
-        os.killpg(os.getpgid(os.getpid()), signal.SIGTERM)
+        os.killpg(pgid, signal.SIGTERM)
+        await asyncio.sleep(5.0)
+        # Still alive? force it. (Unreached if SIGTERM already exited the process.)
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     asyncio.create_task(_kill())
     return {"status": "restarting"}
 
@@ -136,4 +159,12 @@ async def patch_settings(patch: SettingsPatch):
     saved = _load_settings_file()
     saved.update(data)
     _save_settings_file(saved)
+    # If Ambient Mode is live and its target/color changed, re-apply in the
+    # background (the Hue work can take several seconds — don't hang the save).
+    if any(k.startswith("ambient_") for k in data):
+        from models.state import state
+        if state.ambient_mode_enabled:
+            import asyncio
+            from services import ambient_mode
+            asyncio.create_task(ambient_mode.reapply())
     return {"status": "updated"}

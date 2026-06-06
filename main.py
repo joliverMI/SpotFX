@@ -12,6 +12,7 @@ Startup sequence:
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -113,6 +114,10 @@ async def lifespan(app: FastAPI):
         state.dinner_party_mode = bool(_saved["dinner_party_mode"])
     if "use_analyzed_triggerless" in _saved:
         state.use_analyzed_triggerless = bool(_saved["use_analyzed_triggerless"])
+    if "ambient_mode_enabled" in _saved:
+        state.ambient_mode_enabled = bool(_saved["ambient_mode_enabled"])
+    if "ambient_deactivated" in _saved:
+        state.ambient_deactivated = _saved["ambient_deactivated"] or []
 
     # Select song source based on settings
     if settings.song_source == "ledfx":
@@ -136,6 +141,17 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
         asyncio.create_task(engine.run(), name="trigger-engine"),
     ]
+    # Re-assert Ambient Mode if it was left on across restarts (exclude targets
+    # from triggers + hold them at the static color). Deferred as a task so a
+    # slow Hue bridge can't stall startup. If ambient is OFF but a stale parked
+    # list survived an unclean shutdown, self-heal by reactivating those virtuals.
+    if state.ambient_mode_enabled:
+        from services import ambient_mode
+        tasks.append(asyncio.create_task(ambient_mode.enable(), name="ambient-restore"))
+    elif state.ambient_deactivated:
+        from services import ambient_mode
+        tasks.append(asyncio.create_task(ambient_mode.selfheal(), name="ambient-selfheal"))
+
     logger.info("SpotFX started — http://%s:%d", settings.app_host, settings.app_port)
     yield
     # Shutdown
@@ -244,11 +260,21 @@ async def serve_page(page: str):
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
-# ── Dev runner ────────────────────────────────────────────────────────────────
+# ── Runner ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # reload defaults OFF. The watchfiles reloader must not run under the systemd
+    # service: every save in the source tree triggered a worker restart, and that
+    # restart hung on persistent /ws WebSocket connections ("Waiting for
+    # connections to close"), leaving the HTTP server dead while the event loop
+    # kept ticking. Opt in for local dev with SPOTFX_DEV_RELOAD=1.
+    reload = os.getenv("SPOTFX_DEV_RELOAD") == "1"
     uvicorn.run(
         "main:app",
         host=settings.app_host,
         port=settings.app_port,
-        reload=True,
+        reload=reload,
+        # Bound graceful shutdown so SIGTERM (systemd stop, the /settings/restart
+        # button, or a dev reload) force-closes lingering WebSockets after 3s
+        # instead of waiting forever for browser tabs to disconnect.
+        timeout_graceful_shutdown=3,
     )
