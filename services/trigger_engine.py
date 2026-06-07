@@ -1915,15 +1915,18 @@ class TriggerEngine:
 
         # ── Pass 1: effect-switch targets (no nudge — effect switches are absolute) ─
         # Effect-switch writes source the new effect's accent / third color from
-        # the last fired Color Set's 3rd color per virtual (else black).
+        # the last fired Color Set's 3rd color per virtual (else black). An
+        # effect target on a device ALREADY running that effect emits a patch
+        # (kind="patch") that re-asserts the accent — keeps it in sync with a
+        # sibling that switched — rather than a switch; route those to Pass 2.
         switch_writes = []
+        accent_sync_writes = []
         for target in action.targets:
             if target.aspect != "effect":
                 continue
-            switch_writes.extend(
-                compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms,
-                               accent_per_vid=self._last_accent_by_vid)
-            )
+            for w in compile_target(target, state.ledfx_virtual_cache, default_ramp_ms=action.ramp_ms,
+                                    accent_per_vid=self._last_accent_by_vid):
+                (switch_writes if w.kind == "switch" else accent_sync_writes).append(w)
 
         switch_coros = []
         for w in switch_writes:
@@ -1949,7 +1952,7 @@ class TriggerEngine:
         # Resolve beat intensity once per step (action.intensity_source). Every
         # nudge target — and every per-Shape-sub-field nudge spec — reads the
         # same value, keeping the step's audio response coherent.
-        patch_writes = []
+        patch_writes = list(accent_sync_writes)
         step_source = getattr(action, "intensity_source", None) or "rms_total"
         any_nudge = any(t.mode == "nudge" and t.aspect != "effect" for t in action.targets)
         intensity = self._beat_intensity_now(step_source) if any_nudge else None

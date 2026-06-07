@@ -31,7 +31,7 @@ def _final_state_for_virtual(vid: str, switches: list, patches: list, virtual_ca
     with no meaningful state (e.g. no switch + no patches + nothing cached)."""
     # Find the switch for this vid (compile_target emits at most one per target,
     # and the executor's two-pass guarantees the switch lands BEFORE any patch).
-    switch = next((w for w in switches if w.virtual_id == vid), None)
+    switch = next((w for w in switches if w.virtual_id == vid and w.kind == "switch"), None)
     my_patches = [w for w in patches if w.virtual_id == vid]
 
     cached_eff = (virtual_cache.get(vid) or {}).get("effect") or {}
@@ -79,12 +79,15 @@ def _collect_writes(actions: list[MorphStepAction], virtual_cache: dict, intensi
 
         # Pass 1: effect-switch targets compile against current cache.
         # starter_config's accent sources from the last Color Set's 3rd color
-        # (else black) — same source the bus path uses.
+        # (else black) — same source the bus path uses. An effect target on a
+        # device already running that effect yields a kind="patch" accent re-sync
+        # (not a switch); route it to `patches` so the device stays in the scene.
         for target in action.targets:
             if target.aspect != "effect":
                 continue
-            switches.extend(compile_target(target, virtual_cache, default_ramp_ms=ramp_ms,
-                                           accent_per_vid=accent_per_vid))
+            for w in compile_target(target, virtual_cache, default_ramp_ms=ramp_ms,
+                                    accent_per_vid=accent_per_vid):
+                (switches if w.kind == "switch" else patches).append(w)
 
         # Mutate the working cache with the post-switch state so Pass 2 sees it
         # — same mechanic as the executor. We don't touch the real

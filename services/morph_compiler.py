@@ -409,29 +409,56 @@ def compile_target(
             continue
         cur_cfg = cur_eff.get("config") or {}
 
-        # Effect-aspect: switch effect type (or no-op if already on it)
+        # Effect-aspect: switch effect type (or re-assert accent if already on it)
         if target.aspect == "effect":
             new_type = target.absolute_value.effect_type
-            if not new_type or new_type == cur_type:
+            if not new_type:
                 continue
             if new_type not in morph_aspects.supported_effects():
                 continue
+
+            # Resolve the accent / third color this target wants on `new_type`:
+            # an explicit per-step override wins, else the last fired Color Set's
+            # 3rd color for this virtual, else black. None when the effect has no
+            # accent param (melt / radial).
+            accent_param = morph_aspects.accent_param_for(new_type)
+            accent_val = None
+            if accent_param:
+                accent_val = (
+                    target.absolute_value.accent_color
+                    or (accent_per_vid or {}).get(vid)
+                    or "#000000"
+                )
+
+            if new_type == cur_type:
+                # Already on the target effect — don't restart it (a re-sent
+                # `type` would recreate the effect). But still keep the accent
+                # in sync so a device that was already on power ends up matching
+                # a sibling that switched TO power in the same step (otherwise
+                # the two desync: the switcher gets the accent, this one keeps a
+                # stale/default value). Skip when it already matches.
+                if (accent_param and accent_val is not None
+                        and str(cur_cfg.get(accent_param, "")).strip().lower()
+                            != str(accent_val).strip().lower()):
+                    writes.append(ConcreteWrite(
+                        virtual_id=vid,
+                        effect_type=cur_type,
+                        kind="patch",
+                        patch={accent_param: accent_val},
+                        ramp_ms=effective_ramp,
+                    ))
+                continue
+
             # Resume the user's last-known config for this (virtual, effect)
             # pair if we have one; otherwise fall back to taste-neutral defaults
             # from effect_params.json.
             starter = morph_effect_state.get(vid, new_type) or morph_aspects.effect_defaults(new_type) or {}
 
-            # Set the new effect's accent / third color from the last fired
-            # Color Set's 3rd color for this virtual (an explicit per-step
-            # override wins; black when neither is defined). Always written so
-            # the accent never inherits a stale per-effect default on switch.
-            # Effects without an accent param (melt, radial) silently skip.
-            accent_param = morph_aspects.accent_param_for(new_type)
+            # Always write the accent so a switch never inherits a stale
+            # per-effect default (LedFX fills power's sparks_color with white
+            # otherwise).
             if accent_param:
-                if target.absolute_value.accent_color:
-                    starter[accent_param] = target.absolute_value.accent_color
-                else:
-                    starter[accent_param] = (accent_per_vid or {}).get(vid) or "#000000"
+                starter[accent_param] = accent_val
 
             writes.append(ConcreteWrite(
                 virtual_id=vid,
