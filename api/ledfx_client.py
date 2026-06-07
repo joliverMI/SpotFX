@@ -89,10 +89,18 @@ def _capture_in_progress() -> bool:
     `_recording_uri` and the next call dispatches normally).
 
     Returns False whenever `_force_allow_count > 0`, so manual-fire paths
-    wrapped in `force_allow()` always pass through.
+    wrapped in `force_allow()` always pass through. Also returns False when
+    the `suppress_triggers_during_capture` setting is OFF, letting triggers
+    fire during capture.
     """
     if _force_allow_count > 0:
         return False
+    try:
+        from config import settings
+        if not settings.suppress_triggers_during_capture:
+            return False
+    except Exception:
+        pass
     global _capture_gate_diag_logged
     try:
         from services.audio_shape_service import audio_shape_service

@@ -102,6 +102,9 @@
         <label>WAV Files Retained (oldest deleted past this count; 0 = unlimited)</label>
         <input type="number" id="s-wav-max-songs" min="0" step="1">
       </div>
+      <div class="field">
+        <label><input type="checkbox" id="s-suppress-triggers-capture"> Suppress Triggers During Capture</label>
+      </div>
     </div>
 
     <div class="card advanced-only-block">
@@ -352,6 +355,7 @@ document.getElementById('s-smooth-ramp').value    = settings.smooth_ramp_ms ?? 0
 document.getElementById('s-auto-gen-mode').value  = settings.auto_generate_mode ?? 'embedded';
 document.getElementById('s-show-ai-triggers').checked = settings.show_ai_triggers ?? false;
 document.getElementById('s-show-advanced').checked = settings.show_advanced ?? false;
+document.getElementById('s-suppress-triggers-capture').checked = settings.suppress_triggers_during_capture ?? true;
 
 // ── Ambient Mode ──────────────────────────────────────────────────────────────
 const _ambCats = await GET('/device-categories');
@@ -408,6 +412,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     auto_generate_mode:       document.getElementById('s-auto-gen-mode').value,
     show_ai_triggers:         document.getElementById('s-show-ai-triggers').checked,
     show_advanced:            document.getElementById('s-show-advanced').checked,
+    suppress_triggers_during_capture: document.getElementById('s-suppress-triggers-capture').checked,
     ambient_target_category:  document.getElementById('s-ambient-category').value,
     ambient_color_mode:       document.getElementById('s-ambient-color-mode').value,
     ambient_kelvin:           parseInt(document.getElementById('s-ambient-kelvin').value),

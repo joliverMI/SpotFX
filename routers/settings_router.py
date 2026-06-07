@@ -67,6 +67,7 @@ class SettingsPatch(BaseModel):
     show_ai_triggers: Optional[bool] = None
     show_advanced: Optional[bool] = None
     genre_blending_enabled: Optional[bool] = None
+    suppress_triggers_during_capture: Optional[bool] = None
     song_source: Optional[str] = None          # "spotify" | "ledfx"
     lastfm_api_key: Optional[str] = None
     lastfm_username: Optional[str] = None
@@ -112,6 +113,7 @@ async def get_settings():
         "show_ai_triggers": settings.show_ai_triggers,
         "show_advanced": settings.show_advanced,
         "genre_blending_enabled": settings.genre_blending_enabled,
+        "suppress_triggers_during_capture": settings.suppress_triggers_during_capture,
         "song_source": settings.song_source,
         "lastfm_api_key": settings.lastfm_api_key,
         "lastfm_username": settings.lastfm_username,

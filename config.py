@@ -387,6 +387,10 @@ class Settings(BaseSettings):
     # Genre Blending — when ON, suppress song-start triggers if the previous song
     # ended naturally and the new song shares any genre with it.
     genre_blending_enabled: bool = True
+    # Suppress Triggers During Capture — when ON, the LedFX gate mutes trigger
+    # writes while audio_shape_service is recording so capture doesn't compete
+    # with LedFX writes. Turn OFF to let triggers fire during capture.
+    suppress_triggers_during_capture: bool = True
 
     # ── Last.fm (genre fallback / primary in LedFX mode) ─────────────────────
     lastfm_api_key: str = ""
