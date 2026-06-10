@@ -2131,6 +2131,8 @@ class TriggerEngine:
         if not card.entries:
             return
 
+        state.last_color_set_id = card.id  # mirror for the Now Playing indicator
+
         # Address each device by its LIVE active effect (not a stale cached one)
         # so these color writes update config in place instead of switching the
         # effect back to whatever was last polled.
@@ -2403,6 +2405,7 @@ class TriggerEngine:
         lane_index = 1 if repeat else 0
         picked = await self._run_one_lane(event, lane_index, labels, skip_event_ids)
         self._last_scene_update_id = event.id
+        state.last_scene_update_id = event.id  # mirror for the Now Playing indicator
         tag = "Rest" if repeat else "First"
         return f"{tag}: {self._describe_action(picked)}" if picked else tag
 
@@ -3463,6 +3466,12 @@ class TriggerEngine:
                 # compounded event_offset_ms. The root entry of each trigger
                 # also emits the trigger_fired WS broadcast so the UI clears
                 # the preview and shows the flash animation.
+                # While the capture gate is muting LedFX writes, DON'T fire:
+                # _execute_plan_entry's writes would be silently dropped but the
+                # entries marked fired, permanently losing every trigger that
+                # lands in the capture window. Deferring lets overdue entries
+                # fire the moment the capture finishes (a beat late beats never).
+                _muting = ledfx_client.capture_muting_active()
                 triggers_by_id = {t.id: t for t in self._get_active_triggers()}
                 for _tid, _entries in list(self._plan.items()):
                     if _tid in self._fired:
@@ -3477,7 +3486,7 @@ class TriggerEngine:
                     for _entry in _entries:
                         if _entry.fired:
                             continue
-                        if _entry.fire_at_ms <= effective_now:
+                        if _entry.fire_at_ms <= effective_now and not _muting:
                             _entry.fired = True
                             _is_root = (_entry.event.id == _trigger.event_id)
                             logger.info(
@@ -3530,7 +3539,7 @@ class TriggerEngine:
                         continue
                     if trigger.id in self._plan:
                         continue
-                    if trigger.timestamp_ms <= effective_now:
+                    if trigger.timestamp_ms <= effective_now and not _muting:
                         self._fired.add(trigger.id)
                         logger.info(
                             "Firing unplanned trigger %s at ~%dms (event=%s)",

@@ -121,6 +121,28 @@ class WebSocketManager:
                 "context_type": track.context_type,
             }
         payload["timing"] = state.timing or {}
+        # Last Scene Update — the scene the fixed Update/Reset Scene events act on.
+        if state.last_scene_update_id:
+            try:
+                from services.profile_manager import get_event
+                last_scene = get_event(state.last_scene_update_id)
+                if last_scene is not None and last_scene.event_type == "scene_update":
+                    payload["last_scene_id"] = last_scene.id
+                    payload["last_scene_name"] = last_scene.name
+                    payload["last_scene_color"] = last_scene.color
+            except Exception:
+                pass
+        # Last Color Set the engine applied.
+        if state.last_color_set_id:
+            try:
+                from services import color_set_store
+                card = color_set_store.get_by_id(state.last_color_set_id)
+                if card is not None:
+                    payload["last_color_set_id"] = card.id
+                    payload["last_color_set_name"] = card.name
+                    payload["last_color_set_color"] = card.color
+            except Exception:
+                pass
         payload["next_track_uri"] = state.next_track_uri
         payload["next_track_title"] = state.next_track_title
         # Active Set List, if any

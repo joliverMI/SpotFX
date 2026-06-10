@@ -84,6 +84,16 @@ class AppState:
     # ── Live sync timing info (updated each tick by TriggerEngine) ────────────
     timing: dict = field(default_factory=dict)
 
+    # ── Last Scene Update ─────────────────────────────────────────────────────
+    # Id of the most recent scene_update event the engine fired — this is the
+    # scene the fixed Update/Reset Scene events act on. Mirrored from the engine
+    # so broadcast_state can show a "last scene" indicator. Persists across songs.
+    last_scene_update_id: str = ""
+    # Id of the most recent Color Set the engine applied (the resolved member id
+    # when a Group was fired). Mirrored from the engine for the Now Playing
+    # indicator. Persists across songs.
+    last_color_set_id: str = ""
+
     # ── Set List context ─────────────────────────────────────────────────────
     next_track_uri: str = ""           # spotify URI of queue[0] after the current track
     next_track_title: str = ""         # display label for the next track

@@ -119,6 +119,17 @@ def _capture_in_progress() -> bool:
         return False
 
 
+def capture_muting_active() -> bool:
+    """True when LedFX writes are currently being muted by the capture gate
+    (capture in progress, suppress setting on, not inside force_allow()).
+
+    The trigger engine checks this to DEFER firing instead of dispatching a
+    fire that would be silently dropped while still marking the trigger fired —
+    which permanently loses every trigger that lands during a capture window.
+    """
+    return _capture_in_progress()
+
+
 from contextlib import contextmanager
 
 @contextmanager

@@ -369,7 +369,7 @@ class AutoOffsetService:
             windows.insert(0, (0, _PRE_FLIGHT_INTRO_MS))
             logger.info(
                 "Auto-offset xcorr: pre-flight window [0–%d]ms prepended for %s",
-                _PRE_FLIGHT_INTRO_MS, uri,
+                _PRE_FLIGHT_INTRO_MS, new_uri,
             )
 
         if not windows:

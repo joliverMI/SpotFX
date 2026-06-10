@@ -76,6 +76,19 @@
           <span id="countdown"></span>
         </div>
       </div>
+      <!-- Last Scene / Color Set indicators — what Update Scene etc. would act on. -->
+      <div id="last-state-row" style="display:none;margin-top:8px;gap:16px;align-items:center;font-size:11px;color:var(--text-muted);flex-wrap:wrap;">
+        <span id="last-scene-wrap" style="display:none;align-items:center;gap:5px;">
+          Scene:
+          <span id="last-scene-dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#888;"></span>
+          <span id="last-scene-name" style="font-weight:600;color:var(--text);">—</span>
+        </span>
+        <span id="last-colorset-wrap" style="display:none;align-items:center;gap:5px;">
+          Color:
+          <span id="last-colorset-dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#888;"></span>
+          <span id="last-colorset-name" style="font-weight:600;color:var(--text);">—</span>
+        </span>
+      </div>
       <!-- Next trigger preview — always occupies space to prevent vertical jumping.
            Label clamps to 3 lines so long drill-down chains don't resize the card. -->
       <div id="next-action-row" style="visibility:hidden;margin-top:8px;height:calc(1.3em * 3 + 4px);display:flex;align-items:flex-start;gap:8px;overflow:hidden;">
@@ -292,6 +305,25 @@ onMessage('state', msg => {
   last_capture = msg.last_capture ?? null;
   document.getElementById('ledfx-rtt').textContent = msg.ledfx_rtt_ms;
   _lastPollTime = Date.now();
+  // Last Scene Update / Color Set indicators — what Update Scene etc. act on.
+  const _sceneWrap = document.getElementById('last-scene-wrap');
+  if (msg.last_scene_name) {
+    document.getElementById('last-scene-name').textContent = msg.last_scene_name;
+    document.getElementById('last-scene-dot').style.background = msg.last_scene_color || '#888';
+    _sceneWrap.style.display = 'inline-flex';
+  } else {
+    _sceneWrap.style.display = 'none';
+  }
+  const _csWrap = document.getElementById('last-colorset-wrap');
+  if (msg.last_color_set_name) {
+    document.getElementById('last-colorset-name').textContent = msg.last_color_set_name;
+    document.getElementById('last-colorset-dot').style.background = msg.last_color_set_color || '#888';
+    _csWrap.style.display = 'inline-flex';
+  } else {
+    _csWrap.style.display = 'none';
+  }
+  document.getElementById('last-state-row').style.display =
+    (msg.last_scene_name || msg.last_color_set_name) ? 'flex' : 'none';
   if (msg.timing && Object.keys(msg.timing).length) {
     _timing = msg.timing;
     _currentBuffer = _timing.buffer_ms ?? _currentBuffer;
