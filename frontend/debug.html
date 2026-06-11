@@ -84,9 +84,23 @@
         <canvas id="shape-canvas"></canvas>
         <div id="shape-resize-handle"></div>
       </div>
-      <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
-        Saved shape draws upward from the centerline. Live capture (when xcorr is running) draws downward.
-        Pan: middle-mouse drag on the canvas. Zoom: drag the timeline handles.
+      <div class="timeline-wrap" style="margin-top:8px;">
+        <div class="timeline-bar" id="timeline-bar">
+          <div id="zoom-region"></div>
+          <div id="zoom-handle-center" title="Drag to pan"></div>
+          <div id="zoom-handle-start" class="zoom-handle" title="Drag to adjust zoom start"></div>
+          <div id="zoom-handle-end" class="zoom-handle" title="Drag to adjust zoom end"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+        <button class="btn btn-accent" id="btn-follow" style="font-size:11px;padding:2px 8px;"
+                title="Follow the live capture edge (falls back to the playhead when xcorr is idle).">Follow</button>
+        <button class="btn" id="btn-zoom-full" style="font-size:11px;padding:2px 8px;">Full Song</button>
+        <span style="font-size:10px;color:var(--text-muted);">
+          Saved shape draws upward from the centerline; live capture (25&nbsp;ms bins) draws downward.
+          Pan: middle-mouse drag. Zoom: drag the timeline handles.
+          Follow tracks the live capture edge, which lags the song.
+        </span>
       </div>
     </div>
 
@@ -98,8 +112,11 @@
         <div id="diff-resize-handle"></div>
       </div>
       <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
-        Above center = live audio louder than saved at that timestamp. Below = saved louder.
-        When alignment is good and signal level matches, this hovers near zero.
+        Matcher's view: both signals are squared, binned to 25&nbsp;ms, and z-scored over the live
+        span — exactly what the xcorr Pearson correlator compares, so gain/volume differences
+        cancel out. Scale is fixed at ±1 (≡ ±2.5σ). Above center = live louder than expected;
+        below = saved louder. Sustained excursions or time-skewed mirror-image pairs indicate
+        misalignment; when sync is good this hovers near zero.
       </div>
     </details>
 
@@ -220,18 +237,84 @@ diffCanvas.setFilters(
   { total: false, bass: false, mid: false, high: false },
   null,
 );
+// Diff data is normalized to ±1 — pin the render scale so the graph never
+// autoscales and a flat line genuinely means "in sync".
+diffCanvas.setMaxRms(1.0);
 diffCanvas.startLoop(25);
 
-// Follow-mode zoom: 25s of past + 5s of future around the playhead. The
-// canvas's middle-mouse-drag pan flips _userPanned=true so we stop
-// auto-following until the next track change.
-const FOLLOW_PAST_MS   = 8000;
-const FOLLOW_FUTURE_MS = 2000;
-let _userPanned = false;
-shapeCanvas.setOnZoomChange?.(() => { _userPanned = true; });
-diffCanvas.setOnZoomChange?.(() => { _userPanned = true; });
+// Follow-mode zoom: 8s of history + 2s of future around the follow anchor.
+// The anchor is the latest live-capture frame when xcorr is running (the
+// capture lags the song), falling back to the playhead when idle or stale.
+// Any user pan/zoom gesture flips to Manual until Follow is clicked or the
+// track changes.
+const FOLLOW_PAST_MS     = 8000;
+const FOLLOW_FUTURE_MS   = 2000;
+const LIVE_EDGE_STALE_MS = 5000;   // capture edge stopped advancing → playhead
+let _userPanned   = false;
+let _durationMs   = 240000;        // refreshed from shape meta / track
+let _liveEdgeMs   = null;          // latest shifted live-frame timestamp
+let _liveEdgeWallTs = 0;           // wall clock of the last edge advance
+
+function _syncFollowBtn() {
+  const b = document.getElementById('btn-follow');
+  b.classList.toggle('btn-accent', !_userPanned);
+  b.textContent = _userPanned ? 'Manual' : 'Follow';
+}
+function _setManual() { if (!_userPanned) { _userPanned = true; _syncFollowBtn(); } }
+function _setFollow() { _userPanned = false; _syncFollowBtn(); _applyFollowWindow(); }
+
+// Mirror the canvases' zoom window onto the timeline bar.
+function updateZoomRegion() {
+  const dur = _durationMs || 240000;
+  const startPct = Math.max(0, Math.min(100, (shapeCanvas.zoomStart / dur) * 100));
+  const endPct   = Math.max(0, Math.min(100, (shapeCanvas.zoomEnd   / dur) * 100));
+  document.getElementById('zoom-region').style.left  = startPct + '%';
+  document.getElementById('zoom-region').style.width = (endPct - startPct) + '%';
+  document.getElementById('zoom-handle-start').style.left  = startPct + '%';
+  document.getElementById('zoom-handle-end').style.left    = endPct   + '%';
+  document.getElementById('zoom-handle-center').style.left = ((startPct + endPct) / 2) + '%';
+}
+
+// Slide both canvases to the follow anchor (no-op while in Manual).
+function _applyFollowWindow() {
+  if (_userPanned) return;
+  const liveFresh = _liveEdgeMs != null
+    && (Date.now() - _liveEdgeWallTs) < LIVE_EDGE_STALE_MS;
+  const anchor = liveFresh ? _liveEdgeMs : (track?.progress_ms ?? null);
+  if (anchor == null) return;
+  const startMs = Math.max(0, anchor - FOLLOW_PAST_MS);
+  const endMs   = startMs + FOLLOW_PAST_MS + FOLLOW_FUTURE_MS;
+  shapeCanvas.setZoom(startMs, endMs);
+  diffCanvas.setZoom(startMs, endMs);
+  updateZoomRegion();
+}
+
+shapeCanvas.wireZoomHandles(
+  document.getElementById('timeline-bar'),
+  document.getElementById('zoom-handle-start'),
+  document.getElementById('zoom-handle-end'),
+  () => _durationMs,
+  document.getElementById('zoom-handle-center'),
+);
+shapeCanvas.wireMiddlePan(() => _durationMs);
+diffCanvas.wireMiddlePan(() => _durationMs);
+// User gestures on either canvas/bar sync the sibling and drop to Manual.
+shapeCanvas.onZoomChange = (s, e) => { _setManual(); diffCanvas.setZoom(s, e); updateZoomRegion(); };
+diffCanvas.onZoomChange  = (s, e) => { _setManual(); shapeCanvas.setZoom(s, e); updateZoomRegion(); };
+
+document.getElementById('btn-follow').addEventListener('click', () => {
+  _userPanned ? _setFollow() : _setManual();
+});
+document.getElementById('btn-zoom-full').addEventListener('click', () => {
+  _setManual();
+  shapeCanvas.setZoom(0, _durationMs);
+  diffCanvas.setZoom(0, _durationMs);
+  updateZoomRegion();
+});
+
 shapeCanvas.setZoom(0, FOLLOW_PAST_MS + FOLLOW_FUTURE_MS);
 diffCanvas.setZoom(0, FOLLOW_PAST_MS + FOLLOW_FUTURE_MS);
+updateZoomRegion();
 
 // ── State ───────────────────────────────────────────────────────────────────
 let track = null;
@@ -268,31 +351,86 @@ function _interpAt(targetTs, ts, values) {
   return out;
 }
 
-// Build the diff canvas data: positive (live louder) goes up, negative
-// (saved louder) goes down. Both halves are non-negative arrays so the
-// existing setData / setLiveShape rendering paths work unchanged.
+// ── Diff graph (matcher's view) ─────────────────────────────────────────────
+// Mirrors what the xcorr Pearson correlator actually compares: both signals
+// squared, resampled to 25 ms bins, z-scored over the live span. Gain and
+// volume differences cancel out. The diff is normalized to ±1 (±1 ≡ ±2.5σ)
+// and the canvas scale is pinned so the graph never autoscales.
+const DIFF_BIN_MS      = 25;     // mirrors _XCORR_BIN_MS server-side
+const DIFF_SCALE_Z     = 2.5;    // σ that maps to ±1
+const DIFF_MIN_SPAN_MS = 2000;   // z-score unstable below this span
+const _RMS_BANDS = ['rms_total', 'rms_low', 'rms_mid', 'rms_high'];
+
+// Block-mean the ~11.6 ms capture frames onto a 25 ms grid — the resolution
+// xcorr consumes. Returns the same {timestamps_ms, rms_*} shape.
+function _binTo25ms(live) {
+  const ts = live?.timestamps_ms;
+  if (!ts?.length) return live;
+  const out = { timestamps_ms: [] };
+  _RMS_BANDS.forEach(b => out[b] = []);
+  let i = 0;
+  for (let binStart = ts[0]; i < ts.length; binStart += DIFF_BIN_MS) {
+    const binEnd = binStart + DIFF_BIN_MS;
+    let n = 0; const sums = [0, 0, 0, 0];
+    while (i < ts.length && ts[i] < binEnd) {
+      _RMS_BANDS.forEach((b, k) => sums[k] += live[b]?.[i] ?? 0);
+      n++; i++;
+    }
+    if (!n) continue;
+    out.timestamps_ms.push(binStart);
+    _RMS_BANDS.forEach((b, k) => out[b].push(sums[k] / n));
+  }
+  return out;
+}
+
+function _zscore(arr) {
+  const n = arr.length;
+  if (!n) return arr;
+  let mean = 0;
+  for (const v of arr) mean += v;
+  mean /= n;
+  let varSum = 0;
+  for (const v of arr) varSum += (v - mean) * (v - mean);
+  const std = Math.sqrt(varSum / n);
+  if (std < 1e-6) return arr.map(() => 0);
+  return arr.map(v => (v - mean) / std);
+}
+
 function _updateDiffCanvas(live) {
   if (!_savedShape || !live || !live.timestamps_ms?.length) {
     diffCanvas.setData?.(null, null);
     diffCanvas.setLiveShape?.(null);
     return;
   }
-  const ts  = live.timestamps_ms;
-  const sT  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_total);
-  const sL  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_low);
-  const sM  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_mid || []);
-  const sH  = _interpAt(ts, _savedShape.timestamps_ms, _savedShape.rms_high);
-  const pos = { timestamps_ms: ts, rms_total: [], rms_low: [], rms_mid: [], rms_high: [] };
-  const neg = { timestamps_ms: ts, rms_total: [], rms_low: [], rms_mid: [], rms_high: [] };
-  for (let i = 0; i < ts.length; i++) {
-    const dT = (live.rms_total[i] ?? 0) - (sT[i] ?? 0);
-    const dL = (live.rms_low[i]   ?? 0) - (sL[i] ?? 0);
-    const dM = (live.rms_mid[i]   ?? 0) - (sM[i] ?? 0);
-    const dH = (live.rms_high[i]  ?? 0) - (sH[i] ?? 0);
-    pos.rms_total.push(Math.max(0,  dT)); neg.rms_total.push(Math.max(0, -dT));
-    pos.rms_low.push  (Math.max(0,  dL)); neg.rms_low.push  (Math.max(0, -dL));
-    pos.rms_mid.push  (Math.max(0,  dM)); neg.rms_mid.push  (Math.max(0, -dM));
-    pos.rms_high.push (Math.max(0,  dH)); neg.rms_high.push (Math.max(0, -dH));
+  const ts   = live.timestamps_ms;
+  const span = ts[ts.length - 1] - ts[0];
+  if (span < DIFF_MIN_SPAN_MS) {
+    diffCanvas.setData?.(null, null);
+    diffCanvas.setLiveShape?.(null);
+    document.getElementById('diff-status').textContent =
+      `warming up (${(span / 1000).toFixed(1)}s captured)`;
+    return;
+  }
+  const pos = { timestamps_ms: ts }, neg = { timestamps_ms: ts };
+  for (const b of _RMS_BANDS) {
+    const saved = _interpAt(ts, _savedShape.timestamps_ms, _savedShape[b] || []);
+    // Square (matches the server's _signed_square for non-negative RMS), then
+    // z-score each side independently — AGC is absorbed by the z-score.
+    const zLive  = _zscore(ts.map((_, i) => (live[b]?.[i] ?? 0) ** 2));
+    const zSaved = _zscore(saved.map(v => (v ?? 0) ** 2));
+    const p = [], ng = [];
+    for (let i = 0; i < ts.length; i++) {
+      // 3-bin (75 ms) centered moving average kills bin flicker without
+      // hiding any sync error worth seeing.
+      const lo = Math.max(0, i - 1), hi = Math.min(ts.length - 1, i + 1);
+      let d = 0;
+      for (let j = lo; j <= hi; j++) d += (zLive[j] ?? 0) - (zSaved[j] ?? 0);
+      d /= (hi - lo + 1);
+      d = Math.max(-1, Math.min(1, d / DIFF_SCALE_Z));   // normalize: ±1 ≡ ±2.5σ
+      p.push(Math.max(0, d));
+      ng.push(Math.max(0, -d));
+    }
+    pos[b] = p; neg[b] = ng;
   }
   diffCanvas.setData(pos, null);
   diffCanvas.setLiveShape(neg);
@@ -318,12 +456,20 @@ async function _pollLiveFrames(uri) {
   try {
     const data = await GET(`/debug/xcorr-frames?uri=${encodeURIComponent(uri)}`);
     if (data && Array.isArray(data.timestamps_ms) && data.timestamps_ms.length > 0) {
-      const shifted = _shiftLive(data, _shapeOffsetMs);
+      // Bin to 25 ms (the resolution xcorr consumes) so the live overlay's
+      // density matches the saved shape, then shift into saved-shape time.
+      const binned  = _binTo25ms(data);
+      const shifted = _shiftLive(binned, _shapeOffsetMs);
       shapeCanvas.setLiveShape?.(shifted);
-      _updateDiffCanvas(shifted);
       document.getElementById('diff-status').textContent =
-        `${data.timestamps_ms.length} live frames · shifted by ${_shapeOffsetMs >= 0 ? '+' : ''}${_shapeOffsetMs}ms`;
+        `${shifted.timestamps_ms.length} bins (25ms) · shifted by ${_shapeOffsetMs >= 0 ? '+' : ''}${_shapeOffsetMs}ms`;
+      _updateDiffCanvas(shifted);
+      // Follow anchor: the leading edge of the capture (lags the song).
+      const edge = shifted.timestamps_ms[shifted.timestamps_ms.length - 1];
+      if (edge !== _liveEdgeMs) { _liveEdgeMs = edge; _liveEdgeWallTs = Date.now(); }
+      _applyFollowWindow();
     } else {
+      _liveEdgeMs = null;
       shapeCanvas.setLiveShape?.(null);
       _updateDiffCanvas(null);
       document.getElementById('diff-status').textContent = 'xcorr idle — no live frames';
@@ -355,6 +501,8 @@ async function _loadShape(uri) {
       _savedShape = data;
       shapeCanvas.setData(data, meta);
       const dur = meta?.duration_ms || data.timestamps_ms[data.timestamps_ms.length - 1] || 60000;
+      _durationMs = dur;
+      updateZoomRegion();
       document.getElementById('shape-status').textContent =
         `${data.timestamps_ms.length} samples · duration ${(dur/1000).toFixed(0)}s`;
       // Anchor candidates overlay (advanced-only inside the canvas)
@@ -403,7 +551,9 @@ onMessage('state', (msg) => {
   _shapeQuality = msg.timing?.shape_offset_quality ?? 0;
 
   if (uriChanged) {
-    _userPanned = false;   // re-enable follow window for the new song
+    _liveEdgeMs = null;
+    _durationMs = track?.duration_ms || _durationMs;
+    _setFollow();          // re-enable follow window for the new song
     _loadShape(track?.spotify_uri);
     _fetchShapeStatus(track?.spotify_uri);
     document.getElementById('dbg-anchor-summary').textContent = 'no data';
@@ -415,13 +565,7 @@ onMessage('state', (msg) => {
     const p = track.progress_ms ?? 0;
     shapeCanvas.setPlayhead?.(p);
     diffCanvas.setPlayhead?.(p);
-    if (!_userPanned) {
-      // Slide the window so playhead sits FOLLOW_PAST_MS from the left edge.
-      const startMs = Math.max(0, p - FOLLOW_PAST_MS);
-      const endMs   = startMs + FOLLOW_PAST_MS + FOLLOW_FUTURE_MS;
-      shapeCanvas.setZoom(startMs, endMs);
-      diffCanvas.setZoom(startMs, endMs);
-    }
+    _applyFollowWindow();
   }
 });
 

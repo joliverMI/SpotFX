@@ -116,11 +116,21 @@ async def get_data(uri: str = Query(...), start_ms: int = 0, end_ms: int = 0):
         mask = (ts >= start_ms) & (ts <= end_ms)
         ts, rms_t, rms_l, rms_m, rms_h = ts[mask], rms_t[mask], rms_l[mask], rms_m[mask], rms_h[mask]
 
-    # Downsample to max 10000 points for browser rendering
+    # Downsample to max 10000 points for browser rendering. Block-mean the
+    # RMS arrays (rather than stride-picking) so peaks aren't aliased away;
+    # timestamps take each block's start.
     max_pts = 10000
     if len(ts) > max_pts:
         step = len(ts) // max_pts
-        ts, rms_t, rms_l, rms_m, rms_h = ts[::step], rms_t[::step], rms_l[::step], rms_m[::step], rms_h[::step]
+        n = len(ts) // step
+
+        def _block_mean(arr):
+            return arr[: n * step].reshape(n, step).mean(axis=1)
+
+        ts = ts[::step][:n]
+        rms_t, rms_l, rms_m, rms_h = (
+            _block_mean(rms_t), _block_mean(rms_l), _block_mean(rms_m), _block_mean(rms_h)
+        )
 
     return {
         "timestamps_ms": ts.tolist(),

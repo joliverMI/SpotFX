@@ -818,6 +818,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     return ((xcorrMs + _trimMs) - v.startMs) / (v.endMs - v.startMs) * v.W;
   }
   canvasEl.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;   // left-click only — middle-click is pan
     if (!_onTrimChange || _playheadMs == null) return;
     const rect = canvasEl.getBoundingClientRect();
     const x = (e.clientX - rect.left) * (canvasEl.width / rect.width);
@@ -911,6 +912,38 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     window.addEventListener('mouseup', () => {
       _side = null; _panStartX = null;
     });
+  }
+
+  // ── Middle-mouse drag-to-pan ──────────────────────────────────────────────
+  /**
+   * Pan the zoom window by dragging with the middle mouse button on the
+   * canvas. Slides the window preserving its width, clamped to
+   * [0, duration − window]. Fires _onZoomChange on every move — same
+   * semantics as wireZoomHandles drags.
+   *
+   * @param {() => number} getDurationMs — function returning song duration in ms
+   */
+  function wireMiddlePan(getDurationMs) {
+    let _pan = null;   // { startX, s, e }
+    canvasEl.addEventListener('mousedown', e => {
+      if (e.button !== 1) return;
+      e.preventDefault();                       // suppress browser autoscroll
+      _pan = { startX: e.clientX, s: _zoomStartMs, e: _zoomEndMs };
+    });
+    canvasEl.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+    window.addEventListener('mousemove', e => {
+      if (!_pan) return;
+      const rect  = canvasEl.getBoundingClientRect();
+      const winMs = _pan.e - _pan.s;
+      const dxMs  = (e.clientX - _pan.startX) / rect.width * winMs;
+      const dur   = Math.max(getDurationMs() || 0, winMs);
+      const ns    = Math.max(0, Math.min(dur - winMs, _pan.s + dxMs));
+      _zoomStartMs = ns;
+      _zoomEndMs   = ns + winMs;
+      _onZoomChange?.(_zoomStartMs, _zoomEndMs);
+      draw();
+    });
+    window.addEventListener('mouseup', e => { if (e.button === 1) _pan = null; });
   }
 
   // ── Public API ────────────────────────────────────────────────────────────────
@@ -1038,6 +1071,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     // ── Wiring ────────────────────────────────────────────────────────────────
     wireResizeHandle,
     wireZoomHandles,
+    wireMiddlePan,
 
     // ── Callback ──────────────────────────────────────────────────────────────
     set onZoomChange(fn) { _onZoomChange = fn; },

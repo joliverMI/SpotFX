@@ -719,12 +719,24 @@ class AutoOffsetService:
         _anchor_radius = int(settings.anchor_search_radius_ms) + int(settings.anchor_template_radius_ms)
         anchor_horizons: list[int] = [c.timestamp_ms + _anchor_radius for c in anchor_candidates]
         anchor_last_eligible = 0
+        _last_snap_ms = 0
 
         try:
             async for frame in capture:
                 if not app_state.current_track:
                     break
                 frames.append((frame.timestamp_ms, frame.rms_total, frame.rms_low, frame.rms_mid, frame.rms_high))
+
+                # Live-frame snapshot for the Debug page, refreshed on a ~1 s
+                # throttle so the page's live tail advances smoothly instead of
+                # jumping once per xcorr window. Trimmed to the most recent
+                # ~30 s so the snapshot stays small. The reference swap is
+                # safe — readers iterate the old list by value.
+                if frame.timestamp_ms - _last_snap_ms >= 1000:
+                    _last_snap_ms = frame.timestamp_ms
+                    self._frames_snapshot_uri = uri
+                    _snap_cutoff = max(0, frame.timestamp_ms - 30000)
+                    self._frames_snapshot = [f for f in frames if f[0] >= _snap_cutoff]
 
                 # Anchor snap (progressive). Each candidate has its own
                 # horizon; as frame time crosses a new one, retry matching
@@ -964,17 +976,6 @@ class AutoOffsetService:
                     confirmation_shifts.append((stored_offset_ms, float(difficulty)))
 
                 n_measurements += 1
-
-                # Live-frame snapshot for the Debug page. Trim to the most
-                # recent ~30 s of frames so the snapshot stays small and the
-                # diff visualization focuses on the section xcorr just
-                # evaluated. List slicing is shallow-copy-safe — readers
-                # iterate by value.
-                self._frames_snapshot_uri = uri
-                _snap_cutoff = max(0, win_end - 30000)
-                self._frames_snapshot = [
-                    f for f in frames if f[0] >= _snap_cutoff
-                ]
 
                 logger.info(
                     "Auto-offset xcorr: [%d–%d]ms  NEW %+dms r=%.2f Q=%.2f  "
