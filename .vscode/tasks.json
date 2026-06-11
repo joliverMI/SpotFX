@@ -226,9 +226,9 @@
     },
     {
       "label": "manual smoke test",
-      "detail": "Claude updates this task's command whenever it wants the user to run a test. Never creates a new task for tests — always overwrites this one. Currently: Hue white-brightness — sets hue-lights to Single Color 'White temperature' 2700K at full brightness via the new effect schema, streamed in the Hue device's new xy+brightness mode. Watch the bulbs reach high warm-white ambient brightness (white LEDs engaged). To compare against the old dim path, set the hue-lights DEVICE config color_mode to 'rgb' and re-run.",
+      "detail": "Claude updates this task's command whenever it wants the user to run a test. Never creates a new task for tests \u2014 always overwrites this one. Currently: Debug page xcorr graphs \u2014 opens /static/debug.html. Play a song with a saved shape, then check: (1) timeline slider under the Audio Shape canvas \u2014 drag the start/end/center handles, both graphs zoom together and the button flips to Manual; (2) middle-mouse drag pans both graphs; (3) in Follow mode the window tracks the live (downward) capture overlay's leading edge, advancing ~1s steps and lagging the song; after xcorr locks and stops it falls back to the playhead within ~5s; (4) the Live\u2212Saved diff hovers near zero on a fixed \u00b11 scale when synced and shows sustained excursions when misaligned; (5) saved vs live density looks comparable (both 25ms bins).",
       "type": "shell",
-      "command": "curl -s -X POST http://localhost:8888/api/virtuals/hue-lights/effects -H 'Content-Type: application/json' -d '{\"type\":\"singleColor\",\"config\":{\"color_mode\":\"White temperature\",\"kelvin\":2700,\"brightness\":1.0}}' | .venv/bin/python -m json.tool",
+      "command": "xdg-open http://localhost:8000/static/debug.html",
       "options": {
         "cwd": "${workspaceFolder}"
       },
