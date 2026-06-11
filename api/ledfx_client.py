@@ -265,6 +265,21 @@ _first_failure_at = 0.0           # time.monotonic() of the first failure in the
 _last_recycle = 0.0               # time.monotonic() of the last client recycle
 _pool_timeout_times: deque = deque(maxlen=64)  # monotonic ts of recent PoolTimeouts
 
+# ── LedFX degradation watchdog ────────────────────────────────────────────────
+# LedFX rots over long uptimes: RTT creeps from ~2ms to >100ms, effects stop
+# reacting, audio source flaps — and the only known cure is restarting the ledfx
+# service. SpotFX already probes RTT every latency_loop tick (via a DEDICATED
+# probe client, so RTT reflects true server response, not write-queue time), so
+# watch for sustained high RTT (or a dead probe) and restart ledfx automatically.
+# Fires only when LedFX is ALREADY effectively stuck, so the brief restart
+# blackout beats staying frozen indefinitely.
+_LEDFX_RTT_DEGRADED_MS = 80.0     # RTT above this (or a failed probe) counts as degraded (normal is ~2-5ms)
+_LEDFX_WATCHDOG_TRIPS = 2         # consecutive degraded ticks (~30s each) before restarting
+_LEDFX_RESTART_MIN_INTERVAL_S = 300.0  # never auto-restart ledfx more than once per this
+_probe_failed = False             # set by measure_latency: True if the last (unmuted) probe raised
+_watchdog_degraded_count = 0
+_last_ledfx_restart = 0.0
+
 # Rate-limit the failure log so a stall produces one line/sec, not a storm.
 _last_fail_log = 0.0
 _FAIL_LOG_INTERVAL_S = 1.0
@@ -579,6 +594,7 @@ async def measure_latency() -> float:
     Uses a dedicated httpx client so the probe doesn't queue behind trigger
     writes — that would inflate RTT under load and skew effective_offset_ms.
     """
+    global _probe_failed
     if _capture_in_progress():
         return state.ledfx_rtt_ms or 0.0   # mute during capture; keep last known RTT
     client = _get_probe_client()
@@ -587,8 +603,10 @@ async def measure_latency() -> float:
         await client.get("/api/info")
         rtt_ms = (time.monotonic() - t0) * 1000
         state.ledfx_rtt_ms = rtt_ms
+        _probe_failed = False
         return rtt_ms
     except Exception as exc:
+        _probe_failed = True
         logger.warning("LedFX latency probe failed: %r", exc)
         return 0.0
 
@@ -972,8 +990,96 @@ async def poll_virtual_states() -> None:
         await asyncio.sleep(5)
 
 
+async def _restart_ledfx_service() -> None:
+    """Restart the ledfx systemd user service (watchdog recovery). Then drop
+    SpotFX's httpx clients: a LedFX restart severs our keepalive connections,
+    leaving CLOSE-WAIT sockets that would wedge the pool — rebuild clean."""
+    global _client, _probe_client, _last_ledfx_restart
+    _last_ledfx_restart = time.monotonic()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "systemctl", "--user", "restart", "ledfx",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=30)
+        if proc.returncode == 0:
+            logger.warning("LedFX watchdog: ledfx service restarted")
+            _record_event("ledfx_restart", "watchdog: sustained high RTT")
+        else:
+            logger.error("LedFX watchdog: ledfx restart failed (rc=%s): %s",
+                         proc.returncode, (err or b"").decode()[:200])
+    except Exception as exc:
+        logger.error("LedFX watchdog: could not restart ledfx: %r", exc)
+    # Drop both pools regardless so the next calls reconnect to the fresh LedFX.
+    old_c, old_p = _client, _probe_client
+    _client = None
+    _probe_client = None
+    for c in (old_c, old_p):
+        if c is not None:
+            try:
+                await c.aclose()
+            except Exception:
+                pass
+
+
+async def _ledfx_watchdog_tick() -> None:
+    """Restart LedFX when it's been degraded (high RTT or a dead probe) for
+    _LEDFX_WATCHDOG_TRIPS consecutive ticks. Skips while a capture mutes the
+    probe (RTT is stale then), and rate-limits restarts via the cooldown."""
+    global _watchdog_degraded_count
+    if _capture_in_progress():
+        return
+    degraded = _probe_failed or (state.ledfx_rtt_ms or 0.0) > _LEDFX_RTT_DEGRADED_MS
+    if not degraded:
+        _watchdog_degraded_count = 0
+        return
+    _watchdog_degraded_count += 1
+    logger.warning(
+        "LedFX watchdog: degraded tick %d/%d (rtt=%.0fms probe_failed=%s)",
+        _watchdog_degraded_count, _LEDFX_WATCHDOG_TRIPS,
+        state.ledfx_rtt_ms or 0.0, _probe_failed,
+    )
+    if _watchdog_degraded_count < _LEDFX_WATCHDOG_TRIPS:
+        return
+    if (time.monotonic() - _last_ledfx_restart) < _LEDFX_RESTART_MIN_INTERVAL_S:
+        logger.error("LedFX watchdog: degraded but within %ds restart cooldown — holding",
+                     int(_LEDFX_RESTART_MIN_INTERVAL_S))
+        return
+    _watchdog_degraded_count = 0
+    logger.error("LedFX watchdog: degraded for %d ticks — restarting ledfx service",
+                 _LEDFX_WATCHDOG_TRIPS)
+    await _restart_ledfx_service()
+
+
+async def _reconcile_ambient() -> None:
+    """Self-heal ambient drift. state.ambient_mode_enabled is the single source
+    of truth (set by the toggle, persisted, restored on startup, broadcast to the
+    UI). If the flag is OFF but virtuals are still excluded — a disable() that
+    half-applied, or the excluded set surviving a path that flipped the flag —
+    the Hues stay wrongly parked and dark to triggers. Clear it. (The ON
+    direction is owned by enable()/startup, not force-reapplied here.)"""
+    if state.ambient_mode_enabled or not _ambient_excluded:
+        return
+    from services import ambient_mode
+    logger.warning(
+        "Ambient reconcile: flag OFF but %d virtual(s) still excluded — clearing stale ambient hold",
+        len(_ambient_excluded),
+    )
+    await ambient_mode.disable()
+
+
 async def latency_loop() -> None:
-    """Periodically re-measure LedFX latency every 30 seconds."""
+    """Every 30s: re-measure LedFX RTT, run the degradation watchdog, and
+    reconcile ambient state. Watchdog/reconcile errors are swallowed so they
+    can't kill RTT measurement (which trigger timing depends on)."""
     while True:
         await measure_latency()
+        try:
+            await _ledfx_watchdog_tick()
+        except Exception as exc:
+            logger.error("LedFX watchdog error: %r", exc)
+        try:
+            await _reconcile_ambient()
+        except Exception as exc:
+            logger.error("Ambient reconcile error: %r", exc)
         await asyncio.sleep(30)
