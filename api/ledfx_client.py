@@ -247,11 +247,23 @@ _BREAKER_COOLDOWN_S = 2.0         # how long the circuit stays open before a hal
 _RECYCLE_AFTER_FAIL_S = 5.0       # continuous-failure duration before recycling the client
 _RECYCLE_MIN_INTERVAL_S = 5.0     # don't recycle more than once per this window
 
+# Partial-wedge self-heal: the duration-based recycle above only fires on a
+# CONTINUOUS failure streak, because _on_success() resets _first_failure_at.
+# A pool that's only PARTIALLY wedged (some slots free intermittently) yields
+# PoolTimeouts interspersed with successes — every success resets the streak,
+# so neither the breaker nor the duration-recycle ever trips while light writes
+# keep silently failing. PoolTimeout specifically means "no pool slot" — a
+# wedged-pool signature — so track it on a sliding-window RATE (immune to
+# interspersed successes) and recycle when it exceeds the threshold.
+_POOL_TIMEOUT_WINDOW_S = 10.0     # sliding window for counting PoolTimeouts
+_POOL_TIMEOUT_RECYCLE_N = 5       # this many PoolTimeouts within the window → recycle
+
 _inflight_sem: Optional[asyncio.Semaphore] = None
 _consecutive_failures = 0
 _breaker_open_until = 0.0         # time.monotonic() deadline; circuit open while now < this
 _first_failure_at = 0.0           # time.monotonic() of the first failure in the current streak (0 = none)
 _last_recycle = 0.0               # time.monotonic() of the last client recycle
+_pool_timeout_times: deque = deque(maxlen=64)  # monotonic ts of recent PoolTimeouts
 
 # Rate-limit the failure log so a stall produces one line/sec, not a storm.
 _last_fail_log = 0.0
@@ -314,6 +326,8 @@ def _on_failure(exc: Exception, label: str) -> None:
     now = time.monotonic()
     if _first_failure_at == 0.0:            # mark the start of this failure streak
         _first_failure_at = now
+    if isinstance(exc, httpx.PoolTimeout):  # wedged-pool signature — tracked by rate, not streak
+        _pool_timeout_times.append(now)
     if now - _last_fail_log >= _FAIL_LOG_INTERVAL_S:
         extra = f" (+{_suppressed_fail_logs} suppressed)" if _suppressed_fail_logs else ""
         logger.error("LedFX request failed [%s]: %r%s", label, exc, extra)
@@ -338,20 +352,35 @@ async def _maybe_recycle_client() -> None:
     CLOSE-WAIT sockets the breaker's cooldown can't clear — close the httpx
     client and drop the reference so the next _get_client() builds a fresh pool.
     Rate-limited to once per _RECYCLE_MIN_INTERVAL_S. Called from the failure
-    path, so it runs on a half-open probe once the streak is old enough."""
+    path, so it runs on a half-open probe once the streak is old enough.
+
+    Two triggers: (a) a continuous failure streak older than _RECYCLE_AFTER_FAIL_S
+    (total wedge / dead LedFX), or (b) >= _POOL_TIMEOUT_RECYCLE_N PoolTimeouts
+    within _POOL_TIMEOUT_WINDOW_S — a PARTIAL wedge, where interspersed successes
+    keep resetting the streak so (a) never fires but writes keep failing."""
     global _client, _last_recycle
     now = time.monotonic()
-    if _first_failure_at == 0.0 or (now - _first_failure_at) < _RECYCLE_AFTER_FAIL_S:
+    while _pool_timeout_times and (now - _pool_timeout_times[0]) > _POOL_TIMEOUT_WINDOW_S:
+        _pool_timeout_times.popleft()
+    streak_wedge = _first_failure_at != 0.0 and (now - _first_failure_at) >= _RECYCLE_AFTER_FAIL_S
+    pool_wedge = len(_pool_timeout_times) >= _POOL_TIMEOUT_RECYCLE_N
+    if not (streak_wedge or pool_wedge):
         return
     if (now - _last_recycle) < _RECYCLE_MIN_INTERVAL_S:
         return
     _last_recycle = now
+    reason = (
+        f"{len(_pool_timeout_times)} PoolTimeouts in {_POOL_TIMEOUT_WINDOW_S:.0f}s (partial wedge)"
+        if pool_wedge else
+        f"{now - _first_failure_at:.0f}s continuous failures"
+    )
+    _pool_timeout_times.clear()              # reset window so the next streak starts fresh
     old = _client
     _client = None                          # next _get_client() rebuilds a clean pool
-    _record_event("recycled", f"{_consecutive_failures} fails over {now - _first_failure_at:.0f}s")
+    _record_event("recycled", reason)
     logger.warning(
-        "LedFX client recycled after %.0fs of failures (%d consecutive) — rebuilding connection pool",
-        now - _first_failure_at, _consecutive_failures,
+        "LedFX client recycled (%s, %d consecutive) — rebuilding connection pool",
+        reason, _consecutive_failures,
     )
     if old is not None:
         try:
