@@ -335,10 +335,93 @@ def e2e_smoke(stem: Optional[str] = None) -> bool:
     return ok
 
 
+def fft_parity_test(n_trials: int = 50, seed: int = 11,
+                    tol: float = 1e-6) -> float:
+    """Max |r_fft − r_loop| over every shift of `n_trials` random windows on
+    real corpus songs. The loop scorer below is a verbatim copy of
+    xcorr_window's score_at (grid slicing + per-slice z-score)."""
+    import numpy as np
+    from bench.corpus import load_corpus
+    from bench.replay import load_song_assets
+    from bench.simulate import load_wav, make_frames
+    from services import xcorr_core as xc
+
+    rng = random.Random(seed)
+    stems = load_corpus()["stems"][:5]
+    worst = 0.0
+    for trial in range(n_trials):
+        stem = stems[trial % len(stems)]
+        cache = getattr(fft_parity_test, "_cache", {})
+        if stem not in cache:
+            assets = load_song_assets(stem)
+            cache[stem] = (assets, make_frames(load_wav(assets["wav_path"])))
+            fft_parity_test._cache = cache
+        assets, frames = cache[stem]
+        dur = int(assets["meta"].duration_ms or 120000)
+        ws = rng.randrange(8000, max(9000, dur - 40000), 250)
+        we = ws + 5000
+        search_ms = rng.choice([2000, 3500, 8000])
+        frames_now = [f for f in frames if f[0] <= we + 1000 + search_ms]
+
+        landscape = xc.xcorr_window_full(
+            assets["stored_ts"], assets["stored_bands"], frames_now, ws, we,
+            search_ms=search_ms)
+        if landscape is None:
+            continue
+
+        # Loop scorer — verbatim score_at math.
+        BIN = xc.XCORR_BIN_MS
+        bins = np.arange(ws, we, BIN, dtype=float)
+        n_bins = len(bins)
+        live_ts = np.array([f[0] for f in frames_now], dtype=float)
+        band_info = []
+        for band_idx, stored_rms in enumerate(assets["stored_bands"]):
+            template = xc.agc_normalize(np.interp(bins, assets["stored_ts"], stored_rms))
+            if template.std() < 1e-6:
+                continue
+            band_info.append((band_idx, (template - template.mean()) / template.std()))
+        grid_start = ws - search_ms
+        grid_ts = np.arange(grid_start, we + search_ms + BIN, BIN, dtype=float)
+        n_grid = len(grid_ts)
+        live_grid = {}
+        for band_idx, _ in band_info:
+            live_rms = xc.agc_normalize(xc.signed_square(
+                np.array([f[1 + band_idx] for f in frames_now], dtype=float)))
+            live_grid[band_idx] = np.interp(grid_ts, live_ts, live_rms, left=0.0, right=0.0)
+        base_idx = int(round((ws - grid_start) / BIN))
+
+        for k, shift in enumerate(landscape.shifts_ms):
+            off = base_idx + int(shift) // BIN
+            if off < 0 or off + n_bins > n_grid:
+                continue
+            r_sum, n_valid = 0.0, 0
+            for band_idx, tnorm in band_info:
+                sig = live_grid[band_idx][off: off + n_bins]
+                if sig.std() < 1e-6:
+                    continue
+                r_sum += float(np.dot(tnorm, (sig - sig.mean()) / sig.std())) / n_bins
+                n_valid += 1
+            r_loop = (r_sum / n_valid) if n_valid else None
+            r_fft = landscape.r[k]
+            if r_loop is None:
+                if np.isfinite(r_fft):
+                    worst = max(worst, abs(float(r_fft)))
+            else:
+                if not np.isfinite(r_fft):
+                    worst = max(worst, abs(r_loop))
+                else:
+                    worst = max(worst, abs(float(r_fft) - r_loop))
+    return worst
+
+
 def run_selftest() -> bool:
     print("Decision-differential test (2000 random sequences)...")
     failures = decision_differential_test()
     print(f"  {'PASS' if failures == 0 else 'FAIL'} — {failures} divergences")
+    print("FFT-vs-loop kernel parity (50 random windows)...")
+    worst = fft_parity_test()
+    fft_ok = worst < 1e-6
+    print(f"  {'PASS' if fft_ok else 'FAIL'} — max |r_fft − r_loop| = {worst:.2e}")
     print("End-to-end smoke replay...")
     smoke_ok = e2e_smoke()
-    return failures == 0 and smoke_ok
+    return failures == 0 and fft_ok and smoke_ok

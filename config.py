@@ -250,6 +250,17 @@ class Settings(BaseSettings):
     # Coarse-then-fine: coarse step (ms) and number of top candidates to refine.
     xcorr_coarse_step_ms: int = 100
     xcorr_top_k_refine: int = 3
+    # FFT fast-NCC sweep (Phase 2): exact Pearson r at EVERY 25ms shift in one
+    # fftconvolve pass — no coarse-step aliasing — plus full peak-landscape
+    # gates (min-separation top1-top2 margin; comb/periodicity beat-twin
+    # detection that needs no librosa tempo). Coarse+fine path retained as
+    # fallback while False.
+    xcorr_fft_enabled: bool = False
+    xcorr_peak_min_sep_ms: int = 350       # peaks closer than this are one peak
+    xcorr_peak_top_k: int = 5              # peaks kept in the landscape
+    xcorr_comb_min_strength: float = 0.35  # autocorr(r) ratio to flag periodicity
+    xcorr_comb_lag_min_ms: int = 250       # comb-period search range
+    xcorr_comb_lag_max_ms: int = 1500
     # Song-start sniff: fire a dedicated start-window xcorr after this much
     # accumulated live audio at song load.
     xcorr_start_sniff_ms: int = 5000

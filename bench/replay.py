@@ -307,7 +307,9 @@ def replay_play(stem: str, scenario: Scenario, *,
         )
         old_r = float(old_r) if old_r is not None else 0.0
 
-        new_result = xcorr_core.xcorr_window(
+        _sweep_fn = (xcorr_core.xcorr_window_fft if settings.xcorr_fft_enabled
+                     else xcorr_core.xcorr_window)
+        new_result = _sweep_fn(
             stored_ts, stored_bands, frames_now, win_start, win_end,
             search_ms=search_ms, old_r=old_r, tempo_bpm=tempo_bpm,
         )

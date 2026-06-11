@@ -54,6 +54,7 @@ from services.xcorr_core import (
     eval_at_shift as _eval_at_shift,
     xcorr_window as _xcorr_window,
     xcorr_window_detail as _xcorr_window_detail,
+    xcorr_window_fft as _xcorr_window_fft,
 )
 from services.xcorr_sweep import SweepConfig, SweepEvaluator
 
@@ -824,11 +825,14 @@ class AutoOffsetService:
                 old_r = float(old_r) if old_r is not None else 0.0
 
                 # ── NEW candidate: free-search xcorr (multi-band) ────────────
-                # Run on a worker thread so the per-shift numpy sweep doesn't
-                # block the asyncio event loop (which serves LedFX HTTP writes,
-                # WebSocket broadcasts, and the trigger engine tick).
+                # Run on a worker thread so the numpy sweep doesn't block the
+                # asyncio event loop (which serves LedFX HTTP writes, WebSocket
+                # broadcasts, and the trigger engine tick). FFT path (Phase 2):
+                # exact r at every 25ms shift + landscape gates; legacy
+                # coarse+fine kept as fallback while the flag is off.
+                _sweep_fn = _xcorr_window_fft if settings.xcorr_fft_enabled else _xcorr_window
                 new_result = await asyncio.to_thread(
-                    _xcorr_window,
+                    _sweep_fn,
                     stored_ts, stored_bands, frames, win_start, win_end,
                     search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
                     old_r=old_r,

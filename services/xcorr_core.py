@@ -310,6 +310,273 @@ def xcorr_window(
     return (-best_shift, round(best_r, 3))
 
 
+# ── Phase 2: FFT fast-NCC sweep ───────────────────────────────────────────────
+def ncc_sliding(template_norm: np.ndarray, search: np.ndarray,
+                min_std: float = 1e-6) -> np.ndarray:
+    """Exact z-scored Pearson r of `template_norm` (already zero-mean,
+    unit-std, length n) against EVERY length-n window of `search`, in one
+    pass (Lewis 1995 running-sums normalization).
+
+    Because the template is zero-mean:
+        dot(t, zscore(s_k)) = (Σ t·s_k) / σ_k
+    so r[k] = c[k] / (n·σ_k), with c via a single FFT correlation and σ_k
+    from cumulative sums of s and s². Windows with σ_k < min_std return NaN
+    (mirrors the loop's flat-slice skip).
+    """
+    from scipy.signal import correlate
+
+    t = np.asarray(template_norm, dtype=np.float64)
+    s = np.asarray(search, dtype=np.float64)
+    n = len(t)
+    if len(s) < n or n == 0:
+        return np.empty(0)
+    c = correlate(s, t, mode="valid", method="auto")
+
+    cs1 = np.concatenate(([0.0], np.cumsum(s)))
+    cs2 = np.concatenate(([0.0], np.cumsum(s * s)))
+    s1 = cs1[n:] - cs1[:-n]
+    s2 = cs2[n:] - cs2[:-n]
+    mean = s1 / n
+    var = np.maximum(s2 / n - mean * mean, 0.0)
+    sigma = np.sqrt(var)
+
+    r = np.full(len(c), np.nan)
+    ok = sigma >= min_std
+    r[ok] = c[ok] / (n * sigma[ok])
+    return r
+
+
+@dataclass
+class Landscape:
+    """Full-resolution correlation landscape of one window sweep."""
+    shifts_ms: np.ndarray          # shift at each index (25ms apart)
+    r: np.ndarray                  # multi-band mean r at each shift (NaN = invalid)
+    peaks: list[tuple[int, float]]  # [(shift_ms, r)] top-k, ≥min_sep apart, r desc
+    comb_period_ms: Optional[float]
+    comb_strength: float
+
+    @property
+    def top1(self) -> Optional[tuple[int, float]]:
+        return self.peaks[0] if self.peaks else None
+
+    @property
+    def top2(self) -> Optional[tuple[int, float]]:
+        return self.peaks[1] if len(self.peaks) > 1 else None
+
+    @property
+    def margin(self) -> float:
+        if len(self.peaks) > 1:
+            return self.peaks[0][1] - self.peaks[1][1]
+        return float("inf")
+
+    def r_at(self, shift_ms: int) -> Optional[float]:
+        """r at the grid shift nearest shift_ms (None when out of range/NaN)."""
+        if len(self.shifts_ms) == 0:
+            return None
+        idx = int(round((shift_ms - self.shifts_ms[0]) / XCORR_BIN_MS))
+        if idx < 0 or idx >= len(self.r):
+            return None
+        v = self.r[idx]
+        return float(v) if np.isfinite(v) else None
+
+
+def analyze_landscape(shifts_ms: np.ndarray, r: np.ndarray, *,
+                      top_k: Optional[int] = None,
+                      min_sep_ms: Optional[int] = None,
+                      comb_lag_min_ms: Optional[int] = None,
+                      comb_lag_max_ms: Optional[int] = None) -> Landscape:
+    """Peak picking with real separation + comb/periodicity detection.
+
+    Peaks: scipy.signal.find_peaks with `distance`=min_sep, so top1−top2
+    margin compares genuinely distinct peaks (the legacy fine-pass "second_r"
+    was usually the 25ms shoulder of the same peak → margin≈0 always).
+
+    Comb: autocorrelation of (r − mean). A strongly periodic landscape
+    (beat-tile twins) shows a dominant lag in [comb_lag_min, comb_lag_max];
+    `comb_strength` = a[lag]/a[0]. Works without librosa tempo.
+    """
+    from scipy.signal import find_peaks
+
+    top_k = top_k if top_k is not None else int(getattr(settings, "xcorr_peak_top_k", 5))
+    min_sep_ms = min_sep_ms if min_sep_ms is not None else int(getattr(settings, "xcorr_peak_min_sep_ms", 350))
+    comb_lag_min_ms = comb_lag_min_ms if comb_lag_min_ms is not None else int(getattr(settings, "xcorr_comb_lag_min_ms", 250))
+    comb_lag_max_ms = comb_lag_max_ms if comb_lag_max_ms is not None else int(getattr(settings, "xcorr_comb_lag_max_ms", 1500))
+
+    r_clean = np.where(np.isfinite(r), r, -np.inf)
+    distance = max(1, min_sep_ms // XCORR_BIN_MS)
+    idx, _ = find_peaks(r_clean, distance=distance)
+    # find_peaks excludes endpoints; the true best can sit at the search edge.
+    for edge in (0, len(r_clean) - 1):
+        if len(r_clean) > 1 and np.isfinite(r[edge]):
+            neighbor = r_clean[1] if edge == 0 else r_clean[-2]
+            if r_clean[edge] > neighbor:
+                idx = np.append(idx, edge)
+    cand = sorted(((int(shifts_ms[i]), float(r[i])) for i in idx
+                   if np.isfinite(r[i])), key=lambda p: -p[1])
+    # Enforce separation greedily across the merged (peaks+edges) list.
+    peaks: list[tuple[int, float]] = []
+    for shift, rv in cand:
+        if all(abs(shift - p[0]) >= min_sep_ms for p in peaks):
+            peaks.append((shift, rv))
+        if len(peaks) >= top_k:
+            break
+
+    # Comb/periodicity on the mean-removed landscape.
+    comb_period_ms: Optional[float] = None
+    comb_strength = 0.0
+    finite = np.isfinite(r)
+    if finite.sum() >= 8:
+        x = np.where(finite, r, np.nanmean(r[finite]))
+        x = x - x.mean()
+        a = np.correlate(x, x, mode="full")[len(x) - 1:]
+        if a[0] > 1e-12:
+            lag_lo = max(1, comb_lag_min_ms // XCORR_BIN_MS)
+            lag_hi = min(len(a) - 1, comb_lag_max_ms // XCORR_BIN_MS)
+            if lag_hi > lag_lo:
+                lags = np.arange(lag_lo, lag_hi + 1)
+                best_lag = lags[np.argmax(a[lag_lo:lag_hi + 1])]
+                comb_period_ms = float(best_lag * XCORR_BIN_MS)
+                comb_strength = float(a[best_lag] / a[0])
+
+    return Landscape(shifts_ms=shifts_ms, r=r, peaks=peaks,
+                     comb_period_ms=comb_period_ms, comb_strength=comb_strength)
+
+
+def xcorr_window_full(
+    stored_ts: np.ndarray,
+    stored_bands: list[np.ndarray],
+    frames: list[tuple[int, float, float, float, float]],
+    win_start: int,
+    win_end: int,
+    *,
+    search_ms: int,
+) -> Optional[Landscape]:
+    """FFT fast-NCC: multi-band mean Pearson r at EVERY 25ms shift in
+    ±search_ms. Grid construction is identical to `xcorr_window`, so values
+    are bit-comparable to its score_at() at matching shifts."""
+    bins = np.arange(win_start, win_end, XCORR_BIN_MS, dtype=float)
+    n_bins = len(bins)
+    live_ts = np.array([f[0] for f in frames], dtype=float)
+
+    band_info: list[tuple[int, np.ndarray]] = []
+    for band_idx, stored_rms in enumerate(stored_bands):
+        template = agc_normalize(np.interp(bins, stored_ts, stored_rms))
+        if template.std() < 1e-6:
+            continue
+        band_info.append((band_idx, (template - template.mean()) / template.std()))
+    if not band_info:
+        return None
+
+    grid_start = win_start - search_ms
+    grid_end = win_end + search_ms + XCORR_BIN_MS
+    grid_ts = np.arange(grid_start, grid_end, XCORR_BIN_MS, dtype=float)
+    base_idx_at_zero = int(round((win_start - grid_start) / XCORR_BIN_MS))
+
+    r_bands = []
+    for band_idx, template_norm in band_info:
+        live_rms = agc_normalize(
+            signed_square(np.array([f[1 + band_idx] for f in frames], dtype=float))
+        )
+        live_grid = np.interp(grid_ts, live_ts, live_rms, left=0.0, right=0.0)
+        r_bands.append(ncc_sliding(template_norm, live_grid))
+    if not r_bands or len(r_bands[0]) == 0:
+        return None
+
+    stacked = np.vstack(r_bands)
+    with np.errstate(invalid="ignore"):
+        r = np.nanmean(stacked, axis=0)   # per-shift mean over non-flat bands
+    shifts = (np.arange(len(r)) - base_idx_at_zero) * XCORR_BIN_MS
+    return analyze_landscape(shifts, r)
+
+
+def xcorr_window_fft(
+    stored_ts: np.ndarray,
+    stored_bands: list[np.ndarray],
+    frames: list[tuple[int, float, float, float, float]],
+    win_start: int,
+    win_end: int,
+    *,
+    search_ms: int,
+    old_r: Optional[float] = None,
+    tempo_bpm: Optional[float] = None,
+) -> Optional[tuple[int, float]]:
+    """Drop-in replacement for `xcorr_window` using the FFT landscape.
+    Same return contract: (offset_ms, r) or None. Gates read from the full
+    landscape: the wide-search margin compares genuinely separated peaks,
+    and the comb gate rejects beat-twin ambiguity even without librosa
+    tempo. The tempo-based twin check is retained alongside for now."""
+    landscape = xcorr_window_full(
+        stored_ts, stored_bands, frames, win_start, win_end, search_ms=search_ms,
+    )
+    if landscape is None or landscape.top1 is None:
+        return None
+    best_shift, best_r = landscape.top1
+
+    threshold = settings.xcorr_global_threshold
+    require_margin = 0.0
+    if search_ms > settings.xcorr_wide_threshold_ms:
+        threshold = max(threshold, settings.xcorr_wide_min_r)
+        require_margin = settings.xcorr_wide_top1_margin
+
+    if best_r < threshold:
+        logger.info(
+            "xcorr reject: window [%d–%d]ms best r=%.2f below threshold %.2f (search=±%dms, fft)",
+            win_start, win_end, best_r, threshold, search_ms,
+        )
+        return None
+
+    if (require_margin > 0 and landscape.top2 is not None
+            and best_r < settings.xcorr_high_confidence_r
+            and (old_r is None or old_r >= 0.0)
+            and landscape.margin < require_margin):
+        logger.info(
+            "xcorr reject: window [%d–%d]ms ambiguous — top1=%.2f@%+dms top2=%.2f@%+dms margin<%.2f (search=±%dms, fft)",
+            win_start, win_end, best_r, best_shift,
+            landscape.top2[1], landscape.top2[0], require_margin, search_ms,
+        )
+        return None
+
+    # Comb gate: a periodic landscape means beat-tile twins. Require top1 to
+    # beat the best twin at ±1..4 comb periods by the beat-twin margin.
+    comb_min = float(getattr(settings, "xcorr_comb_min_strength", 0.35))
+    twin_margin = float(getattr(settings, "xcorr_beat_twin_margin", 0.10))
+    if (landscape.comb_period_ms and landscape.comb_strength >= comb_min
+            and best_r < settings.xcorr_high_confidence_r):
+        for n in (1, 2, 3, 4):
+            for sign in (-1, 1):
+                twin_r = landscape.r_at(best_shift + sign * int(round(n * landscape.comb_period_ms)))
+                if twin_r is None:
+                    continue
+                if best_r - twin_r < twin_margin:
+                    logger.info(
+                        "xcorr reject: window [%d–%d]ms comb-twin — best=%.2f at %+dms vs twin=%.2f at %+d periods (comb=%.0fms str=%.2f)",
+                        win_start, win_end, best_r, best_shift, twin_r,
+                        sign * n, landscape.comb_period_ms, landscape.comb_strength,
+                    )
+                    return None
+
+    # Tempo-based twin check retained (benchmark decides which retires).
+    if tempo_bpm and tempo_bpm > 0 and best_r < settings.xcorr_high_confidence_r:
+        beat_period_ms = 60_000.0 / float(tempo_bpm)
+        for n in (1, 2, 3, 4):
+            for sign in (-1, 1):
+                twin_shift = best_shift + sign * int(round(n * beat_period_ms))
+                if abs(twin_shift) > search_ms:
+                    continue
+                twin_r = landscape.r_at(twin_shift)
+                if twin_r is None:
+                    continue
+                if best_r - twin_r < twin_margin:
+                    logger.info(
+                        "xcorr reject: window [%d–%d]ms beat-twin — best=%.2f at %+dms vs twin=%.2f at %+dms (%+d beats, margin<%.2f, fft)",
+                        win_start, win_end, best_r, best_shift,
+                        twin_r, twin_shift, sign * n, twin_margin,
+                    )
+                    return None
+
+    return (-best_shift, round(best_r, 3))
+
+
 # DIAGNOSTIC CSV ──────────────────────────────────────────────────────────────
 @dataclass
 class XcorrDetail:
