@@ -499,10 +499,15 @@ def replay_play(stem: str, scenario: Scenario, *,
                 mw_start = mw_end - mon_cfg.span_ms
                 rolling_r = None
                 if mw_start >= 0:
-                    rolling_r = xcorr_core.eval_at_shift(
-                        stored_ts, stored_bands, frames_now,
-                        mw_start, mw_end, -mon_off,
-                    )
+                    # Difficulty gate (mirrors live): flat spans are neutral.
+                    mw_bins = np.arange(mw_start, mw_end, xcorr_core.XCORR_BIN_MS, dtype=float)
+                    mw_tpl = np.interp(mw_bins, stored_ts, stored_rms)
+                    if xcorr_core.difficulty_score(mw_tpl, stored_rms) >= float(
+                            getattr(settings, "xcorr_starting_threshold", 0.15)):
+                        rolling_r = xcorr_core.eval_at_shift(
+                            stored_ts, stored_bands, frames_now,
+                            mw_start, mw_end, -mon_off,
+                        )
                 cpu_samples.append((time.perf_counter() - t0) * 1000.0)
                 action = monitor.note_check(rolling_r, engine._play_best_quality)
                 if action == "confirmed":

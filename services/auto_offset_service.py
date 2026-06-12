@@ -1161,10 +1161,19 @@ class AutoOffsetService:
                     _mw_start = _mw_end - _mon_cfg.span_ms
                     rolling_r = None
                     if _mw_start >= 0:
-                        rolling_r = await asyncio.to_thread(
-                            _eval_at_shift, stored_ts, stored_bands, frames,
-                            _mw_start, _mw_end, -_mon_off,
-                        )
+                        # Difficulty gate: a flat/repetitive stored span can't
+                        # testify about alignment — treat like silence
+                        # (neutral), not like mismatch. Mirrors the sweep's
+                        # window-difficulty wisdom; cuts false recoveries on
+                        # quiet bridges/outros of correctly-locked plays.
+                        _mw_bins = np.arange(_mw_start, _mw_end, _XCORR_BIN_MS, dtype=float)
+                        _mw_tpl = np.interp(_mw_bins, stored_ts, stored_rms)
+                        if _difficulty_score(_mw_tpl, stored_rms) >= float(
+                                getattr(settings, "xcorr_starting_threshold", 0.15)):
+                            rolling_r = await asyncio.to_thread(
+                                _eval_at_shift, stored_ts, stored_bands, frames,
+                                _mw_start, _mw_end, -_mon_off,
+                            )
                     action = monitor.note_check(rolling_r, _mon_pb)
                     try:
                         from services.websocket_manager import ws_manager
