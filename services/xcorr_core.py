@@ -837,45 +837,87 @@ def mismatch_spike(
         kernel = np.ones(smooth_bins) / smooth_bins
         d = np.convolve(d, kernel, mode="same")
 
-    # Cluster pick: prefer a SUSTAINED spike region (sliding 500ms sum) over
-    # a single noisy bin.
-    cw = max(1, 500 // XCORR_BIN_MS)
-    if len(d) <= cw:
-        centers = [int(np.argmax(d))]
-    else:
-        sums = np.convolve(d, np.ones(cw), mode="valid")
-        order = np.argsort(sums)[::-1]
-        centers = [int(order[0] + cw // 2)]
-        # Second-best cluster ≥ halfwin away (retry target when the best
-        # lands on an uninformative stored region).
-        for k in order[1:]:
-            c = int(k + cw // 2)
-            if abs(c - centers[0]) * XCORR_BIN_MS >= halfwin_ms:
-                centers.append(c)
-                break
+    # ── Pattern-aware target pick ─────────────────────────────────────────
+    # A wrong-by-N-beats lock on periodic music leaves the residual LOW
+    # wherever the pattern repeats (it pseudo-aligns with itself) and high
+    # exactly where the periodicity breaks — so spikes arrive as a TRAIN
+    # spanning the break/fill. Centering on the loudest 500ms can drop the
+    # window inside the broken region, whose repetitive content matches
+    # every beat shift equally (the comb gate then rightly refuses it).
+    # The disambiguating content is the pattern EDGE: a window straddling
+    # where pattern meets break matches at only the true offset. So: merge
+    # hot bins into runs (gaps ≤1s bridge per-beat spike trains), take the
+    # run with the most integrated residual, and aim at its edges —
+    # centered on the run when it fits in the window, straddling an edge
+    # when the run is longer.
+    hot_thr = max(0.6 * float(d.max()), float(d.mean()) + float(d.std()))
+    hot = d >= hot_thr
+    gap_bins = max(1, 1000 // XCORR_BIN_MS)
+    runs: list[tuple[int, int, float]] = []   # (start_idx, end_idx, mass)
+    i = 0
+    while i < len(hot):
+        if not hot[i]:
+            i += 1
+            continue
+        j = i
+        last_hot = i
+        while j < len(hot) and (hot[j] or j - last_hot <= gap_bins):
+            if hot[j]:
+                last_hot = j
+            j += 1
+        runs.append((i, last_hot, float(d[i:last_hot + 1].sum())))
+        i = j
+    if not runs:
+        runs = [(int(np.argmax(d)), int(np.argmax(d)), float(d.max()))]
+    runs.sort(key=lambda r: -r[2])
+
+    win_span = 2 * halfwin_ms
+    candidates: list[int] = []   # candidate window CENTERS (bin indices)
+    for (r_lo, r_hi, _mass) in runs[:2]:
+        run_ms = (r_hi - r_lo) * XCORR_BIN_MS
+        if run_ms <= win_span:
+            # Run fits: center the window on the RUN (covers both edges
+            # plus aligned margins on either side).
+            candidates.append((r_lo + r_hi) // 2)
+        else:
+            # Run longer than the window: straddle each edge (half inside
+            # the broken region, half in the still-matching pattern).
+            candidates.append(r_lo)
+            candidates.append(r_hi)
 
     stored_rms_diff = stored_bands[1]   # squared rms_low — difficulty band
     min_diff = float(getattr(settings, "xcorr_starting_threshold", 0.15))
-    for c in centers:
-        spike_ms = int(bins[min(c, len(bins) - 1)])
+
+    def _window_at(c: int) -> Optional[tuple[int, int, int, float]]:
+        spike_ms = int(bins[min(max(c, 0), len(bins) - 1)])
         win_start = max(0, spike_ms - halfwin_ms)
         win_end = min(int(stored_ts[-1]), spike_ms + halfwin_ms)
         if win_end - win_start < 2000:
+            return None
+        return (win_start, win_end, spike_ms,
+                round(float(d[min(max(c, 0), len(d) - 1)]), 3))
+
+    # Prefer the highest-difficulty candidate among those that pass the
+    # informativeness gate; fall back to the first viable one regardless —
+    # downstream gates make a useless window harmless (one sweep's cost).
+    best = None
+    best_diff = -1.0
+    for c in candidates:
+        w = _window_at(c)
+        if w is None:
             continue
-        w_bins = np.arange(win_start, win_end, XCORR_BIN_MS, dtype=float)
+        w_bins = np.arange(w[0], w[1], XCORR_BIN_MS, dtype=float)
         w_tpl = np.interp(w_bins, stored_ts, stored_rms_diff)
-        if difficulty_score(w_tpl, stored_rms_diff) >= min_diff:
-            return (win_start, win_end, spike_ms,
-                    round(float(d[min(c, len(d) - 1)]), 3))
-    # Fall back to the best cluster even if low-difficulty — the downstream
-    # gates make a useless window harmless (it just costs one sweep).
-    spike_ms = int(bins[min(centers[0], len(bins) - 1)])
-    win_start = max(0, spike_ms - halfwin_ms)
-    win_end = min(int(stored_ts[-1]), spike_ms + halfwin_ms)
-    if win_end - win_start < 2000:
-        return None
-    return (win_start, win_end, spike_ms,
-            round(float(d[min(centers[0], len(d) - 1)]), 3))
+        diff = difficulty_score(w_tpl, stored_rms_diff)
+        if diff >= min_diff and diff > best_diff:
+            best, best_diff = w, diff
+    if best is not None:
+        return best
+    for c in candidates:
+        w = _window_at(c)
+        if w is not None:
+            return w
+    return None
 
 
 # DIAGNOSTIC CSV ──────────────────────────────────────────────────────────────

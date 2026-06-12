@@ -232,6 +232,12 @@ def replay_play(stem: str, scenario: Scenario, *,
         seed_history, seed_q, coarse_locked = [expected] * 3, 0.8, True
     elif scenario.seed == "seeded_wrong_2s":
         seed_history, seed_q, coarse_locked = [expected + 2000] * 3, 0.8, True
+    elif scenario.seed == "seeded_wrong_beat":
+        # Wrong by exactly one beat period — the beat-tile twin trap. The
+        # residual stays low through periodic content and spikes only at
+        # pattern boundaries (the monitor's hardest recovery case).
+        beat = int(round(60000.0 / tempo_bpm)) if tempo_bpm else 600
+        seed_history, seed_q, coarse_locked = [expected + beat] * 3, 0.8, True
     else:   # cold
         seed_history, seed_q, coarse_locked = [], 0.0, False
 
