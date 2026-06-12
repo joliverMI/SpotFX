@@ -619,12 +619,46 @@ class AutoOffsetService:
         # legitimate corrections at lower Q than the historical lock could
         # never displace.)
         _seed_meta = load_audio_shape_meta(uri)
+        _slot_history_len = 0
+        _slot_quality = 0.0
+        _slot_cut_in: Optional[int] = None
         if _seed_meta is not None and app_state.active_setlist_id:
             _seed_entry = (_seed_meta.setlist_offsets or {}).get(app_state.active_setlist_id) or {}
             _seed_med = _median_offset(_seed_entry.get("history") or [])
             seed_offset = _seed_med if _seed_med is not None else int(_seed_entry.get("timestamp_offset_ms", 0))
+            _slot_history_len = len(_seed_entry.get("history") or [])
+            _slot_quality = float(_seed_entry.get("offset_quality", 0.0))
+            if _seed_entry.get("observed_cut_in_ms") is not None:
+                _slot_cut_in = int(_seed_entry["observed_cut_in_ms"])
         else:
             seed_offset = int(_seed_meta.timestamp_offset_ms or 0) if _seed_meta else 0
+            _slot_history_len = len(_seed_meta.offset_history or []) if _seed_meta else 0
+            _slot_quality = float(_seed_meta.offset_quality or 0.0) if _seed_meta else 0.0
+
+        # Phase 4: search center from history. Priority: slot history median →
+        # observed cut-in point → Set-List cross-track bias (first play of a
+        # track in a blended Set List) → None (cold → start at the wide stage).
+        history_center: Optional[int] = None
+        _prior_weight_scale = 1.0
+        if _slot_history_len > 0:
+            history_center = int(seed_offset)
+        elif _slot_cut_in is not None:
+            history_center = _slot_cut_in
+        elif (app_state.active_setlist_id
+              and getattr(settings, "xcorr_setlist_bias_enabled", True)):
+            try:
+                from services import setlist_store
+                _sl = setlist_store.get_by_id(app_state.active_setlist_id)
+                _deltas = sorted(int(d) for d in (_sl.recent_offset_deltas or [])) if _sl else []
+                if _deltas:
+                    history_center = _deltas[len(_deltas) // 2]
+                    _prior_weight_scale = 0.5   # cross-track hint, half trust
+                    logger.info(
+                        "Auto-offset xcorr: Set-List bias center %+dms from %d cross-track deltas for %s",
+                        history_center, len(_deltas), uri,
+                    )
+            except Exception:
+                pass
         window_queue = list(windows)
         # All per-window gate decisions (winner pick, confirmation clusters,
         # anti-corr streak, engine-snap stickiness, save gates, lock-and-stop)
@@ -632,10 +666,44 @@ class AutoOffsetService:
         # offline bench harness. This loop performs the side effects.
         # Phase 3: evidence accumulation needs the FFT path's landscapes.
         _accum_active = settings.xcorr_accum_enabled and settings.xcorr_fft_enabled
+        # Phase 4: search escalation ladder (narrow → wide → global).
+        _ladder = None
+        if settings.xcorr_search_ladder_enabled and settings.xcorr_fft_enabled:
+            _ladder = SearchLadder(
+                history_center_ms=history_center,
+                wide_span_ms=search_ms,
+                narrow_span_ms=int(settings.xcorr_search_narrow_ms),
+                global_span_ms=int(settings.xcorr_search_global_ms),
+                duration_ms=int(meta.duration_ms or 0),
+                escalate_after=int(settings.xcorr_ladder_escalate_after),
+            )
+            logger.info(
+                "Auto-offset xcorr: search ladder %s (start=%s center=%+dms ±%dms) for %s",
+                "/".join(s.name for s in _ladder.stages),
+                _ladder.current.name, _ladder.current.center_offset_ms,
+                _ladder.current.span_ms, uri,
+            )
+        _accum_span = (max(search_ms, int(settings.xcorr_search_global_ms))
+                       if _ladder else search_ms)
         accumulator = (
-            EvidenceAccumulator(max_offset_ms=search_ms + 5000)
+            EvidenceAccumulator(max_offset_ms=_accum_span + 5000)
             if _accum_active else None
         )
+        # Phase 4: soft history prior — bounded mass at the historical offset
+        # so it can tip twin ties but never out-vote fresh evidence.
+        if accumulator is not None and history_center is not None:
+            if _slot_history_len > 0:
+                _w_hist = min(1.0, _slot_history_len / 3.0) * max(0.0, _slot_quality)
+            else:
+                _w_hist = 0.5   # cut-in / Set-List bias center: modest fixed trust
+            _prior_mass = (float(settings.xcorr_prior_bonus_mass)
+                           * _w_hist * _prior_weight_scale)
+            if _prior_mass > 0:
+                accumulator.add_gaussian(
+                    history_center, _prior_mass,
+                    sigma_ms=float(settings.xcorr_prior_sigma_ms),
+                    count_support=False,
+                )
         evaluator = SweepEvaluator(
             SweepConfig.from_settings(settings),
             uri=uri,
@@ -792,11 +860,18 @@ class AutoOffsetService:
                 # intro just returns None and we retry next tick.
                 if _prog_active and frame.timestamp_ms >= _prog_next_ms:
                     _prog_next_ms = frame.timestamp_ms + int(settings.xcorr_progressive_interval_ms)
+                    if _ladder is not None:
+                        _p_center = _ladder.current.center_offset_ms
+                        _p_span = _ladder.current.span_ms
+                    else:
+                        _p_center = 0
+                        _p_span = _xcorr_search_ms(int(meta.duration_ms or 0))
                     _prog = await asyncio.to_thread(
                         _progressive_match,
                         frames, stored_ts, stored_bands,
                         t_now_ms=frame.timestamp_ms,
-                        search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
+                        search_ms=_p_span,
+                        center_offset_ms=_p_center,
                     )
                     if _prog is not None:
                         logger.info(
@@ -892,7 +967,17 @@ class AutoOffsetService:
                 # exact r at every 25ms shift + landscape gates; legacy
                 # coarse+fine kept as fallback while the flag is off.
                 _win_landscape = None
-                if _accum_active:
+                _stage = _ladder.current if _ladder else None
+                if _ladder is not None:
+                    _lo, _hi = _stage.shift_bounds
+                    new_result, _win_landscape = await asyncio.to_thread(
+                        _xcorr_window_fft_full,
+                        stored_ts, stored_bands, frames, win_start, win_end,
+                        search_lo_ms=_lo, search_hi_ms=_hi,
+                        old_r=old_r,
+                        tempo_bpm=tempo_bpm,
+                    )
+                elif _accum_active:
                     new_result, _win_landscape = await asyncio.to_thread(
                         _xcorr_window_fft_full,
                         stored_ts, stored_bands, frames, win_start, win_end,
@@ -931,7 +1016,22 @@ class AutoOffsetService:
                     engine_current_offset_ms=(engine_offset_ms if engine_offset_ms is not None else 0),
                     engine_play_best_quality=engine_play_best,
                     landscape=_win_landscape,
+                    envelope_exempt=(_stage is not None and _stage.name == "global"),
                 )
+
+                # Phase 4: ladder escalation — when the current stage keeps
+                # finding nothing, widen; an anti-correlated baseline goes
+                # straight to global (the loaded center is provably wrong).
+                if _ladder is not None:
+                    _new_stage = _ladder.note_window(outcome.new_result is not None)
+                    if _new_stage is None and outcome.baseline_anti_corr:
+                        _new_stage = _ladder.escalate_to_global()
+                    if _new_stage is not None:
+                        logger.info(
+                            "Auto-offset xcorr: search ladder → %s (center=%+dms ±%dms) for %s",
+                            _new_stage.name, _new_stage.center_offset_ms,
+                            _new_stage.span_ms, uri,
+                        )
 
                 logger.info(
                     "Auto-offset xcorr: [%d–%d]ms  NEW %+dms r=%.2f Q=%.2f  "
@@ -1737,13 +1837,22 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
             "source": source,
         })
         history = history[:_OFFSET_HISTORY_CAP]
-        meta.setlist_offsets[sl_id] = {
+        entry_update = {
             **prev,                                          # preserve perception_trim_ms, anti_corr_count, etc
             "timestamp_offset_ms": int(offset_ms),
             "offset_quality": round(quality, 3),
             "generated_at": now_iso,
             "observed_cut_ms": int(cut_ms),
             "history": history,
+        }
+        # Phase 4: a large positive lock is a directly-observed blend cut-in
+        # point — persist it so the next play's narrow search centers there.
+        # Supersedes the crude captured−polled `observed_cut_ms` estimate.
+        _cut_in_min = int(getattr(settings, "xcorr_cut_in_record_min_ms", 3000))
+        if int(offset_ms) >= _cut_in_min:
+            entry_update["observed_cut_in_ms"] = int(offset_ms)
+        meta.setlist_offsets[sl_id] = {
+            **entry_update,
             # Successful save means the stored offset is good for this play —
             # reset the anti-correlated streak counter.
             "anti_corr_count": 0,

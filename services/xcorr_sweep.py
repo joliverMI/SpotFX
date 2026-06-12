@@ -80,6 +80,67 @@ class SweepConfig:
 
 
 @dataclass
+class SearchStage:
+    name: str               # narrow | wide | global
+    center_offset_ms: int   # OFFSET-domain center
+    span_ms: int            # half-width
+
+    @property
+    def shift_bounds(self) -> tuple[int, int]:
+        """Shift-domain (lo, hi) for xcorr_window_fft_full: offset range
+        [c−span, c+span] ⇔ shift range [−c−span, −c+span]."""
+        return (-self.center_offset_ms - self.span_ms,
+                -self.center_offset_ms + self.span_ms)
+
+
+class SearchLadder:
+    """Phase 4 search escalation: narrow → wide → global. Starts narrow when
+    the slot has history (centered on it + any observed cut-in), else wide.
+    Escalates after N consecutive windows with no accepted NEW measurement,
+    or immediately when the baseline is flagged anti-correlated. Never
+    de-escalates within a play."""
+
+    def __init__(self, *, history_center_ms: Optional[int],
+                 wide_span_ms: int, narrow_span_ms: int,
+                 global_span_ms: int, duration_ms: int,
+                 escalate_after: int = 2) -> None:
+        g_span = min(int(global_span_ms), max(int(duration_ms), int(wide_span_ms)))
+        stages = []
+        if history_center_ms is not None:
+            stages.append(SearchStage("narrow", int(history_center_ms), int(narrow_span_ms)))
+        stages.append(SearchStage("wide", int(history_center_ms or 0), int(wide_span_ms)))
+        stages.append(SearchStage("global", 0, g_span))
+        self.stages = stages
+        self._idx = 0
+        self._empty_streak = 0
+        self.escalate_after = int(escalate_after)
+
+    @property
+    def current(self) -> SearchStage:
+        return self.stages[self._idx]
+
+    def note_window(self, found: bool) -> Optional[SearchStage]:
+        """Record a window result. Returns the new stage when escalating."""
+        if found:
+            self._empty_streak = 0
+            return None
+        self._empty_streak += 1
+        if (self._empty_streak >= self.escalate_after
+                and self._idx < len(self.stages) - 1):
+            self._idx += 1
+            self._empty_streak = 0
+            return self.current
+        return None
+
+    def escalate_to_global(self) -> Optional[SearchStage]:
+        if self._idx < len(self.stages) - 1:
+            self._idx = len(self.stages) - 1
+            self._empty_streak = 0
+            return self.current
+        return None
+
+
+@dataclass
 class WindowOutcome:
     """Everything the caller needs to perform this window's side effects."""
     win_start: int
@@ -195,6 +256,9 @@ class SweepEvaluator:
         engine_current_offset_ms: int,
         engine_play_best_quality: float,
         landscape=None,   # xcorr_core.Landscape | None (FFT path, Phase 3)
+        envelope_exempt: bool = False,   # global-stage search (Phase 4): the
+                                         # U-Score envelopes were vetted only
+                                         # over ±12 beats — skip the clip
     ) -> WindowOutcome:
         """Evaluate one completed window. `stored_offset_ms` is the OLD test
         point (the engine's runtime offset, or the disk median fallback);
@@ -236,7 +300,7 @@ class SweepEvaluator:
         # (engine has not snapped yet this play) so a far-from-loaded truth
         # can still be discovered.
         envelope_clipped = False
-        if new_result is not None and engine_play_best_quality > 0.0:
+        if new_result is not None and engine_play_best_quality > 0.0 and not envelope_exempt:
             env = self.envelope_lookup.get((win_start, win_end))
             if env is not None:
                 _safe_neg, _safe_pos = env

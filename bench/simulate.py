@@ -163,7 +163,8 @@ class FakeMetaStore:
     def __init__(self, engine: FakeEngine, *,
                  seed_history: Optional[list[int]] = None,
                  seed_quality: float = 0.0,
-                 coarse_locked: bool = False) -> None:
+                 coarse_locked: bool = False,
+                 observed_cut_in_ms: Optional[int] = None) -> None:
         self.engine = engine
         self.history: list[dict] = [
             {"offset_ms": int(o), "quality": seed_quality, "source": "seed"}
@@ -172,7 +173,17 @@ class FakeMetaStore:
         self.timestamp_offset_ms: int = int(seed_history[0]) if seed_history else 0
         self.offset_quality: float = seed_quality if seed_history else 0.0
         self.coarse_locked = coarse_locked
+        self.observed_cut_in_ms = observed_cut_in_ms
         self.save_log: list[SaveEvent] = []
+
+    def snapshot(self) -> dict:
+        """Slot state for seeding a follow-up play (two-play scenarios)."""
+        return {
+            "history": [int(h["offset_ms"]) for h in self.history],
+            "quality": self.offset_quality,
+            "coarse_locked": self.coarse_locked,
+            "observed_cut_in_ms": self.observed_cut_in_ms,
+        }
 
     def median_offset(self) -> Optional[int]:
         vals = sorted(int(h["offset_ms"]) for h in self.history)
@@ -189,6 +200,9 @@ class FakeMetaStore:
         self.timestamp_offset_ms = int(offset_ms)
         self.offset_quality = round(quality, 3)
         self.coarse_locked = True
+        # Phase 4 cut-in memory (mirrors _save_offset).
+        if int(offset_ms) >= int(getattr(settings, "xcorr_cut_in_record_min_ms", 3000)):
+            self.observed_cut_in_ms = int(offset_ms)
         self.save_log.append(SaveEvent(self.engine.now_ms, int(offset_ms),
                                        quality, source))
         # _save_offset applies to the live engine with an anchor-provenance

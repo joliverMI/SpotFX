@@ -280,6 +280,25 @@ class Settings(BaseSettings):
     xcorr_progressive_min_r: float = 0.65
     xcorr_progressive_dominance: float = 0.12
     xcorr_progressive_min_cv: float = 0.25
+    # Search escalation ladder (Phase 4): narrow (centered on the slot's
+    # history ± observed cut-in) → wide (today's mix-aware formula) → global
+    # (±30s) — escalating only when the current stage finds nothing, so the
+    # wide ranges' false-positive surface is paid only when needed. Requires
+    # xcorr_fft_enabled. Always-wide proved dangerous on self-similar songs.
+    xcorr_search_ladder_enabled: bool = False
+    xcorr_search_narrow_ms: int = 2500
+    xcorr_search_global_ms: int = 30000
+    xcorr_ladder_escalate_after: int = 2   # consecutive empty windows → next stage
+    # Soft history prior (Phase 4): a small Gaussian mass at the slot median
+    # in the evidence accumulator. Bounded well below the lock mass so two
+    # agreeing fresh windows always out-vote history; breaks twin ties.
+    xcorr_prior_bonus_mass: float = 0.3
+    xcorr_prior_sigma_ms: int = 400
+    # First-play-in-Set-List bias seeding from Setlist.recent_offset_deltas.
+    xcorr_setlist_bias_enabled: bool = True
+    # Persist directly-observed blend cut-in points (offset ≥ this) on the
+    # slot as observed_cut_in_ms; next play's narrow stage centers there.
+    xcorr_cut_in_record_min_ms: int = 3000
     # Song-start sniff: fire a dedicated start-window xcorr after this much
     # accumulated live audio at song load.
     xcorr_start_sniff_ms: int = 5000

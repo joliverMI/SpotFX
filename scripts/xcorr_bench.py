@@ -118,6 +118,19 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
                                   wav_bias_ms=bias)
                 results.append(res)
                 done += 1
+                # Two-play memory scenario (Phase 4): replay the same blend
+                # cut-in / wide offset with the slot state the cold play left
+                # behind — exercises cut-in memory + narrow-stage centering.
+                if seed == "cold" and (cut_in > 0 or abs(true_off) >= 10000):
+                    sc2 = Scenario(name=f"{pname}/second_play",
+                                   true_offset_ms=true_off, cut_in_ms=cut_in,
+                                   noise_snr_db=snr, blend_ms=blend_ms,
+                                   seed="snapshot",
+                                   seed_snapshot=res.store_snapshot,
+                                   force_search_ms=force_search_ms)
+                    results.append(replay_play(stem, sc2, assets=assets,
+                                               frames=frames, wav_bias_ms=bias))
+                    done += 1
         el = time.monotonic() - t_start
         print(f"  [{si+1}/{len(stems)}] {stem[:46]:<46} bias={bias:+5d}ms  "
               f"{done}/{total} plays, {el:.0f}s")

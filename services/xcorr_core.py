@@ -458,11 +458,20 @@ def xcorr_window_full(
     win_start: int,
     win_end: int,
     *,
-    search_ms: int,
+    search_ms: Optional[int] = None,
+    search_lo_ms: Optional[int] = None,
+    search_hi_ms: Optional[int] = None,
 ) -> Optional[Landscape]:
-    """FFT fast-NCC: multi-band mean Pearson r at EVERY 25ms shift in
-    ±search_ms. Grid construction is identical to `xcorr_window`, so values
-    are bit-comparable to its score_at() at matching shifts."""
+    """FFT fast-NCC: multi-band mean Pearson r at EVERY 25ms shift.
+    Symmetric form (`search_ms` → shifts ∈ [−s, +s]) is grid-identical to
+    `xcorr_window`'s score_at(). Phase 4's search ladder passes explicit
+    shift-domain bounds (`search_lo_ms`/`search_hi_ms`) for centered or
+    asymmetric ranges (a centered OFFSET range [c−span, c+span] is the
+    shift range [−c−span, −c+span])."""
+    if search_lo_ms is None or search_hi_ms is None:
+        if search_ms is None:
+            raise ValueError("need search_ms or search_lo_ms+search_hi_ms")
+        search_lo_ms, search_hi_ms = -int(search_ms), int(search_ms)
     bins = np.arange(win_start, win_end, XCORR_BIN_MS, dtype=float)
     n_bins = len(bins)
     live_ts = np.array([f[0] for f in frames], dtype=float)
@@ -476,8 +485,8 @@ def xcorr_window_full(
     if not band_info:
         return None
 
-    grid_start = win_start - search_ms
-    grid_end = win_end + search_ms + XCORR_BIN_MS
+    grid_start = win_start + search_lo_ms
+    grid_end = win_end + search_hi_ms + XCORR_BIN_MS
     grid_ts = np.arange(grid_start, grid_end, XCORR_BIN_MS, dtype=float)
     base_idx_at_zero = int(round((win_start - grid_start) / XCORR_BIN_MS))
 
@@ -524,7 +533,9 @@ def xcorr_window_fft_full(
     win_start: int,
     win_end: int,
     *,
-    search_ms: int,
+    search_ms: Optional[int] = None,
+    search_lo_ms: Optional[int] = None,
+    search_hi_ms: Optional[int] = None,
     old_r: Optional[float] = None,
     tempo_bpm: Optional[float] = None,
 ) -> tuple[Optional[tuple[int, float]], Optional["Landscape"]]:
@@ -533,8 +544,14 @@ def xcorr_window_fft_full(
     the wide-search margin compares genuinely separated peaks, and the comb
     gate rejects beat-twin ambiguity even without librosa tempo. The
     tempo-based twin check is retained alongside for now."""
+    if search_lo_ms is None or search_hi_ms is None:
+        if search_ms is None:
+            raise ValueError("need search_ms or search_lo_ms+search_hi_ms")
+        search_lo_ms, search_hi_ms = -int(search_ms), int(search_ms)
+    half_span = (search_hi_ms - search_lo_ms) // 2
     landscape = xcorr_window_full(
-        stored_ts, stored_bands, frames, win_start, win_end, search_ms=search_ms,
+        stored_ts, stored_bands, frames, win_start, win_end,
+        search_lo_ms=search_lo_ms, search_hi_ms=search_hi_ms,
     )
     if landscape is None or landscape.top1 is None:
         return None, landscape
@@ -542,14 +559,14 @@ def xcorr_window_fft_full(
 
     threshold = settings.xcorr_global_threshold
     require_margin = 0.0
-    if search_ms > settings.xcorr_wide_threshold_ms:
+    if half_span > settings.xcorr_wide_threshold_ms:
         threshold = max(threshold, settings.xcorr_wide_min_r)
         require_margin = settings.xcorr_wide_top1_margin
 
     if best_r < threshold:
         logger.info(
-            "xcorr reject: window [%d–%d]ms best r=%.2f below threshold %.2f (search=±%dms, fft)",
-            win_start, win_end, best_r, threshold, search_ms,
+            "xcorr reject: window [%d–%d]ms best r=%.2f below threshold %.2f (search=[%d,%d]ms, fft)",
+            win_start, win_end, best_r, threshold, search_lo_ms, search_hi_ms,
         )
         return None, landscape
 
@@ -558,9 +575,9 @@ def xcorr_window_fft_full(
             and (old_r is None or old_r >= 0.0)
             and landscape.margin < require_margin):
         logger.info(
-            "xcorr reject: window [%d–%d]ms ambiguous — top1=%.2f@%+dms top2=%.2f@%+dms margin<%.2f (search=±%dms, fft)",
+            "xcorr reject: window [%d–%d]ms ambiguous — top1=%.2f@%+dms top2=%.2f@%+dms margin<%.2f (search=[%d,%d]ms, fft)",
             win_start, win_end, best_r, best_shift,
-            landscape.top2[1], landscape.top2[0], require_margin, search_ms,
+            landscape.top2[1], landscape.top2[0], require_margin, search_lo_ms, search_hi_ms,
         )
         return None, landscape
 
@@ -589,7 +606,7 @@ def xcorr_window_fft_full(
         for n in (1, 2, 3, 4):
             for sign in (-1, 1):
                 twin_shift = best_shift + sign * int(round(n * beat_period_ms))
-                if abs(twin_shift) > search_ms:
+                if twin_shift < search_lo_ms or twin_shift > search_hi_ms:
                     continue
                 twin_r = landscape.r_at(twin_shift)
                 if twin_r is None:
@@ -622,6 +639,7 @@ def progressive_match(
     *,
     t_now_ms: int,
     search_ms: int,
+    center_offset_ms: int = 0,
     min_cv: Optional[float] = None,
     min_r: Optional[float] = None,
     min_dominance: Optional[float] = None,
@@ -701,9 +719,10 @@ def progressive_match(
         return None
 
     # Stored search grid: candidate stored positions p for the template
-    # start, offset = p − t0 ∈ [−search, +search].
-    grid_start = t0 - search_ms
-    grid_end = t0 + search_ms + (bins[-1] - bins[0]) + XCORR_BIN_MS
+    # start, offset = p − t0 ∈ center ± search (Phase 4 ladder/cut-in memory
+    # centers the range; default center 0).
+    grid_start = t0 + center_offset_ms - search_ms
+    grid_end = t0 + center_offset_ms + search_ms + (bins[-1] - bins[0]) + XCORR_BIN_MS
     grid_ts = np.arange(grid_start, grid_end, XCORR_BIN_MS, dtype=float)
 
     r_bands = []

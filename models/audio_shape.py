@@ -90,7 +90,11 @@ class AudioShapeMeta(BaseModel):
     #   timestamp_offset_ms : int    — latest xcorr-derived offset (math)
     #   offset_quality      : float  — Q score of latest lock
     #   generated_at        : iso    — when latest lock was saved
-    #   observed_cut_ms     : int
+    #   observed_cut_ms     : int    — captured−polled duration delta (crude
+    #                                  mix-trim estimate, diagnostics only)
+    #   observed_cut_in_ms  : int    — directly-observed blend cut-in point
+    #                                  (a saved lock ≥ xcorr_cut_in_record_min_ms);
+    #                                  centers the next play's narrow search stage
     #   perception_trim_ms  : int    — user-applied nudge layered on top of xcorr
     #                                  (positive = fire later; negative = earlier)
     #   history             : list   — last 5 saved locks, most-recent first:

@@ -44,7 +44,8 @@ class Scenario:
     noise_snr_db: Optional[float] = None
     blend_ms: int = 0
     blend_donor: Optional[str] = None       # corpus stem for donor tail
-    seed: str = "cold"                       # cold | seeded_correct | seeded_wrong_2s
+    seed: str = "cold"                       # cold | seeded_correct | seeded_wrong_2s | snapshot
+    seed_snapshot: Optional[dict] = None     # FakeMetaStore.snapshot() of a prior play
     play_type: str = "first"
     force_search_ms: Optional[int] = None    # override mix-aware search range
 
@@ -89,6 +90,7 @@ class PlayResult:
     cpu_ms_p50: float
     cpu_ms_p95: float
     traces: list[WindowTrace] = field(default_factory=list)
+    store_snapshot: dict = field(default_factory=dict)   # seeds two-play scenarios
 
     @property
     def correct(self) -> bool:
@@ -211,7 +213,14 @@ def replay_play(stem: str, scenario: Scenario, *,
     # ── Seed state per scenario ────────────────────────────────────────────────
     # Expected offset = injected truth + the song's stored WAV↔NPZ bias.
     expected = int(scenario.true_offset_ms) + int(wav_bias_ms)
-    if scenario.seed == "seeded_correct":
+    seed_cut_in: Optional[int] = None
+    if scenario.seed == "snapshot" and scenario.seed_snapshot:
+        snap = scenario.seed_snapshot
+        seed_history = list(snap.get("history") or [])
+        seed_q = float(snap.get("quality") or 0.0)
+        coarse_locked = bool(snap.get("coarse_locked"))
+        seed_cut_in = snap.get("observed_cut_in_ms")
+    elif scenario.seed == "seeded_correct":
         seed_history, seed_q, coarse_locked = [expected] * 3, 0.8, True
     elif scenario.seed == "seeded_wrong_2s":
         seed_history, seed_q, coarse_locked = [expected + 2000] * 3, 0.8, True
@@ -220,18 +229,50 @@ def replay_play(stem: str, scenario: Scenario, *,
 
     engine = FakeEngine(uri, loaded_offset_ms=(seed_history[0] if seed_history else 0))
     store = FakeMetaStore(engine, seed_history=seed_history,
-                          seed_quality=seed_q, coarse_locked=coarse_locked)
+                          seed_quality=seed_q, coarse_locked=coarse_locked,
+                          observed_cut_in_ms=seed_cut_in)
     seed_offset = store.median_offset() if store.history else 0
     if seed_offset is None:
         seed_offset = store.timestamp_offset_ms
 
-    # Phase 3 flags (mirrors the live loop's gating)
+    # Phase 4: search center from history (mirrors the live derivation;
+    # Set-List cross-track bias is live-only).
+    history_center: Optional[int] = None
+    if store.history:
+        history_center = int(seed_offset)
+    elif store.observed_cut_in_ms is not None:
+        history_center = int(store.observed_cut_in_ms)
+
+    # Phase 3/4 flags (mirrors the live loop's gating)
     _accum_active = settings.xcorr_accum_enabled and settings.xcorr_fft_enabled
     search_ms = search_ms_for(meta, scenario)
+    ladder = None
+    if settings.xcorr_search_ladder_enabled and settings.xcorr_fft_enabled:
+        from services.xcorr_sweep import SearchLadder
+        ladder = SearchLadder(
+            history_center_ms=history_center,
+            wide_span_ms=search_ms,
+            narrow_span_ms=int(settings.xcorr_search_narrow_ms),
+            global_span_ms=int(settings.xcorr_search_global_ms),
+            duration_ms=int(meta.duration_ms or 0),
+            escalate_after=int(settings.xcorr_ladder_escalate_after),
+        )
     accumulator = None
     if _accum_active:
         from services.xcorr_evidence import EvidenceAccumulator
-        accumulator = EvidenceAccumulator(max_offset_ms=search_ms + 5000)
+        accum_span = (max(search_ms, int(settings.xcorr_search_global_ms))
+                      if ladder else search_ms)
+        accumulator = EvidenceAccumulator(max_offset_ms=accum_span + 5000)
+        if history_center is not None:
+            if store.history:
+                w_hist = min(1.0, len(store.history) / 3.0) * max(0.0, store.offset_quality)
+            else:
+                w_hist = 0.5
+            prior_mass = float(settings.xcorr_prior_bonus_mass) * w_hist
+            if prior_mass > 0:
+                accumulator.add_gaussian(history_center, prior_mass,
+                                         sigma_ms=float(settings.xcorr_prior_sigma_ms),
+                                         count_support=False)
 
     evaluator = SweepEvaluator(
         SweepConfig.from_settings(settings),
@@ -313,9 +354,13 @@ def replay_play(stem: str, scenario: Scenario, *,
             if not prog_active:
                 continue
             t0 = time.perf_counter()
+            if ladder is not None:
+                p_center, p_span = ladder.current.center_offset_ms, ladder.current.span_ms
+            else:
+                p_center, p_span = 0, search_ms
             match = xcorr_core.progressive_match(
                 frames_now, stored_ts, stored_bands,
-                t_now_ms=ev_time, search_ms=search_ms,
+                t_now_ms=ev_time, search_ms=p_span, center_offset_ms=p_center,
             )
             cpu_samples.append((time.perf_counter() - t0) * 1000.0)
             if match is not None:
@@ -349,7 +394,14 @@ def replay_play(stem: str, scenario: Scenario, *,
         old_r = float(old_r) if old_r is not None else 0.0
 
         win_landscape = None
-        if _accum_active:
+        stage = ladder.current if ladder else None
+        if ladder is not None:
+            lo, hi = stage.shift_bounds
+            new_result, win_landscape = xcorr_core.xcorr_window_fft_full(
+                stored_ts, stored_bands, frames_now, win_start, win_end,
+                search_lo_ms=lo, search_hi_ms=hi, old_r=old_r, tempo_bpm=tempo_bpm,
+            )
+        elif _accum_active:
             new_result, win_landscape = xcorr_core.xcorr_window_fft_full(
                 stored_ts, stored_bands, frames_now, win_start, win_end,
                 search_ms=search_ms, old_r=old_r, tempo_bpm=tempo_bpm,
@@ -374,7 +426,12 @@ def replay_play(stem: str, scenario: Scenario, *,
             engine_current_offset_ms=engine._shape_offset_ms,
             engine_play_best_quality=engine._play_best_quality,
             landscape=win_landscape,
+            envelope_exempt=(stage is not None and stage.name == "global"),
         )
+        if ladder is not None:
+            if ladder.note_window(outcome.new_result is not None) is None \
+                    and outcome.baseline_anti_corr:
+                ladder.escalate_to_global()
 
         if outcome.engine_snap is not None:
             s_off, s_q, s_bypass = outcome.engine_snap
@@ -463,4 +520,5 @@ def replay_play(stem: str, scenario: Scenario, *,
         cpu_ms_p50=round(float(np.percentile(cpu_arr, 50)), 1),
         cpu_ms_p95=round(float(np.percentile(cpu_arr, 95)), 1),
         traces=traces,
+        store_snapshot=store.snapshot(),
     )

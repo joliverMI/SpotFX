@@ -57,18 +57,21 @@ class EvidenceAccumulator:
         self.n_curves += 1
 
     def add_gaussian(self, center_ms: int, mass: float,
-                     sigma_ms: float = 100.0) -> None:
-        """Narrow vote from an anchor or progressive match."""
+                     sigma_ms: float = 100.0, count_support: bool = True) -> None:
+        """Narrow vote from an anchor / progressive match — or, with
+        count_support=False, a soft history prior that can tip ties but
+        never substitutes for fresh evidence (support gate unaffected)."""
         if mass <= 0:
             return
         g = mass * np.exp(-((self.offsets - center_ms) ** 2)
                           / (2.0 * sigma_ms * sigma_ms))
         self.mass += g
-        lo, hi = self._idx(center_ms - 2 * sigma_ms), self._idx(center_ms + 2 * sigma_ms)
-        lo, hi = max(0, lo), min(len(self.offsets), hi + 1)
-        if hi > lo:
-            self.support[lo:hi] += 1
-        self.n_curves += 1
+        if count_support:
+            lo, hi = self._idx(center_ms - 2 * sigma_ms), self._idx(center_ms + 2 * sigma_ms)
+            lo, hi = max(0, lo), min(len(self.offsets), hi + 1)
+            if hi > lo:
+                self.support[lo:hi] += 1
+            self.n_curves += 1
 
     def dominant(self, min_sep_ms: int = 350,
                  centroid_radius_ms: int = 150) -> Optional[AccumPeak]:
