@@ -133,6 +133,9 @@ class FakeEngine:
         bypass_q = float(getattr(settings, "engine_drift_bypass_q", 0.70))
         anti_corr_bypass_q = float(getattr(settings, "engine_anti_corr_bypass_q", 0.85))
         effective_bypass = bypass_drift_cap and quality >= anti_corr_bypass_q
+        # Cold-start progressive exception (mirrors trigger_engine.apply_save).
+        if source == "progressive" and self._play_best_quality == 0.0:
+            effective_bypass = True
         if drift_cap > 0 and quality < bypass_q and not effective_bypass:
             drift = abs(new_effective - self._loaded_offset_ms)
             if drift > drift_cap:

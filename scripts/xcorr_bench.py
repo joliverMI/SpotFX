@@ -126,7 +126,7 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
     cols = ["stem", "scenario", "expected_offset_ms", "final_stored_offset_ms",
             "final_stored_error_ms", "engine_final_error_ms",
             "time_to_first_correct_lock_ms", "wrong_lock_events", "n_saves",
-            "anchor_matched", "locked_via_stop", "windows_evaluated",
+            "anchor_matched", "progressive_matched", "locked_via_stop", "windows_evaluated",
             "windows_planned", "cpu_ms_total", "cpu_ms_p50", "cpu_ms_p95", "correct"]
     with (out_dir / "results.csv").open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)

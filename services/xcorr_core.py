@@ -311,6 +311,15 @@ def xcorr_window(
 
 
 # ── Phase 2: FFT fast-NCC sweep ───────────────────────────────────────────────
+def _nanmean_rows(stacked: np.ndarray) -> np.ndarray:
+    """Column-wise mean ignoring NaNs, NaN where every row is NaN — without
+    numpy's noisy empty-slice RuntimeWarning."""
+    valid = np.isfinite(stacked)
+    cnt = valid.sum(axis=0)
+    s = np.where(valid, stacked, 0.0).sum(axis=0)
+    return np.where(cnt > 0, s / np.maximum(cnt, 1), np.nan)
+
+
 def ncc_sliding(template_norm: np.ndarray, search: np.ndarray,
                 min_std: float = 1e-6) -> np.ndarray:
     """Exact z-scored Pearson r of `template_norm` (already zero-mean,
@@ -483,8 +492,7 @@ def xcorr_window_full(
         return None
 
     stacked = np.vstack(r_bands)
-    with np.errstate(invalid="ignore"):
-        r = np.nanmean(stacked, axis=0)   # per-shift mean over non-flat bands
+    r = _nanmean_rows(stacked)   # per-shift mean over non-flat bands
     shifts = (np.arange(len(r)) - base_idx_at_zero) * XCORR_BIN_MS
     return analyze_landscape(shifts, r)
 
@@ -501,15 +509,35 @@ def xcorr_window_fft(
     tempo_bpm: Optional[float] = None,
 ) -> Optional[tuple[int, float]]:
     """Drop-in replacement for `xcorr_window` using the FFT landscape.
-    Same return contract: (offset_ms, r) or None. Gates read from the full
-    landscape: the wide-search margin compares genuinely separated peaks,
-    and the comb gate rejects beat-twin ambiguity even without librosa
-    tempo. The tempo-based twin check is retained alongside for now."""
+    Same return contract: (offset_ms, r) or None."""
+    result, _ = xcorr_window_fft_full(
+        stored_ts, stored_bands, frames, win_start, win_end,
+        search_ms=search_ms, old_r=old_r, tempo_bpm=tempo_bpm,
+    )
+    return result
+
+
+def xcorr_window_fft_full(
+    stored_ts: np.ndarray,
+    stored_bands: list[np.ndarray],
+    frames: list[tuple[int, float, float, float, float]],
+    win_start: int,
+    win_end: int,
+    *,
+    search_ms: int,
+    old_r: Optional[float] = None,
+    tempo_bpm: Optional[float] = None,
+) -> tuple[Optional[tuple[int, float]], Optional["Landscape"]]:
+    """FFT sweep returning BOTH the gated (offset_ms, r) result and the full
+    Landscape (for evidence accumulation). Gates read from the landscape:
+    the wide-search margin compares genuinely separated peaks, and the comb
+    gate rejects beat-twin ambiguity even without librosa tempo. The
+    tempo-based twin check is retained alongside for now."""
     landscape = xcorr_window_full(
         stored_ts, stored_bands, frames, win_start, win_end, search_ms=search_ms,
     )
     if landscape is None or landscape.top1 is None:
-        return None
+        return None, landscape
     best_shift, best_r = landscape.top1
 
     threshold = settings.xcorr_global_threshold
@@ -523,7 +551,7 @@ def xcorr_window_fft(
             "xcorr reject: window [%d–%d]ms best r=%.2f below threshold %.2f (search=±%dms, fft)",
             win_start, win_end, best_r, threshold, search_ms,
         )
-        return None
+        return None, landscape
 
     if (require_margin > 0 and landscape.top2 is not None
             and best_r < settings.xcorr_high_confidence_r
@@ -534,7 +562,7 @@ def xcorr_window_fft(
             win_start, win_end, best_r, best_shift,
             landscape.top2[1], landscape.top2[0], require_margin, search_ms,
         )
-        return None
+        return None, landscape
 
     # Comb gate: a periodic landscape means beat-tile twins. Require top1 to
     # beat the best twin at ±1..4 comb periods by the beat-twin margin.
@@ -553,7 +581,7 @@ def xcorr_window_fft(
                         win_start, win_end, best_r, best_shift, twin_r,
                         sign * n, landscape.comb_period_ms, landscape.comb_strength,
                     )
-                    return None
+                    return None, landscape
 
     # Tempo-based twin check retained (benchmark decides which retires).
     if tempo_bpm and tempo_bpm > 0 and best_r < settings.xcorr_high_confidence_r:
@@ -572,9 +600,163 @@ def xcorr_window_fft(
                         win_start, win_end, best_r, best_shift,
                         twin_r, twin_shift, sign * n, twin_margin,
                     )
+                    return None, landscape
+
+    return (-best_shift, round(best_r, 3)), landscape
+
+
+# ── Phase 3: progressive early matching ───────────────────────────────────────
+@dataclass
+class ProgressiveMatch:
+    offset_ms: int
+    r: float
+    quality: float                 # r × min(1, span/8s) — short takes earn less
+    span_ms: int                   # live template span after silence trim
+    landscape: Landscape           # shifts_ms holds OFFSETS here (not shifts)
+
+
+def progressive_match(
+    frames: list[tuple[int, float, float, float, float]],
+    stored_ts: np.ndarray,
+    stored_bands: list[np.ndarray],
+    *,
+    t_now_ms: int,
+    search_ms: int,
+    min_cv: Optional[float] = None,
+    min_r: Optional[float] = None,
+    min_dominance: Optional[float] = None,
+) -> Optional[ProgressiveMatch]:
+    """Match ALL captured audio so far against the stored shape — the
+    reverse direction of the window sweep: the LIVE take (silence-trimmed)
+    is the fixed z-scored template, slid across the stored signal with
+    per-position normalization via the same ncc_sliding kernel.
+
+    Designed for song starts: runs every ~1.5s from ~2.5s of capture, so a
+    lock can land well before the first planned window (9s+). Quiet intros
+    fail the CV gate and simply retry next tick — the graceful-wait
+    behavior slow-start songs need. Cut-in/blend starts are handled by the
+    offset-domain search range.
+
+    Returns a ProgressiveMatch (offset in the standard convention: stored
+    position − live clock; cut-in of C ⇒ +C) or None when any strict early
+    gate fails.
+    """
+    min_cv = min_cv if min_cv is not None else float(getattr(settings, "xcorr_progressive_min_cv", 0.25))
+    min_r = min_r if min_r is not None else float(getattr(settings, "xcorr_progressive_min_r", 0.65))
+    min_dominance = min_dominance if min_dominance is not None else float(getattr(settings, "xcorr_progressive_dominance", 0.12))
+
+    if not frames:
+        return None
+    totals = np.array([f[1] for f in frames], dtype=float)
+    ts = np.array([f[0] for f in frames], dtype=float)
+    # Song-onset trim. The capture's head can contain the PREVIOUS track's
+    # tail (and the stored shape's head carries the same ring-buffer
+    # pre-roll), which matches itself at offset 0 with r≈1.0 — observed.
+    # Start the template at the END of the LAST ≥1.5s quiet gap instead of
+    # the first non-silent frame: pollution → gap → song trims to the song;
+    # gapless starts (cut-ins/blends) keep the full take as before.
+    peak = float(totals.max())
+    if peak < 1e-9:
+        return None
+    quiet = totals < 0.05 * peak
+    live_idx = int(np.argmax(~quiet))   # first non-silent (fallback)
+    gap_start = None
+    for i in range(live_idx, len(frames)):
+        if quiet[i]:
+            if gap_start is None:
+                gap_start = i
+        else:
+            if gap_start is not None and ts[i] - ts[gap_start] >= 1500:
+                live_idx = i            # song onset after a real gap
+            gap_start = None
+    t0 = float(ts[live_idx])
+    span_ms = int(t_now_ms - t0)
+    if span_ms < 3500:
+        return None
+
+    # CV gate on the raw total band within the template span — a quiet/flat
+    # intro carries no alignment information yet; retry next tick.
+    seg = totals[(ts >= t0) & (ts <= t_now_ms)]
+    if len(seg) < 4 or seg.mean() < 1e-9:
+        return None
+    if float(seg.std()) / float(seg.mean()) < min_cv:
+        return None
+
+    # Live template bins [t0, t_now) — fixed, z-scored per band.
+    bins = np.arange(t0, t_now_ms, XCORR_BIN_MS, dtype=float)
+    if len(bins) < 8:
+        return None
+
+    # Structure gate: a sparse template (silence + one transient) correlates
+    # near-perfectly with ANY similar transient — observed as a degenerate
+    # r=1.00 match at the wrong position on a 2.5s quiet intro. Require a
+    # meaningful fraction of template bins to carry signal so the take has
+    # extended structure worth trusting.
+    total_template = np.interp(bins, ts, totals, left=0.0, right=0.0)
+    t_peak = float(total_template.max())
+    if t_peak < 1e-9:
+        return None
+    active_frac = float((total_template >= 0.15 * t_peak).mean())
+    if active_frac < 0.20:
+        return None
+
+    # Stored search grid: candidate stored positions p for the template
+    # start, offset = p − t0 ∈ [−search, +search].
+    grid_start = t0 - search_ms
+    grid_end = t0 + search_ms + (bins[-1] - bins[0]) + XCORR_BIN_MS
+    grid_ts = np.arange(grid_start, grid_end, XCORR_BIN_MS, dtype=float)
+
+    r_bands = []
+    for band_idx in range(len(stored_bands)):
+        live_rms = agc_normalize(signed_square(
+            np.array([f[1 + band_idx] for f in frames], dtype=float)))
+        template = np.interp(bins, ts, live_rms, left=0.0, right=0.0)
+        if template.std() < 1e-6:
+            continue
+        template_norm = (template - template.mean()) / template.std()
+        stored_grid = np.interp(grid_ts, stored_ts, stored_bands[band_idx])
+        r_bands.append(ncc_sliding(template_norm, stored_grid))
+    if not r_bands or len(r_bands[0]) == 0:
+        return None
+
+    r = _nanmean_rows(np.vstack(r_bands))
+    offsets = (grid_ts[: len(r)] - t0)   # offset = stored position − live clock
+    landscape = analyze_landscape(offsets, r)
+    if landscape.top1 is None:
+        return None
+    best_offset, best_r = landscape.top1
+
+    # Stored-head exclusion: the stored shape's first seconds can contain
+    # ring-buffer pre-roll (the previous track's tail), which a polluted
+    # live head matches at offset≈0 with r≈1.0. Require the matched stored
+    # segment to extend well past that unreliable region — the same "skip
+    # the first 5s" stance both production calibrators already take. Near-
+    # zero offsets therefore can't lock before ~7s of capture; cut-ins
+    # (matched mid-song) are unaffected.
+    head_ms = int(getattr(settings, "anchor_min_timestamp_ms", 5000))
+    if best_offset + t_now_ms < head_ms + 2000:
+        return None
+
+    if best_r < min_r:
+        return None
+    if landscape.top2 is not None and landscape.margin < min_dominance:
+        return None
+    # Comb gate — strict for early locks (no high-confidence skip): a
+    # periodic landscape means the take could sit on any beat tile.
+    comb_min = float(getattr(settings, "xcorr_comb_min_strength", 0.35))
+    twin_margin = float(getattr(settings, "xcorr_beat_twin_margin", 0.10))
+    if landscape.comb_period_ms and landscape.comb_strength >= comb_min:
+        for n in (1, 2, 3, 4):
+            for sign in (-1, 1):
+                twin_r = landscape.r_at(int(best_offset + sign * round(n * landscape.comb_period_ms)))
+                if twin_r is not None and best_r - twin_r < twin_margin:
                     return None
 
-    return (-best_shift, round(best_r, 3))
+    quality = round(float(best_r) * min(1.0, span_ms / 8000.0), 3)
+    return ProgressiveMatch(
+        offset_ms=int(best_offset), r=round(float(best_r), 3),
+        quality=quality, span_ms=span_ms, landscape=landscape,
+    )
 
 
 # DIAGNOSTIC CSV ──────────────────────────────────────────────────────────────

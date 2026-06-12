@@ -22,6 +22,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +50,10 @@ class SweepConfig:
     engine_snap_far_jump_q: float
     lock_q: float
     lock_agree_windows: int
+    # Phase 3: evidence accumulation (active only when an accumulator is
+    # attached to the evaluator).
+    accum_lock_mass: float = 1.6
+    accum_dominance: float = 0.5
 
     @classmethod
     def from_settings(cls, settings) -> "SweepConfig":
@@ -68,6 +74,8 @@ class SweepConfig:
             engine_snap_far_jump_q=float(getattr(settings, "engine_snap_far_jump_q", 0.85)),
             lock_q=float(getattr(settings, "xcorr_lock_q", 0.75)),
             lock_agree_windows=int(getattr(settings, "xcorr_lock_agree_windows", 3)),
+            accum_lock_mass=float(getattr(settings, "xcorr_accum_lock_mass", 1.6)),
+            accum_dominance=float(getattr(settings, "xcorr_accum_dominance", 0.5)),
         )
 
 
@@ -126,12 +134,18 @@ class SweepEvaluator:
         play_type: str,
         seed_offset_ms: int,
         envelope_lookup: Optional[dict[tuple[int, int], tuple[int, int]]] = None,
+        accumulator=None,   # services.xcorr_evidence.EvidenceAccumulator | None
     ) -> None:
         self.cfg = cfg
         self.uri = uri
         self.verification = verification
         self.play_type = play_type
         self.envelope_lookup = envelope_lookup or {}
+        # Phase 3: when an accumulator is attached, disk saves and
+        # lock-and-stop read the accumulated evidence function instead of
+        # the discrete confirmation clusters. None = legacy behavior.
+        self.accumulator = accumulator
+        self._last_accum_save_offset: Optional[int] = None
 
         self.best_quality: float = -1.0
         # Seed best_offset with the stored offset for this slot so the post-loop
@@ -153,11 +167,19 @@ class SweepEvaluator:
         self._anti_neg_streak: int = 0
         self._last_agree_now: float = 0.0
 
-    # ── Anchor vote ───────────────────────────────────────────────────────────
+    # ── Anchor / progressive votes ────────────────────────────────────────────
     def add_anchor_vote(self, offset_ms: int, weight: float) -> None:
         """The anchor's offset becomes a vote in the sweep's cluster gate.
         Weight = match_r × eligible_count (cross-validation strength)."""
         self.confirmation_shifts.append((int(offset_ms), float(weight)))
+        if self.accumulator is not None:
+            self.accumulator.add_gaussian(int(offset_ms), float(weight))
+
+    def add_progressive_vote(self, offset_ms: int, weight: float) -> None:
+        """A progressive early-match vote (same dual bookkeeping as anchor)."""
+        self.confirmation_shifts.append((int(offset_ms), float(weight)))
+        if self.accumulator is not None:
+            self.accumulator.add_gaussian(int(offset_ms), float(weight))
 
     # ── Per-window evaluation ─────────────────────────────────────────────────
     def process_window(
@@ -172,11 +194,13 @@ class SweepEvaluator:
         stored_quality: float,
         engine_current_offset_ms: int,
         engine_play_best_quality: float,
+        landscape=None,   # xcorr_core.Landscape | None (FFT path, Phase 3)
     ) -> WindowOutcome:
         """Evaluate one completed window. `stored_offset_ms` is the OLD test
         point (the engine's runtime offset, or the disk median fallback);
         `stored_quality` is the slot's stored quality used for the
-        displacement threshold."""
+        displacement threshold. `landscape` feeds the evidence accumulator
+        when one is attached."""
         cfg = self.cfg
 
         if old_r is not None:
@@ -267,6 +291,16 @@ class SweepEvaluator:
 
         self.n_measurements += 1
 
+        # Phase 3: feed the full landscape into the evidence accumulator
+        # (offset domain = −shift), weighted by window difficulty. The
+        # envelope clip above only nulls the discrete NEW result — the curve
+        # itself is still evidence.
+        if self.accumulator is not None and landscape is not None:
+            self.accumulator.add_curve(
+                -np.asarray(landscape.shifts_ms, dtype=float),
+                landscape.r, float(difficulty),
+            )
+
         # ── Engine snap decision (round 9 stickiness gate) ─────────────────
         engine_snap: Optional[tuple[int, float, bool]] = None
         if self.verification != "user_verified" and win_r >= cfg.global_threshold:
@@ -314,12 +348,45 @@ class SweepEvaluator:
             eff_r, eff_q = cfg.single_save_r, cfg.single_save_q
 
         disk_save: Optional[tuple[int, float, str, bool]] = None
-        if (is_global_best
+        single_escape = (is_global_best and self.verification != "user_verified"
+                         and win_r >= eff_r and win_quality >= eff_q)
+        if self.accumulator is not None:
+            # Phase 3: the accumulated-evidence peak replaces the discrete
+            # cluster vote. The single-window high-r escape survives as an
+            # explicit special case (one great window can't reach the mass
+            # bar alone). Repeat saves of the same peak are suppressed.
+            peak = self.accumulator.dominant()
+            sanity_r = (landscape.r_at(-peak.offset_ms)
+                        if (peak is not None and landscape is not None) else None)
+            if (peak is not None
+                    and self.verification != "user_verified"
+                    and peak.mass >= cfg.accum_lock_mass
+                    and peak.dominance >= cfg.accum_dominance
+                    and peak.support >= 2
+                    and sanity_r is not None
+                    and sanity_r >= cfg.global_threshold
+                    and peak.offset_ms != self._last_accum_save_offset):
+                logger.info(
+                    "Auto-offset xcorr: SAVING accumulated-evidence peak — %+dms mass=%.2f dom=%.2f support=%d sanity_r=%.2f for %s",
+                    peak.offset_ms, peak.mass, peak.dominance, peak.support,
+                    sanity_r, self.uri,
+                )
+                disk_save = (peak.offset_ms, max(0.0, self.best_quality),
+                             "sweep-accum", self.baseline_anti_corr)
+                self._last_accum_save_offset = peak.offset_ms
+            elif single_escape:
+                tag = "far-jump" if is_far_jump else "near"
+                logger.info(
+                    "Auto-offset xcorr: SAVING single-window high-r [%s] — %+dms r=%.2f Q=%.2f (accum %s, but r≥%.2f & Q≥%.2f)",
+                    tag, win_offset, win_r, win_quality,
+                    f"mass={peak.mass:.2f}" if peak else "empty", eff_r, eff_q,
+                )
+                disk_save = (win_offset, win_quality, "sweep-single", self.baseline_anti_corr)
+        elif (is_global_best
                 and self.verification != "user_verified"
                 and _agree_now >= _save_min_confirm):
             disk_save = (self.best_offset, self.best_quality, "sweep", self.baseline_anti_corr)
-        elif (is_global_best and self.verification != "user_verified"
-                and win_r >= eff_r and win_quality >= eff_q):
+        elif single_escape:
             tag = "far-jump" if is_far_jump else "near"
             logger.info(
                 "Auto-offset xcorr: SAVING single-window high-r [%s] — %+dms r=%.2f Q=%.2f (cluster %.2f<%.1f, but r≥%.2f & Q≥%.2f)",
@@ -350,8 +417,21 @@ class SweepEvaluator:
 
     # ── Lock-and-stop (call AFTER applying this window's engine snap) ─────────
     def lock_and_stop(self, engine_play_best_quality: float) -> bool:
-        """True when the engine has snapped at high Q AND multiple windows
-        agree on the offset — the marginal value of trailing windows is nil."""
+        """True when the engine has snapped at high Q AND the evidence agrees
+        on the offset — the marginal value of trailing windows is nil."""
+        if self.accumulator is not None:
+            peak = self.accumulator.dominant()
+            if (engine_play_best_quality >= self.cfg.lock_q
+                    and peak is not None
+                    and peak.mass >= self.cfg.accum_lock_mass
+                    and peak.dominance >= self.cfg.accum_dominance):
+                logger.info(
+                    "Auto-offset xcorr: lock-and-stop at Q=%.2f — accum peak %+dms mass=%.2f dom=%.2f for %s",
+                    engine_play_best_quality, peak.offset_ms, peak.mass,
+                    peak.dominance, self.uri,
+                )
+                return True
+            return False
         if (engine_play_best_quality >= self.cfg.lock_q
                 and self._last_agree_now >= self.cfg.lock_agree_windows):
             logger.info(
@@ -383,6 +463,24 @@ class SweepEvaluator:
                 "(measured=%+dms Q=%.2f, stored offset unchanged)",
                 self.best_offset, self.best_quality,
             )
+        elif self.accumulator is not None:
+            # Phase 3: final save reads the accumulated evidence function.
+            peak = self.accumulator.dominant()
+            if (peak is not None
+                    and peak.mass >= cfg.accum_lock_mass
+                    and peak.dominance >= cfg.accum_dominance
+                    and peak.support >= 2
+                    and self.best_quality >= cfg.save_min_quality):
+                disk_save = (peak.offset_ms, self.best_quality,
+                             "sweep-accum", self.baseline_anti_corr)
+            else:
+                logger.info(
+                    "Auto-offset xcorr: NOT saving — accum peak %s (need mass≥%.1f dom≥%.1f support≥2, Q=%.2f≥%.2f)",
+                    (f"{peak.offset_ms:+d}ms mass={peak.mass:.2f} dom={peak.dominance:.2f} "
+                     f"support={peak.support}") if peak else "empty",
+                    cfg.accum_lock_mass, cfg.accum_dominance,
+                    self.best_quality, cfg.save_min_quality,
+                )
         else:
             # Save guard: don't pollute the stored offset with weak or
             # one-window-only measurements. Cluster confirmation_shifts within

@@ -55,8 +55,11 @@ from services.xcorr_core import (
     xcorr_window as _xcorr_window,
     xcorr_window_detail as _xcorr_window_detail,
     xcorr_window_fft as _xcorr_window_fft,
+    xcorr_window_fft_full as _xcorr_window_fft_full,
+    progressive_match as _progressive_match,
 )
 from services.xcorr_sweep import SweepConfig, SweepEvaluator
+from services.xcorr_evidence import EvidenceAccumulator
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +342,8 @@ class AutoOffsetService:
         # has a chance to land before the planned schedule does. Saves the
         # song from playing 10–30s under a stale baseline.
         first_planned = windows[0][0] if windows else None
-        if (current_pos_ms < 1500
+        if (not settings.xcorr_progressive_enabled   # progressive replaces pre-flight
+                and current_pos_ms < 1500
                 and first_planned is not None
                 and first_planned >= _PRE_FLIGHT_INTRO_MS
                 and (not all_windows or all_windows[0][0] != 0)):
@@ -626,6 +630,12 @@ class AutoOffsetService:
         # anti-corr streak, engine-snap stickiness, save gates, lock-and-stop)
         # live in the SweepEvaluator state machine — shared verbatim with the
         # offline bench harness. This loop performs the side effects.
+        # Phase 3: evidence accumulation needs the FFT path's landscapes.
+        _accum_active = settings.xcorr_accum_enabled and settings.xcorr_fft_enabled
+        accumulator = (
+            EvidenceAccumulator(max_offset_ms=search_ms + 5000)
+            if _accum_active else None
+        )
         evaluator = SweepEvaluator(
             SweepConfig.from_settings(settings),
             uri=uri,
@@ -633,6 +643,7 @@ class AutoOffsetService:
             play_type=play_type,
             seed_offset_ms=seed_offset,
             envelope_lookup=envelope_lookup,
+            accumulator=accumulator,
         )
         # Set by the lock-and-stop early exit. When True, the post-loop
         # cleanup leaves `_watching_uri` set so on_track_change's "already
@@ -689,6 +700,11 @@ class AutoOffsetService:
         anchor_horizons: list[int] = [c.timestamp_ms + _anchor_radius for c in anchor_candidates]
         anchor_last_eligible = 0
         _last_snap_ms = 0
+        # Phase 3: progressive early matching — slide the whole captured take
+        # across the stored shape every interval until first lock or the
+        # first planned window completes. Replaces the pre-flight window.
+        _prog_active = bool(settings.xcorr_progressive_enabled)
+        _prog_next_ms = int(settings.xcorr_progressive_start_ms)
 
         try:
             async for frame in capture:
@@ -771,6 +787,40 @@ class AutoOffsetService:
                             anchor_done = True
                         anchor_last_eligible = eligible_count
 
+                # Progressive early match (Phase 3). Strict gates inside
+                # progressive_match (CV / r / dominance / comb) — a quiet
+                # intro just returns None and we retry next tick.
+                if _prog_active and frame.timestamp_ms >= _prog_next_ms:
+                    _prog_next_ms = frame.timestamp_ms + int(settings.xcorr_progressive_interval_ms)
+                    _prog = await asyncio.to_thread(
+                        _progressive_match,
+                        frames, stored_ts, stored_bands,
+                        t_now_ms=frame.timestamp_ms,
+                        search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
+                    )
+                    if _prog is not None:
+                        logger.info(
+                            "Auto-offset xcorr: progressive match %+dms r=%.2f Q=%.2f (span=%.1fs) for %s",
+                            _prog.offset_ms, _prog.r, _prog.quality,
+                            _prog.span_ms / 1000.0, uri,
+                        )
+                        _save_offset(uri, _prog.offset_ms, _prog.quality,
+                                     source="progressive")
+                        evaluator.add_progressive_vote(_prog.offset_ms, _prog.r)
+                        try:
+                            from services.websocket_manager import ws_manager
+                            asyncio.create_task(ws_manager.broadcast({
+                                "type":      "xcorr_progressive",
+                                "uri":       uri,
+                                "offset_ms": _prog.offset_ms,
+                                "r":         _prog.r,
+                                "q":         _prog.quality,
+                                "span_ms":   _prog.span_ms,
+                            }))
+                        except Exception:
+                            pass
+                        _prog_active = False   # first lock — hand over to the sweep
+
                 if not window_queue:
                     break
                 win_start, win_end = window_queue[0]
@@ -778,6 +828,7 @@ class AutoOffsetService:
                     continue
 
                 window_queue.pop(0)
+                _prog_active = False   # first planned window reached — progressive done
 
                 # ── Compute difficulty for this window ────────────────────────
                 bins = np.arange(win_start, win_end, _XCORR_BIN_MS, dtype=float)
@@ -830,14 +881,24 @@ class AutoOffsetService:
                 # broadcasts, and the trigger engine tick). FFT path (Phase 2):
                 # exact r at every 25ms shift + landscape gates; legacy
                 # coarse+fine kept as fallback while the flag is off.
-                _sweep_fn = _xcorr_window_fft if settings.xcorr_fft_enabled else _xcorr_window
-                new_result = await asyncio.to_thread(
-                    _sweep_fn,
-                    stored_ts, stored_bands, frames, win_start, win_end,
-                    search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
-                    old_r=old_r,
-                    tempo_bpm=tempo_bpm,
-                )
+                _win_landscape = None
+                if _accum_active:
+                    new_result, _win_landscape = await asyncio.to_thread(
+                        _xcorr_window_fft_full,
+                        stored_ts, stored_bands, frames, win_start, win_end,
+                        search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
+                        old_r=old_r,
+                        tempo_bpm=tempo_bpm,
+                    )
+                else:
+                    _sweep_fn = _xcorr_window_fft if settings.xcorr_fft_enabled else _xcorr_window
+                    new_result = await asyncio.to_thread(
+                        _sweep_fn,
+                        stored_ts, stored_bands, frames, win_start, win_end,
+                        search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
+                        old_r=old_r,
+                        tempo_bpm=tempo_bpm,
+                    )
 
                 # Engine play-best read once per window — feeds the envelope
                 # clip's cold-start skip and the snap stickiness gate.
@@ -859,6 +920,7 @@ class AutoOffsetService:
                     stored_quality=stored_quality_for_old,
                     engine_current_offset_ms=(engine_offset_ms if engine_offset_ms is not None else 0),
                     engine_play_best_quality=engine_play_best,
+                    landscape=_win_landscape,
                 )
 
                 logger.info(

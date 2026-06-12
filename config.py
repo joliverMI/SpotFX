@@ -261,6 +261,25 @@ class Settings(BaseSettings):
     xcorr_comb_min_strength: float = 0.35  # autocorr(r) ratio to flag periodicity
     xcorr_comb_lag_min_ms: int = 250       # comb-period search range
     xcorr_comb_lag_max_ms: int = 1500
+    # Evidence accumulation (Phase 3): sum difficulty-weighted r(offset)
+    # curves across windows; disk saves fire on the accumulated function's
+    # dominant peak instead of the discrete cluster votes. Beat-twins win
+    # single windows by chance but wash out across windows. Requires
+    # xcorr_fft_enabled (needs full landscapes).
+    xcorr_accum_enabled: bool = False
+    xcorr_accum_lock_mass: float = 1.6     # min accumulated mass to save
+    xcorr_accum_dominance: float = 0.5     # min mass1−mass2 (≥350ms apart)
+    # Progressive early matching (Phase 3): from ~2.5s of capture, slide the
+    # whole live take so far across the stored shape every ~1.5s until the
+    # first planned window completes. Locks well before the 9s+ earliest
+    # window; quiet intros simply retry (CV gate) instead of being skipped.
+    # Replaces the pre-flight [0–8s] window injection when enabled.
+    xcorr_progressive_enabled: bool = False
+    xcorr_progressive_start_ms: int = 2500
+    xcorr_progressive_interval_ms: int = 1500
+    xcorr_progressive_min_r: float = 0.65
+    xcorr_progressive_dominance: float = 0.12
+    xcorr_progressive_min_cv: float = 0.25
     # Song-start sniff: fire a dedicated start-window xcorr after this much
     # accumulated live audio at song load.
     xcorr_start_sniff_ms: int = 5000

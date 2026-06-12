@@ -80,6 +80,7 @@ class PlayResult:
     wrong_lock_events: int                   # disk saves with |error| > 300ms
     n_saves: int
     anchor_matched: bool
+    progressive_matched: bool
     locked_via_stop: bool
     windows_evaluated: int
     windows_planned: int
@@ -189,7 +190,8 @@ def replay_play(stem: str, scenario: Scenario, *,
                    for w in (meta.xcorr_windows or [])]
     windows = list(all_windows)   # current_pos = 0 → all reachable
     first_planned = windows[0][0] if windows else None
-    if (first_planned is not None
+    if (not settings.xcorr_progressive_enabled   # progressive replaces pre-flight
+            and first_planned is not None
             and first_planned >= _PRE_FLIGHT_INTRO_MS
             and (not all_windows or all_windows[0][0] != 0)):
         windows.insert(0, (0, _PRE_FLIGHT_INTRO_MS))
@@ -223,6 +225,14 @@ def replay_play(stem: str, scenario: Scenario, *,
     if seed_offset is None:
         seed_offset = store.timestamp_offset_ms
 
+    # Phase 3 flags (mirrors the live loop's gating)
+    _accum_active = settings.xcorr_accum_enabled and settings.xcorr_fft_enabled
+    search_ms = search_ms_for(meta, scenario)
+    accumulator = None
+    if _accum_active:
+        from services.xcorr_evidence import EvidenceAccumulator
+        accumulator = EvidenceAccumulator(max_offset_ms=search_ms + 5000)
+
     evaluator = SweepEvaluator(
         SweepConfig.from_settings(settings),
         uri=uri,
@@ -230,9 +240,8 @@ def replay_play(stem: str, scenario: Scenario, *,
         play_type=scenario.play_type,
         seed_offset_ms=int(seed_offset),
         envelope_lookup=envelope_lookup,
+        accumulator=accumulator,
     )
-
-    search_ms = search_ms_for(meta, scenario)
 
     # ── Anchor setup (mirrors the cold-start gate) ────────────────────────────
     anchor_should_run = settings.anchor_enabled and not store.coarse_locked
@@ -244,18 +253,28 @@ def replay_play(stem: str, scenario: Scenario, *,
     anchor_horizons = [c.timestamp_ms + _anchor_radius for c in anchor_candidates]
 
     # ── Merged event timeline ─────────────────────────────────────────────────
-    # Anchor crossings fire when frame time reaches a horizon; windows fire at
-    # win_end + margin. Process strictly in time order, like the frame loop.
+    # Anchor crossings fire when frame time reaches a horizon; progressive
+    # ticks every interval from start_ms; windows fire at win_end + margin.
+    # Process strictly in time order, like the frame loop (anchor →
+    # progressive → window within a tick).
+    _prio = {"anchor": 0, "prog": 1, "window": 2}
     events: list[tuple[int, str, object]] = []
     for h in sorted(set(anchor_horizons)):
         events.append((h, "anchor", h))
+    if settings.xcorr_progressive_enabled:
+        t = int(settings.xcorr_progressive_start_ms)
+        while t <= last_frame_ts:
+            events.append((t, "prog", None))
+            t += int(settings.xcorr_progressive_interval_ms)
     for (ws, we) in windows:
         events.append((we + _XCORR_MARGIN_MS, "window", (ws, we)))
-    events.sort(key=lambda e: (e[0], 0 if e[1] == "anchor" else 1))
+    events.sort(key=lambda e: (e[0], _prio[e[1]]))
 
     anchor_done = not anchor_candidates
     anchor_matched = False
     anchor_last_eligible = 0
+    prog_active = bool(settings.xcorr_progressive_enabled)
+    prog_matched = False
     locked_via_stop = False
     traces: list[WindowTrace] = []
     cpu_samples: list[float] = []
@@ -290,8 +309,29 @@ def replay_play(stem: str, scenario: Scenario, *,
             anchor_last_eligible = eligible_count
             continue
 
+        if kind == "prog":
+            if not prog_active:
+                continue
+            t0 = time.perf_counter()
+            match = xcorr_core.progressive_match(
+                frames_now, stored_ts, stored_bands,
+                t_now_ms=ev_time, search_ms=search_ms,
+            )
+            cpu_samples.append((time.perf_counter() - t0) * 1000.0)
+            if match is not None:
+                store.save_offset(uri, match.offset_ms, match.quality,
+                                  source="progressive")
+                evaluator.add_progressive_vote(match.offset_ms, match.r)
+                prog_matched = True
+                prog_active = False
+                if verbose:
+                    print(f"  [prog @{ev_time:>6}] match {match.offset_ms:+d}ms "
+                          f"r={match.r:.2f} Q={match.quality:.2f} span={match.span_ms}ms")
+            continue
+
         # ── Window event ──────────────────────────────────────────────────────
         win_start, win_end = payload
+        prog_active = False   # first planned window reached — progressive done
         t0 = time.perf_counter()
 
         bins = np.arange(win_start, win_end, xcorr_core.XCORR_BIN_MS, dtype=float)
@@ -307,12 +347,19 @@ def replay_play(stem: str, scenario: Scenario, *,
         )
         old_r = float(old_r) if old_r is not None else 0.0
 
-        _sweep_fn = (xcorr_core.xcorr_window_fft if settings.xcorr_fft_enabled
-                     else xcorr_core.xcorr_window)
-        new_result = _sweep_fn(
-            stored_ts, stored_bands, frames_now, win_start, win_end,
-            search_ms=search_ms, old_r=old_r, tempo_bpm=tempo_bpm,
-        )
+        win_landscape = None
+        if _accum_active:
+            new_result, win_landscape = xcorr_core.xcorr_window_fft_full(
+                stored_ts, stored_bands, frames_now, win_start, win_end,
+                search_ms=search_ms, old_r=old_r, tempo_bpm=tempo_bpm,
+            )
+        else:
+            _sweep_fn = (xcorr_core.xcorr_window_fft if settings.xcorr_fft_enabled
+                         else xcorr_core.xcorr_window)
+            new_result = _sweep_fn(
+                stored_ts, stored_bands, frames_now, win_start, win_end,
+                search_ms=search_ms, old_r=old_r, tempo_bpm=tempo_bpm,
+            )
         cpu_ms = (time.perf_counter() - t0) * 1000.0
         cpu_samples.append(cpu_ms)
 
@@ -325,6 +372,7 @@ def replay_play(stem: str, scenario: Scenario, *,
             stored_quality=stored_quality_for_old,
             engine_current_offset_ms=engine._shape_offset_ms,
             engine_play_best_quality=engine._play_best_quality,
+            landscape=win_landscape,
         )
 
         if outcome.engine_snap is not None:
@@ -399,6 +447,7 @@ def replay_play(stem: str, scenario: Scenario, *,
         wrong_lock_events=wrong_locks,
         n_saves=len(store.save_log),
         anchor_matched=anchor_matched,
+        progressive_matched=prog_matched,
         locked_via_stop=locked_via_stop,
         windows_evaluated=len(traces),
         windows_planned=len(windows),
