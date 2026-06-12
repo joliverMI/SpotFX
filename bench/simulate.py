@@ -62,10 +62,17 @@ def make_frames(
     noise_snr_db: Optional[float] = None,
     blend_donor_pcm: Optional[np.ndarray] = None,
     blend_ms: int = 0,
+    offset_change_at_ms: int = 0,
+    offset_change_delta_ms: int = 0,
     rng_seed: int = 0,
 ) -> list[Frame]:
     """Synthesize live-capture frames from PCM with controlled degradations.
-    Returns [(ts_ms, rms_total, rms_low, rms_mid, rms_high), ...]."""
+    Returns [(ts_ms, rms_total, rms_low, rms_mid, rms_high), ...].
+
+    offset_change_*: at clock time `at`, the true offset steps by `delta`
+    (frames after that point shift by −delta — models a Spotify position
+    re-sync mid-song, a real production wrong-lock source). Expected offset
+    becomes a step function: true_offset before, true_offset+delta after."""
     rate = settings.audio_sample_rate
     pcm = np.asarray(pcm, dtype=np.float32)
 
@@ -94,10 +101,18 @@ def make_frames(
 
     frames = synthesize_frames_from_pcm(pcm, 0)
     ts_shift = int(cut_in_ms - true_offset_ms)
-    return [
+    out = [
         (f.timestamp_ms + ts_shift, f.rms_total, f.rms_low, f.rms_mid, f.rms_high)
         for f in frames
     ]
+    if offset_change_at_ms and offset_change_delta_ms:
+        out = [
+            ((f[0] - int(offset_change_delta_ms),) + f[1:]
+             if f[0] >= offset_change_at_ms else f)
+            for f in out
+        ]
+        out.sort(key=lambda f: f[0])
+    return out
 
 
 @dataclass
@@ -145,6 +160,12 @@ class FakeEngine:
         self._play_best_quality = quality
         self.snap_log.append(SnapEvent(self.now_ms, new_effective, quality, source))
         return True
+
+    def demote_play_best(self, uri: str, ceiling: float,
+                         reason: str = "monitor") -> None:
+        """Mirrors trigger_engine.demote_play_best (Phase 5)."""
+        if uri == self._last_uri and self._play_best_quality > ceiling:
+            self._play_best_quality = float(ceiling)
 
 
 @dataclass

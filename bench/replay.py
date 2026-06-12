@@ -28,7 +28,9 @@ from config import settings, AUDIO_SHAPES_DIR
 from models.audio_shape import AudioShapeMeta
 from services import anchor_detector
 from services import xcorr_core
-from services.xcorr_sweep import SweepConfig, SweepEvaluator
+from services.xcorr_sweep import (
+    MismatchMonitor, MonitorConfig, SweepConfig, SweepEvaluator,
+)
 from bench.simulate import FakeEngine, FakeMetaStore, Frame, load_wav, make_frames
 
 _XCORR_MARGIN_MS = 1_000        # mirrors auto_offset_service
@@ -44,6 +46,8 @@ class Scenario:
     noise_snr_db: Optional[float] = None
     blend_ms: int = 0
     blend_donor: Optional[str] = None       # corpus stem for donor tail
+    offset_change_at_ms: int = 0             # midshift: clock time of a position re-sync
+    offset_change_delta_ms: int = 0          # midshift: expected offset steps by this
     seed: str = "cold"                       # cold | seeded_correct | seeded_wrong_2s | snapshot
     seed_snapshot: Optional[dict] = None     # FakeMetaStore.snapshot() of a prior play
     play_type: str = "first"
@@ -89,6 +93,8 @@ class PlayResult:
     cpu_ms_total: float
     cpu_ms_p50: float
     cpu_ms_p95: float
+    engine_correct_time_pct: float = 0.0     # % of song time engine offset within 300ms
+    monitor_recoveries: int = 0
     traces: list[WindowTrace] = field(default_factory=list)
     store_snapshot: dict = field(default_factory=dict)   # seeds two-play scenarios
 
@@ -184,6 +190,8 @@ def replay_play(stem: str, scenario: Scenario, *,
             noise_snr_db=scenario.noise_snr_db,
             blend_donor_pcm=donor_pcm,
             blend_ms=scenario.blend_ms,
+            offset_change_at_ms=scenario.offset_change_at_ms,
+            offset_change_delta_ms=scenario.offset_change_delta_ms,
         )
     last_frame_ts = frames[-1][0] if frames else 0
 
@@ -294,11 +302,11 @@ def replay_play(stem: str, scenario: Scenario, *,
     anchor_horizons = [c.timestamp_ms + _anchor_radius for c in anchor_candidates]
 
     # ── Merged event timeline ─────────────────────────────────────────────────
-    # Anchor crossings fire when frame time reaches a horizon; progressive
-    # ticks every interval from start_ms; windows fire at win_end + margin.
-    # Process strictly in time order, like the frame loop (anchor →
-    # progressive → window within a tick).
-    _prio = {"anchor": 0, "prog": 1, "window": 2}
+    # Tick kinds: anchor horizons, progressive ticks, monitor ticks (Phase 5),
+    # and window-readiness ticks (we + margin). Window dispatch mirrors the
+    # live loop exactly: a queue + readiness check after every tick, so a
+    # mismatch recovery can rebuild the queue mid-play like live does.
+    _prio = {"anchor": 0, "prog": 1, "monitor": 2, "tick": 3}
     events: list[tuple[int, str, object]] = []
     for h in sorted(set(anchor_horizons)):
         events.append((h, "anchor", h))
@@ -307,9 +315,22 @@ def replay_play(stem: str, scenario: Scenario, *,
         while t <= last_frame_ts:
             events.append((t, "prog", None))
             t += int(settings.xcorr_progressive_interval_ms)
+    monitor_enabled = bool(settings.xcorr_monitor_enabled)
+    mon_cfg = MonitorConfig.from_settings(settings)
+    if monitor_enabled:
+        t = mon_cfg.interval_ms
+        while t <= last_frame_ts:
+            events.append((t, "monitor", None))
+            t += mon_cfg.interval_ms
     for (ws, we) in windows:
-        events.append((we + _XCORR_MARGIN_MS, "window", (ws, we)))
+        events.append((we + _XCORR_MARGIN_MS, "tick", None))
     events.sort(key=lambda e: (e[0], _prio[e[1]]))
+
+    all_planned = list(windows)
+    window_queue = list(windows)
+    monitor = MismatchMonitor(mon_cfg)
+    monitor_mode = False
+    pending_dynamic: Optional[tuple[int, int]] = None
 
     anchor_done = not anchor_candidates
     anchor_matched = False
@@ -320,64 +341,16 @@ def replay_play(stem: str, scenario: Scenario, *,
     traces: list[WindowTrace] = []
     cpu_samples: list[float] = []
 
-    for ev_time, kind, payload in events:
-        if ev_time > last_frame_ts:
-            break   # capture would have ended before this event
-        engine.now_ms = ev_time
-        frames_now = [f for f in frames if f[0] <= ev_time]
-        if not frames_now:
-            continue
+    def expected_at(t: int) -> int:
+        """Expected offset as a step function (midshift scenarios)."""
+        if (scenario.offset_change_at_ms and scenario.offset_change_delta_ms
+                and t >= scenario.offset_change_at_ms):
+            return expected + int(scenario.offset_change_delta_ms)
+        return expected
 
-        if kind == "anchor":
-            if anchor_done:
-                continue
-            eligible = [c for c, h in zip(anchor_candidates, anchor_horizons)
-                        if ev_time >= h]
-            eligible_count = len(eligible)
-            if eligible_count <= anchor_last_eligible:
-                continue
-            match = anchor_detector.match_in_frames(eligible, frames_now)
-            if match is not None:
-                store.save_offset(uri, match.offset_ms, match.match_q, source="anchor")
-                evaluator.add_anchor_vote(
-                    int(match.offset_ms),
-                    float(match.match_r) * max(1, eligible_count),
-                )
-                anchor_matched = True
-                anchor_done = True
-            elif eligible_count >= len(anchor_candidates):
-                anchor_done = True
-            anchor_last_eligible = eligible_count
-            continue
-
-        if kind == "prog":
-            if not prog_active:
-                continue
-            t0 = time.perf_counter()
-            if ladder is not None:
-                p_center, p_span = ladder.current.center_offset_ms, ladder.current.span_ms
-            else:
-                p_center, p_span = 0, search_ms
-            match = xcorr_core.progressive_match(
-                frames_now, stored_ts, stored_bands,
-                t_now_ms=ev_time, search_ms=p_span, center_offset_ms=p_center,
-            )
-            cpu_samples.append((time.perf_counter() - t0) * 1000.0)
-            if match is not None:
-                # Engine-only (mirrors live): no disk write from progressive.
-                engine.apply_save(uri, match.offset_ms, match.quality,
-                                  source="progressive")
-                evaluator.add_progressive_vote(match.offset_ms, match.r)
-                prog_matched = True
-                prog_active = False
-                if verbose:
-                    print(f"  [prog @{ev_time:>6}] match {match.offset_ms:+d}ms "
-                          f"r={match.r:.2f} Q={match.quality:.2f} span={match.span_ms}ms")
-            continue
-
-        # ── Window event ──────────────────────────────────────────────────────
-        win_start, win_end = payload
-        prog_active = False   # first planned window reached — progressive done
+    def run_window(win_start: int, win_end: int, frames_now: list) -> bool:
+        """One window evaluation + side effects. Mirrors live _run_window.
+        Returns True when lock-and-stop fired."""
         t0 = time.perf_counter()
 
         bins = np.arange(win_start, win_end, xcorr_core.XCORR_BIN_MS, dtype=float)
@@ -457,17 +430,137 @@ def replay_play(stem: str, scenario: Scenario, *,
             cpu_ms=round(cpu_ms, 2),
         ))
         if verbose:
-            t = traces[-1]
-            print(f"  [{win_start:>6}-{win_end:>6}] diff={t.difficulty:.2f} "
-                  f"OLD r={t.old_r:+.2f}@{stored_offset_ms:+d}  "
-                  f"NEW {('%+d' % t.new_offset_ms) if t.new_offset_ms is not None else '--'}ms "
-                  f"r={t.new_r if t.new_r is not None else 0:.2f}  "
-                  f"winner={t.winner}{' ★' if t.is_global_best else ''} "
-                  f"({t.cpu_ms:.1f}ms)")
+            tr = traces[-1]
+            print(f"  [{win_start:>6}-{win_end:>6}] diff={tr.difficulty:.2f} "
+                  f"OLD r={tr.old_r:+.2f}@{stored_offset_ms:+d}  "
+                  f"NEW {('%+d' % tr.new_offset_ms) if tr.new_offset_ms is not None else '--'}ms "
+                  f"r={tr.new_r if tr.new_r is not None else 0:.2f}  "
+                  f"winner={tr.winner}{' ★' if tr.is_global_best else ''} "
+                  f"({tr.cpu_ms:.1f}ms)")
 
-        if evaluator.lock_and_stop(engine._play_best_quality):
-            locked_via_stop = True
+        return evaluator.lock_and_stop(engine._play_best_quality)
+
+    ended = False
+    for ev_time, kind, payload in events:
+        if ended or ev_time > last_frame_ts:
             break
+        engine.now_ms = ev_time
+        frames_now = [f for f in frames if f[0] <= ev_time]
+        if not frames_now:
+            continue
+
+        if kind == "anchor":
+            if not anchor_done:
+                eligible = [c for c, h in zip(anchor_candidates, anchor_horizons)
+                            if ev_time >= h]
+                eligible_count = len(eligible)
+                if eligible_count > anchor_last_eligible:
+                    match = anchor_detector.match_in_frames(eligible, frames_now)
+                    if match is not None:
+                        store.save_offset(uri, match.offset_ms, match.match_q, source="anchor")
+                        evaluator.add_anchor_vote(
+                            int(match.offset_ms),
+                            float(match.match_r) * max(1, eligible_count),
+                        )
+                        anchor_matched = True
+                        anchor_done = True
+                    elif eligible_count >= len(anchor_candidates):
+                        anchor_done = True
+                    anchor_last_eligible = eligible_count
+
+        elif kind == "prog":
+            if prog_active:
+                t0 = time.perf_counter()
+                if ladder is not None:
+                    p_center, p_span = ladder.current.center_offset_ms, ladder.current.span_ms
+                else:
+                    p_center, p_span = 0, search_ms
+                match = xcorr_core.progressive_match(
+                    frames_now, stored_ts, stored_bands,
+                    t_now_ms=ev_time, search_ms=p_span, center_offset_ms=p_center,
+                )
+                cpu_samples.append((time.perf_counter() - t0) * 1000.0)
+                if match is not None:
+                    # Engine-only (mirrors live): no disk write from progressive.
+                    engine.apply_save(uri, match.offset_ms, match.quality,
+                                      source="progressive")
+                    evaluator.add_progressive_vote(match.offset_ms, match.r)
+                    prog_matched = True
+                    prog_active = False
+                    if verbose:
+                        print(f"  [prog @{ev_time:>6}] match {match.offset_ms:+d}ms "
+                              f"r={match.r:.2f} Q={match.quality:.2f} span={match.span_ms}ms")
+
+        elif kind == "monitor":
+            if monitor_mode:
+                t0 = time.perf_counter()
+                mon_off = engine._shape_offset_ms
+                mw_end = min(ev_time + mon_off, int(stored_ts[-1]))
+                mw_start = mw_end - mon_cfg.span_ms
+                rolling_r = None
+                if mw_start >= 0:
+                    rolling_r = xcorr_core.eval_at_shift(
+                        stored_ts, stored_bands, frames_now,
+                        mw_start, mw_end, -mon_off,
+                    )
+                cpu_samples.append((time.perf_counter() - t0) * 1000.0)
+                action = monitor.note_check(rolling_r, engine._play_best_quality)
+                if action == "confirmed":
+                    spike = xcorr_core.mismatch_spike(
+                        stored_ts, stored_bands, frames_now,
+                        engine_offset_ms=mon_off, t_now_ms=ev_time,
+                        lookback_ms=mon_cfg.spike_lookback_ms,
+                        halfwin_ms=mon_cfg.spike_halfwin_ms,
+                    )
+                    if ladder is not None:
+                        if monitor.recoveries >= 2:
+                            ladder.escalate_to_global()
+                        else:
+                            ladder.escalate()
+                    evaluator.note_mismatch_confirmed(mon_cfg.accum_decay)
+                    engine.demote_play_best(uri, mon_cfg.demote_q)
+                    if spike is not None:
+                        pending_dynamic = (spike[0], spike[1])
+                        if verbose:
+                            print(f"  [monitor @{ev_time:>6}] CONFIRMED r={rolling_r} "
+                                  f"→ dynamic window [{spike[0]}-{spike[1]}] spike={spike[2]}")
+                    window_queue = [(s, e) for s, e in all_planned if s > ev_time]
+                    monitor_mode = False
+
+        # ── Dispatch (every tick, mirrors the live per-frame checks) ──────────
+        if pending_dynamic is not None:
+            dws, dwe = pending_dynamic
+            pending_dynamic = None
+            locked = run_window(dws, dwe, frames_now)
+            monitor.recovery_done()
+            if locked:
+                locked_via_stop = True
+                if not monitor_enabled:
+                    ended = True
+                else:
+                    monitor_mode = True
+                    window_queue = []
+            continue
+
+        while (not monitor_mode and window_queue
+               and ev_time >= window_queue[0][1] + _XCORR_MARGIN_MS):
+            ws, we = window_queue.pop(0)
+            prog_active = False   # first planned window reached — progressive done
+            locked = run_window(ws, we, frames_now)
+            if locked:
+                locked_via_stop = True
+                if not monitor_enabled:
+                    ended = True
+                else:
+                    monitor_mode = True
+                    window_queue = []
+                break
+        if ended:
+            break
+        if not window_queue and not monitor_mode:
+            if not monitor_enabled:
+                break
+            monitor_mode = True
 
     # ── Finalize ──────────────────────────────────────────────────────────────
     if evaluator.n_measurements > 0:
@@ -479,27 +572,43 @@ def replay_play(stem: str, scenario: Scenario, *,
                               bypass_drift_cap=f_bypass)
 
     # ── Metrics ───────────────────────────────────────────────────────────────
-    # "Stored" = what the NEXT play would load from the slot: the last save,
-    # or the untouched seed when no save fired (refusing to overwrite a
-    # correct seed is success, not failure). None only when the slot started
-    # cold AND nothing saved.
+    # "Stored" = what the NEXT play would load from the slot. Errors compare
+    # against the END-of-play expected offset (step function for midshift).
+    expected_final = expected_at(last_frame_ts)
     if store.save_log or store.history:
         final_stored = store.timestamp_offset_ms
     else:
         final_stored = None
-    final_stored_err = (final_stored - expected) if final_stored is not None else None
-    engine_err = engine._shape_offset_ms - expected
+    final_stored_err = (final_stored - expected_final) if final_stored is not None else None
+    engine_err = engine._shape_offset_ms - expected_final
 
     # First correct engine lock that is never later displaced by a wrong one.
     t_lock: Optional[int] = None
     for i, ev in enumerate(engine.snap_log):
-        if abs(ev.offset_ms - expected) <= 100:
-            if all(abs(later.offset_ms - expected) <= 100
+        if abs(ev.offset_ms - expected_at(ev.song_time_ms)) <= 100:
+            if all(abs(later.offset_ms - expected_at(later.song_time_ms)) <= 100
                    for later in engine.snap_log[i + 1:]):
                 t_lock = ev.song_time_ms
                 break
     wrong_locks = sum(1 for ev in store.save_log
-                      if abs(ev.offset_ms - expected) > 300)
+                      if abs(ev.offset_ms - expected_at(ev.song_time_ms)) > 300)
+
+    # Engine-correct time fraction: integrate the engine-offset step function
+    # against the expected step function over [0, last_frame_ts].
+    correct_ms = 0
+    points = [(0, engine._loaded_offset_ms)] + [
+        (ev.song_time_ms, ev.offset_ms) for ev in engine.snap_log]
+    boundaries = sorted({t for t, _ in points}
+                        | ({int(scenario.offset_change_at_ms)}
+                           if scenario.offset_change_at_ms else set())
+                        | {0, last_frame_ts})
+    for a, b in zip(boundaries, boundaries[1:]):
+        if b <= a:
+            continue
+        off = next(o for t, o in reversed(points) if t <= a)
+        if abs(off - expected_at(a)) <= 300:
+            correct_ms += b - a
+    engine_correct_pct = round(100.0 * correct_ms / max(1, last_frame_ts), 1)
 
     cpu_arr = np.array(cpu_samples) if cpu_samples else np.array([0.0])
     return PlayResult(
@@ -519,6 +628,8 @@ def replay_play(stem: str, scenario: Scenario, *,
         cpu_ms_total=round(float(cpu_arr.sum()), 1),
         cpu_ms_p50=round(float(np.percentile(cpu_arr, 50)), 1),
         cpu_ms_p95=round(float(np.percentile(cpu_arr, 95)), 1),
+        engine_correct_time_pct=engine_correct_pct,
+        monitor_recoveries=monitor.recoveries,
         traces=traces,
         store_snapshot=store.snapshot(),
     )

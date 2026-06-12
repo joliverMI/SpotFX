@@ -868,6 +868,20 @@ class TriggerEngine:
         self._play_best_quality = quality
         return True
 
+    def demote_play_best(self, uri: str, ceiling: float,
+                         reason: str = "monitor") -> None:
+        """Phase 5: lower _play_best_quality to `ceiling` (never raise) so a
+        fresh corrective save can win the quality-wins gate after a confirmed
+        live mismatch. The offset itself is untouched — this only re-opens
+        the gate; an actual better measurement must still arrive and clear
+        every other gate (incl. the drift cap)."""
+        if uri == self._last_uri and self._play_best_quality > ceiling:
+            logger.info(
+                "Engine: play-best demoted %.2f → %.2f (%s) for %s",
+                self._play_best_quality, ceiling, reason, uri,
+            )
+            self._play_best_quality = float(ceiling)
+
     def _effective_offset_ms(self) -> int:
         """
         Total ms to subtract from the song timestamp when deciding to fire.

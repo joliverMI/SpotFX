@@ -299,6 +299,23 @@ class Settings(BaseSettings):
     # Persist directly-observed blend cut-in points (offset ≥ this) on the
     # slot as observed_cut_in_ms; next play's narrow stage centers there.
     xcorr_cut_in_record_min_ms: int = 3000
+    # Phase 5: continuous mismatch monitor + spike-targeted re-locking. ON by
+    # default (whole-song safety net; per-check math is sub-ms). After
+    # lock-and-stop / queue drain the loop enters monitor-only mode instead
+    # of closing the capture: a rolling fit check every interval; on
+    # confirmed mismatch a dynamic window at the strongest live-vs-saved
+    # residual spike is swept through ALL existing gates (the monitor never
+    # saves directly), the ladder escalates, and the planned sweep resumes.
+    xcorr_monitor_enabled: bool = True
+    xcorr_monitor_interval_ms: int = 2000
+    xcorr_monitor_span_ms: int = 4000
+    xcorr_monitor_min_r: float = 0.20
+    xcorr_monitor_confirm_checks: int = 2
+    xcorr_monitor_max_recoveries: int = 2
+    xcorr_monitor_spike_lookback_ms: int = 15000
+    xcorr_monitor_spike_halfwin_ms: int = 2500
+    xcorr_monitor_demote_q: float = 0.40
+    xcorr_monitor_accum_decay: float = 0.5
     # Song-start sniff: fire a dedicated start-window xcorr after this much
     # accumulated live audio at song load.
     xcorr_start_sniff_ms: int = 5000

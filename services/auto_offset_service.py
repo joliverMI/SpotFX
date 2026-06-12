@@ -57,8 +57,11 @@ from services.xcorr_core import (
     xcorr_window_fft as _xcorr_window_fft,
     xcorr_window_fft_full as _xcorr_window_fft_full,
     progressive_match as _progressive_match,
+    mismatch_spike as _mismatch_spike,
 )
-from services.xcorr_sweep import SweepConfig, SweepEvaluator
+from services.xcorr_sweep import (
+    MismatchMonitor, MonitorConfig, SweepConfig, SweepEvaluator,
+)
 from services.xcorr_evidence import EvidenceAccumulator
 
 logger = logging.getLogger(__name__)
@@ -774,6 +777,241 @@ class AutoOffsetService:
         _prog_active = bool(settings.xcorr_progressive_enabled)
         _prog_next_ms = int(settings.xcorr_progressive_start_ms)
 
+        # Phase 5: the per-window evaluation, callable for both planned and
+        # dynamically scheduled (mismatch-spike) windows. Returns True when
+        # lock-and-stop fired. Body moved verbatim from the loop (closure
+        # over frames/stored_*/evaluator/_ladder/...).
+        async def _run_window(win_start: int, win_end: int) -> bool:
+            # ── Compute difficulty for this window ────────────────────────
+            bins = np.arange(win_start, win_end, _XCORR_BIN_MS, dtype=float)
+            window_template = np.interp(bins, stored_ts, stored_rms)
+            difficulty = _difficulty_score(window_template, stored_rms)
+
+            # ── OLD candidate: evaluate the engine's CURRENT live offset ──
+            # Test r at whatever the trigger engine is actually using to fire
+            # triggers right now. The disk-stored median is also computed so
+            # downstream gating + diagnostic quality fields stay populated, but
+            # the OLD test point itself is the engine's runtime offset.
+            #
+            # Why: when the engine loaded a stale median at song start (file
+            # updated since by another play), testing OLD at the disk median
+            # hides the engine staleness — every window says "OLD looks fine"
+            # while triggers fire at the wrong offset. Testing at the engine's
+            # actual offset surfaces the gap (low OLD r → NEW wins → apply_save
+            # corrects the engine).
+            cur_meta = load_audio_shape_meta(uri)
+            stored_offset_ms_disk = cur_meta.timestamp_offset_ms if cur_meta else 0
+            stored_quality_for_old = cur_meta.offset_quality if cur_meta else 0.0
+            if cur_meta and app_state.active_setlist_id:
+                sl_entry = (cur_meta.setlist_offsets or {}).get(app_state.active_setlist_id)
+                if sl_entry:
+                    med = _median_offset(sl_entry.get("history") or [])
+                    stored_offset_ms_disk = med if med is not None else int(sl_entry.get("timestamp_offset_ms", 0))
+                    stored_quality_for_old = float(sl_entry.get("offset_quality", 0.0))
+            try:
+                from main import engine as _engine_for_old
+                engine_offset_ms = int(_engine_for_old._shape_offset_ms)
+            except Exception:
+                engine_offset_ms = None
+            stored_offset_ms = engine_offset_ms if engine_offset_ms is not None else stored_offset_ms_disk
+            # Run the OLD evaluation on a worker thread — same reason as
+            # _xcorr_window: numpy releases the GIL during interp/dot, so
+            # the asyncio loop stays responsive while xcorr math runs.
+            old_r = await asyncio.to_thread(
+                _eval_at_shift,
+                stored_ts, stored_bands, frames, win_start, win_end,
+                -stored_offset_ms,                # shift_ms
+            )
+            # Coerce pre-NEW to preserve original ordering: the margin-
+            # skip check inside _xcorr_window sees 0.0 (not None) when the
+            # OLD eval found all bands flat.
+            old_r = float(old_r) if old_r is not None else 0.0
+
+            # ── NEW candidate: free-search xcorr (multi-band) ────────────
+            # Run on a worker thread so the numpy sweep doesn't block the
+            # asyncio event loop (which serves LedFX HTTP writes, WebSocket
+            # broadcasts, and the trigger engine tick). FFT path (Phase 2):
+            # exact r at every 25ms shift + landscape gates; legacy
+            # coarse+fine kept as fallback while the flag is off.
+            _win_landscape = None
+            _stage = _ladder.current if _ladder else None
+            if _ladder is not None:
+                _lo, _hi = _stage.shift_bounds
+                new_result, _win_landscape = await asyncio.to_thread(
+                    _xcorr_window_fft_full,
+                    stored_ts, stored_bands, frames, win_start, win_end,
+                    search_lo_ms=_lo, search_hi_ms=_hi,
+                    old_r=old_r,
+                    tempo_bpm=tempo_bpm,
+                )
+            elif _accum_active:
+                new_result, _win_landscape = await asyncio.to_thread(
+                    _xcorr_window_fft_full,
+                    stored_ts, stored_bands, frames, win_start, win_end,
+                    search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
+                    old_r=old_r,
+                    tempo_bpm=tempo_bpm,
+                )
+            else:
+                _sweep_fn = _xcorr_window_fft if settings.xcorr_fft_enabled else _xcorr_window
+                new_result = await asyncio.to_thread(
+                    _sweep_fn,
+                    stored_ts, stored_bands, frames, win_start, win_end,
+                    search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
+                    old_r=old_r,
+                    tempo_bpm=tempo_bpm,
+                )
+
+            # Engine play-best read once per window — feeds the envelope
+            # clip's cold-start skip and the snap stickiness gate.
+            try:
+                from main import engine as _engine_for_gates
+                engine_play_best = float(_engine_for_gates._play_best_quality)
+            except Exception:
+                engine_play_best = 0.0
+
+            # All gate decisions (winner pick, envelope clip, confirmation
+            # votes, snap stickiness, save gates) happen in the evaluator;
+            # this loop performs the side effects below.
+            outcome = evaluator.process_window(
+                win_start, win_end,
+                difficulty=difficulty,
+                new_result=new_result,
+                old_r=old_r,
+                stored_offset_ms=stored_offset_ms,
+                stored_quality=stored_quality_for_old,
+                engine_current_offset_ms=(engine_offset_ms if engine_offset_ms is not None else 0),
+                engine_play_best_quality=engine_play_best,
+                landscape=_win_landscape,
+                envelope_exempt=(_stage is not None and _stage.name == "global"),
+            )
+
+            # Phase 4: ladder escalation — when the current stage keeps
+            # finding nothing, widen; an anti-correlated baseline goes
+            # straight to global (the loaded center is provably wrong).
+            if _ladder is not None:
+                _new_stage = _ladder.note_window(outcome.new_result is not None)
+                if _new_stage is None and outcome.baseline_anti_corr:
+                    _new_stage = _ladder.escalate_to_global()
+                if _new_stage is not None:
+                    logger.info(
+                        "Auto-offset xcorr: search ladder → %s (center=%+dms ±%dms) for %s",
+                        _new_stage.name, _new_stage.center_offset_ms,
+                        _new_stage.span_ms, uri,
+                    )
+
+            logger.info(
+                "Auto-offset xcorr: [%d–%d]ms  NEW %+dms r=%.2f Q=%.2f  "
+                "OLD %+dms r=%.2f Q=%.2f  diff=%.2f  thr=%.3f  winner=%s%s  for %s",
+                win_start, win_end,
+                outcome.new_offset_ms if outcome.new_result else 0,
+                outcome.new_r, outcome.new_quality,
+                stored_offset_ms, outcome.old_r, outcome.old_quality,
+                difficulty, outcome.displacement_threshold,
+                "NEW" if outcome.is_new else "OLD",
+                " ← global best" if outcome.is_global_best else "",
+                uri,
+            )
+
+            try:
+                from services.websocket_manager import ws_manager
+                asyncio.create_task(ws_manager.broadcast({
+                    "type":               "xcorr_window",
+                    "uri":                uri,
+                    "win_start":          win_start,
+                    "win_end":            win_end,
+                    "failed":             outcome.new_result is None and outcome.old_r == 0.0,
+                    # NEW candidate
+                    "new_offset_ms":      outcome.new_offset_ms if outcome.new_result else None,
+                    "new_r":              round(outcome.new_r, 3) if outcome.new_result else None,
+                    "new_quality":        outcome.new_quality if outcome.new_result else None,
+                    # OLD candidate
+                    "old_offset_ms":      stored_offset_ms,
+                    "old_r":              round(outcome.old_r, 3),
+                    "old_quality":        outcome.old_quality,
+                    # Window info
+                    "difficulty":         round(difficulty, 3),
+                    "winner":             "new" if outcome.is_new else "old",
+                    "applied":            outcome.is_global_best and verification != "user_verified",
+                    # Legacy compatibility
+                    "offset_ms":          outcome.win_offset,
+                    "pearson_r":          round(outcome.win_r, 3),
+                }))
+            except Exception:
+                pass
+
+            # Engine snap (uncluttered): every high-r window also tries to
+            # snap the live engine via apply_save. apply_save only takes
+            # effect when its Q strictly beats the play-best, so a noisy
+            # single window can't override a confident anchor or earlier
+            # higher-Q window. This is what makes the Now Playing display
+            # update mid-play even before a cluster has formed for disk.
+            if outcome.engine_snap is not None:
+                _snap_offset, _snap_q, _snap_bypass = outcome.engine_snap
+                try:
+                    from main import engine
+                    engine.apply_save(uri, _snap_offset, _snap_q,
+                                      source="sweep-window",
+                                      bypass_drift_cap=_snap_bypass)
+                except Exception as exc:
+                    logger.debug("Engine apply_save (window) failed: %s", exc)
+
+            # Per-window DISK save (cluster-confirmed, or the single-window
+            # high-r escape hatch — decided in the evaluator).
+            if outcome.disk_save is not None:
+                _sv_offset, _sv_q, _sv_source, _sv_bypass = outcome.disk_save
+                _save_offset(uri, _sv_offset, _sv_q,
+                             source=_sv_source, bypass_drift_cap=_sv_bypass)
+
+            # DIAGNOSTIC CSV ──────────────────────────────────────────
+            if settings.xcorr_csv_logging:
+                _detail = await asyncio.to_thread(
+                    _xcorr_window_detail,
+                    stored_ts, stored_bands, frames,
+                    win_start, win_end,
+                    -outcome.win_offset,                  # winning_shift
+                    search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
+                )
+                _csv_window_rows.append({
+                    "start_ms":   win_start,
+                    "difficulty": round(difficulty, 4),
+                    "winner":     "new" if outcome.is_new else "old",
+                    "offset_ms":  outcome.win_offset,
+                    "quality":    outcome.win_quality,
+                    "r_avg":      round(outcome.win_r, 4),
+                    "r_total":    _detail.r_total,
+                    "r_low":      _detail.r_low,
+                    "r_mid":      _detail.r_mid,
+                    "r_high":     _detail.r_high,
+                    "peak_total": _detail.peak_total_ms,
+                    "peak_low":   _detail.peak_low_ms,
+                    "peak_mid":   _detail.peak_mid_ms,
+                    "peak_high":  _detail.peak_high_ms,
+                    "old_r_avg":  round(outcome.old_r, 4),
+                })
+            # END DIAGNOSTIC CSV ──────────────────────────────────────
+
+            # Lock-and-stop: once the engine has snapped at high Q AND
+            # multiple windows agree on the offset, the marginal value of
+            # the trailing windows is nil. Reads the engine play-best AFTER
+            # this window's apply_save, matching the pre-refactor ordering.
+            try:
+                from main import engine as _engine_for_lock
+                if evaluator.lock_and_stop(float(_engine_for_lock._play_best_quality)):
+                    return True
+            except Exception:
+                pass
+            return False
+
+        # Phase 5: continuous mismatch monitor state.
+        all_planned = list(windows)
+        _monitor_active = bool(settings.xcorr_monitor_enabled)
+        _mon_cfg = MonitorConfig.from_settings(settings)
+        monitor = MismatchMonitor(_mon_cfg)
+        monitor_mode = False
+        _mon_next_ms = 0
+        pending_dynamic: Optional[tuple[int, int]] = None
+
         try:
             async for frame in capture:
                 if not app_state.current_track:
@@ -906,8 +1144,104 @@ class AutoOffsetService:
                             pass
                         _prog_active = False   # first lock — hand over to the sweep
 
+                # ── Monitor tick (monitor-only mode, Phase 5) ────────────────
+                if monitor_mode and _monitor_active and frame.timestamp_ms >= _mon_next_ms:
+                    _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
+                    try:
+                        from main import engine as _eng_mon
+                        _mon_off = int(_eng_mon._shape_offset_ms)
+                        _mon_pb = float(_eng_mon._play_best_quality)
+                    except Exception:
+                        _mon_off, _mon_pb = 0, 0.0
+                    _mw_end = min(frame.timestamp_ms + _mon_off, int(stored_ts[-1]))
+                    _mw_start = _mw_end - _mon_cfg.span_ms
+                    rolling_r = None
+                    if _mw_start >= 0:
+                        rolling_r = await asyncio.to_thread(
+                            _eval_at_shift, stored_ts, stored_bands, frames,
+                            _mw_start, _mw_end, -_mon_off,
+                        )
+                    action = monitor.note_check(rolling_r, _mon_pb)
+                    try:
+                        from services.websocket_manager import ws_manager
+                        asyncio.create_task(ws_manager.broadcast({
+                            "type":       "xcorr_monitor",
+                            "uri":        uri,
+                            "t_ms":       frame.timestamp_ms,
+                            "rolling_r":  round(rolling_r, 3) if rolling_r is not None else None,
+                            "state":      monitor.state,
+                            "recoveries": monitor.recoveries,
+                        }))
+                    except Exception:
+                        pass
+                    if action == "confirmed":
+                        spike = await asyncio.to_thread(
+                            _mismatch_spike,
+                            stored_ts, stored_bands, frames,
+                            engine_offset_ms=_mon_off,
+                            t_now_ms=frame.timestamp_ms,
+                            lookback_ms=_mon_cfg.spike_lookback_ms,
+                            halfwin_ms=_mon_cfg.spike_halfwin_ms,
+                        )
+                        # First recovery: one ladder stage; second: global —
+                        # the current center is suspect, but global is where
+                        # twins live, so widen gradually.
+                        if _ladder is not None:
+                            _st = (_ladder.escalate_to_global()
+                                   if monitor.recoveries >= 2 else _ladder.escalate())
+                            if _st is not None:
+                                logger.info(
+                                    "Auto-offset monitor: ladder → %s (center=%+dms ±%dms) for %s",
+                                    _st.name, _st.center_offset_ms, _st.span_ms, uri,
+                                )
+                        evaluator.note_mismatch_confirmed(_mon_cfg.accum_decay)
+                        try:
+                            from main import engine as _eng_dem
+                            _eng_dem.demote_play_best(uri, _mon_cfg.demote_q)
+                        except Exception:
+                            pass
+                        if spike is not None:
+                            _dws, _dwe, _spike_ms, _strength = spike
+                            pending_dynamic = (_dws, _dwe)
+                            logger.info(
+                                "Auto-offset monitor: CONFIRMED mismatch (r=%.2f) — dynamic window "
+                                "[%d–%d]ms at residual spike %dms (strength=%.2f), sweep re-armed for %s",
+                                rolling_r if rolling_r is not None else -1.0,
+                                _dws, _dwe, _spike_ms, _strength, uri,
+                            )
+                        else:
+                            logger.info(
+                                "Auto-offset monitor: CONFIRMED mismatch (r=%.2f) — no usable spike, "
+                                "sweep re-armed for %s",
+                                rolling_r if rolling_r is not None else -1.0, uri,
+                            )
+                        window_queue = [(s, e) for s, e in all_planned
+                                        if s > frame.timestamp_ms]
+                        monitor_mode = False
+
+                # ── Dynamic (mismatch-spike) window: bypasses the margin check —
+                # its live data exists by construction (stored-domain window).
+                if pending_dynamic is not None:
+                    _dws, _dwe = pending_dynamic
+                    pending_dynamic = None
+                    locked = await _run_window(_dws, _dwe)
+                    monitor.recovery_done()
+                    if locked:
+                        _locked_via_stop = True
+                        if not _monitor_active:
+                            break
+                        monitor_mode = True
+                        window_queue = []
+                        _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
+                    continue
+
                 if not window_queue:
-                    break
+                    if not _monitor_active:
+                        break          # flags-off: byte-identical exit
+                    if not monitor_mode:
+                        monitor_mode = True
+                        _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
+                    continue
                 win_start, win_end = window_queue[0]
                 if frame.timestamp_ms < win_end + _XCORR_MARGIN_MS:
                     continue
@@ -915,215 +1249,21 @@ class AutoOffsetService:
                 window_queue.pop(0)
                 _prog_active = False   # first planned window reached — progressive done
 
-                # ── Compute difficulty for this window ────────────────────────
-                bins = np.arange(win_start, win_end, _XCORR_BIN_MS, dtype=float)
-                window_template = np.interp(bins, stored_ts, stored_rms)
-                difficulty = _difficulty_score(window_template, stored_rms)
+                locked = await _run_window(win_start, win_end)
+                if locked:
+                    _locked_via_stop = True
+                    if not _monitor_active:
+                        break          # flags-off: byte-identical exit
+                    monitor_mode = True
+                    window_queue = []
+                    _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
+                    continue
 
-                # ── OLD candidate: evaluate the engine's CURRENT live offset ──
-                # Test r at whatever the trigger engine is actually using to fire
-                # triggers right now. The disk-stored median is also computed so
-                # downstream gating + diagnostic quality fields stay populated, but
-                # the OLD test point itself is the engine's runtime offset.
-                #
-                # Why: when the engine loaded a stale median at song start (file
-                # updated since by another play), testing OLD at the disk median
-                # hides the engine staleness — every window says "OLD looks fine"
-                # while triggers fire at the wrong offset. Testing at the engine's
-                # actual offset surfaces the gap (low OLD r → NEW wins → apply_save
-                # corrects the engine).
-                cur_meta = load_audio_shape_meta(uri)
-                stored_offset_ms_disk = cur_meta.timestamp_offset_ms if cur_meta else 0
-                stored_quality_for_old = cur_meta.offset_quality if cur_meta else 0.0
-                if cur_meta and app_state.active_setlist_id:
-                    sl_entry = (cur_meta.setlist_offsets or {}).get(app_state.active_setlist_id)
-                    if sl_entry:
-                        med = _median_offset(sl_entry.get("history") or [])
-                        stored_offset_ms_disk = med if med is not None else int(sl_entry.get("timestamp_offset_ms", 0))
-                        stored_quality_for_old = float(sl_entry.get("offset_quality", 0.0))
-                try:
-                    from main import engine as _engine_for_old
-                    engine_offset_ms = int(_engine_for_old._shape_offset_ms)
-                except Exception:
-                    engine_offset_ms = None
-                stored_offset_ms = engine_offset_ms if engine_offset_ms is not None else stored_offset_ms_disk
-                # Run the OLD evaluation on a worker thread — same reason as
-                # _xcorr_window: numpy releases the GIL during interp/dot, so
-                # the asyncio loop stays responsive while xcorr math runs.
-                old_r = await asyncio.to_thread(
-                    _eval_at_shift,
-                    stored_ts, stored_bands, frames, win_start, win_end,
-                    -stored_offset_ms,                # shift_ms
-                )
-                # Coerce pre-NEW to preserve original ordering: the margin-
-                # skip check inside _xcorr_window sees 0.0 (not None) when the
-                # OLD eval found all bands flat.
-                old_r = float(old_r) if old_r is not None else 0.0
-
-                # ── NEW candidate: free-search xcorr (multi-band) ────────────
-                # Run on a worker thread so the numpy sweep doesn't block the
-                # asyncio event loop (which serves LedFX HTTP writes, WebSocket
-                # broadcasts, and the trigger engine tick). FFT path (Phase 2):
-                # exact r at every 25ms shift + landscape gates; legacy
-                # coarse+fine kept as fallback while the flag is off.
-                _win_landscape = None
-                _stage = _ladder.current if _ladder else None
-                if _ladder is not None:
-                    _lo, _hi = _stage.shift_bounds
-                    new_result, _win_landscape = await asyncio.to_thread(
-                        _xcorr_window_fft_full,
-                        stored_ts, stored_bands, frames, win_start, win_end,
-                        search_lo_ms=_lo, search_hi_ms=_hi,
-                        old_r=old_r,
-                        tempo_bpm=tempo_bpm,
-                    )
-                elif _accum_active:
-                    new_result, _win_landscape = await asyncio.to_thread(
-                        _xcorr_window_fft_full,
-                        stored_ts, stored_bands, frames, win_start, win_end,
-                        search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
-                        old_r=old_r,
-                        tempo_bpm=tempo_bpm,
-                    )
-                else:
-                    _sweep_fn = _xcorr_window_fft if settings.xcorr_fft_enabled else _xcorr_window
-                    new_result = await asyncio.to_thread(
-                        _sweep_fn,
-                        stored_ts, stored_bands, frames, win_start, win_end,
-                        search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
-                        old_r=old_r,
-                        tempo_bpm=tempo_bpm,
-                    )
-
-                # Engine play-best read once per window — feeds the envelope
-                # clip's cold-start skip and the snap stickiness gate.
-                try:
-                    from main import engine as _engine_for_gates
-                    engine_play_best = float(_engine_for_gates._play_best_quality)
-                except Exception:
-                    engine_play_best = 0.0
-
-                # All gate decisions (winner pick, envelope clip, confirmation
-                # votes, snap stickiness, save gates) happen in the evaluator;
-                # this loop performs the side effects below.
-                outcome = evaluator.process_window(
-                    win_start, win_end,
-                    difficulty=difficulty,
-                    new_result=new_result,
-                    old_r=old_r,
-                    stored_offset_ms=stored_offset_ms,
-                    stored_quality=stored_quality_for_old,
-                    engine_current_offset_ms=(engine_offset_ms if engine_offset_ms is not None else 0),
-                    engine_play_best_quality=engine_play_best,
-                    landscape=_win_landscape,
-                    envelope_exempt=(_stage is not None and _stage.name == "global"),
-                )
-
-                # Phase 4: ladder escalation — when the current stage keeps
-                # finding nothing, widen; an anti-correlated baseline goes
-                # straight to global (the loaded center is provably wrong).
-                if _ladder is not None:
-                    _new_stage = _ladder.note_window(outcome.new_result is not None)
-                    if _new_stage is None and outcome.baseline_anti_corr:
-                        _new_stage = _ladder.escalate_to_global()
-                    if _new_stage is not None:
-                        logger.info(
-                            "Auto-offset xcorr: search ladder → %s (center=%+dms ±%dms) for %s",
-                            _new_stage.name, _new_stage.center_offset_ms,
-                            _new_stage.span_ms, uri,
-                        )
-
-                logger.info(
-                    "Auto-offset xcorr: [%d–%d]ms  NEW %+dms r=%.2f Q=%.2f  "
-                    "OLD %+dms r=%.2f Q=%.2f  diff=%.2f  thr=%.3f  winner=%s%s  for %s",
-                    win_start, win_end,
-                    outcome.new_offset_ms if outcome.new_result else 0,
-                    outcome.new_r, outcome.new_quality,
-                    stored_offset_ms, outcome.old_r, outcome.old_quality,
-                    difficulty, outcome.displacement_threshold,
-                    "NEW" if outcome.is_new else "OLD",
-                    " ← global best" if outcome.is_global_best else "",
-                    uri,
-                )
-
-                try:
-                    from services.websocket_manager import ws_manager
-                    asyncio.create_task(ws_manager.broadcast({
-                        "type":               "xcorr_window",
-                        "uri":                uri,
-                        "win_start":          win_start,
-                        "win_end":            win_end,
-                        "failed":             outcome.new_result is None and outcome.old_r == 0.0,
-                        # NEW candidate
-                        "new_offset_ms":      outcome.new_offset_ms if outcome.new_result else None,
-                        "new_r":              round(outcome.new_r, 3) if outcome.new_result else None,
-                        "new_quality":        outcome.new_quality if outcome.new_result else None,
-                        # OLD candidate
-                        "old_offset_ms":      stored_offset_ms,
-                        "old_r":              round(outcome.old_r, 3),
-                        "old_quality":        outcome.old_quality,
-                        # Window info
-                        "difficulty":         round(difficulty, 3),
-                        "winner":             "new" if outcome.is_new else "old",
-                        "applied":            outcome.is_global_best and verification != "user_verified",
-                        # Legacy compatibility
-                        "offset_ms":          outcome.win_offset,
-                        "pearson_r":          round(outcome.win_r, 3),
-                    }))
-                except Exception:
-                    pass
-
-                # Engine snap (uncluttered): every high-r window also tries to
-                # snap the live engine via apply_save. apply_save only takes
-                # effect when its Q strictly beats the play-best, so a noisy
-                # single window can't override a confident anchor or earlier
-                # higher-Q window. This is what makes the Now Playing display
-                # update mid-play even before a cluster has formed for disk.
-                if outcome.engine_snap is not None:
-                    _snap_offset, _snap_q, _snap_bypass = outcome.engine_snap
-                    try:
-                        from main import engine
-                        engine.apply_save(uri, _snap_offset, _snap_q,
-                                          source="sweep-window",
-                                          bypass_drift_cap=_snap_bypass)
-                    except Exception as exc:
-                        logger.debug("Engine apply_save (window) failed: %s", exc)
-
-                # Per-window DISK save (cluster-confirmed, or the single-window
-                # high-r escape hatch — decided in the evaluator).
-                if outcome.disk_save is not None:
-                    _sv_offset, _sv_q, _sv_source, _sv_bypass = outcome.disk_save
-                    _save_offset(uri, _sv_offset, _sv_q,
-                                 source=_sv_source, bypass_drift_cap=_sv_bypass)
-
-                # DIAGNOSTIC CSV ──────────────────────────────────────────
-                if settings.xcorr_csv_logging:
-                    _detail = await asyncio.to_thread(
-                        _xcorr_window_detail,
-                        stored_ts, stored_bands, frames,
-                        win_start, win_end,
-                        -outcome.win_offset,                  # winning_shift
-                        search_ms=_xcorr_search_ms(int(meta.duration_ms or 0)),
-                    )
-                    _csv_window_rows.append({
-                        "start_ms":   win_start,
-                        "difficulty": round(difficulty, 4),
-                        "winner":     "new" if outcome.is_new else "old",
-                        "offset_ms":  outcome.win_offset,
-                        "quality":    outcome.win_quality,
-                        "r_avg":      round(outcome.win_r, 4),
-                        "r_total":    _detail.r_total,
-                        "r_low":      _detail.r_low,
-                        "r_mid":      _detail.r_mid,
-                        "r_high":     _detail.r_high,
-                        "peak_total": _detail.peak_total_ms,
-                        "peak_low":   _detail.peak_low_ms,
-                        "peak_mid":   _detail.peak_mid_ms,
-                        "peak_high":  _detail.peak_high_ms,
-                        "old_r_avg":  round(outcome.old_r, 4),
-                    })
-                # END DIAGNOSTIC CSV ──────────────────────────────────────
-
+                if not window_queue:
+                    if not _monitor_active:
+                        break          # flags-off: byte-identical exit
+                    monitor_mode = True
+                    _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
                 # Lock-and-stop: once the engine has snapped at high Q AND
                 # multiple windows agree on the offset, the marginal value of
                 # the trailing windows is nil — halt the rest of this play's

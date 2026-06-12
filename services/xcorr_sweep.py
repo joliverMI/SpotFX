@@ -132,12 +132,98 @@ class SearchLadder:
             return self.current
         return None
 
+    def escalate(self) -> Optional[SearchStage]:
+        """Advance one stage manually (Phase 5 mismatch recovery: position
+        re-syncs are small — the next stage almost always contains the
+        truth, while global is where twins live)."""
+        if self._idx < len(self.stages) - 1:
+            self._idx += 1
+            self._empty_streak = 0
+            return self.current
+        return None
+
     def escalate_to_global(self) -> Optional[SearchStage]:
         if self._idx < len(self.stages) - 1:
             self._idx = len(self.stages) - 1
             self._empty_streak = 0
             return self.current
         return None
+
+
+@dataclass
+class MonitorConfig:
+    """Phase 5: continuous mismatch monitor knobs (sibling of SweepConfig —
+    kept separate so the decision-differential selftest's SweepConfig
+    transcription stays untouched)."""
+    interval_ms: int = 2000
+    span_ms: int = 4000
+    min_r: float = 0.20
+    confirm_checks: int = 2
+    max_recoveries: int = 2
+    spike_lookback_ms: int = 15000
+    spike_halfwin_ms: int = 2500
+    demote_q: float = 0.40
+    accum_decay: float = 0.5
+
+    @classmethod
+    def from_settings(cls, settings) -> "MonitorConfig":
+        return cls(
+            interval_ms=int(getattr(settings, "xcorr_monitor_interval_ms", 2000)),
+            span_ms=int(getattr(settings, "xcorr_monitor_span_ms", 4000)),
+            min_r=float(getattr(settings, "xcorr_monitor_min_r", 0.20)),
+            confirm_checks=int(getattr(settings, "xcorr_monitor_confirm_checks", 2)),
+            max_recoveries=int(getattr(settings, "xcorr_monitor_max_recoveries", 2)),
+            spike_lookback_ms=int(getattr(settings, "xcorr_monitor_spike_lookback_ms", 15000)),
+            spike_halfwin_ms=int(getattr(settings, "xcorr_monitor_spike_halfwin_ms", 2500)),
+            demote_q=float(getattr(settings, "xcorr_monitor_demote_q", 0.40)),
+            accum_decay=float(getattr(settings, "xcorr_monitor_accum_decay", 0.5)),
+        )
+
+
+class MismatchMonitor:
+    """Phase 5 wrong-lock detector. States: ok → suspect (1..K−1 consecutive
+    low checks) → confirmed (returns 'confirmed' once, capped per play).
+
+    Rules: a None rolling_r (flat/quiet span) is NEUTRAL — no increment, no
+    reset (silence can't hide a wrong lock); an unlocked engine
+    (play_best ≤ 0) resets (not-locked is not mismatch); recoveries are
+    capped per play — after the cap the monitor keeps reporting state but
+    never confirms again.
+    """
+
+    def __init__(self, cfg: MonitorConfig) -> None:
+        self.cfg = cfg
+        self.low_streak = 0
+        self.recoveries = 0
+        self.state = "ok"            # ok | suspect | recovering
+        self.last_r: Optional[float] = None
+
+    def note_check(self, rolling_r: Optional[float],
+                   engine_play_best: float) -> str:
+        """Returns 'none' or 'confirmed'."""
+        self.last_r = rolling_r
+        if rolling_r is None:
+            return "none"
+        if engine_play_best <= 0.0:
+            self.low_streak = 0
+            self.state = "ok"
+            return "none"
+        if rolling_r < self.cfg.min_r:
+            self.low_streak += 1
+            if (self.low_streak >= self.cfg.confirm_checks
+                    and self.recoveries < self.cfg.max_recoveries):
+                self.low_streak = 0
+                self.recoveries += 1
+                self.state = "recovering"
+                return "confirmed"
+            self.state = "suspect"
+        else:
+            self.low_streak = 0
+            self.state = "ok"
+        return "none"
+
+    def recovery_done(self) -> None:
+        self.state = "ok"
 
 
 @dataclass
@@ -241,6 +327,22 @@ class SweepEvaluator:
         self.confirmation_shifts.append((int(offset_ms), float(weight)))
         if self.accumulator is not None:
             self.accumulator.add_gaussian(int(offset_ms), float(weight))
+
+    def note_mismatch_confirmed(self, decay: float = 0.5) -> None:
+        """Phase 5: a confirmed live mismatch means this play's converged
+        state is suspect. Haircut best_quality so corrective windows can
+        become global-best again, and decay accumulated evidence so the
+        wrong peak can be out-voted by fresh measurements. Deliberately
+        does NOT set baseline_anti_corr — that would relax save gates and
+        bypass drift caps on a possibly-false confirmation (e.g. a DJ
+        edit); the dynamic window's OLD eval feeds the anti-corr streak
+        organically instead. That non-relaxation is the disk-damage
+        firewall."""
+        if self.best_quality > 0:
+            self.best_quality *= float(decay)
+        if self.accumulator is not None:
+            self.accumulator.decay(float(decay))
+        self._last_accum_save_offset = None
 
     # ── Per-window evaluation ─────────────────────────────────────────────────
     def process_window(

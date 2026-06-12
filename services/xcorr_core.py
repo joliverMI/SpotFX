@@ -778,6 +778,106 @@ def progressive_match(
     )
 
 
+# ── Phase 5: mismatch spike extraction ────────────────────────────────────────
+def mismatch_spike(
+    stored_ts: np.ndarray,
+    stored_bands: list[np.ndarray],
+    frames: list[tuple[int, float, float, float, float]],
+    *,
+    engine_offset_ms: int,
+    t_now_ms: int,
+    lookback_ms: int = 15000,
+    halfwin_ms: int = 2500,
+    smooth_bins: int = 3,
+) -> Optional[tuple[int, int, int, float]]:
+    """Locate the strongest matcher-view |z-diff| cluster over the recent
+    live span at the engine's current offset — the highest-information
+    location for a corrective measurement when a wrong lock is suspected
+    (a transient present in one signal but unaligned in the other would
+    cancel under correct alignment; its residual marks a distinctive spot).
+
+    Returns (win_start, win_end, spike_ms, strength) in STORED-shape time
+    — directly consumable as a dynamically planned window — or None when
+    the span is flat. Normalization mirrors eval_at_shift exactly
+    (signed-square → 25ms bins → AGC → z-score, live sampled at
+    bins+shift), which is also what the debug page's diff graph draws.
+    """
+    shift = -int(engine_offset_ms)
+    end = min(float(t_now_ms + engine_offset_ms), float(stored_ts[-1]))
+    start = max(float(stored_ts[0]), end - lookback_ms)
+    if end - start < 2000:
+        return None
+    bins = np.arange(start, end, XCORR_BIN_MS, dtype=float)
+    if len(bins) < 8:
+        return None
+    live_ts = np.array([f[0] for f in frames], dtype=float)
+
+    diff_sum = np.zeros(len(bins))
+    n_valid = 0
+    for band_idx in range(len(stored_bands)):
+        template = agc_normalize(np.interp(bins, stored_ts, stored_bands[band_idx]))
+        if template.std() < 1e-6:
+            continue
+        z_t = (template - template.mean()) / template.std()
+        live_rms = signed_square(
+            np.array([f[1 + band_idx] for f in frames], dtype=float))
+        live = agc_normalize(np.interp(bins + shift, live_ts, live_rms,
+                                       left=0.0, right=0.0))
+        if live.std() < 1e-6:
+            continue
+        z_l = (live - live.mean()) / live.std()
+        diff_sum += np.abs(z_l - z_t)
+        n_valid += 1
+    if n_valid == 0:
+        return None
+    d = diff_sum / n_valid
+    # 3-bin (75ms) smooth — same de-flicker the debug graph applies, so the
+    # picked spike matches what the user sees.
+    if smooth_bins > 1 and len(d) > smooth_bins:
+        kernel = np.ones(smooth_bins) / smooth_bins
+        d = np.convolve(d, kernel, mode="same")
+
+    # Cluster pick: prefer a SUSTAINED spike region (sliding 500ms sum) over
+    # a single noisy bin.
+    cw = max(1, 500 // XCORR_BIN_MS)
+    if len(d) <= cw:
+        centers = [int(np.argmax(d))]
+    else:
+        sums = np.convolve(d, np.ones(cw), mode="valid")
+        order = np.argsort(sums)[::-1]
+        centers = [int(order[0] + cw // 2)]
+        # Second-best cluster ≥ halfwin away (retry target when the best
+        # lands on an uninformative stored region).
+        for k in order[1:]:
+            c = int(k + cw // 2)
+            if abs(c - centers[0]) * XCORR_BIN_MS >= halfwin_ms:
+                centers.append(c)
+                break
+
+    stored_rms_diff = stored_bands[1]   # squared rms_low — difficulty band
+    min_diff = float(getattr(settings, "xcorr_starting_threshold", 0.15))
+    for c in centers:
+        spike_ms = int(bins[min(c, len(bins) - 1)])
+        win_start = max(0, spike_ms - halfwin_ms)
+        win_end = min(int(stored_ts[-1]), spike_ms + halfwin_ms)
+        if win_end - win_start < 2000:
+            continue
+        w_bins = np.arange(win_start, win_end, XCORR_BIN_MS, dtype=float)
+        w_tpl = np.interp(w_bins, stored_ts, stored_rms_diff)
+        if difficulty_score(w_tpl, stored_rms_diff) >= min_diff:
+            return (win_start, win_end, spike_ms,
+                    round(float(d[min(c, len(d) - 1)]), 3))
+    # Fall back to the best cluster even if low-difficulty — the downstream
+    # gates make a useless window harmless (it just costs one sweep).
+    spike_ms = int(bins[min(centers[0], len(bins) - 1)])
+    win_start = max(0, spike_ms - halfwin_ms)
+    win_end = min(int(stored_ts[-1]), spike_ms + halfwin_ms)
+    if win_end - win_start < 2000:
+        return None
+    return (win_start, win_end, spike_ms,
+            round(float(d[min(centers[0], len(d) - 1)]), 3))
+
+
 # DIAGNOSTIC CSV ──────────────────────────────────────────────────────────────
 @dataclass
 class XcorrDetail:

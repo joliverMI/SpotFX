@@ -28,6 +28,8 @@ def rescore(tag: str) -> dict[str, dict]:
         errs = []
         locks = []
         wrong = 0
+        ect = [float(r["engine_correct_time_pct"]) for r in rs
+               if r.get("engine_correct_time_pct") not in (None, "")]
         for r in rs:
             expected = int(r["expected_offset_ms"])
             stored = r["final_stored_offset_ms"]
@@ -54,6 +56,7 @@ def rescore(tag: str) -> dict[str, dict]:
             "wrong": round(100 * wrong / len(rs), 1),
             "tlock": int(np.median(locks)) if locks else None,
             "lock_rate": round(100 * len(locks) / len(rs), 1),
+            "ect": round(float(np.mean(ect)), 1) if ect else None,
         }
     return out
 
@@ -63,13 +66,14 @@ def compare(tags: list[str]) -> None:
     scens = sorted(set().union(*(d.keys() for d in data.values())))
     hdr = f"{'scenario':<26}"
     for t in tags:
-        hdr += f"{t[:6]+'_acc':>11}{'wL':>7}{'tlk':>7}"
+        hdr += f"{t[:6]+'_acc':>11}{'wL':>7}{'tlk':>7}{'ect':>7}"
     print(hdr)
     for s in scens:
         row = f"{s:<26}"
         for t in tags:
             v = data[t].get(s, {})
-            row += f"{v.get('acc','-'):>10}%{v.get('wrong','-'):>6}%{str(v.get('tlock','-')):>7}"
+            row += (f"{v.get('acc','-'):>10}%{v.get('wrong','-'):>6}%"
+                    f"{str(v.get('tlock','-')):>7}{str(v.get('ect','-')):>7}")
         print(row)
     import statistics as st
     for t in tags:

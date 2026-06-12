@@ -73,6 +73,13 @@ class EvidenceAccumulator:
                 self.support[lo:hi] += 1
             self.n_curves += 1
 
+    def decay(self, factor: float) -> None:
+        """Phase 5: scale accumulated mass after a confirmed live mismatch
+        so a wrong peak can be out-voted by fresh evidence. Support counts
+        stay — they record that measurements happened, not that they were
+        right."""
+        self.mass *= float(factor)
+
     def dominant(self, min_sep_ms: int = 350,
                  centroid_radius_ms: int = 150) -> Optional[AccumPeak]:
         if self.n_curves == 0 or not np.any(self.mass > 0):

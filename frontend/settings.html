@@ -105,6 +105,9 @@
       <div class="field">
         <label><input type="checkbox" id="s-suppress-triggers-capture"> Suppress Triggers During Capture</label>
       </div>
+      <div class="field">
+        <label><input type="checkbox" id="s-xcorr-monitor"> Whole-song Sync Monitor (auto re-lock on drift)</label>
+      </div>
     </div>
 
     <div class="card advanced-only-block">
@@ -356,6 +359,7 @@ document.getElementById('s-auto-gen-mode').value  = settings.auto_generate_mode 
 document.getElementById('s-show-ai-triggers').checked = settings.show_ai_triggers ?? false;
 document.getElementById('s-show-advanced').checked = settings.show_advanced ?? false;
 document.getElementById('s-suppress-triggers-capture').checked = settings.suppress_triggers_during_capture ?? true;
+document.getElementById('s-xcorr-monitor').checked = settings.xcorr_monitor_enabled ?? true;
 
 // ── Ambient Mode ──────────────────────────────────────────────────────────────
 const _ambCats = await GET('/device-categories');
@@ -413,6 +417,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     show_ai_triggers:         document.getElementById('s-show-ai-triggers').checked,
     show_advanced:            document.getElementById('s-show-advanced').checked,
     suppress_triggers_during_capture: document.getElementById('s-suppress-triggers-capture').checked,
+    xcorr_monitor_enabled:    document.getElementById('s-xcorr-monitor').checked,
     ambient_target_category:  document.getElementById('s-ambient-category').value,
     ambient_color_mode:       document.getElementById('s-ambient-color-mode').value,
     ambient_kelvin:           parseInt(document.getElementById('s-ambient-kelvin').value),

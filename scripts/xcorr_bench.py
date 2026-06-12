@@ -30,25 +30,28 @@ from bench.simulate import load_wav, make_frames  # noqa: E402
 
 SEEDS = ["cold", "seeded_correct", "seeded_wrong_2s"]
 
-# (name, true_offset_ms, cut_in_ms, noise_snr_db, blend_ms)
+# (name, true_offset_ms, cut_in_ms, noise_snr_db, blend_ms, change_at_ms, change_delta_ms)
 PROFILES = [
-    ("off0",        0,      0,     None, 0),
-    ("off+200",     200,    0,     None, 0),
-    ("off-200",     -200,   0,     None, 0),
-    ("off+2s",      2000,   0,     None, 0),
-    ("off-2s",      -2000,  0,     None, 0),
-    ("off+10s",     10000,  0,     None, 0),
-    ("off-10s",     -10000, 0,     None, 0),
-    ("off+25s",     25000,  0,     None, 0),
-    ("off-25s",     -25000, 0,     None, 0),
-    ("noise0",      0,      0,     20.0, 0),
-    ("noise-2s",    -2000,  0,     20.0, 0),
-    ("cutin5s",     5000,   5000,  None, 0),
-    ("cutin15s",    15000,  15000, None, 0),
-    ("cutin25s",    25000,  25000, None, 0),
-    ("blend8s",     0,      0,     None, 8000),
+    ("off0",        0,      0,     None, 0,    0,     0),
+    ("off+200",     200,    0,     None, 0,    0,     0),
+    ("off-200",     -200,   0,     None, 0,    0,     0),
+    ("off+2s",      2000,   0,     None, 0,    0,     0),
+    ("off-2s",      -2000,  0,     None, 0,    0,     0),
+    ("off+10s",     10000,  0,     None, 0,    0,     0),
+    ("off-10s",     -10000, 0,     None, 0,    0,     0),
+    ("off+25s",     25000,  0,     None, 0,    0,     0),
+    ("off-25s",     -25000, 0,     None, 0,    0,     0),
+    ("noise0",      0,      0,     20.0, 0,    0,     0),
+    ("noise-2s",    -2000,  0,     20.0, 0,    0,     0),
+    ("cutin5s",     5000,   5000,  None, 0,    0,     0),
+    ("cutin15s",    15000,  15000, None, 0,    0,     0),
+    ("cutin25s",    25000,  25000, None, 0,    0,     0),
+    ("blend8s",     0,      0,     None, 8000, 0,     0),
+    # Phase 5: mid-song position re-sync (the monitor's headline scenario)
+    ("midshift+1.5s", 0,    0,     None, 0,    60000, 1500),
+    ("midshift-1.5s", 0,    0,     None, 0,    60000, -1500),
 ]
-QUICK_PROFILES = {"off0", "off-2s", "off+10s", "cutin15s", "blend8s"}
+QUICK_PROFILES = {"off0", "off-2s", "off+10s", "cutin15s", "blend8s", "midshift+1.5s"}
 QUICK_SEEDS = ["cold", "seeded_wrong_2s"]
 
 
@@ -93,9 +96,9 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
         donor_stem = stems[si - 1]   # blend donor: previous corpus song (wraps)
         # Offsets only shift timestamps — synthesize once per degradation
         # (cut/noise/blend) and derive per-offset frames cheaply.
-        degr_cache: dict = {(0, None, 0): clean_frames}
-        for (pname, true_off, cut_in, snr, blend_ms) in profiles:
-            key = (cut_in, snr, blend_ms)
+        degr_cache: dict = {(0, None, 0, 0, 0): clean_frames}
+        for (pname, true_off, cut_in, snr, blend_ms, chg_at, chg_delta) in profiles:
+            key = (cut_in, snr, blend_ms, chg_at, chg_delta)
             if key not in degr_cache:
                 if blend_ms > 0 and donor_pcm is None:
                     try:
@@ -106,6 +109,7 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
                     pcm, cut_in_ms=cut_in, noise_snr_db=snr,
                     blend_donor_pcm=donor_pcm if blend_ms > 0 else None,
                     blend_ms=blend_ms,
+                    offset_change_at_ms=chg_at, offset_change_delta_ms=chg_delta,
                 )
             base = degr_cache[key]
             frames = base if true_off == 0 else [(f[0] - true_off,) + f[1:] for f in base]
@@ -113,6 +117,8 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
                 sc = Scenario(name=f"{pname}/{seed}", true_offset_ms=true_off,
                               cut_in_ms=cut_in, noise_snr_db=snr,
                               blend_ms=blend_ms, seed=seed,
+                              offset_change_at_ms=chg_at,
+                              offset_change_delta_ms=chg_delta,
                               force_search_ms=force_search_ms)
                 res = replay_play(stem, sc, assets=assets, frames=frames,
                                   wav_bias_ms=bias)
@@ -127,6 +133,8 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
                                    noise_snr_db=snr, blend_ms=blend_ms,
                                    seed="snapshot",
                                    seed_snapshot=res.store_snapshot,
+                                   offset_change_at_ms=chg_at,
+                                   offset_change_delta_ms=chg_delta,
                                    force_search_ms=force_search_ms)
                     results.append(replay_play(stem, sc2, assets=assets,
                                                frames=frames, wav_bias_ms=bias))
@@ -140,7 +148,8 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
             "final_stored_error_ms", "engine_final_error_ms",
             "time_to_first_correct_lock_ms", "wrong_lock_events", "n_saves",
             "anchor_matched", "progressive_matched", "locked_via_stop", "windows_evaluated",
-            "windows_planned", "cpu_ms_total", "cpu_ms_p50", "cpu_ms_p95", "correct"]
+            "windows_planned", "cpu_ms_total", "cpu_ms_p50", "cpu_ms_p95",
+            "engine_correct_time_pct", "monitor_recoveries", "correct"]
     with (out_dir / "results.csv").open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(cols)
@@ -169,6 +178,8 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
             "lock_rate_pct": round(100 * len(locks) / len(rs), 1),
             "cpu_ms_per_window_p50": round(float(np.median([r.cpu_ms_p50 for r in rs])), 1),
             "cpu_ms_per_play_total": round(float(np.median([r.cpu_ms_total for r in rs])), 1),
+            "engine_correct_time_pct": round(float(np.mean([r.engine_correct_time_pct for r in rs])), 1),
+            "monitor_recoveries_mean": round(float(np.mean([r.monitor_recoveries for r in rs])), 2),
         }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"\nWrote {out_dir}/results.csv + summary.json "

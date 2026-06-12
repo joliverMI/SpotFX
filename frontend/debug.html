@@ -106,7 +106,7 @@
 
     <!-- ── Diff canvas (collapsible) ───────────────────────────────────────── -->
     <details class="card" style="padding:10px 16px;">
-      <summary>Live − Saved diff <span id="diff-status" style="font-weight:400;font-size:11px;color:var(--text-muted);margin-left:6px;"></span></summary>
+      <summary>Live − Saved diff <span id="diff-status" style="font-weight:400;font-size:11px;color:var(--text-muted);margin-left:6px;"></span><span id="monitor-status" style="font-weight:600;font-size:11px;margin-left:10px;"></span></summary>
       <div class="audio-wrap">
         <canvas id="diff-canvas"></canvas>
         <div id="diff-resize-handle"></div>
@@ -652,6 +652,17 @@ onMessage('shape_match_updated', (msg) => {
       `Anchor matched: ${msg.offset_ms >= 0 ? '+' : ''}${msg.offset_ms}ms ` +
       `r=${(+msg.r).toFixed(2)} Q=${(+msg.q).toFixed(2)} band=${msg.band}`;
   }
+});
+
+// ── xcorr_monitor: whole-song sync monitor status (Phase 5) ─────────────────
+const _MON_COLORS = { ok: '#00ff88', suspect: '#ffb300', recovering: '#ff5252' };
+onMessage('xcorr_monitor', (msg) => {
+  const el = document.getElementById('monitor-status');
+  if (!el) return;
+  const r = msg.rolling_r != null ? msg.rolling_r.toFixed(2) : '--';
+  el.textContent = `monitor r=${r} · ${msg.state}` +
+    (msg.recoveries ? ` (${msg.recoveries} recoveries)` : '');
+  el.style.color = _MON_COLORS[msg.state] || 'var(--text-muted)';
 });
 
 onMessage('trigger_fired', (msg) => {
