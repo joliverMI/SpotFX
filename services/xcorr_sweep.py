@@ -608,6 +608,66 @@ class SweepEvaluator:
             return True
         return False
 
+    def _finalize_cluster(self, cfg: SweepConfig) -> Optional[tuple[int, float, str, bool]]:
+        """Legacy weighted-cluster save gate (pre-Phase-3) — the final
+        authority when no accumulator is attached, and the Phase-5 fallback
+        when a post-recovery accumulator hasn't rebuilt enough mass.
+        Save guard: don't pollute the stored offset with weak or
+        one-window-only measurements. Cluster confirmation_shifts within
+        ±tol and prefer the most-agreed cluster when it beats
+        best_offset's agreement."""
+        if self.baseline_anti_corr:
+            min_confirm = cfg.save_min_confirm_anti
+        else:
+            min_confirm = cfg.save_min_confirm
+
+        def _agree_weight(target: int) -> float:
+            return sum(w for s, w in self.confirmation_shifts
+                       if abs(s - target) <= cfg.save_confirm_tol_ms)
+
+        cluster_weights: dict[int, float] = {}
+        for s, _w in self.confirmation_shifts:
+            cluster_weights[s] = _agree_weight(s)
+        best_cluster_centre = (max(cluster_weights, key=cluster_weights.get)
+                               if cluster_weights else self.best_offset)
+        best_cluster_weight = cluster_weights.get(best_cluster_centre, 0.0)
+        best_offset_agree = _agree_weight(self.best_offset)
+
+        # Prefer cluster centre when its weighted agreement strictly beats
+        # the single-best-Q offset's.
+        if best_cluster_weight > best_offset_agree and best_cluster_weight >= min_confirm:
+            cluster_members = [s for s, _w in self.confirmation_shifts
+                               if abs(s - best_cluster_centre) <= cfg.save_confirm_tol_ms]
+            save_offset = int(round(sum(cluster_members) / len(cluster_members)))
+            save_quality = self.best_quality
+            logger.info(
+                "Auto-offset xcorr: cluster override — saving %+dms (cluster weight=%.2f) "
+                "instead of single-best %+dms (weight=%.2f)",
+                save_offset, best_cluster_weight, self.best_offset, best_offset_agree,
+            )
+        else:
+            save_offset = self.best_offset
+            save_quality = self.best_quality
+
+        agree = _agree_weight(save_offset)
+
+        if save_quality < cfg.save_min_quality:
+            logger.info(
+                "Auto-offset xcorr: NOT saving — best Q=%.2f < min %.2f "
+                "(measured=%+dms, stored offset unchanged)",
+                save_quality, cfg.save_min_quality, save_offset,
+            )
+            return None
+        if agree < min_confirm:
+            logger.info(
+                "Auto-offset xcorr: NOT saving — weighted %.2f confirmed "
+                "%+dms within ±%dms (need %.1f) "
+                "(measured Q=%.2f, stored offset unchanged)",
+                agree, save_offset, cfg.save_confirm_tol_ms, min_confirm, save_quality,
+            )
+            return None
+        return (save_offset, save_quality, "sweep", self.baseline_anti_corr)
+
     # ── Post-loop finalization ────────────────────────────────────────────────
     def finalize(self) -> FinalDecision:
         """Cluster-override + final save gates (the post-loop logic)."""
@@ -641,67 +701,21 @@ class SweepEvaluator:
                              "sweep-accum", self.baseline_anti_corr)
             else:
                 logger.info(
-                    "Auto-offset xcorr: NOT saving — accum peak %s (need mass≥%.1f dom≥%.1f support≥2, Q=%.2f≥%.2f)",
+                    "Auto-offset xcorr: accum peak below save gates %s (need mass≥%.1f dom≥%.1f support≥2, Q=%.2f≥%.2f) — trying cluster fallback",
                     (f"{peak.offset_ms:+d}ms mass={peak.mass:.2f} dom={peak.dominance:.2f} "
                      f"support={peak.support}") if peak else "empty",
                     cfg.accum_lock_mass, cfg.accum_dominance,
                     self.best_quality, cfg.save_min_quality,
                 )
+                # Phase 5: cluster fallback. After a mismatch recovery the
+                # accumulator's mass was deliberately decayed — the few
+                # post-recovery windows may not rebuild it past the mass bar
+                # even when they clearly agree. The pre-Phase-3 weighted
+                # cluster gate (≥2.0 within ±300ms) is the battle-tested
+                # arbiter for exactly that "few but agreeing" situation.
+                disk_save = self._finalize_cluster(cfg)
         else:
-            # Save guard: don't pollute the stored offset with weak or
-            # one-window-only measurements. Cluster confirmation_shifts within
-            # ±tol and prefer the most-agreed cluster when it beats
-            # best_offset's agreement.
-            if self.baseline_anti_corr:
-                min_confirm = cfg.save_min_confirm_anti
-            else:
-                min_confirm = cfg.save_min_confirm
-
-            def _agree_weight(target: int) -> float:
-                return sum(w for s, w in self.confirmation_shifts
-                           if abs(s - target) <= cfg.save_confirm_tol_ms)
-
-            cluster_weights: dict[int, float] = {}
-            for s, _w in self.confirmation_shifts:
-                cluster_weights[s] = _agree_weight(s)
-            best_cluster_centre = (max(cluster_weights, key=cluster_weights.get)
-                                   if cluster_weights else self.best_offset)
-            best_cluster_weight = cluster_weights.get(best_cluster_centre, 0.0)
-            best_offset_agree = _agree_weight(self.best_offset)
-
-            # Prefer cluster centre when its weighted agreement strictly beats
-            # the single-best-Q offset's.
-            if best_cluster_weight > best_offset_agree and best_cluster_weight >= min_confirm:
-                cluster_members = [s for s, _w in self.confirmation_shifts
-                                   if abs(s - best_cluster_centre) <= cfg.save_confirm_tol_ms]
-                save_offset = int(round(sum(cluster_members) / len(cluster_members)))
-                save_quality = self.best_quality
-                logger.info(
-                    "Auto-offset xcorr: cluster override — saving %+dms (cluster weight=%.2f) "
-                    "instead of single-best %+dms (weight=%.2f)",
-                    save_offset, best_cluster_weight, self.best_offset, best_offset_agree,
-                )
-            else:
-                save_offset = self.best_offset
-                save_quality = self.best_quality
-
-            agree = _agree_weight(save_offset)
-
-            if save_quality < cfg.save_min_quality:
-                logger.info(
-                    "Auto-offset xcorr: NOT saving — best Q=%.2f < min %.2f "
-                    "(measured=%+dms, stored offset unchanged)",
-                    save_quality, cfg.save_min_quality, save_offset,
-                )
-            elif agree < min_confirm:
-                logger.info(
-                    "Auto-offset xcorr: NOT saving — weighted %.2f confirmed "
-                    "%+dms within ±%dms (need %.1f) "
-                    "(measured Q=%.2f, stored offset unchanged)",
-                    agree, save_offset, cfg.save_confirm_tol_ms, min_confirm, save_quality,
-                )
-            else:
-                disk_save = (save_offset, save_quality, "sweep", self.baseline_anti_corr)
+            disk_save = self._finalize_cluster(cfg)
 
         return FinalDecision(
             best_offset=self.best_offset,

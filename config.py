@@ -310,7 +310,7 @@ class Settings(BaseSettings):
     xcorr_monitor_interval_ms: int = 2000
     xcorr_monitor_span_ms: int = 4000
     xcorr_monitor_min_r: float = 0.20
-    xcorr_monitor_confirm_checks: int = 2
+    xcorr_monitor_confirm_checks: int = 3   # bench: 2 caused recovery churn on noisy content
     xcorr_monitor_max_recoveries: int = 2
     xcorr_monitor_spike_lookback_ms: int = 15000
     xcorr_monitor_spike_halfwin_ms: int = 2500
