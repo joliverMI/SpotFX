@@ -1,0 +1,1756 @@
+stem,scenario,expected_offset_ms,final_stored_offset_ms,final_stored_error_ms,engine_final_error_ms,time_to_first_correct_lock_ms,wrong_lock_events,n_saves,anchor_matched,locked_via_stop,windows_evaluated,windows_planned,cpu_ms_total,cpu_ms_p50,cpu_ms_p95,correct
+Bad Bunny - EoO,off0/cold,-1075,-1050,25,25,9000,0,2,False,True,4,22,572.4,2.5,480.5,True
+Bad Bunny - EoO,off0/seeded_correct,-1075,-1075,0,0,9000,0,2,False,True,4,22,8.7,2.3,2.5,True
+Bad Bunny - EoO,off0/seeded_wrong_2s,-1075,-1050,25,25,9000,0,2,False,True,4,22,8.7,2.3,2.5,True
+Bad Bunny - EoO,off+200/cold,-875,-850,25,25,9000,0,2,False,True,3,22,6.4,2.2,2.3,True
+Bad Bunny - EoO,off+200/seeded_correct,-875,-875,0,0,9000,0,2,False,True,2,22,3.9,2.0,2.2,True
+Bad Bunny - EoO,off+200/seeded_wrong_2s,-875,-850,25,25,9000,0,2,False,True,3,22,6.2,2.2,2.4,True
+Bad Bunny - EoO,off-200/cold,-1275,-1250,25,25,9000,0,2,False,True,4,22,8.9,2.3,2.5,True
+Bad Bunny - EoO,off-200/seeded_correct,-1275,-1275,0,0,9000,0,2,False,True,4,22,8.9,2.3,2.6,True
+Bad Bunny - EoO,off-200/seeded_wrong_2s,-1275,-1250,25,25,9000,0,2,False,True,4,22,8.6,2.3,2.5,True
+Bad Bunny - EoO,off+2s/cold,925,950,25,25,9000,0,2,False,True,3,22,6.5,2.3,2.4,True
+Bad Bunny - EoO,off+2s/seeded_correct,925,925,0,0,9000,0,2,False,True,2,22,3.9,2.0,2.2,True
+Bad Bunny - EoO,off+2s/seeded_wrong_2s,925,950,25,25,9000,0,2,False,True,3,22,6.3,2.3,2.4,True
+Bad Bunny - EoO,off-2s/cold,-3075,-3075,0,0,77250,0,3,True,True,12,22,39.3,3.2,5.1,True
+Bad Bunny - EoO,off-2s/seeded_correct,-3075,-3075,0,0,35250,0,4,False,True,11,22,32.7,2.9,4.1,True
+Bad Bunny - EoO,off-2s/seeded_wrong_2s,-3075,-3075,0,0,77250,0,2,False,True,15,22,56.7,3.6,6.1,True
+Bad Bunny - EoO,off+10s/cold,8925,-475,-9400,-9400,,3,3,False,True,13,22,51.2,4.0,6.5,False
+Bad Bunny - EoO,off+10s/seeded_correct,8925,8925,0,0,9000,0,2,False,True,4,22,10.2,2.7,2.9,True
+Bad Bunny - EoO,off+10s/seeded_wrong_2s,8925,-475,-9400,-9400,,3,3,False,True,14,22,57.0,3.9,6.4,False
+Bad Bunny - EoO,off-10s/cold,-11075,-475,10600,10600,,4,4,False,False,21,22,99.4,5.7,7.4,False
+Bad Bunny - EoO,off-10s/seeded_correct,-11075,-1645,9430,0,,2,2,False,False,21,22,98.1,5.3,7.3,False
+Bad Bunny - EoO,off-10s/seeded_wrong_2s,-11075,-1645,9430,2000,,2,2,False,False,21,22,96.7,5.5,7.4,False
+Bad Bunny - EoO,off+25s/cold,23925,-775,-24700,-24700,,1,1,False,False,22,22,133.5,6.1,9.3,False
+Bad Bunny - EoO,off+25s/seeded_correct,23925,23925,0,0,9000,0,2,False,True,4,22,12.7,3.3,3.5,True
+Bad Bunny - EoO,off+25s/seeded_wrong_2s,23925,1600,-22325,-22325,,4,4,False,True,17,22,88.1,4.8,7.7,False
+Bad Bunny - EoO,off-25s/cold,-26075,-175,25900,25900,,3,3,False,False,21,22,87.7,5.0,6.8,False
+Bad Bunny - EoO,off-25s/seeded_correct,-26075,2175,28250,0,,1,1,False,False,21,22,85.2,4.8,7.0,False
+Bad Bunny - EoO,off-25s/seeded_wrong_2s,-26075,2175,28250,2000,,1,1,False,False,21,22,85.4,4.9,6.9,False
+Bad Bunny - EoO,noise0/cold,-1075,-1050,25,25,9000,0,2,False,True,4,22,8.8,2.3,2.5,True
+Bad Bunny - EoO,noise0/seeded_correct,-1075,-1075,0,0,9000,0,2,False,True,4,22,8.6,2.3,2.5,True
+Bad Bunny - EoO,noise0/seeded_wrong_2s,-1075,-1050,25,25,9000,0,2,False,True,4,22,8.7,2.3,2.5,True
+Bad Bunny - EoO,noise-2s/cold,-3075,-3075,0,0,77250,0,3,True,True,12,22,38.8,3.2,4.9,True
+Bad Bunny - EoO,noise-2s/seeded_correct,-3075,-3075,0,0,35250,0,4,False,True,11,22,32.9,2.9,4.0,True
+Bad Bunny - EoO,noise-2s/seeded_wrong_2s,-3075,-3075,0,0,77250,0,2,False,True,15,22,56.8,3.5,6.2,True
+Bad Bunny - EoO,cutin5s/cold,3925,3950,25,25,9000,0,2,False,True,4,22,9.6,2.5,2.7,True
+Bad Bunny - EoO,cutin5s/seeded_correct,3925,3925,0,0,9000,0,2,False,True,2,22,4.2,2.1,2.4,True
+Bad Bunny - EoO,cutin5s/seeded_wrong_2s,3925,3950,25,25,9000,0,2,False,True,4,22,9.3,2.4,2.7,True
+Bad Bunny - EoO,cutin15s/cold,13925,13925,0,0,26000,0,2,False,True,5,22,15.1,3.1,3.4,True
+Bad Bunny - EoO,cutin15s/seeded_correct,13925,13925,0,0,26000,0,2,False,True,5,22,14.5,3.0,3.4,True
+Bad Bunny - EoO,cutin15s/seeded_wrong_2s,13925,13925,0,0,26000,0,2,False,True,5,22,14.7,3.1,3.5,True
+Bad Bunny - EoO,cutin25s/cold,23925,23925,0,0,77250,0,2,False,True,11,22,47.8,4.4,5.4,True
+Bad Bunny - EoO,cutin25s/seeded_correct,23925,23925,0,0,26000,0,1,False,True,5,22,17.2,3.5,4.1,True
+Bad Bunny - EoO,cutin25s/seeded_wrong_2s,23925,23925,0,0,41000,0,2,False,True,11,22,45.8,4.1,5.2,True
+Bad Bunny - EoO,blend8s/cold,-1075,-1050,25,25,9000,0,2,False,True,4,22,10.0,2.7,2.8,True
+Bad Bunny - EoO,blend8s/seeded_correct,-1075,-1075,0,0,9000,0,2,False,True,4,22,9.3,2.4,2.8,True
+Bad Bunny - EoO,blend8s/seeded_wrong_2s,-1075,-1050,25,25,9000,0,2,False,True,4,22,9.5,2.5,2.8,True
+Bad Bunny - A Tu Merced,off0/cold,-1050,-1053,-3,-3,22850,0,3,True,True,2,11,4.5,2.3,2.7,True
+Bad Bunny - A Tu Merced,off0/seeded_correct,-1050,-1050,0,0,9000,0,3,False,True,4,11,12.9,3.5,3.9,True
+Bad Bunny - A Tu Merced,off0/seeded_wrong_2s,-1050,-1050,0,0,25000,0,3,False,True,4,11,10.7,2.8,3.3,True
+Bad Bunny - A Tu Merced,off+200/cold,-850,-851,-1,-1,9000,0,3,True,True,2,11,4.8,2.4,2.8,True
+Bad Bunny - A Tu Merced,off+200/seeded_correct,-850,-850,0,0,9000,0,3,False,True,4,11,9.0,2.4,2.6,True
+Bad Bunny - A Tu Merced,off+200/seeded_wrong_2s,-850,-850,0,0,25000,0,3,False,True,4,11,9.2,2.4,2.7,True
+Bad Bunny - A Tu Merced,off-200/cold,-1250,-1250,0,0,25000,0,4,True,True,3,11,7.1,2.4,2.8,True
+Bad Bunny - A Tu Merced,off-200/seeded_correct,-1250,-1250,0,0,9000,0,3,False,True,4,11,9.0,2.3,2.6,True
+Bad Bunny - A Tu Merced,off-200/seeded_wrong_2s,-1250,-1250,0,0,25000,0,3,False,True,4,11,9.2,2.3,2.9,True
+Bad Bunny - A Tu Merced,off+2s/cold,950,950,0,0,9000,0,3,True,True,2,11,4.4,2.2,2.6,True
+Bad Bunny - A Tu Merced,off+2s/seeded_correct,950,950,0,0,9000,0,3,False,True,4,11,9.4,2.5,2.7,True
+Bad Bunny - A Tu Merced,off+2s/seeded_wrong_2s,950,950,0,0,25000,0,3,False,True,4,11,9.4,2.5,2.8,True
+Bad Bunny - A Tu Merced,off-2s/cold,-3050,-3050,0,0,54250,0,3,True,True,6,11,16.1,2.7,3.5,True
+Bad Bunny - A Tu Merced,off-2s/seeded_correct,-3050,-3050,0,0,9000,0,2,False,True,6,11,15.7,2.5,3.5,True
+Bad Bunny - A Tu Merced,off-2s/seeded_wrong_2s,-3050,-3050,0,0,25000,0,2,False,True,6,11,15.3,2.4,3.4,True
+Bad Bunny - A Tu Merced,off+10s/cold,8950,,,-8950,,0,0,False,False,11,11,55.4,4.6,7.8,False
+Bad Bunny - A Tu Merced,off+10s/seeded_correct,8950,8950,0,0,9000,0,3,False,True,4,11,11.0,2.9,3.1,True
+Bad Bunny - A Tu Merced,off+10s/seeded_wrong_2s,8950,,,2000,,0,0,False,False,11,11,49.0,4.1,7.0,False
+Bad Bunny - A Tu Merced,off-10s/cold,-11050,,,10425,,0,0,False,False,10,11,41.4,4.0,6.6,False
+Bad Bunny - A Tu Merced,off-10s/seeded_correct,-11050,,,0,,0,0,False,False,10,11,36.3,3.5,5.7,False
+Bad Bunny - A Tu Merced,off-10s/seeded_wrong_2s,-11050,,,2000,,0,0,False,False,10,11,36.0,3.3,5.6,False
+Bad Bunny - A Tu Merced,off+25s/cold,23950,,,-23950,,0,0,False,False,11,11,65.1,6.0,8.6,False
+Bad Bunny - A Tu Merced,off+25s/seeded_correct,23950,23950,0,0,9000,0,3,False,True,4,11,14.1,3.5,4.2,True
+Bad Bunny - A Tu Merced,off+25s/seeded_wrong_2s,23950,,,2000,,0,0,False,False,11,11,57.0,4.8,7.9,False
+Bad Bunny - A Tu Merced,off-25s/cold,-26050,,,26050,,0,0,False,False,10,11,31.3,2.7,5.5,False
+Bad Bunny - A Tu Merced,off-25s/seeded_correct,-26050,,,0,,0,0,False,False,10,11,29.3,2.5,4.9,False
+Bad Bunny - A Tu Merced,off-25s/seeded_wrong_2s,-26050,,,2000,,0,0,False,False,10,11,29.6,2.5,5.0,False
+Bad Bunny - A Tu Merced,noise0/cold,-1050,-1053,-3,-3,22850,0,3,True,True,2,11,4.1,2.0,2.3,True
+Bad Bunny - A Tu Merced,noise0/seeded_correct,-1050,-1050,0,0,9000,0,3,False,True,4,11,8.7,2.3,2.5,True
+Bad Bunny - A Tu Merced,noise0/seeded_wrong_2s,-1050,-1050,0,0,25000,0,3,False,True,4,11,8.8,2.3,2.5,True
+Bad Bunny - A Tu Merced,noise-2s/cold,-3050,-3050,0,0,54250,0,3,True,True,6,11,14.9,2.5,3.2,True
+Bad Bunny - A Tu Merced,noise-2s/seeded_correct,-3050,-3050,0,0,9000,0,2,False,True,6,11,14.7,2.4,3.2,True
+Bad Bunny - A Tu Merced,noise-2s/seeded_wrong_2s,-3050,-3050,0,0,25000,0,2,False,True,6,11,14.6,2.4,3.2,True
+Bad Bunny - A Tu Merced,cutin5s/cold,3950,3950,0,0,25000,0,4,True,True,3,11,7.3,2.7,2.7,True
+Bad Bunny - A Tu Merced,cutin5s/seeded_correct,3950,3950,0,0,25000,0,3,False,True,5,11,13.0,2.7,3.2,True
+Bad Bunny - A Tu Merced,cutin5s/seeded_wrong_2s,3950,3950,0,0,25000,0,3,False,True,5,11,12.8,2.6,3.1,True
+Bad Bunny - A Tu Merced,cutin15s/cold,13950,13950,0,0,25000,0,3,False,True,5,11,14.7,3.0,3.4,True
+Bad Bunny - A Tu Merced,cutin15s/seeded_correct,13950,13950,0,0,25000,0,3,False,True,5,11,14.3,2.9,3.4,True
+Bad Bunny - A Tu Merced,cutin15s/seeded_wrong_2s,13950,13950,0,0,25000,0,3,False,True,5,11,14.3,3.0,3.4,True
+Bad Bunny - A Tu Merced,cutin25s/cold,23950,23950,0,0,29500,0,4,False,True,6,11,23.6,4.0,4.8,True
+Bad Bunny - A Tu Merced,cutin25s/seeded_correct,23950,23950,0,0,29500,0,4,False,True,6,11,21.8,3.6,4.4,True
+Bad Bunny - A Tu Merced,cutin25s/seeded_wrong_2s,23950,23950,0,0,29500,0,4,False,True,6,11,21.5,3.6,4.4,True
+Bad Bunny - A Tu Merced,blend8s/cold,-1050,-1053,-3,-3,22850,0,4,True,True,3,11,6.7,2.4,2.6,True
+Bad Bunny - A Tu Merced,blend8s/seeded_correct,-1050,-1050,0,0,25000,0,3,False,True,5,11,12.0,2.4,3.0,True
+Bad Bunny - A Tu Merced,blend8s/seeded_wrong_2s,-1050,-1050,0,0,25000,0,3,False,True,5,11,11.9,2.4,2.9,True
+Bad Bunny - KLOuFRENS,off0/cold,-950,-953,-3,-3,38500,0,4,True,True,6,13,17.9,2.8,4.3,True
+Bad Bunny - KLOuFRENS,off0/seeded_correct,-950,-950,0,0,38500,0,4,False,True,7,13,21.4,2.9,4.3,True
+Bad Bunny - KLOuFRENS,off0/seeded_wrong_2s,-950,-950,0,0,26000,0,3,False,True,5,13,13.0,2.8,3.2,True
+Bad Bunny - KLOuFRENS,off+200/cold,-750,-750,0,0,38500,0,4,True,True,6,13,17.5,2.8,4.4,True
+Bad Bunny - KLOuFRENS,off+200/seeded_correct,-750,-750,0,0,38500,0,4,False,True,7,13,21.4,2.9,4.3,True
+Bad Bunny - KLOuFRENS,off+200/seeded_wrong_2s,-750,-750,0,0,26000,0,3,False,True,5,13,12.7,2.6,3.2,True
+Bad Bunny - KLOuFRENS,off-200/cold,-1150,-1150,0,0,38500,0,3,True,True,6,13,18.2,2.8,4.4,True
+Bad Bunny - KLOuFRENS,off-200/seeded_correct,-1150,-1150,0,0,38500,0,3,False,True,7,13,20.8,2.9,4.1,True
+Bad Bunny - KLOuFRENS,off-200/seeded_wrong_2s,-1150,-1150,0,0,26000,0,3,False,True,5,13,12.8,2.7,3.1,True
+Bad Bunny - KLOuFRENS,off+2s/cold,1050,1050,0,0,26000,0,3,False,True,5,13,13.2,2.6,3.2,True
+Bad Bunny - KLOuFRENS,off+2s/seeded_correct,1050,1050,0,0,38500,0,4,False,True,7,13,21.9,3.0,4.4,True
+Bad Bunny - KLOuFRENS,off+2s/seeded_wrong_2s,1050,1050,0,0,26000,0,3,False,True,5,13,13.4,2.6,3.6,True
+Bad Bunny - KLOuFRENS,off-2s/cold,-2950,-350,2600,2600,,2,3,True,False,13,13,57.9,4.6,7.1,False
+Bad Bunny - KLOuFRENS,off-2s/seeded_correct,-2950,-1650,1300,1300,,2,2,False,True,11,13,44.2,4.0,6.1,False
+Bad Bunny - KLOuFRENS,off-2s/seeded_wrong_2s,-2950,-350,2600,2600,,2,2,False,False,13,13,54.0,4.1,6.2,False
+Bad Bunny - KLOuFRENS,off+10s/cold,9050,-1375,-10425,-10425,,1,1,False,False,13,13,64.1,5.0,7.4,False
+Bad Bunny - KLOuFRENS,off+10s/seeded_correct,9050,9050,0,0,26000,0,3,False,True,5,13,15.0,3.0,3.6,True
+Bad Bunny - KLOuFRENS,off+10s/seeded_wrong_2s,9050,1225,-7825,-7825,,2,2,False,False,13,13,61.8,4.8,7.1,False
+Bad Bunny - KLOuFRENS,off-10s/cold,-10950,-525,10425,10425,,1,1,False,False,12,13,49.1,4.1,6.0,False
+Bad Bunny - KLOuFRENS,off-10s/seeded_correct,-10950,-525,10425,0,,1,1,False,False,12,13,46.0,3.9,5.4,False
+Bad Bunny - KLOuFRENS,off-10s/seeded_wrong_2s,-10950,-525,10425,2000,,1,1,False,False,12,13,47.0,3.8,5.9,False
+Bad Bunny - KLOuFRENS,off+25s/cold,24050,,,-24775,,0,0,False,False,13,13,73.9,5.4,8.0,False
+Bad Bunny - KLOuFRENS,off+25s/seeded_correct,24050,24050,0,0,26000,0,3,False,True,5,13,19.7,3.7,5.0,True
+Bad Bunny - KLOuFRENS,off+25s/seeded_wrong_2s,24050,3175,-20875,-20875,,2,2,False,False,13,13,72.7,5.7,8.6,False
+Bad Bunny - KLOuFRENS,off-25s/cold,-25950,125,26075,26075,,1,1,False,False,12,13,40.6,3.3,5.4,False
+Bad Bunny - KLOuFRENS,off-25s/seeded_correct,-25950,-2475,23475,23475,,1,1,False,False,12,13,38.9,3.1,5.3,False
+Bad Bunny - KLOuFRENS,off-25s/seeded_wrong_2s,-25950,-2475,23475,23475,,1,1,False,False,12,13,38.9,3.4,5.1,False
+Bad Bunny - KLOuFRENS,noise0/cold,-950,-953,-3,-3,38500,0,4,True,True,6,13,16.3,2.6,3.7,True
+Bad Bunny - KLOuFRENS,noise0/seeded_correct,-950,-950,0,0,38500,0,4,False,True,7,13,20.0,2.9,3.9,True
+Bad Bunny - KLOuFRENS,noise0/seeded_wrong_2s,-950,-950,0,0,26000,0,3,False,True,5,13,12.1,2.5,3.0,True
+Bad Bunny - KLOuFRENS,noise-2s/cold,-2950,-350,2600,2600,,2,3,True,False,13,13,49.2,3.9,5.4,False
+Bad Bunny - KLOuFRENS,noise-2s/seeded_correct,-2950,-1650,1300,1300,,2,2,False,True,11,13,37.9,3.7,5.1,False
+Bad Bunny - KLOuFRENS,noise-2s/seeded_wrong_2s,-2950,-350,2600,2600,,2,2,False,False,13,13,48.6,3.8,5.4,False
+Bad Bunny - KLOuFRENS,cutin5s/cold,4050,4050,0,0,26000,0,3,False,True,5,13,14.0,2.8,3.3,True
+Bad Bunny - KLOuFRENS,cutin5s/seeded_correct,4050,4050,0,0,26000,0,3,False,True,5,13,13.9,2.7,3.3,True
+Bad Bunny - KLOuFRENS,cutin5s/seeded_wrong_2s,4050,4050,0,0,26000,0,3,False,True,5,13,13.4,2.7,3.3,True
+Bad Bunny - KLOuFRENS,cutin15s/cold,14050,14050,0,0,26000,0,3,False,True,5,13,14.9,2.9,3.5,True
+Bad Bunny - KLOuFRENS,cutin15s/seeded_correct,14050,14050,0,0,26000,0,3,False,True,5,13,14.7,3.0,3.5,True
+Bad Bunny - KLOuFRENS,cutin15s/seeded_wrong_2s,14050,14050,0,0,26000,0,3,False,True,5,13,14.8,3.1,3.5,True
+Bad Bunny - KLOuFRENS,cutin25s/cold,24050,24050,0,0,31000,0,2,False,True,5,13,18.0,3.6,4.1,True
+Bad Bunny - KLOuFRENS,cutin25s/seeded_correct,24050,24050,0,0,26000,0,2,False,True,5,13,17.7,3.7,4.1,True
+Bad Bunny - KLOuFRENS,cutin25s/seeded_wrong_2s,24050,24050,0,0,31000,0,2,False,True,5,13,17.5,3.5,4.3,True
+Bad Bunny - KLOuFRENS,blend8s/cold,-950,-953,-3,-3,38500,0,4,True,True,6,13,17.3,2.8,3.9,True
+Bad Bunny - KLOuFRENS,blend8s/seeded_correct,-950,-950,0,0,38500,0,4,False,True,7,13,20.5,2.9,4.0,True
+Bad Bunny - KLOuFRENS,blend8s/seeded_wrong_2s,-950,-950,0,0,26000,0,3,False,True,5,13,12.3,2.5,3.0,True
+Bad Bunny - NADIE SABE,off0/cold,-1000,0,1000,1000,,2,2,False,True,3,9,6.7,2.4,2.5,False
+Bad Bunny - NADIE SABE,off0/seeded_correct,-1000,0,1000,1000,,2,2,False,True,3,9,6.4,2.3,2.4,False
+Bad Bunny - NADIE SABE,off0/seeded_wrong_2s,-1000,0,1000,1000,,2,2,False,True,3,9,6.3,2.2,2.4,False
+Bad Bunny - NADIE SABE,off+200/cold,-800,200,1000,1000,,2,2,False,True,3,9,6.8,2.4,2.5,False
+Bad Bunny - NADIE SABE,off+200/seeded_correct,-800,200,1000,1000,,2,2,False,True,3,9,6.4,2.3,2.4,False
+Bad Bunny - NADIE SABE,off+200/seeded_wrong_2s,-800,200,1000,1000,,2,2,False,True,3,9,6.4,2.3,2.4,False
+Bad Bunny - NADIE SABE,off-200/cold,-1200,-200,1000,1000,,2,2,False,True,3,9,6.7,2.4,2.5,False
+Bad Bunny - NADIE SABE,off-200/seeded_correct,-1200,-200,1000,1000,,2,2,False,True,3,9,6.4,2.3,2.4,False
+Bad Bunny - NADIE SABE,off-200/seeded_wrong_2s,-1200,-200,1000,1000,,2,2,False,True,3,9,6.3,2.3,2.4,False
+Bad Bunny - NADIE SABE,off+2s/cold,1000,2000,1000,1000,,2,2,False,True,3,9,7.0,2.5,2.6,False
+Bad Bunny - NADIE SABE,off+2s/seeded_correct,1000,2000,1000,1000,,2,2,False,True,3,9,6.7,2.4,2.5,False
+Bad Bunny - NADIE SABE,off+2s/seeded_wrong_2s,1000,2000,1000,1000,,2,2,False,True,3,9,6.6,2.4,2.5,False
+Bad Bunny - NADIE SABE,off-2s/cold,-3000,-3006,-6,1000,,1,3,True,False,9,9,81.2,3.4,21.0,True
+Bad Bunny - NADIE SABE,off-2s/seeded_correct,-3000,-2000,1000,1000,,2,2,False,False,9,9,79.6,3.2,20.6,False
+Bad Bunny - NADIE SABE,off-2s/seeded_wrong_2s,-3000,-2000,1000,1000,,2,2,False,False,9,9,79.9,3.2,20.4,False
+Bad Bunny - NADIE SABE,off+10s/cold,9000,,,-9000,,0,0,False,False,9,9,86.6,4.4,21.4,False
+Bad Bunny - NADIE SABE,off+10s/seeded_correct,9000,9000,0,0,28250,0,2,False,True,6,9,29.4,3.4,11.2,True
+Bad Bunny - NADIE SABE,off+10s/seeded_wrong_2s,9000,,,2000,,0,0,False,False,9,9,90.0,4.2,21.4,False
+Bad Bunny - NADIE SABE,off-10s/cold,-11000,,,11000,,0,0,False,False,8,9,75.6,7.3,20.1,False
+Bad Bunny - NADIE SABE,off-10s/seeded_correct,-11000,,,0,,0,0,False,False,8,9,76.4,7.5,20.4,False
+Bad Bunny - NADIE SABE,off-10s/seeded_wrong_2s,-11000,,,2000,,0,0,False,False,8,9,75.0,7.3,20.2,False
+Bad Bunny - NADIE SABE,off+25s/cold,24000,,,-24000,,0,0,False,False,9,9,95.6,5.4,22.4,False
+Bad Bunny - NADIE SABE,off+25s/seeded_correct,24000,24000,0,0,28250,0,2,False,True,6,9,35.1,4.1,12.3,True
+Bad Bunny - NADIE SABE,off+25s/seeded_wrong_2s,24000,,,2000,,0,0,False,False,9,9,96.4,4.6,23.5,False
+Bad Bunny - NADIE SABE,off-25s/cold,-26000,,,26000,,0,0,False,False,7,9,68.4,11.0,19.0,False
+Bad Bunny - NADIE SABE,off-25s/seeded_correct,-26000,,,0,,0,0,False,False,7,9,69.3,11.6,20.2,False
+Bad Bunny - NADIE SABE,off-25s/seeded_wrong_2s,-26000,,,2000,,0,0,False,False,7,9,66.3,10.4,18.7,False
+Bad Bunny - NADIE SABE,noise0/cold,-1000,0,1000,1000,,2,2,False,True,3,9,6.4,2.2,2.3,False
+Bad Bunny - NADIE SABE,noise0/seeded_correct,-1000,0,1000,1000,,2,2,False,True,3,9,6.3,2.3,2.4,False
+Bad Bunny - NADIE SABE,noise0/seeded_wrong_2s,-1000,0,1000,1000,,2,2,False,True,3,9,6.2,2.2,2.4,False
+Bad Bunny - NADIE SABE,noise-2s/cold,-3000,-3006,-6,1000,,1,3,True,False,9,9,75.3,3.0,19.3,True
+Bad Bunny - NADIE SABE,noise-2s/seeded_correct,-3000,-2000,1000,1000,,2,2,False,False,9,9,73.0,3.0,18.6,False
+Bad Bunny - NADIE SABE,noise-2s/seeded_wrong_2s,-3000,-2000,1000,1000,,2,2,False,False,9,9,74.6,3.0,19.1,False
+Bad Bunny - NADIE SABE,cutin5s/cold,4000,3997,-3,1000,,1,3,True,False,9,9,87.1,3.5,21.6,True
+Bad Bunny - NADIE SABE,cutin5s/seeded_correct,4000,5000,1000,1000,,2,2,False,False,9,9,89.9,3.4,24.4,False
+Bad Bunny - NADIE SABE,cutin5s/seeded_wrong_2s,4000,5000,1000,1000,,2,2,False,False,9,9,86.3,3.6,22.1,False
+Bad Bunny - NADIE SABE,cutin15s/cold,14000,15000,1000,1000,,2,2,False,False,9,9,81.8,3.7,19.8,False
+Bad Bunny - NADIE SABE,cutin15s/seeded_correct,14000,15000,1000,1000,,2,2,False,False,9,9,79.9,3.6,19.8,False
+Bad Bunny - NADIE SABE,cutin15s/seeded_wrong_2s,14000,15000,1000,1000,,2,2,False,False,9,9,80.8,3.6,20.5,False
+Bad Bunny - NADIE SABE,cutin25s/cold,24000,24000,0,0,41000,0,2,False,True,7,9,48.6,4.4,15.3,True
+Bad Bunny - NADIE SABE,cutin25s/seeded_correct,24000,24000,0,0,41000,0,2,False,True,7,9,47.3,4.2,15.0,True
+Bad Bunny - NADIE SABE,cutin25s/seeded_wrong_2s,24000,24000,0,0,41000,0,2,False,True,7,9,49.5,4.7,15.2,True
+Bad Bunny - NADIE SABE,blend8s/cold,-1000,-1003,-3,1000,,1,3,True,False,9,9,76.9,3.4,19.0,True
+Bad Bunny - NADIE SABE,blend8s/seeded_correct,-1000,0,1000,1000,,2,2,False,False,9,9,79.1,3.2,20.3,False
+Bad Bunny - NADIE SABE,blend8s/seeded_wrong_2s,-1000,0,1000,1000,,2,2,False,False,9,9,81.3,3.3,20.5,False
+Bad Bunny - 120,off0/cold,-1025,-1028,-3,1025,,1,3,True,False,7,7,23.1,2.9,4.6,True
+Bad Bunny - 120,off0/seeded_correct,-1025,0,1025,1025,,1,1,False,False,7,7,21.4,2.9,4.3,False
+Bad Bunny - 120,off0/seeded_wrong_2s,-1025,0,1025,1025,,1,1,False,False,7,7,21.5,3.0,4.4,False
+Bad Bunny - 120,off+200/cold,-825,-826,-1,1025,,1,3,True,False,7,7,23.5,3.1,4.5,True
+Bad Bunny - 120,off+200/seeded_correct,-825,200,1025,1025,,1,1,False,False,7,7,21.4,3.1,3.9,False
+Bad Bunny - 120,off+200/seeded_wrong_2s,-825,200,1025,1025,,1,1,False,False,7,7,21.4,2.9,4.3,False
+Bad Bunny - 120,off-200/cold,-1225,-1231,-6,1025,,1,3,True,False,7,7,22.2,2.9,4.3,True
+Bad Bunny - 120,off-200/seeded_correct,-1225,-200,1025,1025,,1,1,False,False,7,7,20.6,2.9,3.9,False
+Bad Bunny - 120,off-200/seeded_wrong_2s,-1225,-200,1025,1025,,1,1,False,False,7,7,21.7,2.9,4.3,False
+Bad Bunny - 120,off+2s/cold,975,975,0,1025,,1,3,True,False,7,7,23.5,3.3,4.6,True
+Bad Bunny - 120,off+2s/seeded_correct,975,2000,1025,1025,,1,1,False,False,7,7,21.8,3.0,4.0,False
+Bad Bunny - 120,off+2s/seeded_wrong_2s,975,2000,1025,1025,,1,1,False,False,7,7,21.5,3.3,4.0,False
+Bad Bunny - 120,off-2s/cold,-3025,-3028,-3,2775,,0,2,True,False,7,7,21.5,3.1,3.9,True
+Bad Bunny - 120,off-2s/seeded_correct,-3025,-3025,0,0,32500,0,1,False,False,7,7,20.5,2.8,3.9,True
+Bad Bunny - 120,off-2s/seeded_wrong_2s,-3025,,,1025,,0,0,False,False,7,7,20.5,2.8,3.9,False
+Bad Bunny - 120,off+10s/cold,8975,,,-8375,,0,0,False,False,7,7,27.0,3.5,5.5,False
+Bad Bunny - 120,off+10s/seeded_correct,8975,8975,0,0,25500,0,2,False,True,7,7,31.6,4.3,6.2,True
+Bad Bunny - 120,off+10s/seeded_wrong_2s,8975,,,2000,,0,0,False,False,7,7,24.6,3.4,4.8,False
+Bad Bunny - 120,off-10s/cold,-11025,,,11025,,0,0,False,False,6,7,18.0,2.9,4.0,False
+Bad Bunny - 120,off-10s/seeded_correct,-11025,,,0,,0,0,False,False,6,7,16.6,2.7,3.4,False
+Bad Bunny - 120,off-10s/seeded_wrong_2s,-11025,,,2000,,0,0,False,False,6,7,15.7,2.6,3.4,False
+Bad Bunny - 120,off+25s/cold,23975,,,-23975,,0,0,False,False,7,7,32.5,4.1,6.3,False
+Bad Bunny - 120,off+25s/seeded_correct,23975,23975,0,0,25500,0,2,False,True,7,7,31.1,4.1,5.9,True
+Bad Bunny - 120,off+25s/seeded_wrong_2s,23975,,,2000,,0,0,False,False,7,7,29.9,4.1,5.6,False
+Bad Bunny - 120,off-25s/cold,-26025,,,26025,,0,0,False,False,6,7,13.1,2.1,3.2,False
+Bad Bunny - 120,off-25s/seeded_correct,-26025,,,0,,0,0,False,False,6,7,12.1,2.0,2.7,False
+Bad Bunny - 120,off-25s/seeded_wrong_2s,-26025,,,2000,,0,0,False,False,6,7,11.6,1.9,2.7,False
+Bad Bunny - 120,noise0/cold,-1025,-1028,-3,1025,,1,3,True,False,7,7,20.0,2.8,3.7,True
+Bad Bunny - 120,noise0/seeded_correct,-1025,0,1025,1025,,1,1,False,False,7,7,19.3,2.7,3.6,False
+Bad Bunny - 120,noise0/seeded_wrong_2s,-1025,0,1025,1025,,1,1,False,False,7,7,19.4,2.8,3.6,False
+Bad Bunny - 120,noise-2s/cold,-3025,-3028,-3,2775,,0,2,True,False,7,7,19.4,2.7,3.6,True
+Bad Bunny - 120,noise-2s/seeded_correct,-3025,-3025,0,0,32500,0,1,False,False,7,7,19.0,2.7,3.6,True
+Bad Bunny - 120,noise-2s/seeded_wrong_2s,-3025,-250,2775,2775,,1,1,False,False,7,7,19.0,2.7,3.6,False
+Bad Bunny - 120,cutin5s/cold,3975,3975,0,0,25500,0,2,False,True,7,7,22.5,3.1,4.1,True
+Bad Bunny - 120,cutin5s/seeded_correct,3975,3975,0,0,25500,0,2,False,True,7,7,21.4,3.1,3.9,True
+Bad Bunny - 120,cutin5s/seeded_wrong_2s,3975,,,1025,,0,0,False,False,7,7,21.5,3.0,3.9,False
+Bad Bunny - 120,cutin15s/cold,13975,13975,0,0,25500,0,2,False,True,7,7,23.7,3.3,4.3,True
+Bad Bunny - 120,cutin15s/seeded_correct,13975,13975,0,0,25500,0,2,False,True,7,7,23.3,3.3,4.2,True
+Bad Bunny - 120,cutin15s/seeded_wrong_2s,13975,13975,0,0,25500,0,2,False,True,7,7,23.2,3.3,4.2,True
+Bad Bunny - 120,cutin25s/cold,23975,23975,0,0,25500,0,2,False,True,7,7,28.2,4.1,5.1,True
+Bad Bunny - 120,cutin25s/seeded_correct,23975,23975,0,0,25500,0,2,False,True,7,7,27.2,3.8,4.9,True
+Bad Bunny - 120,cutin25s/seeded_wrong_2s,23975,23975,0,0,25500,0,2,False,True,7,7,27.2,4.0,4.9,True
+Bad Bunny - 120,blend8s/cold,-1025,-1028,-3,1025,,0,2,True,False,7,7,20.8,2.8,4.0,True
+Bad Bunny - 120,blend8s/seeded_correct,-1025,-1025,0,0,25500,0,2,False,True,7,7,19.9,2.8,3.8,True
+Bad Bunny - 120,blend8s/seeded_wrong_2s,-1025,,,1025,,0,0,False,False,7,7,19.6,2.8,3.7,False
+"Arcángel, Bad Bunny - La Jumpa",off0/cold,350,325,-25,-25,9000,0,2,False,True,4,14,10.8,2.9,3.1,True
+"Arcángel, Bad Bunny - La Jumpa",off0/seeded_correct,350,350,0,0,9000,0,3,False,True,3,14,6.9,2.3,2.9,True
+"Arcángel, Bad Bunny - La Jumpa",off0/seeded_wrong_2s,350,325,-25,-25,9000,0,2,False,True,4,14,9.9,2.6,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",off+200/cold,550,525,-25,-25,9000,0,2,False,True,4,14,10.5,2.9,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",off+200/seeded_correct,550,550,0,0,9000,0,3,False,True,3,14,6.8,2.3,2.8,True
+"Arcángel, Bad Bunny - La Jumpa",off+200/seeded_wrong_2s,550,525,-25,-25,9000,0,2,False,True,4,14,10.2,2.7,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",off-200/cold,150,125,-25,-25,9000,0,2,False,True,4,14,10.4,2.7,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",off-200/seeded_correct,150,150,0,0,9000,0,3,False,True,3,14,6.8,2.3,2.8,True
+"Arcángel, Bad Bunny - La Jumpa",off-200/seeded_wrong_2s,150,125,-25,-25,9000,0,2,False,True,4,14,10.0,2.7,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",off+2s/cold,2350,2325,-25,-25,9000,0,2,False,True,4,14,10.7,2.8,3.1,True
+"Arcángel, Bad Bunny - La Jumpa",off+2s/seeded_correct,2350,2350,0,0,9000,0,3,False,True,3,14,7.4,2.5,3.1,True
+"Arcángel, Bad Bunny - La Jumpa",off+2s/seeded_wrong_2s,2350,2325,-25,-25,9000,0,2,False,True,4,14,10.2,2.7,3.1,True
+"Arcángel, Bad Bunny - La Jumpa",off-2s/cold,-1650,-1675,-25,-25,9000,0,2,False,True,5,14,13.3,3.0,3.2,True
+"Arcángel, Bad Bunny - La Jumpa",off-2s/seeded_correct,-1650,-1650,0,0,9000,0,2,False,True,3,14,6.5,2.2,2.6,True
+"Arcángel, Bad Bunny - La Jumpa",off-2s/seeded_wrong_2s,-1650,-1675,-25,-25,9000,0,2,False,True,5,14,12.8,2.8,3.1,True
+"Arcángel, Bad Bunny - La Jumpa",off+10s/cold,10350,,,-10350,,0,0,False,False,14,14,99.9,6.4,13.2,False
+"Arcángel, Bad Bunny - La Jumpa",off+10s/seeded_correct,10350,10350,0,0,9000,0,4,False,True,4,14,12.2,3.1,3.7,True
+"Arcángel, Bad Bunny - La Jumpa",off+10s/seeded_wrong_2s,10350,,,2000,,0,0,False,False,14,14,96.0,5.7,13.2,False
+"Arcángel, Bad Bunny - La Jumpa",off-10s/cold,-9650,100,9750,9750,,2,2,False,False,13,14,82.6,5.4,11.9,False
+"Arcángel, Bad Bunny - La Jumpa",off-10s/seeded_correct,-9650,100,9750,9750,,1,1,False,False,13,14,79.8,4.7,11.9,False
+"Arcángel, Bad Bunny - La Jumpa",off-10s/seeded_wrong_2s,-9650,100,9750,9750,,1,1,False,False,13,14,81.5,4.7,12.7,False
+"Arcángel, Bad Bunny - La Jumpa",off+25s/cold,25350,,,-25350,,0,0,False,False,14,14,112.1,7.4,14.0,False
+"Arcángel, Bad Bunny - La Jumpa",off+25s/seeded_correct,25350,25350,0,0,9000,0,4,False,True,4,14,15.1,4.0,4.1,True
+"Arcángel, Bad Bunny - La Jumpa",off+25s/seeded_wrong_2s,25350,,,2000,,0,0,False,False,14,14,107.6,6.5,13.6,False
+"Arcángel, Bad Bunny - La Jumpa",off-25s/cold,-24650,,,24650,,0,0,False,False,13,14,71.7,4.9,10.7,False
+"Arcángel, Bad Bunny - La Jumpa",off-25s/seeded_correct,-24650,,,0,,0,0,False,False,13,14,69.2,4.6,10.5,False
+"Arcángel, Bad Bunny - La Jumpa",off-25s/seeded_wrong_2s,-24650,,,2000,,0,0,False,False,13,14,69.4,4.1,10.8,False
+"Arcángel, Bad Bunny - La Jumpa",noise0/cold,350,325,-25,-25,9000,0,2,False,True,4,14,9.6,2.5,2.8,True
+"Arcángel, Bad Bunny - La Jumpa",noise0/seeded_correct,350,350,0,0,9000,0,3,False,True,3,14,6.5,2.3,2.6,True
+"Arcángel, Bad Bunny - La Jumpa",noise0/seeded_wrong_2s,350,325,-25,-25,9000,0,2,False,True,4,14,9.3,2.4,2.8,True
+"Arcángel, Bad Bunny - La Jumpa",noise-2s/cold,-1650,-1675,-25,-25,9000,0,2,False,True,5,14,12.3,2.6,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",noise-2s/seeded_correct,-1650,-1650,0,0,9000,0,2,False,True,3,14,6.3,2.2,2.5,True
+"Arcángel, Bad Bunny - La Jumpa",noise-2s/seeded_wrong_2s,-1650,-1675,-25,-25,9000,0,2,False,True,5,14,12.0,2.6,2.9,True
+"Arcángel, Bad Bunny - La Jumpa",cutin5s/cold,5350,5350,0,0,26000,0,2,False,True,5,14,14.4,3.1,3.4,True
+"Arcángel, Bad Bunny - La Jumpa",cutin5s/seeded_correct,5350,5350,0,0,26000,0,2,False,True,5,14,13.9,2.9,3.4,True
+"Arcángel, Bad Bunny - La Jumpa",cutin5s/seeded_wrong_2s,5350,5350,0,0,26000,0,2,False,True,5,14,13.7,2.9,3.3,True
+"Arcángel, Bad Bunny - La Jumpa",cutin15s/cold,15350,15350,0,0,26000,0,3,False,True,5,14,15.5,3.3,3.6,True
+"Arcángel, Bad Bunny - La Jumpa",cutin15s/seeded_correct,15350,15350,0,0,26000,0,3,False,True,5,14,15.0,3.2,3.5,True
+"Arcángel, Bad Bunny - La Jumpa",cutin15s/seeded_wrong_2s,15350,15350,0,0,26000,0,3,False,True,5,14,15.0,3.2,3.5,True
+"Arcángel, Bad Bunny - La Jumpa",cutin25s/cold,25350,25350,0,0,40000,0,2,False,True,6,14,23.7,4.1,4.6,True
+"Arcángel, Bad Bunny - La Jumpa",cutin25s/seeded_correct,25350,25350,0,0,35750,0,2,False,True,6,14,23.0,4.0,4.5,True
+"Arcángel, Bad Bunny - La Jumpa",cutin25s/seeded_wrong_2s,25350,25350,0,0,40000,0,2,False,True,6,14,23.6,4.1,5.0,True
+"Arcángel, Bad Bunny - La Jumpa",blend8s/cold,350,350,0,0,9000,0,3,False,True,4,14,10.2,2.7,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",blend8s/seeded_correct,350,350,0,0,9000,0,3,False,True,4,14,9.8,2.6,3.0,True
+"Arcángel, Bad Bunny - La Jumpa",blend8s/seeded_wrong_2s,350,350,0,0,26000,0,3,False,True,4,14,9.8,2.6,2.9,True
+Bad Bunny - 258,off0/cold,-1112,-1100,12,1112,,0,1,False,False,6,6,18.6,3.1,4.2,True
+Bad Bunny - 258,off0/seeded_correct,-1112,-1125,-13,-13,9000,0,2,False,True,4,6,10.1,2.7,3.0,True
+Bad Bunny - 258,off0/seeded_wrong_2s,-1112,-1125,-13,-13,36000,0,2,False,True,5,6,13.3,2.9,3.2,True
+Bad Bunny - 258,off+200/cold,-912,-925,-13,-13,40500,0,1,False,False,6,6,18.9,3.2,4.5,True
+Bad Bunny - 258,off+200/seeded_correct,-912,-925,-13,-13,9000,0,2,False,True,4,6,10.5,2.8,3.2,True
+Bad Bunny - 258,off+200/seeded_wrong_2s,-912,-925,-13,-13,36000,0,2,False,True,5,6,14.0,3.1,3.5,True
+Bad Bunny - 258,off-200/cold,-1312,,,362,,0,0,False,False,6,6,18.5,3.0,4.5,False
+Bad Bunny - 258,off-200/seeded_correct,-1312,-1325,-13,-13,9000,0,2,False,False,6,6,17.9,3.0,4.3,True
+Bad Bunny - 258,off-200/seeded_wrong_2s,-1312,-1325,-13,-13,36000,0,2,False,True,5,6,13.3,2.9,3.3,True
+Bad Bunny - 258,off+2s/cold,888,,,-888,,0,0,False,False,6,6,18.7,3.1,4.4,False
+Bad Bunny - 258,off+2s/seeded_correct,888,875,-13,-13,9000,0,2,False,True,4,6,10.4,2.7,3.1,True
+Bad Bunny - 258,off+2s/seeded_wrong_2s,888,875,-13,-13,36000,0,2,False,True,4,6,10.4,2.8,3.1,True
+Bad Bunny - 258,off-2s/cold,-3112,-3108,4,3112,,0,1,False,False,6,6,18.0,2.9,4.3,True
+Bad Bunny - 258,off-2s/seeded_correct,-3112,,,0,9000,0,0,False,False,6,6,17.6,3.0,4.1,False
+Bad Bunny - 258,off-2s/seeded_wrong_2s,-3112,,,1112,,0,0,False,False,6,6,17.7,2.9,4.3,False
+Bad Bunny - 258,off+10s/cold,8888,2575,-6313,-8888,,1,1,False,False,6,6,21.3,3.6,4.7,False
+Bad Bunny - 258,off+10s/seeded_correct,8888,8888,0,0,9000,0,1,False,False,6,6,20.5,3.3,4.7,True
+Bad Bunny - 258,off+10s/seeded_wrong_2s,8888,2575,-6313,2000,,1,1,False,False,6,6,20.5,3.4,4.7,False
+Bad Bunny - 258,off-10s/cold,-11112,,,11112,,0,0,False,False,5,6,14.3,2.6,4.0,False
+Bad Bunny - 258,off-10s/seeded_correct,-11112,,,0,,0,0,False,False,5,6,13.7,2.5,3.9,False
+Bad Bunny - 258,off-10s/seeded_wrong_2s,-11112,,,2000,,0,0,False,False,5,6,13.7,2.5,3.9,False
+Bad Bunny - 258,off+25s/cold,23888,,,-23888,,0,0,False,False,6,6,24.9,4.0,5.4,False
+Bad Bunny - 258,off+25s/seeded_correct,23888,23888,0,0,9000,0,1,False,False,6,6,24.7,4.1,5.2,True
+Bad Bunny - 258,off+25s/seeded_wrong_2s,23888,,,2000,,0,0,False,False,6,6,25.1,4.1,5.5,False
+Bad Bunny - 258,off-25s/cold,-26112,,,26112,,0,0,False,False,5,6,10.6,1.9,3.4,False
+Bad Bunny - 258,off-25s/seeded_correct,-26112,,,0,,0,0,False,False,5,6,10.2,1.9,3.3,False
+Bad Bunny - 258,off-25s/seeded_wrong_2s,-26112,,,2000,,0,0,False,False,5,6,10.2,1.8,3.3,False
+Bad Bunny - 258,noise0/cold,-1112,-1100,12,1112,,0,1,False,False,6,6,16.9,2.7,4.0,True
+Bad Bunny - 258,noise0/seeded_correct,-1112,-1125,-13,-13,9000,0,2,False,True,4,6,9.5,2.5,2.9,True
+Bad Bunny - 258,noise0/seeded_wrong_2s,-1112,-1100,12,1112,,0,1,False,False,6,6,16.6,2.7,4.0,True
+Bad Bunny - 258,noise-2s/cold,-3112,-3125,-13,3112,,0,1,False,False,6,6,16.3,2.7,3.8,True
+Bad Bunny - 258,noise-2s/seeded_correct,-3112,-3125,-13,-13,36000,0,1,False,False,6,6,16.3,2.7,3.9,True
+Bad Bunny - 258,noise-2s/seeded_wrong_2s,-3112,-3125,-13,37,75250,0,1,False,False,6,6,16.3,2.7,3.9,True
+Bad Bunny - 258,cutin5s/cold,3888,3875,-13,-13,36000,0,2,False,True,5,6,14.0,3.1,3.2,True
+Bad Bunny - 258,cutin5s/seeded_correct,3888,3888,0,0,26000,0,2,False,False,6,6,18.5,3.1,4.3,True
+Bad Bunny - 258,cutin5s/seeded_wrong_2s,3888,3875,-13,-13,36000,0,2,False,True,5,6,13.8,3.0,3.3,True
+Bad Bunny - 258,cutin15s/cold,13888,13875,-13,-13,36000,0,2,False,True,5,6,15.1,3.1,3.5,True
+Bad Bunny - 258,cutin15s/seeded_correct,13888,13875,-13,-13,26000,0,2,False,True,4,6,11.2,2.9,3.3,True
+Bad Bunny - 258,cutin15s/seeded_wrong_2s,13888,13875,-13,-13,36000,0,2,False,True,5,6,14.8,3.2,3.5,True
+Bad Bunny - 258,cutin25s/cold,23888,23875,-13,-13,36000,0,2,False,True,5,6,18.5,4.0,4.2,True
+Bad Bunny - 258,cutin25s/seeded_correct,23888,23875,-13,-13,26000,0,3,False,True,4,6,14.0,3.7,4.0,True
+Bad Bunny - 258,cutin25s/seeded_wrong_2s,23888,23875,-13,-13,36000,0,2,False,True,5,6,18.1,3.9,4.2,True
+Bad Bunny - 258,blend8s/cold,-1112,-1125,-13,-13,36000,0,2,False,True,5,6,13.2,2.8,3.0,True
+Bad Bunny - 258,blend8s/seeded_correct,-1112,-1125,-13,-13,26000,0,3,False,True,4,6,10.0,2.6,3.0,True
+Bad Bunny - 258,blend8s/seeded_wrong_2s,-1112,-1125,-13,-13,36000,0,2,False,True,5,6,12.9,2.8,3.1,True
+ACDC - Thunderstruck,off0/cold,-1050,0,1050,1050,,3,3,True,True,3,21,7.2,2.0,3.2,False
+ACDC - Thunderstruck,off0/seeded_correct,-1050,-1050,0,1050,,1,2,False,False,21,21,135.9,5.2,13.2,True
+ACDC - Thunderstruck,off0/seeded_wrong_2s,-1050,-1050,0,1050,,1,2,False,False,21,21,134.1,5.0,13.6,True
+ACDC - Thunderstruck,off+200/cold,-850,200,1050,1050,,3,3,True,True,3,21,7.0,2.0,3.1,False
+ACDC - Thunderstruck,off+200/seeded_correct,-850,-850,0,1050,,1,2,False,False,21,21,138.6,5.5,13.5,True
+ACDC - Thunderstruck,off+200/seeded_wrong_2s,-850,-850,0,1050,,1,2,False,False,21,21,136.7,4.9,14.3,True
+ACDC - Thunderstruck,off-200/cold,-1250,-1252,-2,1050,,1,3,True,False,21,21,141.7,6.2,14.3,True
+ACDC - Thunderstruck,off-200/seeded_correct,-1250,-1250,0,1050,,1,2,False,False,21,21,136.9,5.1,14.0,True
+ACDC - Thunderstruck,off-200/seeded_wrong_2s,-1250,-1250,0,1050,,1,2,False,False,21,21,139.5,5.0,15.1,True
+ACDC - Thunderstruck,off+2s/cold,950,950,0,1050,,1,3,True,False,21,21,141.6,5.1,14.1,True
+ACDC - Thunderstruck,off+2s/seeded_correct,950,950,0,1050,,1,2,False,False,21,21,139.0,5.3,14.0,True
+ACDC - Thunderstruck,off+2s/seeded_wrong_2s,950,950,0,1050,,1,2,False,False,21,21,141.0,5.1,14.5,True
+ACDC - Thunderstruck,off-2s/cold,-3050,-3056,-6,1050,,1,3,True,False,21,21,134.7,4.8,13.4,True
+ACDC - Thunderstruck,off-2s/seeded_correct,-3050,-2000,1050,1050,,2,2,False,False,21,21,135.4,4.8,13.5,False
+ACDC - Thunderstruck,off-2s/seeded_wrong_2s,-3050,-2000,1050,1050,,2,2,False,False,21,21,137.0,4.9,13.5,False
+ACDC - Thunderstruck,off+10s/cold,8950,1750,-7200,-7200,,2,2,False,True,6,21,20.6,3.7,4.3,False
+ACDC - Thunderstruck,off+10s/seeded_correct,8950,8950,0,0,37000,0,2,False,True,5,21,15.0,3.4,3.6,True
+ACDC - Thunderstruck,off+10s/seeded_wrong_2s,8950,1750,-7200,-7200,,2,2,False,True,6,21,19.3,3.5,4.0,False
+ACDC - Thunderstruck,off-10s/cold,-11050,-225,10825,10825,,1,1,False,False,20,21,125.6,5.1,13.1,False
+ACDC - Thunderstruck,off-10s/seeded_correct,-11050,,,0,,0,0,False,False,20,21,123.4,5.0,12.3,False
+ACDC - Thunderstruck,off-10s/seeded_wrong_2s,-11050,,,2000,,0,0,False,False,20,21,121.5,4.9,12.6,False
+ACDC - Thunderstruck,off+25s/cold,23950,2325,-21625,-21625,,3,3,False,True,5,21,20.2,4.3,5.0,False
+ACDC - Thunderstruck,off+25s/seeded_correct,23950,23950,0,0,37000,0,2,False,True,5,21,18.8,4.2,4.4,True
+ACDC - Thunderstruck,off+25s/seeded_wrong_2s,23950,2325,-21625,-21625,,3,3,False,True,5,21,18.9,4.3,4.4,False
+ACDC - Thunderstruck,off-25s/cold,-26050,-825,25225,25225,,1,1,False,False,19,21,108.0,4.9,11.8,False
+ACDC - Thunderstruck,off-25s/seeded_correct,-26050,,,0,,0,0,False,False,19,21,104.4,4.6,11.6,False
+ACDC - Thunderstruck,off-25s/seeded_wrong_2s,-26050,,,2000,,0,0,False,False,19,21,105.4,4.6,11.9,False
+ACDC - Thunderstruck,noise0/cold,-1050,0,1050,1050,,3,3,True,True,3,21,6.5,1.9,2.7,False
+ACDC - Thunderstruck,noise0/seeded_correct,-1050,-1050,0,1050,,1,2,False,False,21,21,114.5,4.7,10.3,True
+ACDC - Thunderstruck,noise0/seeded_wrong_2s,-1050,-1050,0,1050,,1,2,False,False,21,21,116.0,4.4,10.7,True
+ACDC - Thunderstruck,noise-2s/cold,-3050,-3056,-6,1050,,1,3,True,False,21,21,113.6,4.4,10.5,True
+ACDC - Thunderstruck,noise-2s/seeded_correct,-3050,-2000,1050,1050,,2,2,False,False,21,21,113.5,4.4,10.4,False
+ACDC - Thunderstruck,noise-2s/seeded_wrong_2s,-3050,-2000,1050,1050,,2,2,False,False,21,21,115.7,4.4,11.3,False
+ACDC - Thunderstruck,cutin5s/cold,3950,3950,0,1050,,1,2,False,False,21,21,128.1,4.9,11.6,True
+ACDC - Thunderstruck,cutin5s/seeded_correct,3950,3950,0,1050,,1,2,False,False,21,21,128.2,5.0,11.8,True
+ACDC - Thunderstruck,cutin5s/seeded_wrong_2s,3950,3950,0,1050,,1,2,False,False,21,21,128.9,4.9,12.3,True
+ACDC - Thunderstruck,cutin15s/cold,13950,13950,0,0,37000,0,2,False,True,5,21,15.1,3.3,3.6,True
+ACDC - Thunderstruck,cutin15s/seeded_correct,13950,13950,0,0,37000,0,2,False,True,5,21,14.6,3.3,3.5,True
+ACDC - Thunderstruck,cutin15s/seeded_wrong_2s,13950,13950,0,0,37000,0,2,False,True,5,21,14.9,3.3,3.5,True
+ACDC - Thunderstruck,cutin25s/cold,23950,23950,0,0,37000,0,3,False,True,5,21,19.3,4.2,4.6,True
+ACDC - Thunderstruck,cutin25s/seeded_correct,23950,23950,0,0,37000,0,3,False,True,5,21,18.1,4.0,4.4,True
+ACDC - Thunderstruck,cutin25s/seeded_wrong_2s,23950,23950,0,0,37000,0,3,False,True,5,21,17.8,4.0,4.2,True
+ACDC - Thunderstruck,blend8s/cold,-1050,-1051,-1,1050,,2,4,True,False,21,21,120.0,4.6,10.9,True
+ACDC - Thunderstruck,blend8s/seeded_correct,-1050,-1050,0,1050,,2,3,False,False,21,21,118.6,4.5,10.9,True
+ACDC - Thunderstruck,blend8s/seeded_wrong_2s,-1050,-1050,0,1050,,2,3,False,False,21,21,120.4,4.7,10.5,True
+Bad Bunny - LA MuDANZA,off0/cold,-1100,-1084,16,22,20125,0,2,True,False,9,9,44.0,3.5,10.7,True
+Bad Bunny - LA MuDANZA,off0/seeded_correct,-1100,-1100,0,0,18750,0,1,False,False,9,9,43.3,3.3,10.4,True
+Bad Bunny - LA MuDANZA,off0/seeded_wrong_2s,-1100,-1100,0,1100,,0,1,False,False,9,9,43.2,3.2,10.5,True
+Bad Bunny - LA MuDANZA,off+200/cold,-900,-901,-1,-1,20125,0,2,True,False,9,9,42.9,3.5,10.2,True
+Bad Bunny - LA MuDANZA,off+200/seeded_correct,-900,-900,0,0,18750,0,1,False,False,9,9,42.6,3.2,10.1,True
+Bad Bunny - LA MuDANZA,off+200/seeded_wrong_2s,-900,-900,0,1100,,0,1,False,False,9,9,42.8,3.3,10.2,True
+Bad Bunny - LA MuDANZA,off-200/cold,-1300,-1281,19,19,20125,0,3,True,True,8,9,33.3,3.3,8.5,True
+Bad Bunny - LA MuDANZA,off-200/seeded_correct,-1300,-1300,0,0,18750,0,1,False,False,9,9,42.1,3.3,10.1,True
+Bad Bunny - LA MuDANZA,off-200/seeded_wrong_2s,-1300,-1300,0,1100,,0,1,False,False,9,9,44.2,3.3,11.3,True
+Bad Bunny - LA MuDANZA,off+2s/cold,900,900,0,0,18750,0,2,True,False,9,9,45.1,3.6,10.7,True
+Bad Bunny - LA MuDANZA,off+2s/seeded_correct,900,900,0,0,18750,0,1,False,False,9,9,42.7,3.3,10.2,True
+Bad Bunny - LA MuDANZA,off+2s/seeded_wrong_2s,900,900,0,1100,,0,1,False,False,9,9,43.4,3.4,10.3,True
+Bad Bunny - LA MuDANZA,off-2s/cold,-3100,-3088,12,19,20125,0,2,True,False,9,9,41.4,3.2,9.9,True
+Bad Bunny - LA MuDANZA,off-2s/seeded_correct,-3100,-3100,0,0,18750,0,1,False,False,9,9,42.1,3.3,10.0,True
+Bad Bunny - LA MuDANZA,off-2s/seeded_wrong_2s,-3100,,,1100,,0,0,False,False,9,9,42.2,3.2,10.2,False
+Bad Bunny - LA MuDANZA,off+10s/cold,8900,,,-8900,,0,0,False,False,9,9,48.8,3.9,10.7,False
+Bad Bunny - LA MuDANZA,off+10s/seeded_correct,8900,8900,0,0,18750,0,3,False,False,9,9,46.8,3.8,10.7,True
+Bad Bunny - LA MuDANZA,off+10s/seeded_wrong_2s,8900,,,2000,,0,0,False,False,9,9,47.5,3.9,10.9,False
+Bad Bunny - LA MuDANZA,off-10s/cold,-11100,,,11100,,0,0,False,False,8,9,39.1,3.6,10.5,False
+Bad Bunny - LA MuDANZA,off-10s/seeded_correct,-11100,,,0,,0,0,False,False,8,9,35.3,3.3,9.2,False
+Bad Bunny - LA MuDANZA,off-10s/seeded_wrong_2s,-11100,,,2000,,0,0,False,False,8,9,35.7,3.3,9.5,False
+Bad Bunny - LA MuDANZA,off+25s/cold,23900,,,-23900,,0,0,False,False,9,9,57.8,5.0,11.8,False
+Bad Bunny - LA MuDANZA,off+25s/seeded_correct,23900,23900,0,0,18750,0,3,False,False,9,9,55.7,4.7,11.8,True
+Bad Bunny - LA MuDANZA,off+25s/seeded_wrong_2s,23900,,,2000,,0,0,False,False,9,9,54.5,4.5,11.8,False
+Bad Bunny - LA MuDANZA,off-25s/cold,-26100,,,26100,,0,0,False,False,7,9,31.5,3.4,8.9,False
+Bad Bunny - LA MuDANZA,off-25s/seeded_correct,-26100,,,0,,0,0,False,False,7,9,29.4,3.2,8.9,False
+Bad Bunny - LA MuDANZA,off-25s/seeded_wrong_2s,-26100,,,2000,,0,0,False,False,7,9,29.4,3.1,8.9,False
+Bad Bunny - LA MuDANZA,noise0/cold,-1100,-1084,16,22,20125,0,2,True,False,9,9,36.2,3.0,8.0,True
+Bad Bunny - LA MuDANZA,noise0/seeded_correct,-1100,-1100,0,0,18750,0,1,False,False,9,9,35.9,3.0,7.9,True
+Bad Bunny - LA MuDANZA,noise0/seeded_wrong_2s,-1100,-1100,0,1100,,0,1,False,False,9,9,37.1,3.0,8.2,True
+Bad Bunny - LA MuDANZA,noise-2s/cold,-3100,-3090,10,19,20125,0,2,True,False,9,9,35.7,2.9,7.9,True
+Bad Bunny - LA MuDANZA,noise-2s/seeded_correct,-3100,-3100,0,0,18750,0,1,False,False,9,9,35.3,2.9,7.8,True
+Bad Bunny - LA MuDANZA,noise-2s/seeded_wrong_2s,-3100,,,1100,,0,0,False,False,9,9,35.5,3.1,7.9,False
+Bad Bunny - LA MuDANZA,cutin5s/cold,3900,3909,9,9,41450,0,3,True,True,5,9,13.2,2.7,3.3,True
+Bad Bunny - LA MuDANZA,cutin5s/seeded_correct,3900,3900,0,0,18750,0,2,False,False,9,9,39.3,3.3,8.7,True
+Bad Bunny - LA MuDANZA,cutin5s/seeded_wrong_2s,3900,3900,0,0,25500,0,2,False,False,9,9,39.0,3.4,8.4,True
+Bad Bunny - LA MuDANZA,cutin15s/cold,13900,13900,0,-13900,,0,3,False,False,9,9,41.3,3.7,8.3,True
+Bad Bunny - LA MuDANZA,cutin15s/seeded_correct,13900,13900,0,0,18750,0,3,False,False,9,9,40.4,3.6,8.4,True
+Bad Bunny - LA MuDANZA,cutin15s/seeded_wrong_2s,13900,13900,0,0,25500,0,3,False,False,9,9,40.8,3.6,8.5,True
+Bad Bunny - LA MuDANZA,cutin25s/cold,23900,23900,0,0,158000,0,2,False,True,8,9,39.7,4.3,8.8,True
+Bad Bunny - LA MuDANZA,cutin25s/seeded_correct,23900,23900,0,0,36500,0,2,False,True,8,9,37.8,4.2,8.0,True
+Bad Bunny - LA MuDANZA,cutin25s/seeded_wrong_2s,23900,23900,0,0,45750,0,2,False,True,8,9,37.3,4.1,8.1,True
+Bad Bunny - LA MuDANZA,blend8s/cold,-1100,-1100,0,22,18750,0,2,True,True,3,9,6.2,2.0,2.3,True
+Bad Bunny - LA MuDANZA,blend8s/seeded_correct,-1100,-1100,0,0,9000,0,2,False,False,9,9,37.8,3.2,8.5,True
+Bad Bunny - LA MuDANZA,blend8s/seeded_wrong_2s,-1100,-1100,0,0,18750,0,2,False,False,9,9,36.5,3.1,8.0,True
+Bad Bunny - Soy Peor,off0/cold,-938,-925,13,13,165750,1,3,False,True,10,11,53.8,4.7,9.5,True
+Bad Bunny - Soy Peor,off0/seeded_correct,-938,-925,13,13,165750,1,3,False,True,10,11,53.4,4.6,9.7,True
+Bad Bunny - Soy Peor,off0/seeded_wrong_2s,-938,-925,13,13,165750,1,3,False,True,10,11,52.4,4.7,9.3,True
+Bad Bunny - Soy Peor,off+200/cold,-738,-725,13,13,165750,1,3,False,True,10,11,55.3,4.7,10.0,True
+Bad Bunny - Soy Peor,off+200/seeded_correct,-738,-725,13,13,165750,1,3,False,True,10,11,53.4,4.6,9.8,True
+Bad Bunny - Soy Peor,off+200/seeded_wrong_2s,-738,-725,13,13,165750,1,3,False,True,10,11,55.4,5.0,10.0,True
+Bad Bunny - Soy Peor,off-200/cold,-1138,-1125,13,13,165750,1,3,False,True,10,11,54.5,5.1,9.7,True
+Bad Bunny - Soy Peor,off-200/seeded_correct,-1138,-1125,13,13,165750,1,3,False,True,10,11,55.5,4.8,10.6,True
+Bad Bunny - Soy Peor,off-200/seeded_wrong_2s,-1138,-1125,13,13,165750,1,3,False,True,10,11,53.2,4.6,9.6,True
+Bad Bunny - Soy Peor,off+2s/cold,1062,1075,13,13,165750,1,3,False,True,10,11,55.6,4.7,10.2,True
+Bad Bunny - Soy Peor,off+2s/seeded_correct,1062,1075,13,13,165750,1,3,False,True,10,11,54.6,4.9,9.9,True
+Bad Bunny - Soy Peor,off+2s/seeded_wrong_2s,1062,1075,13,13,165750,1,3,False,True,10,11,55.9,4.8,10.5,True
+Bad Bunny - Soy Peor,off-2s/cold,-2938,1225,4163,4163,,1,1,False,False,11,11,68.0,6.6,11.7,False
+Bad Bunny - Soy Peor,off-2s/seeded_correct,-2938,,,938,,0,0,False,False,11,11,66.3,5.9,11.6,False
+Bad Bunny - Soy Peor,off-2s/seeded_wrong_2s,-2938,1230,4168,2000,,1,1,False,False,11,11,69.3,6.2,13.2,False
+Bad Bunny - Soy Peor,off+10s/cold,9062,775,-8287,-8287,,2,2,False,False,11,11,74.1,6.4,12.4,False
+Bad Bunny - Soy Peor,off+10s/seeded_correct,9062,9062,0,0,36000,0,3,False,True,9,11,49.3,3.8,9.5,True
+Bad Bunny - Soy Peor,off+10s/seeded_wrong_2s,9062,775,-8287,2000,,2,2,False,False,11,11,72.5,6.4,12.3,False
+Bad Bunny - Soy Peor,off-10s/cold,-10938,1475,12413,12413,,3,3,False,False,10,11,61.8,6.3,11.3,False
+Bad Bunny - Soy Peor,off-10s/seeded_correct,-10938,1475,12413,0,,2,2,False,False,10,11,66.3,7.4,11.6,False
+Bad Bunny - Soy Peor,off-10s/seeded_wrong_2s,-10938,1475,12413,2000,,2,2,False,False,10,11,61.5,6.3,11.5,False
+Bad Bunny - Soy Peor,off+25s/cold,24062,-700,-24762,-24762,,3,3,False,False,11,11,85.6,6.9,13.7,False
+Bad Bunny - Soy Peor,off+25s/seeded_correct,24062,24062,0,0,36000,0,3,False,True,9,11,56.5,4.5,10.5,True
+Bad Bunny - Soy Peor,off+25s/seeded_wrong_2s,24062,-700,-24762,2000,,3,3,False,False,11,11,85.1,7.5,13.6,False
+Bad Bunny - Soy Peor,off-25s/cold,-25938,,,24813,,0,0,False,False,10,11,53.1,5.6,10.4,False
+Bad Bunny - Soy Peor,off-25s/seeded_correct,-25938,,,0,,0,0,False,False,10,11,52.1,5.5,10.4,False
+Bad Bunny - Soy Peor,off-25s/seeded_wrong_2s,-25938,,,2000,,0,0,False,False,10,11,52.5,5.6,10.3,False
+Bad Bunny - Soy Peor,noise0/cold,-938,-925,13,13,165750,0,2,False,True,10,11,48.7,4.1,8.8,True
+Bad Bunny - Soy Peor,noise0/seeded_correct,-938,-925,13,13,165750,0,2,False,True,10,11,49.7,4.1,9.2,True
+Bad Bunny - Soy Peor,noise0/seeded_wrong_2s,-938,-1000,-62,-62,40250,0,2,False,True,6,11,18.1,2.9,4.7,True
+Bad Bunny - Soy Peor,noise-2s/cold,-2938,1225,4163,4163,,1,1,False,False,11,11,59.4,5.1,10.3,False
+Bad Bunny - Soy Peor,noise-2s/seeded_correct,-2938,-2975,-37,-37,36000,0,1,False,False,11,11,59.1,5.0,10.5,True
+Bad Bunny - Soy Peor,noise-2s/seeded_wrong_2s,-2938,1230,4168,2000,,1,1,False,False,11,11,60.7,5.5,10.5,False
+Bad Bunny - Soy Peor,cutin5s/cold,4062,4075,13,13,165750,1,3,False,True,10,11,53.1,4.5,9.5,True
+Bad Bunny - Soy Peor,cutin5s/seeded_correct,4062,4075,13,13,165750,1,3,False,True,10,11,52.0,4.4,9.3,True
+Bad Bunny - Soy Peor,cutin5s/seeded_wrong_2s,4062,4075,13,13,165750,1,3,False,True,10,11,52.6,4.5,9.5,True
+Bad Bunny - Soy Peor,cutin15s/cold,14062,14000,-62,-62,40250,0,2,False,True,6,11,21.1,3.4,5.1,True
+Bad Bunny - Soy Peor,cutin15s/seeded_correct,14062,14000,-62,-62,26000,0,2,False,True,6,11,21.4,3.5,5.4,True
+Bad Bunny - Soy Peor,cutin15s/seeded_wrong_2s,14062,14000,-62,-62,40250,0,2,False,True,6,11,21.3,3.4,5.3,True
+Bad Bunny - Soy Peor,cutin25s/cold,24062,24000,-62,-62,40250,0,2,False,True,7,11,34.0,4.3,7.8,True
+Bad Bunny - Soy Peor,cutin25s/seeded_correct,24062,24000,-62,-62,36000,0,2,False,True,7,11,34.0,4.2,7.9,True
+Bad Bunny - Soy Peor,cutin25s/seeded_wrong_2s,24062,24000,-62,-62,40250,0,2,False,True,7,11,32.1,3.9,7.4,True
+Bad Bunny - Soy Peor,blend8s/cold,-938,-1000,-62,-62,26000,0,2,False,True,6,11,19.7,3.2,4.8,True
+Bad Bunny - Soy Peor,blend8s/seeded_correct,-938,-1000,-62,-62,26000,0,2,False,True,6,11,17.9,2.8,4.6,True
+Bad Bunny - Soy Peor,blend8s/seeded_wrong_2s,-938,-1000,-62,-62,40250,0,2,False,True,6,11,18.1,2.9,4.7,True
+Bad Bunny - BATICANO,off0/cold,-1031,-1100,-69,-69,9000,0,2,False,True,9,12,35.6,3.5,5.6,True
+Bad Bunny - BATICANO,off0/seeded_correct,-1031,-1100,-69,-69,9000,0,2,False,True,9,12,33.7,3.3,5.5,True
+Bad Bunny - BATICANO,off0/seeded_wrong_2s,-1031,-1100,-69,-69,9000,0,2,False,True,9,12,36.2,4.1,5.8,True
+Bad Bunny - BATICANO,off+200/cold,-831,-900,-69,-69,9000,0,2,False,True,9,12,35.2,3.4,5.8,True
+Bad Bunny - BATICANO,off+200/seeded_correct,-831,-900,-69,-69,9000,0,2,False,True,9,12,34.0,3.3,5.6,True
+Bad Bunny - BATICANO,off+200/seeded_wrong_2s,-831,-900,-69,-69,9000,0,2,False,True,9,12,34.9,3.2,6.0,True
+Bad Bunny - BATICANO,off-200/cold,-1231,-1300,-69,-69,16000,0,1,False,False,12,12,64.1,5.3,10.1,True
+Bad Bunny - BATICANO,off-200/seeded_correct,-1231,-1300,-69,-69,9000,0,1,False,False,12,12,63.3,5.0,10.3,True
+Bad Bunny - BATICANO,off-200/seeded_wrong_2s,-1231,-1300,-69,6,82000,0,1,False,False,12,12,62.9,5.0,10.4,True
+Bad Bunny - BATICANO,off+2s/cold,969,900,-69,-69,9000,0,2,False,True,9,12,36.8,3.5,6.1,True
+Bad Bunny - BATICANO,off+2s/seeded_correct,969,900,-69,-69,9000,0,2,False,True,9,12,34.9,3.4,5.6,True
+Bad Bunny - BATICANO,off+2s/seeded_wrong_2s,969,900,-69,-69,9000,0,2,False,True,9,12,35.0,3.4,5.8,True
+Bad Bunny - BATICANO,off-2s/cold,-3031,,,2281,,0,0,False,False,12,12,63.4,5.0,10.3,False
+Bad Bunny - BATICANO,off-2s/seeded_correct,-3031,,,6,16000,0,0,False,False,12,12,61.3,4.8,10.1,False
+Bad Bunny - BATICANO,off-2s/seeded_wrong_2s,-3031,,,2281,,0,0,False,False,12,12,63.8,5.1,10.7,False
+Bad Bunny - BATICANO,off+10s/cold,8969,,,-9119,,0,0,False,False,12,12,71.5,5.5,11.1,False
+Bad Bunny - BATICANO,off+10s/seeded_correct,8969,8969,0,0,40250,0,2,False,False,12,12,68.8,5.4,10.6,True
+Bad Bunny - BATICANO,off+10s/seeded_wrong_2s,8969,,,2000,,0,0,False,False,12,12,69.7,5.4,10.7,False
+Bad Bunny - BATICANO,off-10s/cold,-11031,,,11031,,0,0,False,False,11,12,58.2,5.2,10.1,False
+Bad Bunny - BATICANO,off-10s/seeded_correct,-11031,,,0,,0,0,False,False,11,12,54.6,4.6,9.6,False
+Bad Bunny - BATICANO,off-10s/seeded_wrong_2s,-11031,,,2000,,0,0,False,False,11,12,54.4,4.6,9.7,False
+Bad Bunny - BATICANO,off+25s/cold,23969,,,-23969,,0,0,False,False,12,12,83.5,6.6,13.3,False
+Bad Bunny - BATICANO,off+25s/seeded_correct,23969,23969,0,0,40250,0,2,False,False,12,12,79.3,6.4,11.5,True
+Bad Bunny - BATICANO,off+25s/seeded_wrong_2s,23969,,,2000,,0,0,False,False,12,12,78.3,6.2,11.5,False
+Bad Bunny - BATICANO,off-25s/cold,-26031,,,26031,,0,0,False,False,10,12,46.4,4.2,8.7,False
+Bad Bunny - BATICANO,off-25s/seeded_correct,-26031,,,0,,0,0,False,False,10,12,46.4,4.1,8.9,False
+Bad Bunny - BATICANO,off-25s/seeded_wrong_2s,-26031,,,2000,,0,0,False,False,10,12,47.0,4.1,9.3,False
+Bad Bunny - BATICANO,noise0/cold,-1031,-1100,-69,-69,16000,0,1,False,False,12,12,56.5,4.3,8.8,True
+Bad Bunny - BATICANO,noise0/seeded_correct,-1031,-1100,-69,-69,9000,0,1,False,True,9,12,30.0,3.0,4.8,True
+Bad Bunny - BATICANO,noise0/seeded_wrong_2s,-1031,-1100,-69,-69,82000,0,1,False,False,12,12,54.6,4.2,8.8,True
+Bad Bunny - BATICANO,noise-2s/cold,-3031,,,2281,,0,0,False,False,12,12,53.7,4.2,8.6,False
+Bad Bunny - BATICANO,noise-2s/seeded_correct,-3031,,,6,16000,0,0,False,False,12,12,52.9,4.2,8.4,False
+Bad Bunny - BATICANO,noise-2s/seeded_wrong_2s,-3031,,,2281,,0,0,False,False,12,12,54.3,4.3,8.7,False
+Bad Bunny - BATICANO,cutin5s/cold,3969,3900,-69,-69,9000,0,2,False,True,9,12,33.7,3.4,5.2,True
+Bad Bunny - BATICANO,cutin5s/seeded_correct,3969,3900,-69,-69,9000,0,2,False,True,9,12,32.7,3.3,5.2,True
+Bad Bunny - BATICANO,cutin5s/seeded_wrong_2s,3969,3900,-69,-69,9000,0,2,False,True,9,12,32.4,3.3,5.1,True
+Bad Bunny - BATICANO,cutin15s/cold,13969,13975,6,-13969,,0,3,False,False,12,12,60.5,4.8,9.0,True
+Bad Bunny - BATICANO,cutin15s/seeded_correct,13969,13975,6,6,34750,0,3,False,False,12,12,60.5,4.8,9.0,True
+Bad Bunny - BATICANO,cutin15s/seeded_wrong_2s,13969,13975,6,6,82000,0,3,False,False,12,12,61.2,4.9,9.0,True
+Bad Bunny - BATICANO,cutin25s/cold,23969,23975,6,-23969,,0,2,False,False,12,12,72.6,5.8,10.3,True
+Bad Bunny - BATICANO,cutin25s/seeded_correct,23969,23975,6,6,34750,0,2,False,False,12,12,70.4,5.6,10.2,True
+Bad Bunny - BATICANO,cutin25s/seeded_wrong_2s,23969,23975,6,6,67500,0,2,False,False,12,12,70.6,5.7,10.2,True
+Bad Bunny - BATICANO,blend8s/cold,-1031,-1025,6,6,34750,0,3,False,False,12,12,59.0,4.6,9.4,True
+Bad Bunny - BATICANO,blend8s/seeded_correct,-1031,-1025,6,6,16000,0,1,False,False,12,12,57.6,4.5,9.1,True
+Bad Bunny - BATICANO,blend8s/seeded_wrong_2s,-1031,-1025,6,6,82000,0,3,False,False,12,12,57.3,4.5,9.0,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off0/cold,-2183,1762,3945,3945,,1,1,False,False,19,19,119.1,6.1,11.1,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off0/seeded_correct,-2183,-2250,-67,-67,32000,0,1,False,False,19,19,117.2,6.1,11.3,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off0/seeded_wrong_2s,-2183,1762,3945,3945,,1,1,False,False,19,19,118.5,5.6,11.5,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+200/cold,-1983,-2050,-67,-17,159750,0,1,False,False,19,19,120.4,5.7,11.6,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+200/seeded_correct,-1983,-2050,-67,-67,32000,0,1,False,False,19,19,118.5,5.7,11.7,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+200/seeded_wrong_2s,-1983,1962,3945,3945,,1,1,False,False,19,19,118.2,5.6,11.3,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-200/cold,-2383,1562,3945,3945,,1,1,False,False,19,19,119.6,5.7,11.1,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-200/seeded_correct,-2383,-2450,-67,-67,32000,0,1,False,False,19,19,118.9,5.6,11.8,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-200/seeded_wrong_2s,-2383,1562,3945,3945,,1,1,False,False,19,19,116.7,6.1,11.1,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+2s/cold,-183,-250,-67,-67,32000,0,2,False,True,12,19,54.2,5.0,6.5,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+2s/seeded_correct,-183,-250,-67,-67,32000,0,2,False,True,12,19,54.4,4.8,6.8,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+2s/seeded_wrong_2s,-183,-250,-67,-67,78500,0,2,False,True,12,19,52.6,4.7,6.5,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-2s/cold,-4183,-250,3933,3933,,3,3,True,False,19,19,115.8,5.7,10.9,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-2s/seeded_correct,-4183,-250,3933,0,,2,2,False,False,19,19,118.5,5.6,11.3,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-2s/seeded_wrong_2s,-4183,-250,3933,3933,,2,2,False,False,19,19,114.0,5.6,10.9,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+10s/cold,7817,,,-8067,,0,0,False,False,19,19,130.4,6.3,11.8,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+10s/seeded_correct,7817,,,0,159750,0,0,False,False,19,19,128.7,6.4,11.7,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+10s/seeded_wrong_2s,7817,,,2000,,0,0,False,False,19,19,131.3,6.7,11.8,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-10s/cold,-12183,-4275,7908,7908,,2,2,True,False,18,19,106.4,5.5,10.6,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-10s/seeded_correct,-12183,-225,11958,0,,2,2,False,False,18,19,108.7,5.6,10.5,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-10s/seeded_wrong_2s,-12183,-225,11958,2000,,2,2,False,False,18,19,103.6,5.3,10.2,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+25s/cold,22817,-1250,-24067,-24067,,3,3,False,True,12,19,70.8,6.9,7.8,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+25s/seeded_correct,22817,-1250,-24067,-24067,,3,3,False,True,12,19,66.5,5.8,7.7,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off+25s/seeded_wrong_2s,22817,-1250,-24067,-24067,,3,3,False,True,12,19,71.3,6.4,8.1,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-25s/cold,-27183,,,27933,,0,0,False,False,18,19,93.6,4.9,9.8,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-25s/seeded_correct,-27183,-3242,23941,0,,1,1,False,False,18,19,92.3,4.8,10.0,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",off-25s/seeded_wrong_2s,-27183,-3242,23941,2000,,1,1,False,False,18,19,91.6,4.7,9.9,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",noise0/cold,-2183,1762,3945,3945,,1,1,False,False,19,19,101.7,5.0,9.3,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",noise0/seeded_correct,-2183,-2250,-67,-67,32000,0,1,False,False,19,19,100.6,4.9,9.2,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",noise0/seeded_wrong_2s,-2183,1762,3945,3945,,1,1,False,False,19,19,100.6,5.0,9.3,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",noise-2s/cold,-4183,3744,7927,7927,,3,3,True,True,6,19,15.8,2.6,3.6,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",noise-2s/seeded_correct,-4183,-250,3933,0,,2,2,False,False,19,19,100.7,5.0,9.2,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",noise-2s/seeded_wrong_2s,-4183,-250,3933,3933,,2,2,False,False,19,19,98.8,4.9,9.1,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin5s/cold,2817,2750,-67,-67,78500,0,2,False,True,15,19,72.8,5.0,7.4,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin5s/seeded_correct,2817,2750,-67,-67,32000,0,2,False,True,15,19,71.7,4.9,7.6,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin5s/seeded_wrong_2s,2817,2750,-67,-67,78500,0,2,False,True,15,19,71.9,4.9,7.3,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin15s/cold,12817,12750,-67,-67,78500,0,2,False,True,12,19,53.4,4.8,6.1,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin15s/seeded_correct,12817,12750,-67,-67,32000,0,2,False,True,12,19,52.6,4.6,6.1,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin15s/seeded_wrong_2s,12817,12750,-67,-67,78500,0,2,False,True,12,19,53.0,4.7,6.2,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin25s/cold,22817,6750,-16067,-16067,,1,1,False,True,9,19,41.9,4.3,6.1,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin25s/seeded_correct,22817,22750,-67,-67,26000,0,2,False,True,12,19,63.0,5.4,7.6,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",cutin25s/seeded_wrong_2s,22817,6750,-16067,-16067,,1,1,False,True,9,19,40.9,4.2,6.1,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",blend8s/cold,-2183,1762,3945,3945,,1,1,False,False,19,19,109.5,5.1,10.6,False
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",blend8s/seeded_correct,-2183,-2250,-67,-67,32000,0,1,False,False,19,19,107.9,5.0,10.9,True
+"Arcángel, Bad Bunny, Mambo Kingz, DJ Luian - Tu No Vive Asi (feat. Mambo Kingz & DJ Luian)",blend8s/seeded_wrong_2s,-2183,1762,3945,3945,,1,1,False,False,19,19,106.6,5.2,10.4,False
+Bad Bunny - BENDICIONES,off0/cold,2225,-1103,-3328,-3328,,4,4,True,True,8,14,24.4,3.2,3.8,False
+Bad Bunny - BENDICIONES,off0/seeded_correct,2225,-1100,-3325,-3325,,3,3,False,True,12,14,44.9,3.5,5.7,False
+Bad Bunny - BENDICIONES,off0/seeded_wrong_2s,2225,-1100,-3325,-3325,,3,3,False,True,12,14,44.6,3.7,5.6,False
+Bad Bunny - BENDICIONES,off+200/cold,2425,-901,-3326,-3326,,3,3,True,True,8,14,24.9,3.1,4.2,False
+Bad Bunny - BENDICIONES,off+200/seeded_correct,2425,-900,-3325,-3325,,3,3,False,True,12,14,47.3,3.9,6.0,False
+Bad Bunny - BENDICIONES,off+200/seeded_wrong_2s,2425,-900,-3325,-3325,,3,3,False,True,12,14,46.0,3.7,5.8,False
+Bad Bunny - BENDICIONES,off-200/cold,2025,-1300,-3325,-3325,,4,4,True,True,8,14,23.9,3.0,3.9,False
+Bad Bunny - BENDICIONES,off-200/seeded_correct,2025,-1300,-3325,-3325,,3,3,False,True,12,14,45.4,3.6,5.8,False
+Bad Bunny - BENDICIONES,off-200/seeded_wrong_2s,2025,-1300,-3325,-3325,,3,3,False,True,12,14,46.1,3.8,5.9,False
+Bad Bunny - BENDICIONES,off+2s/cold,4225,900,-3325,-3325,,4,4,True,True,8,14,25.0,3.2,4.0,False
+Bad Bunny - BENDICIONES,off+2s/seeded_correct,4225,900,-3325,-3325,,3,3,False,True,10,14,35.3,3.4,5.4,False
+Bad Bunny - BENDICIONES,off+2s/seeded_wrong_2s,4225,900,-3325,-3325,,3,3,False,True,10,14,34.8,3.4,5.2,False
+Bad Bunny - BENDICIONES,off-2s/cold,225,-3100,-3325,-3325,,4,4,True,True,13,14,50.9,3.6,6.0,False
+Bad Bunny - BENDICIONES,off-2s/seeded_correct,225,-3100,-3325,-3325,,3,3,False,False,14,14,57.3,3.9,6.4,False
+Bad Bunny - BENDICIONES,off-2s/seeded_wrong_2s,225,-3100,-3325,-3325,,3,3,False,False,14,14,59.1,3.9,6.7,False
+Bad Bunny - BENDICIONES,off+10s/cold,12225,2225,-10000,-12225,,2,2,False,False,14,14,68.1,4.3,7.4,False
+Bad Bunny - BENDICIONES,off+10s/seeded_correct,12225,12225,0,0,39750,0,2,False,False,14,14,66.4,4.3,7.1,True
+Bad Bunny - BENDICIONES,off+10s/seeded_wrong_2s,12225,2225,-10000,2000,,2,2,False,False,14,14,65.1,4.3,6.8,False
+Bad Bunny - BENDICIONES,off-10s/cold,-7775,-1100,6675,6675,,1,1,False,False,13,14,51.7,3.5,6.4,False
+Bad Bunny - BENDICIONES,off-10s/seeded_correct,-7775,2225,10000,0,,1,1,False,False,13,14,50.0,3.5,5.9,False
+Bad Bunny - BENDICIONES,off-10s/seeded_wrong_2s,-7775,2225,10000,2000,,1,1,False,False,13,14,50.5,3.5,5.9,False
+Bad Bunny - BENDICIONES,off+25s/cold,27225,-2775,-30000,-30000,,1,1,False,False,14,14,81.1,5.4,8.6,False
+Bad Bunny - BENDICIONES,off+25s/seeded_correct,27225,27225,0,0,34250,0,2,False,False,14,14,76.7,5.2,7.7,True
+Bad Bunny - BENDICIONES,off+25s/seeded_wrong_2s,27225,-2775,-30000,-30000,,2,2,False,False,14,14,76.4,5.1,7.7,False
+Bad Bunny - BENDICIONES,off-25s/cold,-22775,,,23325,,0,0,False,False,12,14,40.1,3.2,5.2,False
+Bad Bunny - BENDICIONES,off-25s/seeded_correct,-22775,,,0,,0,0,False,False,12,14,38.9,3.1,5.1,False
+Bad Bunny - BENDICIONES,off-25s/seeded_wrong_2s,-22775,,,2000,,0,0,False,False,12,14,39.2,3.2,5.2,False
+Bad Bunny - BENDICIONES,noise0/cold,2225,-1103,-3328,-3328,,3,3,True,True,8,14,23.1,3.0,3.6,False
+Bad Bunny - BENDICIONES,noise0/seeded_correct,2225,-1100,-3325,-3325,,2,2,False,True,9,14,26.3,3.0,4.0,False
+Bad Bunny - BENDICIONES,noise0/seeded_wrong_2s,2225,-1100,-3325,-3325,,2,2,False,True,9,14,26.2,3.0,4.0,False
+Bad Bunny - BENDICIONES,noise-2s/cold,225,-3106,-3331,-3331,,3,3,True,True,8,14,21.9,2.9,3.5,False
+Bad Bunny - BENDICIONES,noise-2s/seeded_correct,225,-3100,-3325,-3325,,2,2,False,True,9,14,25.6,2.9,3.9,False
+Bad Bunny - BENDICIONES,noise-2s/seeded_wrong_2s,225,-3100,-3325,-3325,,2,2,False,True,9,14,27.0,3.0,4.1,False
+Bad Bunny - BENDICIONES,cutin5s/cold,7225,3900,-3325,-3328,,2,2,True,True,3,14,7.0,2.2,2.9,False
+Bad Bunny - BENDICIONES,cutin5s/seeded_correct,7225,3900,-3325,-3325,,2,2,False,True,9,14,29.1,3.2,4.5,False
+Bad Bunny - BENDICIONES,cutin5s/seeded_wrong_2s,7225,3900,-3325,-3325,,2,2,False,True,8,14,24.2,3.1,3.7,False
+Bad Bunny - BENDICIONES,cutin15s/cold,17225,13900,-3325,-3325,,2,2,False,True,10,14,36.5,3.6,5.0,False
+Bad Bunny - BENDICIONES,cutin15s/seeded_correct,17225,13900,-3325,-3325,,2,2,False,True,10,14,36.4,3.6,5.0,False
+Bad Bunny - BENDICIONES,cutin15s/seeded_wrong_2s,17225,13900,-3325,-3325,,2,2,False,True,10,14,36.2,3.6,4.9,False
+Bad Bunny - BENDICIONES,cutin25s/cold,27225,23900,-3325,-3325,,2,2,False,True,10,14,42.4,4.2,5.4,False
+Bad Bunny - BENDICIONES,cutin25s/seeded_correct,27225,23900,-3325,-3325,,2,2,False,True,12,14,53.7,4.4,6.1,False
+Bad Bunny - BENDICIONES,cutin25s/seeded_wrong_2s,27225,23900,-3325,-3325,,2,2,False,True,10,14,41.8,4.3,5.4,False
+Bad Bunny - BENDICIONES,blend8s/cold,2225,-1100,-3325,-3328,,2,2,True,True,3,14,6.8,2.1,2.9,False
+Bad Bunny - BENDICIONES,blend8s/seeded_correct,2225,-1100,-3325,-3325,,2,2,False,True,9,14,26.9,3.0,4.0,False
+Bad Bunny - BENDICIONES,blend8s/seeded_wrong_2s,2225,-1100,-3325,-3325,,2,2,False,True,9,14,27.1,3.1,4.1,False
+Bad Bunny - Cuando Perriabas,off0/cold,1950,1950,0,0,16500,0,3,True,True,4,10,9.6,2.2,3.1,True
+Bad Bunny - Cuando Perriabas,off0/seeded_correct,1950,1950,0,0,11000,0,3,False,True,3,10,5.8,1.9,2.2,True
+Bad Bunny - Cuando Perriabas,off0/seeded_wrong_2s,1950,1950,0,0,16500,0,2,False,True,4,10,9.2,2.3,2.9,True
+Bad Bunny - Cuando Perriabas,off+200/cold,2150,2150,0,0,26000,0,3,True,True,4,10,9.4,2.2,3.0,True
+Bad Bunny - Cuando Perriabas,off+200/seeded_correct,2150,2150,0,0,11000,0,3,False,True,3,10,6.1,1.9,2.4,True
+Bad Bunny - Cuando Perriabas,off+200/seeded_wrong_2s,2150,2150,0,0,16500,0,2,False,True,4,10,8.9,2.1,2.9,True
+Bad Bunny - Cuando Perriabas,off-200/cold,1750,1750,0,0,16500,0,3,True,True,4,10,9.6,2.3,3.1,True
+Bad Bunny - Cuando Perriabas,off-200/seeded_correct,1750,1750,0,0,11000,0,3,False,True,3,10,6.0,1.9,2.3,True
+Bad Bunny - Cuando Perriabas,off-200/seeded_wrong_2s,1750,1750,0,0,16500,0,2,False,True,4,10,8.9,2.1,2.9,True
+Bad Bunny - Cuando Perriabas,off+2s/cold,3950,3950,0,0,28300,0,3,True,True,4,10,9.7,2.3,3.1,True
+Bad Bunny - Cuando Perriabas,off+2s/seeded_correct,3950,3950,0,0,11000,0,2,False,True,4,10,9.2,2.2,2.9,True
+Bad Bunny - Cuando Perriabas,off+2s/seeded_wrong_2s,3950,,,2000,,0,0,False,False,10,10,35.9,3.3,5.4,False
+Bad Bunny - Cuando Perriabas,off-2s/cold,-50,-50,0,0,11000,0,3,False,True,3,10,5.9,1.8,2.3,True
+Bad Bunny - Cuando Perriabas,off-2s/seeded_correct,-50,-50,0,0,11000,0,3,False,True,3,10,5.8,1.8,2.3,True
+Bad Bunny - Cuando Perriabas,off-2s/seeded_wrong_2s,-50,-50,0,0,16500,0,2,False,True,4,10,8.4,2.0,2.8,True
+Bad Bunny - Cuando Perriabas,off+10s/cold,11950,,,-11950,,0,0,False,False,10,10,40.3,3.8,5.9,False
+Bad Bunny - Cuando Perriabas,off+10s/seeded_correct,11950,11950,0,0,11000,0,2,False,True,4,10,10.8,2.6,3.4,True
+Bad Bunny - Cuando Perriabas,off+10s/seeded_wrong_2s,11950,,,2000,,0,0,False,False,10,10,39.9,3.9,5.9,False
+Bad Bunny - Cuando Perriabas,off-10s/cold,-8050,-2200,5850,5850,,1,1,False,False,10,10,31.2,3.0,4.9,False
+Bad Bunny - Cuando Perriabas,off-10s/seeded_correct,-8050,-2200,5850,5850,,1,1,False,False,10,10,29.7,2.7,4.9,False
+Bad Bunny - Cuando Perriabas,off-10s/seeded_wrong_2s,-8050,-2200,5850,5850,,1,1,False,False,10,10,29.7,2.7,4.9,False
+Bad Bunny - Cuando Perriabas,off+25s/cold,26950,,,-26950,,0,0,False,False,10,10,47.9,4.6,6.6,False
+Bad Bunny - Cuando Perriabas,off+25s/seeded_correct,26950,26950,0,0,11000,0,2,False,True,4,10,13.6,3.3,4.1,True
+Bad Bunny - Cuando Perriabas,off+25s/seeded_wrong_2s,26950,,,2000,,0,0,False,False,10,10,46.5,4.5,6.6,False
+Bad Bunny - Cuando Perriabas,off-25s/cold,-23050,,,21950,,0,0,False,False,8,10,22.5,2.6,4.4,False
+Bad Bunny - Cuando Perriabas,off-25s/seeded_correct,-23050,,,0,,0,0,False,False,8,10,21.5,2.4,4.2,False
+Bad Bunny - Cuando Perriabas,off-25s/seeded_wrong_2s,-23050,,,2000,,0,0,False,False,8,10,21.8,2.6,4.3,False
+Bad Bunny - Cuando Perriabas,noise0/cold,1950,1950,0,0,16500,0,3,True,True,4,10,9.0,2.1,2.8,True
+Bad Bunny - Cuando Perriabas,noise0/seeded_correct,1950,1950,0,0,11000,0,3,False,True,3,10,5.8,1.9,2.2,True
+Bad Bunny - Cuando Perriabas,noise0/seeded_wrong_2s,1950,1950,0,0,16500,0,2,False,True,4,10,8.6,2.1,2.7,True
+Bad Bunny - Cuando Perriabas,noise-2s/cold,-50,-50,0,0,11000,0,3,False,True,3,10,5.8,1.8,2.2,True
+Bad Bunny - Cuando Perriabas,noise-2s/seeded_correct,-50,-50,0,0,11000,0,3,False,True,3,10,5.7,1.8,2.1,True
+Bad Bunny - Cuando Perriabas,noise-2s/seeded_wrong_2s,-50,-50,0,0,16500,0,2,False,True,4,10,8.2,2.0,2.6,True
+Bad Bunny - Cuando Perriabas,cutin5s/cold,6950,6950,0,0,26000,0,2,False,True,4,10,10.3,2.5,3.2,True
+Bad Bunny - Cuando Perriabas,cutin5s/seeded_correct,6950,6950,0,0,11000,0,2,False,True,4,10,9.7,2.3,3.1,True
+Bad Bunny - Cuando Perriabas,cutin5s/seeded_wrong_2s,6950,6950,0,0,16500,0,2,False,True,4,10,9.7,2.3,3.1,True
+Bad Bunny - Cuando Perriabas,cutin15s/cold,16950,16950,0,0,26000,0,3,False,True,6,10,18.2,3.1,3.6,True
+Bad Bunny - Cuando Perriabas,cutin15s/seeded_correct,16950,16950,0,0,26000,0,3,False,True,6,10,17.9,3.1,3.6,True
+Bad Bunny - Cuando Perriabas,cutin15s/seeded_wrong_2s,16950,16950,0,0,26000,0,3,False,True,6,10,17.7,3.0,3.7,True
+Bad Bunny - Cuando Perriabas,cutin25s/cold,26950,26950,0,0,38500,0,3,False,True,7,10,29.8,4.4,5.7,True
+Bad Bunny - Cuando Perriabas,cutin25s/seeded_correct,26950,26950,0,0,38500,0,3,False,True,7,10,28.6,4.2,5.6,True
+Bad Bunny - Cuando Perriabas,cutin25s/seeded_wrong_2s,26950,26950,0,0,38500,0,3,False,True,7,10,28.5,4.1,5.4,True
+Bad Bunny - Cuando Perriabas,blend8s/cold,1950,1950,0,0,26000,0,3,True,True,4,10,9.6,2.3,3.0,True
+Bad Bunny - Cuando Perriabas,blend8s/seeded_correct,1950,1950,0,0,16500,0,3,False,True,5,10,12.0,2.3,3.1,True
+Bad Bunny - Cuando Perriabas,blend8s/seeded_wrong_2s,1950,1950,0,0,26000,0,3,False,True,5,10,12.1,2.3,3.2,True
+Bad Bunny - 3,off0/cold,-1025,,,0,34250,0,0,False,False,8,8,42.1,4.4,10.3,False
+Bad Bunny - 3,off0/seeded_correct,-1025,,,0,24750,0,0,False,False,8,8,33.2,3.5,7.7,False
+Bad Bunny - 3,off0/seeded_wrong_2s,-1025,,,0,34250,0,0,False,False,8,8,35.4,3.6,8.3,False
+Bad Bunny - 3,off+200/cold,-825,,,0,24750,0,0,False,False,8,8,38.1,4.0,8.8,False
+Bad Bunny - 3,off+200/seeded_correct,-825,,,0,24750,0,0,False,False,8,8,33.9,3.6,8.0,False
+Bad Bunny - 3,off+200/seeded_wrong_2s,-825,,,0,34250,0,0,False,False,8,8,34.7,3.6,8.3,False
+Bad Bunny - 3,off-200/cold,-1225,-1225,0,0,38500,0,1,False,False,8,8,40.0,4.2,9.3,True
+Bad Bunny - 3,off-200/seeded_correct,-1225,-1225,0,0,24750,0,2,False,False,8,8,31.0,3.4,6.5,True
+Bad Bunny - 3,off-200/seeded_wrong_2s,-1225,,,3000,,0,0,False,False,8,8,32.2,3.3,7.5,False
+Bad Bunny - 3,off+2s/cold,975,,,0,24750,0,0,False,False,8,8,30.6,3.3,6.3,False
+Bad Bunny - 3,off+2s/seeded_correct,975,,,0,24750,0,0,False,False,8,8,29.6,3.3,6.2,False
+Bad Bunny - 3,off+2s/seeded_wrong_2s,975,,,0,34250,0,0,False,False,8,8,29.4,3.3,6.1,False
+Bad Bunny - 3,off-2s/cold,-3025,2950,5975,5975,,2,2,False,True,4,8,9.8,2.6,3.0,False
+Bad Bunny - 3,off-2s/seeded_correct,-3025,2950,5975,5975,,2,2,False,True,4,8,9.2,2.5,2.8,False
+Bad Bunny - 3,off-2s/seeded_wrong_2s,-3025,2950,5975,5975,,2,2,False,True,4,8,9.4,2.5,2.9,False
+Bad Bunny - 3,off+10s/cold,8975,2975,-6000,-8975,,1,1,False,False,8,8,33.5,3.7,6.8,False
+Bad Bunny - 3,off+10s/seeded_correct,8975,,,0,24750,0,0,False,False,8,8,32.4,3.6,6.6,False
+Bad Bunny - 3,off+10s/seeded_wrong_2s,8975,2975,-6000,2000,,1,1,False,False,8,8,32.1,3.6,6.5,False
+Bad Bunny - 3,off-10s/cold,-11025,,,12000,,0,0,False,False,7,8,24.1,2.9,5.4,False
+Bad Bunny - 3,off-10s/seeded_correct,-11025,,,0,,0,0,False,False,7,8,22.7,2.8,5.4,False
+Bad Bunny - 3,off-10s/seeded_wrong_2s,-11025,,,2000,,0,0,False,False,7,8,22.9,2.9,5.3,False
+Bad Bunny - 3,off+25s/cold,23975,-25,-24000,-24000,,2,2,False,False,8,8,41.0,4.5,8.5,False
+Bad Bunny - 3,off+25s/seeded_correct,23975,,,0,24750,0,0,False,False,8,8,40.8,4.5,7.8,False
+Bad Bunny - 3,off+25s/seeded_wrong_2s,23975,-25,-24000,2000,,2,2,False,False,8,8,39.4,4.3,7.6,False
+Bad Bunny - 3,off-25s/cold,-26025,,,26025,,0,0,False,False,6,8,16.6,2.4,4.5,False
+Bad Bunny - 3,off-25s/seeded_correct,-26025,,,0,,0,0,False,False,6,8,16.0,2.3,4.4,False
+Bad Bunny - 3,off-25s/seeded_wrong_2s,-26025,,,2000,,0,0,False,False,6,8,16.0,2.3,4.4,False
+Bad Bunny - 3,noise0/cold,-1025,,,0,34250,0,0,False,False,8,8,25.6,2.9,5.0,False
+Bad Bunny - 3,noise0/seeded_correct,-1025,,,0,24750,0,0,False,False,8,8,25.1,2.9,5.0,False
+Bad Bunny - 3,noise0/seeded_wrong_2s,-1025,,,0,34250,0,0,False,False,8,8,25.1,2.9,4.9,False
+Bad Bunny - 3,noise-2s/cold,-3025,2950,5975,5975,,2,2,False,True,4,8,8.7,2.3,2.6,False
+Bad Bunny - 3,noise-2s/seeded_correct,-3025,2950,5975,5975,,2,2,False,True,4,8,8.8,2.3,2.7,False
+Bad Bunny - 3,noise-2s/seeded_wrong_2s,-3025,2950,5975,5975,,2,2,False,True,4,8,8.6,2.3,2.6,False
+Bad Bunny - 3,cutin5s/cold,3975,3975,0,-3975,,0,1,False,False,8,8,27.8,3.2,5.2,True
+Bad Bunny - 3,cutin5s/seeded_correct,3975,3975,0,0,24750,0,1,False,False,8,8,27.0,3.2,5.1,True
+Bad Bunny - 3,cutin5s/seeded_wrong_2s,3975,,,3000,,0,0,False,False,8,8,27.2,3.1,5.2,False
+Bad Bunny - 3,cutin15s/cold,13975,13975,0,-13975,,0,1,False,False,8,8,29.5,3.5,5.5,True
+Bad Bunny - 3,cutin15s/seeded_correct,13975,,,0,24750,0,0,False,False,8,8,30.4,3.5,5.7,False
+Bad Bunny - 3,cutin15s/seeded_wrong_2s,13975,13975,0,0,38500,0,1,False,False,8,8,29.8,3.6,5.5,True
+Bad Bunny - 3,cutin25s/cold,23975,,,-23975,,0,0,False,False,8,8,34.7,4.1,6.1,False
+Bad Bunny - 3,cutin25s/seeded_correct,23975,23975,0,0,34250,0,1,False,False,8,8,35.0,4.2,6.1,True
+Bad Bunny - 3,cutin25s/seeded_wrong_2s,23975,5975,-18000,2000,,1,1,False,False,8,8,33.8,4.0,6.1,False
+Bad Bunny - 3,blend8s/cold,-1025,,,0,34250,0,0,False,False,8,8,26.0,3.0,5.1,False
+Bad Bunny - 3,blend8s/seeded_correct,-1025,,,0,24750,0,0,False,False,8,8,25.8,3.0,5.0,False
+Bad Bunny - 3,blend8s/seeded_wrong_2s,-1025,,,0,34250,0,0,False,False,8,8,25.7,3.0,4.9,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off0/cold,-475,,,0,135250,0,0,False,False,9,9,42.5,3.9,8.5,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off0/seeded_correct,-475,-475,0,0,92250,0,2,False,False,9,9,40.5,3.1,8.5,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off0/seeded_wrong_2s,-475,,,2000,,0,0,False,False,9,9,41.6,3.1,9.0,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+200/cold,-275,,,0,135250,0,0,False,False,9,9,42.8,3.2,9.0,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+200/seeded_correct,-275,-275,0,0,92250,0,2,False,False,9,9,40.7,3.1,8.6,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+200/seeded_wrong_2s,-275,,,2000,,0,0,False,False,9,9,42.1,3.2,8.9,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-200/cold,-675,,,0,135250,0,0,False,False,9,9,42.3,3.4,8.7,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-200/seeded_correct,-675,-675,0,0,92250,0,2,False,False,9,9,40.9,3.1,8.5,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-200/seeded_wrong_2s,-675,,,2000,,0,0,False,False,9,9,43.0,3.3,8.7,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+2s/cold,1525,1525,0,0,129250,0,2,False,False,9,9,42.6,3.3,8.8,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+2s/seeded_correct,1525,1525,0,0,92250,0,2,False,False,9,9,43.4,3.6,8.8,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+2s/seeded_wrong_2s,1525,1525,0,0,129250,0,2,False,False,9,9,42.8,3.2,9.4,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-2s/cold,-2475,,,2475,,0,0,False,False,9,9,42.1,3.2,8.9,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-2s/seeded_correct,-2475,,,0,129250,0,0,False,False,9,9,40.1,3.0,8.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-2s/seeded_wrong_2s,-2475,,,2000,,0,0,False,False,9,9,39.8,2.9,8.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+10s/cold,9525,3350,-6175,-9175,,1,1,False,False,9,9,48.9,3.8,10.0,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+10s/seeded_correct,9525,9525,0,0,129250,0,1,False,False,9,9,45.3,3.7,9.2,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+10s/seeded_wrong_2s,9525,3350,-6175,2000,,1,1,False,False,9,9,45.1,3.6,9.2,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-10s/cold,-10475,1825,12300,12300,,2,2,False,False,8,9,37.8,4.2,8.2,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-10s/seeded_correct,-10475,,,0,,0,0,False,False,8,9,36.8,3.8,8.2,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-10s/seeded_wrong_2s,-10475,,,2000,,0,0,False,False,8,9,36.4,3.8,8.1,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+25s/cold,24525,,,-24600,,0,0,False,False,8,9,41.2,4.3,8.6,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+25s/seeded_correct,24525,24525,0,0,92250,0,2,False,False,8,9,40.4,4.2,8.8,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off+25s/seeded_wrong_2s,24525,,,2000,,0,0,False,False,8,9,46.0,4.1,12.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-25s/cold,-25475,,,24600,,0,0,False,False,8,9,32.2,3.6,7.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-25s/seeded_correct,-25475,,,0,,0,0,False,False,8,9,31.0,3.1,7.5,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",off-25s/seeded_wrong_2s,-25475,,,2000,,0,0,False,False,8,9,30.8,3.2,7.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",noise0/cold,-475,,,0,135250,0,0,False,False,9,9,38.6,3.0,7.9,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",noise0/seeded_correct,-475,-475,0,0,92250,0,2,False,False,9,9,38.2,2.9,7.9,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",noise0/seeded_wrong_2s,-475,,,2000,,0,0,False,False,9,9,38.0,2.9,8.0,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",noise-2s/cold,-2475,,,2475,,0,0,False,False,9,9,37.8,2.9,7.8,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",noise-2s/seeded_correct,-2475,,,0,129250,0,0,False,False,9,9,37.5,2.8,7.9,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",noise-2s/seeded_wrong_2s,-2475,,,2000,,0,0,False,False,9,9,38.7,3.0,8.0,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin5s/cold,4525,,,-4525,,0,0,False,False,9,9,42.9,3.5,8.9,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin5s/seeded_correct,4525,4525,0,0,92250,0,2,False,False,9,9,40.3,3.2,8.2,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin5s/seeded_wrong_2s,4525,,,2000,,0,0,False,False,9,9,41.3,3.4,8.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin15s/cold,14525,,,-14525,,0,0,False,False,9,9,43.3,3.6,8.5,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin15s/seeded_correct,14525,14525,0,0,129250,0,1,False,False,9,9,41.9,3.4,8.4,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin15s/seeded_wrong_2s,14525,,,2000,,0,0,False,False,9,9,41.9,3.5,8.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin25s/cold,24525,,,-24525,,0,0,False,False,8,9,39.9,4.1,8.9,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin25s/seeded_correct,24525,24525,0,0,129250,0,1,False,False,8,9,39.5,4.1,8.8,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",cutin25s/seeded_wrong_2s,24525,,,2000,,0,0,False,False,8,9,40.1,4.0,9.2,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",blend8s/cold,-475,,,0,135250,0,0,False,False,9,9,40.4,3.1,8.4,False
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",blend8s/seeded_correct,-475,-475,0,0,92250,0,2,False,False,9,9,38.9,3.0,8.1,True
+"Bad Bunny, Eladio Carrion - THUNDER Y LIGHTNING",blend8s/seeded_wrong_2s,-475,,,2000,,0,0,False,False,9,9,39.2,3.1,8.1,False
+Bad Bunny - EL MUNDO ES MÍO,off0/cold,-1100,-1100,0,0,72750,1,3,False,True,11,15,42.1,4.3,5.4,True
+Bad Bunny - EL MUNDO ES MÍO,off0/seeded_correct,-1100,-1100,0,0,72750,1,3,False,True,11,15,40.3,4.1,5.2,True
+Bad Bunny - EL MUNDO ES MÍO,off0/seeded_wrong_2s,-1100,-1100,0,0,72750,1,3,False,True,11,15,41.3,4.0,5.6,True
+Bad Bunny - EL MUNDO ES MÍO,off+200/cold,-900,-900,0,0,72750,1,3,False,True,11,15,41.4,4.3,5.3,True
+Bad Bunny - EL MUNDO ES MÍO,off+200/seeded_correct,-900,-900,0,0,72750,1,3,False,True,11,15,40.4,4.1,5.2,True
+Bad Bunny - EL MUNDO ES MÍO,off+200/seeded_wrong_2s,-900,-900,0,0,72750,1,3,False,True,11,15,41.6,4.1,5.5,True
+Bad Bunny - EL MUNDO ES MÍO,off-200/cold,-1300,-1300,0,1100,,1,2,False,False,15,15,67.8,4.7,7.1,True
+Bad Bunny - EL MUNDO ES MÍO,off-200/seeded_correct,-1300,-1300,0,1100,,1,2,False,False,15,15,70.6,4.6,7.3,True
+Bad Bunny - EL MUNDO ES MÍO,off-200/seeded_wrong_2s,-1300,-1300,0,1100,,1,2,False,False,15,15,68.9,4.6,7.2,True
+Bad Bunny - EL MUNDO ES MÍO,off+2s/cold,900,900,0,0,72750,1,3,False,True,11,15,43.1,4.5,5.7,True
+Bad Bunny - EL MUNDO ES MÍO,off+2s/seeded_correct,900,900,0,0,72750,1,3,False,True,11,15,42.1,4.2,5.6,True
+Bad Bunny - EL MUNDO ES MÍO,off+2s/seeded_wrong_2s,900,900,0,0,72750,1,3,False,True,11,15,42.7,4.3,5.5,True
+Bad Bunny - EL MUNDO ES MÍO,off-2s/cold,-3100,-3100,0,1100,,1,2,False,False,15,15,67.0,4.8,6.7,True
+Bad Bunny - EL MUNDO ES MÍO,off-2s/seeded_correct,-3100,-3100,0,1100,,1,2,False,False,15,15,65.5,4.6,7.0,True
+Bad Bunny - EL MUNDO ES MÍO,off-2s/seeded_wrong_2s,-3100,-3100,0,1100,,1,2,False,False,15,15,66.2,4.5,7.1,True
+Bad Bunny - EL MUNDO ES MÍO,off+10s/cold,8900,-450,-9350,-9350,,1,1,False,False,15,15,75.2,5.2,7.5,False
+Bad Bunny - EL MUNDO ES MÍO,off+10s/seeded_correct,8900,8900,0,0,16000,0,3,False,True,8,15,29.4,3.5,4.9,True
+Bad Bunny - EL MUNDO ES MÍO,off+10s/seeded_wrong_2s,8900,2675,-6225,2000,,1,1,False,False,15,15,77.1,4.9,7.5,False
+Bad Bunny - EL MUNDO ES MÍO,off-10s/cold,-11100,,,12475,,0,0,False,False,14,15,59.8,4.3,6.6,False
+Bad Bunny - EL MUNDO ES MÍO,off-10s/seeded_correct,-11100,,,0,,0,0,False,False,14,15,58.7,4.5,6.4,False
+Bad Bunny - EL MUNDO ES MÍO,off-10s/seeded_wrong_2s,-11100,,,2000,,0,0,False,False,14,15,62.9,5.0,6.8,False
+Bad Bunny - EL MUNDO ES MÍO,off+25s/cold,23900,,,-24925,,0,0,False,False,15,15,87.5,6.0,8.3,False
+Bad Bunny - EL MUNDO ES MÍO,off+25s/seeded_correct,23900,23900,0,0,16000,0,3,False,True,8,15,34.4,4.2,5.7,True
+Bad Bunny - EL MUNDO ES MÍO,off+25s/seeded_wrong_2s,23900,,,2000,,0,0,False,False,15,15,85.1,5.7,8.3,False
+Bad Bunny - EL MUNDO ES MÍO,off-25s/cold,-26100,1950,28050,28050,,1,1,False,False,13,15,48.8,3.9,5.9,False
+Bad Bunny - EL MUNDO ES MÍO,off-25s/seeded_correct,-26100,1950,28050,0,,1,1,False,False,13,15,47.1,3.8,5.8,False
+Bad Bunny - EL MUNDO ES MÍO,off-25s/seeded_wrong_2s,-26100,1950,28050,2000,,1,1,False,False,13,15,47.5,3.7,5.8,False
+Bad Bunny - EL MUNDO ES MÍO,noise0/cold,-1100,-1100,0,0,72750,1,3,False,True,11,15,37.1,3.8,4.7,True
+Bad Bunny - EL MUNDO ES MÍO,noise0/seeded_correct,-1100,-1100,0,0,72750,1,3,False,True,11,15,37.1,3.6,4.9,True
+Bad Bunny - EL MUNDO ES MÍO,noise0/seeded_wrong_2s,-1100,-1100,0,0,72750,1,3,False,True,11,15,36.8,3.6,4.8,True
+Bad Bunny - EL MUNDO ES MÍO,noise-2s/cold,-3100,-3100,0,1100,,1,2,False,False,15,15,59.8,4.0,6.3,True
+Bad Bunny - EL MUNDO ES MÍO,noise-2s/seeded_correct,-3100,-3100,0,1100,,1,2,False,False,15,15,59.5,4.0,6.2,True
+Bad Bunny - EL MUNDO ES MÍO,noise-2s/seeded_wrong_2s,-3100,-3100,0,1100,,1,2,False,False,15,15,58.5,4.1,6.1,True
+Bad Bunny - EL MUNDO ES MÍO,cutin5s/cold,3900,3900,0,0,72750,0,2,False,True,8,15,25.5,3.0,4.3,True
+Bad Bunny - EL MUNDO ES MÍO,cutin5s/seeded_correct,3900,3900,0,0,16000,0,2,False,True,8,15,24.9,2.9,4.3,True
+Bad Bunny - EL MUNDO ES MÍO,cutin5s/seeded_wrong_2s,3900,3900,0,0,32250,0,2,False,True,8,15,25.0,2.9,4.3,True
+Bad Bunny - EL MUNDO ES MÍO,cutin15s/cold,13900,13900,0,0,32250,0,3,False,True,8,15,27.8,3.3,4.6,True
+Bad Bunny - EL MUNDO ES MÍO,cutin15s/seeded_correct,13900,13900,0,0,32250,0,3,False,True,8,15,27.5,3.3,4.6,True
+Bad Bunny - EL MUNDO ES MÍO,cutin15s/seeded_wrong_2s,13900,13900,0,0,32250,0,3,False,True,8,15,27.4,3.3,4.6,True
+Bad Bunny - EL MUNDO ES MÍO,cutin25s/cold,23900,23900,0,0,72750,0,2,False,True,8,15,32.4,3.9,5.2,True
+Bad Bunny - EL MUNDO ES MÍO,cutin25s/seeded_correct,23900,23900,0,0,32250,0,2,False,True,8,15,31.5,3.8,5.1,True
+Bad Bunny - EL MUNDO ES MÍO,cutin25s/seeded_wrong_2s,23900,23900,0,0,36250,0,2,False,True,8,15,31.5,3.7,5.2,True
+Bad Bunny - EL MUNDO ES MÍO,blend8s/cold,-1100,-1100,0,0,32250,0,2,False,True,8,15,24.3,2.8,4.2,True
+Bad Bunny - EL MUNDO ES MÍO,blend8s/seeded_correct,-1100,-1100,0,0,16000,0,2,False,True,8,15,23.6,2.8,4.2,True
+Bad Bunny - EL MUNDO ES MÍO,blend8s/seeded_wrong_2s,-1100,-1100,0,0,32250,0,2,False,True,8,15,23.8,2.8,4.2,True
+Bad Bunny - La Zona,off0/cold,-1094,-1090,4,1094,,1,3,True,False,19,19,77.4,4.1,5.8,True
+Bad Bunny - La Zona,off0/seeded_correct,-1094,-1089,5,1094,,1,2,False,False,19,19,76.1,4.1,5.6,True
+Bad Bunny - La Zona,off0/seeded_wrong_2s,-1094,-1089,5,1094,,1,2,False,False,19,19,76.7,4.1,5.7,True
+Bad Bunny - La Zona,off+200/cold,-894,-890,4,1094,,1,3,True,False,19,19,77.7,4.2,5.9,True
+Bad Bunny - La Zona,off+200/seeded_correct,-894,-889,5,1094,,1,2,False,False,19,19,76.9,4.2,5.9,True
+Bad Bunny - La Zona,off+200/seeded_wrong_2s,-894,-889,5,1094,,1,2,False,False,19,19,78.0,4.3,5.9,True
+Bad Bunny - La Zona,off-200/cold,-1294,-1289,5,1094,,1,3,True,False,19,19,77.2,4.4,5.6,True
+Bad Bunny - La Zona,off-200/seeded_correct,-1294,-1288,6,1094,,1,2,False,False,19,19,77.4,4.3,5.8,True
+Bad Bunny - La Zona,off-200/seeded_wrong_2s,-1294,-1288,6,1094,,1,2,False,False,19,19,77.3,4.3,5.9,True
+Bad Bunny - La Zona,off+2s/cold,906,910,4,1094,,1,3,True,False,19,19,79.9,4.3,6.0,True
+Bad Bunny - La Zona,off+2s/seeded_correct,906,911,5,1094,,1,2,False,False,19,19,79.0,4.3,5.9,True
+Bad Bunny - La Zona,off+2s/seeded_wrong_2s,906,911,5,1094,,1,2,False,False,19,19,78.9,4.3,5.8,True
+Bad Bunny - La Zona,off-2s/cold,-3094,-3097,-3,1094,,1,3,True,False,19,19,76.0,4.1,5.7,True
+Bad Bunny - La Zona,off-2s/seeded_correct,-3094,-3095,-1,1094,,1,2,False,False,19,19,75.8,4.1,5.6,True
+Bad Bunny - La Zona,off-2s/seeded_wrong_2s,-3094,-3095,-1,1094,,1,2,False,False,19,19,77.3,4.3,6.3,True
+Bad Bunny - La Zona,off+10s/cold,8906,1250,-7656,-7656,,2,2,False,True,10,19,36.4,3.5,4.9,False
+Bad Bunny - La Zona,off+10s/seeded_correct,8906,8906,0,0,21500,0,3,False,True,5,19,14.7,3.0,3.5,True
+Bad Bunny - La Zona,off+10s/seeded_wrong_2s,8906,1250,-7656,-7656,,2,2,False,True,10,19,36.2,3.7,4.7,False
+Bad Bunny - La Zona,off-10s/cold,-11094,-875,10219,10219,,3,3,False,False,18,19,68.4,4.1,5.3,False
+Bad Bunny - La Zona,off-10s/seeded_correct,-11094,,,0,,0,0,False,False,18,19,65.7,3.8,5.2,False
+Bad Bunny - La Zona,off-10s/seeded_wrong_2s,-11094,,,2000,,0,0,False,False,18,19,66.6,4.0,5.4,False
+Bad Bunny - La Zona,off+25s/cold,23906,925,-22981,-22981,,1,1,False,False,19,19,101.8,5.7,7.1,False
+Bad Bunny - La Zona,off+25s/seeded_correct,23906,23906,0,0,21500,0,3,False,True,5,19,17.9,3.7,4.1,True
+Bad Bunny - La Zona,off+25s/seeded_wrong_2s,23906,925,-22981,-22981,,2,2,False,False,19,19,98.4,5.1,7.1,False
+Bad Bunny - La Zona,off-25s/cold,-26094,-550,25544,25544,,2,2,False,False,17,19,54.8,3.4,4.8,False
+Bad Bunny - La Zona,off-25s/seeded_correct,-26094,3275,29369,0,,1,1,False,False,17,19,55.3,3.2,4.8,False
+Bad Bunny - La Zona,off-25s/seeded_wrong_2s,-26094,3275,29369,2000,,1,1,False,False,17,19,53.2,3.3,4.7,False
+Bad Bunny - La Zona,noise0/cold,-1094,-1090,4,1094,,1,3,True,False,19,19,73.5,3.9,5.5,True
+Bad Bunny - La Zona,noise0/seeded_correct,-1094,-1089,5,1094,,1,2,False,False,19,19,71.8,4.0,5.4,True
+Bad Bunny - La Zona,noise0/seeded_wrong_2s,-1094,-1089,5,1094,,1,2,False,False,19,19,72.6,3.9,5.4,True
+Bad Bunny - La Zona,noise-2s/cold,-3094,-3097,-3,1094,,1,3,True,False,19,19,70.4,3.8,5.2,True
+Bad Bunny - La Zona,noise-2s/seeded_correct,-3094,-3095,-1,1094,,1,2,False,False,19,19,70.0,3.9,5.3,True
+Bad Bunny - La Zona,noise-2s/seeded_wrong_2s,-3094,-3095,-1,1094,,1,2,False,False,19,19,70.3,3.8,5.2,True
+Bad Bunny - La Zona,cutin5s/cold,3906,3897,-9,-9,21150,0,3,True,True,2,19,4.3,2.1,2.4,True
+Bad Bunny - La Zona,cutin5s/seeded_correct,3906,3906,0,0,21500,0,3,False,True,3,19,6.7,2.3,2.6,True
+Bad Bunny - La Zona,cutin5s/seeded_wrong_2s,3906,3900,-6,-6,21500,0,3,False,True,5,19,12.5,2.6,3.0,True
+Bad Bunny - La Zona,cutin15s/cold,13906,13900,-6,-6,30250,0,2,False,True,5,19,14.5,3.1,3.3,True
+Bad Bunny - La Zona,cutin15s/seeded_correct,13906,13906,0,0,21500,0,2,False,True,3,19,7.6,2.6,2.9,True
+Bad Bunny - La Zona,cutin15s/seeded_wrong_2s,13906,13900,-6,-6,30250,0,2,False,True,5,19,14.1,3.0,3.3,True
+Bad Bunny - La Zona,cutin25s/cold,23906,23900,-6,-6,30250,0,2,False,True,6,19,20.6,3.5,3.9,True
+Bad Bunny - La Zona,cutin25s/seeded_correct,23906,23906,0,0,30250,0,2,False,True,4,19,12.3,3.1,3.5,True
+Bad Bunny - La Zona,cutin25s/seeded_wrong_2s,23906,23900,-6,-6,30250,0,2,False,True,6,19,20.1,3.5,3.9,True
+Bad Bunny - La Zona,blend8s/cold,-1094,-1103,-9,-9,21150,0,3,True,True,2,19,3.9,2.0,2.2,True
+Bad Bunny - La Zona,blend8s/seeded_correct,-1094,-1094,0,0,21500,0,2,False,True,3,19,6.1,2.1,2.4,True
+Bad Bunny - La Zona,blend8s/seeded_wrong_2s,-1094,-1100,-6,-6,30250,0,2,False,True,5,19,11.6,2.4,2.8,True
+Bad Bunny - VOU 787,off0/cold,-1100,-1100,0,0,26000,0,1,False,True,4,5,10.3,2.5,3.3,True
+Bad Bunny - VOU 787,off0/seeded_correct,-1100,-1100,0,0,12000,0,1,False,True,4,5,9.7,2.4,3.1,True
+Bad Bunny - VOU 787,off0/seeded_wrong_2s,-1100,-1100,0,0,26000,0,1,False,True,4,5,9.5,2.4,3.0,True
+Bad Bunny - VOU 787,off+200/cold,-900,-900,0,0,12000,0,1,False,True,4,5,10.1,2.4,3.3,True
+Bad Bunny - VOU 787,off+200/seeded_correct,-900,-900,0,0,12000,0,1,False,True,4,5,9.6,2.4,3.0,True
+Bad Bunny - VOU 787,off+200/seeded_wrong_2s,-900,-900,0,0,26000,0,1,False,True,4,5,9.7,2.4,3.2,True
+Bad Bunny - VOU 787,off-200/cold,-1300,600,1900,1900,,1,1,False,False,5,5,15.8,2.6,5.3,False
+Bad Bunny - VOU 787,off-200/seeded_correct,-1300,-1300,0,0,12000,0,2,False,True,4,5,9.7,2.4,3.1,True
+Bad Bunny - VOU 787,off-200/seeded_wrong_2s,-1300,600,1900,1900,,1,1,False,False,5,5,15.3,2.5,5.0,False
+Bad Bunny - VOU 787,off+2s/cold,900,900,0,0,12000,0,1,False,True,4,5,10.5,2.5,3.4,True
+Bad Bunny - VOU 787,off+2s/seeded_correct,900,900,0,0,12000,0,1,False,True,4,5,10.2,2.5,3.2,True
+Bad Bunny - VOU 787,off+2s/seeded_wrong_2s,900,900,0,0,26000,0,1,False,True,4,5,10.2,2.5,3.3,True
+Bad Bunny - VOU 787,off-2s/cold,-3100,,,3100,,0,0,False,False,5,5,16.0,2.5,5.3,False
+Bad Bunny - VOU 787,off-2s/seeded_correct,-3100,,,0,92750,0,0,False,False,5,5,14.8,2.4,4.8,False
+Bad Bunny - VOU 787,off-2s/seeded_wrong_2s,-3100,-1200,1900,1900,,2,2,False,False,5,5,14.8,2.4,5.0,False
+Bad Bunny - VOU 787,off+10s/cold,8900,,,-7700,,0,0,False,False,5,5,20.2,3.1,6.7,False
+Bad Bunny - VOU 787,off+10s/seeded_correct,8900,8900,0,0,12000,0,1,False,True,4,5,11.8,2.9,3.7,True
+Bad Bunny - VOU 787,off+10s/seeded_wrong_2s,8900,3125,-5775,2000,,1,1,False,False,5,5,17.6,3.0,5.5,False
+Bad Bunny - VOU 787,off-10s/cold,-11100,,,11100,,0,0,False,False,5,5,13.5,2.1,4.9,False
+Bad Bunny - VOU 787,off-10s/seeded_correct,-11100,,,0,,0,0,False,False,5,5,12.3,1.9,4.3,False
+Bad Bunny - VOU 787,off-10s/seeded_wrong_2s,-11100,,,2000,,0,0,False,False,5,5,12.3,2.0,4.3,False
+Bad Bunny - VOU 787,off+25s/cold,23900,,,-23050,,0,0,False,False,5,5,22.1,3.7,6.7,False
+Bad Bunny - VOU 787,off+25s/seeded_correct,23900,23900,0,0,12000,0,1,False,True,4,5,14.1,3.5,4.2,True
+Bad Bunny - VOU 787,off+25s/seeded_wrong_2s,23900,,,2000,,0,0,False,False,5,5,20.5,3.6,5.9,False
+Bad Bunny - VOU 787,off-25s/cold,-26100,,,26100,,0,0,False,False,4,5,9.8,1.8,4.6,False
+Bad Bunny - VOU 787,off-25s/seeded_correct,-26100,,,0,,0,0,False,False,4,5,9.0,1.8,4.0,False
+Bad Bunny - VOU 787,off-25s/seeded_wrong_2s,-26100,,,2000,,0,0,False,False,4,5,8.7,1.7,3.9,False
+Bad Bunny - VOU 787,noise0/cold,-1100,-1100,0,0,26000,0,1,False,True,4,5,9.6,2.4,2.9,True
+Bad Bunny - VOU 787,noise0/seeded_correct,-1100,-1100,0,0,12000,0,1,False,True,4,5,9.4,2.3,3.0,True
+Bad Bunny - VOU 787,noise0/seeded_wrong_2s,-1100,-1100,0,0,26000,0,1,False,True,4,5,9.1,2.3,2.9,True
+Bad Bunny - VOU 787,noise-2s/cold,-3100,,,3100,,0,0,False,False,5,5,14.3,2.3,4.7,False
+Bad Bunny - VOU 787,noise-2s/seeded_correct,-3100,,,0,92750,0,0,False,False,5,5,13.8,2.3,4.4,False
+Bad Bunny - VOU 787,noise-2s/seeded_wrong_2s,-3100,-1200,1900,1900,,2,2,False,False,5,5,13.8,2.4,4.4,False
+Bad Bunny - VOU 787,cutin5s/cold,3900,3900,0,0,26000,0,1,False,True,4,5,10.5,2.6,3.2,True
+Bad Bunny - VOU 787,cutin5s/seeded_correct,3900,3900,0,0,12000,0,1,False,True,4,5,10.2,2.6,3.1,True
+Bad Bunny - VOU 787,cutin5s/seeded_wrong_2s,3900,3900,0,0,26000,0,1,False,True,4,5,10.0,2.5,3.1,True
+Bad Bunny - VOU 787,cutin15s/cold,13900,8125,-5775,-5775,,2,2,False,False,5,5,17.5,3.0,5.3,False
+Bad Bunny - VOU 787,cutin15s/seeded_correct,13900,8125,-5775,-5775,,2,2,False,False,5,5,16.8,2.9,5.2,False
+Bad Bunny - VOU 787,cutin15s/seeded_wrong_2s,13900,8125,-5775,-5775,,2,2,False,False,5,5,17.0,2.9,5.3,False
+Bad Bunny - VOU 787,cutin25s/cold,23900,23900,0,0,92750,0,2,False,False,5,5,20.6,3.5,6.2,True
+Bad Bunny - VOU 787,cutin25s/seeded_correct,23900,23900,0,0,30250,0,2,False,False,5,5,19.5,3.5,5.7,True
+Bad Bunny - VOU 787,cutin25s/seeded_wrong_2s,23900,23900,0,0,45000,0,2,False,False,5,5,19.5,3.5,5.7,True
+Bad Bunny - VOU 787,blend8s/cold,-1100,-1100,0,0,26000,0,2,False,True,4,5,9.8,2.4,3.1,True
+Bad Bunny - VOU 787,blend8s/seeded_correct,-1100,-1100,0,0,12000,0,2,False,True,4,5,9.5,2.4,2.9,True
+Bad Bunny - VOU 787,blend8s/seeded_wrong_2s,-1100,-1100,0,0,26000,0,2,False,True,4,5,9.6,2.4,3.0,True
+Bad Bunny - BOKeTE,off0/cold,-1062,-1050,12,12,9000,0,2,False,True,5,6,13.2,2.6,3.2,True
+Bad Bunny - BOKeTE,off0/seeded_correct,-1062,-1062,0,0,9000,0,2,False,False,6,6,19.0,2.8,5.6,True
+Bad Bunny - BOKeTE,off0/seeded_wrong_2s,-1062,-1050,12,12,9000,0,2,False,True,5,6,12.9,2.5,3.2,True
+Bad Bunny - BOKeTE,off+200/cold,-862,-850,12,12,9000,0,2,False,True,5,6,13.5,2.8,3.2,True
+Bad Bunny - BOKeTE,off+200/seeded_correct,-862,-862,0,0,9000,0,2,False,False,6,6,19.4,2.9,5.6,True
+Bad Bunny - BOKeTE,off+200/seeded_wrong_2s,-862,-850,12,12,9000,0,2,False,True,5,6,12.9,2.6,3.2,True
+Bad Bunny - BOKeTE,off-200/cold,-1262,-1250,12,12,9000,0,2,False,True,5,6,13.0,2.6,3.2,True
+Bad Bunny - BOKeTE,off-200/seeded_correct,-1262,-1262,0,0,9000,0,2,False,False,6,6,19.3,2.9,5.6,True
+Bad Bunny - BOKeTE,off-200/seeded_wrong_2s,-1262,-1250,12,12,9000,0,2,False,True,5,6,12.5,2.5,3.1,True
+Bad Bunny - BOKeTE,off+2s/cold,938,950,12,12,9000,0,2,False,True,5,6,13.4,2.7,3.3,True
+Bad Bunny - BOKeTE,off+2s/seeded_correct,938,938,0,0,9000,0,2,False,False,6,6,19.5,2.8,5.6,True
+Bad Bunny - BOKeTE,off+2s/seeded_wrong_2s,938,950,12,12,9000,0,2,False,True,5,6,13.2,2.6,3.2,True
+Bad Bunny - BOKeTE,off-2s/cold,-3062,,,3062,,0,0,False,False,6,6,19.2,2.7,5.8,False
+Bad Bunny - BOKeTE,off-2s/seeded_correct,-3062,-3062,0,0,25750,0,1,False,False,6,6,18.9,2.8,5.4,True
+Bad Bunny - BOKeTE,off-2s/seeded_wrong_2s,-3062,,,12,30000,0,0,False,False,6,6,18.9,2.8,5.6,False
+Bad Bunny - BOKeTE,off+10s/cold,8938,,,-8938,,0,0,False,False,6,6,23.2,3.3,6.6,False
+Bad Bunny - BOKeTE,off+10s/seeded_correct,8938,8938,0,0,9000,0,1,False,False,6,6,21.9,3.2,6.1,True
+Bad Bunny - BOKeTE,off+10s/seeded_wrong_2s,8938,,,2000,,0,0,False,False,6,6,21.8,3.2,6.0,False
+Bad Bunny - BOKeTE,off-10s/cold,-11062,,,11062,,0,0,False,False,5,6,16.0,2.7,5.7,False
+Bad Bunny - BOKeTE,off-10s/seeded_correct,-11062,,,0,,0,0,False,False,5,6,14.9,2.5,5.2,False
+Bad Bunny - BOKeTE,off-10s/seeded_wrong_2s,-11062,,,2000,,0,0,False,False,5,6,15.2,2.6,5.6,False
+Bad Bunny - BOKeTE,off+25s/cold,23938,,,-23938,,0,0,False,False,6,6,27.2,4.0,7.4,False
+Bad Bunny - BOKeTE,off+25s/seeded_correct,23938,23938,0,0,9000,0,1,False,False,6,6,26.3,3.8,6.9,True
+Bad Bunny - BOKeTE,off+25s/seeded_wrong_2s,23938,,,2000,,0,0,False,False,6,6,27.6,4.2,7.2,False
+Bad Bunny - BOKeTE,off-25s/cold,-26062,,,26062,,0,0,False,False,5,6,12.1,1.9,4.8,False
+Bad Bunny - BOKeTE,off-25s/seeded_correct,-26062,,,0,,0,0,False,False,5,6,11.5,1.8,4.6,False
+Bad Bunny - BOKeTE,off-25s/seeded_wrong_2s,-26062,,,2000,,0,0,False,False,5,6,11.6,1.8,4.7,False
+Bad Bunny - BOKeTE,noise0/cold,-1062,-1050,12,12,9000,0,2,False,True,5,6,12.4,2.5,3.0,True
+Bad Bunny - BOKeTE,noise0/seeded_correct,-1062,-1062,0,0,9000,0,2,False,False,6,6,18.4,2.6,5.5,True
+Bad Bunny - BOKeTE,noise0/seeded_wrong_2s,-1062,-1050,12,12,9000,0,2,False,True,5,6,12.5,2.4,3.1,True
+Bad Bunny - BOKeTE,noise-2s/cold,-3062,,,3062,,0,0,False,False,6,6,17.9,2.5,5.3,False
+Bad Bunny - BOKeTE,noise-2s/seeded_correct,-3062,-3062,0,0,25750,0,1,False,False,6,6,17.4,2.5,5.1,True
+Bad Bunny - BOKeTE,noise-2s/seeded_wrong_2s,-3062,,,12,30000,0,0,False,False,6,6,18.1,2.7,5.3,False
+Bad Bunny - BOKeTE,cutin5s/cold,3938,3950,12,12,25750,0,1,False,True,5,6,13.6,2.7,3.2,True
+Bad Bunny - BOKeTE,cutin5s/seeded_correct,3938,3938,0,0,9000,0,3,False,False,6,6,19.7,2.9,5.6,True
+Bad Bunny - BOKeTE,cutin5s/seeded_wrong_2s,3938,3950,12,12,25750,0,1,False,True,5,6,13.5,2.7,3.3,True
+Bad Bunny - BOKeTE,cutin15s/cold,13938,13950,12,-13938,,0,1,False,False,6,6,22.0,3.2,6.2,True
+Bad Bunny - BOKeTE,cutin15s/seeded_correct,13938,13938,0,0,25750,0,1,False,False,6,6,22.0,3.3,6.0,True
+Bad Bunny - BOKeTE,cutin15s/seeded_wrong_2s,13938,13950,12,12,30000,0,1,False,False,6,6,21.3,3.2,5.7,True
+Bad Bunny - BOKeTE,cutin25s/cold,23938,23950,12,-23938,,0,1,False,False,6,6,26.1,3.9,6.7,True
+Bad Bunny - BOKeTE,cutin25s/seeded_correct,23938,,,0,30000,0,0,False,False,6,6,24.8,3.8,6.4,False
+Bad Bunny - BOKeTE,cutin25s/seeded_wrong_2s,23938,,,12,41250,0,0,False,False,6,6,24.7,3.8,6.3,False
+Bad Bunny - BOKeTE,blend8s/cold,-1062,-1050,12,12,30000,0,1,False,False,6,6,19.6,2.8,5.6,True
+Bad Bunny - BOKeTE,blend8s/seeded_correct,-1062,-1062,0,0,25750,0,1,False,False,6,6,18.4,2.8,5.2,True
+Bad Bunny - BOKeTE,blend8s/seeded_wrong_2s,-1062,-1050,12,12,30000,0,1,False,False,6,6,18.8,2.9,5.2,True
+Bad Bunny - BAILE INoLVIDABLE,off0/cold,-1008,,,1008,,0,0,False,False,5,5,15.7,2.7,5.5,False
+Bad Bunny - BAILE INoLVIDABLE,off0/seeded_correct,-1008,,,-42,17250,0,0,False,False,5,5,14.6,2.6,5.0,False
+Bad Bunny - BAILE INoLVIDABLE,off0/seeded_wrong_2s,-1008,,,1008,,0,0,False,False,5,5,14.8,2.6,5.1,False
+Bad Bunny - BAILE INoLVIDABLE,off+200/cold,-808,-826,-18,-18,64250,0,2,True,False,5,5,16.7,2.7,6.3,True
+Bad Bunny - BAILE INoLVIDABLE,off+200/seeded_correct,-808,-840,-32,-32,17250,0,1,False,False,5,5,14.9,2.6,5.1,True
+Bad Bunny - BAILE INoLVIDABLE,off+200/seeded_wrong_2s,-808,,,1008,,0,0,False,False,5,5,14.9,2.6,5.2,False
+Bad Bunny - BAILE INoLVIDABLE,off-200/cold,-1208,,,1008,,0,0,False,False,5,5,15.9,2.8,5.5,False
+Bad Bunny - BAILE INoLVIDABLE,off-200/seeded_correct,-1208,,,-42,17250,0,0,False,False,5,5,14.7,2.5,5.2,False
+Bad Bunny - BAILE INoLVIDABLE,off-200/seeded_wrong_2s,-1208,,,1008,,0,0,False,False,5,5,14.8,2.6,5.0,False
+Bad Bunny - BAILE INoLVIDABLE,off+2s/cold,992,956,-36,-17,17250,0,2,True,False,5,5,16.4,2.8,5.6,True
+Bad Bunny - BAILE INoLVIDABLE,off+2s/seeded_correct,992,960,-32,-32,17250,0,1,False,False,5,5,15.0,2.7,5.1,True
+Bad Bunny - BAILE INoLVIDABLE,off+2s/seeded_wrong_2s,992,,,1008,,0,0,False,False,5,5,14.8,2.6,5.0,False
+Bad Bunny - BAILE INoLVIDABLE,off-2s/cold,-3008,,,3008,,0,0,False,False,5,5,15.3,2.5,5.5,False
+Bad Bunny - BAILE INoLVIDABLE,off-2s/seeded_correct,-3008,,,0,,0,0,False,False,5,5,14.3,2.5,5.1,False
+Bad Bunny - BAILE INoLVIDABLE,off-2s/seeded_wrong_2s,-3008,,,1008,,0,0,False,False,5,5,13.9,2.4,4.9,False
+Bad Bunny - BAILE INoLVIDABLE,off+10s/cold,8992,,,-8992,,0,0,False,False,5,5,18.4,3.2,6.2,False
+Bad Bunny - BAILE INoLVIDABLE,off+10s/seeded_correct,8992,,,0,17250,0,0,False,False,5,5,17.0,3.0,5.6,False
+Bad Bunny - BAILE INoLVIDABLE,off+10s/seeded_wrong_2s,8992,,,2000,,0,0,False,False,5,5,17.0,3.0,5.5,False
+Bad Bunny - BAILE INoLVIDABLE,off-10s/cold,-11008,,,11008,,0,0,False,False,5,5,13.1,2.2,5.0,False
+Bad Bunny - BAILE INoLVIDABLE,off-10s/seeded_correct,-11008,,,0,,0,0,False,False,5,5,11.6,1.9,4.4,False
+Bad Bunny - BAILE INoLVIDABLE,off-10s/seeded_wrong_2s,-11008,,,2000,,0,0,False,False,5,5,12.2,2.0,4.7,False
+Bad Bunny - BAILE INoLVIDABLE,off+25s/cold,23992,,,-23992,,0,0,False,False,5,5,22.2,4.1,6.6,False
+Bad Bunny - BAILE INoLVIDABLE,off+25s/seeded_correct,23992,,,0,17250,0,0,False,False,5,5,20.1,3.7,6.0,False
+Bad Bunny - BAILE INoLVIDABLE,off+25s/seeded_wrong_2s,23992,,,2000,,0,0,False,False,5,5,20.0,3.7,5.9,False
+Bad Bunny - BAILE INoLVIDABLE,off-25s/cold,-26008,,,26008,,0,0,False,False,3,5,7.9,1.5,4.6,False
+Bad Bunny - BAILE INoLVIDABLE,off-25s/seeded_correct,-26008,,,0,,0,0,False,False,3,5,7.4,1.5,4.3,False
+Bad Bunny - BAILE INoLVIDABLE,off-25s/seeded_wrong_2s,-26008,,,2000,,0,0,False,False,3,5,7.2,1.5,4.1,False
+Bad Bunny - BAILE INoLVIDABLE,noise0/cold,-1008,,,1008,,0,0,False,False,5,5,14.0,2.6,4.4,False
+Bad Bunny - BAILE INoLVIDABLE,noise0/seeded_correct,-1008,,,-42,17250,0,0,False,False,5,5,13.2,2.4,4.2,False
+Bad Bunny - BAILE INoLVIDABLE,noise0/seeded_wrong_2s,-1008,,,1008,,0,0,False,False,5,5,13.3,2.4,4.3,False
+Bad Bunny - BAILE INoLVIDABLE,noise-2s/cold,-3008,,,3008,,0,0,False,False,5,5,13.3,2.4,4.2,False
+Bad Bunny - BAILE INoLVIDABLE,noise-2s/seeded_correct,-3008,,,0,,0,0,False,False,5,5,12.7,2.2,4.1,False
+Bad Bunny - BAILE INoLVIDABLE,noise-2s/seeded_wrong_2s,-3008,,,1008,,0,0,False,False,5,5,12.6,2.2,4.1,False
+Bad Bunny - BAILE INoLVIDABLE,cutin5s/cold,3992,4050,58,58,81750,0,2,False,False,5,5,15.9,2.8,5.1,True
+Bad Bunny - BAILE INoLVIDABLE,cutin5s/seeded_correct,3992,3992,0,0,17250,0,2,False,False,5,5,15.3,2.8,5.0,True
+Bad Bunny - BAILE INoLVIDABLE,cutin5s/seeded_wrong_2s,3992,,,1008,,0,0,False,False,5,5,15.0,2.6,4.9,False
+Bad Bunny - BAILE INoLVIDABLE,cutin15s/cold,13992,14050,58,58,81750,0,2,False,False,5,5,16.5,3.1,4.9,True
+Bad Bunny - BAILE INoLVIDABLE,cutin15s/seeded_correct,13992,,,-42,17250,0,0,False,False,5,5,15.9,2.9,4.7,False
+Bad Bunny - BAILE INoLVIDABLE,cutin15s/seeded_wrong_2s,13992,14050,58,58,81750,0,2,False,False,5,5,15.8,2.9,4.7,True
+Bad Bunny - BAILE INoLVIDABLE,cutin25s/cold,23992,24050,58,58,81750,0,2,False,False,5,5,20.7,3.9,6.2,True
+Bad Bunny - BAILE INoLVIDABLE,cutin25s/seeded_correct,23992,,,0,28500,0,0,False,False,5,5,19.3,3.6,5.9,False
+Bad Bunny - BAILE INoLVIDABLE,cutin25s/seeded_wrong_2s,23992,24050,58,58,81750,0,2,False,False,5,5,19.3,3.6,6.0,True
+Bad Bunny - BAILE INoLVIDABLE,blend8s/cold,-1008,,,1008,,0,0,False,False,5,5,15.7,2.6,5.2,False
+Bad Bunny - BAILE INoLVIDABLE,blend8s/seeded_correct,-1008,,,-42,17250,0,0,False,False,5,5,14.5,2.5,5.0,False
+Bad Bunny - BAILE INoLVIDABLE,blend8s/seeded_wrong_2s,-1008,,,1008,,0,0,False,False,5,5,14.2,2.5,4.8,False
+Bad Bunny - Estamos Bien,off0/cold,306,250,-56,-56,15000,0,2,False,True,3,15,5.8,2.0,2.2,True
+Bad Bunny - Estamos Bien,off0/seeded_correct,306,250,-56,-56,15000,0,2,False,True,3,15,5.4,1.9,2.2,True
+Bad Bunny - Estamos Bien,off0/seeded_wrong_2s,306,250,-56,-56,15000,0,2,False,True,4,15,7.8,2.0,2.4,True
+Bad Bunny - Estamos Bien,off+200/cold,506,450,-56,-56,15000,0,2,False,True,4,15,8.4,2.1,2.5,True
+Bad Bunny - Estamos Bien,off+200/seeded_correct,506,450,-56,-56,15000,0,2,False,True,3,15,5.6,2.1,2.2,True
+Bad Bunny - Estamos Bien,off+200/seeded_wrong_2s,506,450,-56,-56,15000,0,2,False,True,4,15,7.9,2.0,2.4,True
+Bad Bunny - Estamos Bien,off-200/cold,106,50,-56,-56,15000,0,2,False,True,3,15,5.9,2.0,2.3,True
+Bad Bunny - Estamos Bien,off-200/seeded_correct,106,50,-56,-56,15000,0,2,False,True,3,15,5.5,1.9,2.2,True
+Bad Bunny - Estamos Bien,off-200/seeded_wrong_2s,106,50,-56,-56,15000,0,2,False,True,4,15,7.8,2.1,2.4,True
+Bad Bunny - Estamos Bien,off+2s/cold,2306,2250,-56,-56,15000,0,2,False,True,4,15,8.7,2.2,2.7,True
+Bad Bunny - Estamos Bien,off+2s/seeded_correct,2306,2250,-56,-56,15000,0,2,False,True,3,15,5.7,2.0,2.2,True
+Bad Bunny - Estamos Bien,off+2s/seeded_wrong_2s,2306,2250,-56,-56,15000,0,2,False,True,4,15,8.3,2.1,2.7,True
+Bad Bunny - Estamos Bien,off-2s/cold,-1694,-1725,-31,-37,20000,0,2,True,True,5,15,11.3,2.1,3.2,True
+Bad Bunny - Estamos Bien,off-2s/seeded_correct,-1694,-1694,0,0,20000,0,2,False,True,6,15,14.7,2.2,3.8,True
+Bad Bunny - Estamos Bien,off-2s/seeded_wrong_2s,-1694,-1675,19,19,53000,0,3,False,True,7,15,19.5,2.4,4.4,True
+Bad Bunny - Estamos Bien,off+10s/cold,10306,2325,-7981,-10306,,1,1,False,False,15,15,98.8,5.5,12.3,False
+Bad Bunny - Estamos Bien,off+10s/seeded_correct,10306,10306,0,0,15000,0,2,False,True,6,15,18.4,2.8,4.4,True
+Bad Bunny - Estamos Bien,off+10s/seeded_wrong_2s,10306,2325,-7981,2000,,1,1,False,False,15,15,97.9,5.6,11.9,False
+Bad Bunny - Estamos Bien,off-10s/cold,-9694,-1675,8019,8019,,1,1,False,False,14,15,76.4,4.8,10.3,False
+Bad Bunny - Estamos Bien,off-10s/seeded_correct,-9694,-1675,8019,0,,1,1,False,False,14,15,77.5,4.5,10.8,False
+Bad Bunny - Estamos Bien,off-10s/seeded_wrong_2s,-9694,-1675,8019,2000,,1,1,False,False,14,15,78.2,4.6,11.5,False
+Bad Bunny - Estamos Bien,off+25s/cold,25306,,,-25306,,0,0,False,False,15,15,113.8,6.5,13.2,False
+Bad Bunny - Estamos Bien,off+25s/seeded_correct,25306,25306,0,0,15000,0,2,False,True,6,15,22.5,3.5,5.0,True
+Bad Bunny - Estamos Bien,off+25s/seeded_wrong_2s,25306,,,2000,,0,0,False,False,15,15,113.8,7.3,13.0,False
+Bad Bunny - Estamos Bien,off-25s/cold,-24694,,,24019,,0,0,False,False,12,15,62.7,4.5,9.5,False
+Bad Bunny - Estamos Bien,off-25s/seeded_correct,-24694,,,0,,0,0,False,False,12,15,60.7,4.4,9.2,False
+Bad Bunny - Estamos Bien,off-25s/seeded_wrong_2s,-24694,,,2000,,0,0,False,False,12,15,61.4,4.5,9.0,False
+Bad Bunny - Estamos Bien,noise0/cold,306,300,-6,-6,53000,1,4,True,True,6,15,14.4,2.3,3.4,True
+Bad Bunny - Estamos Bien,noise0/seeded_correct,306,300,-6,-6,53000,1,3,False,True,6,15,14.0,2.1,3.5,True
+Bad Bunny - Estamos Bien,noise0/seeded_wrong_2s,306,325,19,19,53000,1,4,False,True,7,15,18.2,2.2,4.1,True
+Bad Bunny - Estamos Bien,noise-2s/cold,-1694,-1725,-31,-37,25000,0,2,True,True,5,15,10.4,2.1,2.7,True
+Bad Bunny - Estamos Bien,noise-2s/seeded_correct,-1694,-1694,0,0,20000,0,2,False,True,6,15,13.8,2.2,3.3,True
+Bad Bunny - Estamos Bien,noise-2s/seeded_wrong_2s,-1694,-1675,19,19,53000,0,3,False,True,7,15,17.4,2.2,3.8,True
+Bad Bunny - Estamos Bien,cutin5s/cold,5306,5250,-56,-56,15000,0,2,False,True,4,15,9.0,2.2,2.7,True
+Bad Bunny - Estamos Bien,cutin5s/seeded_correct,5306,5306,0,0,15000,0,3,False,True,6,15,15.7,2.4,3.8,True
+Bad Bunny - Estamos Bien,cutin5s/seeded_wrong_2s,5306,5250,-56,-56,15000,0,2,False,True,4,15,8.5,2.1,2.7,True
+Bad Bunny - Estamos Bien,cutin15s/cold,15306,15325,19,19,53000,0,3,False,True,7,15,21.7,2.9,4.5,True
+Bad Bunny - Estamos Bien,cutin15s/seeded_correct,15306,15306,0,0,20000,0,2,False,True,6,15,16.7,2.7,3.8,True
+Bad Bunny - Estamos Bien,cutin15s/seeded_wrong_2s,15306,15325,19,19,53000,0,3,False,True,7,15,21.1,2.9,4.4,True
+Bad Bunny - Estamos Bien,cutin25s/cold,25306,25325,19,19,53000,1,4,False,True,7,15,29.6,3.7,5.8,True
+Bad Bunny - Estamos Bien,cutin25s/seeded_correct,25306,25325,19,19,53000,1,4,False,True,7,15,26.7,3.5,5.5,True
+Bad Bunny - Estamos Bien,cutin25s/seeded_wrong_2s,25306,25325,19,19,53000,1,4,False,True,7,15,26.7,3.5,5.5,True
+Bad Bunny - Estamos Bien,blend8s/cold,306,250,-56,-56,15000,0,2,False,True,3,15,5.6,2.0,2.1,True
+Bad Bunny - Estamos Bien,blend8s/seeded_correct,306,250,-56,-56,15000,0,2,False,True,3,15,5.3,1.9,2.1,True
+Bad Bunny - Estamos Bien,blend8s/seeded_wrong_2s,306,250,-56,-56,15000,0,2,False,True,4,15,7.6,2.0,2.3,True
+Bad Bunny - Después de la Playa,off0/cold,1700,1700,0,0,9000,0,3,True,True,4,11,10.4,2.5,3.4,True
+Bad Bunny - Después de la Playa,off0/seeded_correct,1700,1700,0,0,9000,0,2,False,True,6,11,18.2,2.8,4.9,True
+Bad Bunny - Después de la Playa,off0/seeded_wrong_2s,1700,1700,0,0,9000,0,2,False,True,6,11,18.3,2.9,4.9,True
+Bad Bunny - Después de la Playa,off+200/cold,1900,1900,0,0,9000,0,3,True,True,4,11,10.3,2.4,3.4,True
+Bad Bunny - Después de la Playa,off+200/seeded_correct,1900,1900,0,0,9000,0,2,False,True,6,11,18.5,2.8,5.1,True
+Bad Bunny - Después de la Playa,off+200/seeded_wrong_2s,1900,1900,0,0,9000,0,2,False,True,6,11,18.4,2.8,5.0,True
+Bad Bunny - Después de la Playa,off-200/cold,1500,1500,0,0,9000,0,3,True,True,4,11,10.0,2.4,3.3,True
+Bad Bunny - Después de la Playa,off-200/seeded_correct,1500,1500,0,0,9000,0,2,False,True,6,11,18.4,2.8,5.0,True
+Bad Bunny - Después de la Playa,off-200/seeded_wrong_2s,1500,1500,0,0,9000,0,2,False,True,6,11,18.3,2.8,5.0,True
+Bad Bunny - Después de la Playa,off+2s/cold,3700,3450,-250,0,28350,0,2,True,True,4,11,10.5,2.5,3.4,True
+Bad Bunny - Después de la Playa,off+2s/seeded_correct,3700,3700,0,0,9000,0,2,False,True,4,11,10.0,2.4,3.2,True
+Bad Bunny - Después de la Playa,off+2s/seeded_wrong_2s,3700,,,2000,,0,0,False,False,11,11,70.6,5.4,13.7,False
+Bad Bunny - Después de la Playa,off-2s/cold,-300,-300,0,0,9000,0,3,True,True,4,11,9.8,2.3,3.3,True
+Bad Bunny - Después de la Playa,off-2s/seeded_correct,-300,-300,0,0,9000,0,2,False,True,6,11,17.8,2.7,4.9,True
+Bad Bunny - Después de la Playa,off-2s/seeded_wrong_2s,-300,-300,0,0,9000,0,2,False,True,6,11,17.4,2.7,4.7,True
+Bad Bunny - Después de la Playa,off+10s/cold,11700,,,-11700,,0,0,False,False,11,11,78.1,5.8,14.5,False
+Bad Bunny - Después de la Playa,off+10s/seeded_correct,11700,11700,0,0,9000,0,2,False,True,6,11,21.9,3.4,5.5,True
+Bad Bunny - Después de la Playa,off+10s/seeded_wrong_2s,11700,,,2000,,0,0,False,False,11,11,78.4,6.1,14.5,False
+Bad Bunny - Después de la Playa,off-10s/cold,-8300,,,8300,,0,0,False,False,10,11,58.4,5.0,11.9,False
+Bad Bunny - Después de la Playa,off-10s/seeded_correct,-8300,,,0,,0,0,False,False,10,11,59.1,5.0,11.9,False
+Bad Bunny - Después de la Playa,off-10s/seeded_wrong_2s,-8300,,,2000,,0,0,False,False,10,11,60.3,5.2,13.2,False
+Bad Bunny - Después de la Playa,off+25s/cold,26700,,,-26700,,0,0,False,False,11,11,92.7,8.0,16.0,False
+Bad Bunny - Después de la Playa,off+25s/seeded_correct,26700,26700,0,0,9000,0,2,False,True,6,11,26.8,4.2,6.3,True
+Bad Bunny - Después de la Playa,off+25s/seeded_wrong_2s,26700,,,2000,,0,0,False,False,11,11,88.4,6.8,16.0,False
+Bad Bunny - Después de la Playa,off-25s/cold,-23300,,,23300,,0,0,False,False,9,11,47.4,4.6,10.8,False
+Bad Bunny - Después de la Playa,off-25s/seeded_correct,-23300,,,0,,0,0,False,False,9,11,48.1,4.3,11.5,False
+Bad Bunny - Después de la Playa,off-25s/seeded_wrong_2s,-23300,,,2000,,0,0,False,False,9,11,47.1,4.4,10.6,False
+Bad Bunny - Después de la Playa,noise0/cold,1700,1700,0,0,9000,0,3,True,True,4,11,9.1,2.2,2.8,True
+Bad Bunny - Después de la Playa,noise0/seeded_correct,1700,1700,0,0,9000,0,2,False,True,6,11,16.3,2.6,4.1,True
+Bad Bunny - Después de la Playa,noise0/seeded_wrong_2s,1700,1700,0,0,9000,0,2,False,True,6,11,16.7,2.7,4.2,True
+Bad Bunny - Después de la Playa,noise-2s/cold,-300,-300,0,0,9000,0,3,True,True,4,11,8.5,2.0,2.8,True
+Bad Bunny - Después de la Playa,noise-2s/seeded_correct,-300,-300,0,0,9000,0,2,False,True,6,11,15.9,2.5,4.0,True
+Bad Bunny - Después de la Playa,noise-2s/seeded_wrong_2s,-300,-300,0,0,9000,0,2,False,True,6,11,15.4,2.4,3.9,True
+Bad Bunny - Después de la Playa,cutin5s/cold,6700,6375,-325,-325,,1,1,False,False,11,11,54.1,4.7,8.7,False
+Bad Bunny - Después de la Playa,cutin5s/seeded_correct,6700,6700,0,0,9000,0,1,False,True,6,11,17.9,2.9,4.4,True
+Bad Bunny - Después de la Playa,cutin5s/seeded_wrong_2s,6700,6375,-325,-325,,1,1,False,False,11,11,54.1,4.6,8.9,False
+Bad Bunny - Después de la Playa,cutin15s/cold,16700,16700,0,0,77250,0,2,False,True,8,11,31.8,3.5,6.2,True
+Bad Bunny - Después de la Playa,cutin15s/seeded_correct,16700,16700,0,0,27000,0,2,False,True,8,11,31.2,3.5,6.0,True
+Bad Bunny - Después de la Playa,cutin15s/seeded_wrong_2s,16700,16700,0,0,40250,0,2,False,True,8,11,31.5,3.5,6.2,True
+Bad Bunny - Después de la Playa,cutin25s/cold,26700,26700,0,0,77250,0,2,False,True,8,11,37.2,4.4,6.9,True
+Bad Bunny - Después de la Playa,cutin25s/seeded_correct,26700,26700,0,0,40250,0,2,False,True,8,11,36.0,4.1,6.8,True
+Bad Bunny - Después de la Playa,cutin25s/seeded_wrong_2s,26700,26700,0,0,44500,0,2,False,True,8,11,36.1,4.2,6.9,True
+Bad Bunny - Después de la Playa,blend8s/cold,1700,1700,0,0,9000,0,3,True,True,4,11,9.4,2.3,3.0,True
+Bad Bunny - Después de la Playa,blend8s/seeded_correct,1700,1700,0,0,9000,0,2,False,True,6,11,16.6,2.6,4.2,True
+Bad Bunny - Después de la Playa,blend8s/seeded_wrong_2s,1700,1700,0,0,9000,0,2,False,True,6,11,16.6,2.6,4.2,True
+Bad Bunny - CYBERTRUCK,off0/cold,-1100,-1100,0,1100,,1,3,True,False,14,14,64.3,4.8,7.4,True
+Bad Bunny - CYBERTRUCK,off0/seeded_correct,-1100,-1100,0,1100,,1,2,False,False,14,14,64.3,4.8,7.6,True
+Bad Bunny - CYBERTRUCK,off0/seeded_wrong_2s,-1100,-1100,0,1100,,1,2,False,False,14,14,63.4,4.7,7.4,True
+Bad Bunny - CYBERTRUCK,off+200/cold,-900,-900,0,1100,,1,3,True,False,14,14,64.9,4.8,7.9,True
+Bad Bunny - CYBERTRUCK,off+200/seeded_correct,-900,-900,0,1100,,1,2,False,False,14,14,64.6,4.9,7.7,True
+Bad Bunny - CYBERTRUCK,off+200/seeded_wrong_2s,-900,-900,0,1100,,1,2,False,False,14,14,65.0,4.6,7.7,True
+Bad Bunny - CYBERTRUCK,off-200/cold,-1300,-1301,-1,1100,,1,3,True,False,14,14,65.0,4.7,7.7,True
+Bad Bunny - CYBERTRUCK,off-200/seeded_correct,-1300,-1300,0,1100,,1,2,False,False,14,14,66.2,4.9,7.8,True
+Bad Bunny - CYBERTRUCK,off-200/seeded_wrong_2s,-1300,-1300,0,1100,,1,2,False,False,14,14,64.2,4.7,7.5,True
+Bad Bunny - CYBERTRUCK,off+2s/cold,900,900,0,1100,,1,3,True,False,14,14,68.8,4.8,8.6,True
+Bad Bunny - CYBERTRUCK,off+2s/seeded_correct,900,900,0,1100,,1,2,False,False,14,14,67.5,4.9,7.8,True
+Bad Bunny - CYBERTRUCK,off+2s/seeded_wrong_2s,900,900,0,1100,,1,2,False,False,14,14,65.5,4.8,7.7,True
+Bad Bunny - CYBERTRUCK,off-2s/cold,-3100,-3101,-1,1100,,1,3,True,False,14,14,63.9,4.7,7.5,True
+Bad Bunny - CYBERTRUCK,off-2s/seeded_correct,-3100,-3100,0,1100,,1,2,False,False,14,14,65.1,4.7,8.1,True
+Bad Bunny - CYBERTRUCK,off-2s/seeded_wrong_2s,-3100,-3100,0,1100,,1,2,False,False,14,14,62.9,4.7,7.5,True
+Bad Bunny - CYBERTRUCK,off+10s/cold,8900,,,-8900,,0,0,False,False,14,14,73.4,5.3,8.2,False
+Bad Bunny - CYBERTRUCK,off+10s/seeded_correct,8900,8900,0,0,16250,0,2,False,True,6,14,18.2,2.7,4.5,True
+Bad Bunny - CYBERTRUCK,off+10s/seeded_wrong_2s,8900,,,2000,,0,0,False,False,14,14,72.5,5.3,8.2,False
+Bad Bunny - CYBERTRUCK,off-10s/cold,-11100,,,11100,,0,0,False,False,13,14,58.0,4.5,7.5,False
+Bad Bunny - CYBERTRUCK,off-10s/seeded_correct,-11100,,,0,,0,0,False,False,13,14,55.4,4.3,7.1,False
+Bad Bunny - CYBERTRUCK,off-10s/seeded_wrong_2s,-11100,,,2000,,0,0,False,False,13,14,55.1,4.4,6.9,False
+Bad Bunny - CYBERTRUCK,off+25s/cold,23900,,,-23900,,0,0,False,False,14,14,86.5,6.7,9.1,False
+Bad Bunny - CYBERTRUCK,off+25s/seeded_correct,23900,23900,0,0,16250,0,2,False,True,6,14,22.7,3.4,5.3,True
+Bad Bunny - CYBERTRUCK,off+25s/seeded_wrong_2s,23900,,,2000,,0,0,False,False,14,14,83.5,6.0,9.2,False
+Bad Bunny - CYBERTRUCK,off-25s/cold,-26100,,,25250,,0,0,False,False,11,14,45.5,3.9,6.2,False
+Bad Bunny - CYBERTRUCK,off-25s/seeded_correct,-26100,,,0,,0,0,False,False,11,14,44.7,3.7,6.5,False
+Bad Bunny - CYBERTRUCK,off-25s/seeded_wrong_2s,-26100,,,2000,,0,0,False,False,11,14,43.9,3.7,6.2,False
+Bad Bunny - CYBERTRUCK,noise0/cold,-1100,-1100,0,1100,,1,3,True,False,14,14,58.3,4.2,6.9,True
+Bad Bunny - CYBERTRUCK,noise0/seeded_correct,-1100,-1100,0,1100,,1,2,False,False,14,14,58.2,4.3,6.7,True
+Bad Bunny - CYBERTRUCK,noise0/seeded_wrong_2s,-1100,-1100,0,1100,,1,2,False,False,14,14,57.2,4.2,6.6,True
+Bad Bunny - CYBERTRUCK,noise-2s/cold,-3100,-3103,-3,1100,,1,3,True,False,14,14,56.8,4.2,6.6,True
+Bad Bunny - CYBERTRUCK,noise-2s/seeded_correct,-3100,-2000,1100,1100,,1,1,False,False,14,14,58.1,4.2,6.9,False
+Bad Bunny - CYBERTRUCK,noise-2s/seeded_wrong_2s,-3100,-2000,1100,1100,,1,1,False,False,14,14,56.7,4.2,6.6,False
+Bad Bunny - CYBERTRUCK,cutin5s/cold,3900,3900,0,0,16250,0,3,True,True,6,14,16.0,2.4,3.8,True
+Bad Bunny - CYBERTRUCK,cutin5s/seeded_correct,3900,3900,0,0,16250,0,2,False,True,6,14,15.5,2.3,3.7,True
+Bad Bunny - CYBERTRUCK,cutin5s/seeded_wrong_2s,3900,3900,0,0,16250,0,2,False,True,6,14,15.6,2.5,3.6,True
+Bad Bunny - CYBERTRUCK,cutin15s/cold,13900,13900,0,0,16250,0,3,False,True,6,14,17.7,2.7,4.1,True
+Bad Bunny - CYBERTRUCK,cutin15s/seeded_correct,13900,13900,0,0,16250,0,3,False,True,6,14,17.4,2.7,4.0,True
+Bad Bunny - CYBERTRUCK,cutin15s/seeded_wrong_2s,13900,13900,0,0,16250,0,3,False,True,6,14,17.5,2.7,4.1,True
+Bad Bunny - CYBERTRUCK,cutin25s/cold,23900,23900,0,0,38750,0,2,False,True,9,14,38.1,4.0,5.7,True
+Bad Bunny - CYBERTRUCK,cutin25s/seeded_correct,23900,23900,0,0,38750,0,2,False,True,9,14,37.5,4.0,5.7,True
+Bad Bunny - CYBERTRUCK,cutin25s/seeded_wrong_2s,23900,23900,0,0,38750,0,2,False,True,9,14,38.0,4.2,5.7,True
+Bad Bunny - CYBERTRUCK,blend8s/cold,-1100,-1103,-3,-3,32500,0,3,True,True,5,14,11.1,2.0,2.8,True
+Bad Bunny - CYBERTRUCK,blend8s/seeded_correct,-1100,-1100,0,0,16250,0,2,False,True,6,14,15.0,2.3,3.7,True
+Bad Bunny - CYBERTRUCK,blend8s/seeded_wrong_2s,-1100,-1100,0,0,71500,0,2,False,True,10,14,33.3,3.3,5.1,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off0/cold,-1075,-1075,0,1075,,1,3,True,False,18,18,91.7,5.0,8.4,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off0/seeded_correct,-1075,-1075,0,0,9000,0,2,False,True,5,18,10.9,2.0,3.0,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off0/seeded_wrong_2s,-1075,-1075,0,1075,,1,2,False,False,18,18,93.1,5.1,8.3,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+200/cold,-875,-875,0,1075,,1,3,True,True,15,18,68.3,4.8,7.4,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+200/seeded_correct,-875,-875,0,0,9000,0,2,False,True,5,18,11.1,2.0,3.1,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+200/seeded_wrong_2s,-875,-875,0,1075,,1,2,False,False,18,18,92.7,5.0,8.7,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-200/cold,-1275,-1276,-1,1075,,1,3,True,True,11,18,39.6,4.2,5.3,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-200/seeded_correct,-1275,-1275,0,0,9000,0,1,False,True,5,18,11.0,2.0,3.2,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-200/seeded_wrong_2s,-1275,-1275,0,1075,,1,2,False,False,18,18,96.3,5.4,8.6,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+2s/cold,925,925,0,1075,,1,3,True,False,18,18,94.4,5.1,8.7,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+2s/seeded_correct,925,925,0,0,9000,0,2,False,True,5,18,11.5,2.2,3.2,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+2s/seeded_wrong_2s,925,925,0,1075,,1,2,False,False,18,18,95.3,5.1,8.6,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-2s/cold,-3075,-2000,1075,1075,,2,3,True,True,10,18,33.5,3.6,4.9,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-2s/seeded_correct,-3075,-3075,0,0,9000,0,1,False,True,6,18,14.7,2.1,3.8,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-2s/seeded_wrong_2s,-3075,-2000,1075,1075,,2,2,False,True,10,18,33.4,3.6,5.0,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+10s/cold,8925,-1397,-10322,-10322,,1,1,False,False,18,18,103.8,5.7,9.8,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+10s/seeded_correct,8925,8925,0,0,9000,0,2,False,True,5,18,13.6,2.5,3.6,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+10s/seeded_wrong_2s,8925,-100,-9025,2000,,1,1,False,False,18,18,101.2,5.6,9.1,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-10s/cold,-11075,-750,10325,10325,,1,1,False,False,17,18,86.7,5.1,8.4,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-10s/seeded_correct,-11075,-750,10325,0,,1,1,False,False,17,18,80.3,4.6,7.9,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-10s/seeded_wrong_2s,-11075,-750,10325,2000,,1,1,False,False,17,18,80.4,4.7,8.1,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+25s/cold,23925,-575,-24500,-24500,,1,1,False,False,18,18,118.1,6.7,9.9,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+25s/seeded_correct,23925,23925,0,0,9000,0,2,False,True,5,18,17.1,3.2,4.2,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off+25s/seeded_wrong_2s,23925,3300,-20625,2000,,1,1,False,False,18,18,116.7,6.4,10.0,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-25s/cold,-26075,-250,25825,25825,,2,2,False,False,14,18,67.3,4.5,7.6,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-25s/seeded_correct,-26075,2325,28400,0,,2,2,False,False,14,18,67.8,4.4,8.0,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",off-25s/seeded_wrong_2s,-26075,2325,28400,2000,,2,2,False,False,14,18,64.2,4.4,7.0,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",noise0/cold,-1075,-1075,0,-3,15000,0,3,True,True,4,18,8.0,2.0,2.2,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",noise0/seeded_correct,-1075,-1075,0,0,15000,0,2,False,True,6,18,14.1,2.0,3.6,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",noise0/seeded_wrong_2s,-1075,-1075,0,0,15000,0,2,False,True,6,18,14.1,2.0,3.5,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",noise-2s/cold,-3075,-3081,-6,-6,20200,0,1,True,True,4,18,7.2,1.8,2.1,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",noise-2s/seeded_correct,-3075,-3075,0,1300,,0,1,False,False,18,18,79.1,4.4,6.9,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",noise-2s/seeded_wrong_2s,-3075,-3075,0,1300,,0,1,False,False,18,18,79.1,4.4,7.0,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin5s/cold,3925,3925,0,-3,15000,0,3,True,True,5,18,12.0,2.3,3.2,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin5s/seeded_correct,3925,3925,0,0,15000,0,2,False,True,6,18,15.3,2.2,3.7,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin5s/seeded_wrong_2s,3925,3925,0,0,15000,0,2,False,True,6,18,15.8,2.3,3.9,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin15s/cold,13925,13925,0,-13925,,0,2,False,False,18,18,90.0,5.1,7.5,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin15s/seeded_correct,13925,13925,0,0,23750,0,4,False,False,18,18,90.5,5.1,7.5,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin15s/seeded_wrong_2s,13925,13925,0,0,43250,0,4,False,False,18,18,90.6,5.0,7.7,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin25s/cold,23925,2000,-21925,-21925,,2,2,False,False,18,18,102.8,5.8,8.4,False
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin25s/seeded_correct,23925,23925,0,0,43250,0,3,False,False,18,18,106.3,5.6,9.9,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",cutin25s/seeded_wrong_2s,23925,23925,0,0,79250,0,1,False,False,18,18,103.3,5.7,8.6,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",blend8s/cold,-1075,-1075,0,-3,15000,0,3,True,True,4,18,8.1,2.0,2.2,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",blend8s/seeded_correct,-1075,-1075,0,-575,,0,1,False,False,18,18,83.3,4.7,7.4,True
+"Bad Bunny, Zion & Lennox - MÁS DE UNA CITA",blend8s/seeded_wrong_2s,-1075,-1075,0,0,15000,0,2,False,True,6,18,15.0,2.1,3.6,True
+Bad Bunny - Efecto,off0/cold,-1050,-1050,0,-16,24325,0,2,True,True,2,16,4.5,2.3,2.6,True
+Bad Bunny - Efecto,off0/seeded_correct,-1050,-1050,0,0,9000,0,1,False,True,6,16,16.6,2.8,3.6,True
+Bad Bunny - Efecto,off0/seeded_wrong_2s,-1050,-1050,0,0,26000,0,1,False,False,16,16,81.2,4.5,8.9,True
+Bad Bunny - Efecto,off+200/cold,-850,-850,0,-14,9000,0,2,True,True,2,16,4.4,2.2,2.6,True
+Bad Bunny - Efecto,off+200/seeded_correct,-850,-850,0,0,9000,0,1,False,True,6,16,16.9,2.8,3.8,True
+Bad Bunny - Efecto,off+200/seeded_wrong_2s,-850,-850,0,0,26000,0,1,False,False,16,16,82.7,4.5,9.2,True
+Bad Bunny - Efecto,off-200/cold,-1250,-1250,0,-6,24325,0,2,True,True,2,16,4.3,2.2,2.5,True
+Bad Bunny - Efecto,off-200/seeded_correct,-1250,-1250,0,0,9000,0,1,False,True,6,16,16.6,2.8,3.7,True
+Bad Bunny - Efecto,off-200/seeded_wrong_2s,-1250,-1250,0,0,26000,0,1,False,False,16,16,83.5,4.5,9.3,True
+Bad Bunny - Efecto,off+2s/cold,950,950,0,-13,9000,0,2,True,True,2,16,4.4,2.2,2.5,True
+Bad Bunny - Efecto,off+2s/seeded_correct,950,950,0,0,9000,0,1,False,True,6,16,17.7,3.0,3.9,True
+Bad Bunny - Efecto,off+2s/seeded_wrong_2s,950,950,0,0,26000,0,1,False,False,16,16,84.2,4.7,9.2,True
+Bad Bunny - Efecto,off-2s/cold,-3050,-3056,-6,-6,24325,0,2,True,True,2,16,4.0,2.0,2.3,True
+Bad Bunny - Efecto,off-2s/seeded_correct,-3050,,,0,26000,0,0,False,False,16,16,82.1,4.8,8.8,False
+Bad Bunny - Efecto,off-2s/seeded_wrong_2s,-3050,-600,2450,2450,,2,2,False,False,16,16,82.2,4.5,9.0,False
+Bad Bunny - Efecto,off+10s/cold,8950,-850,-9800,-9800,,1,1,False,False,16,16,93.1,5.0,10.0,False
+Bad Bunny - Efecto,off+10s/seeded_correct,8950,8950,0,0,9000,0,1,False,True,6,16,19.9,3.3,4.5,True
+Bad Bunny - Efecto,off+10s/seeded_wrong_2s,8950,-850,-9800,2000,,1,1,False,False,16,16,90.7,5.0,9.6,False
+Bad Bunny - Efecto,off-10s/cold,-11050,,,11625,,0,0,False,False,15,16,76.3,4.3,9.1,False
+Bad Bunny - Efecto,off-10s/seeded_correct,-11050,,,0,,0,0,False,False,15,16,73.4,4.2,8.6,False
+Bad Bunny - Efecto,off-10s/seeded_wrong_2s,-11050,,,2000,,0,0,False,False,15,16,73.0,4.2,8.5,False
+Bad Bunny - Efecto,off+25s/cold,23950,,,-24500,,0,0,False,False,16,16,109.8,5.9,10.8,False
+Bad Bunny - Efecto,off+25s/seeded_correct,23950,23950,0,0,9000,0,1,False,True,6,16,23.7,4.0,4.8,True
+Bad Bunny - Efecto,off+25s/seeded_wrong_2s,23950,3125,-20825,2000,,1,1,False,False,16,16,103.4,5.7,10.5,False
+Bad Bunny - Efecto,off-25s/cold,-26050,3325,29375,26050,,1,1,False,False,15,16,62.5,3.7,7.7,False
+Bad Bunny - Efecto,off-25s/seeded_correct,-26050,3325,29375,0,,1,1,False,False,15,16,62.3,3.7,7.6,False
+Bad Bunny - Efecto,off-25s/seeded_wrong_2s,-26050,3325,29375,2000,,1,1,False,False,15,16,61.4,3.5,7.9,False
+Bad Bunny - Efecto,noise0/cold,-1050,-1050,0,-16,24325,0,2,True,True,2,16,4.0,2.0,2.2,True
+Bad Bunny - Efecto,noise0/seeded_correct,-1050,-1050,0,0,9000,0,1,False,True,6,16,15.8,2.7,3.5,True
+Bad Bunny - Efecto,noise0/seeded_wrong_2s,-1050,-1050,0,0,26000,0,1,False,False,16,16,74.2,4.1,7.9,True
+Bad Bunny - Efecto,noise-2s/cold,-3050,-3056,-6,-6,24325,0,2,True,True,2,16,4.0,2.0,2.4,True
+Bad Bunny - Efecto,noise-2s/seeded_correct,-3050,,,0,55250,0,0,False,False,16,16,73.2,4.0,7.8,False
+Bad Bunny - Efecto,noise-2s/seeded_wrong_2s,-3050,-600,2450,2450,,2,2,False,False,16,16,73.2,4.0,7.9,False
+Bad Bunny - Efecto,cutin5s/cold,3950,3950,0,-3,24325,0,2,True,True,2,16,4.6,2.3,2.6,True
+Bad Bunny - Efecto,cutin5s/seeded_correct,3950,3950,0,0,9000,0,2,False,False,16,16,79.5,4.4,8.2,True
+Bad Bunny - Efecto,cutin5s/seeded_wrong_2s,3950,3950,0,0,26000,0,2,False,False,16,16,79.3,4.4,8.5,True
+Bad Bunny - Efecto,cutin15s/cold,13950,13950,0,-13950,,0,3,False,False,16,16,83.9,4.7,8.7,True
+Bad Bunny - Efecto,cutin15s/seeded_correct,13950,13950,0,0,26000,0,3,False,False,16,16,83.0,4.7,8.5,True
+Bad Bunny - Efecto,cutin15s/seeded_wrong_2s,13950,13950,0,0,31750,0,3,False,False,16,16,82.8,4.7,8.5,True
+Bad Bunny - Efecto,cutin25s/cold,23950,23950,0,-23950,,0,1,False,False,16,16,97.2,5.5,9.8,True
+Bad Bunny - Efecto,cutin25s/seeded_correct,23950,23950,0,0,31750,0,2,False,False,16,16,97.3,5.4,10.3,True
+Bad Bunny - Efecto,cutin25s/seeded_wrong_2s,23950,23950,0,0,37250,0,2,False,False,16,16,94.3,5.3,9.5,True
+Bad Bunny - Efecto,blend8s/cold,-1050,-1066,-16,-16,24325,0,2,True,True,2,16,4.3,2.1,2.4,True
+Bad Bunny - Efecto,blend8s/seeded_correct,-1050,-1050,0,0,26000,0,3,False,False,16,16,81.1,4.2,9.5,True
+Bad Bunny - Efecto,blend8s/seeded_wrong_2s,-1050,-1050,0,0,31750,0,3,False,False,16,16,79.2,4.2,8.9,True
+Bad Bunny - TRELLAS,off0/cold,-1000,-1025,-25,22,28000,0,2,True,False,7,7,20.1,3.0,3.8,True
+Bad Bunny - TRELLAS,off0/seeded_correct,-1000,,,-75,18250,0,0,False,False,7,7,19.7,3.0,3.7,False
+Bad Bunny - TRELLAS,off0/seeded_wrong_2s,-1000,-1017,-17,0,38750,0,1,False,False,7,7,19.3,3.0,3.6,True
+Bad Bunny - TRELLAS,off+200/cold,-800,-854,-54,11,18250,0,2,True,False,7,7,20.3,3.2,3.9,True
+Bad Bunny - TRELLAS,off+200/seeded_correct,-800,,,-75,18250,0,0,False,False,7,7,19.8,2.9,3.8,False
+Bad Bunny - TRELLAS,off+200/seeded_wrong_2s,-800,-817,-17,0,38750,0,1,False,False,7,7,19.5,2.9,3.7,True
+Bad Bunny - TRELLAS,off-200/cold,-1200,-1222,-22,44,28000,0,2,True,False,7,7,19.5,3.0,3.7,True
+Bad Bunny - TRELLAS,off-200/seeded_correct,-1200,,,-75,18250,0,0,False,False,7,7,20.0,3.2,3.6,False
+Bad Bunny - TRELLAS,off-200/seeded_wrong_2s,-1200,-1217,-17,0,38750,0,1,False,False,7,7,19.1,3.0,3.6,True
+Bad Bunny - TRELLAS,off+2s/cold,1000,947,-53,12,18250,0,2,True,False,7,7,20.9,3.2,3.8,True
+Bad Bunny - TRELLAS,off+2s/seeded_correct,1000,,,-75,18250,0,0,False,False,7,7,20.5,3.2,3.8,False
+Bad Bunny - TRELLAS,off+2s/seeded_wrong_2s,1000,983,-17,0,38750,0,1,False,False,7,7,20.1,3.0,3.8,True
+Bad Bunny - TRELLAS,off-2s/cold,-3000,-2956,44,44,86150,0,1,True,False,7,7,19.7,3.0,3.9,True
+Bad Bunny - TRELLAS,off-2s/seeded_correct,-3000,,,-75,18250,0,0,False,False,7,7,19.5,2.8,3.7,False
+Bad Bunny - TRELLAS,off-2s/seeded_wrong_2s,-3000,,,0,50500,0,0,False,False,7,7,18.6,2.8,3.5,False
+Bad Bunny - TRELLAS,off+10s/cold,9000,,,-9000,,0,0,False,False,7,7,22.9,3.5,4.2,False
+Bad Bunny - TRELLAS,off+10s/seeded_correct,9000,,,0,38750,0,0,False,False,7,7,23.4,3.7,4.0,False
+Bad Bunny - TRELLAS,off+10s/seeded_wrong_2s,9000,,,2000,,0,0,False,False,7,7,23.1,3.6,4.3,False
+Bad Bunny - TRELLAS,off-10s/cold,-11000,,,11000,,0,0,False,False,6,7,15.1,2.6,3.2,False
+Bad Bunny - TRELLAS,off-10s/seeded_correct,-11000,,,0,,0,0,False,False,6,7,14.9,2.5,3.2,False
+Bad Bunny - TRELLAS,off-10s/seeded_wrong_2s,-11000,,,2000,,0,0,False,False,6,7,14.4,2.5,3.1,False
+Bad Bunny - TRELLAS,off+25s/cold,24000,,,-24000,,0,0,False,False,7,7,28.3,4.2,5.0,False
+Bad Bunny - TRELLAS,off+25s/seeded_correct,24000,,,0,38750,0,0,False,False,7,7,28.9,4.1,4.9,False
+Bad Bunny - TRELLAS,off+25s/seeded_wrong_2s,24000,,,2000,,0,0,False,False,7,7,29.6,4.4,5.3,False
+Bad Bunny - TRELLAS,off-25s/cold,-26000,,,26000,,0,0,False,False,5,7,10.1,2.0,2.5,False
+Bad Bunny - TRELLAS,off-25s/seeded_correct,-26000,,,0,,0,0,False,False,5,7,9.7,1.9,2.4,False
+Bad Bunny - TRELLAS,off-25s/seeded_wrong_2s,-26000,,,2000,,0,0,False,False,5,7,9.4,1.9,2.4,False
+Bad Bunny - TRELLAS,noise0/cold,-1000,-1022,-22,47,28000,0,2,True,False,7,7,18.4,2.8,3.4,True
+Bad Bunny - TRELLAS,noise0/seeded_correct,-1000,,,-75,18250,0,0,False,False,7,7,18.4,2.8,3.4,False
+Bad Bunny - TRELLAS,noise0/seeded_wrong_2s,-1000,-1017,-17,0,38750,0,1,False,False,7,7,18.0,2.7,3.3,True
+Bad Bunny - TRELLAS,noise-2s/cold,-3000,-2956,44,44,86150,0,1,True,False,7,7,17.6,2.7,3.4,True
+Bad Bunny - TRELLAS,noise-2s/seeded_correct,-3000,,,-75,18250,0,0,False,False,7,7,17.8,2.7,3.3,False
+Bad Bunny - TRELLAS,noise-2s/seeded_wrong_2s,-3000,,,2000,,0,0,False,False,7,7,17.7,2.7,3.3,False
+Bad Bunny - TRELLAS,cutin5s/cold,4000,,,-4000,,0,0,False,False,7,7,19.9,3.0,3.6,False
+Bad Bunny - TRELLAS,cutin5s/seeded_correct,4000,,,-75,18250,0,0,False,False,7,7,20.1,3.0,3.7,False
+Bad Bunny - TRELLAS,cutin5s/seeded_wrong_2s,4000,,,0,43000,0,0,False,False,7,7,19.5,3.0,3.5,False
+Bad Bunny - TRELLAS,cutin15s/cold,14000,,,-14000,,0,0,False,False,7,7,22.8,3.5,4.1,False
+Bad Bunny - TRELLAS,cutin15s/seeded_correct,14000,,,-25,28000,0,0,False,False,7,7,22.1,3.4,3.9,False
+Bad Bunny - TRELLAS,cutin15s/seeded_wrong_2s,14000,,,0,38750,0,0,False,False,7,7,21.7,3.3,3.9,False
+Bad Bunny - TRELLAS,cutin25s/cold,24000,,,-24000,,0,0,False,False,7,7,25.7,3.8,4.6,False
+Bad Bunny - TRELLAS,cutin25s/seeded_correct,24000,,,0,38750,0,0,False,False,7,7,25.8,3.9,4.5,False
+Bad Bunny - TRELLAS,cutin25s/seeded_wrong_2s,24000,,,0,43000,0,0,False,False,7,7,25.6,3.8,4.6,False
+Bad Bunny - TRELLAS,blend8s/cold,-1000,-978,22,22,28000,0,1,True,False,7,7,19.0,2.8,3.7,True
+Bad Bunny - TRELLAS,blend8s/seeded_correct,-1000,,,-75,18250,0,0,False,False,7,7,18.8,2.9,3.4,False
+Bad Bunny - TRELLAS,blend8s/seeded_wrong_2s,-1000,,,0,38750,0,0,False,False,7,7,18.6,2.8,3.4,False
+Bad Bunny - BYE ME FUI,off0/cold,-1025,-1025,0,1025,,1,3,True,False,11,11,44.8,3.4,6.2,True
+Bad Bunny - BYE ME FUI,off0/seeded_correct,-1025,-1025,0,1025,,1,2,False,False,11,11,45.0,3.4,6.4,True
+Bad Bunny - BYE ME FUI,off0/seeded_wrong_2s,-1025,-1025,0,1025,,1,2,False,False,11,11,44.1,3.5,6.2,True
+Bad Bunny - BYE ME FUI,off+200/cold,-825,-825,0,1025,,1,3,True,False,11,11,46.1,3.6,6.5,True
+Bad Bunny - BYE ME FUI,off+200/seeded_correct,-825,-825,0,1025,,1,2,False,False,11,11,44.8,3.5,6.4,True
+Bad Bunny - BYE ME FUI,off+200/seeded_wrong_2s,-825,-825,0,1025,,1,2,False,False,11,11,46.5,3.5,7.1,True
+Bad Bunny - BYE ME FUI,off-200/cold,-1225,-1226,-1,1025,,1,3,True,False,11,11,45.3,3.4,6.4,True
+Bad Bunny - BYE ME FUI,off-200/seeded_correct,-1225,-1225,0,1025,,1,2,False,False,11,11,44.7,3.5,6.5,True
+Bad Bunny - BYE ME FUI,off-200/seeded_wrong_2s,-1225,-1225,0,1025,,1,2,False,False,11,11,44.7,3.5,6.4,True
+Bad Bunny - BYE ME FUI,off+2s/cold,975,975,0,1025,,1,3,True,False,11,11,46.5,3.6,6.5,True
+Bad Bunny - BYE ME FUI,off+2s/seeded_correct,975,975,0,1025,,1,2,False,False,11,11,46.0,3.6,6.5,True
+Bad Bunny - BYE ME FUI,off+2s/seeded_wrong_2s,975,975,0,1025,,1,2,False,False,11,11,47.0,3.5,6.8,True
+Bad Bunny - BYE ME FUI,off-2s/cold,-3025,-3028,-3,1025,,1,3,True,False,11,11,45.1,3.4,6.5,True
+Bad Bunny - BYE ME FUI,off-2s/seeded_correct,-3025,-2000,1025,1025,,1,1,False,False,11,11,44.4,3.4,6.4,False
+Bad Bunny - BYE ME FUI,off-2s/seeded_wrong_2s,-3025,-2000,1025,1025,,1,1,False,False,11,11,43.7,3.4,6.3,False
+Bad Bunny - BYE ME FUI,off+10s/cold,8975,-375,-9350,-9350,,1,1,False,False,11,11,51.3,3.9,7.3,False
+Bad Bunny - BYE ME FUI,off+10s/seeded_correct,8975,8975,0,0,23250,0,2,False,True,6,11,19.1,3.3,3.9,True
+Bad Bunny - BYE ME FUI,off+10s/seeded_wrong_2s,8975,10975,2000,2000,,1,1,False,False,11,11,50.3,4.0,7.0,False
+Bad Bunny - BYE ME FUI,off-10s/cold,-11025,-375,10650,10650,,1,1,False,False,10,11,39.9,3.2,6.3,False
+Bad Bunny - BYE ME FUI,off-10s/seeded_correct,-11025,,,0,,0,0,False,False,10,11,38.1,3.1,5.9,False
+Bad Bunny - BYE ME FUI,off-10s/seeded_wrong_2s,-11025,,,2000,,0,0,False,False,10,11,38.2,3.1,5.9,False
+Bad Bunny - BYE ME FUI,off+25s/cold,23975,,,-23975,,0,0,False,False,11,11,59.1,4.6,7.9,False
+Bad Bunny - BYE ME FUI,off+25s/seeded_correct,23975,23975,0,0,23250,0,2,False,True,6,11,22.9,4.0,4.5,True
+Bad Bunny - BYE ME FUI,off+25s/seeded_wrong_2s,23975,25975,2000,2000,,1,1,False,False,11,11,57.5,4.6,7.9,False
+Bad Bunny - BYE ME FUI,off-25s/cold,-26025,,,26025,,0,0,False,False,9,11,31.7,2.6,5.4,False
+Bad Bunny - BYE ME FUI,off-25s/seeded_correct,-26025,,,0,,0,0,False,False,9,11,30.4,2.6,5.3,False
+Bad Bunny - BYE ME FUI,off-25s/seeded_wrong_2s,-26025,,,2000,,0,0,False,False,9,11,30.4,2.6,5.3,False
+Bad Bunny - BYE ME FUI,noise0/cold,-1025,-1025,0,1025,,1,3,True,False,11,11,43.4,3.4,6.2,True
+Bad Bunny - BYE ME FUI,noise0/seeded_correct,-1025,-1025,0,1025,,1,2,False,False,11,11,42.6,3.3,6.1,True
+Bad Bunny - BYE ME FUI,noise0/seeded_wrong_2s,-1025,-1025,0,1025,,1,2,False,False,11,11,42.8,3.3,6.1,True
+Bad Bunny - BYE ME FUI,noise-2s/cold,-3025,-3028,-3,1025,,1,3,True,False,11,11,41.9,3.3,6.0,True
+Bad Bunny - BYE ME FUI,noise-2s/seeded_correct,-3025,-2000,1025,1025,,1,1,False,False,11,11,43.3,3.4,6.1,False
+Bad Bunny - BYE ME FUI,noise-2s/seeded_wrong_2s,-3025,-2000,1025,1025,,1,1,False,False,11,11,42.4,3.3,6.0,False
+Bad Bunny - BYE ME FUI,cutin5s/cold,3975,3972,-3,-3,35775,0,3,True,True,4,11,10.6,2.6,3.2,True
+Bad Bunny - BYE ME FUI,cutin5s/seeded_correct,3975,3975,0,0,23250,0,2,False,True,6,11,16.9,2.9,3.6,True
+Bad Bunny - BYE ME FUI,cutin5s/seeded_wrong_2s,3975,3975,0,0,31000,0,2,False,True,6,11,16.8,2.9,3.5,True
+Bad Bunny - BYE ME FUI,cutin15s/cold,13975,13975,0,0,40500,0,2,False,True,6,11,19.6,3.3,4.0,True
+Bad Bunny - BYE ME FUI,cutin15s/seeded_correct,13975,13975,0,0,23250,0,2,False,True,6,11,18.4,3.1,3.7,True
+Bad Bunny - BYE ME FUI,cutin15s/seeded_wrong_2s,13975,13975,0,0,31000,0,2,False,True,6,11,18.4,3.2,3.8,True
+Bad Bunny - BYE ME FUI,cutin25s/cold,23975,23975,0,0,40500,0,2,False,True,7,11,27.3,4.1,4.5,True
+Bad Bunny - BYE ME FUI,cutin25s/seeded_correct,23975,23975,0,0,31000,0,2,False,True,7,11,26.8,4.1,4.6,True
+Bad Bunny - BYE ME FUI,cutin25s/seeded_wrong_2s,23975,23975,0,0,40500,0,2,False,True,7,11,26.5,4.0,4.6,True
+Bad Bunny - BYE ME FUI,blend8s/cold,-1025,-1028,-3,-3,31000,0,3,True,True,4,11,10.4,2.7,3.2,True
+Bad Bunny - BYE ME FUI,blend8s/seeded_correct,-1025,-1025,0,0,23250,0,2,False,True,6,11,15.9,2.8,3.3,True
+Bad Bunny - BYE ME FUI,blend8s/seeded_wrong_2s,-1025,-1025,0,0,31000,0,2,False,True,6,11,15.7,2.7,3.3,True
+Bad Bunny - BOOKER T,off0/cold,-1075,-1075,0,0,16000,0,3,False,True,3,4,6.9,2.1,2.7,True
+Bad Bunny - BOOKER T,off0/seeded_correct,-1075,-1075,0,0,11500,0,3,False,True,3,4,6.2,1.8,2.6,True
+Bad Bunny - BOOKER T,off0/seeded_wrong_2s,-1075,-1075,0,0,16000,0,3,False,True,3,4,6.3,1.8,2.6,True
+Bad Bunny - BOOKER T,off+200/cold,-875,-875,0,0,11500,0,3,False,True,3,4,6.4,1.9,2.7,True
+Bad Bunny - BOOKER T,off+200/seeded_correct,-875,-875,0,0,11500,0,3,False,True,3,4,6.3,1.9,2.6,True
+Bad Bunny - BOOKER T,off+200/seeded_wrong_2s,-875,-875,0,0,16000,0,3,False,True,3,4,6.3,1.9,2.6,True
+Bad Bunny - BOOKER T,off-200/cold,-1275,-1275,0,0,16000,0,3,False,True,3,4,6.9,2.0,2.8,True
+Bad Bunny - BOOKER T,off-200/seeded_correct,-1275,-1275,0,0,11500,0,3,False,True,3,4,6.7,1.9,2.9,True
+Bad Bunny - BOOKER T,off-200/seeded_wrong_2s,-1275,-1275,0,0,16000,0,3,False,True,3,4,6.4,1.9,2.7,True
+Bad Bunny - BOOKER T,off+2s/cold,925,925,0,0,11500,0,3,False,True,3,4,7.1,2.1,2.9,True
+Bad Bunny - BOOKER T,off+2s/seeded_correct,925,925,0,0,11500,0,3,False,True,3,4,6.6,2.0,2.8,True
+Bad Bunny - BOOKER T,off+2s/seeded_wrong_2s,925,925,0,0,16000,0,3,False,True,3,4,6.6,2.0,2.8,True
+Bad Bunny - BOOKER T,off-2s/cold,-3075,1125,4200,4200,,2,2,False,True,4,4,9.3,2.4,2.9,False
+Bad Bunny - BOOKER T,off-2s/seeded_correct,-3075,-3075,0,0,11500,0,3,False,False,4,4,8.9,2.2,2.8,True
+Bad Bunny - BOOKER T,off-2s/seeded_wrong_2s,-3075,1125,4200,4200,,2,2,False,True,4,4,9.0,2.2,2.8,False
+Bad Bunny - BOOKER T,off+10s/cold,8925,,,-8925,,0,0,False,False,4,4,11.3,2.8,3.4,False
+Bad Bunny - BOOKER T,off+10s/seeded_correct,8925,8925,0,0,11500,0,3,False,True,3,4,8.2,2.5,3.3,True
+Bad Bunny - BOOKER T,off+10s/seeded_wrong_2s,8925,,,2000,,0,0,False,False,4,4,11.1,2.8,3.4,False
+Bad Bunny - BOOKER T,off-10s/cold,-11075,,,11075,,0,0,False,False,4,4,7.5,1.9,2.5,False
+Bad Bunny - BOOKER T,off-10s/seeded_correct,-11075,,,0,,0,0,False,False,4,4,7.4,1.9,2.5,False
+Bad Bunny - BOOKER T,off-10s/seeded_wrong_2s,-11075,,,2000,,0,0,False,False,4,4,7.0,1.8,2.3,False
+Bad Bunny - BOOKER T,off+25s/cold,23925,-1350,-25275,-25275,,1,1,False,False,4,4,14.5,3.6,4.2,False
+Bad Bunny - BOOKER T,off+25s/seeded_correct,23925,23925,0,0,11500,0,3,False,True,3,4,10.6,3.5,3.9,True
+Bad Bunny - BOOKER T,off+25s/seeded_wrong_2s,23925,-1350,-25275,-25275,,1,1,False,False,4,4,14.1,3.6,4.1,False
+Bad Bunny - BOOKER T,off-25s/cold,-26075,-825,25250,25250,,2,2,False,False,2,4,3.5,1.7,1.8,False
+Bad Bunny - BOOKER T,off-25s/seeded_correct,-26075,-825,25250,25250,,2,2,False,False,2,4,3.4,1.7,1.8,False
+Bad Bunny - BOOKER T,off-25s/seeded_wrong_2s,-26075,-825,25250,25250,,2,2,False,False,2,4,3.3,1.6,1.7,False
+Bad Bunny - BOOKER T,noise0/cold,-1075,-1075,0,0,16000,0,3,False,True,3,4,6.2,1.8,2.6,True
+Bad Bunny - BOOKER T,noise0/seeded_correct,-1075,-1075,0,0,11500,0,3,False,True,3,4,5.9,1.8,2.5,True
+Bad Bunny - BOOKER T,noise0/seeded_wrong_2s,-1075,-1075,0,0,16000,0,3,False,True,3,4,6.0,1.8,2.5,True
+Bad Bunny - BOOKER T,noise-2s/cold,-3075,1125,4200,4200,,2,2,False,True,4,4,8.5,2.1,2.7,False
+Bad Bunny - BOOKER T,noise-2s/seeded_correct,-3075,-3075,0,0,11500,0,3,False,False,4,4,8.8,2.2,2.7,True
+Bad Bunny - BOOKER T,noise-2s/seeded_wrong_2s,-3075,1125,4200,4200,,2,2,False,True,4,4,8.5,2.1,2.6,False
+Bad Bunny - BOOKER T,cutin5s/cold,3925,3925,0,0,11500,0,2,False,True,3,4,6.9,2.0,2.8,True
+Bad Bunny - BOOKER T,cutin5s/seeded_correct,3925,3925,0,0,11500,0,2,False,True,3,4,6.7,2.0,2.8,True
+Bad Bunny - BOOKER T,cutin5s/seeded_wrong_2s,3925,3925,0,0,11500,0,2,False,True,3,4,6.7,2.0,2.7,True
+Bad Bunny - BOOKER T,cutin15s/cold,13925,18125,4200,4200,,3,3,False,False,4,4,11.2,2.8,3.3,False
+Bad Bunny - BOOKER T,cutin15s/seeded_correct,13925,13925,0,0,34250,1,4,False,False,4,4,11.4,2.9,3.4,True
+Bad Bunny - BOOKER T,cutin15s/seeded_wrong_2s,13925,18125,4200,4200,,3,3,False,False,4,4,11.1,2.7,3.4,False
+Bad Bunny - BOOKER T,cutin25s/cold,23925,7075,-16850,-16850,,1,1,False,False,4,4,13.2,3.2,3.9,False
+Bad Bunny - BOOKER T,cutin25s/seeded_correct,23925,7075,-16850,-16850,,1,1,False,False,4,4,13.4,3.3,3.9,False
+Bad Bunny - BOOKER T,cutin25s/seeded_wrong_2s,23925,7075,-16850,-16850,,1,1,False,False,4,4,12.9,3.2,3.9,False
+Bad Bunny - BOOKER T,blend8s/cold,-1075,-1075,0,0,16000,0,3,False,True,3,4,6.4,1.9,2.6,True
+Bad Bunny - BOOKER T,blend8s/seeded_correct,-1075,-1075,0,0,11500,0,3,False,True,3,4,6.1,1.8,2.5,True
+Bad Bunny - BOOKER T,blend8s/seeded_wrong_2s,-1075,-1075,0,0,16000,0,3,False,True,3,4,6.3,1.9,2.7,True
+Bad Bunny - MONACO,off0/cold,-619,0,619,619,,2,2,False,False,6,6,19.4,3.2,4.9,False
+Bad Bunny - MONACO,off0/seeded_correct,-619,0,619,619,,2,2,False,False,6,6,18.0,3.1,4.6,False
+Bad Bunny - MONACO,off0/seeded_wrong_2s,-619,0,619,619,,2,2,False,False,6,6,18.0,3.0,4.6,False
+Bad Bunny - MONACO,off+200/cold,-419,200,619,619,,2,2,False,True,2,6,3.9,1.9,2.1,False
+Bad Bunny - MONACO,off+200/seeded_correct,-419,200,619,619,,2,2,False,False,6,6,18.6,3.2,4.7,False
+Bad Bunny - MONACO,off+200/seeded_wrong_2s,-419,200,619,619,,2,2,False,False,6,6,18.1,3.0,4.6,False
+Bad Bunny - MONACO,off-200/cold,-819,-200,619,619,,2,2,False,True,2,6,4.2,2.1,2.2,False
+Bad Bunny - MONACO,off-200/seeded_correct,-819,-200,619,619,,2,2,False,False,6,6,18.9,3.3,4.8,False
+Bad Bunny - MONACO,off-200/seeded_wrong_2s,-819,-200,619,619,,2,2,False,False,6,6,18.5,3.2,4.6,False
+Bad Bunny - MONACO,off+2s/cold,1381,2000,619,619,,2,2,False,False,6,6,19.7,3.2,5.1,False
+Bad Bunny - MONACO,off+2s/seeded_correct,1381,2000,619,619,,2,2,False,False,6,6,18.8,3.1,4.8,False
+Bad Bunny - MONACO,off+2s/seeded_wrong_2s,1381,2000,619,619,,2,2,False,False,6,6,19.4,3.2,5.3,False
+Bad Bunny - MONACO,off-2s/cold,-2619,-2000,619,619,,2,2,False,False,6,6,18.7,3.0,5.0,False
+Bad Bunny - MONACO,off-2s/seeded_correct,-2619,-2000,619,619,,2,2,False,False,6,6,17.6,3.0,4.5,False
+Bad Bunny - MONACO,off-2s/seeded_wrong_2s,-2619,-2000,619,619,,2,2,False,False,6,6,17.7,3.0,4.6,False
+Bad Bunny - MONACO,off+10s/cold,9381,2475,-6906,-9381,,1,1,False,False,6,6,22.1,3.7,5.5,False
+Bad Bunny - MONACO,off+10s/seeded_correct,9381,9381,0,0,9000,0,2,False,True,5,6,15.4,3.4,3.7,True
+Bad Bunny - MONACO,off+10s/seeded_wrong_2s,9381,,,2000,,0,0,False,False,6,6,21.4,3.5,5.5,False
+Bad Bunny - MONACO,off-10s/cold,-10619,,,10369,,0,0,False,False,5,6,14.4,2.6,4.5,False
+Bad Bunny - MONACO,off-10s/seeded_correct,-10619,,,0,,0,0,False,False,5,6,13.7,2.5,4.2,False
+Bad Bunny - MONACO,off-10s/seeded_wrong_2s,-10619,,,2000,,0,0,False,False,5,6,13.7,2.5,4.3,False
+Bad Bunny - MONACO,off+25s/cold,24381,,,-24131,,0,0,False,False,6,6,26.9,4.5,6.3,False
+Bad Bunny - MONACO,off+25s/seeded_correct,24381,24381,0,0,9000,0,2,False,True,5,6,18.9,4.0,4.6,True
+Bad Bunny - MONACO,off+25s/seeded_wrong_2s,24381,,,2000,,0,0,False,False,6,6,25.1,4.2,5.9,False
+Bad Bunny - MONACO,off-25s/cold,-25619,,,25619,,0,0,False,False,4,6,10.7,2.0,4.4,False
+Bad Bunny - MONACO,off-25s/seeded_correct,-25619,,,0,,0,0,False,False,4,6,9.4,1.9,3.6,False
+Bad Bunny - MONACO,off-25s/seeded_wrong_2s,-25619,,,2000,,0,0,False,False,4,6,9.6,2.0,3.7,False
+Bad Bunny - MONACO,noise0/cold,-619,0,619,619,,2,2,False,False,6,6,17.3,2.8,4.3,False
+Bad Bunny - MONACO,noise0/seeded_correct,-619,0,619,619,,2,2,False,False,6,6,17.3,2.9,4.2,False
+Bad Bunny - MONACO,noise0/seeded_wrong_2s,-619,0,619,619,,2,2,False,False,6,6,16.8,2.8,4.3,False
+Bad Bunny - MONACO,noise-2s/cold,-2619,-2625,-6,-6,45750,0,2,False,False,6,6,16.7,2.8,4.3,True
+Bad Bunny - MONACO,noise-2s/seeded_correct,-2619,-2625,-6,-6,41750,0,1,False,False,6,6,16.5,2.8,4.2,True
+Bad Bunny - MONACO,noise-2s/seeded_wrong_2s,-2619,-2625,-6,-6,45750,0,1,False,False,6,6,16.5,2.8,4.1,True
+Bad Bunny - MONACO,cutin5s/cold,4381,5000,619,619,,1,1,False,False,6,6,20.2,3.4,5.0,False
+Bad Bunny - MONACO,cutin5s/seeded_correct,4381,5000,619,619,,1,1,False,False,6,6,18.7,3.1,4.6,False
+Bad Bunny - MONACO,cutin5s/seeded_wrong_2s,4381,5000,619,619,,1,1,False,False,6,6,18.8,3.1,4.7,False
+Bad Bunny - MONACO,cutin15s/cold,14381,14375,-6,-6,45750,0,2,False,True,6,6,20.7,3.4,4.9,True
+Bad Bunny - MONACO,cutin15s/seeded_correct,14381,,,619,,0,0,False,False,6,6,20.1,3.3,4.8,False
+Bad Bunny - MONACO,cutin15s/seeded_wrong_2s,14381,14375,-6,-6,45750,0,2,False,True,6,6,20.1,3.3,4.8,True
+Bad Bunny - MONACO,cutin25s/cold,24381,24375,-6,-6,45750,0,2,False,True,6,6,24.9,4.2,5.8,True
+Bad Bunny - MONACO,cutin25s/seeded_correct,24381,24381,0,0,37250,0,2,False,True,6,6,24.0,4.1,5.6,True
+Bad Bunny - MONACO,cutin25s/seeded_wrong_2s,24381,24375,-6,-6,45750,0,2,False,True,6,6,24.5,4.1,5.9,True
+Bad Bunny - MONACO,blend8s/cold,-619,0,619,619,,1,1,False,False,6,6,18.8,3.1,4.7,False
+Bad Bunny - MONACO,blend8s/seeded_correct,-619,0,619,619,,1,1,False,False,6,6,17.7,3.0,4.4,False
+Bad Bunny - MONACO,blend8s/seeded_wrong_2s,-619,0,619,619,,1,1,False,False,6,6,17.9,3.0,4.5,False
+Bad Bunny - HACIENDO QUE ME AMAS,off0/cold,-1050,-1053,-3,1050,,1,3,True,False,8,8,39.7,3.1,9.4,True
+Bad Bunny - HACIENDO QUE ME AMAS,off0/seeded_correct,-1050,0,1050,1050,,1,1,False,False,8,8,37.7,3.1,8.8,False
+Bad Bunny - HACIENDO QUE ME AMAS,off0/seeded_wrong_2s,-1050,0,1050,1050,,1,1,False,False,8,8,39.1,3.1,9.1,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+200/cold,-850,-851,-1,1050,,1,3,True,False,8,8,40.0,3.2,9.3,True
+Bad Bunny - HACIENDO QUE ME AMAS,off+200/seeded_correct,-850,200,1050,1050,,1,1,False,False,8,8,40.1,3.2,9.4,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+200/seeded_wrong_2s,-850,200,1050,1050,,1,1,False,False,8,8,39.2,3.1,9.4,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-200/cold,-1250,-1244,6,1050,,1,3,True,False,8,8,40.2,3.3,9.2,True
+Bad Bunny - HACIENDO QUE ME AMAS,off-200/seeded_correct,-1250,-200,1050,1050,,1,1,False,False,8,8,39.4,3.1,10.0,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-200/seeded_wrong_2s,-1250,-200,1050,1050,,1,1,False,False,8,8,40.0,3.3,9.5,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+2s/cold,950,950,0,1050,,1,2,True,False,8,8,39.8,3.2,9.3,True
+Bad Bunny - HACIENDO QUE ME AMAS,off+2s/seeded_correct,950,2000,1050,1050,,1,1,False,False,8,8,39.8,3.3,9.3,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+2s/seeded_wrong_2s,950,2000,1050,1050,,1,1,False,False,8,8,39.2,3.2,9.3,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-2s/cold,-3050,-3044,6,1050,,1,3,True,False,8,8,39.7,3.1,9.7,True
+Bad Bunny - HACIENDO QUE ME AMAS,off-2s/seeded_correct,-3050,-2000,1050,1050,,1,1,False,False,8,8,37.9,3.2,9.0,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-2s/seeded_wrong_2s,-3050,-2000,1050,1050,,1,1,False,False,8,8,37.5,3.1,9.0,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+10s/cold,8950,3300,-5650,-8950,,1,1,False,False,8,8,44.6,3.8,10.0,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+10s/seeded_correct,8950,8950,0,0,24500,0,2,False,False,8,8,43.3,3.7,10.0,True
+Bad Bunny - HACIENDO QUE ME AMAS,off+10s/seeded_wrong_2s,8950,3300,-5650,2000,,1,1,False,False,8,8,42.4,3.7,9.8,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-10s/cold,-11050,,,11275,,0,0,False,False,7,8,35.5,2.8,9.0,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-10s/seeded_correct,-11050,,,0,,0,0,False,False,7,8,33.4,2.7,8.8,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-10s/seeded_wrong_2s,-11050,,,2000,,0,0,False,False,7,8,32.8,2.8,8.7,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+25s/cold,23950,,,-23950,,0,0,False,False,8,8,51.1,4.7,10.8,False
+Bad Bunny - HACIENDO QUE ME AMAS,off+25s/seeded_correct,23950,23950,0,0,24500,0,2,False,False,8,8,49.3,4.4,10.8,True
+Bad Bunny - HACIENDO QUE ME AMAS,off+25s/seeded_wrong_2s,23950,,,2000,,0,0,False,False,8,8,49.4,4.4,10.9,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-25s/cold,-26050,,,25400,,0,0,False,False,6,8,27.4,4.3,7.9,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-25s/seeded_correct,-26050,,,0,,0,0,False,False,6,8,26.4,4.0,7.9,False
+Bad Bunny - HACIENDO QUE ME AMAS,off-25s/seeded_wrong_2s,-26050,,,2000,,0,0,False,False,6,8,26.5,4.1,7.8,False
+Bad Bunny - HACIENDO QUE ME AMAS,noise0/cold,-1050,-1053,-3,1050,,1,3,True,False,8,8,33.8,2.9,7.9,True
+Bad Bunny - HACIENDO QUE ME AMAS,noise0/seeded_correct,-1050,0,1050,1050,,1,1,False,False,8,8,32.6,2.9,7.4,False
+Bad Bunny - HACIENDO QUE ME AMAS,noise0/seeded_wrong_2s,-1050,0,1050,1050,,1,1,False,False,8,8,32.6,2.9,7.4,False
+Bad Bunny - HACIENDO QUE ME AMAS,noise-2s/cold,-3050,-3044,6,1050,,1,3,True,False,8,8,33.3,3.0,7.6,True
+Bad Bunny - HACIENDO QUE ME AMAS,noise-2s/seeded_correct,-3050,-2000,1050,1050,,1,1,False,False,8,8,32.7,2.9,7.5,False
+Bad Bunny - HACIENDO QUE ME AMAS,noise-2s/seeded_wrong_2s,-3050,-2000,1050,1050,,1,1,False,False,8,8,32.6,2.9,7.6,False
+Bad Bunny - HACIENDO QUE ME AMAS,cutin5s/cold,3950,3947,-3,-3,77150,0,3,True,True,6,8,20.6,3.2,5.8,True
+Bad Bunny - HACIENDO QUE ME AMAS,cutin5s/seeded_correct,3950,3950,0,0,24500,0,2,False,False,8,8,35.4,3.2,7.9,True
+Bad Bunny - HACIENDO QUE ME AMAS,cutin5s/seeded_wrong_2s,3950,3950,0,0,35750,0,3,False,False,8,8,35.1,3.3,7.9,True
+Bad Bunny - HACIENDO QUE ME AMAS,cutin15s/cold,13950,-8575,-22525,-22525,,1,1,False,False,8,8,36.9,3.4,8.0,False
+Bad Bunny - HACIENDO QUE ME AMAS,cutin15s/seeded_correct,13950,-8575,-22525,-22525,,1,1,False,False,8,8,36.8,3.4,8.0,False
+Bad Bunny - HACIENDO QUE ME AMAS,cutin15s/seeded_wrong_2s,13950,-8575,-22525,-22525,,1,1,False,False,8,8,36.6,3.5,7.9,False
+Bad Bunny - HACIENDO QUE ME AMAS,cutin25s/cold,23950,23950,0,-23950,,0,1,False,False,8,8,43.9,4.3,9.0,True
+Bad Bunny - HACIENDO QUE ME AMAS,cutin25s/seeded_correct,23950,23950,0,0,35750,0,1,False,False,8,8,42.4,4.1,8.8,True
+Bad Bunny - HACIENDO QUE ME AMAS,cutin25s/seeded_wrong_2s,23950,23950,0,0,40500,0,1,False,False,8,8,43.4,4.2,9.3,True
+Bad Bunny - HACIENDO QUE ME AMAS,blend8s/cold,-1050,-1053,-3,-3,35750,0,3,True,True,6,8,20.0,2.9,5.8,True
+Bad Bunny - HACIENDO QUE ME AMAS,blend8s/seeded_correct,-1050,-1050,0,0,24500,0,2,False,False,8,8,34.4,3.2,7.8,True
+Bad Bunny - HACIENDO QUE ME AMAS,blend8s/seeded_wrong_2s,-1050,-1050,0,0,35750,0,3,False,False,8,8,34.3,3.0,7.9,True
+Bad Bunny - MALDITA POBREZA,off0/cold,-1000,0,1000,1000,,1,1,False,False,5,5,14.3,3.2,3.3,False
+Bad Bunny - MALDITA POBREZA,off0/seeded_correct,-1000,0,1000,1000,,1,1,False,False,5,5,13.6,3.0,3.3,False
+Bad Bunny - MALDITA POBREZA,off0/seeded_wrong_2s,-1000,0,1000,1000,,1,1,False,False,5,5,13.3,2.9,3.2,False
+Bad Bunny - MALDITA POBREZA,off+200/cold,-800,200,1000,1000,,1,1,False,False,5,5,14.7,3.3,3.4,False
+Bad Bunny - MALDITA POBREZA,off+200/seeded_correct,-800,200,1000,1000,,1,1,False,False,5,5,13.7,3.0,3.3,False
+Bad Bunny - MALDITA POBREZA,off+200/seeded_wrong_2s,-800,200,1000,1000,,1,1,False,False,5,5,13.4,2.9,3.3,False
+Bad Bunny - MALDITA POBREZA,off-200/cold,-1200,-200,1000,1000,,1,1,False,False,5,5,13.9,3.1,3.3,False
+Bad Bunny - MALDITA POBREZA,off-200/seeded_correct,-1200,-200,1000,1000,,1,1,False,False,5,5,13.5,2.9,3.2,False
+Bad Bunny - MALDITA POBREZA,off-200/seeded_wrong_2s,-1200,-200,1000,1000,,1,1,False,False,5,5,13.3,2.9,3.2,False
+Bad Bunny - MALDITA POBREZA,off+2s/cold,1000,2000,1000,1000,,1,1,False,False,5,5,15.0,3.4,3.5,False
+Bad Bunny - MALDITA POBREZA,off+2s/seeded_correct,1000,2000,1000,1000,,1,1,False,False,5,5,13.9,3.0,3.3,False
+Bad Bunny - MALDITA POBREZA,off+2s/seeded_wrong_2s,1000,2000,1000,1000,,1,1,False,False,5,5,13.9,3.0,3.3,False
+Bad Bunny - MALDITA POBREZA,off-2s/cold,-3000,-2000,1000,1000,,1,1,False,False,5,5,13.9,3.1,3.3,False
+Bad Bunny - MALDITA POBREZA,off-2s/seeded_correct,-3000,-2000,1000,1000,,1,1,False,False,5,5,13.2,2.9,3.2,False
+Bad Bunny - MALDITA POBREZA,off-2s/seeded_wrong_2s,-3000,-2000,1000,1000,,1,1,False,False,5,5,12.9,2.8,3.2,False
+Bad Bunny - MALDITA POBREZA,off+10s/cold,9000,,,-7225,,0,0,False,False,5,5,17.1,3.8,4.1,False
+Bad Bunny - MALDITA POBREZA,off+10s/seeded_correct,9000,9000,0,0,25750,0,2,False,False,5,5,15.9,3.4,3.7,True
+Bad Bunny - MALDITA POBREZA,off+10s/seeded_wrong_2s,9000,,,2000,,0,0,False,False,5,5,15.5,3.4,3.6,False
+Bad Bunny - MALDITA POBREZA,off-10s/cold,-11000,,,11000,,0,0,False,False,4,5,10.2,2.7,2.8,False
+Bad Bunny - MALDITA POBREZA,off-10s/seeded_correct,-11000,,,0,,0,0,False,False,4,5,9.7,2.5,2.7,False
+Bad Bunny - MALDITA POBREZA,off-10s/seeded_wrong_2s,-11000,,,2000,,0,0,False,False,4,5,9.4,2.4,2.7,False
+Bad Bunny - MALDITA POBREZA,off+25s/cold,24000,,,-24000,,0,0,False,False,5,5,21.0,4.4,5.1,False
+Bad Bunny - MALDITA POBREZA,off+25s/seeded_correct,24000,24000,0,0,25750,0,2,False,False,5,5,19.7,4.1,4.4,True
+Bad Bunny - MALDITA POBREZA,off+25s/seeded_wrong_2s,24000,,,2000,,0,0,False,False,5,5,19.4,4.0,4.5,False
+Bad Bunny - MALDITA POBREZA,off-25s/cold,-26000,,,26000,,0,0,False,False,4,5,7.3,1.9,2.1,False
+Bad Bunny - MALDITA POBREZA,off-25s/seeded_correct,-26000,,,0,,0,0,False,False,4,5,6.8,1.8,2.0,False
+Bad Bunny - MALDITA POBREZA,off-25s/seeded_wrong_2s,-26000,,,2000,,0,0,False,False,4,5,6.7,1.8,2.0,False
+Bad Bunny - MALDITA POBREZA,noise0/cold,-1000,0,1000,1000,,1,1,False,False,5,5,12.7,2.8,3.0,False
+Bad Bunny - MALDITA POBREZA,noise0/seeded_correct,-1000,0,1000,1000,,1,1,False,False,5,5,12.8,2.8,3.0,False
+Bad Bunny - MALDITA POBREZA,noise0/seeded_wrong_2s,-1000,0,1000,1000,,1,1,False,False,5,5,12.4,2.7,3.0,False
+Bad Bunny - MALDITA POBREZA,noise-2s/cold,-3000,-2000,1000,1000,,1,1,False,False,5,5,12.3,2.7,3.0,False
+Bad Bunny - MALDITA POBREZA,noise-2s/seeded_correct,-3000,-2000,1000,1000,,1,1,False,False,5,5,12.2,2.6,3.0,False
+Bad Bunny - MALDITA POBREZA,noise-2s/seeded_wrong_2s,-3000,-2000,1000,1000,,1,1,False,False,5,5,12.1,2.6,2.9,False
+Bad Bunny - MALDITA POBREZA,cutin5s/cold,4000,4000,0,0,37750,0,2,False,False,5,5,14.9,3.3,3.4,True
+Bad Bunny - MALDITA POBREZA,cutin5s/seeded_correct,4000,4000,0,0,25750,0,2,False,False,5,5,14.3,3.1,3.4,True
+Bad Bunny - MALDITA POBREZA,cutin5s/seeded_wrong_2s,4000,4000,0,0,37750,0,2,False,False,5,5,14.0,3.1,3.4,True
+Bad Bunny - MALDITA POBREZA,cutin15s/cold,14000,14000,0,0,37750,0,2,False,False,5,5,15.6,3.5,3.6,True
+Bad Bunny - MALDITA POBREZA,cutin15s/seeded_correct,14000,14000,0,0,25750,0,2,False,False,5,5,15.1,3.2,3.6,True
+Bad Bunny - MALDITA POBREZA,cutin15s/seeded_wrong_2s,14000,14000,0,0,37750,0,2,False,False,5,5,15.1,3.2,3.5,True
+Bad Bunny - MALDITA POBREZA,cutin25s/cold,24000,24000,0,0,37750,0,2,False,False,5,5,19.0,4.1,4.3,True
+Bad Bunny - MALDITA POBREZA,cutin25s/seeded_correct,24000,24000,0,0,37750,0,2,False,False,5,5,18.2,3.9,4.2,True
+Bad Bunny - MALDITA POBREZA,cutin25s/seeded_wrong_2s,24000,24000,0,0,37750,0,2,False,False,5,5,18.0,4.0,4.2,True
+Bad Bunny - MALDITA POBREZA,blend8s/cold,-1000,-1000,0,0,25750,0,2,False,False,5,5,13.6,3.0,3.2,True
+Bad Bunny - MALDITA POBREZA,blend8s/seeded_correct,-1000,-1000,0,0,25750,0,2,False,False,5,5,13.2,2.9,3.2,True
+Bad Bunny - MALDITA POBREZA,blend8s/seeded_wrong_2s,-1000,-1000,0,0,37750,0,2,False,False,5,5,12.8,2.8,3.1,True
+Bad Bunny - KETU TeCRÉ,off0/cold,-1025,-1025,0,1025,,1,3,True,False,19,19,104.5,4.8,10.5,True
+Bad Bunny - KETU TeCRÉ,off0/seeded_correct,-1025,-1025,0,1025,,1,2,False,False,19,19,108.5,5.2,11.9,True
+Bad Bunny - KETU TeCRÉ,off0/seeded_wrong_2s,-1025,-1025,0,1025,,1,2,False,False,19,19,105.9,5.1,11.2,True
+Bad Bunny - KETU TeCRÉ,off+200/cold,-825,-825,0,1025,,1,3,True,False,19,19,106.9,5.0,11.1,True
+Bad Bunny - KETU TeCRÉ,off+200/seeded_correct,-825,-825,0,1025,,1,2,False,False,19,19,107.1,5.1,11.4,True
+Bad Bunny - KETU TeCRÉ,off+200/seeded_wrong_2s,-825,-825,0,1025,,1,2,False,False,19,19,107.2,5.1,11.7,True
+Bad Bunny - KETU TeCRÉ,off-200/cold,-1225,-1226,-1,1025,,1,3,True,False,19,19,106.4,5.0,11.0,True
+Bad Bunny - KETU TeCRÉ,off-200/seeded_correct,-1225,-1225,0,1025,,1,2,False,False,19,19,105.4,5.1,11.0,True
+Bad Bunny - KETU TeCRÉ,off-200/seeded_wrong_2s,-1225,-1225,0,1025,,1,2,False,False,19,19,105.9,5.2,11.2,True
+Bad Bunny - KETU TeCRÉ,off+2s/cold,975,975,0,1025,,1,3,True,False,19,19,107.6,5.0,11.6,True
+Bad Bunny - KETU TeCRÉ,off+2s/seeded_correct,975,975,0,1025,,1,2,False,False,19,19,111.6,5.4,11.7,True
+Bad Bunny - KETU TeCRÉ,off+2s/seeded_wrong_2s,975,975,0,1025,,1,2,False,False,19,19,109.3,5.1,11.8,True
+Bad Bunny - KETU TeCRÉ,off-2s/cold,-3025,-3031,-6,1025,,1,3,True,False,19,19,104.5,4.8,11.1,True
+Bad Bunny - KETU TeCRÉ,off-2s/seeded_correct,-3025,-2000,1025,1025,,1,1,False,False,19,19,103.9,4.8,10.8,False
+Bad Bunny - KETU TeCRÉ,off-2s/seeded_wrong_2s,-3025,-2000,1025,1025,,1,1,False,False,19,19,104.0,5.0,11.0,False
+Bad Bunny - KETU TeCRÉ,off+10s/cold,8975,2050,-6925,-6925,,1,1,False,False,19,19,116.3,5.6,12.0,False
+Bad Bunny - KETU TeCRÉ,off+10s/seeded_correct,8975,8975,0,0,22000,0,2,False,True,7,19,23.6,3.1,4.3,True
+Bad Bunny - KETU TeCRÉ,off+10s/seeded_wrong_2s,8975,2050,-6925,-6925,,1,1,False,False,19,19,114.3,5.3,11.9,False
+Bad Bunny - KETU TeCRÉ,off-10s/cold,-11025,500,11525,11525,,1,1,False,False,18,19,98.5,4.7,10.8,False
+Bad Bunny - KETU TeCRÉ,off-10s/seeded_correct,-11025,,,0,,0,0,False,False,18,19,94.4,4.6,10.4,False
+Bad Bunny - KETU TeCRÉ,off-10s/seeded_wrong_2s,-11025,,,2000,,0,0,False,False,18,19,94.4,4.6,10.2,False
+Bad Bunny - KETU TeCRÉ,off+25s/cold,23975,,,-23675,,0,0,False,False,19,19,130.5,6.1,12.6,False
+Bad Bunny - KETU TeCRÉ,off+25s/seeded_correct,23975,23975,0,0,22000,0,2,False,True,7,19,28.0,4.1,4.9,True
+Bad Bunny - KETU TeCRÉ,off+25s/seeded_wrong_2s,23975,3200,-20775,-20775,,2,2,False,True,9,19,38.8,4.3,5.7,False
+Bad Bunny - KETU TeCRÉ,off-25s/cold,-26025,-1800,24225,24225,,2,2,False,False,17,19,82.8,4.1,9.5,False
+Bad Bunny - KETU TeCRÉ,off-25s/seeded_correct,-26025,1675,27700,0,,1,1,False,False,17,19,81.0,4.1,9.6,False
+Bad Bunny - KETU TeCRÉ,off-25s/seeded_wrong_2s,-26025,1675,27700,2000,,1,1,False,False,17,19,83.1,4.2,9.5,False
+Bad Bunny - KETU TeCRÉ,noise0/cold,-1025,-1025,0,1025,,1,3,True,False,19,19,101.1,4.7,10.5,True
+Bad Bunny - KETU TeCRÉ,noise0/seeded_correct,-1025,-1025,0,1025,,1,2,False,False,19,19,99.9,4.8,10.7,True
+Bad Bunny - KETU TeCRÉ,noise0/seeded_wrong_2s,-1025,-1025,0,1025,,1,2,False,False,19,19,100.8,4.7,10.7,True
+Bad Bunny - KETU TeCRÉ,noise-2s/cold,-3025,-3031,-6,1025,,1,3,True,False,19,19,98.6,4.7,10.4,True
+Bad Bunny - KETU TeCRÉ,noise-2s/seeded_correct,-3025,-2000,1025,1025,,1,1,False,False,19,19,98.4,4.7,10.2,False
+Bad Bunny - KETU TeCRÉ,noise-2s/seeded_wrong_2s,-3025,-2000,1025,1025,,1,1,False,False,19,19,98.2,4.6,10.5,False
+Bad Bunny - KETU TeCRÉ,cutin5s/cold,3975,3972,-3,-3,35650,0,3,True,True,6,19,17.1,2.7,3.8,True
+Bad Bunny - KETU TeCRÉ,cutin5s/seeded_correct,3975,3975,0,0,22000,0,2,False,True,7,19,20.8,2.8,4.1,True
+Bad Bunny - KETU TeCRÉ,cutin5s/seeded_wrong_2s,3975,3975,0,0,26750,0,2,False,True,7,19,20.5,2.7,4.0,True
+Bad Bunny - KETU TeCRÉ,cutin15s/cold,13975,13975,0,0,56500,0,2,False,True,7,19,22.9,3.0,4.3,True
+Bad Bunny - KETU TeCRÉ,cutin15s/seeded_correct,13975,13975,0,0,22000,0,2,False,True,7,19,22.4,3.0,4.3,True
+Bad Bunny - KETU TeCRÉ,cutin15s/seeded_wrong_2s,13975,13975,0,0,26750,0,2,False,True,7,19,22.4,3.0,4.3,True
+Bad Bunny - KETU TeCRÉ,cutin25s/cold,23975,23975,0,0,56500,0,2,False,True,8,19,32.9,4.0,5.4,True
+Bad Bunny - KETU TeCRÉ,cutin25s/seeded_correct,23975,23975,0,0,31250,0,2,False,True,8,19,32.1,3.9,5.3,True
+Bad Bunny - KETU TeCRÉ,cutin25s/seeded_wrong_2s,23975,23975,0,0,41750,0,2,False,True,8,19,32.2,4.1,5.2,True
+Bad Bunny - KETU TeCRÉ,blend8s/cold,-1025,-1028,-3,-3,26750,0,1,True,True,5,19,12.5,2.4,3.2,True
+Bad Bunny - KETU TeCRÉ,blend8s/seeded_correct,-1025,-1025,0,0,22000,0,2,False,True,7,19,19.7,2.6,4.0,True
+Bad Bunny - KETU TeCRÉ,blend8s/seeded_wrong_2s,-1025,-1025,0,0,26750,0,2,False,True,7,19,19.7,2.6,4.0,True
+Bad Bunny - Vete,off0/cold,-1000,-1016,-16,-16,23500,0,2,True,True,3,9,7.2,2.4,2.9,True
+Bad Bunny - Vete,off0/seeded_correct,-1000,-1000,0,0,9000,0,2,False,True,5,9,12.8,2.7,3.2,True
+Bad Bunny - Vete,off0/seeded_wrong_2s,-1000,-1000,0,0,33250,0,3,False,True,6,9,16.4,2.8,3.6,True
+Bad Bunny - Vete,off+200/cold,-800,-801,-1,-1,23500,0,3,True,True,3,9,7.1,2.3,3.0,True
+Bad Bunny - Vete,off+200/seeded_correct,-800,-800,0,0,9000,0,2,False,True,5,9,13.1,2.7,3.3,True
+Bad Bunny - Vete,off+200/seeded_wrong_2s,-800,-800,0,0,33250,0,3,False,True,6,9,16.4,2.9,3.6,True
+Bad Bunny - Vete,off-200/cold,-1200,-1194,6,6,32300,0,3,True,True,3,9,6.9,2.2,2.9,True
+Bad Bunny - Vete,off-200/seeded_correct,-1200,-1200,0,0,9000,0,2,False,True,5,9,12.8,2.7,3.2,True
+Bad Bunny - Vete,off-200/seeded_wrong_2s,-1200,-1200,0,0,33250,0,3,False,True,6,9,16.5,2.8,3.6,True
+Bad Bunny - Vete,off+2s/cold,1000,1000,0,0,23500,0,3,True,True,3,9,7.7,2.3,3.3,True
+Bad Bunny - Vete,off+2s/seeded_correct,1000,1000,0,0,9000,0,2,False,True,5,9,13.7,2.9,3.4,True
+Bad Bunny - Vete,off+2s/seeded_wrong_2s,1000,1000,0,0,33250,0,3,False,True,6,9,17.3,2.9,3.8,True
+Bad Bunny - Vete,off-2s/cold,-3000,-2994,6,6,32300,0,2,True,True,3,9,6.6,2.1,2.8,True
+Bad Bunny - Vete,off-2s/seeded_correct,-3000,-3000,0,0,23500,0,2,False,True,6,9,16.0,2.8,3.5,True
+Bad Bunny - Vete,off-2s/seeded_wrong_2s,-3000,-3000,0,0,33250,0,2,False,True,6,9,16.0,2.8,3.5,True
+Bad Bunny - Vete,off+10s/cold,9000,-1425,-10425,-10425,,2,2,False,False,9,9,41.9,4.0,7.6,False
+Bad Bunny - Vete,off+10s/seeded_correct,9000,9000,0,0,9000,0,2,False,True,5,9,15.6,3.2,3.8,True
+Bad Bunny - Vete,off+10s/seeded_wrong_2s,9000,,,2000,,0,0,False,False,9,9,37.7,3.8,6.5,False
+Bad Bunny - Vete,off-10s/cold,-11000,-550,10450,10450,,2,2,False,False,8,9,30.4,3.0,6.5,False
+Bad Bunny - Vete,off-10s/seeded_correct,-11000,,,0,,0,0,False,False,8,9,27.0,2.9,5.4,False
+Bad Bunny - Vete,off-10s/seeded_wrong_2s,-11000,,,2000,,0,0,False,False,8,9,27.5,2.9,5.6,False
+Bad Bunny - Vete,off+25s/cold,24000,,,-24775,,0,0,False,False,9,9,48.1,4.6,8.2,False
+Bad Bunny - Vete,off+25s/seeded_correct,24000,24000,0,0,9000,0,2,False,True,5,9,18.9,4.0,4.4,True
+Bad Bunny - Vete,off+25s/seeded_wrong_2s,24000,,,2000,,0,0,False,False,9,9,45.5,4.5,7.6,False
+Bad Bunny - Vete,off-25s/cold,-26000,,,26000,,0,0,False,False,7,9,21.7,2.5,5.0,False
+Bad Bunny - Vete,off-25s/seeded_correct,-26000,,,0,,0,0,False,False,7,9,20.8,2.5,4.7,False
+Bad Bunny - Vete,off-25s/seeded_wrong_2s,-26000,,,2000,,0,0,False,False,7,9,20.0,2.4,4.6,False
+Bad Bunny - Vete,noise0/cold,-1000,-1016,-16,-16,23500,0,2,True,True,3,9,6.5,2.2,2.5,True
+Bad Bunny - Vete,noise0/seeded_correct,-1000,-1000,0,0,9000,0,2,False,True,5,9,12.2,2.5,3.1,True
+Bad Bunny - Vete,noise0/seeded_wrong_2s,-1000,-1000,0,0,33250,0,3,False,True,6,9,15.8,2.7,3.3,True
+Bad Bunny - Vete,noise-2s/cold,-3000,-2994,6,6,32300,0,2,True,True,3,9,6.4,2.1,2.6,True
+Bad Bunny - Vete,noise-2s/seeded_correct,-3000,-3000,0,0,23500,0,2,False,True,6,9,15.5,2.7,3.2,True
+Bad Bunny - Vete,noise-2s/seeded_wrong_2s,-3000,-3000,0,0,33250,0,2,False,True,6,9,15.3,2.7,3.2,True
+Bad Bunny - Vete,cutin5s/cold,4000,3997,-3,-3,32300,0,3,True,True,3,9,7.4,2.4,3.0,True
+Bad Bunny - Vete,cutin5s/seeded_correct,4000,4000,0,0,23500,0,3,False,True,6,9,17.2,3.0,3.6,True
+Bad Bunny - Vete,cutin5s/seeded_wrong_2s,4000,4000,0,0,33250,0,3,False,True,6,9,17.0,3.0,3.5,True
+Bad Bunny - Vete,cutin15s/cold,14000,14000,0,0,40500,0,3,False,True,6,9,19.0,3.3,3.8,True
+Bad Bunny - Vete,cutin15s/seeded_correct,14000,14000,0,0,23500,0,3,False,True,6,9,18.7,3.2,3.8,True
+Bad Bunny - Vete,cutin15s/seeded_wrong_2s,14000,14000,0,0,33250,0,3,False,True,6,9,18.7,3.2,3.8,True
+Bad Bunny - Vete,cutin25s/cold,24000,24000,0,0,40500,0,3,False,True,6,9,23.0,4.1,4.5,True
+Bad Bunny - Vete,cutin25s/seeded_correct,24000,24000,0,0,33250,0,3,False,True,6,9,22.3,4.0,4.5,True
+Bad Bunny - Vete,cutin25s/seeded_wrong_2s,24000,24000,0,0,40500,0,3,False,True,6,9,22.1,3.9,4.3,True
+Bad Bunny - Vete,blend8s/cold,-1000,-1016,-16,-16,23500,0,2,True,True,3,9,7.2,2.3,2.9,True
+Bad Bunny - Vete,blend8s/seeded_correct,-1000,-1000,0,0,23500,0,3,False,True,6,9,16.3,2.8,3.5,True
+Bad Bunny - Vete,blend8s/seeded_wrong_2s,-1000,-1000,0,0,33250,0,3,False,True,6,9,16.1,2.8,3.4,True
+"Bad Bunny, Mora - HIBIKI",off0/cold,-1025,0,1025,1025,,1,1,False,True,8,9,36.4,3.2,8.1,False
+"Bad Bunny, Mora - HIBIKI",off0/seeded_correct,-1025,-1025,0,0,25500,0,2,False,True,5,9,13.7,3.0,3.5,True
+"Bad Bunny, Mora - HIBIKI",off0/seeded_wrong_2s,-1025,0,1025,1025,,1,1,False,True,8,9,36.2,3.1,8.1,False
+"Bad Bunny, Mora - HIBIKI",off+200/cold,-825,200,1025,1025,,1,1,False,True,8,9,37.6,3.3,8.4,False
+"Bad Bunny, Mora - HIBIKI",off+200/seeded_correct,-825,-825,0,0,25500,0,2,False,True,5,9,13.4,3.0,3.2,True
+"Bad Bunny, Mora - HIBIKI",off+200/seeded_wrong_2s,-825,200,1025,1025,,1,1,False,True,8,9,37.1,3.2,8.6,False
+"Bad Bunny, Mora - HIBIKI",off-200/cold,-1225,-200,1025,1025,,1,1,False,True,8,9,36.9,3.3,8.7,False
+"Bad Bunny, Mora - HIBIKI",off-200/seeded_correct,-1225,-1225,0,0,25500,0,2,False,True,5,9,13.6,3.0,3.3,True
+"Bad Bunny, Mora - HIBIKI",off-200/seeded_wrong_2s,-1225,-200,1025,1025,,1,1,False,True,8,9,36.2,3.1,8.4,False
+"Bad Bunny, Mora - HIBIKI",off+2s/cold,975,975,0,0,25500,0,2,False,True,5,9,14.2,3.0,3.5,True
+"Bad Bunny, Mora - HIBIKI",off+2s/seeded_correct,975,975,0,0,25500,0,2,False,True,5,9,14.1,3.1,3.3,True
+"Bad Bunny, Mora - HIBIKI",off+2s/seeded_wrong_2s,975,2000,1025,1025,,1,1,False,True,8,9,37.5,3.3,8.6,False
+"Bad Bunny, Mora - HIBIKI",off-2s/cold,-3025,,,3025,,0,0,False,False,9,9,45.6,3.2,9.1,False
+"Bad Bunny, Mora - HIBIKI",off-2s/seeded_correct,-3025,-3025,0,0,44750,0,1,False,False,9,9,45.2,3.3,9.2,True
+"Bad Bunny, Mora - HIBIKI",off-2s/seeded_wrong_2s,-3025,-2000,1025,1025,,1,1,False,False,9,9,45.5,3.2,9.3,False
+"Bad Bunny, Mora - HIBIKI",off+10s/cold,8975,,,-8500,,0,0,False,False,9,9,51.6,3.8,9.9,False
+"Bad Bunny, Mora - HIBIKI",off+10s/seeded_correct,8975,8975,0,0,25500,0,2,False,True,5,9,15.8,3.4,3.8,True
+"Bad Bunny, Mora - HIBIKI",off+10s/seeded_wrong_2s,8975,,,2000,,0,0,False,False,9,9,51.4,3.8,10.4,False
+"Bad Bunny, Mora - HIBIKI",off-10s/cold,-11025,,,11025,,0,0,False,False,8,9,39.9,4.5,8.5,False
+"Bad Bunny, Mora - HIBIKI",off-10s/seeded_correct,-11025,,,0,,0,0,False,False,8,9,39.8,4.4,8.6,False
+"Bad Bunny, Mora - HIBIKI",off-10s/seeded_wrong_2s,-11025,,,2000,,0,0,False,False,8,9,40.5,4.5,8.8,False
+"Bad Bunny, Mora - HIBIKI",off+25s/cold,23975,,,-24500,,0,0,False,False,9,9,60.0,4.6,11.1,False
+"Bad Bunny, Mora - HIBIKI",off+25s/seeded_correct,23975,23975,0,0,25500,0,2,False,True,5,9,19.8,4.0,4.7,True
+"Bad Bunny, Mora - HIBIKI",off+25s/seeded_wrong_2s,23975,,,2000,,0,0,False,False,9,9,58.7,4.6,11.4,False
+"Bad Bunny, Mora - HIBIKI",off-25s/cold,-26025,,,26025,,0,0,False,False,8,9,34.7,3.9,7.8,False
+"Bad Bunny, Mora - HIBIKI",off-25s/seeded_correct,-26025,,,0,,0,0,False,False,8,9,33.9,3.7,7.9,False
+"Bad Bunny, Mora - HIBIKI",off-25s/seeded_wrong_2s,-26025,,,2000,,0,0,False,False,8,9,34.6,3.7,8.2,False
+"Bad Bunny, Mora - HIBIKI",noise0/cold,-1025,0,1025,1025,,1,1,False,False,9,9,41.6,3.1,8.1,False
+"Bad Bunny, Mora - HIBIKI",noise0/seeded_correct,-1025,-1025,0,0,25500,0,2,False,True,5,9,12.2,2.6,2.9,True
+"Bad Bunny, Mora - HIBIKI",noise0/seeded_wrong_2s,-1025,0,1025,1025,,1,1,False,False,9,9,42.2,3.1,8.3,False
+"Bad Bunny, Mora - HIBIKI",noise-2s/cold,-3025,,,3025,,0,0,False,False,9,9,41.0,2.9,8.2,False
+"Bad Bunny, Mora - HIBIKI",noise-2s/seeded_correct,-3025,-3025,0,0,111750,0,1,False,False,9,9,40.3,2.9,7.9,True
+"Bad Bunny, Mora - HIBIKI",noise-2s/seeded_wrong_2s,-3025,-2000,1025,1025,,1,1,False,False,9,9,40.4,3.0,8.0,False
+"Bad Bunny, Mora - HIBIKI",cutin5s/cold,3975,3975,0,0,25500,0,2,False,True,5,9,13.9,3.0,3.3,True
+"Bad Bunny, Mora - HIBIKI",cutin5s/seeded_correct,3975,3975,0,0,25500,0,2,False,True,5,9,13.7,2.9,3.3,True
+"Bad Bunny, Mora - HIBIKI",cutin5s/seeded_wrong_2s,3975,3975,0,0,25500,0,2,False,True,5,9,13.8,3.0,3.4,True
+"Bad Bunny, Mora - HIBIKI",cutin15s/cold,13975,13975,0,0,25500,0,2,False,True,5,9,15.2,3.3,3.5,True
+"Bad Bunny, Mora - HIBIKI",cutin15s/seeded_correct,13975,13975,0,0,25500,0,2,False,True,5,9,15.1,3.3,3.5,True
+"Bad Bunny, Mora - HIBIKI",cutin15s/seeded_wrong_2s,13975,13975,0,0,25500,0,2,False,True,5,9,15.0,3.2,3.5,True
+"Bad Bunny, Mora - HIBIKI",cutin25s/cold,23975,23975,0,0,40750,0,2,False,True,7,9,33.8,4.1,7.9,True
+"Bad Bunny, Mora - HIBIKI",cutin25s/seeded_correct,23975,23975,0,0,36750,0,2,False,True,7,9,33.3,4.0,7.9,True
+"Bad Bunny, Mora - HIBIKI",cutin25s/seeded_wrong_2s,23975,23975,0,0,40750,0,2,False,True,7,9,33.4,4.1,8.1,True
+"Bad Bunny, Mora - HIBIKI",blend8s/cold,-1025,-1025,0,0,25500,0,2,False,True,5,9,13.2,2.8,3.1,True
+"Bad Bunny, Mora - HIBIKI",blend8s/seeded_correct,-1025,-1025,0,0,25500,0,2,False,True,5,9,12.9,2.8,3.2,True
+"Bad Bunny, Mora - HIBIKI",blend8s/seeded_wrong_2s,-1025,-1025,0,0,25500,0,2,False,True,5,9,12.8,2.8,3.1,True
+Bad Bunny - DtMF,off0/cold,-975,-978,-3,-3,36275,0,3,True,True,6,12,19.1,2.7,5.2,True
+Bad Bunny - DtMF,off0/seeded_correct,-975,-975,0,975,,0,1,False,False,12,12,62.8,6.0,8.5,True
+Bad Bunny - DtMF,off0/seeded_wrong_2s,-975,-975,0,0,31250,0,2,False,False,12,12,62.6,6.0,8.5,True
+Bad Bunny - DtMF,off+200/cold,-775,-776,-1,-1,36275,0,3,True,True,6,12,19.3,2.7,5.5,True
+Bad Bunny - DtMF,off+200/seeded_correct,-775,-775,0,975,,0,1,False,False,12,12,66.7,6.1,9.3,True
+Bad Bunny - DtMF,off+200/seeded_wrong_2s,-775,-775,0,0,31250,0,2,False,False,12,12,64.5,5.9,9.0,True
+Bad Bunny - DtMF,off-200/cold,-1175,-1156,19,19,36275,0,3,True,True,6,12,19.5,2.8,5.5,True
+Bad Bunny - DtMF,off-200/seeded_correct,-1175,-1175,0,975,,0,1,False,False,12,12,64.7,6.0,8.7,True
+Bad Bunny - DtMF,off-200/seeded_wrong_2s,-1175,-1175,0,0,31250,0,2,False,False,12,12,63.5,6.1,8.8,True
+Bad Bunny - DtMF,off+2s/cold,1025,1025,0,0,31250,0,3,True,True,6,12,20.1,2.9,5.6,True
+Bad Bunny - DtMF,off+2s/seeded_correct,1025,1025,0,975,,0,1,False,False,12,12,68.5,6.5,9.4,True
+Bad Bunny - DtMF,off+2s/seeded_wrong_2s,1025,1025,0,0,31250,0,2,False,False,12,12,65.1,6.3,8.9,True
+Bad Bunny - DtMF,off-2s/cold,-2975,-2956,19,19,36275,0,3,True,True,6,12,18.8,2.7,5.3,True
+Bad Bunny - DtMF,off-2s/seeded_correct,-2975,,,975,,0,0,False,False,12,12,63.6,5.8,9.3,False
+Bad Bunny - DtMF,off-2s/seeded_wrong_2s,-2975,-2975,0,0,90250,0,1,False,False,12,12,62.1,5.9,8.6,True
+Bad Bunny - DtMF,off+10s/cold,9025,,,-9025,,0,0,False,False,12,12,71.7,6.8,9.4,False
+Bad Bunny - DtMF,off+10s/seeded_correct,9025,9025,0,0,26000,0,2,False,False,12,12,70.2,6.3,9.9,True
+Bad Bunny - DtMF,off+10s/seeded_wrong_2s,9025,,,2000,,0,0,False,False,12,12,70.7,6.6,9.4,False
+Bad Bunny - DtMF,off-10s/cold,-10975,,,10975,,0,0,False,False,11,12,58.9,6.1,8.3,False
+Bad Bunny - DtMF,off-10s/seeded_correct,-10975,,,0,,0,0,False,False,11,12,56.2,5.6,8.1,False
+Bad Bunny - DtMF,off-10s/seeded_wrong_2s,-10975,,,2000,,0,0,False,False,11,12,56.2,5.8,8.2,False
+Bad Bunny - DtMF,off+25s/cold,24025,,,-24025,,0,0,False,False,12,12,83.7,7.6,10.6,False
+Bad Bunny - DtMF,off+25s/seeded_correct,24025,24025,0,0,26000,0,2,False,False,12,12,80.0,7.2,10.4,True
+Bad Bunny - DtMF,off+25s/seeded_wrong_2s,24025,,,2000,,0,0,False,False,12,12,81.0,7.0,10.6,False
+Bad Bunny - DtMF,off-25s/cold,-25975,,,25975,,0,0,False,False,11,12,49.5,5.2,7.5,False
+Bad Bunny - DtMF,off-25s/seeded_correct,-25975,,,0,,0,0,False,False,11,12,48.1,5.1,7.4,False
+Bad Bunny - DtMF,off-25s/seeded_wrong_2s,-25975,,,2000,,0,0,False,False,11,12,50.1,5.1,7.8,False
+Bad Bunny - DtMF,noise0/cold,-975,-978,-3,-3,36275,0,3,True,True,6,12,17.2,2.6,4.5,True
+Bad Bunny - DtMF,noise0/seeded_correct,-975,-975,0,975,,0,1,False,False,12,12,57.3,5.2,7.8,True
+Bad Bunny - DtMF,noise0/seeded_wrong_2s,-975,-975,0,0,31250,0,2,False,False,12,12,57.5,5.2,8.0,True
+Bad Bunny - DtMF,noise-2s/cold,-2975,-2956,19,19,36275,0,3,True,True,6,12,16.3,2.5,4.3,True
+Bad Bunny - DtMF,noise-2s/seeded_correct,-2975,,,975,,0,0,False,False,12,12,56.2,5.1,7.8,False
+Bad Bunny - DtMF,noise-2s/seeded_wrong_2s,-2975,-2975,0,0,90250,0,1,False,False,12,12,55.7,5.0,7.6,True
+Bad Bunny - DtMF,cutin5s/cold,4025,4022,-3,-3,36275,0,1,True,True,5,12,13.5,2.9,3.2,True
+Bad Bunny - DtMF,cutin5s/seeded_correct,4025,4025,0,0,26000,0,2,False,False,12,12,62.4,5.8,8.4,True
+Bad Bunny - DtMF,cutin5s/seeded_wrong_2s,4025,4025,0,0,31250,0,2,False,False,12,12,63.0,5.7,8.5,True
+Bad Bunny - DtMF,cutin15s/cold,14025,14025,0,-14025,,0,2,False,False,12,12,64.0,5.7,8.4,True
+Bad Bunny - DtMF,cutin15s/seeded_correct,14025,14025,0,0,26000,0,2,False,False,12,12,63.5,5.9,8.2,True
+Bad Bunny - DtMF,cutin15s/seeded_wrong_2s,14025,14025,0,0,31250,0,2,False,False,12,12,63.6,5.8,8.3,True
+Bad Bunny - DtMF,cutin25s/cold,24025,24025,0,0,90250,0,2,False,True,7,12,32.2,3.9,7.3,True
+Bad Bunny - DtMF,cutin25s/seeded_correct,24025,24025,0,0,26000,0,2,False,True,7,12,30.9,3.9,7.0,True
+Bad Bunny - DtMF,cutin25s/seeded_wrong_2s,24025,24025,0,0,31250,0,2,False,True,7,12,32.6,4.0,7.5,True
+Bad Bunny - DtMF,blend8s/cold,-975,-978,-3,-3,36275,0,2,True,True,5,12,12.7,2.6,3.0,True
+Bad Bunny - DtMF,blend8s/seeded_correct,-975,-975,0,0,118500,0,2,False,False,12,12,59.9,5.4,8.3,True
+Bad Bunny - DtMF,blend8s/seeded_wrong_2s,-975,-975,0,0,31250,0,2,False,False,12,12,60.1,5.4,8.4,True
+Bad Bunny - EL CLúB,off0/cold,2375,2375,0,0,93750,0,2,False,True,6,9,20.1,2.7,6.2,True
+Bad Bunny - EL CLúB,off0/seeded_correct,2375,2375,0,0,9000,0,3,False,True,6,9,18.6,2.7,5.3,True
+Bad Bunny - EL CLúB,off0/seeded_wrong_2s,2375,2375,0,0,26000,0,2,False,True,6,9,18.9,2.7,5.5,True
+Bad Bunny - EL CLúB,off+200/cold,2575,2575,0,0,93750,0,3,True,True,6,9,19.3,2.7,5.7,True
+Bad Bunny - EL CLúB,off+200/seeded_correct,2575,2575,0,0,9000,0,3,False,True,6,9,18.8,2.7,5.5,True
+Bad Bunny - EL CLúB,off+200/seeded_wrong_2s,2575,2575,0,0,26000,0,2,False,True,6,9,18.8,2.7,5.5,True
+Bad Bunny - EL CLúB,off-200/cold,2175,2169,-6,-6,41700,0,3,True,True,6,9,20.4,2.7,6.6,True
+Bad Bunny - EL CLúB,off-200/seeded_correct,2175,2175,0,0,9000,0,3,False,True,6,9,19.1,2.7,5.7,True
+Bad Bunny - EL CLúB,off-200/seeded_wrong_2s,2175,2175,0,0,26000,0,2,False,True,6,9,18.6,2.7,5.4,True
+Bad Bunny - EL CLúB,off+2s/cold,4375,4387,12,-4075,,0,2,True,False,9,9,40.0,3.1,7.0,True
+Bad Bunny - EL CLúB,off+2s/seeded_correct,4375,4375,0,0,9000,0,2,False,True,6,9,19.3,2.8,5.6,True
+Bad Bunny - EL CLúB,off+2s/seeded_wrong_2s,4375,,,2000,,0,0,False,False,9,9,39.9,3.1,7.0,False
+Bad Bunny - EL CLúB,off-2s/cold,375,369,-6,-6,41700,0,3,True,True,6,9,20.4,2.7,6.6,True
+Bad Bunny - EL CLúB,off-2s/seeded_correct,375,375,0,0,9000,0,3,False,True,6,9,18.5,2.6,5.5,True
+Bad Bunny - EL CLúB,off-2s/seeded_wrong_2s,375,375,0,0,26000,0,2,False,True,6,9,18.0,2.6,5.3,True
+Bad Bunny - EL CLúB,off+10s/cold,12375,,,-12200,,0,0,False,False,9,9,43.9,3.6,7.4,False
+Bad Bunny - EL CLúB,off+10s/seeded_correct,12375,12375,0,0,9000,0,2,False,True,6,9,21.3,3.1,5.8,True
+Bad Bunny - EL CLúB,off+10s/seeded_wrong_2s,12375,,,2000,,0,0,False,False,9,9,44.2,3.8,7.7,False
+Bad Bunny - EL CLúB,off-10s/cold,-7625,0,7625,7625,,2,2,False,False,8,9,32.9,4.1,6.1,False
+Bad Bunny - EL CLúB,off-10s/seeded_correct,-7625,,,0,,0,0,False,False,8,9,32.5,4.0,6.4,False
+Bad Bunny - EL CLúB,off-10s/seeded_wrong_2s,-7625,,,2000,,0,0,False,False,8,9,34.2,4.1,6.9,False
+Bad Bunny - EL CLúB,off+25s/cold,27375,,,-27375,,0,0,False,False,9,9,50.9,4.7,8.3,False
+Bad Bunny - EL CLúB,off+25s/seeded_correct,27375,27375,0,0,9000,0,2,False,True,6,9,26.8,3.9,7.0,True
+Bad Bunny - EL CLúB,off+25s/seeded_wrong_2s,27375,,,2000,,0,0,False,False,9,9,50.4,4.3,8.3,False
+Bad Bunny - EL CLúB,off-25s/cold,-22625,,,22625,,0,0,False,False,8,9,27.3,3.4,5.6,False
+Bad Bunny - EL CLúB,off-25s/seeded_correct,-22625,,,0,,0,0,False,False,8,9,27.4,3.3,5.9,False
+Bad Bunny - EL CLúB,off-25s/seeded_wrong_2s,-22625,,,2000,,0,0,False,False,8,9,26.1,3.2,5.6,False
+Bad Bunny - EL CLúB,noise0/cold,2375,2375,0,0,93750,0,2,False,True,6,9,17.2,2.5,4.6,True
+Bad Bunny - EL CLúB,noise0/seeded_correct,2375,2375,0,0,9000,0,3,False,True,6,9,16.5,2.5,4.4,True
+Bad Bunny - EL CLúB,noise0/seeded_wrong_2s,2375,2375,0,0,26000,0,2,False,True,6,9,16.7,2.5,4.4,True
+Bad Bunny - EL CLúB,noise-2s/cold,375,369,-6,-6,41700,0,3,True,True,6,9,16.9,2.5,4.7,True
+Bad Bunny - EL CLúB,noise-2s/seeded_correct,375,375,0,0,9000,0,3,False,True,6,9,16.4,2.4,4.6,True
+Bad Bunny - EL CLúB,noise-2s/seeded_wrong_2s,375,375,0,0,26000,0,2,False,True,6,9,16.3,2.4,4.4,True
+Bad Bunny - EL CLúB,cutin5s/cold,7375,7375,0,0,93750,0,2,False,True,7,9,24.5,3.0,5.6,True
+Bad Bunny - EL CLúB,cutin5s/seeded_correct,7375,7375,0,0,26000,0,2,False,True,7,9,24.1,3.0,5.6,True
+Bad Bunny - EL CLúB,cutin5s/seeded_wrong_2s,7375,7375,0,0,30000,0,2,False,True,7,9,24.4,3.0,5.8,True
+Bad Bunny - EL CLúB,cutin15s/cold,17375,17375,0,0,93750,0,2,False,True,7,9,26.3,3.2,5.8,True
+Bad Bunny - EL CLúB,cutin15s/seeded_correct,17375,17375,0,0,26000,0,2,False,True,7,9,25.9,3.2,5.8,True
+Bad Bunny - EL CLúB,cutin15s/seeded_wrong_2s,17375,17375,0,0,30000,0,2,False,True,7,9,25.7,3.2,5.8,True
+Bad Bunny - EL CLúB,cutin25s/cold,27375,27375,0,0,93750,0,2,False,True,8,9,38.0,3.9,6.9,True
+Bad Bunny - EL CLúB,cutin25s/seeded_correct,27375,27375,0,0,37000,0,2,False,True,8,9,36.9,3.9,6.8,True
+Bad Bunny - EL CLúB,cutin25s/seeded_wrong_2s,27375,27375,0,0,41000,0,2,False,True,8,9,37.9,3.9,6.9,True
+Bad Bunny - EL CLúB,blend8s/cold,2375,2375,0,0,93750,0,2,False,True,7,9,23.8,2.8,5.6,True
+Bad Bunny - EL CLúB,blend8s/seeded_correct,2375,2375,0,0,26000,0,2,False,True,7,9,22.9,2.8,5.4,True
+Bad Bunny - EL CLúB,blend8s/seeded_wrong_2s,2375,2375,0,0,30000,0,2,False,True,7,9,23.6,2.9,5.5,True
+Bad Bunny - HOY COBRÉ,off0/cold,-450,-428,22,450,,1,3,True,False,6,6,18.8,3.1,4.5,True
+Bad Bunny - HOY COBRÉ,off0/seeded_correct,-450,0,450,450,,2,2,False,False,6,6,18.2,3.0,4.2,False
+Bad Bunny - HOY COBRÉ,off0/seeded_wrong_2s,-450,0,450,450,,2,2,False,False,6,6,17.3,2.9,3.9,False
+Bad Bunny - HOY COBRÉ,off+200/cold,-250,-226,24,450,,1,3,True,False,6,6,18.0,3.1,4.1,True
+Bad Bunny - HOY COBRÉ,off+200/seeded_correct,-250,200,450,450,,2,2,False,False,6,6,17.9,3.0,3.9,False
+Bad Bunny - HOY COBRÉ,off+200/seeded_wrong_2s,-250,200,450,450,,2,2,False,False,6,6,17.3,2.9,3.9,False
+Bad Bunny - HOY COBRÉ,off-200/cold,-650,-631,19,450,,1,3,True,False,6,6,18.4,3.1,4.1,True
+Bad Bunny - HOY COBRÉ,off-200/seeded_correct,-650,-200,450,450,,2,2,False,False,6,6,18.5,3.1,4.0,False
+Bad Bunny - HOY COBRÉ,off-200/seeded_wrong_2s,-650,-200,450,450,,2,2,False,False,6,6,17.5,2.9,4.1,False
+Bad Bunny - HOY COBRÉ,off+2s/cold,1550,1575,25,450,,1,3,True,False,6,6,18.2,3.1,4.1,True
+Bad Bunny - HOY COBRÉ,off+2s/seeded_correct,1550,2000,450,450,,2,2,False,False,6,6,18.3,3.1,4.0,False
+Bad Bunny - HOY COBRÉ,off+2s/seeded_wrong_2s,1550,2000,450,450,,2,2,False,False,6,6,17.9,3.1,4.0,False
+Bad Bunny - HOY COBRÉ,off-2s/cold,-2450,-2431,19,450,,1,3,True,False,6,6,17.8,3.0,4.2,True
+Bad Bunny - HOY COBRÉ,off-2s/seeded_correct,-2450,-2000,450,450,,2,2,False,False,6,6,17.2,2.9,3.8,False
+Bad Bunny - HOY COBRÉ,off-2s/seeded_wrong_2s,-2450,-2000,450,450,,2,2,False,False,6,6,17.2,2.9,4.0,False
+Bad Bunny - HOY COBRÉ,off+10s/cold,9550,2950,-6600,-9550,,1,1,False,False,6,6,20.8,3.6,4.5,False
+Bad Bunny - HOY COBRÉ,off+10s/seeded_correct,9550,,,0,39750,0,0,False,False,6,6,20.8,3.4,4.3,False
+Bad Bunny - HOY COBRÉ,off+10s/seeded_wrong_2s,9550,2950,-6600,2000,,1,1,False,False,6,6,19.9,3.3,4.4,False
+Bad Bunny - HOY COBRÉ,off-10s/cold,-10450,,,10450,,0,0,False,False,5,6,14.3,2.7,3.8,False
+Bad Bunny - HOY COBRÉ,off-10s/seeded_correct,-10450,,,0,,0,0,False,False,5,6,13.4,2.6,3.5,False
+Bad Bunny - HOY COBRÉ,off-10s/seeded_wrong_2s,-10450,,,2000,,0,0,False,False,5,6,13.2,2.6,3.5,False
+Bad Bunny - HOY COBRÉ,off+25s/cold,24550,-1900,-26450,-26450,,2,2,False,False,6,6,24.4,4.2,5.1,False
+Bad Bunny - HOY COBRÉ,off+25s/seeded_correct,24550,,,0,39750,0,0,False,False,6,6,24.6,4.0,4.9,False
+Bad Bunny - HOY COBRÉ,off+25s/seeded_wrong_2s,24550,-1900,-26450,2000,,1,1,False,False,6,6,23.7,3.9,4.9,False
+Bad Bunny - HOY COBRÉ,off-25s/cold,-25450,,,25450,,0,0,False,False,5,6,10.0,2.0,3.0,False
+Bad Bunny - HOY COBRÉ,off-25s/seeded_correct,-25450,,,0,,0,0,False,False,5,6,9.9,1.8,3.1,False
+Bad Bunny - HOY COBRÉ,off-25s/seeded_wrong_2s,-25450,,,2000,,0,0,False,False,5,6,9.6,1.8,2.9,False
+Bad Bunny - HOY COBRÉ,noise0/cold,-450,-428,22,450,,1,3,True,False,6,6,16.1,2.6,3.7,True
+Bad Bunny - HOY COBRÉ,noise0/seeded_correct,-450,0,450,450,,2,2,False,False,6,6,16.7,2.7,3.9,False
+Bad Bunny - HOY COBRÉ,noise0/seeded_wrong_2s,-450,0,450,450,,2,2,False,False,6,6,16.5,2.7,3.7,False
+Bad Bunny - HOY COBRÉ,noise-2s/cold,-2450,-2431,19,450,,1,3,True,False,6,6,16.0,2.8,3.5,True
+Bad Bunny - HOY COBRÉ,noise-2s/seeded_correct,-2450,-2000,450,450,,2,2,False,False,6,6,15.9,2.7,3.6,False
+Bad Bunny - HOY COBRÉ,noise-2s/seeded_wrong_2s,-2450,-2000,450,450,,2,2,False,False,6,6,15.7,2.6,3.6,False
+Bad Bunny - HOY COBRÉ,cutin5s/cold,4550,4572,22,450,,1,3,True,False,6,6,18.1,2.9,4.1,True
+Bad Bunny - HOY COBRÉ,cutin5s/seeded_correct,4550,5000,450,450,,1,1,False,False,6,6,17.7,3.0,3.8,False
+Bad Bunny - HOY COBRÉ,cutin5s/seeded_wrong_2s,4550,5000,450,450,,1,1,False,False,6,6,17.7,3.0,4.0,False
+Bad Bunny - HOY COBRÉ,cutin15s/cold,14550,15000,450,450,,1,1,False,False,6,6,19.8,3.2,4.5,False
+Bad Bunny - HOY COBRÉ,cutin15s/seeded_correct,14550,15000,450,450,,1,1,False,False,6,6,19.1,3.2,4.2,False
+Bad Bunny - HOY COBRÉ,cutin15s/seeded_wrong_2s,14550,15000,450,450,,1,1,False,False,6,6,19.0,3.2,4.1,False
+Bad Bunny - HOY COBRÉ,cutin25s/cold,24550,24575,25,25,44250,0,2,False,False,6,6,22.9,3.7,4.9,True
+Bad Bunny - HOY COBRÉ,cutin25s/seeded_correct,24550,24575,25,25,32250,0,1,False,False,6,6,22.5,3.8,4.6,True
+Bad Bunny - HOY COBRÉ,cutin25s/seeded_wrong_2s,24550,24575,25,25,44250,0,2,False,False,6,6,22.3,3.9,4.6,True
+Bad Bunny - HOY COBRÉ,blend8s/cold,-450,-428,22,450,,1,3,True,False,6,6,16.7,2.8,3.8,True
+Bad Bunny - HOY COBRÉ,blend8s/seeded_correct,-450,0,450,450,,1,1,False,False,6,6,17.1,2.8,3.8,False
+Bad Bunny - HOY COBRÉ,blend8s/seeded_wrong_2s,-450,0,450,450,,1,1,False,False,6,6,16.7,2.9,3.7,False
+Bad Bunny - Si Estuviésemos Juntos,off0/cold,1844,1800,-44,-44,16000,0,3,False,True,5,14,11.4,2.1,2.9,True
+Bad Bunny - Si Estuviésemos Juntos,off0/seeded_correct,1844,1800,-44,-44,9000,0,3,False,True,4,14,7.9,1.9,2.3,True
+Bad Bunny - Si Estuviésemos Juntos,off0/seeded_wrong_2s,1844,1800,-44,-44,27500,0,3,False,True,5,14,11.0,2.1,2.9,True
+Bad Bunny - Si Estuviésemos Juntos,off+200/cold,2044,2000,-44,-44,16000,0,3,False,True,5,14,11.4,2.2,3.0,True
+Bad Bunny - Si Estuviésemos Juntos,off+200/seeded_correct,2044,2000,-44,-44,9000,0,3,False,True,4,14,8.0,1.9,2.4,True
+Bad Bunny - Si Estuviésemos Juntos,off+200/seeded_wrong_2s,2044,2000,-44,-44,27500,0,3,False,True,5,14,10.9,2.1,2.9,True
+Bad Bunny - Si Estuviésemos Juntos,off-200/cold,1644,1600,-44,-44,16000,0,3,False,True,5,14,11.1,2.1,2.8,True
+Bad Bunny - Si Estuviésemos Juntos,off-200/seeded_correct,1644,1600,-44,-44,9000,0,3,False,True,4,14,8.0,2.0,2.3,True
+Bad Bunny - Si Estuviésemos Juntos,off-200/seeded_wrong_2s,1644,1600,-44,-44,27500,0,3,False,True,5,14,10.8,2.1,2.8,True
+Bad Bunny - Si Estuviésemos Juntos,off+2s/cold,3844,,,-2794,,0,0,False,False,14,14,61.6,4.3,7.3,False
+Bad Bunny - Si Estuviésemos Juntos,off+2s/seeded_correct,3844,3844,0,0,9000,0,4,False,True,7,14,19.0,2.5,3.9,True
+Bad Bunny - Si Estuviésemos Juntos,off+2s/seeded_wrong_2s,3844,,,2000,,0,0,False,False,14,14,62.2,4.3,7.3,False
+Bad Bunny - Si Estuviésemos Juntos,off-2s/cold,-156,-200,-44,-44,9000,0,3,False,True,4,14,7.8,1.9,2.3,True
+Bad Bunny - Si Estuviésemos Juntos,off-2s/seeded_correct,-156,-200,-44,-44,9000,0,3,False,True,4,14,7.5,1.9,2.2,True
+Bad Bunny - Si Estuviésemos Juntos,off-2s/seeded_wrong_2s,-156,-200,-44,-44,27500,0,3,False,True,5,14,10.4,2.0,2.7,True
+Bad Bunny - Si Estuviésemos Juntos,off+10s/cold,11844,655,-11189,-11189,,3,3,False,False,14,14,67.6,4.6,7.9,False
+Bad Bunny - Si Estuviésemos Juntos,off+10s/seeded_correct,11844,11844,0,0,9000,0,4,False,True,7,14,21.5,2.9,4.2,True
+Bad Bunny - Si Estuviésemos Juntos,off+10s/seeded_wrong_2s,11844,658,-11186,2000,,2,2,False,False,14,14,66.0,4.6,7.6,False
+Bad Bunny - Si Estuviésemos Juntos,off-10s/cold,-8156,3000,11156,8156,,1,1,False,False,13,14,52.4,4.1,6.6,False
+Bad Bunny - Si Estuviésemos Juntos,off-10s/seeded_correct,-8156,,,0,,0,0,False,False,13,14,50.6,4.1,6.5,False
+Bad Bunny - Si Estuviésemos Juntos,off-10s/seeded_wrong_2s,-8156,,,2000,,0,0,False,False,13,14,50.8,4.1,6.4,False
+Bad Bunny - Si Estuviésemos Juntos,off+25s/cold,26844,,,-26844,,0,0,False,False,14,14,78.0,5.4,8.8,False
+Bad Bunny - Si Estuviésemos Juntos,off+25s/seeded_correct,26844,26844,0,0,9000,0,4,False,True,7,14,27.1,3.8,5.0,True
+Bad Bunny - Si Estuviésemos Juntos,off+25s/seeded_wrong_2s,26844,,,2000,,0,0,False,False,14,14,78.3,5.4,8.6,False
+Bad Bunny - Si Estuviésemos Juntos,off-25s/cold,-23156,-850,22306,22306,,2,2,False,False,11,14,41.9,3.9,6.1,False
+Bad Bunny - Si Estuviésemos Juntos,off-25s/seeded_correct,-23156,,,0,,0,0,False,False,11,14,40.6,3.8,6.0,False
+Bad Bunny - Si Estuviésemos Juntos,off-25s/seeded_wrong_2s,-23156,,,2000,,0,0,False,False,11,14,40.6,3.8,5.9,False
+Bad Bunny - Si Estuviésemos Juntos,noise0/cold,1844,1800,-44,-44,16000,0,3,False,True,5,14,10.7,2.0,2.7,True
+Bad Bunny - Si Estuviésemos Juntos,noise0/seeded_correct,1844,1800,-44,-44,9000,0,3,False,True,4,14,7.7,1.9,2.2,True
+Bad Bunny - Si Estuviésemos Juntos,noise0/seeded_wrong_2s,1844,1800,-44,-44,27500,0,3,False,True,5,14,10.5,2.0,2.6,True
+Bad Bunny - Si Estuviésemos Juntos,noise-2s/cold,-156,-200,-44,-44,9000,0,3,False,True,4,14,7.6,2.0,2.2,True
+Bad Bunny - Si Estuviésemos Juntos,noise-2s/seeded_correct,-156,-200,-44,-44,9000,0,3,False,True,4,14,7.3,1.8,2.2,True
+Bad Bunny - Si Estuviésemos Juntos,noise-2s/seeded_wrong_2s,-156,-200,-44,-44,27500,0,3,False,True,5,14,10.0,1.9,2.6,True
+Bad Bunny - Si Estuviésemos Juntos,cutin5s/cold,6844,6800,-44,-44,27500,0,3,False,True,6,14,15.7,2.6,3.4,True
+Bad Bunny - Si Estuviésemos Juntos,cutin5s/seeded_correct,6844,6800,-44,-44,16000,0,3,False,True,5,14,11.6,2.3,2.9,True
+Bad Bunny - Si Estuviésemos Juntos,cutin5s/seeded_wrong_2s,6844,6800,-44,-44,27500,0,3,False,True,6,14,14.6,2.4,3.3,True
+Bad Bunny - Si Estuviésemos Juntos,cutin15s/cold,16844,16800,-44,-44,27500,0,3,False,True,7,14,21.0,2.8,4.0,True
+Bad Bunny - Si Estuviésemos Juntos,cutin15s/seeded_correct,16844,16800,-44,-44,27500,0,3,False,True,6,14,17.3,2.8,3.8,True
+Bad Bunny - Si Estuviésemos Juntos,cutin15s/seeded_wrong_2s,16844,16800,-44,-44,27500,0,3,False,True,7,14,20.7,2.9,4.0,True
+Bad Bunny - Si Estuviésemos Juntos,cutin25s/cold,26844,26825,-19,-19,37500,0,3,False,True,7,14,25.3,3.6,4.5,True
+Bad Bunny - Si Estuviésemos Juntos,cutin25s/seeded_correct,26844,26844,0,0,37500,0,2,False,True,7,14,24.1,3.4,4.5,True
+Bad Bunny - Si Estuviésemos Juntos,cutin25s/seeded_wrong_2s,26844,26825,-19,-19,37500,0,3,False,True,7,14,24.4,3.3,4.6,True
+Bad Bunny - Si Estuviésemos Juntos,blend8s/cold,1844,1800,-44,-44,21000,0,3,False,True,6,14,14.3,2.3,3.1,True
+Bad Bunny - Si Estuviésemos Juntos,blend8s/seeded_correct,1844,1800,-44,-44,16000,0,3,False,True,5,14,10.6,2.1,2.6,True
+Bad Bunny - Si Estuviésemos Juntos,blend8s/seeded_wrong_2s,1844,1800,-44,-44,27500,0,3,False,True,6,14,14.0,2.2,3.2,True
