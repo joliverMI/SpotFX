@@ -60,7 +60,7 @@ from services.xcorr_core import (
     mismatch_spike as _mismatch_spike,
 )
 from services.xcorr_sweep import (
-    MismatchMonitor, MonitorConfig, SweepConfig, SweepEvaluator,
+    MismatchMonitor, MonitorConfig, SearchLadder, SweepConfig, SweepEvaluator,
 )
 from services.xcorr_evidence import EvidenceAccumulator
 
@@ -535,7 +535,10 @@ class AutoOffsetService:
         )
 
         capture = AudioCaptureStream(song_start)
-        capture.start()
+        # NOTE: capture.start() is deferred to just before the frame loop so
+        # an exception anywhere in the setup below can't leak an open
+        # PulseAudio stream (observed: a setup NameError left the stream
+        # running → core dump at the next track change).
 
         # Load stored shape once
         meta = load_audio_shape_meta(uri)
@@ -1012,6 +1015,7 @@ class AutoOffsetService:
         _mon_next_ms = 0
         pending_dynamic: Optional[tuple[int, int]] = None
 
+        capture.start()
         try:
             async for frame in capture:
                 if not app_state.current_track:
