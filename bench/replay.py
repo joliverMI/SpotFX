@@ -319,7 +319,8 @@ def replay_play(stem: str, scenario: Scenario, *,
             )
             cpu_samples.append((time.perf_counter() - t0) * 1000.0)
             if match is not None:
-                store.save_offset(uri, match.offset_ms, match.quality,
+                # Engine-only (mirrors live): no disk write from progressive.
+                engine.apply_save(uri, match.offset_ms, match.quality,
                                   source="progressive")
                 evaluator.add_progressive_vote(match.offset_ms, match.r)
                 prog_matched = True
@@ -421,7 +422,14 @@ def replay_play(stem: str, scenario: Scenario, *,
                               bypass_drift_cap=f_bypass)
 
     # ── Metrics ───────────────────────────────────────────────────────────────
-    final_stored = store.save_log[-1].offset_ms if store.save_log else None
+    # "Stored" = what the NEXT play would load from the slot: the last save,
+    # or the untouched seed when no save fired (refusing to overwrite a
+    # correct seed is success, not failure). None only when the slot started
+    # cold AND nothing saved.
+    if store.save_log or store.history:
+        final_stored = store.timestamp_offset_ms
+    else:
+        final_stored = None
     final_stored_err = (final_stored - expected) if final_stored is not None else None
     engine_err = engine._shape_offset_ms - expected
 

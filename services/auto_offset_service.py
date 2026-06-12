@@ -804,8 +804,18 @@ class AutoOffsetService:
                             _prog.offset_ms, _prog.r, _prog.quality,
                             _prog.span_ms / 1000.0, uri,
                         )
-                        _save_offset(uri, _prog.offset_ms, _prog.quality,
-                                     source="progressive")
+                        # Engine-only: progressive corrects the live engine
+                        # early but never writes to disk — persistent saves
+                        # remain the windows'/accumulator's job, so a wrong
+                        # early match can't poison the slot history.
+                        try:
+                            from main import engine as _engine_for_prog
+                            _engine_for_prog.apply_save(
+                                uri, int(_prog.offset_ms), float(_prog.quality),
+                                source="progressive",
+                            )
+                        except Exception as exc:
+                            logger.debug("Engine apply_save (progressive) failed: %s", exc)
                         evaluator.add_progressive_vote(_prog.offset_ms, _prog.r)
                         try:
                             from services.websocket_manager import ws_manager
