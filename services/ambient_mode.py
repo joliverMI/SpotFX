@@ -14,10 +14,16 @@ color LEDs for white, so streamed white never reaches full output. The Hue
 bulbs' dedicated white LEDs at full lumens.
 
 So Ambient Mode, for each Hue device in the target category:
-  1. excludes the virtual from the trigger engine (ledfx_client.set_ambient_excluded),
-  2. clears its LedFX effect + stops the entertainment stream (so REST state sticks),
-  3. PUTs every light in the entertainment group to the configured color at full
-     brightness over the Hue REST API.
+  1. FREEZES the LedFX Hue device (ledfx_client.freeze_hue_device) — LedFX stops
+     that device's entertainment stream so the bridge reverts to normal REST mode
+     and drops all flush frames. The driving virtual stays ACTIVE and rendering;
+     only the device output is muted. The trigger engine, scenes, and morphs run
+     normally and need zero ambient knowledge — nothing to exclude or park.
+  2. PUTs every light in the entertainment group to the configured color at full
+     brightness over the Hue REST API (after the freeze, so the now-stopped stream
+     can't override it).
+
+Disable simply unfreezes the devices, re-engaging their streams.
 
 Bridge credentials (ip / app-key / entertainment id) are read live from the
 LedFX Hue device config — SpotFX stores no Hue secrets of its own.
@@ -132,15 +138,6 @@ def _segment_devices(vobj: dict) -> set[str]:
     return devs
 
 
-def _persist_deactivated(vids: list) -> None:
-    """Persist which virtuals ambient parked, so a SpotFX restart (while ambient
-    is on) can still reactivate the right ones when ambient is later turned off."""
-    from routers.settings_router import _load_settings_file, _save_settings_file
-    saved = _load_settings_file()
-    saved["ambient_deactivated"] = list(vids)
-    _save_settings_file(saved)
-
-
 # ── Hue bridge REST ──────────────────────────────────────────────────────────
 
 def _bridge_client(cfg: dict) -> httpx.AsyncClient:
@@ -222,53 +219,40 @@ async def disable() -> dict:
         return await _disable_impl()
 
 
-async def _enable_impl() -> dict:
-    """Activate ambient mode.
-
-    From the target category's virtuals we resolve the underlying Hue *devices*
-    (via segments), then auto-discover EVERY virtual that streams to those
-    devices — including spanning virtuals like 'single-color-effect' that the
-    user didn't pick directly. All of those are parked (deactivated, effect
-    preserved) + excluded from triggers (so nothing re-dims the bulbs), then
-    each Hue device is set to the static full-brightness color over REST."""
-    vids = _target_virtuals()
+async def _resolve_hue_cfgs() -> dict[str, dict]:
+    """Resolve {device_id: hue_cfg} for every Hue device backing the target
+    category's virtuals (via their segments). Shared by enable/disable/reconcile.
+    Topology is stable, so re-resolving each time is robust across restarts."""
     all_v = await _all_virtuals()
-
-    # 1) Resolve target Hue device ids from the chosen virtuals' segments.
     target_devices: set[str] = set()
-    for vid in vids:
-        vobj = all_v.get(vid, {})
-        target_devices |= _segment_devices(vobj)
+    for vid in _target_virtuals():
+        target_devices |= _segment_devices(all_v.get(vid, {}))
         target_devices.add(vid)  # device-backed virtual references itself
     hue_cfgs: dict[str, dict] = {}
     for did in target_devices:
         cfg = await _hue_cfg(did)
         if cfg:
             hue_cfgs[did] = cfg
-    hue_device_ids = set(hue_cfgs)
+    return hue_cfgs
 
-    # 2) Auto-discover every virtual that drives any target Hue device.
-    driving: set[str] = set(vids) | hue_device_ids
-    for v_id, vobj in all_v.items():
-        if _segment_devices(vobj) & hue_device_ids:
-            driving.add(v_id)
 
-    # 3) Exclude ALL driving virtuals from triggers FIRST (so nothing re-drives
-    #    the bulbs), then PARK only the ones that are CURRENTLY ACTIVE by
-    #    deactivating them (active=false). Parking preserves their effect, so
-    #    turning ambient off resumes exactly what was showing. We record only the
-    #    ones we actually parked, so disable() won't wrongly activate virtuals
-    #    that were already idle (e.g. unused device-virtuals).
-    from models.state import state
-    driving_list = sorted(driving)
-    ledfx_client.set_ambient_excluded(driving_list)
-    to_park = [v for v in driving_list if (all_v.get(v) or {}).get("active")]
-    for v_id in to_park:
-        await ledfx_client.set_virtual_active(v_id, False)
-    state.ambient_deactivated = to_park
-    _persist_deactivated(to_park)
+async def _enable_impl() -> dict:
+    """Activate ambient mode: FREEZE each target Hue device (LedFX stops its
+    entertainment stream so the bridge reverts to REST mode and drops flush
+    frames), THEN write the static full-brightness color via REST. Order matters —
+    freeze must complete before REST, else a live stream frame overrides REST.
+    The driving virtuals stay active; LedFX just mutes the device output, so
+    triggers/scenes need no ambient knowledge."""
+    hue_cfgs = await _resolve_hue_cfgs()
+    hue_device_ids = sorted(hue_cfgs)
 
-    # 5) Set every target Hue device to the static color at full brightness.
+    # 1) Freeze each Hue device — LedFX awaits the stream-stop server-side.
+    frozen_ok = 0
+    for did in hue_device_ids:
+        if await ledfx_client.freeze_hue_device(did, True):
+            frozen_ok += 1
+
+    # 2) Streams are down now — write the static color via REST.
     total_lights = 0
     for cfg in hue_cfgs.values():
         total_lights += await _apply_hue(cfg)
@@ -276,56 +260,30 @@ async def _enable_impl() -> dict:
     if not hue_device_ids:
         logger.warning("Ambient: no Hue devices resolved from category %r", settings.ambient_target_category)
     logger.info(
-        "Ambient ENABLED: %d Hue device(s), %d driving virtual(s) parked, %d light(s) set.",
-        len(hue_device_ids), len(to_park), total_lights,
+        "Ambient ENABLED: %d/%d Hue device(s) frozen, %d light(s) set.",
+        frozen_ok, len(hue_device_ids), total_lights,
     )
-    return {
-        "hue_devices": sorted(hue_device_ids),
-        "stopped_virtuals": driving_list,
-        "lights_set": total_lights,
-    }
+    return {"hue_devices": hue_device_ids, "frozen": frozen_ok, "lights_set": total_lights}
 
 
 async def _disable_impl() -> dict:
-    """Deactivate ambient mode: re-include virtuals in triggers and REACTIVATE
-    the virtuals we parked, so each resumes the exact effect it was showing
-    before ambient took over — no waiting for the next trigger."""
-    from models.state import state
-    # Re-include in triggers first so reactivation isn't fought by the guard.
-    ledfx_client.set_ambient_excluded([])
-    parked = list(state.ambient_deactivated or [])
-    for v_id in parked:
-        # Best-effort: the call may time out on the slow Hue handshake, but LedFX
-        # completes the activation server-side regardless, so we don't gate on it.
-        await ledfx_client.set_virtual_active(v_id, True)
-    state.ambient_deactivated = []
-    _persist_deactivated([])
-    logger.info("Ambient DISABLED: requested reactivation of %d virtual(s): %s", len(parked), parked)
-    return {"status": "disabled", "reactivated": parked}
+    """Deactivate ambient mode: UNFREEZE each Hue device so LedFX re-engages its
+    entertainment stream and music reactivity resumes. Nothing was parked, so
+    there's nothing to reactivate."""
+    hue_device_ids = sorted(await _resolve_hue_cfgs())
+    unfrozen = 0
+    for did in hue_device_ids:
+        if await ledfx_client.freeze_hue_device(did, False):
+            unfrozen += 1
+    logger.info("Ambient DISABLED: unfroze %d Hue device(s): %s", unfrozen, hue_device_ids)
+    return {"status": "disabled", "unfrozen": hue_device_ids}
 
 
 async def reapply() -> dict:
-    """Re-run enable() if ambient mode is currently active (e.g. settings changed)."""
+    """Re-run enable() if ambient mode is currently active (e.g. settings changed).
+    enable() is idempotent (re-freeze is a no-op that re-asserts the stop, then
+    re-writes REST), so this just refreshes the static color."""
     from models.state import state
     if state.ambient_mode_enabled:
         return await enable()
     return {"status": "inactive"}
-
-
-async def selfheal() -> dict:
-    """Recover from an unclean shutdown. If SpotFX restarted (e.g. a dev auto-
-    reload) while ambient was ON, it may have died before disable() reactivated
-    the parked virtuals — leaving them stuck active=false with ambient now off.
-    Reactivate any stale parked virtuals and clear the list."""
-    from models.state import state
-    vids = list(state.ambient_deactivated or [])
-    if state.ambient_mode_enabled or not vids:
-        return {"status": "noop"}
-    healed = 0
-    for v_id in vids:
-        if await ledfx_client.set_virtual_active(v_id, True):
-            healed += 1
-    state.ambient_deactivated = []
-    _persist_deactivated([])
-    logger.info("Ambient self-heal: reactivated %d stale parked virtual(s): %s", healed, vids)
-    return {"status": "healed", "reactivated": healed}

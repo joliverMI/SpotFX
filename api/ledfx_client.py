@@ -53,24 +53,13 @@ _bus_task: Optional[asyncio.Task] = None
 BUS_WINDOW_MS = 8  # coalesce window; must be << ramp step_ms (25 ms)
 
 
-# ── Ambient-mode trigger exclusion ──────────────────────────────────────────────
-# When SpotFX Ambient Mode is on, the targeted virtuals are driven to a static
-# full-brightness color via the Hue REST API (see services/ambient_mode.py) and
-# must be ignored by the trigger engine. Rather than filter at every action type,
-# we drop their writes at the single choke point all effect/config writes pass
-# through (_set_virtual_effect_direct + set_virtual_config). Updated on toggle.
-_ambient_excluded: set[str] = set()
-
-
-def set_ambient_excluded(virtual_ids) -> None:
-    """Replace the set of virtuals whose trigger-driven writes should be dropped."""
-    global _ambient_excluded
-    _ambient_excluded = set(virtual_ids or ())
-    logger.info("Ambient-mode excluded virtuals: %s", sorted(_ambient_excluded) or "(none)")
-
-
-def is_ambient_excluded(virtual_id: str) -> bool:
-    return virtual_id in _ambient_excluded
+# ── Ambient Mode ────────────────────────────────────────────────────────────────
+# Ambient Mode no longer excludes virtuals trigger-engine-side. Instead it FREEZES
+# the Hue devices in LedFX (freeze_hue_device below): LedFX stops their
+# entertainment stream so the bridge reverts to REST mode and drops flush frames,
+# while the driving virtual stays active. Triggers/scenes/morphs run normally and
+# need zero ambient knowledge — the device just swallows the output. See
+# services/ambient_mode.py and ledfx hue.py set_frozen().
 
 
 _capture_gate_diag_logged = False
@@ -470,8 +459,6 @@ def _get_probe_client() -> httpx.AsyncClient:
 # ── Internal direct-fire helpers (bypass bus) ─────────────────────────────────
 
 async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: dict) -> bool:
-    if virtual_id in _ambient_excluded:
-        return True   # Ambient Mode owns this virtual via Hue REST; drop trigger writes
     if _capture_in_progress():
         return True   # capture-in-progress mute (acts like success so callers don't error)
     resp = await _request(
@@ -495,8 +482,6 @@ async def _set_virtual_effect_tween_direct(
     """Single PUT asking LedFX to interpolate `config` params to target over
     transition_ms (server-side, per render frame). Same gating as
     _set_virtual_effect_direct."""
-    if virtual_id in _ambient_excluded:
-        return True
     if _capture_in_progress():
         return True
     resp = await _request(
@@ -611,50 +596,17 @@ async def measure_latency() -> float:
         return 0.0
 
 
-async def _activate_scene_per_virtual(scene_id: str) -> bool:
-    """Apply a scene by writing each virtual's effect individually, so the
-    ambient-excluded virtuals are skipped (the per-virtual write guard drops
-    them). Used while Ambient Mode is on, because LedFX's native scene-activate
-    is atomic and would re-drive the Hue bulbs we're holding static.
-
-    Replicates the visible result of activate for the NON-ambient virtuals:
-    each scene entry carries its effect `type` + `config`."""
-    resp = await _request("GET", "/api/scenes", label=f"scene_fetch:{scene_id}")
-    if resp is None:
-        return False
-    scene = ((resp.json() or {}).get("scenes") or {}).get(scene_id)
-    if not scene:
-        logger.warning("trigger_scene: scene '%s' not found for per-virtual apply", scene_id)
-        return False
-    coros = []
-    for vid, entry in (scene.get("virtuals") or {}).items():
-        if vid in _ambient_excluded:
-            continue  # held static by Ambient Mode — never re-drive it
-        if not isinstance(entry, dict) or entry.get("action", "activate") != "activate":
-            continue
-        etype = entry.get("type")
-        if etype:
-            coros.append(_set_virtual_effect_direct(vid, etype, entry.get("config") or {}))
-    if coros:
-        await asyncio.gather(*coros)
-    return True
-
-
 async def trigger_scene(scene_id: str) -> bool:
     """
-    Activate a LedFX scene by its scene_id.
+    Activate a LedFX scene by its scene_id (native atomic activate).
     Returns True on success.
 
-    While Ambient Mode is on, apply the scene per-virtual (skipping the held Hue
-    virtuals) instead of the atomic activate that would override them.
+    Ambient Mode no longer special-cases this: the Hue devices are frozen in
+    LedFX (their output muted at the device), so a normal scene-activate that
+    re-drives the Hue virtual is harmless — the frozen device swallows it.
     """
     if _capture_in_progress():
         return True   # capture-in-progress mute
-    if _ambient_excluded:
-        ok = await _activate_scene_per_virtual(scene_id)
-        if ok:
-            logger.info("LedFX scene applied per-virtual (ambient hold): %s", scene_id)
-        return ok
     resp = await _request(
         "PUT", "/api/scenes",
         json={"id": scene_id, "action": "activate"},
@@ -778,6 +730,33 @@ async def get_device(device_id: str) -> dict:
     return resp.json() if resp is not None else {}
 
 
+async def freeze_hue_device(device_id: str, frozen: bool) -> bool:
+    """Freeze/unfreeze a Hue device's output in LedFX (PUT /api/devices/{id}/freeze).
+    Freezing stops the entertainment stream so the bridge reverts to REST mode and
+    drops flush frames; the virtual stays active. LedFX awaits the stream-stop, so
+    on success a REST write is safe (for freeze). Best-effort — on failure the
+    ambient reconciler re-asserts on its next tick."""
+    resp = await _request(
+        "PUT", f"/api/devices/{device_id}/freeze",
+        json={"freeze": bool(frozen)},
+        label=f"freeze:{device_id}",
+    )
+    return resp is not None
+
+
+async def get_hue_frozen(device_id: str) -> Optional[bool]:
+    """Return a device's freeze state from LedFX, or None if unreachable."""
+    resp = await _request(
+        "GET", f"/api/devices/{device_id}/freeze", label=f"freeze_get:{device_id}"
+    )
+    if resp is None:
+        return None
+    try:
+        return bool((resp.json() or {}).get("frozen"))
+    except Exception:
+        return None
+
+
 async def clear_virtual_effect(virtual_id: str) -> bool:
     """Clear the active effect on a virtual (DELETE /api/virtuals/{id}/effects).
     For Hue this stops the entertainment stream so REST state changes stick.
@@ -822,8 +801,6 @@ async def set_virtual_config(virtual_id: str, config: dict) -> bool:
     POST /api/virtuals  body: {"id": virtual_id, "config": config}
     This merges with the existing virtual config — only specified fields are changed.
     """
-    if virtual_id in _ambient_excluded:
-        return True   # Ambient Mode owns this virtual via Hue REST; drop trigger writes
     if _capture_in_progress():
         return True   # capture-in-progress mute
     resp = await _request(
@@ -1020,6 +997,15 @@ async def _restart_ledfx_service() -> None:
                 await c.aclose()
             except Exception:
                 pass
+    # A LedFX restart loses the in-memory Hue freeze flags, so a device re-engages
+    # its stream and ambient silently breaks. Give LedFX a moment to come up, then
+    # re-assert freeze immediately (don't wait for the next 30s reconcile tick).
+    if state.ambient_mode_enabled:
+        await asyncio.sleep(8)
+        try:
+            await _reconcile_ambient()
+        except Exception as exc:
+            logger.error("Post-restart ambient reconcile error: %r", exc)
 
 
 async def _ledfx_watchdog_tick() -> None:
@@ -1052,20 +1038,55 @@ async def _ledfx_watchdog_tick() -> None:
 
 
 async def _reconcile_ambient() -> None:
-    """Self-heal ambient drift. state.ambient_mode_enabled is the single source
-    of truth (set by the toggle, persisted, restored on startup, broadcast to the
-    UI). If the flag is OFF but virtuals are still excluded — a disable() that
-    half-applied, or the excluded set surviving a path that flipped the flag —
-    the Hues stay wrongly parked and dark to triggers. Clear it. (The ON
-    direction is owned by enable()/startup, not force-reapplied here.)"""
-    if state.ambient_mode_enabled or not _ambient_excluded:
-        return
+    """Self-heal ambient drift, both directions. state.ambient_mode_enabled is the
+    single source of truth (set by the toggle, persisted, restored on startup,
+    broadcast to the UI). Device freeze is in-memory in LedFX and is LOST on a
+    LedFX restart, so a device can silently re-engage its stream while ambient is
+    meant to be on. Drive each target Hue device's freeze state toward the flag:
+    ON  → any device not frozen gets re-frozen + REST re-applied;
+    OFF → any device still frozen gets unfrozen."""
     from services import ambient_mode
-    logger.warning(
-        "Ambient reconcile: flag OFF but %d virtual(s) still excluded — clearing stale ambient hold",
-        len(_ambient_excluded),
-    )
-    await ambient_mode.disable()
+    want = bool(state.ambient_mode_enabled)
+
+    all_v = await ambient_mode._all_virtuals()
+    target_devices: set[str] = set()
+    for vid in ambient_mode._target_virtuals():
+        target_devices |= ambient_mode._segment_devices(all_v.get(vid, {}))
+        target_devices.add(vid)
+    hue_cfgs: dict[str, dict] = {}
+    for did in target_devices:
+        cfg = await ambient_mode._hue_cfg(did)
+        if cfg:
+            hue_cfgs[did] = cfg
+    if not hue_cfgs:
+        return
+
+    drift = []
+    for did in hue_cfgs:
+        is_frozen = await get_hue_frozen(did)
+        if is_frozen is None:
+            continue                 # LedFX unreachable for this device — next tick
+        if is_frozen != want:
+            drift.append(did)
+    if not drift:
+        return
+
+    if want:
+        logger.warning(
+            "Ambient reconcile: %d Hue device(s) lost freeze (LedFX restart?) — re-asserting",
+            len(drift),
+        )
+        for did in drift:
+            await freeze_hue_device(did, True)
+        for did in drift:            # re-write REST only AFTER re-freezing
+            await ambient_mode._apply_hue(hue_cfgs[did])
+    else:
+        logger.warning(
+            "Ambient reconcile: flag OFF but %d Hue device(s) still frozen — unfreezing",
+            len(drift),
+        )
+        for did in drift:
+            await freeze_hue_device(did, False)
 
 
 async def latency_loop() -> None:

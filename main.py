@@ -116,8 +116,6 @@ async def lifespan(app: FastAPI):
         state.use_analyzed_triggerless = bool(_saved["use_analyzed_triggerless"])
     if "ambient_mode_enabled" in _saved:
         state.ambient_mode_enabled = bool(_saved["ambient_mode_enabled"])
-    if "ambient_deactivated" in _saved:
-        state.ambient_deactivated = _saved["ambient_deactivated"] or []
 
     # Select song source based on settings
     if settings.song_source == "ledfx":
@@ -141,16 +139,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
         asyncio.create_task(engine.run(), name="trigger-engine"),
     ]
-    # Re-assert Ambient Mode if it was left on across restarts (exclude targets
-    # from triggers + hold them at the static color). Deferred as a task so a
-    # slow Hue bridge can't stall startup. If ambient is OFF but a stale parked
-    # list survived an unclean shutdown, self-heal by reactivating those virtuals.
+    # Re-assert Ambient Mode if it was left on across restarts (freeze the Hue
+    # devices + hold them at the static color). Deferred as a task so a slow Hue
+    # bridge can't stall startup. No parked-virtual selfheal needed — ambient no
+    # longer deactivates virtuals.
     if state.ambient_mode_enabled:
         from services import ambient_mode
         tasks.append(asyncio.create_task(ambient_mode.enable(), name="ambient-restore"))
-    elif state.ambient_deactivated:
-        from services import ambient_mode
-        tasks.append(asyncio.create_task(ambient_mode.selfheal(), name="ambient-selfheal"))
 
     logger.info("SpotFX started — http://%s:%d", settings.app_host, settings.app_port)
     yield

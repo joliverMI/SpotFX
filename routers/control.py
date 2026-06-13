@@ -150,16 +150,15 @@ async def set_dinner_party(enabled: bool):
 
 @router.post("/ambient-mode")
 async def set_ambient_mode(enabled: bool):
-    """Enable/disable Ambient Mode: hold the configured device category at a
-    static full-brightness color (via Hue REST) and exclude it from triggers.
-    HA-callable, same shape as /dinner-party and /pause.
+    """Enable/disable Ambient Mode: freeze the target Hue devices in LedFX (stop
+    their entertainment stream) and hold them at a static full-brightness color
+    via Hue REST. HA-callable, same shape as /dinner-party and /pause.
 
-    The actual Hue work (REST light writes, LedFX virtual park/reactivate) runs
-    in a BACKGROUND task: activating a Hue-spanning virtual triggers a slow
-    LedFX entertainment handshake, so awaiting it here would hang the toggle (and
-    pile up if toggled repeatedly). The task is serialized by a lock in
-    ambient_mode, so rapid toggles can't overlap. The endpoint returns
-    immediately; lights follow within a few seconds."""
+    The actual Hue work (freeze + REST light writes) runs in a BACKGROUND task:
+    freezing awaits the bridge stream-stop and the REST writes hit two bridges, so
+    awaiting it here would hang the toggle (and pile up if toggled repeatedly). The
+    task is serialized by a lock in ambient_mode, so rapid toggles can't overlap.
+    The endpoint returns immediately; lights follow within a few seconds."""
     import asyncio
     state.ambient_mode_enabled = enabled
     from routers.settings_router import _load_settings_file, _save_settings_file
