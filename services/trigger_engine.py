@@ -210,6 +210,9 @@ class TriggerEngine:
         # bounce traversal.
         self._color_cursor: dict[str, int] = {}
         self._color_cursor_dir: dict[str, int] = {}
+        # Index served two fires ago per group — used to break a bounce ping-pong
+        # when advance > 1 (e.g. n=3 advance=2 would otherwise loop 0,2,0,2).
+        self._color_cursor_prev: dict[str, int] = {}
         # Last fired Color Set's 3rd (accent) color per virtual, recorded as a
         # Color Set is applied. value may be None when that set's entry left the
         # accent undefined. On an effect switch to an accent-capable effect
@@ -293,6 +296,7 @@ class TriggerEngine:
             self._last_action.clear()
             self._color_cursor.clear()
             self._color_cursor_dir.clear()
+            self._color_cursor_prev.clear()
             self._nudge_dir.clear()
             self._preselected.clear()
             self._preselected_steps.clear()
@@ -2069,32 +2073,66 @@ class TriggerEngine:
             if updates:
                 morph_effect_state.save_many(updates)
 
-    def _select_color_set_member(self, group, pick_mode: str) -> Optional[str]:
+    def _select_color_set_member(
+        self, group, pick_mode: str, advance: int = 1, direction: str = "forward"
+    ) -> Optional[str]:
         """Pick one member Color Set id from a Group, updating in-memory cursor
         state. `pick_mode` ("default"|"cycle"|"weighted") overrides the group's
-        own `mode` unless "default". Returns the chosen color_set_id or None."""
+        own `mode` unless "default". For cycle mode, `advance` is how many
+        members to move per fire (1 = next, 3 = skip 2) and `direction`
+        ("forward"|"backward") sets travel: absolute index direction for wrap,
+        and relative to the current bounce direction for bounce ("backward"
+        reverses it). A move never settles on the set currently showing; in
+        bounce with advance > 1 it also avoids the set from two fires ago, so an
+        even advance can't ping-pong between two endpoints (e.g. n=3 advance=2).
+        Returns the color_set_id."""
         members = group.members or []
         if not members:
             return None
         n = len(members)
         mode = group.mode if pick_mode == "default" else pick_mode
         cur = self._color_cursor.get(group.id)
+        prev = self._color_cursor_prev.get(group.id)
+        adv = max(1, int(advance))
+        back = direction == "backward"
 
         if mode == "cycle":
             if cur is None:
                 idx = 0
-                self._color_cursor_dir[group.id] = 1
+                self._color_cursor_dir[group.id] = -1 if back else 1
             elif group.cycle_behavior == "bounce" and n > 1:
-                direction = self._color_cursor_dir.get(group.id, 1)
-                nxt = cur + direction
-                if nxt >= n:
-                    direction, nxt = -1, cur - 1
-                elif nxt < 0:
-                    direction, nxt = 1, cur + 1
-                self._color_cursor_dir[group.id] = direction
-                idx = max(0, min(n - 1, nxt))
+                d = self._color_cursor_dir.get(group.id, 1)
+                if back:
+                    d = -d  # "backward" reverses the current bounce direction
+
+                def _bounce_step(i, dd):
+                    nxt = i + dd
+                    if nxt >= n:
+                        dd, nxt = -1, i - 1
+                    elif nxt < 0:
+                        dd, nxt = 1, i + 1
+                    return nxt, dd
+
+                idx = cur
+                for _ in range(adv):
+                    idx, d = _bounce_step(idx, d)
+                # Never settle on the set already showing; for advance > 1 also
+                # avoid the set from two fires ago so an even stride can't get
+                # stuck ping-ponging between two endpoints. Step one further
+                # (reflecting) until clear; bounded by n since single steps visit
+                # every index.
+                forbidden = {cur}
+                if adv > 1 and n > 2 and prev is not None:
+                    forbidden.add(prev)
+                guard = 0
+                while idx in forbidden and guard < n:
+                    idx, d = _bounce_step(idx, d)
+                    guard += 1
+                self._color_cursor_dir[group.id] = d
             else:  # wrap (or single-member bounce)
-                idx = (cur + 1) % n
+                idx = (cur + (-adv if back else adv)) % n
+                if idx == cur and n > 1:
+                    idx = (idx + (-1 if back else 1)) % n
         else:  # weighted
             last_idx = cur if group.exclude_current else None
             weights = [0.0 if i == last_idx else m.weight for i, m in enumerate(members)]
@@ -2104,6 +2142,7 @@ class TriggerEngine:
                 weights = [1.0] * n
             idx = random.choices(range(n), weights=weights, k=1)[0]
 
+        self._color_cursor_prev[group.id] = cur  # what this fire's cursor was
         self._color_cursor[group.id] = idx
         return members[idx].color_set_id
 
@@ -2141,7 +2180,9 @@ class TriggerEngine:
             return
 
         if card.kind == "group":
-            chosen_id = self._select_color_set_member(card, action.pick_mode)
+            chosen_id = self._select_color_set_member(
+                card, action.pick_mode, action.advance, action.direction
+            )
             if not chosen_id:
                 logger.info("morph_color: group '%s' has no members", card.name)
                 return

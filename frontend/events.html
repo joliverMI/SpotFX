@@ -427,6 +427,10 @@ function actionFields(a) {
       const pm = a.pick_mode || 'default';
       const pmOpts = [['default','Group default'],['cycle','Cycle'],['weighted','Weighted']]
         .map(([v,l]) => `<option value="${v}"${v === pm ? ' selected' : ''}>${l}</option>`).join('');
+      const advVal = a.advance != null ? a.advance : 1;
+      const dir = a.direction || 'forward';
+      const dirOpts = [['forward','Forward'],['backward','Backward']]
+        .map(([v,l]) => `<option value="${v}"${v === dir ? ' selected' : ''}>${l}</option>`).join('');
       const preserve = a.preserve_effect !== false;  // default on
       const preserveStyle = preserve
         ? 'background:var(--accent);color:#fff;'
@@ -435,6 +439,11 @@ function actionFields(a) {
         <select class="mc-ref" style="min-width:200px;flex:1;">${csOpts}</select>
         <span style="font-size:11px;color:var(--text-muted);" title="For Groups only: override how the next Color Set is picked.">Pick</span>
         <select class="mc-pick-mode" style="width:130px;font-size:11px;">${pmOpts}</select>
+        <span style="font-size:11px;color:var(--text-muted);" title="Cycle/bounce groups only: how many members to move per fire (1 = next, 3 = skip 2).">Adv</span>
+        <input type="number" class="mc-advance" value="${advVal}" min="1" step="1" style="width:56px"
+          title="Cycle/bounce groups only: how many members to move per fire (1 = next, 3 = skip 2).">
+        <select class="mc-direction" style="width:104px;font-size:11px;"
+          title="Cycle/bounce groups only: travel direction. For bounce, Backward reverses the current bounce direction.">${dirOpts}</select>
         <span style="font-size:11px;color:var(--text-muted);">Ramp (ms)</span>
         <input type="number" class="mc-ramp" value="${rampVal}" min="0" step="50" placeholder="global" style="width:80px">
         <button type="button" class="mc-preserve" data-on="${preserve ? '1' : '0'}" onclick="mcPreserveToggle(this)"
@@ -1389,6 +1398,8 @@ function syncActionFromRow(row) {
         type, weight, labels,
         ref_id: dyn.querySelector('.mc-ref')?.value || '',
         pick_mode: dyn.querySelector('.mc-pick-mode')?.value || 'default',
+        advance: Math.max(1, parseInt(dyn.querySelector('.mc-advance')?.value) || 1),
+        direction: dyn.querySelector('.mc-direction')?.value || 'forward',
         ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
         preserve_effect: dyn.querySelector('.mc-preserve')?.dataset.on !== '0',
       };

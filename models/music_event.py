@@ -202,12 +202,18 @@ class MorphColorAction(BaseModel):
     mode. `ref_id` points at a ColorSetCard (kind="set" or "group"). For a
     group, `pick_mode` overrides the group's default selection; "default" uses
     the group's own `mode`. `ramp_ms` is the step default; each Color Set entry
-    may override it. See `services/trigger_engine._execute_morph_color`."""
+    may override it. `advance`/`direction` apply only when the resolved mode is
+    "cycle" (wrap or bounce): `advance` is how many members to move per fire (1 =
+    next, 3 = skip 2). For wrap, `direction` is the absolute index direction; for
+    bounce, "forward" continues the current travel direction and "backward"
+    reverses it. See `services/trigger_engine._execute_morph_color`."""
     type:      Literal["morph_color"] = "morph_color"
     labels:    list[str] = Field(default_factory=list)
     weight:    float = 1.0
     ref_id:    str = ""
     pick_mode: Literal["default", "cycle", "weighted"] = "default"
+    advance:   int = Field(default=1, ge=1)
+    direction: Literal["forward", "backward"] = "forward"
     ramp_ms:   int | None = None
     # When True (default), skip any color-set value that would reset the LedFX
     # effect (e.g. background_color), preserving the running effect. When False,
