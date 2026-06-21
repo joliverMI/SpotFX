@@ -64,6 +64,8 @@ def make_frames(
     blend_ms: int = 0,
     offset_change_at_ms: int = 0,
     offset_change_delta_ms: int = 0,
+    gap_at_ms: int = 0,
+    gap_len_ms: int = 0,
     rng_seed: int = 0,
 ) -> list[Frame]:
     """Synthesize live-capture frames from PCM with controlled degradations.
@@ -112,6 +114,12 @@ def make_frames(
             for f in out
         ]
         out.sort(key=lambda f: f[0])
+    if gap_len_ms > 0:
+        # Drop frames in [gap_at, gap_at+gap_len] — a real capture stall: a
+        # hole in samples while surviving timestamps stay monotonic, exactly
+        # what queue-full drops produce.
+        lo, hi = int(gap_at_ms), int(gap_at_ms + gap_len_ms)
+        out = [f for f in out if not (lo <= f[0] < hi)]
     return out
 
 

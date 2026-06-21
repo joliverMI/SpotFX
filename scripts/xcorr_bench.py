@@ -30,28 +30,30 @@ from bench.simulate import load_wav, make_frames  # noqa: E402
 
 SEEDS = ["cold", "seeded_correct", "seeded_wrong_2s"]
 
-# (name, true_offset_ms, cut_in_ms, noise_snr_db, blend_ms, change_at_ms, change_delta_ms)
+# (name, true_offset_ms, cut_in_ms, noise_snr_db, blend_ms, change_at_ms, change_delta_ms, gap_at_ms, gap_len_ms)
 PROFILES = [
-    ("off0",        0,      0,     None, 0,    0,     0),
-    ("off+200",     200,    0,     None, 0,    0,     0),
-    ("off-200",     -200,   0,     None, 0,    0,     0),
-    ("off+2s",      2000,   0,     None, 0,    0,     0),
-    ("off-2s",      -2000,  0,     None, 0,    0,     0),
-    ("off+10s",     10000,  0,     None, 0,    0,     0),
-    ("off-10s",     -10000, 0,     None, 0,    0,     0),
-    ("off+25s",     25000,  0,     None, 0,    0,     0),
-    ("off-25s",     -25000, 0,     None, 0,    0,     0),
-    ("noise0",      0,      0,     20.0, 0,    0,     0),
-    ("noise-2s",    -2000,  0,     20.0, 0,    0,     0),
-    ("cutin5s",     5000,   5000,  None, 0,    0,     0),
-    ("cutin15s",    15000,  15000, None, 0,    0,     0),
-    ("cutin25s",    25000,  25000, None, 0,    0,     0),
-    ("blend8s",     0,      0,     None, 8000, 0,     0),
+    ("off0",        0,      0,     None, 0,    0,     0,    0,     0),
+    ("off+200",     200,    0,     None, 0,    0,     0,    0,     0),
+    ("off-200",     -200,   0,     None, 0,    0,     0,    0,     0),
+    ("off+2s",      2000,   0,     None, 0,    0,     0,    0,     0),
+    ("off-2s",      -2000,  0,     None, 0,    0,     0,    0,     0),
+    ("off+10s",     10000,  0,     None, 0,    0,     0,    0,     0),
+    ("off-10s",     -10000, 0,     None, 0,    0,     0,    0,     0),
+    ("off+25s",     25000,  0,     None, 0,    0,     0,    0,     0),
+    ("off-25s",     -25000, 0,     None, 0,    0,     0,    0,     0),
+    ("noise0",      0,      0,     20.0, 0,    0,     0,    0,     0),
+    ("noise-2s",    -2000,  0,     20.0, 0,    0,     0,    0,     0),
+    ("cutin5s",     5000,   5000,  None, 0,    0,     0,    0,     0),
+    ("cutin15s",    15000,  15000, None, 0,    0,     0,    0,     0),
+    ("cutin25s",    25000,  25000, None, 0,    0,     0,    0,     0),
+    ("blend8s",     0,      0,     None, 8000, 0,     0,    0,     0),
     # Phase 5: mid-song position re-sync (the monitor's headline scenario)
-    ("midshift+1.5s", 0,    0,     None, 0,    60000, 1500),
-    ("midshift-1.5s", 0,    0,     None, 0,    60000, -1500),
+    ("midshift+1.5s", 0,    0,     None, 0,    60000, 1500, 0,     0),
+    ("midshift-1.5s", 0,    0,     None, 0,    60000, -1500, 0,    0),
+    # Phase 6: capture stall (~400ms hole landing in an early planned window)
+    ("gap400",      0,      0,     None, 0,    0,     0,    22000, 400),
 ]
-QUICK_PROFILES = {"off0", "off-2s", "off+10s", "cutin15s", "blend8s", "midshift+1.5s"}
+QUICK_PROFILES = {"off0", "off-2s", "off+10s", "cutin15s", "blend8s", "midshift+1.5s", "gap400"}
 QUICK_SEEDS = ["cold", "seeded_wrong_2s"]
 
 
@@ -96,9 +98,9 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
         donor_stem = stems[si - 1]   # blend donor: previous corpus song (wraps)
         # Offsets only shift timestamps — synthesize once per degradation
         # (cut/noise/blend) and derive per-offset frames cheaply.
-        degr_cache: dict = {(0, None, 0, 0, 0): clean_frames}
-        for (pname, true_off, cut_in, snr, blend_ms, chg_at, chg_delta) in profiles:
-            key = (cut_in, snr, blend_ms, chg_at, chg_delta)
+        degr_cache: dict = {(0, None, 0, 0, 0, 0, 0): clean_frames}
+        for (pname, true_off, cut_in, snr, blend_ms, chg_at, chg_delta, gap_at, gap_len) in profiles:
+            key = (cut_in, snr, blend_ms, chg_at, chg_delta, gap_at, gap_len)
             if key not in degr_cache:
                 if blend_ms > 0 and donor_pcm is None:
                     try:
@@ -110,6 +112,7 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
                     blend_donor_pcm=donor_pcm if blend_ms > 0 else None,
                     blend_ms=blend_ms,
                     offset_change_at_ms=chg_at, offset_change_delta_ms=chg_delta,
+                    gap_at_ms=gap_at, gap_len_ms=gap_len,
                 )
             base = degr_cache[key]
             frames = base if true_off == 0 else [(f[0] - true_off,) + f[1:] for f in base]
@@ -119,6 +122,7 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
                               blend_ms=blend_ms, seed=seed,
                               offset_change_at_ms=chg_at,
                               offset_change_delta_ms=chg_delta,
+                              gap_at_ms=gap_at, gap_len_ms=gap_len,
                               force_search_ms=force_search_ms)
                 res = replay_play(stem, sc, assets=assets, frames=frames,
                                   wav_bias_ms=bias)
@@ -135,6 +139,7 @@ def run_grid(tag: str, *, corpus_name: str, quick: bool, limit_songs: int | None
                                    seed_snapshot=res.store_snapshot,
                                    offset_change_at_ms=chg_at,
                                    offset_change_delta_ms=chg_delta,
+                                   gap_at_ms=gap_at, gap_len_ms=gap_len,
                                    force_search_ms=force_search_ms)
                     results.append(replay_play(stem, sc2, assets=assets,
                                                frames=frames, wav_bias_ms=bias))

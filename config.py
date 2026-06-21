@@ -316,6 +316,12 @@ class Settings(BaseSettings):
     xcorr_monitor_spike_halfwin_ms: int = 2500
     xcorr_monitor_demote_q: float = 0.40
     xcorr_monitor_accum_decay: float = 0.5
+    # Phase 6: capture-gap rejection. A window (or monitor rolling check)
+    # whose live span contains a consecutive-frame gap larger than this is
+    # discarded/neutralized — np.interp would otherwise bridge the hole with
+    # fabricated samples and score the window on invented data. Distinct from
+    # audio_max_gap_ms (recorder, whole-shape discard). ~17 native frames.
+    xcorr_window_max_gap_ms: int = 200
     # Song-start sniff: fire a dedicated start-window xcorr after this much
     # accumulated live audio at song load.
     xcorr_start_sniff_ms: int = 5000

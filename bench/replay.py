@@ -48,6 +48,8 @@ class Scenario:
     blend_donor: Optional[str] = None       # corpus stem for donor tail
     offset_change_at_ms: int = 0             # midshift: clock time of a position re-sync
     offset_change_delta_ms: int = 0          # midshift: expected offset steps by this
+    gap_at_ms: int = 0                       # capture-stall: drop frames from here
+    gap_len_ms: int = 0                      # capture-stall: for this duration
     seed: str = "cold"                       # cold | seeded_correct | seeded_wrong_2s | snapshot
     seed_snapshot: Optional[dict] = None     # FakeMetaStore.snapshot() of a prior play
     play_type: str = "first"
@@ -192,6 +194,8 @@ def replay_play(stem: str, scenario: Scenario, *,
             blend_ms=scenario.blend_ms,
             offset_change_at_ms=scenario.offset_change_at_ms,
             offset_change_delta_ms=scenario.offset_change_delta_ms,
+            gap_at_ms=scenario.gap_at_ms,
+            gap_len_ms=scenario.gap_len_ms,
         )
     last_frame_ts = frames[-1][0] if frames else 0
 
@@ -357,6 +361,11 @@ def replay_play(stem: str, scenario: Scenario, *,
     def run_window(win_start: int, win_end: int, frames_now: list) -> bool:
         """One window evaluation + side effects. Mirrors live _run_window.
         Returns True when lock-and-stop fired."""
+        # Capture-gap rejection (Phase 6) — mirrors live _run_window.
+        _gap = xcorr_core.max_frame_gap_ms(
+            frames_now, win_start - search_ms, win_end + search_ms)
+        if _gap > settings.xcorr_window_max_gap_ms:
+            return False
         t0 = time.perf_counter()
 
         bins = np.arange(win_start, win_end, xcorr_core.XCORR_BIN_MS, dtype=float)
@@ -505,11 +514,15 @@ def replay_play(stem: str, scenario: Scenario, *,
                 mw_start = mw_end - mon_cfg.span_ms
                 rolling_r = None
                 if mw_start >= 0:
-                    # Difficulty gate (mirrors live): flat spans are neutral.
+                    # Difficulty + gap gate (mirrors live): flat spans and
+                    # capture stalls are neutral (rolling_r stays None).
                     mw_bins = np.arange(mw_start, mw_end, xcorr_core.XCORR_BIN_MS, dtype=float)
                     mw_tpl = np.interp(mw_bins, stored_ts, stored_rms)
-                    if xcorr_core.difficulty_score(mw_tpl, stored_rms) >= float(
-                            getattr(settings, "xcorr_starting_threshold", 0.15)):
+                    mw_gap = xcorr_core.max_frame_gap_ms(
+                        frames_now, mw_start - mon_off, mw_end - mon_off)
+                    if (xcorr_core.difficulty_score(mw_tpl, stored_rms) >= float(
+                            getattr(settings, "xcorr_starting_threshold", 0.15))
+                            and mw_gap <= settings.xcorr_window_max_gap_ms):
                         rolling_r = xcorr_core.eval_at_shift(
                             stored_ts, stored_bands, frames_now,
                             mw_start, mw_end, -mon_off,

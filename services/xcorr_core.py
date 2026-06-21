@@ -63,6 +63,19 @@ def signed_square(arr: np.ndarray) -> np.ndarray:
     return arr * np.abs(arr)
 
 
+def max_frame_gap_ms(frames, t0_ms: float, t1_ms: float) -> int:
+    """Largest consecutive-timestamp delta among frames in [t0, t1] (0 if <2).
+
+    Mirrors the recorder's gap idiom (audio_analyzer.ingest). A large value
+    means a capture hole (dropped/queue-full frames) that np.interp would
+    silently bridge with a fabricated straight-line ramp — corrupting any
+    window scored over that region. Frames are timestamp-sorted (appended in
+    capture order), so a single forward scan suffices.
+    """
+    ts = [f[0] for f in frames if t0_ms <= f[0] <= t1_ms]
+    return max((ts[i + 1] - ts[i] for i in range(len(ts) - 1)), default=0)
+
+
 def difficulty_score(window_rms: np.ndarray, song_rms: np.ndarray) -> float:
     """
     How much dynamic content is in this window, normalised 0–1.
@@ -831,6 +844,20 @@ def mismatch_spike(
     if n_valid == 0:
         return None
     d = diff_sum / n_valid
+
+    # Gap exclusion (Phase 6): a capture hole shows as a huge residual
+    # (interp ramp vs real stored) and would be picked as THE spike, aiming
+    # the recovery at fabricated data. Zero residual on bins with no real
+    # live frame within ~60ms of their sampled live time (bins + shift).
+    if len(live_ts) and len(bins):
+        live_at = bins + shift
+        idx = np.searchsorted(live_ts, live_at)
+        idx_lo = np.clip(idx - 1, 0, len(live_ts) - 1)
+        idx_hi = np.clip(idx, 0, len(live_ts) - 1)
+        nearest = np.minimum(np.abs(live_at - live_ts[idx_lo]),
+                             np.abs(live_at - live_ts[idx_hi]))
+        d = np.where(nearest <= 60.0, d, 0.0)
+
     # 3-bin (75ms) smooth — same de-flicker the debug graph applies, so the
     # picked spike matches what the user sees.
     if smooth_bins > 1 and len(d) > smooth_bins:

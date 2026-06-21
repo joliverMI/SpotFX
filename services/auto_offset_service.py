@@ -58,6 +58,7 @@ from services.xcorr_core import (
     xcorr_window_fft_full as _xcorr_window_fft_full,
     progressive_match as _progressive_match,
     mismatch_spike as _mismatch_spike,
+    max_frame_gap_ms as _max_frame_gap_ms,
 )
 from services.xcorr_sweep import (
     MismatchMonitor, MonitorConfig, SearchLadder, SweepConfig, SweepEvaluator,
@@ -785,6 +786,20 @@ class AutoOffsetService:
         # lock-and-stop fired. Body moved verbatim from the loop (closure
         # over frames/stored_*/evaluator/_ladder/...).
         async def _run_window(win_start: int, win_end: int) -> bool:
+            # ── Capture-gap rejection (Phase 6) ───────────────────────────
+            # If the live capture stalled anywhere in this window's searched
+            # span, np.interp would bridge the hole with fabricated samples
+            # and score the window on invented data. Discard transparently:
+            # no OLD/NEW eval, no evaluator/ladder mutation, no CSV — a gap
+            # is "no measurement attempted," not "found nothing."
+            _gap = _max_frame_gap_ms(frames, win_start - search_ms, win_end + search_ms)
+            if _gap > settings.xcorr_window_max_gap_ms:
+                logger.info(
+                    "Auto-offset xcorr: window [%d–%d]ms discarded — capture gap %dms (>%dms) for %s",
+                    win_start, win_end, _gap, settings.xcorr_window_max_gap_ms, uri,
+                )
+                return False
+
             # ── Compute difficulty for this window ────────────────────────
             bins = np.arange(win_start, win_end, _XCORR_BIN_MS, dtype=float)
             window_template = np.interp(bins, stored_ts, stored_rms)
@@ -1168,8 +1183,16 @@ class AutoOffsetService:
                         # quiet bridges/outros of correctly-locked plays.
                         _mw_bins = np.arange(_mw_start, _mw_end, _XCORR_BIN_MS, dtype=float)
                         _mw_tpl = np.interp(_mw_bins, stored_ts, stored_rms)
-                        if _difficulty_score(_mw_tpl, stored_rms) >= float(
-                                getattr(settings, "xcorr_starting_threshold", 0.15)):
+                        # Gap gate (Phase 6): a capture stall in the rolling
+                        # span makes the interpolated live look like garbage —
+                        # leave rolling_r None (neutral) so a gap can't confirm
+                        # a false mismatch. Live region = bins shifted by the
+                        # engine offset (eval_at_shift samples at bins-_mon_off).
+                        _mw_gap = _max_frame_gap_ms(
+                            frames, _mw_start - _mon_off, _mw_end - _mon_off)
+                        if (_difficulty_score(_mw_tpl, stored_rms) >= float(
+                                getattr(settings, "xcorr_starting_threshold", 0.15))
+                                and _mw_gap <= settings.xcorr_window_max_gap_ms):
                             rolling_r = await asyncio.to_thread(
                                 _eval_at_shift, stored_ts, stored_bands, frames,
                                 _mw_start, _mw_end, -_mon_off,
