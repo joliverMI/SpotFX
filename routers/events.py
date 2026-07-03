@@ -35,6 +35,13 @@ async def get_event_by_id(event_id: str):
 async def upsert_event(event: MusicEvent):
     if event.id in FIXED_EVENT_IDS:
         raise HTTPException(403, "Built-in event cannot be edited")
+    # The frozen classic editor doesn't know the composite shape — reject a
+    # legacy-shape payload that would silently flatten a migrated event.
+    existing = get_event(event.id)
+    if (existing is not None and existing.event_type == "composite"
+            and event.event_type != "composite"):
+        raise HTTPException(
+            409, "Event is composite — edit it in the new editor (/app/)")
     save_event(event)
     return {"status": "saved", "id": event.id}
 

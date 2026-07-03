@@ -107,6 +107,10 @@ class _PlanEntry:
     preselected_steps: Optional[list] = None      # for "sequence" events — per-step action pre-selection
     preselected_morph_picks: Optional[list] = None  # for "morph_set" events — per-lane pre-picks (list[MorphPick])
     morph_anchor_offset_ms: int = 0               # earliest lane offset; fire_at_ms is start_at + this (lanes sleep offset - anchor)
+    # For "composite" events — plan-time resolution of every random_group in the
+    # tree (group.id → RandomOption.id) so previews match fires and scene-override
+    # can pre-stage. Fire-time falls back to fresh picks when None.
+    resolved_picks: Optional[dict] = None
     snapshot_task: Optional[asyncio.Task] = None  # pre-fire snapshot of the LedFX state this event will change
     # Scene-override lookahead: planner pre-stages the temp scene + transition_times
     # ahead of fire_at_ms; fire-time just activates the prepared scene.
@@ -1093,6 +1097,79 @@ class TriggerEngine:
                 ))
                 return self._morph_picks_summary(picks) if picks else event.name
 
+            if event.event_type == "composite":
+                root = event.root
+                resolved = self._resolve_random_picks(root, list(lbls)) if root is not None else {}
+                # Anchor mirrors legacy: beats root shifts by start_offset_beats;
+                # parallel root shifts by min(child offset) (children then sleep
+                # offset - anchor at fire time).
+                fire_at = start_at
+                anchor_off = 0
+                if root is not None and root.type == "sequence_group" and root.timing == "beats":
+                    interval = self._local_beat_interval_ms(start_at)
+                    fire_at = start_at + root.start_offset_beats * interval
+                elif root is not None and root.type == "parallel_group" and root.children:
+                    anchor_off = min(int(c.offset_ms or 0) for c in root.children)
+                    fire_at = start_at + anchor_off
+
+                # Plan event_ref children on RESOLVED branches with compounded
+                # timing, so their event_offset_ms lands correctly (the inline
+                # fallback in _execute_action stays for unresolved branches).
+                child_ids: set[str] = set()
+
+                def _plan_refs(action, base_ms: float, merged: list[str], d: int) -> None:
+                    if action is None or d > 5:
+                        return
+                    t = getattr(action, "type", "")
+                    if t == "event_ref" and action.event_id:
+                        child = get_event(action.event_id)
+                        if child and child.id not in visited_next:
+                            walk(child, int(base_ms), merged + list(action.labels or []),
+                                 depth + 1, visited_next)
+                            child_ids.add(child.id)
+                        return
+                    if t == "random_group":
+                        opt_id = resolved.get(action.id)
+                        opt = next((o for o in action.options if o.id == opt_id), None)
+                        if opt is not None:
+                            for a in opt.actions:
+                                _plan_refs(a, base_ms, merged + list(opt.labels or []), d + 1)
+                        return
+                    if t == "sequence_group":
+                        tmg = action.timing
+                        interval = self._local_beat_interval_ms(int(base_ms)) if tmg == "beats" else 0
+                        tcur = base_ms + (action.start_offset_beats * interval if tmg == "beats" else 0)
+                        for i, c in enumerate(action.children):
+                            if tmg == "beats":
+                                if i > 0:
+                                    tcur += (1 + c.delay_beats) * interval
+                            else:
+                                tcur += c.delay_ms
+                            for a in c.actions:
+                                _plan_refs(a, tcur, merged + list(c.labels or []), d + 1)
+                        return
+                    if t == "parallel_group":
+                        for c in action.children:
+                            for a in c.actions:
+                                _plan_refs(a, base_ms + int(c.offset_ms or 0),
+                                           merged + list(c.labels or []), d + 1)
+                        return
+
+                if root is not None:
+                    _plan_refs(root, float(start_at), list(lbls), 0)
+
+                entries.append(_PlanEntry(
+                    fire_at_ms=int(fire_at), event=event, labels=list(lbls),
+                    trigger_ms=trigger.timestamp_ms,
+                    trigger_id=trigger.id,
+                    is_root=(event.id == root_event.id),
+                    planned_descendant_ids=child_ids,
+                    resolved_picks=resolved,
+                    morph_anchor_offset_ms=anchor_off,
+                ))
+                return (self._describe_action(root, resolved=resolved)
+                        if root is not None else event.name)
+
             if event.event_type in SCENE_EVENT_TYPES:
                 # Which lane runs depends on live state at fire time, so emit a
                 # plain entry and resolve it in _execute_plan_entry.
@@ -1127,6 +1204,114 @@ class TriggerEngine:
         if step.action is not None:
             return [step.action]
         return []
+
+    CONTAINER_ACTION_TYPES = ("random_group", "sequence_group", "parallel_group")
+
+    def _iter_leaf_actions(self, actions, resolved_picks: dict | None = None, _depth: int = 0):
+        """Yield leaf (non-container) actions from a list, descending containers.
+        For random_group: descend only the resolved option when the pick is
+        known, else ALL options — a conservative superset, which is correct for
+        snapshot/ambient collection (over-capturing is safe)."""
+        if _depth > 6 or not actions:
+            return
+        for a in actions:
+            t = getattr(a, "type", "")
+            if t == "random_group":
+                opts = a.options
+                if resolved_picks and a.id in resolved_picks:
+                    opts = [o for o in a.options if o.id == resolved_picks[a.id]]
+                for o in opts:
+                    yield from self._iter_leaf_actions(o.actions, resolved_picks, _depth + 1)
+            elif t in ("sequence_group", "parallel_group"):
+                for c in a.children:
+                    yield from self._iter_leaf_actions(c.actions, resolved_picks, _depth + 1)
+            else:
+                yield a
+
+    def _event_leaf_actions(self, event: MusicEvent, resolved_picks: dict | None = None) -> list:
+        """Flat leaf-action list for any event shape (legacy steps or composite root)."""
+        if event.event_type == "composite":
+            return list(self._iter_leaf_actions([event.root] if event.root else [], resolved_picks))
+        if event.event_type in ("sequence", "beat_sequence"):
+            steps = event.beat_sequence_steps if event.event_type == "beat_sequence" else event.sequence_steps
+            flat: list = []
+            for step in steps:
+                if step.step_type == "action":
+                    flat.extend(self._resolve_step_actions(step))
+            return list(self._iter_leaf_actions(flat, resolved_picks))
+        return list(self._iter_leaf_actions(list(event.actions or []), resolved_picks))
+
+    def _resolve_random_picks(
+        self, action, labels: list[str], out: dict | None = None, _depth: int = 0,
+    ) -> dict:
+        """Plan-time resolution of every random_group in an action tree:
+        {group.id: RandomOption.id}. Picking here advances the _last_action
+        dedupe memory — same precedent as plan-time _select_action for singles.
+        Recurses only into the PICKED option of each group; sequence/parallel
+        children are all walked (merging child labels like lane picks do)."""
+        if out is None:
+            out = {}
+        if action is None or _depth > 6:
+            return out
+        t = getattr(action, "type", "")
+        if t == "random_group":
+            if not action.dedupe:
+                self._last_action.pop(action.id, None)
+            opt = self._pick_from_actions(action.options, labels, dedupe_key=action.id,
+                                          desc="random group (plan)")
+            if opt is not None:
+                out[action.id] = opt.id
+                for a in opt.actions:
+                    self._resolve_random_picks(a, labels + list(opt.labels or []), out, _depth + 1)
+        elif t in ("sequence_group", "parallel_group"):
+            for c in action.children:
+                merged = labels + list(c.labels or [])
+                for a in c.actions:
+                    self._resolve_random_picks(a, merged, out, _depth + 1)
+        return out
+
+    def _composite_scene_picks(self, event, resolved_picks: dict | None):
+        """Flatten a RESOLVED composite tree into MorphPick-shaped lanes for the
+        scene-override machinery. Returns None when the tree can't be expressed
+        as one atomic activate: root missing, an unresolved random_group, or any
+        sequence_group (an atomic activate can't stagger steps in time)."""
+        root = event.root if event.event_type == "composite" else None
+        if root is None:
+            return None
+
+        def flatten(action, offset: int, name: str, depth: int = 0):
+            if depth > 6:
+                return None
+            t = getattr(action, "type", "")
+            if t == "sequence_group":
+                return None
+            if t == "random_group":
+                opt = None
+                if resolved_picks and action.id in resolved_picks:
+                    opt = next((o for o in action.options if o.id == resolved_picks[action.id]), None)
+                elif len(action.options) == 1:
+                    opt = action.options[0]
+                if opt is None:
+                    return None
+                picks: list = []
+                for a in opt.actions:
+                    sub = flatten(a, offset, name, depth + 1)
+                    if sub is None:
+                        return None
+                    picks.extend(sub)
+                return picks
+            if t == "parallel_group":
+                picks = []
+                for c in action.children:
+                    for a in c.actions:
+                        sub = flatten(a, offset + int(c.offset_ms or 0), c.name or name, depth + 1)
+                        if sub is None:
+                            return None
+                        picks.extend(sub)
+                return picks
+            return [MorphPick(name, action, offset)]
+
+        return flatten(root, 0, "")
 
     def _select_action(self, event: MusicEvent, labels: list[str]) -> Optional[Action]:
         """Pick an action from event.actions (delegates to _pick_from_actions).
@@ -1182,8 +1367,11 @@ class TriggerEngine:
         self._last_action[dedupe_key] = chosen_i
         return selected
 
-    def _describe_action(self, action: Action, _depth: int = 0) -> str:
-        """Return a short human-readable label for a pre-selected action."""
+    def _describe_action(self, action: Action, _depth: int = 0,
+                         resolved: dict | None = None) -> str:
+        """Return a short human-readable label for a pre-selected action.
+        `resolved` (random_group.id → option.id) drills into the picked branch
+        so plan-time previews match what actually fires."""
         if action.type == "ledfx_scene":
             return action.scene_id
         elif action.type == "ledfx_ambient":
@@ -1226,7 +1414,32 @@ class TriggerEngine:
                     return f"→ {sub.name}"
             return "→ (event ref)"
         elif action.type == "random_group":
+            if resolved and action.id in resolved and _depth < 4:
+                opt = next((o for o in action.options if o.id == resolved[action.id]), None)
+                if opt is not None:
+                    inner = ", ".join(
+                        self._describe_action(a, _depth + 1, resolved) for a in opt.actions
+                    )
+                    return f"🎲 {opt.name or inner or '—'}" if not opt.name else f"🎲 {opt.name}: {inner}"
             return f"🎲 1 of {len(action.options)}"
+        elif action.type == "sequence_group":
+            if _depth >= 3:
+                return f"Seq · {len(action.children)} steps"
+            parts = [
+                ", ".join(self._describe_action(a, _depth + 1, resolved) for a in c.actions) or "—"
+                for c in action.children
+            ]
+            return " > ".join(parts) if parts else "Seq (empty)"
+        elif action.type == "parallel_group":
+            if _depth >= 3:
+                return f"⫴ {len(action.children)} lanes"
+            parts = []
+            for c in action.children:
+                desc = ", ".join(self._describe_action(a, _depth + 1, resolved) for a in c.actions) or "—"
+                if c.offset_ms:
+                    desc = f"{desc} ({c.offset_ms:+d}ms)"
+                parts.append(f"{c.name}: {desc}" if c.name else desc)
+            return " · ".join(parts) if parts else "Parallel (empty)"
         return action.type
 
     def _preselect_sequence_steps(
@@ -1282,12 +1495,24 @@ class TriggerEngine:
             return False
 
         with ledfx_client.force_allow():
+            # Composite: resolve random picks ONCE so the scene-override attempt
+            # and the fallback bus dispatch fire the same branches.
+            _rp: dict | None = None
+            _so_picks = None
+            if event.event_type == "composite" and event.root is not None:
+                _rp = self._resolve_random_picks(event.root, list(labels or []))
+                _so_picks = self._composite_scene_picks(event, _rp)
+
             # ── Scene-override fast path (manual fire = prepare inline + fire) ──
-            if await self._maybe_fire_scene_override(event, labels=labels):
+            if await self._maybe_fire_scene_override(event, labels=labels, picks=_so_picks):
                 await ledfx_client.drain_bus()
                 return True
 
-            if event.event_type == "single":
+            if event.event_type == "composite":
+                await self._execute_composite(
+                    event, list(labels or []), resolved_picks=_rp, lead_sleep=True,
+                )
+            elif event.event_type == "single":
                 await self._apply_pre_commands(event, list(labels or []))
                 lead_ms = max(
                     settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
@@ -1370,6 +1595,24 @@ class TriggerEngine:
                 )
                 return False
             return True
+        if event.event_type == "composite":
+            # Callers pass picks from _composite_scene_picks (resolved + flattened).
+            # None = tree can't be one atomic activate (unresolved random, any
+            # sequence_group, or empty root) — bus dispatch.
+            if picks is None:
+                logger.info(
+                    "Event '%s' (composite) not flattenable for scene-override "
+                    "(unresolved random / sequence group) — bus dispatch.", event.name,
+                )
+                return False
+            offsets = {p.offset_ms for p in picks}
+            if len(offsets) > 1:
+                logger.info(
+                    "Event '%s' (composite) has mixed offsets %s — bus dispatch.",
+                    event.name, sorted(offsets),
+                )
+                return False
+            return True
         logger.warning(
             "Event '%s' has scene_override=True but event_type=%s — not honored in Phase 1; "
             "falling back to the bus dispatch.",
@@ -1398,11 +1641,12 @@ class TriggerEngine:
         match the chosen picks."""
         from models.music_event import DeviceSettingsAction
         actions: list = []
-        if event.event_type == "single":
+        if picks is not None:
+            actions = [p.action for p in picks if isinstance(p.action, DeviceSettingsAction)]
+        elif event.event_type == "single":
             actions = [a for a in (event.actions or []) if isinstance(a, DeviceSettingsAction)]
         elif event.event_type == "morph_set":
-            if picks is None:
-                picks = self._pick_morph_lanes(event, labels or [])
+            picks = self._pick_morph_lanes(event, labels or [])
             actions = [p.action for p in picks if isinstance(p.action, DeviceSettingsAction)]
         out: list = []
         for a in actions:
@@ -1503,7 +1747,8 @@ class TriggerEngine:
         if not self._event_eligible_for_scene_override(event, picks=picks):
             return False
         if picks is not None:
-            morph_actions = [p.action for p in picks if p.action is not None]
+            from models.music_event import MorphStepAction
+            morph_actions = [p.action for p in picks if isinstance(p.action, MorphStepAction)]
         else:
             morph_actions = self._collect_morph_actions_for_event(event, labels)
         payload = self._build_scene_payload(morph_actions)
@@ -1565,6 +1810,14 @@ class TriggerEngine:
             morph_summary = self._morph_picks_summary(morph_picks)
         elif event.event_type == "device_settings":
             asyncio.create_task(self._apply_device_targets(event.device_targets))
+        elif event.event_type == "composite":
+            # Resolve picks synchronously so the broadcast summary matches the fire.
+            rp = self._resolve_random_picks(event.root, list(trigger.labels)) if event.root else {}
+            if event.root is not None:
+                morph_summary = self._describe_action(event.root, resolved=rp)
+            asyncio.create_task(
+                self._execute_composite(event, list(trigger.labels), resolved_picks=rp)
+            )
         elif event.event_type in SCENE_EVENT_TYPES:
             # Lane choice depends on live scene state; resolve + fire async.
             asyncio.create_task(self._execute_scene_event(event, trigger.labels))
@@ -1602,27 +1855,47 @@ class TriggerEngine:
     async def _execute_action(
         self, action: Action, labels: list[str] | None = None,
         await_ramps: bool = False, skip_event_ids: set[str] | None = None,
-        _depth: int = 0,
+        _depth: int = 0, resolved_picks: dict | None = None,
     ) -> None:
-        """Dispatch a single action."""
+        """Dispatch a single action. `resolved_picks` (random_group.id →
+        RandomOption.id) pins random branches to the plan-time resolution so
+        fires match previews; absent entries fall back to fresh picks."""
+        if action.type in self.CONTAINER_ACTION_TYPES and _depth > 5:
+            logger.warning("%s depth cap (5) hit — skipping nested group", action.type)
+            return
         if action.type == "random_group":
-            if _depth > 5:
-                logger.warning("random_group depth cap (5) hit — skipping nested group")
-                return
-            if not action.dedupe:
-                self._last_action.pop(action.id, None)  # forget last pick → no de-weighting
-            opt = self._pick_from_actions(
-                action.options, labels or [], dedupe_key=action.id, desc="random group",
-            )
+            opt = None
+            if resolved_picks and action.id in resolved_picks:
+                opt = next((o for o in action.options if o.id == resolved_picks[action.id]), None)
+            if opt is None:
+                if not action.dedupe:
+                    self._last_action.pop(action.id, None)  # forget last pick → no de-weighting
+                opt = self._pick_from_actions(
+                    action.options, labels or [], dedupe_key=action.id, desc="random group",
+                )
             if opt and opt.actions:
                 merged = (labels or []) + [l for l in opt.labels if l not in (labels or [])]
                 await asyncio.gather(*(
                     self._execute_action(
                         a, merged, await_ramps=await_ramps,
                         skip_event_ids=skip_event_ids, _depth=_depth + 1,
+                        resolved_picks=resolved_picks,
                     )
                     for a in opt.actions
                 ))
+            return
+        if action.type == "sequence_group":
+            await self._execute_sequence_group(
+                action, labels or [], skip_event_ids=skip_event_ids,
+                resolved_picks=resolved_picks, _depth=_depth,
+            )
+            return
+        if action.type == "parallel_group":
+            await self._execute_parallel_group(
+                action, labels or [], await_ramps=await_ramps,
+                skip_event_ids=skip_event_ids,
+                resolved_picks=resolved_picks, _depth=_depth,
+            )
             return
         if action.type == "event_ref":
             sub = get_event(action.event_id)
@@ -1650,6 +1923,9 @@ class TriggerEngine:
                 )
             elif sub.event_type == "morph_set":
                 await self._execute_morph_set(sub, labels or [], skip_event_ids=skip_event_ids)
+            elif sub.event_type == "composite":
+                # Other events own their trees — fresh picks, not our resolved map.
+                await self._execute_composite(sub, labels or [], skip_event_ids=skip_event_ids)
             elif sub.event_type in SCENE_EVENT_TYPES:
                 await self._execute_scene_event(sub, labels or [], skip_event_ids=skip_event_ids)
             else:
@@ -2635,9 +2911,12 @@ class TriggerEngine:
         except asyncio.TimeoutError:
             logger.debug("morph: effect-type refresh exceeded 25ms; using cached types")
 
-    async def _snapshot_for_revert(self, event: MusicEvent) -> dict:
+    async def _snapshot_for_revert(self, event: MusicEvent | None = None,
+                                   actions: list | None = None) -> dict:
         """
         Snapshot only the specific LedFX param values this sequence will change.
+        Pass `actions` (a flat leaf-action list, e.g. from _iter_leaf_actions)
+        to snapshot for a composite group; otherwise the event's steps are used.
 
         Snapshot format:
           {
@@ -2691,12 +2970,13 @@ class TriggerEngine:
                 if k in vcfg and k not in entry:
                     entry[k] = vcfg[k]
 
+        leaf_actions = actions if actions is not None else (
+            self._event_leaf_actions(event) if event is not None else []
+        )
+
         # Gather every vid this event will touch so we can warm them concurrently.
         target_vids: set[str] = set()
-        for _step in (event.beat_sequence_steps if event.event_type == "beat_sequence" else event.sequence_steps):
-            if _step.step_type != "action":
-                continue
-            for _a in self._resolve_step_actions(_step):
+        for _a in leaf_actions:
                 if _a.type in ("ledfx_ambient", "ledfx_ambient_color"):
                     target_vids.update(get_virtuals_for_role("ambient"))
                 elif _a.type == "ledfx_global_transition":
@@ -2712,17 +2992,7 @@ class TriggerEngine:
         if target_vids:
             await _warm(list(target_vids))
 
-        steps_to_check = (
-            event.beat_sequence_steps if event.event_type == "beat_sequence"
-            else event.sequence_steps
-        )
-        for step in steps_to_check:
-            if step.step_type != "action":
-                continue
-            all_actions = self._resolve_step_actions(step)
-            if not all_actions:
-                continue
-            for action in all_actions:
+        for action in leaf_actions:
                 if action.type == "ledfx_global_brightness":
                     snapshot.setdefault("global_brightness", _lc._current_brightness)
 
@@ -2872,16 +3142,17 @@ class TriggerEngine:
             if labels:
                 labels[:] = [l for l in labels if not l.startswith("=transition:")]
 
-    def _event_touches_ambient(self, event: MusicEvent) -> list[str]:
+    def _event_touches_ambient(self, event: MusicEvent | None = None,
+                               actions: list | None = None) -> list[str]:
         """Return the list of ambient virtual ids this event will modify, or []
-        if it doesn't touch the ambient role. Used by the steal-snapshot path."""
-        steps = event.beat_sequence_steps if event.event_type == "beat_sequence" else event.sequence_steps
-        for step in steps:
-            if step.step_type != "action":
-                continue
-            for a in self._resolve_step_actions(step):
-                if a.type in ("ledfx_ambient", "ledfx_ambient_color"):
-                    return list(get_virtuals_for_role("ambient"))
+        if it doesn't touch the ambient role. Used by the steal-snapshot path.
+        Pass `actions` (flat leaf list) for composite groups."""
+        leaf = actions if actions is not None else (
+            self._event_leaf_actions(event) if event is not None else []
+        )
+        for a in leaf:
+            if a.type in ("ledfx_ambient", "ledfx_ambient_color"):
+                return list(get_virtuals_for_role("ambient"))
         return []
 
     def _steal_pending_ambient_snapshot(self, vids: list[str]) -> Optional[dict]:
@@ -2910,7 +3181,7 @@ class TriggerEngine:
         return stolen or None
 
     async def _schedule_ambient_revert(
-        self, event: MusicEvent, snapshot: dict, revert_cfg, vids: list[str],
+        self, name: str, snapshot: dict, revert_cfg, vids: list[str],
     ) -> None:
         """Fire revert as a cancellable task registered under each target vid.
         An overlapping flip can cancel this task mid-sleep via the steal path."""
@@ -2995,6 +3266,8 @@ class TriggerEngine:
                             sub_event, trigger_ms, merged_labels,
                             skip_event_ids=skip_event_ids,
                         )
+                    elif sub_event.event_type == "composite":
+                        await self._execute_composite(sub_event, merged_labels, skip_event_ids=skip_event_ids)
                     else:
                         # Use pre-selected action if available (matches what was previewed)
                         pre = pre_steps[step_idx] if pre_steps and step_idx < len(pre_steps) else None
@@ -3012,7 +3285,7 @@ class TriggerEngine:
             if ambient_vids:
                 # Ambient flips: schedule cancellable revert so overlapping flips
                 # can steal our snapshot. Returns immediately; revert runs in bg.
-                await self._schedule_ambient_revert(event, snapshot, revert, ambient_vids)
+                await self._schedule_ambient_revert(event.name, snapshot, revert, ambient_vids)
             else:
                 logger.info(
                     "Revert firing for '%s' (delay=%dms, transition=%dms)",
@@ -3028,6 +3301,294 @@ class TriggerEngine:
             )
         if body_error:
             raise body_error
+
+    # ── Composite (node-tree) executors ─────────────────────────────────────
+
+    async def _execute_parallel_group(
+        self, group, labels: list[str], *,
+        await_ramps: bool = False,
+        skip_event_ids: set[str] | None = None,
+        resolved_picks: dict | None = None,
+        _depth: int = 0,
+    ) -> None:
+        """Fire every child concurrently, staggered by per-child offset_ms.
+        Generalization of _fire_morph_picks: anchor = min(offset); each child
+        sleeps (offset - anchor) >= 0; a long stagger re-checks state.paused."""
+        children = [c for c in group.children if c.actions]
+        if not children:
+            return
+        anchor = min(int(c.offset_ms or 0) for c in children)
+
+        async def _one(child) -> None:
+            rel = int(child.offset_ms or 0) - anchor  # >= 0
+            if rel > 0:
+                await asyncio.sleep(rel / 1000)
+                # A long stagger can outlast a pause/seek — don't fire into stale state.
+                if state.paused:
+                    return
+            merged = labels + list(child.labels or [])
+            await asyncio.gather(*(
+                self._execute_action(
+                    a, merged, await_ramps=await_ramps, skip_event_ids=skip_event_ids,
+                    _depth=_depth + 1, resolved_picks=resolved_picks,
+                )
+                for a in child.actions
+            ))
+
+        await asyncio.gather(*(_one(c) for c in children), return_exceptions=True)
+
+    async def _execute_sequence_group(
+        self, group, labels: list[str], *,
+        name: str = "",
+        skip_event_ids: set[str] | None = None,
+        resolved_picks: dict | None = None,
+        _depth: int = 0,
+        anchor_ms: int | None = None,
+        step1_prefired: bool = False,
+        precomputed_snapshot: Optional[dict] = None,
+    ) -> None:
+        """Run children in order. timing="ms" ports _execute_sequence (per-child
+        delay sleeps, revert with ambient-steal, revert-always-runs); timing=
+        "beats" ports _execute_beat_sequence (beat interval, pre_ramp shift +
+        100ms safety pad + ramp compression, monotonic-clock timeline, revert
+        as a synthetic timeline entry)."""
+        label = name or f"group:{group.id[:8]}"
+        if group.timing == "beats":
+            await self._execute_beats_group(
+                group, labels, name=label, skip_event_ids=skip_event_ids,
+                resolved_picks=resolved_picks, _depth=_depth, anchor_ms=anchor_ms,
+                step1_prefired=step1_prefired, precomputed_snapshot=precomputed_snapshot,
+            )
+            return
+
+        revert = group.revert
+        leaf = list(self._iter_leaf_actions(
+            [a for c in group.children for a in c.actions], resolved_picks,
+        )) if revert and revert.enabled else []
+        ambient_vids = self._event_touches_ambient(actions=leaf) if revert and revert.enabled else []
+        snapshot: dict = {}
+        if revert and revert.enabled:
+            stolen = self._steal_pending_ambient_snapshot(ambient_vids) if ambient_vids else None
+            if stolen is not None:
+                snapshot = stolen
+            elif precomputed_snapshot is not None:
+                snapshot = precomputed_snapshot
+            else:
+                snapshot = await self._snapshot_for_revert(actions=leaf)
+            if not snapshot:
+                logger.warning(
+                    "Revert skipped for '%s': snapshot is empty (target virtual cache may be missing effect info)",
+                    label,
+                )
+
+        body_error: Optional[BaseException] = None
+        try:
+            for child in group.children:
+                if child.delay_ms > 0:
+                    await asyncio.sleep(child.delay_ms / 1000)
+                if not child.actions:
+                    continue
+                merged = labels + list(child.labels or [])
+                await asyncio.gather(*(
+                    self._execute_action(
+                        a, merged, await_ramps=True, skip_event_ids=skip_event_ids,
+                        _depth=_depth + 1, resolved_picks=resolved_picks,
+                    )
+                    for a in child.actions
+                ))
+        except asyncio.CancelledError:
+            logger.warning("Sequence group '%s' cancelled; revert will still run if configured", label)
+            raise
+        except Exception as exc:
+            body_error = exc
+            logger.error("Sequence group '%s' body raised: %r; revert will still run if configured", label, exc)
+
+        if revert and revert.enabled and snapshot:
+            if ambient_vids:
+                await self._schedule_ambient_revert(label, snapshot, revert, ambient_vids)
+            else:
+                logger.info(
+                    "Revert firing for '%s' (delay=%dms, transition=%dms)",
+                    label, revert.delay_ms, revert.transition_ms,
+                )
+                if revert.delay_ms > 0:
+                    await asyncio.sleep(revert.delay_ms / 1000)
+                await self._restore_from_snapshot(snapshot, revert)
+        elif revert and revert.enabled:
+            logger.warning(
+                "Revert NOT firing for '%s': snapshot empty (revert.enabled=%s snapshot=%s)",
+                label, revert.enabled, bool(snapshot),
+            )
+        if body_error:
+            raise body_error
+
+    async def _execute_beats_group(
+        self, group, labels: list[str], *,
+        name: str,
+        skip_event_ids: set[str] | None = None,
+        resolved_picks: dict | None = None,
+        _depth: int = 0,
+        anchor_ms: int | None = None,
+        step1_prefired: bool = False,
+        precomputed_snapshot: Optional[dict] = None,
+    ) -> None:
+        """Beats-mode body of a sequence_group — port of _execute_beat_sequence."""
+        have_beats = bool(self._beats_cache)
+        if not have_beats and group.beat_fallback == "skip":
+            uri = state.current_track.spotify_uri if state.current_track else ""
+            logger.warning("Beats group '%s': no beat data for %s — skipping", name, uri)
+            return
+
+        if anchor_ms is not None:
+            anchor = anchor_ms
+            interval_ms = self._local_beat_interval_ms(anchor)
+        else:
+            song_now = state.current_track.interpolated_progress_ms() if state.current_track else 0
+            interval_ms = self._local_beat_interval_ms(song_now)
+            anchor = song_now + group.start_offset_beats * interval_ms
+
+        # Build timeline of (child, fire_time, actual_ramp, is_revert).
+        timeline: list[tuple] = []
+        nominal_time = float(anchor)
+        prev_fire_time: float = float("-inf")
+        prev_ramp_ms = 0
+
+        for i, child in enumerate(group.children):
+            if i > 0:
+                nominal_time += (1 + child.delay_beats) * interval_ms
+            # Containers resolve at fire time — no ramp contribution.
+            ramp_sources = [a for a in child.actions if a.type not in self.CONTAINER_ACTION_TYPES]
+            ramp_ms = 0
+            if ramp_sources:
+                ramp_ms = max(
+                    (a.ramp_ms if getattr(a, "ramp_ms", None) is not None else settings.smooth_ramp_ms)
+                    for a in ramp_sources
+                )
+            raw_fire = (nominal_time - ramp_ms) if (child.pre_ramp and ramp_ms > 0) else nominal_time
+            earliest = prev_fire_time + prev_ramp_ms + 100
+            if raw_fire < earliest:
+                fire_time = earliest
+                actual_ramp = max(0, int(nominal_time) - int(earliest))
+            else:
+                fire_time = raw_fire
+                actual_ramp = ramp_ms
+            timeline.append((child, fire_time, actual_ramp, False))
+            prev_fire_time = fire_time
+            prev_ramp_ms = actual_ramp
+
+        revert = group.revert
+        if revert and revert.enabled and timeline:
+            revert_nominal = nominal_time + (1 + revert.delay_beats) * interval_ms
+            raw_fire = (revert_nominal - revert.transition_ms) if (revert.pre_ramp and revert.transition_ms > 0) else revert_nominal
+            earliest = prev_fire_time + prev_ramp_ms + 100
+            revert_fire_time = max(raw_fire, earliest)
+            timeline.append((None, revert_fire_time, revert.transition_ms, True))
+
+        snapshot: dict = {}
+        if revert and revert.enabled:
+            if precomputed_snapshot is not None:
+                snapshot = precomputed_snapshot
+            else:
+                leaf = list(self._iter_leaf_actions(
+                    [a for c in group.children for a in c.actions], resolved_picks,
+                ))
+                snapshot = await self._snapshot_for_revert(actions=leaf)
+
+        import time as _time
+        timeline_origin = int(timeline[0][1]) if timeline else 0
+        exec_start = _time.monotonic()
+        _song_now = state.current_track.interpolated_progress_ms() if state.current_track else 0
+        logger.info(
+            "beats_group '%s': anchor=%d song_now=%d lag=%+dms interval=%dms steps=%s",
+            name, anchor, _song_now, _song_now - int(anchor), interval_ms,
+            [int(t[1]) - timeline_origin for t in timeline],
+        )
+
+        for i, (child, fire_time, actual_ramp, is_revert) in enumerate(timeline):
+            if i == 0 and step1_prefired:
+                continue
+            step_offset_ms = int(fire_time) - timeline_origin
+            elapsed_ms = (_time.monotonic() - exec_start) * 1000
+            wait_ms = step_offset_ms - elapsed_ms
+            if wait_ms > 0:
+                await asyncio.sleep(wait_ms / 1000)
+            logger.info(
+                "  bg step %d/%d: planned_offset=%dms elapsed=%dms waited=%dms%s",
+                i, len(timeline), step_offset_ms, int(elapsed_ms), max(0, int(wait_ms)),
+                " [REVERT]" if is_revert else "",
+            )
+            if is_revert:
+                if snapshot:
+                    await self._restore_from_snapshot(snapshot, revert)
+            elif child is not None and child.actions:
+                merged = labels + list(child.labels or [])
+                dispatch = []
+                for action in child.actions:
+                    stored_ramp = getattr(action, "ramp_ms", None)
+                    effective_ramp = stored_ramp if stored_ramp is not None else settings.smooth_ramp_ms
+                    if (action.type not in self.CONTAINER_ACTION_TYPES
+                            and actual_ramp != effective_ramp and hasattr(action, "ramp_ms")):
+                        action = action.model_copy(update={"ramp_ms": actual_ramp})
+                    dispatch.append(action)
+                await asyncio.gather(*(
+                    self._execute_action(
+                        a, merged, await_ramps=False, skip_event_ids=skip_event_ids,
+                        _depth=_depth + 1, resolved_picks=resolved_picks,
+                    )
+                    for a in dispatch
+                ))
+
+    async def _execute_composite(
+        self, event: MusicEvent, labels: list[str], *,
+        skip_event_ids: set[str] | None = None,
+        resolved_picks: dict | None = None,
+        anchor_ms: int | None = None,
+        skip_pre_commands: bool = False,
+        step1_prefired: bool = False,
+        precomputed_snapshot: Optional[dict] = None,
+        lead_sleep: bool = False,
+    ) -> None:
+        """Top-level entry for a composite event: snapshot (if the root is a
+        revert-enabled sequence group — BEFORE pre-commands, matching legacy
+        order), pre-commands (uniform rule: whenever pre_*_enabled — migrated
+        morph_sets carry the flags disabled), then the root tree."""
+        root = event.root
+        if root is None:
+            return
+
+        snap = precomputed_snapshot
+        if (root.type == "sequence_group" and root.revert and root.revert.enabled
+                and snap is None):
+            leaf = list(self._iter_leaf_actions(
+                [a for c in root.children for a in c.actions], resolved_picks,
+            ))
+            ambient_vids = self._event_touches_ambient(actions=leaf)
+            stolen = self._steal_pending_ambient_snapshot(ambient_vids) if ambient_vids else None
+            snap = stolen if stolen is not None else await self._snapshot_for_revert(actions=leaf)
+
+        if not skip_pre_commands:
+            await self._apply_pre_commands(event, labels)
+            if lead_sleep and root.type != "sequence_group":
+                # Manual fires of single-like roots wait the pre-command lead,
+                # mirroring the legacy fire_event_now single path.
+                lead_ms = max(
+                    settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
+                    settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
+                )
+                if lead_ms > 0:
+                    await asyncio.sleep(lead_ms / 1000)
+
+        if root.type == "sequence_group":
+            await self._execute_sequence_group(
+                root, labels, name=event.name, skip_event_ids=skip_event_ids,
+                resolved_picks=resolved_picks, anchor_ms=anchor_ms,
+                step1_prefired=step1_prefired, precomputed_snapshot=snap,
+            )
+        else:
+            await self._execute_action(
+                root, labels, await_ramps=True, skip_event_ids=skip_event_ids,
+                resolved_picks=resolved_picks,
+            )
 
     async def _execute_plan_entry(self, entry: _PlanEntry) -> None:
         """Execute one plan entry at its scheduled time."""
@@ -3051,6 +3612,9 @@ class TriggerEngine:
         # Eligible but planner missed the lookahead window — prepare inline
         # (best effort) and fire. Logs a warning.
         _so_picks = entry.preselected_morph_picks if evt.event_type == "morph_set" else None
+        if evt.event_type == "composite":
+            _so_picks = entry.preselected_morph_picks or self._composite_scene_picks(
+                evt, entry.resolved_picks)
         if self._event_eligible_for_scene_override(evt, picks=_so_picks):
             with ledfx_client.force_allow():
                 fired = await self._maybe_fire_scene_override(evt, labels=entry.labels, picks=_so_picks)
@@ -3116,6 +3680,15 @@ class TriggerEngine:
             )
         elif evt.event_type == "device_settings":
             await self._apply_device_targets(evt.device_targets)
+        elif evt.event_type == "composite":
+            await self._execute_composite(
+                evt, entry.labels,
+                skip_event_ids=skip_ids,
+                resolved_picks=entry.resolved_picks,
+                anchor_ms=entry.fire_at_ms,
+                skip_pre_commands=skip_pc,
+                precomputed_snapshot=snap,
+            )
         elif evt.event_type in SCENE_EVENT_TYPES:
             await self._execute_scene_event(evt, entry.labels, skip_event_ids=skip_ids)
 
@@ -3280,6 +3853,8 @@ class TriggerEngine:
                                 sub_event, sub_trigger_ms, merged_labels,
                                 skip_event_ids=skip_event_ids,
                             )
+                        elif sub_event.event_type == "composite":
+                            await self._execute_composite(sub_event, merged_labels, skip_event_ids=skip_event_ids)
                         else:
                             sub_action = self._select_action(sub_event, merged_labels)
                             if sub_action:
@@ -3535,7 +4110,12 @@ class TriggerEngine:
                                 continue
                             if not _entry.is_root:
                                 continue
-                            if not self._event_eligible_for_scene_override(_entry.event):
+                            _ck_picks = None
+                            if _entry.event.event_type == "composite":
+                                _ck_picks = (_entry.preselected_morph_picks
+                                             or self._composite_scene_picks(
+                                                 _entry.event, _entry.resolved_picks))
+                            if not self._event_eligible_for_scene_override(_entry.event, picks=_ck_picks):
                                 continue
                             if _entry.fire_at_ms - effective_now > lead_ms:
                                 continue
@@ -3543,9 +4123,13 @@ class TriggerEngine:
                             if _entry.event.event_type == "morph_set" and picks is None:
                                 picks = self._pick_morph_lanes(_entry.event, _entry.labels)
                                 _entry.preselected_morph_picks = picks
+                            elif _entry.event.event_type == "composite":
+                                picks = _ck_picks
+                                _entry.preselected_morph_picks = picks
+                            from models.music_event import MorphStepAction as _MSA
                             morph_actions = (
-                                [p.action for p in (picks or []) if p.action is not None]
-                                if _entry.event.event_type == "morph_set"
+                                [p.action for p in (picks or []) if isinstance(p.action, _MSA)]
+                                if _entry.event.event_type in ("morph_set", "composite")
                                 else self._collect_morph_actions_for_event(_entry.event, _entry.labels)
                             )
                             payload = self._build_scene_payload(morph_actions)
@@ -3618,6 +4202,11 @@ class TriggerEngine:
                                 if _entry.preselected_morph_picks is None:
                                     _entry.preselected_morph_picks = self._pick_morph_lanes(_entry.event, _entry.labels)
                                 _morph_summary = self._morph_picks_summary(_entry.preselected_morph_picks)
+                            elif (_entry.event.event_type == "composite"
+                                  and _entry.event.root is not None
+                                  and _entry.event.root.type == "parallel_group"):
+                                _morph_summary = self._describe_action(
+                                    _entry.event.root, resolved=_entry.resolved_picks)
                             asyncio.create_task(self._execute_plan_entry(_entry))
                             if _is_root:
                                 asyncio.create_task(
