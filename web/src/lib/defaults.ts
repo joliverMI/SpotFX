@@ -4,6 +4,8 @@ import type {
   ActionType,
   BeatSequenceStep,
   MusicEvent,
+  ParallelChild,
+  SequenceChild,
   SequenceStep,
 } from '../types/events';
 import { uuid } from './uid';
@@ -40,8 +42,23 @@ export function newAction(type: ActionType): Action {
       return { ...base, type, targets: [] };
     case 'random_group':
       return { ...base, type, id: uuid(), dedupe: true, options: [] };
+    case 'sequence_group':
+      return {
+        ...base, type, id: uuid(), timing: 'ms', children: [],
+        revert: null, beat_fallback: 'fallback', start_offset_beats: 0,
+      };
+    case 'parallel_group':
+      return { ...base, type, id: uuid(), children: [] };
   }
 }
+
+export const newSequenceChild = (): SequenceChild => ({
+  id: uuid(), name: '', labels: [], delay_ms: 0, delay_beats: 0, pre_ramp: true, actions: [],
+});
+
+export const newParallelChild = (): ParallelChild => ({
+  id: uuid(), name: '', labels: [], offset_ms: 0, actions: [],
+});
 
 export const newSequenceStep = (): SequenceStep => ({
   step_type: 'action',
@@ -87,6 +104,7 @@ export function newEvent(event_type: MusicEvent['event_type'] = 'single'): Music
     beat_sequence_start_offset_beats: 0,
     morph_lanes: [],
     device_targets: [],
+    root: null,
     event_offset_ms: 0,
   };
 }

@@ -152,7 +152,7 @@ export interface DeviceSettingsAction extends ActionBase {
   targets: DeviceSettingTarget[];
 }
 
-/** HA choose-style random container (backend lands in Phase C). */
+/** HA choose-style random container. */
 export interface RandomOption {
   id: string;
   name: string;
@@ -168,6 +168,49 @@ export interface RandomGroupAction extends ActionBase {
   options: RandomOption[];
 }
 
+/** Unified revert for sequence_group — ms mode reads delay_ms, beats mode delay_beats+pre_ramp. */
+export interface GroupRevert {
+  enabled: boolean;
+  delay_ms: number;
+  delay_beats: number;
+  transition_ms: number;
+  pre_ramp: boolean;
+}
+
+export interface SequenceChild {
+  id: string;
+  name: string;
+  labels: string[];
+  delay_ms: number;    // ms mode: slept before this child (honored on child 0)
+  delay_beats: number; // beats mode: extra beats skipped (ignored on child 0)
+  pre_ramp: boolean;   // beats mode only
+  actions: Action[];   // fire concurrently
+}
+
+export interface SequenceGroupAction extends ActionBase {
+  type: 'sequence_group';
+  id: string;
+  timing: 'ms' | 'beats';
+  children: SequenceChild[];
+  revert: GroupRevert | null;
+  beat_fallback: 'skip' | 'fallback';
+  start_offset_beats: number;
+}
+
+export interface ParallelChild {
+  id: string;
+  name: string;
+  labels: string[];
+  offset_ms: number; // stagger vs group fire moment (negative = earlier)
+  actions: Action[];
+}
+
+export interface ParallelGroupAction extends ActionBase {
+  type: 'parallel_group';
+  id: string;
+  children: ParallelChild[];
+}
+
 export type Action =
   | EventRefAction
   | LedFxSceneAction
@@ -179,7 +222,9 @@ export type Action =
   | MorphStepAction
   | MorphColorAction
   | DeviceSettingsAction
-  | RandomGroupAction;
+  | RandomGroupAction
+  | SequenceGroupAction
+  | ParallelGroupAction;
 
 export type ActionType = Action['type'];
 
@@ -228,7 +273,7 @@ export type EventType =
   | 'single' | 'sequence' | 'beat_sequence' | 'morph_set'
   | 'scene_update' | 'update_scene' | 'reset_scene'
   | 'shape_flare' | 'color_flare' | 'combo_flare'
-  | 'device_settings';
+  | 'device_settings' | 'composite';
 
 export interface MusicEvent {
   id: string;
@@ -261,6 +306,9 @@ export interface MusicEvent {
 
   device_targets: DeviceSettingTarget[];
 
+  /** event_type "composite": the whole body as one Action tree (null = empty). */
+  root: Action | null;
+
   event_offset_ms: number;
 }
 
@@ -282,4 +330,5 @@ export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   color_flare: 'Color Flare',
   combo_flare: 'Combo Flare',
   device_settings: 'Device Settings',
+  composite: 'Composite',
 };

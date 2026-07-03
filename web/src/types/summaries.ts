@@ -23,6 +23,8 @@ export const ACTION_ICONS: Record<Action['type'], string> = {
   morph_color: '🖌️',
   device_settings: '⚙️',
   random_group: '🎲',
+  sequence_group: '➡️',
+  parallel_group: '⫴',
 };
 
 export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
@@ -37,6 +39,8 @@ export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
   morph_color: 'Morph Color',
   device_settings: 'Device Settings',
   random_group: 'Random Group',
+  sequence_group: 'Sequence',
+  parallel_group: 'Parallel',
 };
 
 export function summarizeAction(action: Action, ctx: SummaryContext = {}): string {
@@ -78,5 +82,11 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
     }
     case 'random_group':
       return `🎲 1 of ${action.options.length}`;
+    case 'sequence_group':
+      return action.timing === 'beats'
+        ? `🥁 Beat seq · ${action.children.length} steps`
+        : `➡️ Seq · ${action.children.length} steps`;
+    case 'parallel_group':
+      return `⫴ ${action.children.length} lanes`;
   }
 }

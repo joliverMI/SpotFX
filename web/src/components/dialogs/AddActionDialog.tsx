@@ -14,6 +14,8 @@ const DESCRIPTIONS: Record<ActionType, string> = {
   morph_color: 'Apply a saved Color Set or Color Group',
   device_settings: 'Virtual-config changes (max brightness, freq band)',
   random_group: 'Pick one weighted option; its actions fire together',
+  sequence_group: 'Run children in order with ms or beat delays',
+  parallel_group: 'Run children at once, each with its own offset',
 };
 
 /** HA-style searchable "Add action" dialog. `types` limits what can be added here. */

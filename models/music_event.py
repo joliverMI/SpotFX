@@ -308,6 +308,74 @@ class RandomGroupAction(BaseModel):
     options: list[RandomOption] = Field(default_factory=list)
 
 
+class GroupRevert(BaseModel):
+    """Unified revert config for a sequence_group. In timing="ms" mode the
+    hold time is delay_ms; in timing="beats" mode it is delay_beats (+
+    pre_ramp starts the restore ramp early so it completes on the target
+    beat). transition_ms is the restore ramp duration in both modes."""
+    enabled: bool = True
+    delay_ms: int = 0
+    delay_beats: int = 0
+    transition_ms: int = 500
+    pre_ramp: bool = True          # beats mode only
+
+
+class SequenceChild(BaseModel):
+    """One step of a SequenceGroupAction. All `actions` fire concurrently.
+
+    timing="ms":    delay_ms is slept BEFORE this child fires (honored on
+                    child 0 too, matching legacy SequenceStep semantics).
+    timing="beats": delay_beats = extra beats skipped before this child
+                    (ignored on child 0, matching legacy BeatSequenceStep);
+                    pre_ramp starts ramps early so they complete on the beat."""
+    id:          str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name:        str = ""
+    labels:      list[str] = Field(default_factory=list)
+    delay_ms:    int = 0
+    delay_beats: int = 0
+    pre_ramp:    bool = True
+    actions:     list[Action] = Field(default_factory=list)
+
+
+class SequenceGroupAction(BaseModel):
+    """Ordered container: children fire one after another with ms or beat
+    delays. Nestable anywhere an Action is (composite root, parallel/random
+    children, other sequence groups). beat_fallback / start_offset_beats
+    apply only when timing="beats"."""
+    type:    Literal["sequence_group"] = "sequence_group"
+    id:      str = Field(default_factory=lambda: str(uuid.uuid4()))
+    labels:  list[str] = Field(default_factory=list)
+    weight:  float = 1.0
+    timing:  Literal["ms", "beats"] = "ms"
+    children: list[SequenceChild] = Field(default_factory=list)
+    revert:  Optional[GroupRevert] = None
+    beat_fallback:      Literal["skip", "fallback"] = "fallback"
+    start_offset_beats: int = 0
+
+
+class ParallelChild(BaseModel):
+    """One lane of a ParallelGroupAction. All `actions` fire concurrently.
+    offset_ms staggers this child relative to the group's fire moment
+    (negative = earlier); the group anchors at min(offset_ms) like legacy
+    morph lanes."""
+    id:        str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name:      str = ""
+    labels:    list[str] = Field(default_factory=list)
+    offset_ms: int = 0
+    actions:   list[Action] = Field(default_factory=list)
+
+
+class ParallelGroupAction(BaseModel):
+    """Concurrent container: every child fires together (subject to per-child
+    offset_ms stagger). The composable generalization of morph_set lanes —
+    put a RandomGroupAction inside a child to get 'pick one per lane'."""
+    type:     Literal["parallel_group"] = "parallel_group"
+    id:       str = Field(default_factory=lambda: str(uuid.uuid4()))
+    labels:   list[str] = Field(default_factory=list)
+    weight:   float = 1.0
+    children: list[ParallelChild] = Field(default_factory=list)
+
+
 # Discriminated union of all action types
 Action = Annotated[
     EventRefAction
@@ -320,13 +388,16 @@ Action = Annotated[
     | MorphStepAction
     | MorphColorAction
     | DeviceSettingsAction
-    | RandomGroupAction,
+    | RandomGroupAction
+    | SequenceGroupAction
+    | ParallelGroupAction,
     Field(discriminator="type"),
 ]
 
-# RandomOption.actions references the Action union recursively.
-RandomOption.model_rebuild()
-RandomGroupAction.model_rebuild()
+# These models reference the Action union recursively.
+for _m in (RandomOption, RandomGroupAction, SequenceChild, SequenceGroupAction,
+           ParallelChild, ParallelGroupAction):
+    _m.model_rebuild()
 
 
 class MorphLane(BaseModel):
@@ -405,6 +476,12 @@ class MusicEvent(BaseModel):
         "shape_flare", "color_flare", "combo_flare",
         # Sets LedFX virtual-config Device Settings (max_brightness / freq band).
         "device_settings",
+        # Unified node-tree event: the entire body is `root` (an Action, usually
+        # a sequence_group / parallel_group / random_group). Legacy payload
+        # fields are empty on composite events. Scene-family events stay
+        # legacy-shaped until v2 (their cross-event statefulness — flares
+        # re-running lanes of the last scene_update — needs named children).
+        "composite",
     ] = "single"
     color: str = "#FFD700"     # hex color shown on timeline
     labels: list[str] = Field(default_factory=list)
@@ -446,6 +523,10 @@ class MusicEvent(BaseModel):
 
     # For event_type == "device_settings" — virtual-config changes applied instantly.
     device_targets: list[DeviceSettingTarget] = Field(default_factory=list)
+
+    # For event_type == "composite" — the whole event body as one Action tree.
+    # None = empty event (executors no-op).
+    root: Optional[Action] = None
 
     # Timing offset: shift when this event fires (negative = earlier, positive = later)
     event_offset_ms: int = 0
