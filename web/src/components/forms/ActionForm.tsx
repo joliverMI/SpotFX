@@ -72,7 +72,9 @@ function TypedForm({ action, update }: { action: Action; update: UpdateAction })
     case 'device_settings':
       return <DeviceSettingsForm action={action} update={update as never} />;
     case 'random_group':
-      return null; // options render above via RandomGroupBody
+    case 'sequence_group':
+    case 'parallel_group':
+      return null; // container bodies render above (RandomGroup/SequenceGroup/ParallelGroupBody)
   }
 }
 

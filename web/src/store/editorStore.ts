@@ -5,7 +5,7 @@ import { produce, setAutoFreeze } from 'immer';
 setAutoFreeze(false);
 import type { Action, MusicEvent } from '../types/events';
 import { attachUids, stripUids } from '../lib/uid';
-import { findByUid, getAtPath } from '../lib/paths';
+import { findByUid, getAtPath, ROOT_PATH } from '../lib/paths';
 
 interface EditorState {
   draft: MusicEvent | null;
@@ -56,6 +56,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().mutate((d) => {
       const loc = findByUid(d, uid);
       if (!loc) return;
+      if (loc.containerPath === ROOT_PATH) {
+        d.root = null;
+        return;
+      }
       const arr = getAtPath(d, loc.containerPath) as unknown[];
       arr.splice(loc.index, 1);
     }),
@@ -64,6 +68,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().mutate((d) => {
       const loc = findByUid(d, uid);
       if (!loc) return;
+      if (loc.containerPath === ROOT_PATH) return; // root card isn't movable
       if (loc.kind !== 'action' && loc.containerPath !== targetContainer) return; // steps stay in their track
       const src = getAtPath(d, loc.containerPath) as unknown[];
       const [item] = src.splice(loc.index, 1);

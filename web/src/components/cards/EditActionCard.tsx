@@ -9,6 +9,8 @@ import { getAtPath, findByUid } from '../../lib/paths';
 import { getUid } from '../../lib/uid';
 import ActionForm from '../forms/ActionForm';
 import RandomGroupBody from './RandomGroupBody';
+import SequenceGroupBody from './SequenceGroupBody';
+import ParallelGroupBody from './ParallelGroupBody';
 
 /** Editable HA-style card: drag handle, collapsed summary ⇄ expanded form, ⧉/✕ menu. */
 export default function EditActionCard({ action }: { action: Action }) {
@@ -68,6 +70,8 @@ export default function EditActionCard({ action }: { action: Action }) {
       {open && (
         <div className="action-card-body">
           {action.type === 'random_group' && <RandomGroupBody uid={uid} action={action} />}
+          {action.type === 'sequence_group' && <SequenceGroupBody uid={uid} action={action} />}
+          {action.type === 'parallel_group' && <ParallelGroupBody uid={uid} action={action} />}
           <ActionForm action={action} update={(fn) => updateAction(uid, fn)} />
         </div>
       )}

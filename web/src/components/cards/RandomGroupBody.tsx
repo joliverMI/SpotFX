@@ -1,7 +1,7 @@
 import type { RandomGroupAction, RandomOption } from '../../types/events';
 import { uuid } from '../../lib/uid';
-import { findByUid } from '../../lib/paths';
 import { useEditorStore } from '../../store/editorStore';
+import { groupPathOf } from './groupPath';
 import { Checkbox, LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 
@@ -15,9 +15,8 @@ export default function RandomGroupBody({ uid, action }: { uid: string; action: 
   const updateAction = useEditorStore((s) => s.updateAction);
   if (!draft) return null;
 
-  const loc = findByUid(draft, uid);
-  if (loc?.kind !== 'action') return null;
-  const groupPath = `${loc.containerPath}.${loc.index}`;
+  const groupPath = groupPathOf(draft, uid);
+  if (!groupPath) return null;
   const set = (fn: (g: RandomGroupAction) => void) =>
     updateAction(uid, (a) => { if (a.type === 'random_group') fn(a); });
 

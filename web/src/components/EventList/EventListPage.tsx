@@ -15,10 +15,20 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'device_settings', label: 'Devices' },
 ];
 
+/** Composite events classify by their root node for filtering + the type chip. */
+function effectiveType(ev: MusicEvent): EventType {
+  if (ev.event_type !== 'composite') return ev.event_type;
+  const r = ev.root;
+  if (!r) return 'single';
+  if (r.type === 'sequence_group') return r.timing === 'beats' ? 'beat_sequence' : 'sequence';
+  if (r.type === 'parallel_group') return 'morph_set';
+  return 'single';
+}
+
 function matchesFilter(ev: MusicEvent, f: Filter): boolean {
   if (f === 'all') return true;
   if (f === 'scene') return SCENE_EVENT_TYPES.includes(ev.event_type);
-  return ev.event_type === (f as EventType);
+  return effectiveType(ev) === (f as EventType);
 }
 
 export default function EventListPage() {
@@ -76,9 +86,9 @@ export default function EventListPage() {
             ))}
           </div>
           <span style={{ display: 'flex', gap: 6 }}>
-            <button className="primary" onClick={() => navigate('/event/new?type=single')}>+ Single</button>
-            <button className="primary" onClick={() => navigate('/event/new?type=sequence')}>+ Sequence</button>
-            <button className="primary" onClick={() => navigate('/event/new?type=morph_set')}>+ Morph Set</button>
+            <button className="primary" onClick={() => navigate('/event/new?type=composite&root=random_group')}>+ Random</button>
+            <button className="primary" onClick={() => navigate('/event/new?type=composite&root=sequence_group')}>+ Sequence</button>
+            <button className="primary" onClick={() => navigate('/event/new?type=composite&root=parallel_group')}>+ Parallel</button>
           </span>
         </div>
       </div>
@@ -90,7 +100,10 @@ export default function EventListPage() {
             {ev.fixed && <span title="Built-in (read-only)" style={{ marginRight: 6 }}>🔒</span>}
             {ev.name}
           </span>
-          <span className="chip">{EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}</span>
+          <span className="chip" title={ev.event_type === 'composite' ? 'Composite (node tree)' : undefined}>
+            {ev.event_type === 'composite' && '🌳 '}
+            {EVENT_TYPE_LABELS[effectiveType(ev)] ?? effectiveType(ev)}
+          </span>
           {ev.energy_level != null && <span className="chip accent">⚡ {ev.energy_level}</span>}
           {ev.labels.slice(0, 3).map((l) => (
             <span key={l} className="chip">{l}</span>

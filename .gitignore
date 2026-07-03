@@ -23,6 +23,7 @@ storage/nn_models/
 storage/resources/
 storage/.spotify_token_cache
 storage/events.json
+storage/events.json.bak-*
 storage/gradients.json
 storage/palettes.json
 storage/settings.json

@@ -18,9 +18,10 @@ import { ACTION_ICONS, summarizeAction, type SummaryContext } from '../../types/
 import { SummaryProvider } from '../SummaryCtx';
 import { useEditorStore, useIsDirty } from '../../store/editorStore';
 import { findByUid } from '../../lib/paths';
-import { newEvent } from '../../lib/defaults';
+import { newAction, newEvent } from '../../lib/defaults';
 import { uuid } from '../../lib/uid';
 import EventMetaPanel from './EventMetaPanel';
+import RootSlot from './RootSlot';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import EditableSequenceTrack from '../tracks/EditableSequenceTrack';
 import EditableParallelLanes from '../tracks/EditableParallelLanes';
@@ -29,7 +30,7 @@ import ParallelLanes from '../tracks/ParallelLanes';
 import DeviceTargetsTrack from '../tracks/DeviceTargetsTrack';
 
 /** Event types with full track editing; the rest render read-only tracks. */
-const EDITABLE_TYPES = ['single', 'sequence', 'morph_set', 'scene_update'];
+const EDITABLE_TYPES = ['single', 'sequence', 'morph_set', 'scene_update', 'composite'];
 
 const collision: CollisionDetection = (args) => {
   const within = pointerWithin(args);
@@ -64,8 +65,13 @@ export default function EventEditorPage() {
   // Load the event into the store when the route target changes.
   useEffect(() => {
     if (isNew) {
-      const t = (search.get('type') as MusicEvent['event_type']) || 'single';
-      load(newEvent(t));
+      const t = (search.get('type') as MusicEvent['event_type']) || 'composite';
+      const ev = newEvent(t);
+      const rootKind = search.get('root');
+      if (t === 'composite' && rootKind) {
+        ev.root = newAction(rootKind as Parameters<typeof newAction>[0]);
+      }
+      load(ev);
       return;
     }
     const ev = events?.find((e) => e.id === id);
@@ -201,6 +207,7 @@ export default function EventEditorPage() {
             {(draft.event_type === 'morph_set' || draft.event_type === 'scene_update') && (
               <EditableParallelLanes event={draft} />
             )}
+            {draft.event_type === 'composite' && <RootSlot event={draft} />}
             <DragOverlay>
               {dragged?.kind === 'action' && (
                 <div className="action-card" style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>
