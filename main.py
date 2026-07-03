@@ -238,6 +238,26 @@ FRONTEND_DIR = Path(__file__).parent / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
+# ── React SPA (web/dist) ──────────────────────────────────────────────────────
+class SPAStaticFiles(StaticFiles):
+    """Serve web/dist with index.html fallback so client-side routes
+    (/app/event/<id>) deep-link correctly."""
+
+    async def get_response(self, path: str, scope):
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+
+
+WEB_DIST = Path(__file__).parent / "web" / "dist"
+if WEB_DIST.exists():
+    app.mount("/app", SPAStaticFiles(directory=str(WEB_DIST), html=True), name="app")
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return FileResponse(str(FRONTEND_DIR / "favicon.svg"), media_type="image/svg+xml")

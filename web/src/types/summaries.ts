@@ -1,0 +1,82 @@
+/**
+ * summarizeAction() — TS port of trigger_engine._describe_action so collapsed
+ * card summaries match the preview strings SpotFX shows on Now Playing.
+ */
+import type { Action, MusicEvent } from './events';
+
+export interface SummaryContext {
+  /** id → event, for resolving event_ref names */
+  events?: Record<string, MusicEvent>;
+  /** color-set card id → name, for morph_color */
+  colorSetNames?: Record<string, string>;
+}
+
+export const ACTION_ICONS: Record<Action['type'], string> = {
+  event_ref: '🔗',
+  ledfx_scene: '🎬',
+  ledfx_ambient: '🌈',
+  ledfx_ambient_color: '🎨',
+  ledfx_global_brightness: '💡',
+  ledfx_global_transition: '⏱️',
+  ledfx_effect_param: '🎛️',
+  morph_step: '🧬',
+  morph_color: '🖌️',
+  device_settings: '⚙️',
+  random_group: '🎲',
+};
+
+export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
+  event_ref: 'Event Reference',
+  ledfx_scene: 'LedFX Scene',
+  ledfx_ambient: 'Ambient',
+  ledfx_ambient_color: 'Complementary Color',
+  ledfx_global_brightness: 'Global Brightness',
+  ledfx_global_transition: 'Global Transition',
+  ledfx_effect_param: 'Effect Params',
+  morph_step: 'Morph Step',
+  morph_color: 'Morph Color',
+  device_settings: 'Device Settings',
+  random_group: 'Random Group',
+};
+
+export function summarizeAction(action: Action, ctx: SummaryContext = {}): string {
+  switch (action.type) {
+    case 'ledfx_scene':
+      return action.scene_id;
+    case 'ledfx_ambient': {
+      const parts: string[] = [];
+      if (action.color) parts.push(action.color);
+      if (action.brightness != null) parts.push(`${Math.round(action.brightness * 100)}% bright`);
+      return 'Ambient ' + (parts.length ? parts.join(', ') : '–');
+    }
+    case 'ledfx_ambient_color':
+      return 'Complementary color';
+    case 'ledfx_global_brightness':
+      return `Brightness ${Math.round(action.brightness * 100)}%`;
+    case 'ledfx_global_transition':
+      return `Transition ${action.transition_time}s`;
+    case 'ledfx_effect_param': {
+      const scope = action.virtual_id || action.category || 'all';
+      const names = action.params.map((p) => p.param_label).filter(Boolean);
+      const body = names.length ? names.join(', ') : 'params';
+      return `${body} (${scope})`;
+    }
+    case 'morph_step': {
+      const n = action.targets.length;
+      const aspects = [...new Set(action.targets.map((t) => t.aspect))].sort();
+      return `Morph ${n}× (${aspects.length ? aspects.join(', ') : 'no targets'})`;
+    }
+    case 'morph_color': {
+      const name = ctx.colorSetNames?.[action.ref_id] ?? '?';
+      return `Color → ${name}`;
+    }
+    case 'device_settings':
+      return `Device settings (${action.targets.length}×)`;
+    case 'event_ref': {
+      const sub = ctx.events?.[action.event_id];
+      return sub ? `→ ${sub.name}` : '→ (event ref)';
+    }
+    case 'random_group':
+      return `🎲 1 of ${action.options.length}`;
+  }
+}

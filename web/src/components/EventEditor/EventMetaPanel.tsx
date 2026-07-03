@@ -1,0 +1,80 @@
+import type { MusicEvent } from '../../types/events';
+import { SCENE_EVENT_TYPES } from '../../types/events';
+import { useEditorStore } from '../../store/editorStore';
+import { Checkbox, ColorInput, LabelsInput, NumberInput, Row, TextInput } from '../forms/inputs';
+
+export default function EventMetaPanel({ event }: { event: MusicEvent }) {
+  const mutate = useEditorStore((s) => s.mutate);
+  const set = (fn: (d: MusicEvent) => void) => mutate(fn);
+  const showPre = !(['morph_set', ...SCENE_EVENT_TYPES] as string[]).includes(event.event_type);
+
+  return (
+    <div className="card">
+      <div className="card-title">Event settings</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '0 24px' }}>
+        <div>
+          <Row label="Name">
+            <TextInput value={event.name} onChange={(v) => set((d) => { d.name = v; })} />
+          </Row>
+          <Row label="Timeline color">
+            <ColorInput value={event.color} onChange={(v) => set((d) => { d.color = v ?? '#FFD700'; })} />
+          </Row>
+          <Row label="Labels">
+            <LabelsInput value={event.labels} onChange={(v) => set((d) => { d.labels = v; })} />
+          </Row>
+          <Row label="Energy (1–10)" help="Blank = energy-agnostic">
+            <NumberInput value={event.energy_level} nullable min={1} max={10} step={1}
+              onChange={(v) => set((d) => { d.energy_level = v == null ? null : Math.max(1, Math.min(10, Math.round(v))); })} />
+          </Row>
+          <Row label="Fire offset (ms)" help="Negative fires earlier, positive later">
+            <NumberInput value={event.event_offset_ms} step={10}
+              onChange={(v) => set((d) => { d.event_offset_ms = v ?? 0; })} />
+          </Row>
+        </div>
+        <div>
+          <Row label="Flags">
+            <span style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <Checkbox value={event.ai_exposed} label="AI exposed"
+                onChange={(v) => set((d) => { d.ai_exposed = v; })} />
+              <Checkbox value={event.scene_override} label="Scene override"
+                onChange={(v) => set((d) => { d.scene_override = v; })} />
+            </span>
+          </Row>
+          {showPre && (
+            <>
+              <Row label="Pre-brightness" help="Fired before the main action / first step">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Checkbox value={event.pre_brightness_enabled}
+                    onChange={(v) => set((d) => { d.pre_brightness_enabled = v; })} />
+                  {event.pre_brightness_enabled && (
+                    <>
+                      <NumberInput value={event.pre_brightness_value} min={0} max={1} step={0.05} width={80}
+                        onChange={(v) => set((d) => { d.pre_brightness_value = v ?? 1; })} />
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>ramp</span>
+                      <NumberInput value={event.pre_brightness_ramp_ms} nullable width={90}
+                        onChange={(v) => set((d) => { d.pre_brightness_ramp_ms = v; })} />
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>ms</span>
+                    </>
+                  )}
+                </span>
+              </Row>
+              <Row label="Pre-transition">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Checkbox value={event.pre_transition_enabled}
+                    onChange={(v) => set((d) => { d.pre_transition_enabled = v; })} />
+                  {event.pre_transition_enabled && (
+                    <>
+                      <NumberInput value={event.pre_transition_value} min={0} step={0.1} width={80}
+                        onChange={(v) => set((d) => { d.pre_transition_value = v ?? 0.5; })} />
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>s</span>
+                    </>
+                  )}
+                </span>
+              </Row>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

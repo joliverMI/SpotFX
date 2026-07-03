@@ -1,0 +1,92 @@
+/** Factory defaults mirroring the pydantic model defaults in models/music_event.py. */
+import type {
+  Action,
+  ActionType,
+  BeatSequenceStep,
+  MusicEvent,
+  SequenceStep,
+} from '../types/events';
+import { uuid } from './uid';
+
+export function newAction(type: ActionType): Action {
+  const base = { labels: [] as string[], weight: 1.0 };
+  switch (type) {
+    case 'event_ref':
+      return { ...base, type, event_id: '' };
+    case 'ledfx_scene':
+      return { ...base, type, scene_id: '' };
+    case 'ledfx_ambient':
+      return {
+        ...base, type,
+        color: null, brightness: null, max_brightness: null,
+        blur: null, bass_decay_rate: null, background_brightness: null,
+      };
+    case 'ledfx_ambient_color':
+      return { ...base, type };
+    case 'ledfx_global_brightness':
+      return { ...base, type, brightness: 1.0, ramp_ms: null };
+    case 'ledfx_global_transition':
+      return { ...base, type, transition_time: 0.5, transition_mode: null };
+    case 'ledfx_effect_param':
+      return { ...base, type, virtual_id: null, category: null, params: [], ramp_ms: null };
+    case 'morph_step':
+      return { ...base, type, ramp_ms: null, intensity_source: 'rms_total', targets: [] };
+    case 'morph_color':
+      return {
+        ...base, type, ref_id: '', pick_mode: 'default', advance: 1,
+        direction: 'forward', ramp_ms: null, preserve_effect: true,
+      };
+    case 'device_settings':
+      return { ...base, type, targets: [] };
+    case 'random_group':
+      return { ...base, type, id: uuid(), dedupe: true, options: [] };
+  }
+}
+
+export const newSequenceStep = (): SequenceStep => ({
+  step_type: 'action',
+  event_id: null,
+  action: null,
+  actions: [],
+  delay_ms: 0,
+  labels: [],
+});
+
+export const newBeatSequenceStep = (): BeatSequenceStep => ({
+  step_type: 'action',
+  event_id: null,
+  action: null,
+  actions: [],
+  delay_beats: 0,
+  pre_ramp: true,
+  labels: [],
+});
+
+export function newEvent(event_type: MusicEvent['event_type'] = 'single'): MusicEvent {
+  return {
+    id: uuid(),
+    name: 'New Event',
+    event_type,
+    color: '#FFD700',
+    labels: [],
+    energy_level: null,
+    ai_exposed: false,
+    fixed: false,
+    scene_override: false,
+    pre_brightness_enabled: true,
+    pre_brightness_value: 1.0,
+    pre_brightness_ramp_ms: null,
+    pre_transition_enabled: true,
+    pre_transition_value: 0.5,
+    actions: [],
+    sequence_steps: [],
+    revert: null,
+    beat_sequence_steps: [],
+    beat_revert: null,
+    beat_sequence_fallback: 'fallback',
+    beat_sequence_start_offset_beats: 0,
+    morph_lanes: [],
+    device_targets: [],
+    event_offset_ms: 0,
+  };
+}

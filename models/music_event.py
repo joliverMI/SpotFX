@@ -277,6 +277,37 @@ class LedFxEffectParamAction(BaseModel):
     ramp_ms: int | None = None      # None = use settings.smooth_ramp_ms; 0 = instant
 
 
+class RandomOption(BaseModel):
+    """One weighted branch of a RandomGroupAction. When chosen, all of its
+    actions fire concurrently (same semantics as SequenceStep.actions).
+    `actions` may nest further random_groups (depth-capped at execution)."""
+    id:      str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name:    str = ""                     # optional editor display name
+    labels:  list[str] = Field(default_factory=list)
+    weight:  float = 1.0
+    actions: list[Action] = Field(default_factory=list)
+
+
+class RandomGroupAction(BaseModel):
+    """HA choose-style container: pick ONE option (weighted random, label-
+    filtered, last-pick de-duped under this group's `id`) and fire its actions
+    concurrently. Embeddable anywhere an Action is: single pools, sequence /
+    beat-sequence step actions, morph lane alternatives, and nested inside
+    another group's options.
+
+    Carries no timing fields — every option fires at the group's own fire
+    moment, which keeps the timeline planner pick-independent (resolution
+    happens at fire time, not plan time). Note: event_refs inside an option
+    are not walked by the planner, so their event_offset_ms is applied inline
+    via the _execute_action fallback path (same as depth-overflow refs)."""
+    type:    Literal["random_group"] = "random_group"
+    id:      str = Field(default_factory=lambda: str(uuid.uuid4()))  # dedupe key
+    labels:  list[str] = Field(default_factory=list)
+    weight:  float = 1.0        # weight of the group itself inside a parent pool
+    dedupe:  bool = True        # avoid repeating the last-picked option
+    options: list[RandomOption] = Field(default_factory=list)
+
+
 # Discriminated union of all action types
 Action = Annotated[
     EventRefAction
@@ -288,9 +319,14 @@ Action = Annotated[
     | LedFxEffectParamAction
     | MorphStepAction
     | MorphColorAction
-    | DeviceSettingsAction,
+    | DeviceSettingsAction
+    | RandomGroupAction,
     Field(discriminator="type"),
 ]
+
+# RandomOption.actions references the Action union recursively.
+RandomOption.model_rebuild()
+RandomGroupAction.model_rebuild()
 
 
 class MorphLane(BaseModel):

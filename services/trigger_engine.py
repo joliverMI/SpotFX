@@ -1225,6 +1225,8 @@ class TriggerEngine:
                 elif sub:
                     return f"→ {sub.name}"
             return "→ (event ref)"
+        elif action.type == "random_group":
+            return f"🎲 1 of {len(action.options)}"
         return action.type
 
     def _preselect_sequence_steps(
@@ -1331,12 +1333,34 @@ class TriggerEngine:
         lanes directly (a conservative superset — mixed lanes always fall back)."""
         if not getattr(event, "scene_override", False):
             return False
+        # random_group resolves at fire time, so the morph payload can't be
+        # pre-staged into a scene — fall back to per-virtual bus dispatch.
+        def _has_random_group(actions) -> bool:
+            return any(getattr(a, "type", "") == "random_group" for a in (actions or []))
         if event.event_type == "single":
+            if _has_random_group(event.actions):
+                logger.info(
+                    "Event '%s' contains a random_group — scene-override not honored "
+                    "(picks resolve at fire time); using bus dispatch.", event.name,
+                )
+                return False
             return True
         if event.event_type == "morph_set":
             if picks is not None:
+                if _has_random_group([p.action for p in picks]):
+                    logger.info(
+                        "Event '%s' picked a random_group lane — scene-override not "
+                        "honored; using bus dispatch.", event.name,
+                    )
+                    return False
                 offsets = {p.offset_ms for p in picks}
             else:
+                if any(_has_random_group(l.alternatives) for l in (event.morph_lanes or [])):
+                    logger.info(
+                        "Event '%s' has random_group lane alternatives — scene-override "
+                        "not honored; using bus dispatch.", event.name,
+                    )
+                    return False
                 offsets = {int(l.offset_ms or 0) for l in (event.morph_lanes or [])}
             if len(offsets) > 1:
                 logger.info(
@@ -1578,8 +1602,28 @@ class TriggerEngine:
     async def _execute_action(
         self, action: Action, labels: list[str] | None = None,
         await_ramps: bool = False, skip_event_ids: set[str] | None = None,
+        _depth: int = 0,
     ) -> None:
         """Dispatch a single action."""
+        if action.type == "random_group":
+            if _depth > 5:
+                logger.warning("random_group depth cap (5) hit — skipping nested group")
+                return
+            if not action.dedupe:
+                self._last_action.pop(action.id, None)  # forget last pick → no de-weighting
+            opt = self._pick_from_actions(
+                action.options, labels or [], dedupe_key=action.id, desc="random group",
+            )
+            if opt and opt.actions:
+                merged = (labels or []) + [l for l in opt.labels if l not in (labels or [])]
+                await asyncio.gather(*(
+                    self._execute_action(
+                        a, merged, await_ramps=await_ramps,
+                        skip_event_ids=skip_event_ids, _depth=_depth + 1,
+                    )
+                    for a in opt.actions
+                ))
+            return
         if action.type == "event_ref":
             sub = get_event(action.event_id)
             if sub is None:
@@ -1611,7 +1655,10 @@ class TriggerEngine:
             else:
                 sub_action = self._select_action(sub, labels or [])
                 if sub_action:
-                    await self._execute_action(sub_action, labels, await_ramps=await_ramps, skip_event_ids=skip_event_ids)
+                    await self._execute_action(
+                        sub_action, labels, await_ramps=await_ramps,
+                        skip_event_ids=skip_event_ids, _depth=_depth + 1,
+                    )
             return
 
         if action.type == "ledfx_scene":
@@ -3122,14 +3169,17 @@ class TriggerEngine:
                 nominal_time += (1 + step.delay_beats) * interval_ms
 
             resolved = self._resolve_step_actions(step) if step.step_type == "action" else []
+            # random_group resolves at fire time — it carries no ramp, so it
+            # contributes no pre-ramp lead (fires on the beat, ramp starts there).
+            ramp_sources = [a for a in resolved if a.type != "random_group"]
             ramp_ms = 0
-            if resolved:
+            if ramp_sources:
                 # Respect ramp_ms=0 (instant) — only fall back to smooth_ramp_ms
                 # when the field is None. The previous `or` coerced 0 to the
                 # fallback, inflating the inter-step safety pad by ~500ms.
                 ramp_ms = max(
                     (a.ramp_ms if getattr(a, "ramp_ms", None) is not None else settings.smooth_ramp_ms)
-                    for a in resolved
+                    for a in ramp_sources
                 )
 
             raw_fire = (nominal_time - ramp_ms) if (step.pre_ramp and ramp_ms > 0) else nominal_time

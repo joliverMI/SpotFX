@@ -1,0 +1,92 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ActionType } from '../../types/events';
+import { ACTION_ICONS, ACTION_TYPE_LABELS } from '../../types/summaries';
+
+const DESCRIPTIONS: Record<ActionType, string> = {
+  event_ref: 'Fire another event’s action pool',
+  ledfx_scene: 'Activate a named LedFX scene',
+  ledfx_ambient: 'Patch the Single Color Effect (color, blur…)',
+  ledfx_ambient_color: 'Apply the complementary of the current ambient color',
+  ledfx_global_brightness: 'Set LedFX global brightness',
+  ledfx_global_transition: 'Set LedFX global transition time / mode',
+  ledfx_effect_param: 'Set effect parameters by unified label',
+  morph_step: 'Multi-target aspect changes (shape/effect/color/…)',
+  morph_color: 'Apply a saved Color Set or Color Group',
+  device_settings: 'Virtual-config changes (max brightness, freq band)',
+  random_group: 'Pick one weighted option; its actions fire together',
+};
+
+/** HA-style searchable "Add action" dialog. `types` limits what can be added here. */
+export default function AddActionDialog({
+  types,
+  onPick,
+  onClose,
+}: {
+  types: ActionType[];
+  onPick: (t: ActionType) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return types.filter(
+      (t) =>
+        !needle ||
+        ACTION_TYPE_LABELS[t].toLowerCase().includes(needle) ||
+        t.includes(needle) ||
+        DESCRIPTIONS[t].toLowerCase().includes(needle),
+    );
+  }, [q, types]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100,
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '10vh',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{ width: 520, maxWidth: '92vw', maxHeight: '75vh', overflowY: 'auto', margin: 0 }}
+      >
+        <input
+          ref={inputRef}
+          type="search"
+          placeholder="Search action types…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && visible.length === 1) onPick(visible[0]);
+          }}
+          style={{ width: '100%', marginBottom: 12 }}
+        />
+        {visible.map((t) => (
+          <div
+            key={t}
+            className="action-card-row"
+            style={{ border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6 }}
+            onClick={() => onPick(t)}
+          >
+            <span className="action-card-icon">{ACTION_ICONS[t]}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{ACTION_TYPE_LABELS[t]}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{DESCRIPTIONS[t]}</div>
+            </div>
+          </div>
+        ))}
+        {!visible.length && <p className="empty-note">No action types match “{q}”.</p>}
+      </div>
+    </div>
+  );
+}
