@@ -1816,7 +1816,11 @@ class TriggerEngine:
             if event.root is not None:
                 morph_summary = self._describe_action(event.root, resolved=rp)
             asyncio.create_task(
-                self._execute_composite(event, list(trigger.labels), resolved_picks=rp)
+                self._execute_composite(
+                    event, list(trigger.labels), resolved_picks=rp,
+                    # Look-ahead may have fired pre-commands already (_pre_fired).
+                    skip_pre_commands=trigger.id in self._pre_fired,
+                )
             )
         elif event.event_type in SCENE_EVENT_TYPES:
             # Lane choice depends on live scene state; resolve + fire async.

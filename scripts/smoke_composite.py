@@ -27,24 +27,15 @@ from models.music_event import MusicEvent                      # noqa: E402
 from services.trigger_engine import TriggerEngine              # noqa: E402
 
 
-# ── virtual clock ───────────────────────────────────────────────────────────
-CLOCK_MS = [0.0]
-_orig_sleep = asyncio.sleep
+# ── virtual clock (discrete-event; correct for concurrent staggered sleeps) ──
+from scripts._virtual_clock import VirtualClock  # noqa: E402
 
-
-async def fake_sleep(seconds, *a, **k):
-    # Yield first so already-spawned tasks run at the pre-advance time,
-    # then advance the virtual clock.
-    await _orig_sleep(0)
-    CLOCK_MS[0] += seconds * 1000
+clock = VirtualClock()
+_ = time  # time.monotonic patched by VirtualClock
 
 
 def now() -> int:
-    return int(CLOCK_MS[0])
-
-
-asyncio.sleep = fake_sleep
-time.monotonic = lambda: CLOCK_MS[0] / 1000.0
+    return clock.now_ms
 
 # ── recorders ───────────────────────────────────────────────────────────────
 fired: list[tuple] = []
@@ -83,7 +74,7 @@ def ev(root: dict | None, **kw) -> MusicEvent:
 
 def reset():
     fired.clear()
-    CLOCK_MS[0] = 0.0
+    clock.reset()
 
 
 def fail(msg: str):
@@ -111,7 +102,7 @@ async def main() -> None:
         {"delay_ms": 100, "actions": [b(0.2)]},
         {"delay_ms": 250, "actions": [b(0.3)]},
     ]}
-    await engine._execute_composite(ev(seq), [])
+    await clock.run(engine._execute_composite(ev(seq), []))
     if brightness_times() != [(0.1, 0), (0.2, 100), (0.3, 350)]:
         fail(f"ms sequence spacing wrong: {brightness_times()}")
     ok("ms sequence: order + cumulative delays exact (0/100/350)")
@@ -122,7 +113,7 @@ async def main() -> None:
         {"name": "early", "offset_ms": -500, "actions": [b(0.5)]},
         {"name": "late", "offset_ms": 0, "actions": [b(0.6)]},
     ]}
-    await engine._execute_composite(ev(par), [])
+    await clock.run(engine._execute_composite(ev(par), []))
     got = sorted(brightness_times(), key=lambda x: x[1])
     if got != [(0.5, 0), (0.6, 500)]:
         fail(f"parallel offsets wrong: {got}")
@@ -136,13 +127,13 @@ async def main() -> None:
     ]}
     e3 = ev(rg)
     for _ in range(20):
-        await engine._execute_composite(e3, [], resolved_picks={"rg1": "oB"})
+        await clock.run(engine._execute_composite(e3, [], resolved_picks={"rg1": "oB"}))
     vals = {f[1] for f in fired if f[0] == "brightness"}
     if vals != {0.22}:
         fail(f"resolved_picks not honored: {vals}")
     reset()
     for _ in range(50):
-        await engine._execute_composite(e3, [])  # fresh picks
+        await clock.run(engine._execute_composite(e3, []))  # fresh picks
     vals = {f[1] for f in fired if f[0] == "brightness"}
     if vals != {0.11, 0.22}:
         fail(f"fresh-pick fallback broken: {vals}")
@@ -155,7 +146,7 @@ async def main() -> None:
         {"delay_beats": 0, "pre_ramp": False, "actions": [b(0.5)]},
         {"delay_beats": 1, "pre_ramp": False, "actions": [b(0.6)]},
     ]}
-    await engine._execute_composite(ev(beats), [], anchor_ms=1000)
+    await clock.run(engine._execute_composite(ev(beats), [], anchor_ms=1000))
     # nominal: 1000, 1200, 1600; c0 pre-ramps to 700 → origin. offsets 0/500/900.
     ramps = [(f[1], f[2], f[3]) for f in fired if f[0] == "ramp"]
     bts = brightness_times()
@@ -171,7 +162,7 @@ async def main() -> None:
         {"delay_beats": 0, "pre_ramp": True, "actions": [b(0.4, ramp=300)]},
         {"delay_beats": 0, "pre_ramp": True, "actions": [b(0.5, ramp=300)]},
     ]}
-    await engine._execute_composite(ev(beats2), [], anchor_ms=1000)
+    await clock.run(engine._execute_composite(ev(beats2), [], anchor_ms=1000))
     # c1 nominal 1200, raw 900 < earliest (700+300+100=1100) → fire 1100, ramp 100
     ramps = [(f[1], f[2], f[3]) for f in fired if f[0] == "ramp"]
     if ramps != [(0.4, 300, 0), (0.5, 100, 400)]:
@@ -184,7 +175,7 @@ async def main() -> None:
     seqr = {"type": "sequence_group", "children": [
         {"actions": [b(0.1)]},
     ], "revert": {"enabled": True, "delay_ms": 200, "transition_ms": 0}}
-    await engine._execute_composite(ev(seqr), [])
+    await clock.run(engine._execute_composite(ev(seqr), []))
     bts = brightness_times()
     if bts != [(0.1, 0), (0.77, 200)]:
         fail(f"revert wrong: {bts}")
@@ -195,7 +186,7 @@ async def main() -> None:
     deep: dict = {"type": "sequence_group", "children": [{"actions": [b(0.9)]}]}
     for _ in range(7):
         deep = {"type": "sequence_group", "children": [{"actions": [deep]}]}
-    await engine._execute_composite(ev(deep), [])
+    await clock.run(engine._execute_composite(ev(deep), []))
     if brightness_times():
         fail("depth cap failed — deep leaf fired")
     ok("depth cap (5) stops runaway nesting")
@@ -206,13 +197,13 @@ async def main() -> None:
     skip_ev = ev({"type": "sequence_group", "timing": "beats",
                   "beat_fallback": "skip",
                   "children": [{"actions": [b(0.3)]}]})
-    await engine._execute_composite(skip_ev, [])
+    await clock.run(engine._execute_composite(skip_ev, []))
     if brightness_times():
         fail("beat_fallback=skip fired without beats")
     fb_ev = ev({"type": "sequence_group", "timing": "beats",
                 "beat_fallback": "fallback",
                 "children": [{"actions": [b(0.3)]}]})
-    await engine._execute_composite(fb_ev, [])
+    await clock.run(engine._execute_composite(fb_ev, []))
     if not brightness_times():
         fail("beat_fallback=fallback did not fire")
     engine._beats_cache = [0.0]
