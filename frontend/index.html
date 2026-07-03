@@ -411,7 +411,7 @@ function showMorphSummary(summary) {
 
 onMessage('trigger_fired', msg => {
   flashTrigger(msg.color || '#FFD700');
-  if (msg.summary && (msg.event_type === 'morph_set' || msg.event_type === undefined)) {
+  if (msg.summary && (msg.event_type === 'morph_set' || msg.event_type === 'composite' || msg.event_type === undefined)) {
     showMorphSummary(msg.summary);
   }
   // Highlight the row

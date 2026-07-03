@@ -33,7 +33,8 @@ from typing import Optional
 
 from api import ledfx_client
 from models.music_event import (
-    AspectValue, MorphLane, MorphScope, MorphStepAction, MorphTarget, MusicEvent,
+    AspectValue, MorphScope, MorphStepAction, MorphTarget, MusicEvent,
+    ParallelChild, ParallelGroupAction,
 )
 from services import effect_params, morph_aspects
 
@@ -256,7 +257,7 @@ async def import_scene(scene_id: str) -> Optional[MusicEvent]:
         if not targets:
             continue
         step = MorphStepAction(ramp_ms=500, targets=targets)
-        lanes.append(MorphLane(name=vid, labels=[], alternatives=[step]))
+        lanes.append(ParallelChild(name=vid, labels=[], actions=[step]))
 
     if not lanes:
         logger.info("scene_absorb: scene '%s' had no importable virtuals (skipped: %s)", scene_id, skipped)
@@ -268,8 +269,12 @@ async def import_scene(scene_id: str) -> Optional[MusicEvent]:
 
     return MusicEvent(
         name=f"Import: {scene_name}",
-        event_type="morph_set",
+        event_type="composite",
         color="#FFD700",
         labels=["imported-scene"],
-        morph_lanes=lanes,
+        # Post-unification shape: one parallel lane per virtual. Pre-commands
+        # off, matching migrated morph_set semantics.
+        pre_brightness_enabled=False,
+        pre_transition_enabled=False,
+        root=ParallelGroupAction(children=lanes),
     )
