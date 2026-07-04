@@ -13,9 +13,11 @@ Supported action types:
   ledfx_global_transition — set LedFX global transition time / mode
 """
 from __future__ import annotations
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, Field
 import uuid
+
+from models.value_binding import ValueBinding
 
 
 class ActionLabel(BaseModel):
@@ -125,7 +127,14 @@ class AspectValue(BaseModel):
                                                 instead of their absolute value.
       aspect=effect                           → effect_type
     """
-    number:       float | None = None
+    number:       float | ValueBinding | None = None
+    # Per-param weight overrides for the numeric-distribution aspects (brightness
+    # and reactivity in the UI; blur maps to a single param so the editor is
+    # suppressed). Keyed by "{effect_type}.{param_name}", each value replaces that
+    # param's default `aspect_scale` from effect_params.json when the single
+    # `number` slider is distributed across the aspect's params. Absent / unset
+    # keys fall back to the catalog default. See morph_compiler._patch_numeric.
+    scale_overrides: dict[str, float] | None = None
     color_kind:   Optional[Literal["gradient", "solid"]] = None
     color_value:  str | None = None
     bg_color:     str | None = None
@@ -134,15 +143,15 @@ class AspectValue(BaseModel):
     # the morph compiler uses this on effect-switch instead of auto-deriving
     # from bg_color. None = use bg_color (or starter default if no bg_color set).
     accent_color: str | None = None
-    polygon:      Optional[bool | Literal["toggle"]] = None
-    star:         float | None = None
-    edges:        int | None = None
-    twist:        float | None = None
-    flip:         Optional[bool | Literal["toggle"]] = None
+    polygon:      Optional[bool | Literal["toggle"] | ValueBinding] = None
+    star:         float | ValueBinding | None = None
+    edges:        int | ValueBinding | None = None
+    twist:        float | ValueBinding | None = None
+    flip:         Optional[bool | Literal["toggle"] | ValueBinding] = None
     # x_offset / y_offset live in the FRONTEND −1..1 space. The compiler converts
     # to LedFX's 0..1 storage via the `scale_offset` flag in effect_params.json.
-    x_offset:     float | None = None
-    y_offset:     float | None = None
+    x_offset:     float | ValueBinding | None = None
+    y_offset:     float | ValueBinding | None = None
     effect_type:  str | None = None
     # Per-shape-sub-field nudge specs (consulted only when target.mode == "nudge"
     # and target.aspect == "shape"). Booleans (polygon, flip) don't have nudge —
@@ -176,7 +185,7 @@ class MorphTarget(BaseModel):
     intensity_scale:  float = 0.0       # 0 = ignore beat intensity, 1 = full RMS scaling
     # Legacy — superseded by MorphStepAction.intensity_source. Kept so old data parses.
     intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
-    ramp_ms:          int | None = None  # overrides MorphStepAction.ramp_ms when set
+    ramp_ms:          int | ValueBinding | None = None  # overrides MorphStepAction.ramp_ms when set
 
 
 class MorphStepAction(BaseModel):
@@ -191,7 +200,7 @@ class MorphStepAction(BaseModel):
     type:             Literal["morph_step"] = "morph_step"
     labels:           list[str] = Field(default_factory=list)
     weight:           float = 1.0
-    ramp_ms:          int | None = None  # default for targets that don't override
+    ramp_ms:          int | ValueBinding | None = None  # default for targets that don't override
     intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
     targets:          list[MorphTarget] = Field(default_factory=list)
 
@@ -212,9 +221,9 @@ class MorphColorAction(BaseModel):
     weight:    float = 1.0
     ref_id:    str = ""
     pick_mode: Literal["default", "cycle", "weighted"] = "default"
-    advance:   int = Field(default=1, ge=1)
+    advance:   Union[Annotated[int, Field(ge=1)], ValueBinding] = 1
     direction: Literal["forward", "backward"] = "forward"
-    ramp_ms:   int | None = None
+    ramp_ms:   int | ValueBinding | None = None
     # When True (default), skip any color-set value that would reset the LedFX
     # effect (e.g. background_color), preserving the running effect. When False,
     # those values are still applied — but always instantly, never ramped.
@@ -245,8 +254,8 @@ class DeviceSettingsAction(BaseModel):
 class EffectParamChange(BaseModel):
     """One parameter change within a LedFxEffectParamAction."""
     param_label: str          # unified label e.g. "Reactivity", "Effect Brightness"
-    target_value: float = 0.0 # numeric value; ignored for toggle/color/gradient/polar params
-    toggle_action: str | None = None  # "on", "off", "toggle" — only for toggle-type params
+    target_value: float | ValueBinding = 0.0 # numeric value; ignored for toggle/color/gradient/polar params
+    toggle_action: str | ValueBinding | None = None  # "on", "off", "toggle" — only for toggle-type params
     string_value: str | None = None   # hex color or CSS gradient string — for color/gradient params
     flip_sign:    bool         = False  # if True: apply abs(target_value) with opposite sign of current
     polar_angle:  float | None = None   # degrees, 0=top (y=1,x=0), clockwise — for polar-type params

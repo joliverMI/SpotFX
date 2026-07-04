@@ -539,6 +539,25 @@ def load_beats_for_uri(spotify_uri: str) -> list | None:
         return None
 
 
+def load_sections_for_uri(spotify_uri: str) -> list | None:
+    """
+    Return the sections list from the cached librosa JSON for a given Spotify
+    URI. Each section is a dict with start_ms/end_ms/label/energy_rms/
+    onset_density_per_s (energy + density normalized 0–1 per song).
+    Returns None if the librosa file doesn't exist or has no sections.
+    Used by value bindings (signal="section_energy").
+    """
+    path = _librosa_path_for_uri(spotify_uri)
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        sections = data.get("sections", [])
+        return sections if sections else None
+    except Exception:
+        return None
+
+
 def load_tempo_for_uri(spotify_uri: str) -> float | None:
     """Return tempo_bpm from the librosa JSON for a URI, or None if unavailable."""
     path = _librosa_path_for_uri(spotify_uri)
