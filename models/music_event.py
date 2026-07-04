@@ -283,7 +283,7 @@ class LedFxEffectParamAction(BaseModel):
     virtual_id: str | None = None   # e.g. "crystal-mapper"
     category: str | None = None     # e.g. "Matrix" | "Strips" | "Singles"
     params: list[EffectParamChange] = Field(default_factory=list)
-    ramp_ms: int | None = None      # None = use settings.smooth_ramp_ms; 0 = instant
+    ramp_ms: int | ValueBinding | None = None  # None = use settings.smooth_ramp_ms; 0 = instant
 
 
 class RandomOption(BaseModel):

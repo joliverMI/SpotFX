@@ -43,6 +43,11 @@ export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
   parallel_group: 'Parallel',
 };
 
+/** Cheap deep scan: does this action contain any value binding? */
+export function hasBindingDeep(action: Action): boolean {
+  return JSON.stringify(action).includes('"bind":"signal"');
+}
+
 export function summarizeAction(action: Action, ctx: SummaryContext = {}): string {
   switch (action.type) {
     case 'ledfx_scene':
@@ -63,16 +68,16 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
       const scope = action.virtual_id || action.category || 'all';
       const names = action.params.map((p) => p.param_label).filter(Boolean);
       const body = names.length ? names.join(', ') : 'params';
-      return `${body} (${scope})`;
+      return `${body} (${scope})${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'morph_step': {
       const n = action.targets.length;
       const aspects = [...new Set(action.targets.map((t) => t.aspect))].sort();
-      return `Morph ${n}× (${aspects.length ? aspects.join(', ') : 'no targets'})`;
+      return `Morph ${n}× (${aspects.length ? aspects.join(', ') : 'no targets'})${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'morph_color': {
       const name = ctx.colorSetNames?.[action.ref_id] ?? '?';
-      return `Color → ${name}`;
+      return `Color → ${name}${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'device_settings':
       return `Device settings (${action.targets.length}×)`;

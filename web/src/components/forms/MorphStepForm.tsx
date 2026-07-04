@@ -12,6 +12,7 @@ import { useMorphAspects } from '../../api/queries';
 import { Checkbox, ColorInput, NumberInput, Row, Select, TextInput } from './inputs';
 import { ParentScopeToggle } from './ScopePicker';
 import SearchSelect from './SearchSelect';
+import { BindableNumber, BindableTri } from './BindingInput';
 
 const newTarget = (): MorphTarget => ({
   scope: { virtual_ids: [], categories: [], roles: [] },
@@ -147,7 +148,7 @@ export default function MorphStepForm({
   return (
     <div>
       <Row label="Ramp (ms)" help="Default for targets without their own ramp">
-        <NumberInput value={action.ramp_ms} nullable onChange={(v) => update((a) => { a.ramp_ms = v; })} />
+        <BindableNumber value={action.ramp_ms} nullable onChange={(v) => update((a) => { a.ramp_ms = v; })} />
       </Row>
       <Row label="Intensity source" help="Beat signal feeding every nudge in this step">
         <Select
@@ -194,7 +195,7 @@ export default function MorphStepForm({
             {/* ── numeric aspects: brightness / reactivity / blur ── */}
             {NUMERIC_ASPECTS.includes(t.aspect) && !nudgeMode && (
               <Row label="Value (0–1)">
-                <NumberInput value={av.number ?? null} nullable min={0} max={1} step={0.05}
+                <BindableNumber value={av.number ?? null} nullable min={0} max={1} step={0.05}
                   onChange={(v) => setAV((x) => { x.number = v; })} />
               </Row>
             )}
@@ -254,31 +255,33 @@ export default function MorphStepForm({
             {t.aspect === 'shape' && (
               <>
                 <Row label="Polygon" help="tri-state: on / off / toggle current">
-                  <TriState value={av.polygon} onChange={(v) => setAV((x) => { x.polygon = v; })} />
+                  <BindableTri value={av.polygon ?? null} onChange={(v) => setAV((x) => { x.polygon = v; })}
+                    renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
                 </Row>
                 <Row label="Flip">
-                  <TriState value={av.flip} onChange={(v) => setAV((x) => { x.flip = v; })} />
+                  <BindableTri value={av.flip ?? null} onChange={(v) => setAV((x) => { x.flip = v; })}
+                    renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
                 </Row>
                 {!nudgeMode && (
                   <>
                     <Row label="Star (0–1)">
-                      <NumberInput value={av.star ?? null} nullable min={0} max={1} step={0.05}
+                      <BindableNumber value={av.star ?? null} nullable min={0} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.star = v; })} />
                     </Row>
                     <Row label="Edges">
-                      <NumberInput value={av.edges ?? null} nullable min={0} step={1}
-                        onChange={(v) => setAV((x) => { x.edges = v == null ? null : Math.round(v); })} />
+                      <BindableNumber value={av.edges ?? null} nullable min={0} step={1}
+                        onChange={(v) => setAV((x) => { x.edges = typeof v === 'number' ? Math.round(v) : v; })} />
                     </Row>
                     <Row label="Twist">
-                      <NumberInput value={av.twist ?? null} nullable step={0.05}
+                      <BindableNumber value={av.twist ?? null} nullable step={0.05}
                         onChange={(v) => setAV((x) => { x.twist = v; })} />
                     </Row>
                     <Row label="X offset (−1..1)">
-                      <NumberInput value={av.x_offset ?? null} nullable min={-1} max={1} step={0.05}
+                      <BindableNumber value={av.x_offset ?? null} nullable min={-1} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.x_offset = v; })} />
                     </Row>
                     <Row label="Y offset (−1..1)">
-                      <NumberInput value={av.y_offset ?? null} nullable min={-1} max={1} step={0.05}
+                      <BindableNumber value={av.y_offset ?? null} nullable min={-1} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.y_offset = v; })} />
                     </Row>
                   </>
@@ -307,7 +310,7 @@ export default function MorphStepForm({
                 onChange={(v) => setAV((x) => { x.accent_color = v; })} />
             </Row>
             <Row label="Ramp override (ms)">
-              <NumberInput value={t.ramp_ms} nullable onChange={(v) => setT((tt) => { tt.ramp_ms = v; })} />
+              <BindableNumber value={t.ramp_ms} nullable onChange={(v) => setT((tt) => { tt.ramp_ms = v; })} />
             </Row>
           </div>
         );

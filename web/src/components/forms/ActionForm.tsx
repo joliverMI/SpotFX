@@ -4,6 +4,8 @@ import type { Action } from '../../types/events';
 import { useColorSets, useEvents, useScenes } from '../../api/queries';
 import { LabelsInput, NumberInput, Row, Select, ColorInput, TextInput, Checkbox } from './inputs';
 import SearchSelect from './SearchSelect';
+import { BindableNumber } from './BindingInput';
+import { isBinding } from '../../types/events';
 import EffectParamForm from './EffectParamForm';
 import MorphStepForm from './MorphStepForm';
 import DeviceSettingsForm from './DeviceSettingsForm';
@@ -141,7 +143,10 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
       </Row>
       {action.pick_mode === 'cycle' && (
         <>
-          <Row label="Advance" help="Members to move per fire"><NumberInput value={action.advance} min={1} step={1} onChange={(v) => set((a) => { a.advance = Math.max(1, Math.round(v ?? 1)); })} /></Row>
+          <Row label="Advance" help="Members to move per fire">
+            <BindableNumber value={action.advance} min={1} step={1}
+              onChange={(v) => set((a) => { a.advance = isBinding(v) || v == null ? (v ?? 1) : Math.max(1, Math.round(v)); })} />
+          </Row>
           <Row label="Direction">
             <Select value={action.direction} width={140}
               onChange={(v) => set((a) => { a.direction = v as typeof a.direction; })}
@@ -149,7 +154,7 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
           </Row>
         </>
       )}
-      <Row label="Ramp (ms)"><NumberInput value={action.ramp_ms} nullable onChange={(v) => set((a) => { a.ramp_ms = v; })} /></Row>
+      <Row label="Ramp (ms)"><BindableNumber value={action.ramp_ms} nullable onChange={(v) => set((a) => { a.ramp_ms = v; })} /></Row>
       <Row label="Preserve effect" help="Skip values that would reset the running LedFX effect">
         <Checkbox value={action.preserve_effect} onChange={(v) => set((a) => { a.preserve_effect = v; })} />
       </Row>

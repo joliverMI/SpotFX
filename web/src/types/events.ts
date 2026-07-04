@@ -4,6 +4,34 @@
  * round-trips whole MusicEvent JSON through POST /api/events (upsert).
  */
 
+// ── Value bindings (signal-driven parameters) ───────────────────────────────
+
+export type SignalName = 'rms_total' | 'rms_bass' | 'onset_score' | 'section_energy';
+
+export interface BindingStep {
+  threshold: number;              // applies when signal >= threshold
+  value: number | boolean | string;
+}
+
+export interface ValueBinding {
+  bind: 'signal';
+  signal: SignalName;
+  window_beats: number;           // 0 = nearest beat; N = rolling mean over N beats
+  window_dir: 'past' | 'future' | 'centered';
+  mode: 'map' | 'steps';
+  in_min: number;
+  in_max: number;
+  out_min: number;
+  out_max: number;
+  steps: BindingStep[];
+  fallback: number | boolean | string | null;
+}
+
+export type Bindable<T> = T | ValueBinding;
+
+export const isBinding = (v: unknown): v is ValueBinding =>
+  typeof v === 'object' && v !== null && (v as ValueBinding).bind === 'signal';
+
 // ── Morph primitives ────────────────────────────────────────────────────────
 
 export interface MorphScope {
@@ -21,19 +49,19 @@ export interface NumericNudge {
 }
 
 export interface AspectValue {
-  number?: number | null;
+  number?: Bindable<number> | null;
   scale_overrides?: Record<string, number> | null;
   color_kind?: 'gradient' | 'solid' | null;
   color_value?: string | null;
   bg_color?: string | null;
   accent_color?: string | null;
-  polygon?: boolean | 'toggle' | null;
-  star?: number | null;
-  edges?: number | null;
-  twist?: number | null;
-  flip?: boolean | 'toggle' | null;
-  x_offset?: number | null;
-  y_offset?: number | null;
+  polygon?: Bindable<boolean | 'toggle'> | null;
+  star?: Bindable<number> | null;
+  edges?: Bindable<number> | null;
+  twist?: Bindable<number> | null;
+  flip?: Bindable<boolean | 'toggle'> | null;
+  x_offset?: Bindable<number> | null;
+  y_offset?: Bindable<number> | null;
   effect_type?: string | null;
   star_nudge?: NumericNudge | null;
   edges_nudge?: NumericNudge | null;
@@ -55,7 +83,7 @@ export interface MorphTarget {
   nudge_amount: number;
   intensity_scale: number;
   intensity_source: IntensitySource; // legacy, ignored at fire time
-  ramp_ms: number | null;
+  ramp_ms: Bindable<number> | null;
 }
 
 // ── Actions (discriminated union on `type`) ─────────────────────────────────
@@ -103,8 +131,8 @@ export interface LedFxGlobalTransitionAction extends ActionBase {
 
 export interface EffectParamChange {
   param_label: string;
-  target_value: number;
-  toggle_action: string | null;
+  target_value: Bindable<number>;
+  toggle_action: Bindable<string> | null;
   string_value: string | null;
   flip_sign: boolean;
   polar_angle: number | null;
@@ -120,12 +148,12 @@ export interface LedFxEffectParamAction extends ActionBase {
   virtual_id: string | null;
   category: string | null;
   params: EffectParamChange[];
-  ramp_ms: number | null;
+  ramp_ms: Bindable<number> | null;
 }
 
 export interface MorphStepAction extends ActionBase {
   type: 'morph_step';
-  ramp_ms: number | null;
+  ramp_ms: Bindable<number> | null;
   intensity_source: IntensitySource;
   targets: MorphTarget[];
 }
@@ -134,9 +162,9 @@ export interface MorphColorAction extends ActionBase {
   type: 'morph_color';
   ref_id: string;
   pick_mode: 'default' | 'cycle' | 'weighted';
-  advance: number;
+  advance: Bindable<number>;
   direction: 'forward' | 'backward';
-  ramp_ms: number | null;
+  ramp_ms: Bindable<number> | null;
   preserve_effect: boolean;
 }
 

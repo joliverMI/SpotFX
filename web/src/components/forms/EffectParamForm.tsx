@@ -5,6 +5,7 @@ import { useParamLabels } from '../../api/queries';
 import { Checkbox, ColorInput, NumberInput, Row, Select, TextInput } from './inputs';
 import { ParentScopeToggle } from './ScopePicker';
 import SearchSelect from './SearchSelect';
+import { BindableNumber, BindableToggle } from './BindingInput';
 
 const newParam = (label: string): EffectParamChange => ({
   param_label: label,
@@ -52,7 +53,7 @@ export default function EffectParamForm({
         />
       </Row>
       <Row label="Ramp (ms)" help="Blank = settings default, 0 = instant">
-        <NumberInput value={action.ramp_ms} nullable onChange={(v) => update((a) => { a.ramp_ms = v; })} />
+        <BindableNumber value={action.ramp_ms} nullable onChange={(v) => update((a) => { a.ramp_ms = v; })} />
       </Row>
 
       <div className="card-title" style={{ marginTop: 10 }}>Parameters</div>
@@ -77,7 +78,7 @@ export default function EffectParamForm({
 
               {kind === 'numeric' && (
                 <>
-                  <NumberInput
+                  <BindableNumber
                     value={p.target_value}
                     min={info?.min ?? undefined}
                     max={info?.max ?? undefined}
@@ -88,11 +89,13 @@ export default function EffectParamForm({
                 </>
               )}
               {kind === 'toggle' && (
-                <Select
+                <BindableToggle
                   value={p.toggle_action ?? 'toggle'}
                   onChange={(v) => setP(i, (q) => { q.toggle_action = v; })}
-                  options={['on', 'off', 'toggle'].map((v) => ({ value: v, label: v }))}
-                  width={110}
+                  renderScalar={(v, set) => (
+                    <Select value={v ?? 'toggle'} onChange={set} width={110}
+                      options={['on', 'off', 'toggle'].map((o) => ({ value: o, label: o }))} />
+                  )}
                 />
               )}
               {kind === 'color' && (
