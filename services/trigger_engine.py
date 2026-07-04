@@ -30,6 +30,7 @@ from models.music_event import MusicEvent, Action
 from services.profile_manager import get_event
 from services.audio_analyzer import load_audio_shape_meta, load_beats_for_uri, load_tempo_for_uri
 from services.device_category_service import get_virtuals_for_role
+from services.signal_resolver import resolve_action_bindings, resolve_signal, static_ramp_ms
 from services.effect_params import get_all_virtual_ids
 from services.websocket_manager import ws_manager
 from api import ledfx_client
@@ -246,6 +247,7 @@ class TriggerEngine:
         self._loaded_offset_ms: int = 0
         # Per-song librosa cache — avoids re-reading the JSON every beat-sequence fire.
         self._beats_cache: Optional[list] = None
+        self._sections_cache: Optional[list] = None  # librosa sections for value bindings
         self._tempo_cache: Optional[float] = None
         # Pre-selection state for trigger preview
         self._preselected: dict[str, Action] = {}           # trigger_id → pre-selected action (single events)
@@ -324,6 +326,8 @@ class TriggerEngine:
             # Pre-load librosa beats/tempo once so beat-sequence fires don't
             # each re-parse the JSON file from disk.
             self._beats_cache = load_beats_for_uri(profile.spotify_uri)
+            from services.audio_analyzer import load_sections_for_uri
+            self._sections_cache = load_sections_for_uri(profile.spotify_uri)
             self._tempo_cache = load_tempo_for_uri(profile.spotify_uri)
             # Cache AI suggestion set as MusicTrigger list for this song
             from services.suggestion_store import load_suggestion_set
@@ -1713,6 +1717,9 @@ class TriggerEngine:
         if the morph produced no touched virtuals (scene-override pointless)."""
         if not morph_actions:
             return None
+        # Resolve value bindings now so the prestaged scene carries concrete
+        # values (same ≤500ms-early drift as the nudge intensity_resolver).
+        morph_actions = [resolve_action_bindings(a, self._signal_now) for a in morph_actions]
         import copy
         from services.morph_scene import build_scene_state
         working_cache = copy.deepcopy(dict(state.ledfx_virtual_cache))
@@ -2097,6 +2104,7 @@ class TriggerEngine:
                 )
 
         elif action.type == "ledfx_effect_param":
+            action = resolve_action_bindings(action, self._signal_now)
             from services.effect_params import get_virtuals_for_category, resolve_params, get_param_meta
             if action.virtual_id:
                 virtuals = [action.virtual_id]
@@ -2319,6 +2327,7 @@ class TriggerEngine:
         Finally, persist the post-action (effect, config) for every touched
         virtual so future switch-backs resume the right state.
         """
+        action = resolve_action_bindings(action, self._signal_now)
         from services.morph_compiler import compile_target, resolve_scope
         from services.effect_params import get_param_meta
         from services import morph_effect_state
@@ -2561,6 +2570,7 @@ class TriggerEngine:
         effect with a canonical-key fallback — so it works regardless of which
         effect a device is running (modeled or not). Color/BG strings ramp via
         gradient interpolation; background mode is instant."""
+        action = resolve_action_bindings(action, self._signal_now)
         from services import color_set_store
         from services import morph_effect_state
         from services.morph_compiler import resolve_scope
@@ -2894,7 +2904,32 @@ class TriggerEngine:
         indices = _FLARE_LANES.get(event.event_type)
         if indices is None:
             return ""
+        # Shape Flare falls back to the Color lane when the Shape lane (2) is
+        # empty, so an event with only color alternatives still flares.
+        if event.event_type == "shape_flare" and self._scene_lane_is_empty(2):
+            indices = [3]  # Color
         return await self._run_last_scene_lanes(indices, labels, skip_event_ids)
+
+    def _plan_ramp_ms(self, action) -> int:
+        """Effective ramp for beat-timeline math — resolves a bound ramp_ms
+        so max() never sees a ValueBinding object."""
+        r = static_ramp_ms(getattr(action, "ramp_ms", None), self._signal_now)
+        return r if r is not None else settings.smooth_ramp_ms
+
+    def _signal_now(self, binding) -> Optional[float]:
+        """Current value of a ValueBinding's signal at the live song position.
+        Same track/progress guards as _beat_intensity_now; sections and beats
+        come from the runtime caches (lazy-loaded per URI as a fallback)."""
+        if not state.current_track or not state.current_track.spotify_uri:
+            return None
+        uri = state.current_track.spotify_uri
+        beats = self._beats_cache or load_beats_for_uri(uri)
+        sections = self._sections_cache
+        if sections is None and binding.signal == "section_energy":
+            from services.audio_analyzer import load_sections_for_uri
+            sections = self._sections_cache = load_sections_for_uri(uri)
+        now_ms = state.current_track.interpolated_progress_ms()
+        return resolve_signal(binding, beats, sections, int(now_ms))
 
     def _beat_intensity_now(self, source: str) -> Optional[float]:
         """Resolve the current beat-level intensity for a nudge target.
@@ -3539,10 +3574,7 @@ class TriggerEngine:
             ramp_sources = [a for a in child.actions if a.type not in self.CONTAINER_ACTION_TYPES]
             ramp_ms = 0
             if ramp_sources:
-                ramp_ms = max(
-                    (a.ramp_ms if getattr(a, "ramp_ms", None) is not None else settings.smooth_ramp_ms)
-                    for a in ramp_sources
-                )
+                ramp_ms = max(self._plan_ramp_ms(a) for a in ramp_sources)
             raw_fire = (nominal_time - ramp_ms) if (child.pre_ramp and ramp_ms > 0) else nominal_time
             earliest = prev_fire_time + prev_ramp_ms + 100
             if raw_fire < earliest:
@@ -3830,12 +3862,9 @@ class TriggerEngine:
             ramp_ms = 0
             if ramp_sources:
                 # Respect ramp_ms=0 (instant) — only fall back to smooth_ramp_ms
-                # when the field is None. The previous `or` coerced 0 to the
-                # fallback, inflating the inter-step safety pad by ~500ms.
-                ramp_ms = max(
-                    (a.ramp_ms if getattr(a, "ramp_ms", None) is not None else settings.smooth_ramp_ms)
-                    for a in ramp_sources
-                )
+                # when the field is None. Bound ramps resolve via _plan_ramp_ms
+                # so max() never sees a ValueBinding.
+                ramp_ms = max(self._plan_ramp_ms(a) for a in ramp_sources)
 
             raw_fire = (nominal_time - ramp_ms) if (step.pre_ramp and ramp_ms > 0) else nominal_time
             # Safety pad: steps can't overlap their predecessor's ramp + 100 ms.

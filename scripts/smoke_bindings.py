@@ -180,8 +180,120 @@ def main() -> None:
     assert static_ramp_ms(vb(mode="map", out_min=0, out_max=1000), lambda b: 0.25) == 250
     ok("static_ramp_ms resolves bindings for timeline max()")
 
-    print("\nALL PASS (part 1 — pure resolver)")
+    print("ALL PASS (part 1 — pure resolver)\n")
+
+
+async def engine_seams() -> None:
+    """Part 2: the resolver is applied at every executor seam, with the live
+    signal context (track position + caches). LedFX writes are irrelevant here
+    — targets resolve to nothing — what matters is that each seam hands its
+    downstream a RESOLVED action."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from services import effect_params
+    effect_params.load()
+
+    import services.trigger_engine as te
+    from models.music_event import MorphColorAction, MorphStepAction, LedFxEffectParamAction, MusicEvent
+    from models.state import state
+
+    engine = te.TriggerEngine()
+    engine._beats_cache = BEATS
+    engine._sections_cache = SECTIONS
+    engine._local_beat_interval_ms = lambda at_ms: 500  # type: ignore
+    state.current_track = SimpleNamespace(
+        spotify_uri="spotify:track:smoke",
+        interpolated_progress_ms=lambda: 5000,  # rms_total = 0.5 at nearest beat
+        is_playing=True,
+    )
+
+    # Record every action that passes through the seam, then delegate.
+    seen: list = []
+    real = te.resolve_action_bindings
+
+    def recorder(action, signal_fn):
+        out = real(action, signal_fn)
+        seen.append(out)
+        return out
+
+    te.resolve_action_bindings = recorder  # type: ignore
+
+    def last_of(t: str):
+        return next(a for a in reversed(seen) if a.type == t)
+
+    # (a) morph_step: bound number + bound target ramp resolve at the seam
+    ms = MorphStepAction(ramp_ms={"bind": "signal", "mode": "map", "out_min": 1000, "out_max": 100},
+                         targets=[{"aspect": "brightness",
+                                   "absolute_value": {"number": {"bind": "signal", "mode": "map",
+                                                                 "out_min": 0.2, "out_max": 0.8}}}])
+    await engine._execute_morph_step(ms)
+    got = last_of("morph_step")
+    assert got.targets[0].absolute_value.number == 0.5, got.targets[0].absolute_value.number
+    assert got.ramp_ms == 550, got.ramp_ms
+    assert isinstance(ms.ramp_ms, ValueBinding), "stored action untouched"
+    ok("seam: _execute_morph_step resolves number + ramp (sig 0.5 → 0.5 / 550ms)")
+
+    # (b) morph_color: bound advance uses section_energy (0.6 @5000ms → tier 2)
+    mc = MorphColorAction(ref_id="nonexistent", advance={
+        "bind": "signal", "signal": "section_energy", "mode": "steps",
+        "steps": [{"threshold": 0.0, "value": 1}, {"threshold": 0.5, "value": 2},
+                  {"threshold": 0.9, "value": 4}],
+    })
+    await engine._execute_morph_color(mc)
+    assert last_of("morph_color").advance == 2
+    ok("seam: _execute_morph_color resolves advance from section_energy (0.6 → 2)")
+
+    # (c) effect_param leaf: bound toggle + no-op target_value drop
+    ep = LedFxEffectParamAction(params=[
+        {"param_label": "Flip", "toggle_action": {"bind": "signal", "mode": "steps",
+                                                  "steps": [{"threshold": 0.4, "value": "on"}]},
+         "target_value": 0.0},
+        {"param_label": "Reactivity", "target_value": {"bind": "signal", "mode": "steps",
+                                                       "steps": [{"threshold": 0.9, "value": 1.0}]}},
+    ])
+    await engine._execute_action(ep, [])
+    got = last_of("ledfx_effect_param")
+    assert len(got.params) == 1 and got.params[0].toggle_action == "on"
+    ok("seam: effect_param leaf resolves toggle, drops no-op param")
+
+    # (d) scene-override payload resolves before build_scene_state
+    payload_actions = [MorphStepAction(targets=[{"aspect": "brightness",
+                                                 "absolute_value": {"number": {"bind": "signal", "mode": "map",
+                                                                               "out_min": 0.0, "out_max": 1.0}}}])]
+    engine._build_scene_payload(payload_actions)
+    got = last_of("morph_step")
+    assert got.targets[0].absolute_value.number == 0.5
+    ok("seam: _build_scene_payload resolves bindings before scene build")
+
+    # (e) beats timeline with bound ramp: no TypeError, resolved int reaches leaf
+    beats_ev = MusicEvent(name="b", event_type="composite", pre_brightness_enabled=False,
+                          pre_transition_enabled=False,
+                          root={"type": "sequence_group", "timing": "beats", "children": [
+                              {"pre_ramp": True, "actions": [{
+                                  "type": "morph_step",
+                                  "ramp_ms": {"bind": "signal", "mode": "map", "out_min": 0, "out_max": 600},
+                                  "targets": []}]},
+                          ]})
+    await engine._execute_composite(beats_ev, [], anchor_ms=5000)
+    got = last_of("morph_step")
+    assert isinstance(got.ramp_ms, int), f"ramp not resolved: {got.ramp_ms!r}"
+    ok(f"seam: beats timeline builds with bound ramp (stamped {got.ramp_ms}ms), no TypeError")
+
+    te.resolve_action_bindings = real  # type: ignore
+    state.current_track = None
+    print("\nALL PASS (part 2 — engine seams)")
 
 
 if __name__ == "__main__":
     main()
+    import asyncio as _a
+
+    # Virtual clock so the beats-group timeline doesn't actually sleep.
+    from scripts._virtual_clock import VirtualClock
+    _clock = VirtualClock()
+
+    async def _run():
+        await _clock.run(engine_seams())
+
+    _a.run(_run())
