@@ -9,9 +9,8 @@ export default function NavBar() {
       <a href="/">Now Playing</a>
       <a href="/builder.html">Profile Builder</a>
       <Link to="/" className={pathname === '/' || pathname.startsWith('/event') ? 'active' : ''}>
-        Events ✨
+        Events
       </Link>
-      <a href="/events.html">Events (classic)</a>
       <a href="/color-sets.html">Color Sets</a>
       <a href="/devices.html">Devices</a>
       <a href="/setlist.html">Set Lists</a>

@@ -1,7 +1,8 @@
-import type { ParallelChild, ParallelGroupAction } from '../../types/events';
+import type { Action, ParallelChild, ParallelGroupAction } from '../../types/events';
 import { newParallelChild } from '../../lib/defaults';
 import { uuid } from '../../lib/uid';
 import { useEditorStore } from '../../store/editorStore';
+import { cloneForPaste, useClipboard, writeClip } from '../../store/clipboard';
 import { LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import { groupPathOf } from './groupPath';
@@ -11,6 +12,7 @@ import { groupPathOf } from './groupPath';
 export default function ParallelGroupBody({ uid, action }: { uid: string; action: ParallelGroupAction }) {
   const draft = useEditorStore((s) => s.draft);
   const updateAction = useEditorStore((s) => s.updateAction);
+  const clip = useClipboard();
   if (!draft) return null;
   const groupPath = groupPathOf(draft, uid);
   if (!groupPath) return null;
@@ -41,6 +43,8 @@ export default function ParallelGroupBody({ uid, action }: { uid: string; action
                 const [c] = g.children.splice(j, 1);
                 g.children.splice(j - 1, 0, c);
               })}>↑</button>
+            <button title="Copy lane" style={{ padding: '2px 7px', fontSize: 12 }}
+              onClick={() => writeClip('parallel_child', child, `lane “${child.name || j + 1}” · ${child.actions.length} actions`)}>📋</button>
             <button title="Duplicate lane" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => {
                 const clone = JSON.parse(JSON.stringify(g.children[j], (k, v) => (k.startsWith('_') ? undefined : v))) as ParallelChild;
@@ -66,6 +70,20 @@ export default function ParallelGroupBody({ uid, action }: { uid: string; action
       <button style={{ fontSize: 12 }} onClick={() => set((g) => { g.children.push(newParallelChild()); })}>
         + Add lane
       </button>
+      {(clip?.kind === 'parallel_child' || clip?.kind === 'action') && (
+        <button style={{ fontSize: 12, marginLeft: 6 }} title={`Paste “${clip.summary}”`}
+          onClick={() => set((g) => {
+            if (clip.kind === 'parallel_child') {
+              g.children.push(cloneForPaste(clip.data as ParallelChild));
+            } else {
+              const c = newParallelChild();
+              c.actions.push(cloneForPaste(clip.data as Action));
+              g.children.push(c);
+            }
+          })}>
+          📋 Paste lane
+        </button>
+      )}
     </div>
   );
 }

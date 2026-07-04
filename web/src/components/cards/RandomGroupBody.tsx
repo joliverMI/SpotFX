@@ -1,6 +1,7 @@
-import type { RandomGroupAction, RandomOption } from '../../types/events';
+import type { Action, RandomGroupAction, RandomOption } from '../../types/events';
 import { uuid } from '../../lib/uid';
 import { useEditorStore } from '../../store/editorStore';
+import { cloneForPaste, useClipboard, writeClip } from '../../store/clipboard';
 import { groupPathOf } from './groupPath';
 import { Checkbox, LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import EditableActionContainer from '../tracks/EditableActionContainer';
@@ -13,6 +14,7 @@ const newOption = (): RandomOption => ({ id: uuid(), name: '', labels: [], weigh
 export default function RandomGroupBody({ uid, action }: { uid: string; action: RandomGroupAction }) {
   const draft = useEditorStore((s) => s.draft);
   const updateAction = useEditorStore((s) => s.updateAction);
+  const clip = useClipboard();
   if (!draft) return null;
 
   const groupPath = groupPathOf(draft, uid);
@@ -44,6 +46,8 @@ export default function RandomGroupBody({ uid, action }: { uid: string; action: 
                 onChange={(v) => set((g) => { g.options[j].weight = v ?? 1; })} />
             </label>
             <span style={{ flex: 1 }} />
+            <button title="Copy option" style={{ padding: '2px 7px', fontSize: 12 }}
+              onClick={() => writeClip('random_option', opt, `option “${opt.name || j + 1}” · ${opt.actions.length} actions`)}>📋</button>
             <button title="Duplicate option" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => {
                 const clone = JSON.parse(JSON.stringify(g.options[j], (k, v) => (k.startsWith('_') ? undefined : v))) as RandomOption;
@@ -69,6 +73,20 @@ export default function RandomGroupBody({ uid, action }: { uid: string; action: 
       <button style={{ fontSize: 12 }} onClick={() => set((g) => { g.options.push(newOption()); })}>
         + Add option
       </button>
+      {(clip?.kind === 'random_option' || clip?.kind === 'action') && (
+        <button style={{ fontSize: 12, marginLeft: 6 }} title={`Paste “${clip.summary}”`}
+          onClick={() => set((g) => {
+            if (clip.kind === 'random_option') {
+              g.options.push(cloneForPaste(clip.data as RandomOption));
+            } else {
+              const o = newOption();
+              o.actions.push(cloneForPaste(clip.data as Action));
+              g.options.push(o);
+            }
+          })}>
+          📋 Paste option
+        </button>
+      )}
     </div>
   );
 }

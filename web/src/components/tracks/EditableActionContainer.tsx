@@ -6,6 +6,7 @@ import { getUid } from '../../lib/uid';
 import { getAtPath } from '../../lib/paths';
 import { newAction } from '../../lib/defaults';
 import { useEditorStore } from '../../store/editorStore';
+import { cloneForPaste, useClipboard } from '../../store/clipboard';
 import EditActionCard from '../cards/EditActionCard';
 import AddActionDialog from '../dialogs/AddActionDialog';
 
@@ -28,6 +29,7 @@ export default function EditableActionContainer({
 }) {
   const [adding, setAdding] = useState(false);
   const mutate = useEditorStore((s) => s.mutate);
+  const clip = useClipboard();
   const { setNodeRef, isOver } = useDroppable({ id: `container:${containerPath}` });
 
   return (
@@ -49,6 +51,20 @@ export default function EditableActionContainer({
       <button style={{ fontSize: 12, marginTop: 2 }} onClick={() => setAdding(true)}>
         + Add action
       </button>
+      {clip?.kind === 'action' && (
+        <button
+          style={{ fontSize: 12, marginTop: 2, marginLeft: 6 }}
+          title={`Paste “${clip.summary}”`}
+          onClick={() =>
+            mutate((d) => {
+              const arr = getAtPath(d, containerPath) as Action[];
+              arr.push(cloneForPaste(clip.data as Action));
+            })
+          }
+        >
+          📋 Paste
+        </button>
+      )}
       {adding && (
         <AddActionDialog
           types={EDITABLE_ACTION_TYPES}

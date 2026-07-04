@@ -11,6 +11,7 @@ import ActionForm from '../forms/ActionForm';
 import RandomGroupBody from './RandomGroupBody';
 import SequenceGroupBody from './SequenceGroupBody';
 import ParallelGroupBody from './ParallelGroupBody';
+import { writeClip } from '../../store/clipboard';
 
 /** Editable HA-style card: drag handle, collapsed summary ⇄ expanded form, ⧉/✕ menu. */
 export default function EditActionCard({ action }: { action: Action }) {
@@ -62,6 +63,8 @@ export default function EditActionCard({ action }: { action: Action }) {
           <span key={l} className="chip">{l}</span>
         ))}
         <span className="action-card-type">{ACTION_TYPE_LABELS[action.type] ?? action.type}</span>
+        <button title="Copy (paste in any track, any event)" style={{ padding: '2px 7px', fontSize: 12 }}
+          onClick={(e) => { e.stopPropagation(); writeClip('action', action, summarizeAction(action, ctx)); }}>📋</button>
         <button title="Duplicate" style={{ padding: '2px 7px', fontSize: 12 }}
           onClick={(e) => { e.stopPropagation(); duplicate(); }}>⧉</button>
         <button className="danger" title="Delete" style={{ padding: '2px 7px', fontSize: 12 }}

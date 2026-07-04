@@ -1,7 +1,8 @@
-import type { GroupRevert, SequenceChild, SequenceGroupAction } from '../../types/events';
+import type { Action, GroupRevert, SequenceChild, SequenceGroupAction } from '../../types/events';
 import { newSequenceChild } from '../../lib/defaults';
 import { uuid } from '../../lib/uid';
 import { useEditorStore } from '../../store/editorStore';
+import { cloneForPaste, useClipboard, writeClip } from '../../store/clipboard';
 import { Checkbox, LabelsInput, NumberInput, Select } from '../forms/inputs';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import { groupPathOf } from './groupPath';
@@ -15,6 +16,7 @@ const defaultRevert = (): GroupRevert => ({
 export default function SequenceGroupBody({ uid, action }: { uid: string; action: SequenceGroupAction }) {
   const draft = useEditorStore((s) => s.draft);
   const updateAction = useEditorStore((s) => s.updateAction);
+  const clip = useClipboard();
   if (!draft) return null;
   const groupPath = groupPathOf(draft, uid);
   if (!groupPath) return null;
@@ -77,6 +79,8 @@ export default function SequenceGroupBody({ uid, action }: { uid: string; action
                 const [c] = g.children.splice(j, 1);
                 g.children.splice(j - 1, 0, c);
               })}>↑</button>
+            <button title="Copy step" style={{ padding: '2px 7px', fontSize: 12 }}
+              onClick={() => writeClip('sequence_child', child, `step · ${child.actions.length} actions`)}>📋</button>
             <button title="Duplicate step" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => {
                 const clone = JSON.parse(JSON.stringify(g.children[j], (k, v) => (k.startsWith('_') ? undefined : v))) as SequenceChild;
@@ -102,6 +106,20 @@ export default function SequenceGroupBody({ uid, action }: { uid: string; action
       <button style={{ fontSize: 12 }} onClick={() => set((g) => { g.children.push(newSequenceChild()); })}>
         + Add step
       </button>
+      {(clip?.kind === 'sequence_child' || clip?.kind === 'action') && (
+        <button style={{ fontSize: 12, marginLeft: 6 }} title={`Paste “${clip.summary}”`}
+          onClick={() => set((g) => {
+            if (clip.kind === 'sequence_child') {
+              g.children.push(cloneForPaste(clip.data as SequenceChild));
+            } else {
+              const c = newSequenceChild();
+              c.actions.push(cloneForPaste(clip.data as Action));
+              g.children.push(c);
+            }
+          })}>
+          📋 Paste step
+        </button>
+      )}
 
       <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8,
                     display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
