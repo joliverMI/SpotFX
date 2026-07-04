@@ -58,6 +58,18 @@ export interface MorphAspectsInfo {
   supported_effects: string[];
 }
 
+export interface ParamConfig {
+  categories: Record<string, { virtuals: string[] }>;
+}
+
+export function useParamConfig() {
+  return useQuery({
+    queryKey: ['param-config'],
+    queryFn: () => apiGet<ParamConfig>('/effect-params/config'),
+    staleTime: 60_000,
+  });
+}
+
 export function useMorphAspects() {
   return useQuery({
     queryKey: ['morph-aspects'],

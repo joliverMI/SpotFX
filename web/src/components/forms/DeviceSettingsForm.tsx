@@ -1,5 +1,6 @@
 import type { DeviceSettingsAction, DeviceSettingTarget } from '../../types/events';
-import { NumberInput, Row, ScopeListInput } from './inputs';
+import { NumberInput, Row } from './inputs';
+import { ParentScopeToggle } from './ScopePicker';
 
 const newTarget = (): DeviceSettingTarget => ({
   scope: { virtual_ids: [], categories: [], roles: [] },
@@ -19,12 +20,10 @@ export default function DeviceSettingsForm({
     <div>
       {action.targets.map((t, i) => (
         <div key={i} className="action-card" style={{ padding: 10, marginBottom: 8 }}>
-          <Row label="Virtuals"><ScopeListInput value={t.scope.virtual_ids} placeholder="ids (blank = any)"
-            onChange={(v) => update((a) => { a.targets[i].scope.virtual_ids = v; })} /></Row>
-          <Row label="Categories"><ScopeListInput value={t.scope.categories} placeholder="Matrix, Strips, Singles"
-            onChange={(v) => update((a) => { a.targets[i].scope.categories = v; })} /></Row>
-          <Row label="Roles"><ScopeListInput value={t.scope.roles} placeholder="roles"
-            onChange={(v) => update((a) => { a.targets[i].scope.roles = v; })} /></Row>
+          <Row label="Target" help="parent = inherit the nearest group/lane Target (or all devices)">
+            <ParentScopeToggle scope={t.scope}
+              onChange={(s) => update((a) => { a.targets[i].scope = s ?? { virtual_ids: [], categories: [], roles: [] }; })} />
+          </Row>
           <Row label="Max brightness" help="0–1, blank = unchanged">
             <NumberInput value={t.max_brightness} nullable min={0} max={1} step={0.05}
               onChange={(v) => update((a) => { a.targets[i].max_brightness = v; })} />

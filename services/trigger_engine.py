@@ -1207,26 +1207,75 @@ class TriggerEngine:
 
     CONTAINER_ACTION_TYPES = ("random_group", "sequence_group", "parallel_group")
 
-    def _iter_leaf_actions(self, actions, resolved_picks: dict | None = None, _depth: int = 0):
+    @staticmethod
+    def _scope_is_empty(scope) -> bool:
+        return scope is None or (
+            not scope.virtual_ids and not scope.categories and not scope.roles
+        )
+
+    def _effective_scope(self, own, inherited):
+        """Child override wins; else inherit. None = nothing set anywhere."""
+        return own if not self._scope_is_empty(own) else inherited
+
+    def _apply_inherited_scope(self, action, scope):
+        """Return `action` with EMPTY leaf scopes replaced by the inherited
+        group/lane scope (set in the editor's Target field). Same object when
+        nothing applies. Leaves with their own scope always win. Does not
+        cross event_ref boundaries — referenced events keep their own scoping."""
+        if self._scope_is_empty(scope):
+            return action
+        if action.type == "morph_step":
+            if not any(self._scope_is_empty(t.scope) for t in action.targets):
+                return action
+            new = action.model_copy(deep=True)
+            for t in new.targets:
+                if self._scope_is_empty(t.scope):
+                    t.scope = scope.model_copy(deep=True)
+            return new
+        if action.type == "ledfx_effect_param":
+            if action.virtual_id or action.category:
+                return action
+            if scope.virtual_ids:
+                return action.model_copy(update={"virtual_id": scope.virtual_ids[0]})
+            if scope.categories:
+                return action.model_copy(update={"category": scope.categories[0]})
+            return action  # roles-only scope has no effect_param mapping
+        if action.type == "device_settings":
+            if not any(self._scope_is_empty(t.scope) for t in action.targets):
+                return action
+            new = action.model_copy(deep=True)
+            for t in new.targets:
+                if self._scope_is_empty(t.scope):
+                    t.scope = scope.model_copy(deep=True)
+            return new
+        return action
+
+    def _iter_leaf_actions(self, actions, resolved_picks: dict | None = None,
+                           _depth: int = 0, inherited_scope=None):
         """Yield leaf (non-container) actions from a list, descending containers.
         For random_group: descend only the resolved option when the pick is
         known, else ALL options — a conservative superset, which is correct for
-        snapshot/ambient collection (over-capturing is safe)."""
+        snapshot/ambient collection (over-capturing is safe). Group/lane Target
+        scopes are applied so snapshots stay as narrow as the actual writes."""
         if _depth > 6 or not actions:
             return
         for a in actions:
             t = getattr(a, "type", "")
             if t == "random_group":
+                eff = self._effective_scope(a.scope, inherited_scope)
                 opts = a.options
                 if resolved_picks and a.id in resolved_picks:
                     opts = [o for o in a.options if o.id == resolved_picks[a.id]]
                 for o in opts:
-                    yield from self._iter_leaf_actions(o.actions, resolved_picks, _depth + 1)
+                    o_eff = self._effective_scope(o.scope, eff)
+                    yield from self._iter_leaf_actions(o.actions, resolved_picks, _depth + 1, o_eff)
             elif t in ("sequence_group", "parallel_group"):
+                g_eff = self._effective_scope(getattr(a, "scope", None), inherited_scope)
                 for c in a.children:
-                    yield from self._iter_leaf_actions(c.actions, resolved_picks, _depth + 1)
+                    c_eff = self._effective_scope(c.scope, g_eff)
+                    yield from self._iter_leaf_actions(c.actions, resolved_picks, _depth + 1, c_eff)
             else:
-                yield a
+                yield self._apply_inherited_scope(a, inherited_scope) if inherited_scope is not None else a
 
     def _event_leaf_actions(self, event: MusicEvent, resolved_picks: dict | None = None) -> list:
         """Flat leaf-action list for any event shape (legacy steps or composite root)."""
@@ -1279,13 +1328,14 @@ class TriggerEngine:
         if root is None:
             return None
 
-        def flatten(action, offset: int, name: str, depth: int = 0):
+        def flatten(action, offset: int, name: str, depth: int = 0, scope=None):
             if depth > 6:
                 return None
             t = getattr(action, "type", "")
             if t == "sequence_group":
                 return None
             if t == "random_group":
+                eff = self._effective_scope(action.scope, scope)
                 opt = None
                 if resolved_picks and action.id in resolved_picks:
                     opt = next((o for o in action.options if o.id == resolved_picks[action.id]), None)
@@ -1293,9 +1343,10 @@ class TriggerEngine:
                     opt = action.options[0]
                 if opt is None:
                     return None
+                o_eff = self._effective_scope(opt.scope, eff)
                 picks: list = []
                 for a in opt.actions:
-                    sub = flatten(a, offset, name, depth + 1)
+                    sub = flatten(a, offset, name, depth + 1, o_eff)
                     if sub is None:
                         return None
                     picks.extend(sub)
@@ -1303,12 +1354,15 @@ class TriggerEngine:
             if t == "parallel_group":
                 picks = []
                 for c in action.children:
+                    c_eff = self._effective_scope(c.scope, scope)
                     for a in c.actions:
-                        sub = flatten(a, offset + int(c.offset_ms or 0), c.name or name, depth + 1)
+                        sub = flatten(a, offset + int(c.offset_ms or 0), c.name or name, depth + 1, c_eff)
                         if sub is None:
                             return None
                         picks.extend(sub)
                 return picks
+            if scope is not None:
+                action = self._apply_inherited_scope(action, scope)
             return [MorphPick(name, action, offset)]
 
         return flatten(root, 0, "")
@@ -1860,14 +1914,18 @@ class TriggerEngine:
         self, action: Action, labels: list[str] | None = None,
         await_ramps: bool = False, skip_event_ids: set[str] | None = None,
         _depth: int = 0, resolved_picks: dict | None = None,
+        inherited_scope=None,
     ) -> None:
         """Dispatch a single action. `resolved_picks` (random_group.id →
         RandomOption.id) pins random branches to the plan-time resolution so
-        fires match previews; absent entries fall back to fresh picks."""
+        fires match previews; absent entries fall back to fresh picks.
+        `inherited_scope` is the nearest group/lane Target — leaves with empty
+        scopes adopt it (see _apply_inherited_scope)."""
         if action.type in self.CONTAINER_ACTION_TYPES and _depth > 5:
             logger.warning("%s depth cap (5) hit — skipping nested group", action.type)
             return
         if action.type == "random_group":
+            eff_scope = self._effective_scope(action.scope, inherited_scope)
             opt = None
             if resolved_picks and action.id in resolved_picks:
                 opt = next((o for o in action.options if o.id == resolved_picks[action.id]), None)
@@ -1879,11 +1937,12 @@ class TriggerEngine:
                 )
             if opt and opt.actions:
                 merged = (labels or []) + [l for l in opt.labels if l not in (labels or [])]
+                opt_scope = self._effective_scope(opt.scope, eff_scope)
                 await asyncio.gather(*(
                     self._execute_action(
                         a, merged, await_ramps=await_ramps,
                         skip_event_ids=skip_event_ids, _depth=_depth + 1,
-                        resolved_picks=resolved_picks,
+                        resolved_picks=resolved_picks, inherited_scope=opt_scope,
                     )
                     for a in opt.actions
                 ))
@@ -1892,6 +1951,7 @@ class TriggerEngine:
             await self._execute_sequence_group(
                 action, labels or [], skip_event_ids=skip_event_ids,
                 resolved_picks=resolved_picks, _depth=_depth,
+                inherited_scope=inherited_scope,
             )
             return
         if action.type == "parallel_group":
@@ -1899,8 +1959,13 @@ class TriggerEngine:
                 action, labels or [], await_ramps=await_ramps,
                 skip_event_ids=skip_event_ids,
                 resolved_picks=resolved_picks, _depth=_depth,
+                inherited_scope=inherited_scope,
             )
             return
+        if inherited_scope is not None and action.type not in ("event_ref",):
+            # Leaf: adopt the nearest Target where the leaf's own scope is empty.
+            # event_refs are excluded — referenced events keep their own scoping.
+            action = self._apply_inherited_scope(action, inherited_scope)
         if action.type == "event_ref":
             sub = get_event(action.event_id)
             if sub is None:
@@ -3314,6 +3379,7 @@ class TriggerEngine:
         skip_event_ids: set[str] | None = None,
         resolved_picks: dict | None = None,
         _depth: int = 0,
+        inherited_scope=None,
     ) -> None:
         """Fire every child concurrently, staggered by per-child offset_ms.
         Generalization of _fire_morph_picks: anchor = min(offset); each child
@@ -3331,10 +3397,12 @@ class TriggerEngine:
                 if state.paused:
                     return
             merged = labels + list(child.labels or [])
+            child_scope = self._effective_scope(child.scope, inherited_scope)
             await asyncio.gather(*(
                 self._execute_action(
                     a, merged, await_ramps=await_ramps, skip_event_ids=skip_event_ids,
                     _depth=_depth + 1, resolved_picks=resolved_picks,
+                    inherited_scope=child_scope,
                 )
                 for a in child.actions
             ))
@@ -3350,6 +3418,7 @@ class TriggerEngine:
         anchor_ms: int | None = None,
         step1_prefired: bool = False,
         precomputed_snapshot: Optional[dict] = None,
+        inherited_scope=None,
     ) -> None:
         """Run children in order. timing="ms" ports _execute_sequence (per-child
         delay sleeps, revert with ambient-steal, revert-always-runs); timing=
@@ -3357,17 +3426,20 @@ class TriggerEngine:
         100ms safety pad + ramp compression, monotonic-clock timeline, revert
         as a synthetic timeline entry)."""
         label = name or f"group:{group.id[:8]}"
+        group_scope = self._effective_scope(group.scope, inherited_scope)
         if group.timing == "beats":
             await self._execute_beats_group(
                 group, labels, name=label, skip_event_ids=skip_event_ids,
                 resolved_picks=resolved_picks, _depth=_depth, anchor_ms=anchor_ms,
                 step1_prefired=step1_prefired, precomputed_snapshot=precomputed_snapshot,
+                inherited_scope=group_scope,
             )
             return
 
         revert = group.revert
         leaf = list(self._iter_leaf_actions(
             [a for c in group.children for a in c.actions], resolved_picks,
+            inherited_scope=group_scope,
         )) if revert and revert.enabled else []
         ambient_vids = self._event_touches_ambient(actions=leaf) if revert and revert.enabled else []
         snapshot: dict = {}
@@ -3393,10 +3465,12 @@ class TriggerEngine:
                 if not child.actions:
                     continue
                 merged = labels + list(child.labels or [])
+                child_scope = self._effective_scope(child.scope, group_scope)
                 await asyncio.gather(*(
                     self._execute_action(
                         a, merged, await_ramps=True, skip_event_ids=skip_event_ids,
                         _depth=_depth + 1, resolved_picks=resolved_picks,
+                        inherited_scope=child_scope,
                     )
                     for a in child.actions
                 ))
@@ -3435,6 +3509,7 @@ class TriggerEngine:
         anchor_ms: int | None = None,
         step1_prefired: bool = False,
         precomputed_snapshot: Optional[dict] = None,
+        inherited_scope=None,
     ) -> None:
         """Beats-mode body of a sequence_group — port of _execute_beat_sequence."""
         have_beats = bool(self._beats_cache)
@@ -3495,6 +3570,7 @@ class TriggerEngine:
             else:
                 leaf = list(self._iter_leaf_actions(
                     [a for c in group.children for a in c.actions], resolved_picks,
+                    inherited_scope=inherited_scope,
                 ))
                 snapshot = await self._snapshot_for_revert(actions=leaf)
 
@@ -3526,6 +3602,7 @@ class TriggerEngine:
                     await self._restore_from_snapshot(snapshot, revert)
             elif child is not None and child.actions:
                 merged = labels + list(child.labels or [])
+                child_scope = self._effective_scope(child.scope, inherited_scope)
                 dispatch = []
                 for action in child.actions:
                     stored_ramp = getattr(action, "ramp_ms", None)
@@ -3538,6 +3615,7 @@ class TriggerEngine:
                     self._execute_action(
                         a, merged, await_ramps=False, skip_event_ids=skip_event_ids,
                         _depth=_depth + 1, resolved_picks=resolved_picks,
+                        inherited_scope=child_scope,
                     )
                     for a in dispatch
                 ))

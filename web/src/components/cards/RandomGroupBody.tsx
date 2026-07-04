@@ -4,9 +4,10 @@ import { useEditorStore } from '../../store/editorStore';
 import { cloneForPaste, useClipboard, writeClip } from '../../store/clipboard';
 import { groupPathOf } from './groupPath';
 import { Checkbox, LabelsInput, NumberInput, TextInput } from '../forms/inputs';
+import { ParentScopeToggle } from '../forms/ScopePicker';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 
-const newOption = (): RandomOption => ({ id: uuid(), name: '', labels: [], weight: 1, actions: [] });
+const newOption = (): RandomOption => ({ id: uuid(), name: '', labels: [], weight: 1, scope: null, actions: [] });
 
 /** Expanded body of a random_group card: weighted options, each holding a nested
  * (droppable, sortable) action list. Recursion happens naturally — options can
@@ -33,6 +34,10 @@ export default function RandomGroupBody({ uid, action }: { uid: string; action: 
           label="avoid repeating last pick"
           onChange={(v) => set((g) => { g.dedupe = v; })}
         />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <span style={{ color: 'var(--text-muted)' }} title="Default device/category for every option (options can override)">target</span>
+          <ParentScopeToggle scope={action.scope} onChange={(s) => set((g) => { g.scope = s; })} />
+        </label>
       </div>
       {action.options.map((opt, j) => (
         <div key={opt.id} className="action-card" style={{ padding: 10, marginBottom: 8 }}>
@@ -56,6 +61,10 @@ export default function RandomGroupBody({ uid, action }: { uid: string; action: 
               })}>⧉</button>
             <button className="danger" title="Delete option" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => { g.options.splice(j, 1); })}>✕</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }} title="Device/category this option targets">target</span>
+            <ParentScopeToggle scope={opt.scope} onChange={(s) => set((g) => { g.options[j].scope = s; })} />
           </div>
           <div style={{ marginBottom: 6 }}>
             <LabelsInput value={opt.labels} placeholder="option filter labels (optional)"

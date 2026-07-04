@@ -1,8 +1,10 @@
 /** Full-fidelity form for ledfx_effect_param — all six param kinds:
  * numeric (+flip_sign), toggle, color, gradient, polar, move_xy, move_polar. */
-import type { EffectParamChange, LedFxEffectParamAction } from '../../types/events';
+import type { EffectParamChange, LedFxEffectParamAction, MorphScope } from '../../types/events';
 import { useParamLabels } from '../../api/queries';
 import { Checkbox, ColorInput, NumberInput, Row, Select, TextInput } from './inputs';
+import { ParentScopeToggle } from './ScopePicker';
+import SearchSelect from './SearchSelect';
 
 const newParam = (label: string): EffectParamChange => ({
   param_label: label,
@@ -32,23 +34,21 @@ export default function EffectParamForm({
 
   return (
     <div>
-      <Row label="Virtual (scope)" help="Blank = use category / global">
-        <TextInput
-          value={action.virtual_id ?? ''}
-          onChange={(v) => update((a) => { a.virtual_id = v || null; })}
-          placeholder="e.g. crystal-mapper (blank = all)"
-        />
-      </Row>
-      <Row label="Category (scope)">
-        <Select
-          value={action.category ?? ''}
-          onChange={(v) => update((a) => { a.category = v || null; })}
-          options={[
-            { value: '', label: '— all —' },
-            { value: 'Matrix', label: 'Matrix' },
-            { value: 'Strips', label: 'Strips' },
-            { value: 'Singles', label: 'Singles' },
-          ]}
+      <Row label="Target" help="parent = inherit the nearest group/lane Target (or all devices)">
+        <ParentScopeToggle
+          scope={
+            action.virtual_id
+              ? { virtual_ids: [action.virtual_id], categories: [], roles: [] }
+              : action.category
+                ? { virtual_ids: [], categories: [action.category], roles: [] }
+                : null
+          }
+          onChange={(s: MorphScope | null) =>
+            update((a) => {
+              a.virtual_id = s?.virtual_ids[0] ?? null;
+              a.category = s?.categories[0] ?? null;
+            })
+          }
         />
       </Row>
       <Row label="Ramp (ms)" help="Blank = settings default, 0 = instant">
@@ -62,14 +62,16 @@ export default function EffectParamForm({
         return (
           <div key={i} className="action-card" style={{ padding: 8, marginBottom: 6 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Select
+              <SearchSelect
                 value={p.param_label}
                 onChange={(v) => update((a) => { a.params[i] = newParam(v); })}
                 options={(labels ?? [{ label: p.param_label, type: 'numeric', min: null, max: null }]).map((l) => ({
                   value: l.label,
                   label: l.label,
+                  group: l.type,
                 }))}
-                width={190}
+                width={200}
+                allowEmpty={false}
               />
               <span className="chip">{kind}</span>
 

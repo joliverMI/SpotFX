@@ -158,6 +158,7 @@ export interface RandomOption {
   name: string;
   labels: string[];
   weight: number;
+  scope: MorphScope | null; // null = inherit group Target
   actions: Action[];
 }
 
@@ -165,6 +166,7 @@ export interface RandomGroupAction extends ActionBase {
   type: 'random_group';
   id: string;
   dedupe: boolean;
+  scope: MorphScope | null; // default Target for options
   options: RandomOption[];
 }
 
@@ -184,6 +186,7 @@ export interface SequenceChild {
   delay_ms: number;    // ms mode: slept before this child (honored on child 0)
   delay_beats: number; // beats mode: extra beats skipped (ignored on child 0)
   pre_ramp: boolean;   // beats mode only
+  scope: MorphScope | null; // null = inherit group Target
   actions: Action[];   // fire concurrently
 }
 
@@ -191,6 +194,7 @@ export interface SequenceGroupAction extends ActionBase {
   type: 'sequence_group';
   id: string;
   timing: 'ms' | 'beats';
+  scope: MorphScope | null; // default Target for children (empty leaf scopes adopt it)
   children: SequenceChild[];
   revert: GroupRevert | null;
   beat_fallback: 'skip' | 'fallback';
@@ -202,6 +206,7 @@ export interface ParallelChild {
   name: string;
   labels: string[];
   offset_ms: number; // stagger vs group fire moment (negative = earlier)
+  scope: MorphScope | null; // per-lane Target
   actions: Action[];
 }
 

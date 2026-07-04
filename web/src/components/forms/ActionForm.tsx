@@ -3,6 +3,7 @@
 import type { Action } from '../../types/events';
 import { useColorSets, useEvents, useScenes } from '../../api/queries';
 import { LabelsInput, NumberInput, Row, Select, ColorInput, TextInput, Checkbox } from './inputs';
+import SearchSelect from './SearchSelect';
 import EffectParamForm from './EffectParamForm';
 import MorphStepForm from './MorphStepForm';
 import DeviceSettingsForm from './DeviceSettingsForm';
@@ -86,9 +87,9 @@ function EventRefForm({ action, update }: { action: Extract<Action, { type: 'eve
     .map((e) => ({ value: e.id, label: e.name }));
   return (
     <Row label="Event">
-      <Select value={action.event_id} width={280}
+      <SearchSelect value={action.event_id} width={280}
         onChange={(v) => update((a) => { if (a.type === 'event_ref') a.event_id = v; })}
-        options={[{ value: '', label: '— pick an event —' }, ...opts]} />
+        options={opts} placeholder="— pick an event —" />
     </Row>
   );
 }
@@ -98,9 +99,9 @@ function SceneForm({ action, update }: { action: Extract<Action, { type: 'ledfx_
   const opts = (scenes ?? []).map((s) => ({ value: s.id, label: s.name }));
   return (
     <Row label="Scene">
-      <Select value={action.scene_id} width={280}
+      <SearchSelect value={action.scene_id} width={280}
         onChange={(v) => update((a) => { if (a.type === 'ledfx_scene') a.scene_id = v; })}
-        options={[{ value: '', label: '— pick a scene —' }, ...opts]} />
+        options={opts} placeholder="— pick a scene —" />
     </Row>
   );
 }
@@ -130,8 +131,8 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
   return (
     <>
       <Row label="Color set / group">
-        <Select value={action.ref_id} width={280} onChange={(v) => set((a) => { a.ref_id = v; })}
-          options={[{ value: '', label: '— pick —' }, ...opts]} />
+        <SearchSelect value={action.ref_id} width={280} onChange={(v) => set((a) => { a.ref_id = v; })}
+          options={opts} placeholder="— pick a color set —" />
       </Row>
       <Row label="Pick mode">
         <Select value={action.pick_mode} width={140}

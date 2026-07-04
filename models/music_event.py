@@ -285,6 +285,8 @@ class RandomOption(BaseModel):
     name:    str = ""                     # optional editor display name
     labels:  list[str] = Field(default_factory=list)
     weight:  float = 1.0
+    # None = inherit the group's scope; set = override for this option.
+    scope:   Optional[MorphScope] = None
     actions: list[Action] = Field(default_factory=list)
 
 
@@ -305,6 +307,8 @@ class RandomGroupAction(BaseModel):
     labels:  list[str] = Field(default_factory=list)
     weight:  float = 1.0        # weight of the group itself inside a parent pool
     dedupe:  bool = True        # avoid repeating the last-picked option
+    # Default target for every option (options inherit unless they override).
+    scope:   Optional[MorphScope] = None
     options: list[RandomOption] = Field(default_factory=list)
 
 
@@ -334,6 +338,9 @@ class SequenceChild(BaseModel):
     delay_ms:    int = 0
     delay_beats: int = 0
     pre_ramp:    bool = True
+    # None = inherit the parent group's scope ("parent" in the editor);
+    # set = override for this step's subtree.
+    scope:       Optional[MorphScope] = None
     actions:     list[Action] = Field(default_factory=list)
 
 
@@ -347,6 +354,10 @@ class SequenceGroupAction(BaseModel):
     labels:  list[str] = Field(default_factory=list)
     weight:  float = 1.0
     timing:  Literal["ms", "beats"] = "ms"
+    # Default target for every child (steps inherit unless they override).
+    # Leaf actions with an EMPTY scope adopt the inherited one at fire time;
+    # no inherited scope anywhere = global (legacy behavior).
+    scope:   Optional[MorphScope] = None
     children: list[SequenceChild] = Field(default_factory=list)
     revert:  Optional[GroupRevert] = None
     beat_fallback:      Literal["skip", "fallback"] = "fallback"
@@ -362,6 +373,8 @@ class ParallelChild(BaseModel):
     name:      str = ""
     labels:    list[str] = Field(default_factory=list)
     offset_ms: int = 0
+    # Per-lane target: leaf actions with empty scopes in this lane adopt it.
+    scope:     Optional[MorphScope] = None
     actions:   list[Action] = Field(default_factory=list)
 
 

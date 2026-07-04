@@ -9,7 +9,9 @@ import type {
   NumericNudge,
 } from '../../types/events';
 import { useMorphAspects } from '../../api/queries';
-import { Checkbox, ColorInput, NumberInput, Row, ScopeListInput, Select, TextInput } from './inputs';
+import { Checkbox, ColorInput, NumberInput, Row, Select, TextInput } from './inputs';
+import { ParentScopeToggle } from './ScopePicker';
+import SearchSelect from './SearchSelect';
 
 const newTarget = (): MorphTarget => ({
   scope: { virtual_ids: [], categories: [], roles: [] },
@@ -184,12 +186,10 @@ export default function MorphStepForm({
                 onClick={() => update((a) => { a.targets.splice(i, 1); })}>✕</button>
             </div>
 
-            <Row label="Virtuals"><ScopeListInput value={t.scope.virtual_ids} placeholder="ids, comma-separated (blank = any)"
-              onChange={(v) => setT((tt) => { tt.scope.virtual_ids = v; })} /></Row>
-            <Row label="Categories"><ScopeListInput value={t.scope.categories} placeholder="Matrix, Strips, Singles"
-              onChange={(v) => setT((tt) => { tt.scope.categories = v; })} /></Row>
-            <Row label="Roles"><ScopeListInput value={t.scope.roles} placeholder="roles"
-              onChange={(v) => setT((tt) => { tt.scope.roles = v; })} /></Row>
+            <Row label="Target" help="parent = inherit the nearest group/lane Target (or all devices)">
+              <ParentScopeToggle scope={t.scope}
+                onChange={(s) => setT((tt) => { tt.scope = s ?? { virtual_ids: [], categories: [], roles: [] }; })} />
+            </Row>
 
             {/* ── numeric aspects: brightness / reactivity / blur ── */}
             {NUMERIC_ASPECTS.includes(t.aspect) && !nudgeMode && (
@@ -243,10 +243,10 @@ export default function MorphStepForm({
             {/* ── effect switch ── */}
             {t.aspect === 'effect' && (
               <Row label="Effect type">
-                <Select value={av.effect_type ?? ''}
+                <SearchSelect value={av.effect_type ?? ''}
                   onChange={(v) => setAV((x) => { x.effect_type = v || null; })}
-                  options={[{ value: '', label: '—' }, ...(aspects?.supported_effects ?? []).map((e) => ({ value: e, label: e }))]}
-                  width={160} />
+                  options={(aspects?.supported_effects ?? []).map((e) => ({ value: e, label: e }))}
+                  placeholder="— keep current —" width={200} />
               </Row>
             )}
 

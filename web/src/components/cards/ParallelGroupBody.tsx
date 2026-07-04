@@ -4,6 +4,7 @@ import { uuid } from '../../lib/uid';
 import { useEditorStore } from '../../store/editorStore';
 import { cloneForPaste, useClipboard, writeClip } from '../../store/clipboard';
 import { LabelsInput, NumberInput, TextInput } from '../forms/inputs';
+import { ParentScopeToggle } from '../forms/ScopePicker';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import { groupPathOf } from './groupPath';
 
@@ -53,6 +54,10 @@ export default function ParallelGroupBody({ uid, action }: { uid: string; action
               })}>⧉</button>
             <button className="danger" title="Delete lane" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => { g.children.splice(j, 1); })}>✕</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }} title="Device/category this lane targets (empty leaf scopes adopt it)">target</span>
+            <ParentScopeToggle scope={child.scope} onChange={(s) => set((g) => { g.children[j].scope = s; })} />
           </div>
           <div style={{ marginBottom: 6 }}>
             <LabelsInput value={child.labels} placeholder="lane filter labels (merge with trigger labels)"

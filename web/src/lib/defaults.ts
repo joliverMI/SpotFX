@@ -41,10 +41,10 @@ export function newAction(type: ActionType): Action {
     case 'device_settings':
       return { ...base, type, targets: [] };
     case 'random_group':
-      return { ...base, type, id: uuid(), dedupe: true, options: [] };
+      return { ...base, type, id: uuid(), dedupe: true, scope: null, options: [] };
     case 'sequence_group':
       return {
-        ...base, type, id: uuid(), timing: 'ms', children: [],
+        ...base, type, id: uuid(), timing: 'ms', scope: null, children: [],
         revert: null, beat_fallback: 'fallback', start_offset_beats: 0,
       };
     case 'parallel_group':
@@ -53,11 +53,11 @@ export function newAction(type: ActionType): Action {
 }
 
 export const newSequenceChild = (): SequenceChild => ({
-  id: uuid(), name: '', labels: [], delay_ms: 0, delay_beats: 0, pre_ramp: true, actions: [],
+  id: uuid(), name: '', labels: [], delay_ms: 0, delay_beats: 0, pre_ramp: true, scope: null, actions: [],
 });
 
 export const newParallelChild = (): ParallelChild => ({
-  id: uuid(), name: '', labels: [], offset_ms: 0, actions: [],
+  id: uuid(), name: '', labels: [], offset_ms: 0, scope: null, actions: [],
 });
 
 export const newSequenceStep = (): SequenceStep => ({

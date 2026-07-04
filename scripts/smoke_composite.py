@@ -255,6 +255,51 @@ async def main() -> None:
     assert engine._composite_scene_picks(seq_ov, {}) is None
     ok("scene-override: flat-parallel+resolved eligible; unresolved/mixed/sequence fall back")
 
+    # ── 11. scope inheritance: group/lane Target flows into empty leaf scopes ─
+    reset()
+    from models.music_event import LedFxEffectParamAction, MorphScope, MorphStepAction, MorphTarget
+
+    captured: list = []
+
+    async def rec_dev_targets(targets):
+        captured.append([t.scope.model_dump() for t in targets])
+
+    engine._apply_device_targets = rec_dev_targets  # type: ignore
+
+    dev = {"type": "device_settings", "targets": [
+        {"scope": {"virtual_ids": [], "categories": [], "roles": []},
+         "max_brightness": 0.5, "frequency_min": None, "frequency_max": None}]}
+    dev_override = {"type": "device_settings", "targets": [
+        {"scope": {"virtual_ids": ["explicit-vid"], "categories": [], "roles": []},
+         "max_brightness": 0.9, "frequency_min": None, "frequency_max": None}]}
+    scoped = ev({"type": "sequence_group",
+                 "scope": {"virtual_ids": [], "categories": ["Matrix"], "roles": []},
+                 "children": [
+                     {"actions": [dev, dev_override]},
+                     # step override beats group scope
+                     {"scope": {"virtual_ids": [], "categories": ["Strips"], "roles": []},
+                      "actions": [dev]},
+                 ]})
+    await clock.run(engine._execute_composite(scoped, []))
+    cats = sorted(str(c[0]["categories"] or c[0]["virtual_ids"]) for c in captured)
+    if cats != ["['Matrix']", "['Strips']", "['explicit-vid']"]:
+        fail(f"scope inheritance wrong: {cats}")
+
+    sc = MorphScope(categories=["Matrix"])
+    epa = LedFxEffectParamAction(params=[])
+    if engine._apply_inherited_scope(epa, sc).category != "Matrix":
+        fail("effect_param category mapping")
+    if engine._apply_inherited_scope(epa, MorphScope(virtual_ids=["vidx"])).virtual_id != "vidx":
+        fail("effect_param virtual mapping")
+    epa2 = LedFxEffectParamAction(params=[], category="Singles")
+    if engine._apply_inherited_scope(epa2, sc).category != "Singles":
+        fail("explicit effect_param scope must win")
+    ms = MorphStepAction(targets=[MorphTarget(aspect="brightness")])
+    out2 = engine._apply_inherited_scope(ms, sc)
+    if out2.targets[0].scope.categories != ["Matrix"] or ms.targets[0].scope.categories:
+        fail("morph target inheritance / original mutated")
+    ok("scope inheritance: group→step→leaf, overrides win, originals untouched")
+
     print("\nALL PASS")
 
 
