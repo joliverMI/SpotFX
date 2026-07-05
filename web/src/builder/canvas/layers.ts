@@ -23,8 +23,10 @@ function maxRmsFor(f: CanvasFrame, idx: number[]): number {
   return raw * f.view.scales.total * f.view.scaleOverall;
 }
 
-/** Shape data is drawn shifted by the shape offset; helper mapping data-ms → x. */
-const dataX = (f: CanvasFrame, ms: number) => f.timeToX(ms + f.view.offsetMs);
+/** Legacy semantics (shape_canvas.js): the shape offset shifts the PLAYHEAD
+ * (playhead layer draws at nowMs + offsetMs); RMS data, triggers, marks and
+ * librosa overlays all draw at their raw timestamps. */
+const dataX = (f: CanvasFrame, ms: number) => f.timeToX(ms);
 
 // ── 0: intensity background (NEW) ────────────────────────────────────────────
 export const intensityBackground: CanvasLayer = {
@@ -36,7 +38,7 @@ export const intensityBackground: CanvasLayer = {
     const shape = f.data.shape!;
     const avg = shape.avg_rms_1s!;
     const ts = shape.timestamps_ms;
-    const idx = windowIndices(ts.map((t) => t + f.view.offsetMs), f.win.startMs, f.win.endMs);
+    const idx = windowIndices(ts, f.win.startMs, f.win.endMs);
     if (!idx.length) return;
     const maxRms = maxRmsFor(f, idx);
     const y = (v: number) => f.mainH - (v / maxRms) * f.mainH * 0.9;
@@ -71,7 +73,7 @@ export const rmsBands: CanvasLayer = {
     const { ctx, view } = f;
     const shape = f.data.shape!;
     const ts = shape.timestamps_ms;
-    const idx = windowIndices(ts.map((t) => t + view.offsetMs), f.win.startMs, f.win.endMs);
+    const idx = windowIndices(ts, f.win.startMs, f.win.endMs);
     if (!idx.length) return;
     const maxRms = maxRmsFor(f, idx);
     const rmsToY = (v: number) => f.mainH - (v / maxRms) * f.mainH * 0.9;
@@ -102,7 +104,7 @@ export const avgLines: CanvasLayer = {
     const shape = f.data.shape!;
     const av = f.data.averages!;
     const ts = shape.timestamps_ms;
-    const idx = windowIndices(ts.map((t) => t + view.offsetMs), f.win.startMs, f.win.endMs);
+    const idx = windowIndices(ts, f.win.startMs, f.win.endMs);
     if (!idx.length) return;
     const maxRms = maxRmsFor(f, idx);
     const rmsToY = (v: number) => f.mainH - (v / maxRms) * f.mainH * 0.9;
@@ -373,7 +375,9 @@ export const calibration: CanvasLayer = {
   draw(f) {
     const { ctx } = f;
     ctx.save();
-    for (const ms of f.data.calibrationTargetsMs) {
+    for (const raw of f.data.calibrationTargetsMs) {
+      // Legacy: calibration targets live in capture-data time → shape offset applies.
+      const ms = raw + f.view.offsetMs;
       if (ms < f.win.startMs || ms > f.win.endMs) continue;
       const x = f.timeToX(ms);
       ctx.fillStyle = '#00e5ff';
