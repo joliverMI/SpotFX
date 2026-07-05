@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CollapsibleCard from '../components/CollapsibleCard';
 import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
@@ -75,6 +75,17 @@ export default function BuilderPage() {
   const [canvasHeight] = useSticky('canvasHeight', 260);
 
   const durationMs = profile?.duration_ms || meta?.duration_ms || track?.duration_ms || 1;
+
+  // Canvas playhead shows the AUDIBLE moment: raw progress minus the audio
+  // chain latency (legacy: setPlayhead(p - audio_latency_ms)). The timeline
+  // bar and follow window intentionally use raw progress, matching legacy.
+  const audioLatencyRef = useRef(0);
+  audioLatencyRef.current = Number(settings?.audio_latency_ms ?? 0);
+  const getCanvasNowMs = useCallback(() => {
+    const now = getNowMs();
+    return now === null ? null : now - audioLatencyRef.current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const followWin = useFollowWindow({
     getNowMs,
     durationMs,
@@ -171,7 +182,7 @@ export default function BuilderPage() {
           data={data}
           view={view}
           getWin={followWin.getWin}
-          getNowMs={getNowMs}
+          getNowMs={getCanvasNowMs}
           height={totalCanvasHeight}
           pointer={{
             onHit: (hit: Hit) => {
