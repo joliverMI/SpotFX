@@ -9,7 +9,10 @@ import type { MarkType } from '../types';
 const TRI_H = 8;
 const TRI_W = 7;
 export const CIRCLE_R = 5;
-const CIRCLE_HIT_R = 9;
+// Buffered hit radius: clicks near the circle always mean "drag intensity",
+// so a time-drag never starts right next to it.
+const CIRCLE_HIT_R = 13;
+const LINE_HIT_X = 5; // px either side of the scan-line grabs the trigger
 
 function windowIndices(ts: number[], startMs: number, endMs: number): number[] {
   const out: number[] = [];
@@ -333,7 +336,8 @@ export const triggers: CanvasLayer = {
     }
   },
   hitTest(x, y, f): Hit {
-    // circles first, then triangles (triangle band is the top TRI_H px)
+    // Circles first (buffered radius), then anywhere on the trigger's
+    // scan-line — triangle and line both start a time drag.
     for (const t of f.data.triggers) {
       const tMs = t.timestamp_ms + f.view.triggerOffsetMs;
       if (tMs < f.win.startMs || tMs > f.win.endMs) continue;
@@ -342,13 +346,14 @@ export const triggers: CanvasLayer = {
       if ((x - tx) ** 2 + (y - cy) ** 2 <= CIRCLE_HIT_R ** 2)
         return { kind: 'trigger-intensity', triggerId: t.id };
     }
-    if (y <= TRI_H + 4) {
+    if (y <= f.mainH) {
+      const tol = y <= TRI_H + 4 ? 6 : LINE_HIT_X; // triangle slightly wider
       let best: { id: string; d: number } | null = null;
       for (const t of f.data.triggers) {
         const tMs = t.timestamp_ms + f.view.triggerOffsetMs;
         if (tMs < f.win.startMs || tMs > f.win.endMs) continue;
         const d = Math.abs(f.timeToX(tMs) - x);
-        if (d <= 6 && (!best || d < best.d)) best = { id: t.id, d };
+        if (d <= tol && (!best || d < best.d)) best = { id: t.id, d };
       }
       if (best) return { kind: 'trigger-triangle', triggerId: best.id };
     }
