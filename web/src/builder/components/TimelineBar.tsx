@@ -37,6 +37,7 @@ export default function TimelineBar({
 }) {
   const barRef = useRef<HTMLDivElement>(null);
   const [, force] = useState(0);
+  const [hover, setHover] = useState<{ name: string; leftPct: string } | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => force((n) => n + 1), 100);
@@ -124,24 +125,35 @@ export default function TimelineBar({
       <div style={{ position: 'absolute', top: 0, bottom: 0, left: pct(win.startMs),
                     width: `${Math.max(0.5, ((win.endMs - win.startMs) / dur) * 100)}%`,
                     background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.25)',
-                    cursor: 'grab' }}
+                    cursor: 'grab', zIndex: 2 }}
            onPointerDown={dragEdge('center')}>
         <div onPointerDown={dragEdge('start')}
              style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 7, cursor: 'ew-resize' }} />
         <div onPointerDown={dragEdge('end')}
              style={{ position: 'absolute', right: -3, top: 0, bottom: 0, width: 7, cursor: 'ew-resize' }} />
       </div>
+      {hover && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: hover.leftPct, transform: 'translate(-50%, -4px)',
+          background: 'rgba(0,0,0,0.85)', color: '#fff', fontSize: 11, padding: '2px 8px',
+          borderRadius: 4, whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 5,
+        }}>
+          {hover.name}
+        </div>
+      )}
       {triggers.map((t) => {
         const ev = events.find((e) => e.id === t.event_id);
         return (
           <div
             key={t.id}
-            title={ev?.name ?? t.event_id}
             onPointerDown={dragMarker(t)}
+            onPointerEnter={() => setHover({ name: ev?.name ?? t.event_id, leftPct: pct(t.timestamp_ms) })}
+            onPointerLeave={() => setHover(null)}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onArmedContext(t.timestamp_ms, t.id); }}
             style={{
               position: 'absolute', top: 2, bottom: 2, left: pct(t.timestamp_ms), width: 5,
               marginLeft: -2, background: ev?.color ?? '#888', borderRadius: 1, cursor: 'grab',
+              zIndex: 1,
             }}
           />
         );

@@ -128,9 +128,12 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
           onChange={(v) => set((a) => { a.pick_mode = v as typeof a.pick_mode; })}
           options={['default', 'cycle', 'weighted'].map((v) => ({ value: v, label: v }))} />
       </Row>
-      {action.pick_mode === 'cycle' && (
+      {(action.pick_mode === 'cycle' || action.pick_mode === 'default') && (
         <>
-          <Row label="Advance" help="Members to move per fire">
+          <Row label="Advance"
+            help={action.pick_mode === 'default'
+              ? "Members to move per fire — used when the group's own mode resolves to cycle/bounce; ignored for random"
+              : 'Members to move per fire'}>
             <BindableNumber value={action.advance} min={1} step={1}
               onChange={(v) => set((a) => { a.advance = isBinding(v) || v == null ? (v ?? 1) : Math.max(1, Math.round(v)); })} />
           </Row>

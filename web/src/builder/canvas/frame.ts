@@ -23,9 +23,16 @@ export interface ViewState {
   librosaOffsetMs: number;
   triggerOffsetMs: number;  // shift-all preview
   maxRms: number | null;    // pinned Y max
-  intensityBg: boolean;
+  intensityMode: IntensityBgMode;
   advanced: boolean;
 }
+
+export type IntensityBgMode = 'off' | 'total' | 'bass' | 'section' | 'triggers';
+export const INTENSITY_MODES: IntensityBgMode[] = ['off', 'total', 'bass', 'section', 'triggers'];
+export const INTENSITY_MODE_LABELS: Record<IntensityBgMode, string> = {
+  off: 'Intensity', total: 'Total RMS', bass: 'Bass RMS',
+  section: 'Section energy', triggers: 'Trigger intensity',
+};
 
 export interface LayerDataBag {
   shape: AudioShapeData | null;
@@ -36,8 +43,10 @@ export interface LayerDataBag {
   triggers: MusicTrigger[];
   events: EventOption[];
   calibrationTargetsMs: number[];
-  /** transient drag ghost for the intensity circle */
-  draggingIntensity: { triggerId: string; intensity: number } | null;
+  /** transient drag ghost; delta vs baseIntensity also shifts other selected circles */
+  draggingIntensity: { triggerId: string; intensity: number; baseIntensity: number } | null;
+  selectedIds: string[];
+  hoverTriggerId: string | null;
 }
 
 export interface CanvasFrame {

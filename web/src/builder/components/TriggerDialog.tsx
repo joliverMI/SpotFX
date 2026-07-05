@@ -45,6 +45,21 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
+  // Palette key pressed while the dialog is open → assign + save immediately.
+  useEffect(() => {
+    if (!editingId) return;
+    const onAssign = (e: Event) => {
+      const evId = String((e as CustomEvent).detail ?? '');
+      if (evId) {
+        setEventId(evId);
+        save(evId);
+      }
+    };
+    window.addEventListener('spotfx:palette-assign', onAssign);
+    return () => window.removeEventListener('spotfx:palette-assign', onAssign);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, tsText, labels, intensity]);
+
   if (!editingId || (!isNew && !existing)) return null;
 
   const recents = readSticky<string[]>('recentEvents', []);
@@ -59,21 +74,22 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
 
   const close = () => setEditing(null);
 
-  const save = () => {
+  const save = (overrideEventId?: string) => {
     const ms = parseMsTenths(tsText);
-    if (ms === null || !eventId) return;
-    writeSticky('lastEventId', eventId);
-    writeSticky('recentEvents', [eventId, ...recents.filter((r) => r !== eventId)].slice(0, 8));
+    const evId = overrideEventId ?? eventId;
+    if (ms === null || !evId) return;
+    writeSticky('lastEventId', evId);
+    writeSticky('recentEvents', [evId, ...recents.filter((r) => r !== evId)].slice(0, 8));
     const labelList = labels.split(',').map((s) => s.trim()).filter(Boolean);
     mutateWorking((triggers) => {
       if (isNew) {
-        triggers.push({ id: uuid(), timestamp_ms: ms, event_id: eventId,
+        triggers.push({ id: uuid(), timestamp_ms: ms, event_id: evId,
                         labels: labelList, enabled: true, intensity });
       } else {
         const t = triggers.find((tt) => tt.id === editingId);
         if (t) {
           t.timestamp_ms = ms;
-          t.event_id = eventId;
+          t.event_id = evId;
           t.labels = labelList;
           t.intensity = intensity;
         }
@@ -131,7 +147,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
         </label>
 
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="primary" onClick={save} disabled={!eventId || parseMsTenths(tsText) === null}>
+          <button className="primary" onClick={() => save()} disabled={!eventId || parseMsTenths(tsText) === null}>
             Save
           </button>
           {!isNew && <button className="danger" onClick={del}>Delete</button>}

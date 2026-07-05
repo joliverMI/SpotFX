@@ -9,14 +9,17 @@ import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from './canvas/layers';
-import { BEAT_STRIP_H, stripCountFor, type LayerDataBag, type ViewState } from './canvas/frame';
+import { BEAT_STRIP_H, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
 import { computeAverages, computeMfccDistances } from './canvas/data';
 import ModeBar from './components/ModeBar';
 import TimelineBar from './components/TimelineBar';
 import ShapeControls from './components/ShapeControls';
 import TriggerDialog from './components/TriggerDialog';
 import TriggerList from './components/TriggerList';
+import PaletteCard from './components/PaletteCard';
 import { useTriggerInteractions } from './hooks/useTriggerInteractions';
+import { useIntensityKeyboard } from './hooks/useIntensityKeyboard';
+import { usePaletteKeyboard } from './hooks/usePaletteKeyboard';
 import { usePalettes } from './queries';
 import type { MarkType } from './types';
 
@@ -75,7 +78,7 @@ export default function BuilderPage() {
   const [librosaFilters, setLibrosaFilters] = useSticky('librosaFilters',
     { sections: true, beats: true, onsets: false, harmonic: false, bass: false, snare: false, mfcc: false });
   const [markFilters] = useSticky<Record<MarkType, boolean>>('markFilters', ALL_MARKS);
-  const [intensityBg, setIntensityBg] = useSticky('intensityBg', false);
+  const [intensityMode, setIntensityMode] = useSticky<IntensityBgMode>('intensityMode', 'off');
   const [canvasHeight, setCanvasHeight] = useSticky('canvasHeight', 260);
 
   const durationMs = profile?.duration_ms || meta?.duration_ms || track?.duration_ms || 1;
@@ -113,6 +116,12 @@ export default function BuilderPage() {
     return palettesRef.current?.find((pl) => pl.id === st.activePaletteId)?.keys[st.armedKey] ?? null;
   }, []);
 
+  usePaletteKeyboard({
+    getPalettes: () => palettesRef.current,
+    onToggleFollow: () => followWin.setFollowSnapped(!followWin.follow),
+  });
+  useIntensityKeyboard();
+
   const averages = useMemo(
     () => (shape ? computeAverages(shape, Number(settings?.shape_average_window_ms ?? 4000)) : null),
     [shape, settings],
@@ -131,12 +140,14 @@ export default function BuilderPage() {
     librosaOffsetMs: Number((librosa as { librosa_offset_ms?: number } | undefined)?.librosa_offset_ms ?? 0),
     triggerOffsetMs: triggerPreviewOffsetMs,
     maxRms,
-    intensityBg,
+    intensityMode,
     advanced: false,
   }), [bandFilters, avgFilters, markFilters, librosaFilters, scales, meta, librosa,
-       triggerPreviewOffsetMs, maxRms, intensityBg]);
+       triggerPreviewOffsetMs, maxRms, intensityMode]);
 
   const [beatTip, setBeatTip] = useState<{ ms: number; values: Record<string, number> } | null>(null);
+  const [hoverTriggerId, setHoverTriggerId] = useState<string | null>(null);
+  const selectedIds = useBuilderStore((s) => s.selectedIds);
   const librosaRef = useRef(librosa ?? null);
   librosaRef.current = librosa ?? null;
   const librosaOffRef = useRef(0);
@@ -146,6 +157,7 @@ export default function BuilderPage() {
     getLibrosaOffsetMs: () => librosaOffRef.current,
     getArmedEventId,
     onBeatTip: setBeatTip,
+    onHover: setHoverTriggerId,
   });
 
   const data: LayerDataBag = useMemo(() => ({
@@ -158,8 +170,10 @@ export default function BuilderPage() {
     events: (events ?? []).map((e) => ({ id: e.id, name: e.name, color: e.color })),
     calibrationTargetsMs,
     draggingIntensity,
+    selectedIds,
+    hoverTriggerId,
   }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events,
-       calibrationTargetsMs, draggingIntensity]);
+       calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId]);
 
   const stripCount = stripCountFor(data, librosaFilters);
   const totalCanvasHeight = canvasHeight + stripCount * BEAT_STRIP_H;
@@ -175,9 +189,9 @@ export default function BuilderPage() {
         title="Timeline"
         headerExtra={
           <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
-            <button onClick={() => followWin.setFollow(!followWin.follow)}
+            <button onClick={() => followWin.setFollowSnapped(!followWin.follow)}
               className={followWin.follow ? 'primary' : ''}
-              title="Toggle follow/manual zoom (` key)">
+              title="Toggle follow/manual zoom (` key) — enabling snaps to the playhead">
               {followWin.follow ? 'Follow' : 'Manual'}
             </button>
             <button onClick={followWin.fullSong}>Full Song</button>
@@ -282,10 +296,14 @@ export default function BuilderPage() {
           setAvgFilters={(p) => setAvgFilters((f) => ({ ...f, ...p }))}
           setScales={(band, v) => setScalesRaw((s) => ({ ...s, [band]: v }))}
           setLibrosaFilter={(k, v) => setLibrosaFilters((f) => ({ ...f, [k]: v }))}
-          setIntensityBg={setIntensityBg}
+          setIntensityMode={setIntensityMode}
           hasLibrosa={!!librosa?.beats?.length}
           hasIntensityCurve={!!shape?.avg_rms_1s?.length}
         />
+      </CollapsibleCard>
+
+      <CollapsibleCard id="palettes" title="Palettes" defaultCollapsed>
+        <PaletteCard events={data.events} />
       </CollapsibleCard>
 
       <CollapsibleCard id="triggers" title="All Triggers">

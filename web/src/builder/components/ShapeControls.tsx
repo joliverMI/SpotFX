@@ -4,6 +4,7 @@
  * ×2/÷2, snap 1.0). All state arrives via props (sticky at the page level). */
 import { useRef } from 'react';
 import type { ViewState } from '../canvas/frame';
+import { INTENSITY_MODES, INTENSITY_MODE_LABELS, type IntensityBgMode } from '../canvas/frame';
 import { SCALE_LABELS } from '../canvas/data';
 
 type Band = 'total' | 'bass' | 'mid' | 'high';
@@ -15,7 +16,7 @@ export default function ShapeControls({
   setAvgFilters,
   setScales,
   setLibrosaFilter,
-  setIntensityBg,
+  setIntensityMode,
   hasLibrosa,
   hasIntensityCurve,
 }: {
@@ -24,7 +25,7 @@ export default function ShapeControls({
   setAvgFilters: (patch: Partial<ViewState['avgFilters']>) => void;
   setScales: (band: Band, value: number) => void;
   setLibrosaFilter: (key: keyof ViewState['librosaFilters'], value: boolean) => void;
-  setIntensityBg: (v: boolean) => void;
+  setIntensityMode: (v: IntensityBgMode) => void;
   hasLibrosa: boolean;
   hasIntensityCurve: boolean;
 }) {
@@ -96,14 +97,22 @@ export default function ShapeControls({
         Marks
       </button>
       <button
-        className={`chip filter ${view.intensityBg ? 'active' : ''}`}
-        disabled={!hasIntensityCurve}
-        title={hasIntensityCurve
-          ? 'Smoothed intensity envelope (stored avg_rms_1s) as background'
-          : 'No stored envelope for this capture (re-capture to generate)'}
-        onClick={() => setIntensityBg(!view.intensityBg)}
+        className={`chip filter ${view.intensityMode !== 'off' ? 'active' : ''}`}
+        title="Intensity background — click: on/off · scroll over the button: pick source (Total RMS / Bass RMS / Section energy / Trigger intensity)"
+        onClick={() => setIntensityMode(view.intensityMode === 'off'
+          ? (hasIntensityCurve ? 'total' : 'triggers') : 'off')}
+        onWheel={(e) => {
+          e.preventDefault();
+          const cur = INTENSITY_MODES.indexOf(view.intensityMode);
+          const dir = e.deltaY > 0 ? 1 : -1;
+          let next = (cur + dir + INTENSITY_MODES.length) % INTENSITY_MODES.length;
+          if (INTENSITY_MODES[next] === 'off') {
+            next = (next + dir + INTENSITY_MODES.length) % INTENSITY_MODES.length;
+          }
+          setIntensityMode(INTENSITY_MODES[next]);
+        }}
       >
-        ⚡ Intensity
+        ⚡ {INTENSITY_MODE_LABELS[view.intensityMode]}
       </button>
       {hasLibrosa && (
         <>

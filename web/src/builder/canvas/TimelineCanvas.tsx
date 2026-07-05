@@ -7,8 +7,9 @@ import { BEAT_STRIP_H, stripCountFor } from './frame';
 
 export interface PointerHandlers {
   onHit?: (hit: Hit, ev: PointerEvent, frame: FrameGeom) => void;
+  onHoverMove?: (hit: Hit) => void;
   onDoubleClick?: (ms: number, y: number, hit: Hit, frame: FrameGeom) => void;
-  onContextMenu?: (ms: number, hit: Hit) => void;
+  onContextMenu?: (ms: number, hit: Hit, y?: number, frame?: FrameGeom) => void;
   onDragMove?: (ev: PointerEvent, frame: FrameGeom) => void;
   onDragEnd?: (ev: PointerEvent, frame: FrameGeom) => void;
   onPan?: (deltaMs: number) => void;
@@ -165,12 +166,21 @@ export default function TimelineCanvas({
       if (panStart) {
         const { x } = rel(ev);
         const span = panStart.winEnd - panStart.winStart;
-        const deltaMs = ((panStart.x - x) / Math.max(1, g.w)) * span;
+        // Drag right → window moves right (reversed per user preference).
+        const deltaMs = ((x - panStart.x) / Math.max(1, g.w)) * span;
         s.pointer?.onPan?.(deltaMs);
         panStart = { ...panStart, x };
         return;
       }
-      if (dragging) s.pointer?.onDragMove?.(ev, g);
+      if (dragging) {
+        s.pointer?.onDragMove?.(ev, g);
+        return;
+      }
+      // idle hover (no buttons) — trigger name labels
+      if (ev.buttons === 0) {
+        const { x, y } = rel(ev);
+        s.pointer?.onHoverMove?.(hitTest(x, y));
+      }
     };
     const up = (ev: PointerEvent) => {
       const s = stateRef.current;
@@ -194,7 +204,7 @@ export default function TimelineCanvas({
       if (!g) return;
       ev.preventDefault();
       const { x, y } = rel(ev);
-      s.pointer?.onContextMenu?.(g.xToTime(x), hitTest(x, y));
+      s.pointer?.onContextMenu?.(g.xToTime(x), hitTest(x, y), y, g);
     };
 
     canvas.addEventListener('pointerdown', down);

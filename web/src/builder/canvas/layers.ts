@@ -31,39 +31,68 @@ function maxRmsFor(f: CanvasFrame, idx: number[]): number {
  * librosa overlays all draw at their raw timestamps. */
 const dataX = (f: CanvasFrame, ms: number) => f.timeToX(ms);
 
-// ── 0: intensity background (NEW) ────────────────────────────────────────────
+// ── 0: intensity background — total RMS / bass RMS / section energy /
+//      trigger-intensity polyline (hold-scroll the ⚡ button to pick) ─────────
+function drawCurve(f: CanvasFrame, pts: { x: number; y: number }[], close = true) {
+  const { ctx } = f;
+  if (pts.length < 2) return;
+  ctx.save();
+  if (close) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, f.mainH);
+    for (const p of pts) ctx.lineTo(p.x, p.y);
+    ctx.lineTo(pts[pts.length - 1].x, f.mainH);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(29,185,84,0.13)';
+    ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(29,185,84,0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.stroke();
+  ctx.restore();
+}
+
 export const intensityBackground: CanvasLayer = {
   id: 'intensityBackground',
   z: 0,
-  visible: (f) => f.view.intensityBg && !!f.data.shape?.avg_rms_1s?.length,
+  visible: (f) => f.view.intensityMode !== 'off',
   draw(f) {
-    const { ctx } = f;
-    const shape = f.data.shape!;
-    const avg = shape.avg_rms_1s!;
-    const ts = shape.timestamps_ms;
-    const idx = windowIndices(ts, f.win.startMs, f.win.endMs);
-    if (!idx.length) return;
-    const maxRms = maxRmsFor(f, idx);
-    const y = (v: number) => f.mainH - (v / maxRms) * f.mainH * 0.9;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(dataX(f, ts[idx[0]]), f.mainH);
-    for (const i of idx) ctx.lineTo(dataX(f, ts[i]), y(avg[i] ?? 0));
-    ctx.lineTo(dataX(f, ts[idx[idx.length - 1]]), f.mainH);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(29,185,84,0.13)'; // accent, subtle
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(29,185,84,0.5)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    let first = true;
-    for (const i of idx) {
-      const x = dataX(f, ts[i]);
-      const yy = y(avg[i] ?? 0);
-      if (first) { ctx.moveTo(x, yy); first = false; } else ctx.lineTo(x, yy);
+    const mode = f.view.intensityMode;
+    if (mode === 'total' || mode === 'bass') {
+      const shape = f.data.shape;
+      if (!shape) return;
+      const series = mode === 'total' ? shape.avg_rms_1s : f.data.averages?.rms_low;
+      if (!series?.length) return;
+      const ts = shape.timestamps_ms;
+      const idx = windowIndices(ts, f.win.startMs, f.win.endMs);
+      if (!idx.length) return;
+      const maxRms = maxRmsFor(f, idx);
+      const y = (v: number) => f.mainH - (v / maxRms) * f.mainH * 0.9;
+      drawCurve(f, idx.map((i) => ({ x: dataX(f, ts[i]), y: y(series[i] ?? 0) })));
+      return;
     }
-    ctx.stroke();
-    ctx.restore();
+    if (mode === 'section') {
+      const secs = f.data.librosa?.sections;
+      if (!secs?.length) return;
+      const off = f.view.librosaOffsetMs;
+      const y = (v: number) => f.mainH - v * f.mainH * 0.9; // energy_rms is 0-1
+      const pts: { x: number; y: number }[] = [];
+      for (const sec of secs) {
+        pts.push({ x: f.timeToX(sec.start_ms + off), y: y(sec.energy_rms) });
+        pts.push({ x: f.timeToX(sec.end_ms + off), y: y(sec.energy_rms) });
+      }
+      drawCurve(f, pts);
+      return;
+    }
+    // triggers: polyline through the intensity circles (0-1 → circle Y space)
+    const trigs = [...f.data.triggers].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    if (trigs.length < 2) return;
+    drawCurve(f, trigs.map((t) => ({
+      x: f.timeToX(t.timestamp_ms + f.view.triggerOffsetMs),
+      y: circleY(f.mainH, t.intensity ?? 0.5),
+    })), false);
   },
 };
 
@@ -312,25 +341,49 @@ export const triggers: CanvasLayer = {
       ctx.fill();
       ctx.globalAlpha = 1;
 
-      // Intensity circle (NEW): y ∝ intensity on the scan-line.
-      const dragging = f.data.draggingIntensity?.triggerId === t.id;
-      const intensity = dragging ? f.data.draggingIntensity!.intensity : (t.intensity ?? 0.5);
+      // Intensity circle: y ∝ intensity on the scan-line. Drag ghosts: the
+      // anchor circle follows the pointer; other SELECTED circles shift by
+      // the same delta. Selected circles get an accent ring.
+      const dg = f.data.draggingIntensity;
+      const selected = f.data.selectedIds.includes(t.id);
+      let intensity = t.intensity ?? 0.5;
+      let dragging = false;
+      if (dg) {
+        if (dg.triggerId === t.id) {
+          intensity = dg.intensity;
+          dragging = true;
+        } else if (selected && f.data.selectedIds.includes(dg.triggerId)) {
+          intensity = Math.max(0, Math.min(1, intensity + (dg.intensity - dg.baseIntensity)));
+          dragging = true;
+        }
+      }
       const cy = circleY(f.mainH, intensity);
       ctx.save();
       ctx.beginPath();
-      ctx.arc(x, cy, dragging ? CIRCLE_R + 1 : CIRCLE_R, 0, Math.PI * 2);
+      ctx.arc(x, cy, dragging || selected ? CIRCLE_R + 1 : CIRCLE_R, 0, Math.PI * 2);
       ctx.fillStyle = evColor;
-      ctx.globalAlpha = dragging ? 1 : 0.85;
+      ctx.globalAlpha = dragging || selected ? 1 : 0.85;
       ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#ffffff';
-      ctx.globalAlpha = dragging ? 1 : 0.7;
+      ctx.lineWidth = selected ? 2.5 : 1.5;
+      ctx.strokeStyle = selected ? '#1db954' : '#ffffff';
+      ctx.globalAlpha = dragging || selected ? 1 : 0.7;
       ctx.stroke();
-      if (dragging) {
+      if (dragging || selected) {
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#ffffff';
         ctx.font = '10px monospace';
         ctx.fillText(intensity.toFixed(2), x + CIRCLE_R + 4, cy + 3);
+      }
+      if (f.data.hoverTriggerId === t.id && !dragging) {
+        ctx.globalAlpha = 1;
+        ctx.font = '11px sans-serif';
+        const name = ev?.name ?? t.event_id;
+        const tw = ctx.measureText(name).width;
+        const lx = Math.min(Math.max(2, x + 6), f.w - tw - 6);
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(lx - 3, TRI_H + 4, tw + 6, 15);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(name, lx, TRI_H + 15);
       }
       ctx.restore();
     }

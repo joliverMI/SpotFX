@@ -25,11 +25,18 @@ export default function TriggerList({
     if (id) setFiredId(id);
   }), []);
 
-  // Auto-scroll the fired row into view.
+  // Auto-scroll the fired row into view — scrolling ONLY the list container
+  // (scrollIntoView would scroll the page too, yanking the viewport around
+  // during live playback).
   useEffect(() => {
     if (!listFollow || !firedId) return;
-    wrapRef.current?.querySelector(`[data-tid="${firedId}"]`)
-      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const wrap = wrapRef.current;
+    const row = wrap?.querySelector<HTMLElement>(`[data-tid="${firedId}"]`);
+    if (!wrap || !row) return;
+    wrap.scrollTo({
+      top: row.offsetTop - wrap.clientHeight / 2 + row.clientHeight / 2,
+      behavior: 'smooth',
+    });
   }, [firedId, listFollow]);
 
   const sorted = [...triggers].sort((a, b) => a.timestamp_ms - b.timestamp_ms);

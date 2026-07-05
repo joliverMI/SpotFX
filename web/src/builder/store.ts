@@ -28,6 +28,9 @@ interface BuilderState {
   editingTriggerId: string | null; // 'new:<ms>' opens create dialog
   armedKey: string | null;
   activePaletteId: string | null;
+  /** Multi-selected trigger ids for keyboard intensity editing. */
+  selectedIds: string[];
+  lastSelectedId: string | null;
 
   /** Preview-only shift offset (ms) applied visually to all triggers. */
   triggerPreviewOffsetMs: number;
@@ -39,6 +42,7 @@ interface BuilderState {
   setAutoWait: (v: boolean) => void;
   setSlot: (id: string) => void;
   setEditingTrigger: (id: string | null) => void;
+  setSelection: (ids: string[], last?: string | null) => void;
   setArmedKey: (k: string | null) => void;
   setActivePaletteId: (id: string | null) => void;
   setTriggerPreviewOffset: (ms: number) => void;
@@ -66,6 +70,8 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   editingTriggerId: null,
   armedKey: null,
   activePaletteId: null,
+  selectedIds: [],
+  lastSelectedId: null,
   triggerPreviewOffsetMs: 0,
   calibrationTargetsMs: [],
 
@@ -75,6 +81,8 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   setAutoWait: (v) => set({ autoWait: v }),
   setSlot: (id) => set({ slotId: id }),
   setEditingTrigger: (id) => set({ editingTriggerId: id }),
+  setSelection: (ids, last) =>
+    set({ selectedIds: ids, lastSelectedId: last !== undefined ? last : ids[ids.length - 1] ?? null }),
   setArmedKey: (k) => set({ armedKey: k }),
   setActivePaletteId: (id) => set({ activePaletteId: id }),
   setTriggerPreviewOffset: (ms) => set({ triggerPreviewOffsetMs: ms }),

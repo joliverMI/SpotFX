@@ -40,10 +40,39 @@ export function useFollowWindow(opts: {
     return { startMs: 0, endMs: dur };
   }, []);
 
+  /** Full Song toggles: if already showing the whole song, shrink back to a
+   * default-size window (at the playhead when there is one, else the start). */
   const fullSong = useCallback(() => {
+    const s = stable.current;
+    const showingFull = !s.follow && s.manualWin === null;
     setFollow(false);
-    setManualWin(null); // null manual = full song
+    if (!showingFull) {
+      setManualWin(null); // show full song
+      return;
+    }
+    const winMs = s.windowS * 1000;
+    const now = s.getNowMs();
+    const center = now !== null ? now : winMs / 2;
+    setManualWin(clampWin(
+      { startMs: center - winMs / 2, endMs: center + winMs / 2 },
+      Math.max(1, s.durationMs), winMs,
+    ));
   }, [setFollow]);
+
+  /** Enabling follow snaps to the playhead keeping the CURRENT window size
+   * (the size you were looking at carries over; position jumps to now). */
+  const setFollowSnapped = useCallback((on: boolean) => {
+    if (on) {
+      const s = stable.current;
+      const cur = !s.follow && s.manualWin
+        ? s.manualWin
+        : { startMs: 0, endMs: s.windowS * 1000 };
+      const spanS = Math.max(2, Math.round((cur.endMs - cur.startMs) / 1000));
+      setWindowS(spanS);
+      setFutureS((f) => Math.min(f, Math.round(spanS / 3)));
+    }
+    setFollow(on);
+  }, [setFollow, setWindowS, setFutureS]);
 
   return {
     follow,
@@ -55,6 +84,7 @@ export function useFollowWindow(opts: {
     manualWin,
     setManualWin,
     fullSong,
+    setFollowSnapped,
     getWin,
   };
 }
