@@ -6,7 +6,7 @@
 
 // ── Value bindings (signal-driven parameters) ───────────────────────────────
 
-export type SignalName = 'rms_total' | 'rms_bass' | 'onset_score' | 'section_energy';
+export type SignalName = 'rms_total' | 'rms_bass' | 'onset_score' | 'section_energy' | 'trigger_intensity';
 
 export interface BindingStep {
   threshold: number;              // applies when signal >= threshold

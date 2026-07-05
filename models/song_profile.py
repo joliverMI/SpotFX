@@ -18,6 +18,10 @@ class MusicTrigger(BaseModel):
     event_id: str              # references MusicEvent.id
     labels: list[str] = Field(default_factory=list)  # filter labels passed to event
     enabled: bool = True
+    # User-driven fire intensity (0-1, 0.5 = mid). Drawn as the draggable
+    # circle on the builder timeline; consumed by value bindings via the
+    # "trigger_intensity" signal.
+    intensity: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class SongProfile(BaseModel):

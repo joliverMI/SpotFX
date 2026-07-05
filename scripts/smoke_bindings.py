@@ -180,6 +180,28 @@ def main() -> None:
     assert static_ramp_ms(vb(mode="map", out_min=0, out_max=1000), lambda b: 0.25) == 250
     ok("static_ramp_ms resolves bindings for timeline max()")
 
+    # ── 11. trigger_intensity signal ────────────────────────────────────────
+    ti = vb(signal="trigger_intensity", mode="map", out_min=100, out_max=900)
+    assert resolve_signal(ti, None, None, 0, trigger_intensity=0.75) == 0.75
+    assert resolve_signal(ti, None, None, 0, trigger_intensity=1.4) == 1.0, "clamps"
+    assert resolve_signal(ti, None, None, 0) is None, "no trigger → None"
+    assert apply_binding(ti, None, "int0") == 500, "manual fire → neutral map"
+    tis = vb(signal="trigger_intensity", mode="steps",
+             steps=[{"threshold": 0.0, "value": 1}, {"threshold": 0.7, "value": 3}], fallback=2)
+    assert apply_binding(tis, resolve_signal(tis, None, None, 0, trigger_intensity=0.9), "int1") == 3
+    assert apply_binding(tis, resolve_signal(tis, None, None, 0), "int1") == 2, "steps fallback"
+    ok("trigger_intensity: value/clamp/None + map neutral + steps fallback")
+
+    # ── 12. profile intensity persistence ───────────────────────────────────
+    import json as _json
+    from models.song_profile import MusicTrigger
+    old = MusicTrigger(**{"timestamp_ms": 1000, "event_id": "x"})  # no intensity key
+    assert old.intensity == 0.5, "default mid"
+    kept = MusicTrigger(**_json.loads(
+        MusicTrigger(timestamp_ms=1, event_id="x", intensity=0.73).model_dump_json()))
+    assert kept.intensity == 0.73, "round-trips"
+    ok("MusicTrigger.intensity: default 0.5, round-trips")
+
     print("ALL PASS (part 1 — pure resolver)\n")
 
 
@@ -278,6 +300,26 @@ async def engine_seams() -> None:
     got = last_of("morph_step")
     assert isinstance(got.ramp_ms, int), f"ramp not resolved: {got.ramp_ms!r}"
     ok(f"seam: beats timeline builds with bound ramp (stamped {got.ramp_ms}ms), no TypeError")
+
+    # (f) trigger_intensity threads through the per-fire ContextVar
+    tok = te._FIRE_INTENSITY.set(0.9)
+    try:
+        mc2 = MorphColorAction(ref_id="nonexistent", advance={
+            "bind": "signal", "signal": "trigger_intensity", "mode": "steps",
+            "steps": [{"threshold": 0.0, "value": 1}, {"threshold": 0.75, "value": 4}],
+        })
+        await engine._execute_morph_color(mc2)
+        assert last_of("morph_color").advance == 4
+    finally:
+        te._FIRE_INTENSITY.reset(tok)
+    # without the var (manual fire): steps below-first → fallback → default 1
+    mc3 = MorphColorAction(ref_id="nonexistent", advance={
+        "bind": "signal", "signal": "trigger_intensity", "mode": "steps",
+        "steps": [{"threshold": 0.5, "value": 4}],
+    })
+    await engine._execute_morph_color(mc3)
+    assert last_of("morph_color").advance == 1, "manual fire → no-op → advance 1"
+    ok("seam: trigger_intensity via ContextVar (0.9 → tier 4; manual fire → default)")
 
     te.resolve_action_bindings = real  # type: ignore
     state.current_track = None

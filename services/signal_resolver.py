@@ -45,8 +45,16 @@ def resolve_signal(
     beats: list | None,
     sections: list | None,
     now_ms: int,
+    trigger_intensity: Optional[float] = None,
 ) -> Optional[float]:
-    """Current value of the binding's signal at song position now_ms, 0-1."""
+    """Current value of the binding's signal at song position now_ms, 0-1.
+    `trigger_intensity` is the firing trigger's user-set intensity (None for
+    manual fires — the binding's fallback applies). window_* are ignored for
+    trigger_intensity and section_energy."""
+    if binding.signal == "trigger_intensity":
+        if trigger_intensity is None:
+            return None
+        return max(0.0, min(1.0, float(trigger_intensity)))
     if binding.signal == "section_energy":
         return _section_energy(sections, now_ms)
     return _beat_signal(beats, binding, now_ms)

@@ -20,6 +20,7 @@ import logging
 import random
 import re
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field as dc_field
 from typing import NamedTuple, Optional
 
@@ -31,6 +32,12 @@ from services.profile_manager import get_event
 from services.audio_analyzer import load_audio_shape_meta, load_beats_for_uri, load_tempo_for_uri
 from services.device_category_service import get_virtuals_for_role
 from services.signal_resolver import resolve_action_bindings, resolve_signal, static_ramp_ms
+
+# Per-fire trigger intensity for the "trigger_intensity" binding signal.
+# Both fire paths run in their own asyncio task (copied Context), so setting
+# this at fire entry can't leak across overlapping fires. Manual event fires
+# never set it → bindings resolve to their fallback.
+_FIRE_INTENSITY: ContextVar[float | None] = ContextVar("spotfx_fire_intensity", default=None)
 from services.effect_params import get_all_virtual_ids
 from services.websocket_manager import ws_manager
 from api import ledfx_client
@@ -102,6 +109,7 @@ class _PlanEntry:
     labels: list[str] = dc_field(default_factory=list)
     trigger_ms: int = 0                           # root trigger timestamp (for logs)
     trigger_id: str = ""                          # root trigger id (to check _pre_fired at exec time)
+    trigger_intensity: float = 0.5                # firing trigger's user-set intensity (0-1)
     is_root: bool = False                         # True only for the root entry of a trigger's plan
     planned_descendant_ids: set[str] = dc_field(default_factory=set)
     preselected_action: Optional[Action] = None   # for "single" events — action chosen at plan time
@@ -1036,6 +1044,7 @@ class TriggerEngine:
                     fire_at_ms=start_at, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
+                    trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
                     preselected_action=action,
                 ))
@@ -1060,6 +1069,7 @@ class TriggerEngine:
                     fire_at_ms=start_at, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
+                    trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
                     preselected_steps=preselected_steps,
@@ -1088,6 +1098,7 @@ class TriggerEngine:
                     fire_at_ms=anchor, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
+                    trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
                 ))
@@ -1108,6 +1119,7 @@ class TriggerEngine:
                     fire_at_ms=start_at + morph_anchor, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
+                    trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
                     preselected_morph_picks=picks,
                     morph_anchor_offset_ms=morph_anchor,
@@ -1179,6 +1191,7 @@ class TriggerEngine:
                     fire_at_ms=int(fire_at), event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
+                    trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
                     resolved_picks=resolved,
@@ -1194,6 +1207,7 @@ class TriggerEngine:
                     fire_at_ms=start_at, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
+                    trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
                 ))
                 return event.name
@@ -1203,6 +1217,7 @@ class TriggerEngine:
                     fire_at_ms=start_at, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
+                    trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
                 ))
                 return f"Device settings ({len(event.device_targets)}×)"
@@ -1844,6 +1859,7 @@ class TriggerEngine:
         if state.paused:
             logger.debug("Trigger %s skipped (service paused).", trigger.id)
             return
+        _FIRE_INTENSITY.set(getattr(trigger, "intensity", 0.5))
 
         event = get_event(trigger.event_id)
         if event is None:
@@ -2939,6 +2955,10 @@ class TriggerEngine:
         """Current value of a ValueBinding's signal at the live song position.
         Same track/progress guards as _beat_intensity_now; sections and beats
         come from the runtime caches (lazy-loaded per URI as a fallback)."""
+        if binding.signal == "trigger_intensity":
+            # Needs no track/beat context — just the per-fire value.
+            return resolve_signal(binding, None, None, 0,
+                                  trigger_intensity=_FIRE_INTENSITY.get())
         if not state.current_track or not state.current_track.spotify_uri:
             return None
         uri = state.current_track.spotify_uri
@@ -2948,7 +2968,8 @@ class TriggerEngine:
             from services.audio_analyzer import load_sections_for_uri
             sections = self._sections_cache = load_sections_for_uri(uri)
         now_ms = state.current_track.interpolated_progress_ms()
-        return resolve_signal(binding, beats, sections, int(now_ms))
+        return resolve_signal(binding, beats, sections, int(now_ms),
+                              trigger_intensity=_FIRE_INTENSITY.get())
 
     def _beat_intensity_now(self, source: str) -> Optional[float]:
         """Resolve the current beat-level intensity for a nudge target.
@@ -3660,6 +3681,7 @@ class TriggerEngine:
         """Execute one plan entry at its scheduled time."""
         if state.paused:
             return
+        _FIRE_INTENSITY.set(entry.trigger_intensity)  # per-task context — no cross-fire leak
         evt = entry.event
         skip_ids = entry.planned_descendant_ids or None
 
@@ -4116,7 +4138,11 @@ class TriggerEngine:
                                 if _entry.event.event_type in ("morph_set", "composite")
                                 else self._collect_morph_actions_for_event(_entry.event, _entry.labels)
                             )
-                            payload = self._build_scene_payload(morph_actions)
+                            _fi_tok = _FIRE_INTENSITY.set(_entry.trigger_intensity)
+                            try:
+                                payload = self._build_scene_payload(morph_actions)
+                            finally:
+                                _FIRE_INTENSITY.reset(_fi_tok)
                             if payload is None:
                                 _entry.scene_override_prepared = True  # nothing to do, skip lookahead retries
                                 continue

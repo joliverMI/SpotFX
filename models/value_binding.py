@@ -12,6 +12,9 @@ Signals (all 0–1, from the precomputed librosa analysis):
       beats are precomputed, letting a binding anticipate a build or drop).
   section_energy — mean RMS of the librosa section containing the fire
       position (window_* ignored).
+  trigger_intensity — the firing MusicTrigger's user-set intensity (0-1,
+      drawn on the builder timeline; window_* ignored). Manual event fires
+      have no trigger → resolves None → the binding's fallback applies.
 
 Mapping modes:
   map   — linear range map: signal in [in_min, in_max] → [out_min, out_max]
@@ -35,7 +38,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-SignalName = Literal["rms_total", "rms_bass", "onset_score", "section_energy"]
+SignalName = Literal["rms_total", "rms_bass", "onset_score", "section_energy", "trigger_intensity"]
 
 # Values a binding may produce: numbers, bools, or toggle-ish strings.
 BindingValue = float | bool | str

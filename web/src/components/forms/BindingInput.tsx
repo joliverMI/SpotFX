@@ -13,6 +13,7 @@ const SIGNALS: { value: SignalName; label: string }[] = [
   { value: 'rms_bass', label: 'Bass RMS' },
   { value: 'onset_score', label: 'Onset' },
   { value: 'section_energy', label: 'Section energy' },
+  { value: 'trigger_intensity', label: 'Trigger intensity' },
 ];
 
 export function newBinding(kind: ValueKind, outMin = 0, outMax = 1): ValueBinding {
@@ -78,7 +79,7 @@ export function BindingEditor({ binding, onChange, kind }: {
         <Select value={binding.signal} width={140}
           onChange={(v) => set({ signal: v as SignalName })}
           options={SIGNALS} />
-        {binding.signal !== 'section_energy' && (
+        {binding.signal !== 'section_energy' && binding.signal !== 'trigger_intensity' && (
           <>
             <span style={{ color: 'var(--text-muted)' }} title="0 = current beat; N = rolling mean over N beats">window</span>
             <NumberInput value={binding.window_beats} min={0} step={1} width={64}

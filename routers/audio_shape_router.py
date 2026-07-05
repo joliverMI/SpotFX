@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 
+import functools
+
 import numpy as np
 
 from config import AUDIO_SHAPES_DIR
@@ -93,6 +95,15 @@ async def get_status(uri: str = Query(...)):
     }
 
 
+@functools.lru_cache(maxsize=8)
+def _load_npz_arrays(path_str: str, mtime_ns: int) -> dict:
+    """Cache the parsed npz arrays keyed by (path, mtime) — the builder
+    refetches on every page load and the npz never changes between captures
+    (a recapture bumps mtime and misses the cache)."""
+    with np.load(path_str) as z:
+        return {k: z[k] for k in z.files}
+
+
 @router.get("/data")
 async def get_data(uri: str = Query(...), start_ms: int = 0, end_ms: int = 0):
     """Return timeseries data as JSON arrays (downsampled if needed)."""
@@ -104,16 +115,21 @@ async def get_data(uri: str = Query(...), start_ms: int = 0, end_ms: int = 0):
     if not npz_path.exists():
         raise HTTPException(404, "Audio shape file missing")
 
-    data = np.load(npz_path)
+    data = _load_npz_arrays(str(npz_path), npz_path.stat().st_mtime_ns)
     ts = data["timestamps_ms"].astype(int)
     rms_t = data["rms_total"]
     rms_l = data["rms_low"]
     rms_m = data["rms_mid"] if "rms_mid" in data else np.zeros_like(rms_l)
     rms_h = data["rms_high"]
+    # Pre-smoothed 1s rolling-mean envelope — the stored intensity curve the
+    # builder's intensity-background layer renders. Old captures may lack it.
+    avg1 = data["avg_rms_1s"] if "avg_rms_1s" in data else None
 
     # Slice to requested window if provided
     if end_ms > start_ms:
         mask = (ts >= start_ms) & (ts <= end_ms)
+        if avg1 is not None:
+            avg1 = avg1[mask]
         ts, rms_t, rms_l, rms_m, rms_h = ts[mask], rms_t[mask], rms_l[mask], rms_m[mask], rms_h[mask]
 
     # Downsample to max 10000 points for browser rendering. Block-mean the
@@ -131,6 +147,8 @@ async def get_data(uri: str = Query(...), start_ms: int = 0, end_ms: int = 0):
         rms_t, rms_l, rms_m, rms_h = (
             _block_mean(rms_t), _block_mean(rms_l), _block_mean(rms_m), _block_mean(rms_h)
         )
+        if avg1 is not None:
+            avg1 = _block_mean(avg1)
 
     return {
         "timestamps_ms": ts.tolist(),
@@ -138,6 +156,7 @@ async def get_data(uri: str = Query(...), start_ms: int = 0, end_ms: int = 0):
         "rms_low": rms_l.tolist(),
         "rms_mid": rms_m.tolist(),
         "rms_high": rms_h.tolist(),
+        "avg_rms_1s": avg1.tolist() if avg1 is not None else None,
     }
 
 
