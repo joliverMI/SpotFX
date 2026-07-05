@@ -1239,6 +1239,19 @@ class AutoOffsetService:
                         if spike is not None:
                             _dws, _dwe, _spike_ms, _strength = spike
                             pending_dynamic = (_dws, _dwe)
+                            try:
+                                from services.websocket_manager import ws_manager
+                                asyncio.create_task(ws_manager.broadcast({
+                                    "type":      "xcorr_spike",
+                                    "uri":       uri,
+                                    "t_ms":      frame.timestamp_ms,
+                                    "spike_ms":  _spike_ms,
+                                    "win_start": _dws,
+                                    "win_end":   _dwe,
+                                    "strength":  round(float(_strength), 3),
+                                }))
+                            except Exception:
+                                pass
                             logger.info(
                                 "Auto-offset monitor: CONFIRMED mismatch (r=%.2f) — dynamic window "
                                 "[%d–%d]ms at residual spike %dms (strength=%.2f), sweep re-armed for %s",
@@ -2069,6 +2082,17 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
     apply_quality = float(quality) * (1.6 if source == "anchor" else 1.0)
     try:
         from main import engine
+        # Systemic-offset learner: record how far this confirmed lock landed
+        # from the offset loaded at song start (the residual neither the
+        # per-song baseline nor the per-Set-List bias predicted) BEFORE
+        # apply_save mutates the live offset. No-op unless the learner is on.
+        try:
+            from services import systemic_offset
+            residual = engine.systemic_residual_for(uri, int(offset_ms))
+            if residual is not None:
+                systemic_offset.record(residual, float(quality))
+        except Exception as exc:
+            logger.debug("systemic_offset record failed: %s", exc)
         engine.apply_save(uri, int(offset_ms), apply_quality, source,
                           bypass_drift_cap=bypass_drift_cap)
     except Exception as exc:

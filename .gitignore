@@ -40,3 +40,4 @@ storage/color_sets.json
 
 # Claude local settings
 .claude/settings.local.json
+storage/offset_bias.json

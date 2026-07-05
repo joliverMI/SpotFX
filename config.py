@@ -322,9 +322,51 @@ class Settings(BaseSettings):
     # fabricated samples and score the window on invented data. Distinct from
     # audio_max_gap_ms (recorder, whole-shape discard). ~17 native frames.
     xcorr_window_max_gap_ms: int = 200
+    # Phase 7 (prototype): continuous opportunistic re-lock. Today the
+    # progressive matcher stops at the first planned window, so on a blended
+    # playlist — where the contaminated intro doesn't correlate and the
+    # historical seed is often wrong (cut-in varies per play) — the engine
+    # rides the wrong seed until a sparse mid/late planned window happens to
+    # land on clean audio (observed: 170s+). With this on, progressive keeps
+    # probing recent audio every interval through the whole sweep and snaps
+    # the ENGINE the moment clean audio gives a confident match (disk-save
+    # path unchanged; keeps the seed meanwhile per design).
+    xcorr_continuous_relock_enabled: bool = False
     # Song-start sniff: fire a dedicated start-window xcorr after this much
     # accumulated live audio at song load.
     xcorr_start_sniff_ms: int = 5000
+
+    # ── Systemic starting-offset learner ───────────────────────────────────────
+    # A single device-wide bias capturing the COMMON timing component of recent
+    # confirmed locks — the slice no per-song baseline or per-Set-List delta
+    # corrected. It exists for pipeline-level latency shifts (Spotify restart,
+    # snapclient reconnect) that move EVERY song by a similar amount. Layered on
+    # top of per-song / per-Set-List resolution as a cold-start aid only; this
+    # play's own re-lock overrides it. See services/systemic_offset.py. OFF by
+    # default — inert (bias 0) until enabled.
+    systemic_offset_enabled: bool = False
+    # Only feed confident saves into the learner (a shaky lock shouldn't teach
+    # the whole catalogue).
+    systemic_offset_min_quality: float = 0.55
+    # Reinforcement decay: each residual's weight halves every this-many hours,
+    # so a long idle gap collapses confidence and a fresh session re-earns trust.
+    systemic_offset_half_life_h: float = 3.0
+    # Residuals older than this are culled entirely.
+    systemic_offset_max_age_h: float = 24.0
+    # Decayed sample mass at which the count component of confidence saturates
+    # (~3 recent quality-1.0 locks → full count trust).
+    systemic_offset_full_mass: float = 3.0
+    # Agreement gate: weighted MAD (spread) of residuals at/above which the
+    # agreement component of confidence falls to 0 — scattered residuals across
+    # songs produce no bias even if there are many of them.
+    systemic_offset_spread_tol_ms: int = 1500
+    # Don't apply the bias below this confidence (avoids micro-jitter on thin
+    # or disagreeing evidence).
+    systemic_offset_min_confidence: float = 0.25
+    # Hard clamp on the applied bias magnitude.
+    systemic_offset_max_bias_ms: int = 5000
+    # Rolling residual history cap.
+    systemic_offset_sample_cap: int = 40
 
     # ── Early-feature anchor alignment ─────────────────────────────────────────
     # At capture time we scan the first `anchor_scan_window_ms` for steep RMS
