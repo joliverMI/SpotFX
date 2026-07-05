@@ -43,9 +43,6 @@ _client: Optional[httpx.AsyncClient] = None
 # connection to reflect true network+server RTT, not pool queue time.
 _probe_client: Optional[httpx.AsyncClient] = None
 
-# Cached global brightness — updated whenever we set it so ramps start from the right value
-_current_brightness: float = 1.0
-
 # ── Command bus ────────────────────────────────────────────────────────────────
 _effect_bus: dict[tuple, dict] = {}   # (virtual_id, effect_type) → merged config patch
 _config_bus: dict = {}                # global config patch (global_brightness, etc.)
@@ -562,11 +559,102 @@ async def set_config(patch: dict) -> None:
     Queue a global config patch into the coalesce bus.
     Multiple patches within the bus window are merged; later keys overwrite earlier.
     """
-    global _current_brightness
-    if "global_brightness" in patch:
-        _current_brightness = patch["global_brightness"]
     _config_bus.update(patch)
     _schedule_bus_flush()
+
+
+# ── Non-ramping write verification (GET-after-PUT reconciliation) ─────────────
+
+def _values_match(a, b) -> bool:
+    """Compare an intended value against a live one for verification.
+
+    Numbers within a small tolerance; everything else (colors, strings, bools)
+    by normalized string equality — mirrors the compiler's color compare
+    (str(x).strip().lower()) so '#000000' == ' #000000 ' and case differences
+    don't read as mismatches."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return bool(a) == bool(b)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(float(a) - float(b)) <= 1e-3
+    return str(a).strip().lower() == str(b).strip().lower()
+
+
+async def verify_and_correct(
+    targets: dict, *, settle_ms: int = 20, timeout_ms: int = 60
+) -> dict:
+    """Read affected virtuals back and re-issue any NON-RAMPING value that
+    didn't land.
+
+    targets: {vid: {"type": expected_effect_type | None,
+                    "config": {param: expected_value, ...}}}
+
+    Drains the bus, settles briefly, then GETs each virtual and compares the
+    expected effect type + discrete config params (colors, bools, instant
+    numerics) against live state. A type mismatch re-PUTs the switch with the
+    expected config; param mismatches re-PUT a partial patch (so in-flight ramps
+    of *other* params are untouched). The local cache is updated to the corrected
+    values. Best-effort: muted during capture and bounded by timeout_ms so a
+    slow/unreachable LedFX falls through rather than stalling the fire.
+
+    Returns {vid: [corrected_param, ...]} (uses "type" for an effect switch) for
+    caller logging — empty when everything matched."""
+    if _capture_in_progress() or not targets:
+        return {}
+
+    await drain_bus()
+    if settle_ms > 0:
+        await asyncio.sleep(settle_ms / 1000)
+
+    corrected: dict = {}
+
+    async def _one(vid: str, spec: dict) -> None:
+        live = await get_virtual(vid)
+        if not live:
+            return
+        payload = live.get(vid, live)
+        if not isinstance(payload, dict):
+            return
+        live_eff = payload.get("effect") or {}
+        live_type = live_eff.get("type")
+        live_cfg = live_eff.get("config") or {}
+
+        exp_type = spec.get("type")
+        exp_cfg = spec.get("config") or {}
+
+        # Effect type didn't take → re-PUT the switch with its full intended config.
+        if exp_type and live_type and not _values_match(exp_type, live_type):
+            if await _set_virtual_effect_direct(vid, exp_type, dict(exp_cfg)):
+                state.ledfx_virtual_cache.setdefault(vid, {})["effect"] = {
+                    "type": exp_type, "config": dict(exp_cfg),
+                }
+                corrected[vid] = ["type"]
+            return
+
+        # Right effect (or no type expected) → reconcile the discrete params.
+        fixes = {
+            p: v for p, v in exp_cfg.items()
+            if not _values_match(v, live_cfg.get(p))
+        }
+        if not fixes:
+            return
+        cfg_type = live_type or exp_type
+        if cfg_type and await _set_virtual_effect_direct(vid, cfg_type, dict(fixes)):
+            cache_cfg = (
+                state.ledfx_virtual_cache.setdefault(vid, {})
+                .setdefault("effect", {}).setdefault("config", {})
+            )
+            cache_cfg.update(fixes)
+            corrected[vid] = sorted(fixes)
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(_one(v, s) for v, s in targets.items()),
+                           return_exceptions=True),
+            timeout=timeout_ms / 1000,
+        )
+    except asyncio.TimeoutError:
+        logger.debug("verify_and_correct exceeded %dms; partial reconcile", timeout_ms)
+    return corrected
 
 
 # ── Other API calls (bypass bus) ──────────────────────────────────────────────
@@ -827,17 +915,6 @@ def get_cached_param(virtual_id: str, param_name: str) -> float | None:
 
 
 # ── Ramp functions (go through bus; step_ms=25 → 40 fps) ─────────────────────
-
-async def ramp_brightness(target: float, ramp_ms: int, step_ms: int = 25) -> None:
-    """Smoothly ramp global brightness from _current_brightness to target over ramp_ms."""
-    start = _current_brightness
-    steps = max(1, ramp_ms // step_ms)
-    for i in range(1, steps + 1):
-        val = round(start + (target - start) * (i / steps), 4)
-        await set_config({"global_brightness": val})
-        if i < steps:
-            await asyncio.sleep(step_ms / 1000)
-
 
 async def ramp_effect_params(
     virtual_id: str, effect_type: str, patch: dict, ramp_ms: int, step_ms: int = 25

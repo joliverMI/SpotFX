@@ -31,14 +31,6 @@
         <input type="number" id="s-ledfx-buffer" step="10">
       </div>
       <div class="field">
-        <label>Pre-brightness lead time (ms) — brightness fires this many ms before scene</label>
-        <input type="number" id="s-pre-brightness-lead" step="50" min="0">
-      </div>
-      <div class="field">
-        <label>Pre-transition lead time (ms) — transition fires this many ms before scene</label>
-        <input type="number" id="s-pre-transition-lead" step="50" min="0">
-      </div>
-      <div class="field">
         <label>Smooth ramp duration (ms) — global default for brightness &amp; effect ramps; 0 = instant</label>
         <input type="number" id="s-smooth-ramp" step="50" min="0">
       </div>
@@ -312,8 +304,6 @@ connectWS();
 const settings = await GET('/settings');
 document.getElementById('s-audio-latency').value       = settings.audio_latency_ms;
 document.getElementById('s-ledfx-buffer').value        = settings.ledfx_trigger_buffer_ms;
-document.getElementById('s-pre-brightness-lead').value = settings.pre_brightness_lead_ms ?? 200;
-document.getElementById('s-pre-transition-lead').value = settings.pre_transition_lead_ms ?? 200;
 document.getElementById('s-zoom-window').value    = settings.builder_zoom_window_s;
 document.getElementById('s-future-buffer').value  = settings.builder_future_buffer_s;
 document.getElementById('s-audio-device').value   = settings.audio_input_device;
@@ -390,8 +380,6 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   await PATCH('/settings', {
     audio_latency_ms:        parseInt(document.getElementById('s-audio-latency').value),
     ledfx_trigger_buffer_ms: parseInt(document.getElementById('s-ledfx-buffer').value),
-    pre_brightness_lead_ms:  parseInt(document.getElementById('s-pre-brightness-lead').value),
-    pre_transition_lead_ms:  parseInt(document.getElementById('s-pre-transition-lead').value),
     builder_zoom_window_s:   parseInt(document.getElementById('s-zoom-window').value),
     builder_future_buffer_s: parseInt(document.getElementById('s-future-buffer').value),
     audio_input_device:      document.getElementById('s-audio-device').value,

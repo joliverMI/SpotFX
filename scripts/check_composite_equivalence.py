@@ -114,8 +114,6 @@ def normalize_events(raw: dict) -> dict[str, MusicEvent]:
     out = {}
     for eid, d in raw.items():
         d = json.loads(json.dumps(d))
-        d["pre_brightness_enabled"] = False
-        d["pre_transition_enabled"] = False
         d["event_offset_ms"] = 0
         out[eid] = MusicEvent(**d)
     return out

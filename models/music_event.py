@@ -9,7 +9,6 @@ Supported action types:
   ledfx_scene           — activate a named LedFX scene
   ledfx_ambient         — patch Single Color Effect (color, blur, etc.)
   ledfx_ambient_color   — apply complementary color to Single Color Effect (cache-based, no latency)
-  ledfx_global_brightness — set LedFX global brightness
   ledfx_global_transition — set LedFX global transition time / mode
 """
 from __future__ import annotations
@@ -62,15 +61,6 @@ class LedFxAmbientColorAction(BaseModel):
 
 
 
-class LedFxGlobalBrightnessAction(BaseModel):
-    """Set the LedFX global brightness knob."""
-    type: Literal["ledfx_global_brightness"] = "ledfx_global_brightness"
-    labels: list[str] = Field(default_factory=list)
-    weight: float = 1.0
-    brightness: float  # 0.0–1.0
-    ramp_ms: int | None = None   # None = use settings.smooth_ramp_ms; 0 = instant
-
-
 class LedFxGlobalTransitionAction(BaseModel):
     """Set the LedFX global transition time (and optionally transition mode)."""
     type: Literal["ledfx_global_transition"] = "ledfx_global_transition"
@@ -117,6 +107,9 @@ class AspectValue(BaseModel):
     target's aspect are inspected by the compiler; the rest are ignored.
 
       aspect=brightness | reactivity | blur  → number (target.mode controls nudge vs absolute)
+                                                brightness / reactivity may also carry
+                                                scale_overrides (per-param weight overrides
+                                                — e.g. split fg vs bg brightness; see below)
       aspect=color                            → color_kind + color_value
       aspect=bg_color                         → bg_color
       aspect=shape                            → any subset of {polygon, star, edges, twist, flip}
@@ -404,7 +397,6 @@ Action = Annotated[
     | LedFxSceneAction
     | LedFxAmbientAction
     | LedFxAmbientColorAction
-    | LedFxGlobalBrightnessAction
     | LedFxGlobalTransitionAction
     | LedFxEffectParamAction
     | MorphStepAction
@@ -517,13 +509,6 @@ class MusicEvent(BaseModel):
     # "morph_set"; ignored (with a warning log) for "sequence" / "beat_sequence".
     scene_override: bool = False
 
-    # Pre-commands — fired before the main action (single) or before the first step (sequence / beat_sequence)
-    pre_brightness_enabled: bool = True
-    pre_brightness_value: float = 1.0
-    pre_brightness_ramp_ms: int | None = None   # None = use settings.smooth_ramp_ms; 0 = instant
-    pre_transition_enabled: bool = True
-    pre_transition_value: float = 0.5   # seconds
-
     # For event_type == "single": randomly picked from this list
     actions: list[Action] = Field(default_factory=list)
 
@@ -538,9 +523,8 @@ class MusicEvent(BaseModel):
     beat_sequence_start_offset_beats: int = 0  # beats to shift entire sequence (negative = earlier)
 
     # For event_type == "morph_set" — each lane independently picks one Action
-    # to fire; all picks fire concurrently. pre_brightness_* / pre_transition_*
-    # are intentionally NOT applied to morph_set events (brightness now lives
-    # on the Morph Step targets themselves and global scene transitions are gone).
+    # to fire; all picks fire concurrently. Brightness lives on the Morph Step
+    # targets themselves and global scene transitions are gone.
     morph_lanes: list[MorphLane] = Field(default_factory=list)
 
     # For event_type == "device_settings" — virtual-config changes applied instantly.

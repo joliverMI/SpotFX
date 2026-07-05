@@ -1,8 +1,8 @@
 """
 Offline smoke test for RandomGroupAction (HA choose-style random container).
 
-No LedFX writes — ledfx_client.set_config is monkeypatched with a recorder, so
-this can run while SpotFX and music are live.
+No LedFX writes — ledfx_client.set_virtual_config is monkeypatched with a
+recorder, so this can run while SpotFX and music are live.
 
 USAGE
   .venv/bin/python scripts/smoke_random_group.py
@@ -35,11 +35,17 @@ from api import ledfx_client                                # noqa: E402
 from models.music_event import (                            # noqa: E402
     MusicEvent, RandomGroupAction, RandomOption,
 )
+from services import trigger_engine as te                   # noqa: E402
 from services.trigger_engine import TriggerEngine           # noqa: E402
+
+# One fake virtual so ledfx_global_transition (the recordable leaf) has a target.
+te.get_all_virtual_ids = lambda: ["v-smoke"]  # type: ignore
 
 
 def brightness(v: float) -> dict:
-    return {"type": "ledfx_global_brightness", "brightness": v, "ramp_ms": 0}
+    # Distinguishing value rides on transition_time (global brightness is gone;
+    # per-device brightness lives on Morph Steps now).
+    return {"type": "ledfx_global_transition", "transition_time": v, "transition_mode": None}
 
 
 def fail(msg: str) -> None:
@@ -86,10 +92,10 @@ async def main() -> None:
     # ── recorder in place of LedFX writes ─────────────────────────────────
     fired: list[float] = []
 
-    async def record_set_config(cfg: dict) -> None:
-        fired.append(cfg["global_brightness"])
+    async def record_set_virtual_config(vid: str, cfg: dict) -> None:
+        fired.append(cfg["transition_time"])
 
-    ledfx_client.set_config = record_set_config  # type: ignore[assignment]
+    ledfx_client.set_virtual_config = record_set_virtual_config  # type: ignore[assignment]
 
     # ── 2. exactly one option per fire ─────────────────────────────────────
     by_count = Counter()

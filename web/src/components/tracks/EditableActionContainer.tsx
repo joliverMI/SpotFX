@@ -12,7 +12,7 @@ import AddActionDialog from '../dialogs/AddActionDialog';
 
 export const EDITABLE_ACTION_TYPES: ActionType[] = [
   'event_ref', 'ledfx_scene', 'ledfx_ambient', 'ledfx_ambient_color',
-  'ledfx_global_brightness', 'ledfx_global_transition', 'ledfx_effect_param',
+  'ledfx_global_transition', 'ledfx_effect_param',
   'morph_step', 'morph_color', 'device_settings',
   'random_group', 'sequence_group', 'parallel_group',
 ];

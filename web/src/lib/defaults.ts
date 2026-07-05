@@ -25,8 +25,6 @@ export function newAction(type: ActionType): Action {
       };
     case 'ledfx_ambient_color':
       return { ...base, type };
-    case 'ledfx_global_brightness':
-      return { ...base, type, brightness: 1.0, ramp_ms: null };
     case 'ledfx_global_transition':
       return { ...base, type, transition_time: 0.5, transition_mode: null };
     case 'ledfx_effect_param':
@@ -90,11 +88,6 @@ export function newEvent(event_type: MusicEvent['event_type'] = 'single'): Music
     ai_exposed: false,
     fixed: false,
     scene_override: false,
-    pre_brightness_enabled: true,
-    pre_brightness_value: 1.0,
-    pre_brightness_ramp_ms: null,
-    pre_transition_enabled: true,
-    pre_transition_value: 0.5,
     actions: [],
     sequence_steps: [],
     revert: null,

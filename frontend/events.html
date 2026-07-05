@@ -104,28 +104,6 @@
           <input type="range" id="e-energy-val" min="1" max="10" step="1" value="5" style="flex:1" disabled>
           <span id="e-energy-display" style="width:20px;text-align:center;font-size:13px;font-weight:600;">5</span>
         </div>
-        <!-- Pre-command options — only shown for single events -->
-        <div id="single-pre-commands" style="display:none">
-          <div class="field" style="display:flex;align-items:center;gap:12px;">
-            <label style="white-space:nowrap;font-size:12px;display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="e-pre-brightness-en"> Pre-brightness
-            </label>
-            <input type="range" id="e-pre-brightness-val" min="0" max="1" step="0.01" value="1" style="flex:1" disabled>
-            <span id="e-pre-brightness-display" style="width:36px;text-align:right;font-size:13px;font-weight:600;">100%</span>
-          </div>
-          <div class="field" style="display:flex;align-items:center;gap:12px;">
-            <label style="white-space:nowrap;font-size:12px;display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="e-pre-transition-en"> Pre-transition
-            </label>
-            <input type="range" id="e-pre-transition-val" min="0" max="5" step="0.1" value="0.5" style="flex:1" disabled>
-            <span id="e-pre-transition-display" style="width:36px;text-align:right;font-size:13px;font-weight:600;">0.5s</span>
-          </div>
-          <div class="field" style="display:flex;align-items:center;gap:12px;">
-            <label style="white-space:nowrap;font-size:12px;">Pre-brightness ramp (ms)</label>
-            <input type="number" id="e-pre-brightness-ramp" min="0" step="50" placeholder="global default" style="width:110px">
-            <span style="font-size:11px;color:var(--text-muted);">blank = use global smooth_ramp_ms</span>
-          </div>
-        </div>
         <div class="field">
           <label>Type</label>
           <select id="e-type">
@@ -260,7 +238,7 @@ let scenes = [];
 let selectedId = null;
 let typeFilter    = null;
 let aiExFilter    = false;
-const _RAMP_TYPES = new Set(['ledfx_global_brightness', 'ledfx_effect_param', 'morph_step', 'morph_color']);
+const _RAMP_TYPES = new Set(['ledfx_effect_param', 'morph_step', 'morph_color']);
 let allParamLabels = [];
 let effectParamsConfig = {};
 let savedGradients = [];
@@ -325,7 +303,6 @@ const ACTION_TYPES = [
   { value: 'ledfx_scene',             label: 'Scene'             },
   { value: 'ledfx_ambient',           label: 'Change Ambient'    },
   { value: 'ledfx_ambient_color',     label: 'Contrast Color'    },
-  { value: 'ledfx_global_brightness', label: 'Global Brightness' },
   { value: 'ledfx_global_transition', label: 'Global Transition' },
   { value: 'ledfx_effect_param',      label: 'Effect Parameter'  },
   { value: 'morph_step',              label: 'Morph Step'        },
@@ -375,12 +352,6 @@ function actionFields(a) {
     case 'ledfx_ambient_color':
       return `<span class="action-hint">Reads current ambient color → applies 180° complementary color (cache-based, no latency)</span>`;
 
-
-    case 'ledfx_global_brightness':
-      return `<label>Brightness
-        <input type="range" class="action-gb-val" min=0 max=1 step=0.01 value="${a.brightness ?? 1}" style="width:100px">
-        <span class="action-gb-display">${(a.brightness ?? 1).toFixed(2)}</span></label>
-        <label style="margin-left:8px;">Ramp (ms) <input type="number" class="action-gb-ramp" value="${a.ramp_ms ?? ''}" min="0" step="50" placeholder="global" style="width:80px"></label>`;
 
     case 'ledfx_global_transition':
       return `<label>Time (s) <input type="number" class="action-gt-time" value="${a.transition_time ?? 0.5}" min=0 step=0.1 style="width:60px"></label>
@@ -788,10 +759,15 @@ function msAspectValueHtml(aspect, val) {
   // Numeric aspects (brightness / reactivity / blur): slider + number
   if (aspect === 'brightness' || aspect === 'reactivity' || aspect === 'blur') {
     const n = val.number != null ? val.number : 0.5;
-    return `<div class="ms-val ms-val-num" style="display:flex;align-items:center;gap:6px;">
+    let html = `<div class="ms-val ms-val-num" style="display:flex;align-items:center;gap:6px;">
       <input type="range" class="ms-val-range" min="0" max="1" step="0.01" value="${n}" style="flex:1;accent-color:var(--accent);">
       <input type="number" class="ms-val-number" min="0" max="1" step="0.01" value="${n}" style="width:60px;">
     </div>`;
+    // These aspects distribute the single value across several effect params,
+    // each capped by a per-param weight. Offer direct editing of those weights
+    // (self-suppresses for aspects that map to a single param, e.g. blur).
+    html += msScaleWeightsHtml(aspect, val);
+    return html;
   }
   // BG Color: solid hex (larger picker, hex mirror)
   if (aspect === 'bg_color') {
@@ -857,6 +833,64 @@ function msAspectValueHtml(aspect, val) {
     </div>`;
   }
   return `<span class="action-hint">(unknown aspect: ${aspect})</span>`;
+}
+
+// "Per-param scale weights" editor (collapsed by default) for the numeric
+// distribution aspects (reactivity, brightness, blur).
+//
+// A single aspect value is distributed across every numeric param the aspect
+// maps to on whichever effect each targeted device is running — e.g. brightness
+// drives both `brightness` (fg) and `background_brightness` (bg). Each param has
+// a default weight (`aspect_scale` in effect_params.json) that caps how far the
+// value can push it. This editor lets the user override those weights per
+// target, grouped by effect, so fg/bg (etc.) can be split apart. Blank input =
+// use the catalog default. Overrides round-trip via absolute_value.scale_overrides,
+// keyed "{effect}.{param}". Self-suppresses unless some effect exposes ≥2 numeric
+// params for the aspect (nothing to "break out" otherwise, e.g. blur).
+function msScaleWeightsHtml(aspect, val) {
+  const overrides = (val && val.scale_overrides) || {};
+  const effects = morphAspects.supported_effects || [];
+  const numericNames = (etype) =>
+    ((morphAspects.per_effect_params?.[etype]?.[aspect]) || []).filter(p => {
+      const t = effectParamsConfig.effects?.[etype]?.params?.[p]?.type;
+      return t === 'numeric' || t === 'integer';
+    });
+  // Nothing to split unless at least one effect maps the aspect to ≥2 params.
+  if (!effects.some(e => numericNames(e).length >= 2)) return '';
+  const label = (morphAspects.aspect_labels?.[aspect]) || aspect;
+  let groups = '';
+  for (const etype of effects) {
+    const names = numericNames(etype);
+    const params = effectParamsConfig.effects?.[etype]?.params || {};
+    const rows = names.map(p => {
+      const key = `${etype}.${p}`;
+      const def = params[p]?.aspect_scale;
+      const defStr = (def != null ? def : 1.0);
+      const ov = overrides[key];
+      const v = ov != null ? ov : '';
+      return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">
+        <span style="flex:1;font-family:monospace;color:var(--text-muted);">${p}</span>
+        <input type="number" class="ms-rscale" data-key="${key}" min="0" max="2" step="0.05"
+               value="${v}" placeholder="${defStr}" title="Default ${defStr} — blank uses default"
+               style="width:64px;">
+      </div>`;
+    }).join('');
+    if (!rows) continue;
+    groups += `<div style="margin-top:4px;">
+      <div style="font-size:11px;color:var(--accent);font-weight:600;">${etype}</div>
+      ${rows}
+    </div>`;
+  }
+  if (!groups) return '';
+  return `<details class="ms-rscales" style="margin-top:6px;">
+    <summary style="font-size:11px;color:var(--text-muted);cursor:pointer;">Per-param scale weights</summary>
+    <div style="padding:4px 2px 2px;font-size:11px;">
+      <div style="font-style:italic;opacity:0.7;line-height:1.3;margin-bottom:4px;">
+        Each weight caps how far the ${label} value pushes that param (1.0 = full range). Blank uses the effect default.
+      </div>
+      ${groups}
+    </div>
+  </details>`;
 }
 
 function morphTargetRowHtml(t, ti) {
@@ -1127,6 +1161,14 @@ function syncMorphTarget(row) {
   if (aspect === 'brightness' || aspect === 'reactivity' || aspect === 'blur') {
     const n = parseFloat(row.querySelector('.ms-val-number')?.value);
     absolute_value.number = Number.isFinite(n) ? n : 0.5;
+    // Collect per-param scale weight overrides (reactivity / brightness); blank
+    // inputs = use default. The editor is absent for single-param aspects.
+    const ov = {};
+    row.querySelectorAll('.ms-rscale').forEach(inp => {
+      const v = parseFloat(inp.value);
+      if (Number.isFinite(v)) ov[inp.dataset.key] = v;
+    });
+    if (Object.keys(ov).length) absolute_value.scale_overrides = ov;
   } else if (aspect === 'bg_color') {
     absolute_value.bg_color = row.querySelector('.ms-val-bg-color')?.value || '#000000';
   } else if (aspect === 'color') {
@@ -1295,11 +1337,6 @@ function wireSliders(container) {
     num.addEventListener('input', () => { if (num.value !== '') range.value = num.value; });
     if (num.value !== '') range.value = num.value;
   });
-  // Global brightness range display
-  const gbRange = container.querySelector('.action-gb-val');
-  if (gbRange) gbRange.addEventListener('input', () => {
-    container.querySelector('.action-gb-display').textContent = parseFloat(gbRange.value).toFixed(2);
-  });
   // Morph Step per-target value inputs
   container.querySelectorAll('.ms-target-row').forEach(row => msWireValueSync(row));
 }
@@ -1359,15 +1396,6 @@ function syncActionFromRow(row) {
     case 'ledfx_ambient_color':
       return { type, weight, labels };
 
-
-    case 'ledfx_global_brightness': {
-      const rampStr = row.querySelector('.action-gb-ramp')?.value;
-      return {
-        type, weight, labels,
-        brightness: parseFloat(row.querySelector('.action-gb-val')?.value ?? 1),
-        ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
-      };
-    }
 
     case 'ledfx_global_transition': {
       const mode = row.querySelector('.action-gt-mode')?.value;
@@ -1480,13 +1508,11 @@ function syncActionsFromDOM(e) {
   e.actions = rows.map(syncActionFromRow);
 }
 
-// Deprecated action types: drive UI pills + convert-buttons. ledfx_global_brightness
-// → "Convert to Morph Step" (per-virtual Brightness aspect). ledfx_scene → "Convert
-// to Morph Set" (calls the Phase 6 scene-import endpoint, replaces this action with
-// an event_ref into the new event). Both old types remain executable.
+// Deprecated action types: drive UI pills + convert-buttons. ledfx_scene →
+// "Convert to Morph Set" (calls the Phase 6 scene-import endpoint, replaces
+// this action with an event_ref into the new event). Still executable.
 const DEPRECATED_TYPES = {
-  ledfx_global_brightness: { label: 'Use Morph Step',  convert: 'msConvertGlobalBrightness' },
-  ledfx_scene:             { label: 'Use Morph Set',   convert: 'msConvertScene'            },
+  ledfx_scene: { label: 'Use Morph Set', convert: 'msConvertScene' },
 };
 
 function deprecationChipHtml(actionType, i) {
@@ -1555,30 +1581,6 @@ function _replaceActionInModel(btn, replacement) {
   }
   return true;
 }
-
-// Convert ledfx_global_brightness → a Morph Step that sets brightness across
-// every imported virtual (global scope), preserving weight/labels/ramp_ms.
-window.msConvertGlobalBrightness = function(btn) {
-  const row = btn.closest('.action-row');
-  const dyn = row.querySelector('.action-dynamic');
-  const brightness = parseFloat(row.querySelector('.action-gb-val')?.value ?? 1);
-  const rampStr = row.querySelector('.action-gb-ramp')?.value;
-  const ramp_ms = rampStr !== '' && rampStr != null ? parseInt(rampStr) : null;
-  const weight = parseFloat(row.querySelector('.action-weight')?.value) || 1;
-  const labels = (row.querySelector('.action-labels')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
-  const replacement = {
-    type: 'morph_step', weight, labels, ramp_ms,
-    targets: [{
-      scope: { virtual_ids: [], categories: [], roles: [] },  // empty = all imported
-      aspect: 'brightness',
-      mode: 'absolute',
-      absolute_value: { number: brightness },
-      nudge_amount: 0, intensity_scale: 0, intensity_source: 'rms_total',
-      ramp_ms: null,
-    }],
-  };
-  _replaceActionInModel(btn, replacement);
-};
 
 // Convert ledfx_scene → call the import endpoint, then replace this action with
 // an event_ref pointing at the new morph_set event. Preserves weight/labels.
@@ -2252,23 +2254,6 @@ function selectEvent(id) {
   document.getElementById('e-energy-val').disabled = !en;
   document.getElementById('e-energy-val').value = e.energy_level ?? 5;
   document.getElementById('e-energy-display').textContent = e.energy_level ?? 5;
-  // Pre-brightness
-  const pbEn = e.pre_brightness_enabled !== false;
-  document.getElementById('e-pre-brightness-en').checked = pbEn;
-  document.getElementById('e-pre-brightness-val').disabled = !pbEn;
-  document.getElementById('e-pre-brightness-val').value = e.pre_brightness_value ?? 1.0;
-  document.getElementById('e-pre-brightness-display').textContent =
-    Math.round((e.pre_brightness_value ?? 1.0) * 100) + '%';
-  // Pre-transition
-  const ptEn = e.pre_transition_enabled !== false;
-  document.getElementById('e-pre-transition-en').checked = ptEn;
-  document.getElementById('e-pre-transition-val').disabled = !ptEn;
-  document.getElementById('e-pre-transition-val').value = e.pre_transition_value ?? 0.5;
-  document.getElementById('e-pre-transition-display').textContent =
-    (e.pre_transition_value ?? 0.5).toFixed(1) + 's';
-  // Pre-brightness ramp
-  const rampInput = document.getElementById('e-pre-brightness-ramp');
-  rampInput.value = e.pre_brightness_ramp_ms != null ? e.pre_brightness_ramp_ms : '';
   document.getElementById('e-offset').value = e.event_offset_ms ?? 0;
   renderActions(e);
   renderSequence(e);
@@ -2313,7 +2298,6 @@ function toggleSections(type) {
   // Scene Update reuses the morph lanes editor (constrained to First/Rest).
   document.getElementById('morph-set-section').style.display = (type === 'morph_set' || type === 'scene_update') ? '' : 'none';
   document.getElementById('device-settings-section').style.display = type === 'device_settings' ? '' : 'none';
-  document.getElementById('single-pre-commands').style.display = isFixedScene ? 'none' : '';
 }
 
 function renderDeviceTargets(e) {
@@ -2332,23 +2316,6 @@ document.getElementById('e-energy-en').addEventListener('change', () => {
 document.getElementById('e-energy-val').addEventListener('input', () => {
   document.getElementById('e-energy-display').textContent = document.getElementById('e-energy-val').value;
 });
-document.getElementById('e-pre-brightness-en').addEventListener('change', () => {
-  document.getElementById('e-pre-brightness-val').disabled =
-    !document.getElementById('e-pre-brightness-en').checked;
-});
-document.getElementById('e-pre-brightness-val').addEventListener('input', () => {
-  document.getElementById('e-pre-brightness-display').textContent =
-    Math.round(parseFloat(document.getElementById('e-pre-brightness-val').value) * 100) + '%';
-});
-document.getElementById('e-pre-transition-en').addEventListener('change', () => {
-  document.getElementById('e-pre-transition-val').disabled =
-    !document.getElementById('e-pre-transition-en').checked;
-});
-document.getElementById('e-pre-transition-val').addEventListener('input', () => {
-  document.getElementById('e-pre-transition-display').textContent =
-    parseFloat(document.getElementById('e-pre-transition-val').value).toFixed(1) + 's';
-});
-
 document.getElementById('btn-add-action').addEventListener('click', () => {
   const e = events.find(e => e.id === selectedId);
   if (!e) return;
@@ -2417,13 +2384,6 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   const energyEn = document.getElementById('e-energy-en').checked;
   e.energy_level = energyEn ? parseInt(document.getElementById('e-energy-val').value) : null;
 
-  // Pre-commands apply to all event types
-  e.pre_brightness_enabled = document.getElementById('e-pre-brightness-en').checked;
-  e.pre_brightness_value    = parseFloat(document.getElementById('e-pre-brightness-val').value);
-  e.pre_transition_enabled  = document.getElementById('e-pre-transition-en').checked;
-  e.pre_transition_value    = parseFloat(document.getElementById('e-pre-transition-val').value);
-  const rampStr = document.getElementById('e-pre-brightness-ramp').value;
-  e.pre_brightness_ramp_ms = rampStr !== '' ? parseInt(rampStr) : null;
   e.event_offset_ms = parseInt(document.getElementById('e-offset').value) || 0;
 
   if (e.event_type === 'single') {
@@ -2473,12 +2433,6 @@ document.getElementById('btn-duplicate').addEventListener('click', async () => {
   src.scene_override  = document.getElementById('e-scene-override-btn').dataset.active === 'true';
   if (src.event_type === 'single') {
     syncActionsFromDOM(src);
-    src.pre_brightness_enabled = document.getElementById('e-pre-brightness-en').checked;
-    src.pre_brightness_value   = parseFloat(document.getElementById('e-pre-brightness-val').value);
-    src.pre_transition_enabled = document.getElementById('e-pre-transition-en').checked;
-    src.pre_transition_value   = parseFloat(document.getElementById('e-pre-transition-val').value);
-    const rampStr = document.getElementById('e-pre-brightness-ramp').value;
-    src.pre_brightness_ramp_ms = rampStr !== '' ? parseInt(rampStr) : null;
   } else if (src.event_type === 'sequence') {
     src.sequence_steps = syncStepsFromDOM();
     src.revert = readRevertFromDOM();
@@ -2554,7 +2508,7 @@ async function seedDefaultEvent() {
 
 // ── New ────────────────────────────────────────────────────────────────────
 document.getElementById('btn-new').addEventListener('click', async () => {
-  const e = { id: uuid(), name: 'New Event', event_type: 'sequence', color: '#FFD700', labels: [], energy_level: null, pre_brightness_enabled: true, pre_brightness_value: 1.0, pre_brightness_ramp_ms: null, pre_transition_enabled: true, pre_transition_value: 0.5, actions: [], sequence_steps: [], beat_sequence_steps: [], beat_revert: null, beat_sequence_fallback: 'fallback' };
+  const e = { id: uuid(), name: 'New Event', event_type: 'sequence', color: '#FFD700', labels: [], energy_level: null, actions: [], sequence_steps: [], beat_sequence_steps: [], beat_revert: null, beat_sequence_fallback: 'fallback' };
   events.push(e);
   await POST('/events', e);
   selectEvent(e.id);

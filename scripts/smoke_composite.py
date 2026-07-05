@@ -24,6 +24,8 @@ effect_params.load()
 
 from api import ledfx_client                                   # noqa: E402
 from models.music_event import MusicEvent                      # noqa: E402
+from models.state import state                                 # noqa: E402
+from services import trigger_engine as te                      # noqa: E402
 from services.trigger_engine import TriggerEngine              # noqa: E402
 
 
@@ -37,16 +39,27 @@ _ = time  # time.monotonic patched by VirtualClock
 def now() -> int:
     return clock.now_ms
 
+# ── one fake virtual so ledfx_effect_param (the recordable leaf) resolves ────
+SMOKE_VID = "v-smoke"
+te.get_all_virtual_ids = lambda: [SMOKE_VID]  # type: ignore
+
+
+def seed_cache(brightness: float = 0.8) -> None:
+    state.ledfx_virtual_cache[SMOKE_VID] = {
+        "effect": {"type": "power", "config": {"brightness": brightness}},
+        "config": {},
+    }
+
 # ── recorders ───────────────────────────────────────────────────────────────
 fired: list[tuple] = []
 
 
-async def rec_set_config(cfg: dict) -> None:
-    fired.append(("brightness", cfg.get("global_brightness"), now()))
+async def rec_set_virtual_effect(vid, etype, config) -> None:
+    fired.append(("brightness", config.get("brightness"), now()))
 
 
-def rec_ramp_brightness(value, ramp_ms, step_ms=25):
-    fired.append(("ramp", value, ramp_ms, now()))
+def rec_ramp_effect_params(vid, etype, patch, ramp_ms, step_ms=25):
+    fired.append(("ramp", patch.get("brightness"), ramp_ms, now()))
     async def _noop():
         pass
     return _noop()
@@ -56,25 +69,28 @@ async def rec_set_virtual_config(vid, cfg):
     fired.append(("vconfig", vid, tuple(sorted(cfg)), now()))
 
 
-ledfx_client.set_config = rec_set_config                    # type: ignore
-ledfx_client.ramp_brightness = rec_ramp_brightness          # type: ignore
+ledfx_client.set_virtual_effect = rec_set_virtual_effect    # type: ignore
+ledfx_client.ramp_effect_params = rec_ramp_effect_params    # type: ignore
 ledfx_client.set_virtual_config = rec_set_virtual_config    # type: ignore
 
 
 def b(v: float, ramp: int = 0) -> dict:
-    return {"type": "ledfx_global_brightness", "brightness": v, "ramp_ms": ramp}
+    # Effect-param leaf on the fake virtual — the distinguishing value rides on
+    # the power effect's brightness param (the global-brightness action is gone).
+    return {"type": "ledfx_effect_param", "virtual_id": SMOKE_VID, "ramp_ms": ramp,
+            "params": [{"param_label": "Effect Brightness", "target_value": v}]}
 
 
 def ev(root: dict | None, **kw) -> MusicEvent:
     return MusicEvent(
-        name=kw.pop("name", "smoke"), event_type="composite", root=root,
-        pre_brightness_enabled=False, pre_transition_enabled=False, **kw,
+        name=kw.pop("name", "smoke"), event_type="composite", root=root, **kw,
     )
 
 
 def reset():
     fired.clear()
     clock.reset()
+    seed_cache()  # instant writes mutate the cached effect config — reseed
 
 
 def fail(msg: str):
@@ -171,7 +187,7 @@ async def main() -> None:
 
     # ── 6. revert (ms): snapshot before body, restore after delay ───────────
     reset()
-    ledfx_client._current_brightness = 0.77  # type: ignore
+    seed_cache(0.77)  # pre-event brightness param value — revert must restore it
     seqr = {"type": "sequence_group", "children": [
         {"actions": [b(0.1)]},
     ], "revert": {"enabled": True, "delay_ms": 200, "transition_ms": 0}}
@@ -219,7 +235,8 @@ async def main() -> None:
     rg_model = ev(rg).root
     unresolved = engine._describe_action(rg_model)
     resolved = engine._describe_action(rg_model, resolved={"rg1": "oB"})
-    if unresolved != "🎲 1 of 2" or "22" not in resolved.replace("0.22", "22"):
+    # Resolved pick renders the picked option's leaf summary instead of "1 of N"
+    if unresolved != "🎲 1 of 2" or "Effect Brightness" not in resolved:
         fail(f"random describe: {unresolved!r} / {resolved!r}")
     ok(f"describe: seq={seq_desc!r} par~ok random resolved={resolved!r}")
 

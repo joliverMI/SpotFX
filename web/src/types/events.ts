@@ -117,12 +117,6 @@ export interface LedFxAmbientColorAction extends ActionBase {
   type: 'ledfx_ambient_color';
 }
 
-export interface LedFxGlobalBrightnessAction extends ActionBase {
-  type: 'ledfx_global_brightness';
-  brightness: number;
-  ramp_ms: number | null;
-}
-
 export interface LedFxGlobalTransitionAction extends ActionBase {
   type: 'ledfx_global_transition';
   transition_time: number;
@@ -249,7 +243,6 @@ export type Action =
   | LedFxSceneAction
   | LedFxAmbientAction
   | LedFxAmbientColorAction
-  | LedFxGlobalBrightnessAction
   | LedFxGlobalTransitionAction
   | LedFxEffectParamAction
   | MorphStepAction
@@ -318,12 +311,6 @@ export interface MusicEvent {
   ai_exposed: boolean;
   fixed: boolean;
   scene_override: boolean;
-
-  pre_brightness_enabled: boolean;
-  pre_brightness_value: number;
-  pre_brightness_ramp_ms: number | null;
-  pre_transition_enabled: boolean;
-  pre_transition_value: number;
 
   actions: Action[];
 

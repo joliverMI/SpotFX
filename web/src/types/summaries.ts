@@ -16,7 +16,6 @@ export const ACTION_ICONS: Record<Action['type'], string> = {
   ledfx_scene: '🎬',
   ledfx_ambient: '🌈',
   ledfx_ambient_color: '🎨',
-  ledfx_global_brightness: '💡',
   ledfx_global_transition: '⏱️',
   ledfx_effect_param: '🎛️',
   morph_step: '🧬',
@@ -32,7 +31,6 @@ export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
   ledfx_scene: 'LedFX Scene',
   ledfx_ambient: 'Ambient',
   ledfx_ambient_color: 'Complementary Color',
-  ledfx_global_brightness: 'Global Brightness',
   ledfx_global_transition: 'Global Transition',
   ledfx_effect_param: 'Effect Params',
   morph_step: 'Morph Step',
@@ -60,8 +58,6 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
     }
     case 'ledfx_ambient_color':
       return 'Complementary color';
-    case 'ledfx_global_brightness':
-      return `Brightness ${Math.round(action.brightness * 100)}%`;
     case 'ledfx_global_transition':
       return `Transition ${action.transition_time}s`;
     case 'ledfx_effect_param': {

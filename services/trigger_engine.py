@@ -146,18 +146,35 @@ def _resolve_shape_offset(meta) -> tuple[int, float, str]:
                 base = int(sl_entry.get("timestamp_offset_ms", 0))
             quality = float(sl_entry.get("offset_quality", 0.0))
             trim = int(sl_entry.get("perception_trim_ms", 0))
-            return base + trim, quality, f"setlist:{sl_id}"
+            return _layer_systemic(base + trim, quality, f"setlist:{sl_id}")
         # No entry yet — bias the default by the Set List's recent deltas.
         bias = _setlist_delta_bias(sl_id)
         if bias != 0:
             base = int(meta.timestamp_offset_ms or 0) + bias
             quality = float(meta.offset_quality or 0.0)
             trim = int(getattr(meta, "perception_trim_ms", 0) or 0)
-            return base + trim, quality, f"default+setlist_bias:{bias:+d}"
+            return _layer_systemic(base + trim, quality,
+                                   f"default+setlist_bias:{bias:+d}")
     base = int(meta.timestamp_offset_ms or 0)
     quality = float(meta.offset_quality or 0.0)
     trim = int(getattr(meta, "perception_trim_ms", 0) or 0)
-    return base + trim, quality, "default"
+    return _layer_systemic(base + trim, quality, "default")
+
+
+def _layer_systemic(offset_ms: int, quality: float, source: str) -> tuple[int, float, str]:
+    """Add the device-wide systemic starting-offset bias on top of the
+    per-song / per-Set-List resolution. Cold-start aid only — this play's own
+    xcorr re-lock overrides it via apply_save. Inert (no-op) unless the learner
+    is enabled and confident (see services/systemic_offset.py)."""
+    try:
+        from services import systemic_offset
+        pred = systemic_offset.predict()
+    except Exception:
+        return offset_ms, quality, source
+    if pred.bias_ms == 0:
+        return offset_ms, quality, source
+    return (offset_ms + pred.bias_ms, quality,
+            f"{source}+systemic:{pred.bias_ms:+d}@{pred.confidence:.2f}")
 
 
 def _perception_trim_for(meta) -> int:
@@ -204,8 +221,7 @@ class TriggerEngine:
     def __init__(self):
         self._profile: Optional[SongProfile] = None
         self._fired: set[str] = set()          # trigger ids fired this playback
-        self._pre_fired: set[str] = set()      # trigger ids whose pre-commands have fired
-        self._pre_ramp_fired: set[str] = set() # trigger ids whose brightness ramp has started
+        self._pre_fired: set[str] = set()      # trigger ids whose step-1 pre-ramp has fired
         self._last_uri: str = ""
         self._last_progress_ms: int = 0
         # Track last called action per event id to avoid immediate repeat
@@ -270,12 +286,6 @@ class TriggerEngine:
         # of how many flips interleave. See plan section "added, 4".
         # {vid: (snapshot, revert_cfg, revert_task)}
         self._pending_ambient_revert: dict[str, tuple[dict, object, asyncio.Task]] = {}
-        # Tracks the look-ahead _fire_pre_commands task per trigger, so when
-        # _execute_plan_entry runs with skip_pre_commands=True it can AWAIT
-        # the task before step 0 — guaranteeing the transition PUT reaches
-        # LedFX before the effect PUT (otherwise the httpx pool may dispatch
-        # them out of order and the transition won't apply to the change).
-        self._pre_cmd_tasks: dict[str, asyncio.Task] = {}
 
     def _spawn_ramp(self, coro) -> asyncio.Task:
         """Create a tracked ramp task. All ramp tasks should use this instead of create_task."""
@@ -297,8 +307,6 @@ class TriggerEngine:
             self._ramp_tasks.clear()
             self._fired.clear()
             self._pre_fired.clear()
-            self._pre_ramp_fired.clear()
-            self._pre_cmd_tasks.clear()
             self._last_action.clear()
             self._color_cursor.clear()
             self._color_cursor_dir.clear()
@@ -409,7 +417,6 @@ class TriggerEngine:
                 # bypassing it and firing Song Start regardless.
                 self._fired.add(start_trig.id)
                 self._pre_fired.add(start_trig.id)
-                self._pre_ramp_fired.add(start_trig.id)
                 if state.paused:
                     logger.info(
                         "load_profile: skipping Song Start trigger %s — service paused",
@@ -481,7 +488,6 @@ class TriggerEngine:
             return
         self._fired.update(ids)
         self._pre_fired.update(ids)
-        self._pre_ramp_fired.update(ids)
         logger.info("Genre Blending: suppressing start trigger(s) %s — %s", ids, reason)
 
     def reconsider_genre_blend(self) -> None:
@@ -503,7 +509,6 @@ class TriggerEngine:
             return
         self._fired.update(newly_suppressed)
         self._pre_fired.update(newly_suppressed)
-        self._pre_ramp_fired.update(newly_suppressed)
         logger.info(
             "Genre Blending (late): suppressing start trigger(s) %s — %s",
             newly_suppressed, reason,
@@ -525,7 +530,6 @@ class TriggerEngine:
                 )
                 self._fired = {tid for tid in self._fired if not tid.startswith("tl_")}
                 self._pre_fired = {tid for tid in self._pre_fired if not tid.startswith("tl_")}
-                self._pre_ramp_fired = {tid for tid in self._pre_ramp_fired if not tid.startswith("tl_")}
                 logger.info("Triggerless: refreshed %d synthetic triggers from '%s'",
                             len(self._triggerless_triggers), tp.name)
                 # Fire the Song Start event now. The tl_start_0 trigger is at 0ms,
@@ -538,7 +542,6 @@ class TriggerEngine:
                 if start_trig:
                     self._fired.add(start_trig.id)
                     self._pre_fired.add(start_trig.id)
-                    self._pre_ramp_fired.add(start_trig.id)
                     if state.paused:
                         logger.info(
                             "Dinner Party on: skipping Song Start event %s — service paused",
@@ -575,7 +578,6 @@ class TriggerEngine:
                 }
                 self._fired.update(skip_ids)
                 self._pre_fired.update(skip_ids)
-                self._pre_ramp_fired.update(skip_ids)
                 self._fired.add(song_start.id)
                 if state.paused:
                     logger.info(
@@ -879,6 +881,17 @@ class TriggerEngine:
         self._shape_offset_quality = quality
         self._play_best_quality = quality
         return True
+
+    def systemic_residual_for(self, uri: str, raw_offset_ms: int) -> Optional[int]:
+        """Residual of a confirmed save vs the offset loaded at song start, in
+        the engine's effective-offset frame (trim included on both sides, so it
+        cancels). Feeds the systemic-offset learner. None when this isn't the
+        current song (the loaded baseline wouldn't correspond)."""
+        if uri != self._last_uri:
+            return None
+        meta = load_audio_shape_meta(uri)
+        trim = _perception_trim_for(meta)
+        return int(raw_offset_ms) + int(trim) - int(self._loaded_offset_ms)
 
     def demote_play_best(self, uri: str, ceiling: float,
                          reason: str = "monitor") -> None:
@@ -1441,8 +1454,6 @@ class TriggerEngine:
             return "Complementary color"
         elif action.type == "ledfx_reverse":
             return "Reverse"
-        elif action.type == "ledfx_global_brightness":
-            return f"Brightness {int(action.brightness * 100)}%"
         elif action.type == "ledfx_global_transition":
             return f"Transition {action.transition_time}s"
         elif action.type == "ledfx_effect_param":
@@ -1539,9 +1550,6 @@ class TriggerEngine:
         shape gate would otherwise mute writes). Pause is not consulted —
         manual fires intentionally work regardless of `state.paused`.
 
-        For single events: applies pre-brightness (ramp awaited) and pre-transition,
-        waits the configured lead time, then fires the main action.
-
         When `event.scene_override == True` and the event has morph_step actions,
         skips the per-virtual write path entirely: builds the post-morph scene,
         pushes it + per-virtual transition_time to LedFX, then activates the
@@ -1568,16 +1576,9 @@ class TriggerEngine:
 
             if event.event_type == "composite":
                 await self._execute_composite(
-                    event, list(labels or []), resolved_picks=_rp, lead_sleep=True,
+                    event, list(labels or []), resolved_picks=_rp,
                 )
             elif event.event_type == "single":
-                await self._apply_pre_commands(event, list(labels or []))
-                lead_ms = max(
-                    settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
-                    settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
-                )
-                if lead_ms > 0:
-                    await asyncio.sleep(lead_ms / 1000)
                 action = self._select_action(event, labels or [])
                 if action is None:
                     return False
@@ -1877,11 +1878,7 @@ class TriggerEngine:
             if event.root is not None:
                 morph_summary = self._describe_action(event.root, resolved=rp)
             asyncio.create_task(
-                self._execute_composite(
-                    event, list(trigger.labels), resolved_picks=rp,
-                    # Look-ahead may have fired pre-commands already (_pre_fired).
-                    skip_pre_commands=trigger.id in self._pre_fired,
-                )
+                self._execute_composite(event, list(trigger.labels), resolved_picks=rp)
             )
         elif event.event_type in SCENE_EVENT_TYPES:
             # Lane choice depends on live scene state; resolve + fire async.
@@ -1897,25 +1894,6 @@ class TriggerEngine:
                 summary=morph_summary,
             )
         )
-
-    async def _fire_pre_commands(self, event: MusicEvent, trigger_id: str, labels: list[str] | None = None) -> None:
-        """Fire global brightness/transition ahead of a single event's main action."""
-        if event.event_type in SCENE_EVENT_TYPES:
-            return  # scene morphs control their own ramps; no pre-set transition
-        ov = self._parse_label_overrides(labels or [])
-        if not ov.get("skip_brightness") and event.pre_brightness_enabled and trigger_id not in self._pre_ramp_fired:
-            value = ov.get("brightness_value", event.pre_brightness_value)
-            await ledfx_client.set_config({"global_brightness": value})
-        if not ov.get("skip_transition") and event.pre_transition_enabled:
-            value = ov.get("transition_value", event.pre_transition_value)
-            cfg = {"transition_time": value}
-            vids = get_all_virtual_ids()
-            logger.info("Pre-transition (look-ahead) '%s': set transition_time=%s on %d virtuals", event.name, value, len(vids))
-            if vids:
-                await asyncio.gather(
-                    *(ledfx_client.set_virtual_config(vid, cfg) for vid in vids),
-                    return_exceptions=True,
-                )
 
     async def _execute_action(
         self, action: Action, labels: list[str] | None = None,
@@ -2081,16 +2059,6 @@ class TriggerEngine:
                     cfg["gradient"] = comp
                     cfg["background_color"] = comp
                     cfg["sparks_color"] = comp
-
-        elif action.type == "ledfx_global_brightness":
-            ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
-            if ramp_ms > 0:
-                if await_ramps:
-                    await ledfx_client.ramp_brightness(action.brightness, ramp_ms)
-                else:
-                    self._spawn_ramp(ledfx_client.ramp_brightness(action.brightness, ramp_ms))
-            else:
-                await ledfx_client.set_config({"global_brightness": action.brightness})
 
         elif action.type == "ledfx_global_transition":
             cfg: dict = {"transition_time": action.transition_time}
@@ -2355,6 +2323,14 @@ class TriggerEngine:
                                     accent_per_vid=self._last_accent_by_vid):
                 (switch_writes if w.kind == "switch" else accent_sync_writes).append(w)
 
+        # Non-ramping values we intend this step, accumulated per virtual so we
+        # can read them back and re-issue any that didn't land (effect type,
+        # colors incl. the third/accent sparks_color, bools, instant numerics).
+        # Ramped params are deliberately excluded — they may be mid-flight.
+        verify_targets: dict[str, dict] = {}
+        def _vt(vid: str) -> dict:
+            return verify_targets.setdefault(vid, {"type": None, "config": {}})
+
         switch_coros = []
         for w in switch_writes:
             # Snapshot the pre-switch (effect, config) before we lose it, so
@@ -2364,14 +2340,21 @@ class TriggerEngine:
             if pre_eff.get("type") and pre_eff.get("type") != w.new_effect_type:
                 morph_effect_state.save(w.virtual_id, pre_eff["type"], dict(pre_eff.get("config") or {}))
 
+            starter = w.starter_config or {}
             switch_coros.append(
-                ledfx_client.set_virtual_effect(w.virtual_id, w.new_effect_type, w.starter_config or {})
+                ledfx_client.set_virtual_effect(w.virtual_id, w.new_effect_type, starter)
             )
             # Mirror the switch into the cache so Pass 2 sees the new effect.
             state.ledfx_virtual_cache.setdefault(w.virtual_id, {})["effect"] = {
                 "type": w.new_effect_type,
-                "config": dict(w.starter_config or {}),
+                "config": dict(starter),
             }
+            # Verify the type + the discrete (colour/toggle) starter fields.
+            vt = _vt(w.virtual_id)
+            vt["type"] = w.new_effect_type
+            vt["config"].update(
+                {k: v for k, v in starter.items() if isinstance(v, (str, bool))}
+            )
         if switch_coros:
             await asyncio.gather(*switch_coros, return_exceptions=True)
 
@@ -2434,6 +2417,7 @@ class TriggerEngine:
                     ledfx_client.set_virtual_effect(w.virtual_id, w.effect_type, {**bool_patch, **instant_str})
                 )
                 effect_cfg.update({**bool_patch, **instant_str})
+                _vt(w.virtual_id)["config"].update({**bool_patch, **instant_str})
 
             if num_patch:
                 if ramp_ms > 0:
@@ -2449,6 +2433,7 @@ class TriggerEngine:
                         ledfx_client.set_virtual_effect(w.virtual_id, w.effect_type, num_patch)
                     )
                     effect_cfg.update(num_patch)
+                    _vt(w.virtual_id)["config"].update(num_patch)
 
             if ramp_str:
                 if await_ramps:
@@ -2460,6 +2445,27 @@ class TriggerEngine:
 
         if instant_coros:
             await asyncio.gather(*instant_coros, return_exceptions=True)
+
+        # ── Verify non-ramping writes landed; re-issue any that didn't ─────────
+        # Sparks-when-power guarantee: for any verified virtual now on the
+        # `power` effect, make sure the sparks params are checked even if this
+        # step didn't explicitly touch them (LedFX re-fills sparks_color white on
+        # a switch). Source the intended values from the post-write cache.
+        if verify_targets and settings.verify_nonramping_writes:
+            for vid, spec in verify_targets.items():
+                eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+                if (spec.get("type") or eff.get("type")) == "power":
+                    cfg = eff.get("config") or {}
+                    for sp in ("sparks_color", "sparks_decay_rate"):
+                        if sp not in spec["config"] and sp in cfg:
+                            spec["config"][sp] = cfg[sp]
+            corrected = await ledfx_client.verify_and_correct(
+                verify_targets,
+                settle_ms=settings.verify_settle_ms,
+                timeout_ms=settings.verify_timeout_ms,
+            )
+            if corrected:
+                logger.warning("morph verify corrected non-ramping writes: %s", corrected)
 
         # ── Persist post-action state for every touched virtual ───────────────
         if touched:
@@ -2750,8 +2756,11 @@ class TriggerEngine:
             logger.warning("fire_color_set_now: unknown card %s", card_id)
             return False
         with ledfx_client.force_allow():
+            # Preview shows the full set, so it must NOT honor preserve_effect —
+            # otherwise effect-resetting params (e.g. background_color) get
+            # silently dropped and the background never fires.
             await self._execute_morph_color(
-                MorphColorAction(ref_id=card_id, pick_mode="default"),
+                MorphColorAction(ref_id=card_id, pick_mode="default", preserve_effect=False),
                 await_ramps=True,
             )
             await ledfx_client.drain_bus()
@@ -2828,9 +2837,8 @@ class TriggerEngine:
     ) -> None:
         """Fire a `morph_set` MusicEvent: for each lane, pick one Action from
         its alternatives (weighted random + label-filtered) and fire all picks
-        concurrently. Pre-fire commands (`pre_brightness_*`, `pre_transition_*`)
-        are intentionally not applied — brightness lives on Morph Step targets
-        now and global scene transitions are gone."""
+        concurrently. Brightness lives on Morph Step targets and global scene
+        transitions are gone."""
         if not event.morph_lanes:
             return
         picks = self._pick_morph_lanes(event, labels)
@@ -2893,6 +2901,17 @@ class TriggerEngine:
             if p is not None:
                 parts.append(f"{nm}: {self._describe_action(p)}")
         return f"{last.name} → {' · '.join(parts)}" if parts else f"→ {last.name}"
+
+    def _scene_lane_is_empty(self, lane_index: int) -> bool:
+        """True when the last fired Scene Update has no alternatives in
+        `lane_index` (or there is no active Scene Update / lane)."""
+        last = get_event(self._last_scene_update_id) if self._last_scene_update_id else None
+        if last is None or last.event_type != "scene_update":
+            return True
+        lanes = last.morph_lanes or []
+        if lane_index < 0 or lane_index >= len(lanes):
+            return True
+        return not lanes[lane_index].alternatives
 
     async def _execute_scene_event(
         self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
@@ -3024,13 +3043,13 @@ class TriggerEngine:
 
         Snapshot format:
           {
-            "global_brightness": float,
             "virtual_effects":  {vid: {"type": str, "params": {pname: value}}},
             "virtual_configs":  {vid: {key: value}},
           }
         """
-        from api import ledfx_client as _lc
         from services.effect_params import resolve_params, get_param_meta, get_virtuals_for_category
+        from services.morph_compiler import resolve_scope
+        from services.morph_aspects import params_for_aspect
 
         snapshot: dict = {}
 
@@ -3093,12 +3112,27 @@ class TriggerEngine:
                         target_vids.update(_gfc(_a.category))
                     else:
                         target_vids.update(get_all_virtual_ids())
+                elif _a.type == "morph_step":
+                    for _t in _a.targets:
+                        if _t.aspect != "effect":
+                            target_vids.update(resolve_scope(_t.scope))
         if target_vids:
             await _warm(list(target_vids))
 
         for action in leaf_actions:
-                if action.type == "ledfx_global_brightness":
-                    snapshot.setdefault("global_brightness", _lc._current_brightness)
+                if action.type == "morph_step":
+                    # Snapshot the aspect-mapped params on every scoped virtual so
+                    # a revert-enabled group restores what the morph changed.
+                    # Effect switches are excluded — they resume via morph state,
+                    # not param revert.
+                    for t in action.targets:
+                        if t.aspect == "effect":
+                            continue
+                        for vid in resolve_scope(t.scope):
+                            cached = state.ledfx_virtual_cache.get(vid, {})
+                            etype = cached.get("effect", {}).get("type")
+                            if etype:
+                                _snap_effect(vid, params_for_aspect(etype, t.aspect))
 
                 elif action.type == "ledfx_ambient":
                     for vid in get_virtuals_for_role("ambient"):
@@ -3152,13 +3186,6 @@ class TriggerEngine:
 
         t_ms = revert_cfg.transition_ms
 
-        if "global_brightness" in snapshot:
-            target = snapshot["global_brightness"]
-            if t_ms > 0:
-                self._spawn_ramp(_lc.ramp_brightness(target, t_ms))
-            else:
-                await _lc.set_config({"global_brightness": target})
-
         for vid, vsnap in snapshot.get("virtual_effects", {}).items():
             etype = vsnap["type"]
             params = vsnap["params"]
@@ -3191,60 +3218,6 @@ class TriggerEngine:
                 await _lc.set_virtual_config(vid, vcfg)
 
         logger.info("Revert applied")
-
-    @staticmethod
-    def _parse_label_overrides(labels: list[str]) -> dict:
-        """Extract special label overrides from the labels list."""
-        ov: dict = {}
-        for l in labels:
-            if l == "-brightness":
-                ov["skip_brightness"] = True
-            elif l == "-transition":
-                ov["skip_transition"] = True
-            elif l.startswith("=brightness:"):
-                try: ov["brightness_value"] = float(l.split(":", 1)[1])
-                except ValueError: pass
-            elif l.startswith("=transition:"):
-                try: ov["transition_value"] = float(l.split(":", 1)[1])
-                except ValueError: pass
-            elif l.startswith("=ramp:"):
-                try: ov["ramp_ms"] = int(l.split(":", 1)[1])
-                except ValueError: pass
-        return ov
-
-    async def _apply_pre_commands(self, event: MusicEvent, labels: list[str] | None = None) -> None:
-        """Apply pre-brightness and pre-transition before a sequence or single event fires.
-        Special labels: -brightness/-transition skip; =brightness:/=transition:/=ramp: override.
-        = overrides are consumed (removed from labels) after use so nested events use their own values.
-        """
-        if event.event_type in SCENE_EVENT_TYPES:
-            return  # scene morphs control their own ramps; no pre-set transition
-        ov = self._parse_label_overrides(labels or [])
-        if not ov.get("skip_brightness") and event.pre_brightness_enabled:
-            value = ov.get("brightness_value", event.pre_brightness_value)
-            ramp_ms = ov.get("ramp_ms",
-                             event.pre_brightness_ramp_ms if event.pre_brightness_ramp_ms is not None
-                             else settings.smooth_ramp_ms)
-            if ramp_ms > 0:
-                await ledfx_client.ramp_brightness(value, ramp_ms)
-            else:
-                await ledfx_client.set_config({"global_brightness": value})
-            # Consume = overrides so they don't fire again in nested events
-            if labels:
-                labels[:] = [l for l in labels
-                             if not l.startswith("=brightness:") and not l.startswith("=ramp:")]
-        if not ov.get("skip_transition") and event.pre_transition_enabled:
-            value = ov.get("transition_value", event.pre_transition_value)
-            cfg = {"transition_time": value}
-            vids = get_all_virtual_ids()
-            logger.info("Pre-transition (inline) '%s': set transition_time=%s on %d virtuals", event.name, value, len(vids))
-            if vids:
-                await asyncio.gather(
-                    *(ledfx_client.set_virtual_config(vid, cfg) for vid in vids),
-                    return_exceptions=True,
-                )
-            if labels:
-                labels[:] = [l for l in labels if not l.startswith("=transition:")]
 
     def _event_touches_ambient(self, event: MusicEvent | None = None,
                                actions: list | None = None) -> list[str]:
@@ -3280,8 +3253,6 @@ class TriggerEngine:
                 for k, v in prev_snap[key].items():
                     if k not in merged:
                         merged[k] = v
-            if "global_brightness" in prev_snap and "global_brightness" not in stolen:
-                stolen["global_brightness"] = prev_snap["global_brightness"]
         return stolen or None
 
     async def _schedule_ambient_revert(
@@ -3293,13 +3264,13 @@ class TriggerEngine:
             try:
                 logger.info(
                     "Revert firing for '%s' (delay=%dms, transition=%dms)",
-                    event.name, revert_cfg.delay_ms, revert_cfg.transition_ms,
+                    name, revert_cfg.delay_ms, revert_cfg.transition_ms,
                 )
                 if revert_cfg.delay_ms > 0:
                     await asyncio.sleep(revert_cfg.delay_ms / 1000)
                 await self._restore_from_snapshot(snapshot, revert_cfg)
             except asyncio.CancelledError:
-                logger.info("Revert cancelled for '%s' — snapshot stolen by overlapping flip", event.name)
+                logger.info("Revert cancelled for '%s' — snapshot stolen by overlapping flip", name)
                 raise
             finally:
                 # Clear the pending entry only if it's still pointing at us.
@@ -3315,7 +3286,6 @@ class TriggerEngine:
     async def _execute_sequence(
         self, event: MusicEvent, labels: list[str], pre_steps: list | None = None,
         skip_event_ids: set[str] | None = None,
-        skip_pre_commands: bool = False,
         precomputed_snapshot: Optional[dict] = None,
     ) -> None:
         """Execute a sequence of steps, then optionally revert LedFX state."""
@@ -3338,8 +3308,6 @@ class TriggerEngine:
                     "Revert skipped for '%s': snapshot is empty (target virtual cache may be missing effect info)",
                     event.name,
                 )
-        if not skip_pre_commands:
-            await self._apply_pre_commands(event, labels)
 
         body_error: Optional[BaseException] = None
         try:
@@ -3657,15 +3625,11 @@ class TriggerEngine:
         skip_event_ids: set[str] | None = None,
         resolved_picks: dict | None = None,
         anchor_ms: int | None = None,
-        skip_pre_commands: bool = False,
         step1_prefired: bool = False,
         precomputed_snapshot: Optional[dict] = None,
-        lead_sleep: bool = False,
     ) -> None:
         """Top-level entry for a composite event: snapshot (if the root is a
-        revert-enabled sequence group — BEFORE pre-commands, matching legacy
-        order), pre-commands (uniform rule: whenever pre_*_enabled — migrated
-        morph_sets carry the flags disabled), then the root tree."""
+        revert-enabled sequence group), then the root tree."""
         root = event.root
         if root is None:
             return
@@ -3679,18 +3643,6 @@ class TriggerEngine:
             ambient_vids = self._event_touches_ambient(actions=leaf)
             stolen = self._steal_pending_ambient_snapshot(ambient_vids) if ambient_vids else None
             snap = stolen if stolen is not None else await self._snapshot_for_revert(actions=leaf)
-
-        if not skip_pre_commands:
-            await self._apply_pre_commands(event, labels)
-            if lead_sleep and root.type != "sequence_group":
-                # Manual fires of single-like roots wait the pre-command lead,
-                # mirroring the legacy fire_event_now single path.
-                lead_ms = max(
-                    settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
-                    settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
-                )
-                if lead_ms > 0:
-                    await asyncio.sleep(lead_ms / 1000)
 
         if root.type == "sequence_group":
             await self._execute_sequence_group(
@@ -3738,21 +3690,6 @@ class TriggerEngine:
                     evt.name,
                 )
                 return
-        # If this is the root entry and pre-commands were fired by the
-        # look-ahead path (_pre_fired set), skip them inside the sequence
-        # so step 0 fires immediately instead of awaiting brightness ramps.
-        skip_pc = entry.is_root and entry.trigger_id in self._pre_fired
-        # Await the look-ahead pre-commands task if one is still running for
-        # this trigger. Without this await, the sequence's first effect PUT
-        # can reach LedFX before the transition PUT (both go through the same
-        # httpx pool concurrently), making the transition silently not apply.
-        if skip_pc:
-            _pc_task = self._pre_cmd_tasks.pop(entry.trigger_id, None)
-            if _pc_task is not None and not _pc_task.done():
-                try:
-                    await _pc_task
-                except Exception:
-                    pass
         # If the planner kicked off a pre-fire snapshot task, await it now.
         # Should already be complete (built seconds ago while the loop was idle).
         snap: Optional[dict] = None
@@ -3770,7 +3707,6 @@ class TriggerEngine:
                 evt, entry.labels,
                 pre_steps=entry.preselected_steps,
                 skip_event_ids=skip_ids,
-                skip_pre_commands=skip_pc,
                 precomputed_snapshot=snap,
             )
         elif evt.event_type == "beat_sequence":
@@ -3779,7 +3715,6 @@ class TriggerEngine:
                 evt, entry.fire_at_ms, entry.labels,
                 skip_event_ids=skip_ids,
                 anchor_override_ms=entry.fire_at_ms,
-                skip_pre_commands=skip_pc,
                 precomputed_snapshot=snap,
             )
         elif evt.event_type == "morph_set":
@@ -3800,7 +3735,6 @@ class TriggerEngine:
                 skip_event_ids=skip_ids,
                 resolved_picks=entry.resolved_picks,
                 anchor_ms=entry.fire_at_ms,
-                skip_pre_commands=skip_pc,
                 precomputed_snapshot=snap,
             )
         elif evt.event_type in SCENE_EVENT_TYPES:
@@ -3814,7 +3748,6 @@ class TriggerEngine:
         step1_prefired: bool = False,
         skip_event_ids: set[str] | None = None,
         anchor_override_ms: int | None = None,
-        skip_pre_commands: bool = False,
         precomputed_snapshot: Optional[dict] = None,
     ) -> None:
         """
@@ -3889,7 +3822,6 @@ class TriggerEngine:
             revert_fire_time = max(raw_fire, earliest)
             timeline.append((None, revert_fire_time, revert.transition_ms, True))
 
-        # Snapshot BEFORE pre-commands so revert restores the true pre-event state.
         # _snapshot_for_revert itself warms any missing target-virtual cache entries
         # concurrently, so no separate sequential refresh is needed.
         snapshot: dict = {}
@@ -3898,8 +3830,6 @@ class TriggerEngine:
                 snapshot = precomputed_snapshot
             else:
                 snapshot = await self._snapshot_for_revert(event)
-        if not skip_pre_commands:
-            await self._apply_pre_commands(event, labels)
 
         # Execute timeline — use monotonic clock for relative inter-step delays.
         # This keeps beat spacing correct even when the trigger fires late (e.g. negative
@@ -4008,7 +3938,6 @@ class TriggerEngine:
                 if re_enabled:
                     self._fired -= re_enabled
                     self._pre_fired -= re_enabled
-                    self._pre_ramp_fired -= re_enabled
                     for tid in re_enabled:
                         self._preselected.pop(tid, None)
                         self._preselected_steps.pop(tid, None)
@@ -4017,7 +3946,6 @@ class TriggerEngine:
                                 _e.snapshot_task.cancel()
                         self._plan.pop(tid, None)
                         self._plan_desc.pop(tid, None)
-                        self._pre_cmd_tasks.pop(tid, None)
                     logger.info("Seek-back detected (%dms → %dms): re-enabled %d triggers",
                                 self._last_progress_ms, now_ms, len(re_enabled))
             self._last_progress_ms = now_ms
@@ -4057,7 +3985,6 @@ class TriggerEngine:
                     self._plan_desc.pop(_t.id, None)
                     self._preselected.pop(_t.id, None)
                     self._preselected_steps.pop(_t.id, None)
-                    self._pre_cmd_tasks.pop(_t.id, None)
                 logger.info(
                     "Stale-fire suppression: skipped %d trigger(s) more than %dms behind effective_now=%d (raw song pos=%d, offset=%+d)",
                     len(_stale), STALE_FIRE_MS, effective_now, now_ms, offset,
@@ -4128,24 +4055,8 @@ class TriggerEngine:
             # ─────────────────────────────────────────────────────────────────
 
             if not state.paused:
-                # Brightness ramp look-ahead — starts ramp at T - lead_ms - ramp_ms
-                # Skip in dinner party mode (DP scenes handle their own brightness)
+                # Skip in dinner party mode (DP scenes handle their own ramps)
                 if not state.dinner_party_mode:
-                    for trigger in self._get_active_triggers():
-                        if not trigger.enabled or trigger.id in self._fired or trigger.id in self._pre_ramp_fired:
-                            continue
-                        event = get_event(trigger.event_id)
-                        if not event or event.event_type != "single" or not event.pre_brightness_enabled:
-                            continue
-                        ramp_ms = event.pre_brightness_ramp_ms if event.pre_brightness_ramp_ms is not None \
-                                  else settings.smooth_ramp_ms
-                        if ramp_ms <= 0:
-                            continue
-                        lead_ms = settings.pre_brightness_lead_ms
-                        if trigger.timestamp_ms - lead_ms - ramp_ms <= effective_now:
-                            self._pre_ramp_fired.add(trigger.id)
-                            self._spawn_ramp(ledfx_client.ramp_brightness(event.pre_brightness_value, ramp_ms))
-
                     # Beat sequence Step 1 pre-ramp look-ahead
                     for trigger in self._get_active_triggers():
                         if not trigger.enabled or trigger.id in self._fired or trigger.id in self._pre_fired:
@@ -4167,44 +4078,6 @@ class TriggerEngine:
                         if trigger.timestamp_ms - ramp_ms <= effective_now:
                             self._pre_fired.add(trigger.id)
                             asyncio.create_task(self._execute_action(step0.action, trigger.labels, await_ramps=False))
-
-                    # Pre-command look-ahead: fire brightness/transition lead_ms before main trigger.
-                    # Now applies to all event types — for sequence/beat_sequence we use the
-                    # plan's root fire_at_ms (which already accounts for cumulative offsets) so
-                    # pre-commands finish before step 0 and don't block its fire.
-                    for trigger in self._get_active_triggers():
-                        if not trigger.enabled or trigger.id in self._fired or trigger.id in self._pre_fired:
-                            continue
-                        event = get_event(trigger.event_id)
-                        if not event:
-                            continue
-                        lead_ms = max(
-                            settings.pre_brightness_lead_ms if event.pre_brightness_enabled else 0,
-                            settings.pre_transition_lead_ms if event.pre_transition_enabled else 0,
-                        )
-                        if lead_ms <= 0:
-                            continue
-                        # For sequence/beat_sequence prefer the plan's root fire_at_ms so
-                        # pre-commands land relative to the actual (offset-adjusted) start.
-                        anchor_ms = trigger.timestamp_ms
-                        _plan_entries = self._plan.get(trigger.id) or []
-                        for _e in _plan_entries:
-                            if _e.event.id == trigger.event_id:
-                                anchor_ms = _e.fire_at_ms
-                                break
-                        _delta = anchor_ms - lead_ms - effective_now
-                        if _delta <= 0:
-                            logger.info(
-                                "Pre-cmd look-ahead: trigger=%s event='%s' type=%s pt_en=%s pb_en=%s lead=%d anchor=%d eff_now=%d delta=%d",
-                                trigger.id, event.name, event.event_type,
-                                event.pre_transition_enabled, event.pre_brightness_enabled,
-                                lead_ms, anchor_ms, effective_now, _delta,
-                            )
-                            self._pre_fired.add(trigger.id)
-                            _pc_task = asyncio.create_task(
-                                self._fire_pre_commands(event, trigger.id, trigger.labels)
-                            )
-                            self._pre_cmd_tasks[trigger.id] = _pc_task
 
                 # ── Scene-override look-ahead ─────────────────────────────
                 # For any root entry with event.scene_override eligible, pre-stage

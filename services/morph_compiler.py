@@ -134,6 +134,12 @@ def _patch_numeric(
         scale = meta.get("aspect_scale")
         if scale is None:
             scale = 1.0
+        # Per-target weight override (UI: reactivity "per-param scale weights").
+        # Keyed by "{effect_type}.{param}"; replaces the catalog default scale
+        # for this param. Applies to both absolute and nudge math below.
+        override = (val.scale_overrides or {}).get(f"{effect_type}.{pname}")
+        if override is not None:
+            scale = override
         lo = meta.get("min", 0.0)
         hi = meta.get("max", 1.0)
 
@@ -142,7 +148,13 @@ def _patch_numeric(
             current = current_config.get(pname)
             if current is None:
                 current = (lo + hi) / 2  # neutral fallback if cache lacks the param
-            new_val = float(current) + param_delta
+            current = float(current)
+            # magnitude_only params (radial `spin`) store a signed value but are
+            # driven in magnitude space — the sign is owned by spin_sign/Flip and
+            # re-applied at write time. Nudge the magnitude, not the signed value.
+            if meta.get("magnitude_only"):
+                current = abs(current)
+            new_val = current + param_delta
         else:
             scaled = max(0.0, min(1.0, val.number * scale))
             new_val = lo + (hi - lo) * scaled

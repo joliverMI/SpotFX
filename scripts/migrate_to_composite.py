@@ -184,10 +184,6 @@ def migrate(raw: dict) -> tuple[dict, list[tuple[str, str, str]], int]:
         migrated.update(LEGACY_BODY_RESET)
         migrated["event_type"] = "composite"
         migrated["root"] = root
-        if et == "morph_set":
-            # morph_set never fired pre-commands; the rule moves into data.
-            migrated["pre_brightness_enabled"] = False
-            migrated["pre_transition_enabled"] = False
         MusicEvent(**migrated)  # validate — raises on any mapping bug
         out[eid] = migrated
         rows.append((ev.get("name", eid), et, summary))

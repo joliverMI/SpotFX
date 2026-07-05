@@ -91,7 +91,6 @@ async def set_analyzed_trigger_override(enabled: bool):
     if enabled:
         engine._fired.clear()
         engine._pre_fired.clear()
-        engine._pre_ramp_fired.clear()
     await ws_manager.broadcast_state(state)
     return {"analyzed_trigger_override": enabled, "has_analyzed": engine._analyzed_triggers is not None,
             "count": len(engine._analyzed_triggers) if engine._analyzed_triggers else 0}

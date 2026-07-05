@@ -7,7 +7,6 @@ const DESCRIPTIONS: Record<ActionType, string> = {
   ledfx_scene: 'Activate a named LedFX scene',
   ledfx_ambient: 'Patch the Single Color Effect (color, blur…)',
   ledfx_ambient_color: 'Apply the complementary of the current ambient color',
-  ledfx_global_brightness: 'Set LedFX global brightness',
   ledfx_global_transition: 'Set LedFX global transition time / mode',
   ledfx_effect_param: 'Set effect parameters by unified label',
   morph_step: 'Multi-target aspect changes (shape/effect/color/…)',

@@ -60,8 +60,6 @@ class SettingsPatch(BaseModel):
     quiet_baseline_window_s: Optional[int] = None
     quiet_min_duration_ms: Optional[int] = None
     audio_shape_min_capture_pct: Optional[float] = None
-    pre_brightness_lead_ms: Optional[int] = None
-    pre_transition_lead_ms: Optional[int] = None
     smooth_ramp_ms: Optional[int] = None
     auto_generate_mode: Optional[str] = None   # "embedded" | "claude"
     show_ai_triggers: Optional[bool] = None
@@ -107,8 +105,6 @@ async def get_settings():
         "quiet_baseline_window_s": settings.quiet_baseline_window_s,
         "quiet_min_duration_ms": settings.quiet_min_duration_ms,
         "audio_shape_min_capture_pct": settings.audio_shape_min_capture_pct,
-        "pre_brightness_lead_ms": settings.pre_brightness_lead_ms,
-        "pre_transition_lead_ms": settings.pre_transition_lead_ms,
         "smooth_ramp_ms": settings.smooth_ramp_ms,
         "auto_generate_mode": settings.auto_generate_mode,
         "show_ai_triggers": settings.show_ai_triggers,

@@ -40,19 +40,6 @@ function TypedForm({ action, update }: { action: Action; update: UpdateAction })
       return <AmbientForm action={action} update={update} />;
     case 'ledfx_ambient_color':
       return <p className="empty-note">Applies the complementary of the current ambient color. No parameters.</p>;
-    case 'ledfx_global_brightness':
-      return (
-        <>
-          <Row label="Brightness">
-            <NumberInput value={action.brightness} min={0} max={1} step={0.05}
-              onChange={(v) => update((a) => { if (a.type === 'ledfx_global_brightness') a.brightness = v ?? 1; })} />
-          </Row>
-          <Row label="Ramp (ms)" help="Blank = settings default, 0 = instant">
-            <NumberInput value={action.ramp_ms} nullable
-              onChange={(v) => update((a) => { if (a.type === 'ledfx_global_brightness') a.ramp_ms = v; })} />
-          </Row>
-        </>
-      );
     case 'ledfx_global_transition':
       return (
         <>

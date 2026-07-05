@@ -267,8 +267,7 @@ async def engine_seams() -> None:
     ok("seam: _build_scene_payload resolves bindings before scene build")
 
     # (e) beats timeline with bound ramp: no TypeError, resolved int reaches leaf
-    beats_ev = MusicEvent(name="b", event_type="composite", pre_brightness_enabled=False,
-                          pre_transition_enabled=False,
+    beats_ev = MusicEvent(name="b", event_type="composite",
                           root={"type": "sequence_group", "timing": "beats", "children": [
                               {"pre_ramp": True, "actions": [{
                                   "type": "morph_step",

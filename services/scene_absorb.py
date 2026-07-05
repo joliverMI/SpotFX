@@ -272,9 +272,6 @@ async def import_scene(scene_id: str) -> Optional[MusicEvent]:
         event_type="composite",
         color="#FFD700",
         labels=["imported-scene"],
-        # Post-unification shape: one parallel lane per virtual. Pre-commands
-        # off, matching migrated morph_set semantics.
-        pre_brightness_enabled=False,
-        pre_transition_enabled=False,
+        # Post-unification shape: one parallel lane per virtual.
         root=ParallelGroupAction(children=lanes),
     )

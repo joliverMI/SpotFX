@@ -115,7 +115,8 @@
       "params": {
         "polygon":   { "label":"Polygon",  "type":"toggle",  "smooth":false,                                  "aspect":"shape" },
         "spin":      { "label":"Speed",    "type":"numeric", "smooth":false, "min":0,"max":1,
-                       "magnitude_only":true, "note":"target_value is magnitude; sign preserved from current value" },
+                       "aspect":"reactivity", "aspect_scale":1.0,
+                       "magnitude_only":true, "note":"Reactivity drives the magnitude; spin_sign/Flip owns the sign (magnitude_only preserves it on write)" },
         "spin_sign": { "label":"Flip",     "type":"toggle",  "smooth":false,
                        "maps_to":"spin",   "sign_control":true,                                              "aspect":"shape",
                        "note":"On=positive spin, Off=negative spin, Toggle=negate sign" },
