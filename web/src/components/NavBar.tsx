@@ -7,7 +7,9 @@ export default function NavBar() {
     <nav>
       <span className="logo">SpotFX</span>
       <a href="/">Now Playing</a>
-      <a href="/builder.html">Profile Builder</a>
+      <Link to="/builder" className={pathname === '/builder' ? 'active' : ''}>
+        Profile Builder
+      </Link>
       <Link to="/" className={pathname === '/' || pathname.startsWith('/event') ? 'active' : ''}>
         Events
       </Link>
