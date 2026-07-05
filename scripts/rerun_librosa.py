@@ -7,6 +7,8 @@ Re-analyzes songs that have saved WAV files, adding any new features
 Usage:
   python scripts/rerun_librosa.py                              # all songs with WAVs
   python scripts/rerun_librosa.py --uri spotify:track:abc123   # specific song
+  python scripts/rerun_librosa.py --uris uri1,uri2             # explicit list
+  python scripts/rerun_librosa.py --training-profiles          # songs in storage/training_profiles.json
   python scripts/rerun_librosa.py --dry-run                    # show what would run
 """
 from __future__ import annotations
@@ -86,18 +88,39 @@ def rerun_one(meta: AudioShapeMeta) -> bool:
         return False
 
 
+def training_profile_uris() -> set[str]:
+    """Union of training + embedded-only URIs across all training profiles."""
+    tp_path = PROJECT_ROOT / "storage" / "training_profiles.json"
+    uris: set[str] = set()
+    for prof in json.loads(tp_path.read_text(encoding="utf-8")).values():
+        uris.update(prof.get("training_uris") or [])
+        uris.update(prof.get("embedded_only_uris") or [])
+    return uris
+
+
 def main():
     parser = argparse.ArgumentParser(description="Re-run librosa analysis on existing WAV files")
     parser.add_argument("--uri", type=str, help="Specific Spotify URI to re-analyze")
+    parser.add_argument("--uris", type=str, help="Comma-separated list of Spotify URIs")
+    parser.add_argument("--training-profiles", action="store_true",
+                        help="Restrict to songs referenced by storage/training_profiles.json")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be analyzed without running")
     args = parser.parse_args()
 
     songs = find_songs_with_wavs()
 
+    wanted: set[str] | None = None
     if args.uri:
-        songs = [(m, w) for m, w in songs if m.spotify_uri == args.uri]
+        wanted = {args.uri}
+    elif args.uris:
+        wanted = {u.strip() for u in args.uris.split(",") if u.strip()}
+    elif args.training_profiles:
+        wanted = training_profile_uris()
+        print(f"Training profiles reference {len(wanted)} unique URIs")
+    if wanted is not None:
+        songs = [(m, w) for m, w in songs if m.spotify_uri in wanted]
         if not songs:
-            print(f"No WAV found for {args.uri}")
+            print("No matching songs with WAVs found")
             return
 
     print(f"\nFound {len(songs)} songs with WAV files")

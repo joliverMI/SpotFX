@@ -20,6 +20,7 @@ class LibrosaBeat(BaseModel):
     rms_high:  float = 0.0   # high-frequency band (>4000 Hz)
     onset_score:      float = 0.0  # sum of onset strengths in this interval, normalised 0–1 across song
     bass_onset_score: float = 0.0  # sum of bass onset strengths, normalised 0–1
+    snare_onset_score: float = 0.0 # sum of snare onset strengths, normalised 0–1 (librosa v3+)
     harmonic_score:   float = 0.0  # sum of harmonic novelty values, normalised 0–1
     mfcc: list[float] = Field(default_factory=list)        # 13 MFCC coefficients (z-score normalised per song)
     mfcc_delta: list[float] = Field(default_factory=list)  # 13 delta-MFCC coefficients
@@ -55,5 +56,6 @@ class LibrosaAnalysis(BaseModel):
     beats: list[LibrosaBeat]
     onsets: list[LibrosaOnset]
     bass_onsets: list[LibrosaOnset] = Field(default_factory=list)  # low-freq (<250 Hz) onset pass
+    snare_onsets: list[LibrosaOnset] = Field(default_factory=list) # mid-band percussive pass (librosa v3+)
     sections: list[LibrosaSection]
     harmonic_changes: list[LibrosaHarmonicChange]

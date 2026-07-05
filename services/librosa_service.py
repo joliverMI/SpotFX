@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,10 @@ from models.librosa_analysis import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Analysis format version stamped into meta + sidecar on completion.
+# 2 = MFCC added; 3 = HPSS bass/snare onset passes + decluttered overall onsets.
+LIBROSA_VERSION = 3
 
 # ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -101,12 +106,27 @@ def get_analysis_by_uri(spotify_uri: str) -> Optional[LibrosaAnalysis]:
 
 # ── WAV retention ─────────────────────────────────────────────────────────────
 
+def _last_played_mtime(wav: Path) -> float:
+    """
+    Last-played proxy for a WAV: the audio-shape sidecar .json is rewritten
+    every time the song plays (offset locks persist setlist_offsets/history),
+    so its mtime tracks plays while the WAV mtime only tracks capture date.
+    """
+    mtime = wav.stat().st_mtime
+    sidecar = wav.with_suffix(".json")
+    try:
+        mtime = max(mtime, sidecar.stat().st_mtime)
+    except OSError:
+        pass
+    return mtime
+
+
 def manage_wav_retention() -> None:
-    """Delete oldest WAV files when count exceeds settings.audio_wav_max_songs."""
+    """Delete least-recently-played WAVs when count exceeds settings.audio_wav_max_songs."""
     max_songs = settings.audio_wav_max_songs
     if max_songs <= 0:
         return
-    wavs = sorted(AUDIO_SHAPES_DIR.glob("*.wav"), key=lambda p: p.stat().st_mtime)
+    wavs = sorted(AUDIO_SHAPES_DIR.glob("*.wav"), key=_last_played_mtime)
     to_delete = wavs[: max(0, len(wavs) - max_songs)]
     for p in to_delete:
         try:
@@ -114,6 +134,149 @@ def manage_wav_retention() -> None:
             logger.info("WAV retention: deleted %s", p.name)
         except Exception as exc:
             logger.warning("WAV retention: could not delete %s: %s", p.name, exc)
+
+
+# ── WAV↔NPZ alignment ─────────────────────────────────────────────────────────
+
+def _measure_wav_npz_bias(meta: AudioShapeMeta) -> Optional[int]:
+    """
+    Measure the offset that maps WAV time to the NPZ (song-relative) timeline
+    by cross-correlating the WAV's band RMS against the stored NPZ bands,
+    reusing the benchmark harness. Measured fresh each time (no cache — the
+    WAV/NPZ pair changes on recapture). Returns None when no ≥2-window xcorr
+    consensus forms (e.g. sidecar has no xcorr_windows).
+    """
+    try:
+        from bench.calibrate import measure_wav_bias
+        from bench.replay import load_song_assets
+        from bench.simulate import load_wav, make_frames
+
+        stem = Path(meta.npz_file).stem
+        assets = load_song_assets(stem)
+        frames = make_frames(load_wav(assets["wav_path"]))
+        return measure_wav_bias(assets, frames)
+    except Exception as exc:
+        logger.warning("WAV↔NPZ bias measurement failed for %s: %s", meta.title, exc)
+        return None
+
+
+# ── Onset detection helpers ───────────────────────────────────────────────────
+# Factored into pure functions with explicit params so scripts/tune_onsets.py
+# can grid-search candidates in memory without touching stored sidecars.
+
+@dataclass
+class OnsetParams:
+    delta: float
+    wait_ms: int
+    min_strength: float
+    fmin: Optional[int] = None
+    fmax: Optional[int] = None
+
+
+def overall_onset_params() -> OnsetParams:
+    return OnsetParams(
+        delta=settings.librosa_onset_delta,
+        wait_ms=settings.librosa_onset_wait_ms,
+        min_strength=settings.librosa_onset_min_strength,
+    )
+
+
+def bass_onset_params() -> OnsetParams:
+    return OnsetParams(
+        delta=settings.librosa_bass_onset_delta,
+        wait_ms=settings.librosa_bass_onset_wait_ms,
+        min_strength=settings.librosa_bass_min_strength,
+        fmax=settings.librosa_bass_fmax,
+    )
+
+
+def snare_onset_params() -> OnsetParams:
+    return OnsetParams(
+        delta=settings.librosa_snare_onset_delta,
+        wait_ms=settings.librosa_snare_onset_wait_ms,
+        min_strength=settings.librosa_snare_min_strength,
+        fmin=settings.librosa_snare_fmin,
+        fmax=settings.librosa_snare_fmax,
+    )
+
+
+def compute_percussive(y: np.ndarray, sr: int, margin: float) -> np.ndarray:
+    """
+    Percussive component via HPSS, shared by the bass and snare detectors so
+    sustained harmonic content (bass-guitar notes, pads) doesn't fire onsets.
+    margin <= 1.0 disables the separation and returns y unchanged.
+    """
+    if margin <= 1.0:
+        return y
+    import librosa
+    _, y_perc = librosa.effects.hpss(y, margin=(1.0, margin))
+    return y_perc
+
+
+def compute_onset_envelope(
+    y: np.ndarray, sr: int, fmin: Optional[int] = None, fmax: Optional[int] = None,
+) -> np.ndarray:
+    """Band-limited onset-strength envelope with median aggregation across mel
+    bands (median is less prone than mean to broadband noise inflating peaks)."""
+    import librosa
+    kwargs = {}
+    if fmin:
+        kwargs["fmin"] = fmin
+    if fmax:
+        kwargs["fmax"] = fmax
+    if fmin or fmax:
+        # Scale the mel-band count to the band's share of the full mel range:
+        # 128 bands crammed into e.g. 0-250 Hz leaves most filters over empty
+        # FFT bins, and median aggregation of mostly-empty bands returns an
+        # all-zero envelope (no onsets at all).
+        lo = float(fmin or 0.0)
+        hi = float(fmax or sr / 2.0)
+        full_mel = librosa.hz_to_mel(sr / 2.0)
+        frac = (librosa.hz_to_mel(hi) - librosa.hz_to_mel(lo)) / full_mel
+        kwargs["n_mels"] = int(np.clip(round(128 * frac), 8, 128))
+    return librosa.onset.onset_strength(y=y, sr=sr, aggregate=np.median, **kwargs)
+
+
+def pick_onset_frames(
+    env: np.ndarray, sr: int, *,
+    delta: float, wait_ms: int, min_strength: float, hop_length: int = 512,
+) -> np.ndarray:
+    """
+    Peak-pick onset frames from an envelope. onset_detect normalizes the
+    envelope 0-1 (normalize=True default), so delta and min_strength are both
+    on a 0-1 scale. wait_ms enforces a minimum gap between onsets.
+    """
+    import librosa
+    wait = max(1, round(wait_ms / 1000 * sr / hop_length))
+    frames = librosa.onset.onset_detect(
+        onset_envelope=env, sr=sr, units='frames', delta=delta, wait=wait,
+    )
+    frames = np.asarray(frames, dtype=int)
+    frames = frames[frames < len(env)]
+    if min_strength > 0 and len(frames):
+        env_max = float(env.max()) if env.max() > 0 else 1.0
+        frames = frames[(env[frames] / env_max) >= min_strength]
+    return frames
+
+
+def onsets_from_frames(env: np.ndarray, frames: np.ndarray, sr: int) -> list[LibrosaOnset]:
+    import librosa
+    env_max = float(env.max()) if env.max() > 0 else 1.0
+    times = librosa.frames_to_time(frames, sr=sr)
+    return [
+        LibrosaOnset(ms=int(t * 1000), strength=round(float(env[f]) / env_max, 3))
+        for t, f in zip(times, frames)
+    ]
+
+
+def pick_onsets(
+    env: np.ndarray, sr: int, *,
+    delta: float, wait_ms: int, min_strength: float, hop_length: int = 512,
+) -> list[LibrosaOnset]:
+    frames = pick_onset_frames(
+        env, sr, delta=delta, wait_ms=wait_ms, min_strength=min_strength, hop_length=hop_length,
+    )
+    return onsets_from_frames(env, frames, sr)
 
 
 # ── Core analysis ─────────────────────────────────────────────────────────────
@@ -143,18 +306,13 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
     beats_per_bar = 4
 
     # ── Onsets ────────────────────────────────────────────────────────────
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    onset_frames = librosa.onset.onset_detect(
-        onset_envelope=onset_env, sr=sr, units='frames', delta=settings.librosa_onset_delta,
+    # Full-spectrum, on raw y (sections reuse onset_frames for density).
+    op = overall_onset_params()
+    onset_env = compute_onset_envelope(y, sr)
+    onset_frames = pick_onset_frames(
+        onset_env, sr, delta=op.delta, wait_ms=op.wait_ms, min_strength=op.min_strength,
     )
-    onset_times = librosa.frames_to_time(onset_frames, sr=sr)
-    # Normalise strength to 0–1
-    env_max = float(onset_env.max()) if onset_env.max() > 0 else 1.0
-    onsets = [
-        LibrosaOnset(ms=int(t * 1000), strength=round(float(onset_env[f]) / env_max, 3))
-        for t, f in zip(onset_times, onset_frames)
-        if f < len(onset_env)
-    ]
+    onsets = onsets_from_frames(onset_env, onset_frames, sr)
 
     # ── Downbeat phase detection ───────────────────────────────────────────
     # For each candidate phase (0–beats_per_bar-1), average the onset envelope
@@ -185,8 +343,23 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
     # ── Per-beat RMS energy (four bands) ──────────────────────────────────
     rms_t_arr, rms_b_arr, rms_m_arr, rms_h_arr = _compute_beat_rms(y, sr, beat_times)
 
-    # ── Bass onsets ────────────────────────────────────────────────────────
-    bass_onsets = _detect_bass_onsets(y, sr)
+    # ── Bass + snare onsets (shared percussive component) ─────────────────
+    y_perc = compute_percussive(y, sr, settings.librosa_hpss_margin)
+    bp, sp = bass_onset_params(), snare_onset_params()
+    bass_env = compute_onset_envelope(y_perc, sr, fmin=bp.fmin, fmax=bp.fmax)
+    snare_env = compute_onset_envelope(y_perc, sr, fmin=sp.fmin, fmax=sp.fmax)
+    bass_onsets = pick_onsets(
+        bass_env, sr, delta=bp.delta, wait_ms=bp.wait_ms, min_strength=bp.min_strength)
+    snare_onsets = pick_onsets(
+        snare_env, sr, delta=sp.delta, wait_ms=sp.wait_ms, min_strength=sp.min_strength)
+
+    # Dense scoring passes: the per-beat *_score buckets feed the embedded
+    # trigger generator, so they must reflect true hit density (rapid kick
+    # rolls) — a permissive pick, not the decluttered display lists above.
+    sd, sw = settings.librosa_score_delta, settings.librosa_score_wait_ms
+    onsets_dense = pick_onsets(onset_env, sr, delta=sd, wait_ms=sw, min_strength=0.0)
+    bass_dense   = pick_onsets(bass_env,  sr, delta=sd, wait_ms=sw, min_strength=0.0)
+    snare_dense  = pick_onsets(snare_env, sr, delta=sd, wait_ms=sw, min_strength=0.0)
 
     # ── Structural sections ────────────────────────────────────────────────
     sections = _detect_sections(y, sr, beat_frames, tempo_bpm, onset_frames)
@@ -194,9 +367,9 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
     # ── Harmonic changes ──────────────────────────────────────────────────
     harmonic_changes = _detect_harmonic_changes(y, sr, beat_frames)
 
-    # ── Per-beat event scores (onset / bass onset / harmonic) ─────────────
-    onset_scores, bass_scores, harmonic_scores = _compute_beat_event_scores(
-        beat_times, onsets, bass_onsets, harmonic_changes,
+    # ── Per-beat event scores (onset / bass / snare / harmonic) ───────────
+    onset_scores, bass_scores, snare_scores, harmonic_scores = _compute_beat_event_scores(
+        beat_times, onsets_dense, bass_dense, snare_dense, harmonic_changes,
     )
 
     # ── Per-beat MFCC features ──────────────────────────────────────────
@@ -231,6 +404,7 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
             rms_high =round(rms_h_arr[i], 3),
             onset_score     =round(onset_scores[i],    3),
             bass_onset_score=round(bass_scores[i],     3),
+            snare_onset_score=round(snare_scores[i],   3),
             harmonic_score  =round(harmonic_scores[i], 3),
             mfcc=[round(float(mfcc_sync[c, i]), 3) for c in range(13)] if i < n_mfcc_beats else [],
             mfcc_delta=[round(float(mfcc_delta_sync[c, i]), 3) for c in range(13)] if i < n_mfcc_beats else [],
@@ -240,18 +414,25 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
 
     # ── Capture start offset ───────────────────────────────────────────────
     # The WAV starts at t=0 (start of capture), but audio shape timestamps
-    # are song-relative (capture begins mid-song). Seed librosa_offset_ms
-    # from timestamps_ms[0] in the NPZ so marks align by default.
+    # are song-relative (capture begins mid-song). Preferred seed: xcorr the
+    # WAV against the stored NPZ bands (the WAV writer and the RMS block
+    # timestamps disagree by a per-song bias, typically ~1 s). Fallback when
+    # no xcorr consensus forms: assume the WAV starts at timestamps_ms[0].
     capture_offset_ms = 0
-    npz_path = AUDIO_SHAPES_DIR / meta.npz_file
-    if npz_path.exists():
-        try:
-            npz_data = np.load(str(npz_path))
-            ts = npz_data["timestamps_ms"] if "timestamps_ms" in npz_data else None
-            if ts is not None and len(ts) > 0:
-                capture_offset_ms = int(ts[0])
-        except Exception as exc:
-            logger.warning("Could not read capture offset from NPZ for %s: %s", meta.title, exc)
+    bias = _measure_wav_npz_bias(meta)
+    if bias is not None:
+        capture_offset_ms = int(bias)
+        logger.info("Librosa offset seeded from WAV↔NPZ xcorr: %+d ms (%s)", bias, meta.title)
+    else:
+        npz_path = AUDIO_SHAPES_DIR / meta.npz_file
+        if npz_path.exists():
+            try:
+                npz_data = np.load(str(npz_path))
+                ts = npz_data["timestamps_ms"] if "timestamps_ms" in npz_data else None
+                if ts is not None and len(ts) > 0:
+                    capture_offset_ms = int(ts[0])
+            except Exception as exc:
+                logger.warning("Could not read capture offset from NPZ for %s: %s", meta.title, exc)
 
     analysis = LibrosaAnalysis(
         spotify_uri=meta.spotify_uri,
@@ -265,6 +446,7 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
         beats=beats,
         onsets=onsets,
         bass_onsets=bass_onsets,
+        snare_onsets=snare_onsets,
         sections=sections,
         harmonic_changes=harmonic_changes,
     )
@@ -276,20 +458,21 @@ def analyze_sync(meta: AudioShapeMeta) -> LibrosaAnalysis:
     if meta.spotify_uri:
         _librosa_index[meta.spotify_uri] = jpath.name
 
-    # Stamp the sidecar with librosa version (2 = has MFCC)
-    meta.librosa_version = 2
+    # Stamp the sidecar with the analysis format version
+    meta.librosa_version = LIBROSA_VERSION
     sidecar_path = (AUDIO_SHAPES_DIR / meta.npz_file).with_suffix(".json")
     if sidecar_path.exists():
         try:
             sidecar_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            sidecar_data["librosa_version"] = 2
+            sidecar_data["librosa_version"] = LIBROSA_VERSION
             sidecar_path.write_text(json.dumps(sidecar_data, indent=2), encoding="utf-8")
         except Exception as exc:
             logger.warning("Could not update sidecar librosa_version: %s", exc)
 
     logger.info(
-        "Librosa analysis complete: %s — %.1f BPM, %d beats, %d onsets, %d bass, %d sections, %d harmonic",
-        meta.title, tempo_bpm, len(beats), len(onsets), len(bass_onsets), len(sections), len(harmonic_changes),
+        "Librosa analysis complete: %s — %.1f BPM, %d beats, %d onsets, %d bass, %d snare, %d sections, %d harmonic",
+        meta.title, tempo_bpm, len(beats), len(onsets), len(bass_onsets), len(snare_onsets),
+        len(sections), len(harmonic_changes),
     )
     return analysis
 
@@ -417,24 +600,31 @@ def _detect_sections(
     return sections
 
 
-def _detect_bass_onsets(y: np.ndarray, sr: int) -> list[LibrosaOnset]:
+def _detect_bass_onsets(
+    y: np.ndarray, sr: int, params: Optional[OnsetParams] = None,
+) -> list[LibrosaOnset]:
     """
-    Detect onsets using a low-frequency (bass) onset envelope (fmax=250 Hz).
-    Captures kick-drum and sub-bass hits that the full-spectrum detector under-weights.
+    Kick / sub-bass hits: low-frequency onset envelope (fmax ~250 Hz) over the
+    percussive component (pass y_perc from compute_percussive so sustained
+    bass-guitar notes don't fire).
     """
-    import librosa
+    p = params or bass_onset_params()
+    env = compute_onset_envelope(y, sr, fmin=p.fmin, fmax=p.fmax)
+    return pick_onsets(env, sr, delta=p.delta, wait_ms=p.wait_ms, min_strength=p.min_strength)
 
-    bass_env = librosa.onset.onset_strength(y=y, sr=sr, fmax=settings.librosa_bass_fmax)
-    bass_frames = librosa.onset.onset_detect(
-        onset_envelope=bass_env, sr=sr, units='frames', delta=settings.librosa_bass_onset_delta,
-    )
-    bass_times = librosa.frames_to_time(bass_frames, sr=sr)
-    env_max = float(bass_env.max()) if bass_env.max() > 0 else 1.0
-    return [
-        LibrosaOnset(ms=int(t * 1000), strength=round(float(bass_env[f]) / env_max, 3))
-        for t, f in zip(bass_times, bass_frames)
-        if f < len(bass_env)
-    ]
+
+def _detect_snare_onsets(
+    y: np.ndarray, sr: int, params: Optional[OnsetParams] = None,
+) -> list[LibrosaOnset]:
+    """
+    Snare / clap hits: mid-band onset envelope over the percussive component.
+    Snares are a broadband burst with dominant 1.5-6 kHz energy; hi-hats
+    concentrate above ~6-8 kHz at lower energy, so the band limit plus the
+    strength floor suppresses hat false-positives without a second pass.
+    """
+    p = params or snare_onset_params()
+    env = compute_onset_envelope(y, sr, fmin=p.fmin, fmax=p.fmax)
+    return pick_onsets(env, sr, delta=p.delta, wait_ms=p.wait_ms, min_strength=p.min_strength)
 
 
 def _compute_beat_rms(
@@ -496,16 +686,17 @@ def _compute_beat_event_scores(
     beat_times: np.ndarray,
     onsets: list[LibrosaOnset],
     bass_onsets: list[LibrosaOnset],
+    snare_onsets: list[LibrosaOnset],
     harmonic_changes: list[LibrosaHarmonicChange],
-) -> tuple[list[float], list[float], list[float]]:
+) -> tuple[list[float], list[float], list[float], list[float]]:
     """
     For each beat interval, sum the strength/novelty of events that land in it.
-    Returns three parallel lists (onset_scores, bass_onset_scores, harmonic_scores),
+    Returns four parallel lists (onset, bass, snare, harmonic scores),
     each normalised 0–1 across the song (max = 1.0).
     """
     n = len(beat_times)
     if n == 0:
-        return [], [], []
+        return [], [], [], []
 
     beat_ms = (beat_times * 1000).astype(int)
 
@@ -517,6 +708,7 @@ def _compute_beat_event_scores(
 
     onset_raw    = np.zeros(n)
     bass_raw     = np.zeros(n)
+    snare_raw    = np.zeros(n)
     harmonic_raw = np.zeros(n)
 
     for o in onsets:
@@ -529,6 +721,11 @@ def _compute_beat_event_scores(
         if 0 <= idx < n and bo.ms < cell_end[idx]:
             bass_raw[idx] += bo.strength
 
+    for so in snare_onsets:
+        idx = int(np.searchsorted(beat_ms, so.ms, side='right')) - 1
+        if 0 <= idx < n and so.ms < cell_end[idx]:
+            snare_raw[idx] += so.strength
+
     for hc in harmonic_changes:
         idx = int(np.searchsorted(beat_ms, hc.ms, side='right')) - 1
         if 0 <= idx < n and hc.ms < cell_end[idx]:
@@ -537,13 +734,14 @@ def _compute_beat_event_scores(
     # Drop the last beat — it's a partial cell and accumulates trailing events.
     onset_raw    = onset_raw[:-1]
     bass_raw     = bass_raw[:-1]
+    snare_raw    = snare_raw[:-1]
     harmonic_raw = harmonic_raw[:-1]
 
     def _norm(arr: np.ndarray) -> list[float]:
         m = float(arr.max())
         return (arr / m).tolist() if m > 0 else arr.tolist()
 
-    return _norm(onset_raw), _norm(bass_raw), _norm(harmonic_raw)
+    return _norm(onset_raw), _norm(bass_raw), _norm(snare_raw), _norm(harmonic_raw)
 
 
 def _detect_harmonic_changes(y: np.ndarray, sr: int, beat_frames: np.ndarray) -> list[LibrosaHarmonicChange]:

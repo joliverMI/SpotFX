@@ -177,6 +177,7 @@
         <button class="librosa-filter-btn active" data-lf="onsets" style="background:rgba(255,136,0,0.5);">Onsets</button>
         <button class="librosa-filter-btn active" data-lf="harmonic" style="background:rgba(204,102,255,0.5);">Harmonic</button>
         <button class="librosa-filter-btn active" data-lf="bass"    style="background:rgba(68,221,136,0.5);">Bass</button>
+        <button class="librosa-filter-btn active" data-lf="snare"   style="background:rgba(255,221,51,0.5);">Snare</button>
         <button class="librosa-filter-btn active" data-lf="mfcc" style="background:rgba(255,102,51,0.5);">MFCC</button>
         <span id="librosa-summary" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
         <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Offset:</span>
@@ -270,8 +271,8 @@
     <div class="field">
       <label>Filter Labels (comma separated)</label>
       <input type="text" id="edit-labels"
-             placeholder="e.g. blue, -red, =brightness:0.5, =transition:1.5"
-             title="Comma-separated label filters (case-insensitive).&#10;&#10;Filter syntax:&#10;  foo     include actions tagged &quot;foo&quot;&#10;  -foo    exclude actions tagged &quot;foo&quot;&#10;&#10;An action must match at least one positive label (if any are given) and no negative labels.&#10;Weight-0 actions are label-only: included only when a positive label matches.&#10;If no actions match, the filter is ignored and all actions are used.&#10;&#10;Pre-command overrides (applied once, not cascaded to nested events):&#10;  -brightness           skip this event's pre-brightness&#10;  -transition           skip this event's pre-transition&#10;  =brightness:0.5       override pre-brightness to 0.5 (0..1)&#10;  =transition:1.5       override pre-transition to 1.5 seconds&#10;  =ramp:500             override brightness ramp to 500 ms&#10;&#10;Common convention labels authors tag actions with:&#10;  colors:      blue, red, warm, cool&#10;  intensity:   bright, dim, subtle&#10;  transition:  fast, slow, smooth, snap">
+             placeholder="e.g. blue, -red, fast"
+             title="Comma-separated label filters (case-insensitive).&#10;&#10;Filter syntax:&#10;  foo     include actions tagged &quot;foo&quot;&#10;  -foo    exclude actions tagged &quot;foo&quot;&#10;&#10;An action must match at least one positive label (if any are given) and no negative labels.&#10;Weight-0 actions are label-only: included only when a positive label matches.&#10;If no actions match, the filter is ignored and all actions are used.&#10;&#10;Common convention labels authors tag actions with:&#10;  colors:      blue, red, warm, cool&#10;  intensity:   bright, dim, subtle&#10;  transition:  fast, slow, smooth, snap">
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button id="popup-save" class="btn-accent">Save</button>
@@ -662,7 +663,8 @@ function _applyLibrosaAnalysis(la) {
   document.getElementById('librosa-summary').textContent =
     `${la.tempo_bpm.toFixed(1)} BPM  •  ${la.beats.length} beats  •  ` +
     `${la.sections.length} sections  •  ${la.onsets.length} onsets  •  ` +
-    `${la.bass_onsets?.length ?? 0} bass  •  ${la.harmonic_changes.length} harmonic`;
+    `${la.bass_onsets?.length ?? 0} bass  •  ${la.snare_onsets?.length ?? 0} snare  •  ` +
+    `${la.harmonic_changes.length} harmonic`;
   const slider = document.getElementById('librosa-offset-slider');
   const display = document.getElementById('librosa-offset-display');
   slider.value = la.librosa_offset_ms ?? 0;
@@ -1242,7 +1244,21 @@ document.getElementById('btn-zoom').addEventListener('click', () => {
   const btn = document.getElementById('btn-zoom');
   btn.classList.toggle('btn-accent', zoomFollows);
   btn.textContent = zoomFollows ? 'Follow' : 'Manual';
-  if (zoomFollows && _lastFiredIdx >= 0) scrollBuilderListToAnchor();
+  if (zoomFollows) {
+    if (_lastFiredIdx >= 0) scrollBuilderListToAnchor();
+    // Snap the window onto the playhead immediately. Without this the window
+    // stays frozen at its manual position until the next live tick, leaving
+    // the playhead ahead of (off the right edge of) the window.
+    if (liveMode && track && profile) {
+      const p = getProgress();
+      zoomEndMs   = Math.min(profile.duration_ms, p + _followFutureMs);
+      zoomStartMs = Math.max(0, zoomEndMs - _followWindowMs);
+      updateZoomRegion();
+      shapeCanvas.setZoom(zoomStartMs, zoomEndMs);
+      shapeCanvas.setPlayhead(p - (appSettings?.audio_latency_ms ?? 0));
+      shapeCanvas.draw();
+    }
+  }
 });
 
 document.getElementById('btn-zoom-out').addEventListener('click', () => {
@@ -2293,13 +2309,14 @@ const _profileSlotObserver = setInterval(() => {
 document.querySelectorAll('.librosa-filter-btn').forEach(b => {
   b.addEventListener('click', () => {
     const lf = b.dataset.lf;
-    // For MFCC: adjust canvas height since it adds/removes a strip row
-    if (lf === 'mfcc') {
+    // MFCC/snare toggles add/remove a strip row — adjust canvas height to match
+    const addsStrip = lf === 'mfcc' || (lf === 'snare' && shapeCanvas.hasSnareData());
+    if (addsStrip) {
       const el = document.getElementById('shape-canvas');
       const curH = el.offsetHeight || 120;
       const STRIP = 21;  // BEAT_STRIP_H
-      const wasOn = shapeCanvas.librosaFilters.mfcc;
-      shapeCanvas.librosaFilters.mfcc = !wasOn;
+      const wasOn = shapeCanvas.librosaFilters[lf];
+      shapeCanvas.librosaFilters[lf] = !wasOn;
       el.style.height = (wasOn ? curH - STRIP : curH + STRIP) + 'px';
     } else {
       shapeCanvas.librosaFilters[lf] = !shapeCanvas.librosaFilters[lf];

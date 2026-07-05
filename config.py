@@ -59,9 +59,6 @@ class Settings(BaseSettings):
     audio_latency_ms: int = 1000
     # Positive = trigger earlier, negative = trigger later
     ledfx_trigger_buffer_ms: int = 250
-    # How many ms before the main scene action to fire pre-brightness / pre-transition
-    pre_brightness_lead_ms: int = 200
-    pre_transition_lead_ms: int = 200
     # Global default ramp duration for brightness/effect param changes; 0 = instant
     smooth_ramp_ms: int = 500
     # Prefer LedFX server-side param interpolation (one PUT + transition_ms) over
@@ -69,6 +66,16 @@ class Settings(BaseSettings):
     # (GET /api/info → features.param_transition). Kill-switch: set False to force
     # the legacy client-side ramps. Effective only when LedFX actually supports it.
     server_side_tween: bool = True
+
+    # ── Write verification (non-ramping reconciliation) ────────────────────────
+    # After a morph step's non-ramping writes (effect switch, colors incl. the
+    # third/accent sparks_color, instant numerics), read the affected virtuals
+    # back and re-issue any value that didn't land — guards against dropped/
+    # coalesce-overwritten PUTs and LedFX re-filling power.sparks_color white on
+    # an effect switch. Set False to disable the readback entirely.
+    verify_nonramping_writes: bool = True
+    verify_settle_ms: int = 20    # wait after bus-drain before the readback GET
+    verify_timeout_ms: int = 60   # best-effort cap; fall through rather than stall the fire
 
     # ── Polling intervals (ms) ─────────────────────────────────────────────────
     poll_interval_playing_ms: int = 5000
@@ -444,7 +451,7 @@ class Settings(BaseSettings):
 
     # ── Librosa / WAV retention ───────────────────────────────────────────────
     # Max number of WAV files to keep for librosa re-analysis (0 = unlimited)
-    audio_wav_max_songs: int = 50
+    audio_wav_max_songs: int = 2000
 
     # ── Librosa analysis tuning ───────────────────────────────────────────────
     # Section detection: novelty score threshold (0.0–1.0) a boundary must reach
@@ -467,15 +474,55 @@ class Settings(BaseSettings):
 
     # Full-spectrum onset detection: sensitivity delta above local baseline (librosa default ~0.07).
     # Lower = more onsets detected (catches subtle attacks); higher = only strong hits.
-    librosa_onset_delta: float = 0.07
+    # onset_detect normalizes the envelope 0-1 first, so delta is on a 0-1 scale.
+    # Tuned via scripts/tune_onsets.py (2026-07): 0.12 cuts density ~35% vs 0.07
+    # with better beat-grid precision.
+    librosa_onset_delta: float = 0.12
+
+    # Full-spectrum onsets: minimum gap between detected onsets (ms) and minimum
+    # normalized envelope strength an onset must reach to be kept.
+    librosa_onset_wait_ms: int = 50
+    librosa_onset_min_strength: float = 0.10
+
+    # HPSS margin for the percussive separation shared by the bass and snare
+    # detectors (harmonic content like bass-guitar sustain is removed before
+    # onset detection). >1 sharpens the split; <=1.0 disables HPSS.
+    # Adds ~2-5 s per song to analysis (runs in the worker subprocess).
+    librosa_hpss_margin: float = 3.0
 
     # Bass onset detection: upper frequency cutoff in Hz for the low-freq onset envelope.
     # 250 Hz captures kick and sub-bass; raise toward 500 Hz to include upper bass/toms.
     librosa_bass_fmax: int = 250
 
     # Bass onset detection: sensitivity delta (same scale as librosa_onset_delta).
-    # Often needs to be lower than full-spectrum delta because bass transients are slower.
-    librosa_bass_onset_delta: float = 0.1
+    # Tuned via scripts/tune_onsets.py (2026-07): with HPSS margin 3.0 this
+    # lands ~1.1 onsets/beat (vs ~2/beat legacy) at equal composite score.
+    librosa_bass_onset_delta: float = 0.25
+
+    # Bass onsets: minimum gap (ms) and normalized strength floor.
+    # 60 ms keeps rapid build-up kick rolls visible (16ths at 100 BPM are
+    # ~150 ms apart and rolls get faster near drops).
+    librosa_bass_onset_wait_ms: int = 60
+    librosa_bass_min_strength: float = 0.10
+
+    # Snare onset detection: mel-band edges (Hz) for the mid-band percussive
+    # envelope. Snares are a broadband burst with dominant 1.5-6 kHz energy;
+    # hi-hats concentrate above ~6-8 kHz, so keeping fmax below that (plus the
+    # strength floor) suppresses hat false-positives.
+    # Tuned via scripts/tune_onsets.py (2026-07): delta 0.25 + wait 150 dominated
+    # the grid; band edges were within noise, kept at 1.5-6 kHz for hat rejection.
+    librosa_snare_fmin: int = 1500
+    librosa_snare_fmax: int = 6000
+    librosa_snare_onset_delta: float = 0.25
+    librosa_snare_onset_wait_ms: int = 150
+    librosa_snare_min_strength: float = 0.10
+
+    # Per-beat score passes: the beat-bucket onset/bass/snare scores that feed
+    # the embedded trigger generator are computed from a DENSE peak pick
+    # (low delta, short wait, no floor) so rapid rolls aren't undercounted —
+    # the displayed onset lists use the tuned sparse params above.
+    librosa_score_delta: float = 0.10
+    librosa_score_wait_ms: int = 30
 
     # Downbeat phase: which beat index (0–3) in a bar corresponds to beat 1.
     # -1 = auto-detect from onset strength (picks the phase whose beats have the

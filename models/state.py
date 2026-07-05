@@ -26,11 +26,22 @@ class SpotifyTrackInfo:
     context_type: str = ""     # "playlist" | "album" | "artist" | ""
 
     def interpolated_progress_ms(self) -> int:
-        """Estimate current progress without an extra API call."""
+        """Estimate current progress without an extra API call.
+
+        Clamped to [0, duration_ms]: playback can never run past the song's
+        end. Without the clamp a stale fetched_at (machine sleep, stalled
+        poller) extrapolates arbitrarily far forward — which previously
+        poisoned the audio-capture time baseline, placing every sample
+        beyond the song (invisible shape, triggers that never fire).
+        """
         if not self.is_playing:
-            return self.progress_ms
-        elapsed = (time.monotonic() - self.fetched_at) * 1000
-        return int(self.progress_ms + elapsed)
+            progress = self.progress_ms
+        else:
+            elapsed = (time.monotonic() - self.fetched_at) * 1000
+            progress = int(self.progress_ms + elapsed)
+        if self.duration_ms > 0:
+            return max(0, min(progress, self.duration_ms))
+        return max(0, progress)
 
 
 @dataclass

@@ -284,6 +284,24 @@ class AudioShapeService:
         the full song. _stop_and_save honors `_force_recapture` to gate
         atomic commit on all four checks (coverage + WAV + librosa + anchor).
         """
+        # Freshness guard: every time baseline below (acoustic boundary or
+        # Spotify estimate) is derived from track.fetched_at. If that poll is
+        # stale — machine sleep, stalled poller — the interpolated progress no
+        # longer reflects the real song position and the whole capture is
+        # placed at the wrong song-time (timestamps beyond the song → invisible
+        # shape, triggers that never fire). Skip this cycle; on_track_change
+        # fires again next poll and starts the capture once data is fresh.
+        from config import settings as _s
+        stale_ms = (time.monotonic() - track.fetched_at) * 1000
+        max_stale_ms = _s.poll_interval_playing_ms * 3
+        if stale_ms > max_stale_ms:
+            logger.info(
+                "Capture deferred for %s — track poll is %.0fms stale (limit %dms); "
+                "awaiting fresh progress",
+                track.title, stale_ms, max_stale_ms,
+            )
+            return
+
         # song_start_monotonic offset so frame timestamps are song-relative.
         # Prefer the acoustic boundary computed in on_track_change when present
         # (force-recapture symmetric trim). Fall back to Spotify's reported
@@ -423,6 +441,34 @@ class AudioShapeService:
                     )
                     self._last_capture_status = "failed"
                     self._last_capture_reason = "too_short"
+                    self._last_capture_uri = self._recording_uri
+                    self._recorder = None
+                    self._capture = None
+                    self._recording_uri = None
+                    return
+                # Timestamp-sanity — discard if the capture's song-time baseline
+                # is implausible. A stale poll behind the song_start estimate
+                # places every sample beyond the song's end (ts_first >=
+                # duration), which renders no shape and fires no triggers. The
+                # freshness guard in _start() should prevent this; this is the
+                # final net so a poisoned baseline is never persisted as a
+                # "complete" shape.
+                ts_first = self._recorder._timestamps[0]
+                if duration_ms > 0 and ts_first >= duration_ms:
+                    logger.warning(
+                        "Audio shape discarded — timestamp baseline beyond song end "
+                        "(first sample at %dms, duration %dms): %s",
+                        ts_first, duration_ms, self._recorder.meta.npz_file,
+                    )
+                    fail_meta = self._recorder.meta.model_copy(
+                        update={"capture_complete": False, "capture_failed": True}
+                    )
+                    from config import AUDIO_SHAPES_DIR
+                    sidecar = AUDIO_SHAPES_DIR / fail_meta.npz_file.replace(".npz", ".json")
+                    AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
+                    sidecar.write_text(fail_meta.model_dump_json(indent=2), encoding="utf-8")
+                    self._last_capture_status = "failed"
+                    self._last_capture_reason = "bad_timestamps"
                     self._last_capture_uri = self._recording_uri
                     self._recorder = None
                     self._capture = None

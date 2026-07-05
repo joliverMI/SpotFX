@@ -128,7 +128,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   // Librosa analysis overlay
   let _librosaAnalysis = null;
   let _librosaOffsetMs = 0;
-  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true, mfcc: true };
+  const _librosaFilters = { beats: true, onsets: true, sections: true, harmonic: true, bass: true, snare: true, mfcc: true };
   let _mfccDistances = null;  // pre-computed MFCC timbral distances per beat (0-1 normalised)
 
   // Profile triggers (used by builder.html when no custom markers set)
@@ -151,6 +151,7 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   let _anchorTempoBpm   = null;      // tempo for ±1..4 beat twin lines
   let _liveMatch        = null;      // {offset_ms, r, q, candidate_idx, band}
   let _xcorrWindows     = [];        // [{win_start, win_end, new_offset_ms, new_r, new_quality, old_r, winner, failed}, ...]
+  let _spikes           = [];        // [{spike_ms, win_start, win_end, strength}, ...] — mismatch-spike picks (Debug)
   const ANCHOR_BAND_COLOR = {
     rms_total: '#ffffff',
     rms_low:   '#3aa0ff',
@@ -164,7 +165,13 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
   // ── Draw ─────────────────────────────────────────────────────────────────────
   const BEAT_STRIP_H  = 21;   // height of one heat-map strip (1px separator + 20px cells)
   const BASE_BEAT_STRIPS = 5;  // rms_total | rms_bass | onsets | bass onsets | harmonics
-  function _numStrips() { return BASE_BEAT_STRIPS + (_librosaFilters.mfcc && _mfccDistances ? 1 : 0); }
+  // Snare strip only for librosa v3+ analyses (older songs have no snare_onsets)
+  function _hasSnareData() { return !!(_librosaAnalysis?.snare_onsets?.length); }
+  function _numStrips() {
+    return BASE_BEAT_STRIPS
+      + (_librosaFilters.snare && _hasSnareData() ? 1 : 0)
+      + (_librosaFilters.mfcc && _mfccDistances ? 1 : 0);
+  }
   function _totalStripH() { return BEAT_STRIP_H * _numStrips(); }
 
   function draw() {
@@ -387,6 +394,24 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
           const tickH = tickMin + Math.round((tickMax - tickMin) * bo.strength);
           ctx.globalAlpha = 0.25 + bo.strength * 0.6;
           ctx.strokeStyle = '#44dd88';
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, tickH); ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // Snare onsets — yellow ticks from top; height + opacity scale with strength
+      if (_librosaFilters.snare && la.snare_onsets?.length) {
+        const tickMin = Math.round(mainH * 0.03);
+        const tickMax = Math.round(mainH * 0.16);
+        ctx.save();
+        ctx.lineWidth = 1.5;
+        for (const so of la.snare_onsets) {
+          const t = so.ms + off;
+          if (t < startMs || t > endMs) continue;
+          const x = timeToX(t);
+          const tickH = tickMin + Math.round((tickMax - tickMin) * so.strength);
+          ctx.globalAlpha = 0.25 + so.strength * 0.6;
+          ctx.strokeStyle = '#ffdd33';
           ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, tickH); ctx.stroke();
         }
         ctx.restore();
@@ -680,6 +705,50 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
       ctx.restore();
     }
 
+    // Mismatch-spike overlay (Debug) — when the monitor confirms a wrong lock
+    // it picks a residual spike and a recovery window around it. Draw the
+    // chosen window as a translucent magenta band and mark the spike itself
+    // with a labelled vertical line, so the user can see WHERE the engine
+    // decided to re-measure and WHY. Not gated by advanced-mode; the Debug
+    // page relies on this even in its default view.
+    if (_spikes.length) {
+      ctx.save();
+      for (const sp of _spikes) {
+        const ws = (sp.win_start ?? 0) + _offsetMs;
+        const we = (sp.win_end   ?? 0) + _offsetMs;
+        const sm = (sp.spike_ms  ?? 0) + _offsetMs;
+        // Window band (clipped to the viewport)
+        if (we >= startMs && ws <= endMs) {
+          const xs = timeToX(Math.max(ws, startMs));
+          const xe = timeToX(Math.min(we, endMs));
+          ctx.globalAlpha = 0.12;
+          ctx.fillStyle = '#ff2d95';
+          ctx.fillRect(xs, 0, Math.max(1, xe - xs), mainH);
+          ctx.globalAlpha = 0.6;
+          ctx.strokeStyle = '#ff2d95';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(xs, 0); ctx.lineTo(xs, mainH);
+          ctx.moveTo(xe, 0); ctx.lineTo(xe, mainH); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        // Spike center + label
+        if (sm >= startMs && sm <= endMs) {
+          const x = timeToX(sm);
+          ctx.globalAlpha = 0.95;
+          ctx.strokeStyle = '#ff2d95'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
+          ctx.fillStyle = '#ff2d95';
+          ctx.font = '10px monospace';
+          ctx.textAlign = 'left';
+          const s = sp.strength != null ? ` s=${(+sp.strength).toFixed(2)}` : '';
+          ctx.fillText(`spike${s}`, x + 3, 22);
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
     // Playhead — caller applies audio_latency_ms; _offsetMs corrects capture timing.
     // When a perception trim is active, draw a second (orange) playhead at
     // _offsetMs + _trimMs so the user can see the effective firing position
@@ -694,6 +763,32 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mainH); ctx.stroke();
         ctx.setLineDash([]);
         ctx.globalAlpha = 1;
+      } else {
+        // Off-screen: pin a directional marker to the nearest edge instead of
+        // letting the playhead silently vanish. This happens whenever the zoom
+        // window doesn't contain it — e.g. a follow anchor lagging the song, or
+        // the moment between switching Manual→Follow before the window snaps.
+        // The arrowhead points toward the true (off-screen) position.
+        const offRight = xcorrMs > endMs;
+        const dir  = offRight ? 1 : -1;
+        const tipX = offRight ? W - 1 : 1;
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(tipX, 0); ctx.lineTo(tipX, mainH); ctx.stroke();
+        ctx.setLineDash([]);
+        // Arrowhead at vertical center, base inset from the edge, tip on it.
+        const ay = mainH / 2, aw = 8, ah = 6;
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(tipX, ay);
+        ctx.lineTo(tipX - dir * aw, ay - ah);
+        ctx.lineTo(tipX - dir * aw, ay + ah);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
       }
       if (_trimMs) {
         const trimDisplayMs = _playheadMs + _offsetMs + _trimMs;
@@ -730,6 +825,10 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
         { get: b => b.bass_onset_score ?? 0, color: '#44dd88', dbColor: '#88ffbb' },
         { get: b => b.harmonic_score   ?? 0, color: '#cc66ff', dbColor: '#ee99ff' },
       ];
+      // Conditionally add snare strip (librosa v3+ analyses only)
+      if (_librosaFilters.snare && _hasSnareData()) {
+        STRIPS.push({ get: b => b.snare_onset_score ?? 0, color: '#ffdd33', dbColor: '#ffee88' });
+      }
       // Conditionally add MFCC distance strip
       if (_librosaFilters.mfcc) {
         if (_mfccDistances) {
@@ -1016,6 +1115,20 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
     /** Clear all per-window xcorr overlay results. Caller should invoke this
      *  on track change so the previous song's windows don't stay visible. */
     clearXcorrWindows() { _xcorrWindows = []; },
+    /** Append one mismatch-spike pick (Debug overlay). Draws a magenta window
+     *  band + spike marker. msg: {spike_ms, win_start, win_end, strength}.
+     *  Keeps only the few most recent so stale picks fade off. */
+    addSpike(msg) {
+      _spikes.push({
+        spike_ms:  msg.spike_ms,
+        win_start: msg.win_start,
+        win_end:   msg.win_end,
+        strength:  msg.strength,
+      });
+      if (_spikes.length > 4) _spikes.shift();
+    },
+    /** Clear all spike overlays. Invoke on track change. */
+    clearSpikes() { _spikes = []; },
     /** Supply profile triggers + events for drawing trigger markers. */
     setProfile(profile, events) {
       _profile = profile;
@@ -1053,6 +1166,8 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
         canvasEl.style.height = (curH - oldStripH + newStripH) + 'px';
       }
     },
+    /** True when the loaded analysis includes snare onsets (librosa v3+). */
+    hasSnareData() { return _hasSnareData(); },
     /** Override the librosa time offset (ms) without replacing the analysis object. */
     setLibrosaOffset(ms) { _librosaOffsetMs = ms ?? 0; },
     get librosaOffsetMs() { return _librosaOffsetMs; },
@@ -1164,6 +1279,11 @@ export function createShapeCanvas(canvasEl, resizeHandleEl = null) {
         b => b.bass_onset_score ?? 0,
         b => b.harmonic_score   ?? 0,
       ];
+      // Extend for snare strip when active (must mirror the draw-time STRIPS order)
+      if (_librosaFilters.snare && _hasSnareData()) {
+        STRIP_COLORS.push('#ffdd33');
+        STRIP_GET.push(b => b.snare_onset_score ?? 0);
+      }
       // Extend for MFCC strip when active
       if (_librosaFilters.mfcc && _mfccDistances) {
         STRIP_COLORS.push('#ff6633');
