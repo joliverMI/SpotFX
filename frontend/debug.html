@@ -194,6 +194,12 @@
       <div id="dbg-xcorr-windows" class="dbg-mono">no windows yet</div>
     </div>
 
+    <!-- ── Mismatch spikes ──────────────────────────────────────────────────── -->
+    <div class="dbg-section">
+      <h3>Mismatch spikes <span style="color:#ff2d95;">●</span> (recovery windows)</h3>
+      <div id="dbg-spikes" class="dbg-mono">no spikes yet</div>
+    </div>
+
     <!-- ── Calibration target ───────────────────────────────────────────────── -->
     <div id="dbg-cal" class="dbg-section" style="display:none;">
       <h3>Calibration</h3>
@@ -520,6 +526,8 @@ async function _loadShape(uri) {
     document.getElementById('shape-status').textContent = `Load failed: ${e.message || e}`;
   }
   shapeCanvas.clearXcorrWindows?.();
+  shapeCanvas.clearSpikes?.();
+  diffCanvas.clearSpikes?.();
   _restartLivePoll(uri);
 }
 
@@ -559,6 +567,9 @@ onMessage('state', (msg) => {
     document.getElementById('dbg-anchor-summary').textContent = 'no data';
     document.getElementById('dbg-anchor-match').textContent = '';
     document.getElementById('dbg-xcorr-windows').textContent = 'no windows yet';
+    _spikeLines.length = 0;
+    const _sp = document.getElementById('dbg-spikes');
+    if (_sp) _sp.textContent = 'no spikes yet';
   }
 
   if (track) {
@@ -642,6 +653,20 @@ onMessage('xcorr_window', (msg) => {
   );
   if (_xcorrLines.length > 30) _xcorrLines.pop();
   document.getElementById('dbg-xcorr-windows').textContent = _xcorrLines.join('\n');
+});
+
+// ── xcorr_spike: monitor confirmed a wrong lock and picked a recovery window ──
+const _spikeLines = [];
+onMessage('xcorr_spike', (msg) => {
+  shapeCanvas.addSpike?.(msg);
+  diffCanvas.addSpike?.(msg);
+  _spikeLines.unshift(
+    `spike @${msg.spike_ms}ms → window [${msg.win_start}-${msg.win_end}] ` +
+    `strength=${(+(msg.strength ?? 0)).toFixed(2)}`
+  );
+  if (_spikeLines.length > 10) _spikeLines.pop();
+  const el = document.getElementById('dbg-spikes');
+  if (el) el.textContent = _spikeLines.join('\n');
 });
 
 onMessage('shape_match_updated', (msg) => {

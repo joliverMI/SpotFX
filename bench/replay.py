@@ -499,9 +499,19 @@ def replay_play(stem: str, scenario: Scenario, *,
                     # Engine-only (mirrors live): no disk write from progressive.
                     engine.apply_save(uri, match.offset_ms, match.quality,
                                       source="progressive")
-                    evaluator.add_progressive_vote(match.offset_ms, match.r)
+                    # Vote the accumulator only on the FIRST match — continuous
+                    # re-probes must not flood the mass gate.
+                    if not prog_matched:
+                        evaluator.add_progressive_vote(match.offset_ms, match.r)
                     prog_matched = True
-                    prog_active = False
+                    # Continuous relock (Phase 7): keep probing recent audio
+                    # through the sweep so the engine snaps the moment clean
+                    # audio appears, instead of stopping at the first planned
+                    # window. Stop only once a confident lock is in hand.
+                    if not (settings.xcorr_continuous_relock_enabled
+                            and engine._play_best_quality < float(
+                                getattr(settings, "xcorr_lock_q", 0.75))):
+                        prog_active = False
                     if verbose:
                         print(f"  [prog @{ev_time:>6}] match {match.offset_ms:+d}ms "
                               f"r={match.r:.2f} Q={match.quality:.2f} span={match.span_ms}ms")
@@ -569,7 +579,11 @@ def replay_play(stem: str, scenario: Scenario, *,
         while (not monitor_mode and window_queue
                and ev_time >= window_queue[0][1] + _XCORR_MARGIN_MS):
             ws, we = window_queue.pop(0)
-            prog_active = False   # first planned window reached — progressive done
+            # First planned window reached — progressive normally hands off to
+            # the sweep here. Continuous relock keeps it probing recent audio
+            # until a confident lock so the engine corrects ASAP (Phase 7).
+            if not settings.xcorr_continuous_relock_enabled:
+                prog_active = False
             locked = run_window(ws, we, frames_now)
             if locked:
                 locked_via_stop = True
