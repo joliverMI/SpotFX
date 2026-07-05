@@ -9,11 +9,15 @@ import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from './canvas/layers';
-import { BEAT_STRIP_H, stripCountFor, type Hit, type LayerDataBag, type ViewState } from './canvas/frame';
+import { BEAT_STRIP_H, stripCountFor, type LayerDataBag, type ViewState } from './canvas/frame';
 import { computeAverages, computeMfccDistances } from './canvas/data';
 import ModeBar from './components/ModeBar';
 import TimelineBar from './components/TimelineBar';
 import ShapeControls from './components/ShapeControls';
+import TriggerDialog from './components/TriggerDialog';
+import TriggerList from './components/TriggerList';
+import { useTriggerInteractions } from './hooks/useTriggerInteractions';
+import { usePalettes } from './queries';
 import type { MarkType } from './types';
 
 const ALL_MARKS: Record<MarkType, boolean> = {
@@ -72,7 +76,7 @@ export default function BuilderPage() {
     { sections: true, beats: true, onsets: false, harmonic: false, bass: false, snare: false, mfcc: false });
   const [markFilters] = useSticky<Record<MarkType, boolean>>('markFilters', ALL_MARKS);
   const [intensityBg, setIntensityBg] = useSticky('intensityBg', false);
-  const [canvasHeight] = useSticky('canvasHeight', 260);
+  const [canvasHeight, setCanvasHeight] = useSticky('canvasHeight', 260);
 
   const durationMs = profile?.duration_ms || meta?.duration_ms || track?.duration_ms || 1;
 
@@ -98,6 +102,17 @@ export default function BuilderPage() {
     return slotId ? profile.setlist_triggers[slotId] ?? profile.triggers : profile.triggers;
   }, [profile, slotId]);
 
+  // Armed palette event (arming UI lands in Phase 3; right-click placement
+  // is already wired through the store fields).
+  const { data: palettes } = usePalettes();
+  const palettesRef = useRef(palettes);
+  palettesRef.current = palettes;
+  const getArmedEventId = useCallback(() => {
+    const st = useBuilderStore.getState();
+    if (!st.armedKey || !st.activePaletteId) return null;
+    return palettesRef.current?.find((pl) => pl.id === st.activePaletteId)?.keys[st.armedKey] ?? null;
+  }, []);
+
   const averages = useMemo(
     () => (shape ? computeAverages(shape, Number(settings?.shape_average_window_ms ?? 4000)) : null),
     [shape, settings],
@@ -121,6 +136,18 @@ export default function BuilderPage() {
   }), [bandFilters, avgFilters, markFilters, librosaFilters, scales, meta, librosa,
        triggerPreviewOffsetMs, maxRms, intensityBg]);
 
+  const [beatTip, setBeatTip] = useState<{ ms: number; values: Record<string, number> } | null>(null);
+  const librosaRef = useRef(librosa ?? null);
+  librosaRef.current = librosa ?? null;
+  const librosaOffRef = useRef(0);
+  librosaOffRef.current = view.librosaOffsetMs;
+  const { pointer: triggerPointer, draggingIntensity } = useTriggerInteractions({
+    getLibrosa: () => librosaRef.current,
+    getLibrosaOffsetMs: () => librosaOffRef.current,
+    getArmedEventId,
+    onBeatTip: setBeatTip,
+  });
+
   const data: LayerDataBag = useMemo(() => ({
     shape: shape ?? null,
     averages,
@@ -130,13 +157,12 @@ export default function BuilderPage() {
     triggers: workingTriggers,
     events: (events ?? []).map((e) => ({ id: e.id, name: e.name, color: e.color })),
     calibrationTargetsMs,
-    draggingIntensity: null,
-  }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events, calibrationTargetsMs]);
+    draggingIntensity,
+  }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events,
+       calibrationTargetsMs, draggingIntensity]);
 
   const stripCount = stripCountFor(data, librosaFilters);
   const totalCanvasHeight = canvasHeight + stripCount * BEAT_STRIP_H;
-
-  const [beatTip, setBeatTip] = useState<{ ms: number; values: Record<string, number> } | null>(null);
 
   return (
     <>
@@ -173,10 +199,38 @@ export default function BuilderPage() {
             if (edge === 'end' || edge === 'center') followWin.setFutureS((s) => Math.max(0, s + deltaMs / 1000));
             if (edge === 'start') followWin.setWindowS((s) => Math.max(2, s - deltaMs / 1000));
           }}
+          onEdit={(id) => useBuilderStore.getState().setEditingTrigger(id)}
+          onMove={(id, ms) => useBuilderStore.getState().mutateWorking((ts) => {
+            const t = ts.find((tt) => tt.id === id);
+            if (t) t.timestamp_ms = ms;
+          })}
+          onDelete={(id) => useBuilderStore.getState().mutateWorking((ts) => {
+            const i = ts.findIndex((tt) => tt.id === id);
+            if (i >= 0) ts.splice(i, 1);
+          })}
+          onCreate={(ms) => useBuilderStore.getState().setEditingTrigger(`new:${ms}`)}
+          onArmedContext={(ms, tid) => triggerPointer.onContextMenu?.(ms,
+            tid ? { kind: 'trigger-triangle', triggerId: tid } : null)}
         />
       </CollapsibleCard>
 
-      <CollapsibleCard id="shape" title="Audio Shape">
+      <CollapsibleCard
+        id="shape"
+        title="Audio Shape"
+        headerExtra={
+          <button
+            style={{ fontSize: 12 }}
+            disabled={!profile}
+            title="Add a trigger at the current playhead"
+            onClick={() => {
+              const now = getNowMs() ?? 0;
+              useBuilderStore.getState().setEditingTrigger(`new:${Math.round(now / 20) * 20}`);
+            }}
+          >
+            + Add Trigger
+          </button>
+        }
+      >
         <TimelineCanvas
           layers={BUILDER_LAYERS}
           data={data}
@@ -185,10 +239,7 @@ export default function BuilderPage() {
           getNowMs={getCanvasNowMs}
           height={totalCanvasHeight}
           pointer={{
-            onHit: (hit: Hit) => {
-              if (hit?.kind === 'beat') setBeatTip({ ms: hit.beatMs, values: hit.values });
-              else setBeatTip(null);
-            },
+            ...triggerPointer,
             onPan: (deltaMs) => {
               const w = followWin.getWin();
               followWin.setFollow(false);
@@ -196,6 +247,27 @@ export default function BuilderPage() {
             },
           }}
         />
+        <div
+          title="Drag to resize the canvas"
+          style={{ height: 8, cursor: 'ns-resize', display: 'flex', alignItems: 'center',
+                   justifyContent: 'center', color: 'var(--text-muted)', fontSize: 8, userSelect: 'none' }}
+          onPointerDown={(ev) => {
+            ev.preventDefault();
+            (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
+            const startY = ev.clientY;
+            const startH = canvasHeight;
+            const move = (e: PointerEvent) =>
+              setCanvasHeight(Math.max(120, Math.min(700, startH + (e.clientY - startY))));
+            const up = () => {
+              window.removeEventListener('pointermove', move);
+              window.removeEventListener('pointerup', up);
+            };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', up);
+          }}
+        >
+          ⣀⣀⣀
+        </div>
         {beatTip && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             beat @ {fmtMs(beatTip.ms)} —{' '}
@@ -215,6 +287,12 @@ export default function BuilderPage() {
           hasIntensityCurve={!!shape?.avg_rms_1s?.length}
         />
       </CollapsibleCard>
+
+      <CollapsibleCard id="triggers" title="All Triggers">
+        <TriggerList triggers={workingTriggers} events={data.events} />
+      </CollapsibleCard>
+
+      <TriggerDialog events={data.events} />
 
       {!uri && (
         <p className="empty-note">
