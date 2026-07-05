@@ -1,8 +1,12 @@
-/** Mode bar: Live / Auto-Wait toggles + song search (standard mode) + track
- * info. Capture/Analyze/Genre-Blend/Verified wiring lands in Phase 5. */
-import { useMemo, useState } from 'react';
+/** Mode bar: Live / Auto-Wait, song search (standard mode), engine mode
+ * toggles (Capture / Analyze / Genre Blend — states mirrored from the WS
+ * state message), Verified flag, setlist slot select, track info. */
+import { useEffect, useMemo, useState } from 'react';
+import { apiPost } from '../../api/client';
+import { useToast } from '../../components/Toast';
+import { useSticky } from '../../lib/useSticky';
 import { useBuilderStore } from '../store';
-import { useProfilesList } from '../queries';
+import { useProfilesList, useSetlists } from '../queries';
 
 export default function ModeBar() {
   const track = useBuilderStore((s) => s.track);
@@ -14,9 +18,22 @@ export default function ModeBar() {
   const setManualUri = useBuilderStore((s) => s.setManualUri);
   const profile = useBuilderStore((s) => s.profile);
   const dirty = useBuilderStore((s) => s.dirty);
+  const modes = useBuilderStore((s) => s.modes);
+  const slotId = useBuilderStore((s) => s.slotId);
+  const setSlot = useBuilderStore((s) => s.setSlot);
+  const mutateProfile = useBuilderStore((s) => s.mutateProfile);
+  const toast = useToast();
 
   const { data: profiles } = useProfilesList();
+  const { data: setlists } = useSetlists();
   const [q, setQ] = useState('');
+
+  // Sticky global slot; the store is the live copy the rest of the page reads.
+  const [stickySlot, setStickySlot] = useSticky('setlistSlot', '');
+  useEffect(() => {
+    setSlot(stickySlot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stickySlot]);
 
   const results = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -26,8 +43,12 @@ export default function ModeBar() {
       .slice(0, 12);
   }, [q, profiles]);
 
+  const post = (path: string, err: string) =>
+    apiPost(path).catch(() => toast(err, 'error'));
+
   const shownTitle = liveMode ? track?.title : profile?.title;
   const shownArtist = liveMode ? track?.artist : profile?.artist;
+  const slotHasOverride = !!slotId && !!profile?.setlist_triggers[slotId];
 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -46,7 +67,7 @@ export default function ModeBar() {
             placeholder="Search songs…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            style={{ width: 260 }}
+            style={{ width: 220 }}
           />
           {results.length > 0 && (
             <div style={{
@@ -66,6 +87,48 @@ export default function ModeBar() {
           )}
         </span>
       )}
+
+      <span style={{ width: 1, height: 20, background: 'var(--border)' }} />
+      <button className={`chip filter ${modes.analysis ? 'active' : ''}`}
+        title="Toggle audio capture/analysis"
+        onClick={() => void post('/analysis/toggle', 'Capture toggle failed')}>
+        Capture{modes.recaptureRemaining > 0 ? ` (${modes.recaptureRemaining})` : ''}
+      </button>
+      <button className={`chip filter ${modes.autoGen ? 'active' : ''}`}
+        title="Auto-generate AI triggers for unseen songs"
+        onClick={() => void post(`/control/auto-generate?enabled=${!modes.autoGen}`, 'Auto-gen toggle failed')}>
+        Analyze
+      </button>
+      <button className={`chip filter ${modes.genreBlend ? 'active' : ''}`}
+        title="Blend genre defaults into sparse profiles"
+        onClick={() => void post('/genre-blending/toggle', 'Genre-blend toggle failed')}>
+        Genre
+      </button>
+      <button className={`chip filter ${profile?.verified ? 'active' : ''}`}
+        disabled={!profile}
+        title="Mark this profile's timing as human-verified"
+        onClick={() => mutateProfile((p) => { p.verified = !p.verified; })}>
+        {profile?.verified ? '✓ Verified' : 'Verified'}
+      </button>
+
+      <span style={{ width: 1, height: 20, background: 'var(--border)' }} />
+      <select
+        value={slotId}
+        onChange={(e) => setStickySlot(e.target.value)}
+        title={slotHasOverride
+          ? 'This slot has its own trigger list'
+          : slotId ? 'Slot shows Default until first edit (then copies it)' : 'Editing the Default trigger list'}
+        style={{ fontSize: 12, maxWidth: 150,
+                 borderColor: slotHasOverride ? 'var(--accent)' : undefined }}
+      >
+        <option value="">Default</option>
+        {(setlists ?? []).map((sl) => (
+          <option key={sl.id} value={sl.id}>
+            {sl.name}{profile?.setlist_triggers[sl.id] ? ' •' : ''}
+          </option>
+        ))}
+      </select>
+
       <span style={{ flex: 1 }} />
       <span style={{ minWidth: 0, textAlign: 'right' }}>
         <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

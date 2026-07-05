@@ -34,6 +34,19 @@ export function useAudioShapeData(uri: string | null, captureComplete: boolean) 
   });
 }
 
+/** In-progress capture polling — only while analysis is on and the capture
+ * isn't complete. Serves the same band arrays as /data (avg_rms_1s absent). */
+export function useLiveShape(uri: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['shape-live', uri],
+    queryFn: () => apiGet<AudioShapeData>(`/audio-shape/live?uri=${enc(uri!)}`),
+    enabled: !!uri && enabled,
+    refetchInterval: 1000,
+    retry: false,
+    gcTime: 0,
+  });
+}
+
 export function useLibrosa(uri: string | null) {
   return useQuery({
     queryKey: ['librosa', uri],

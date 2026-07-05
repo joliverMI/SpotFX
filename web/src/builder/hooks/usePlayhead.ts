@@ -19,6 +19,12 @@ export function usePlayhead() {
 
   useEffect(() => {
     const off = onMessage('state', (msg) => {
+      useBuilderStore.getState().setModes({
+        ...(msg.audio_analysis_enabled !== undefined ? { analysis: !!msg.audio_analysis_enabled } : {}),
+        ...(msg.auto_generate_enabled !== undefined ? { autoGen: !!msg.auto_generate_enabled } : {}),
+        ...(msg.genre_blending_enabled !== undefined ? { genreBlend: !!msg.genre_blending_enabled } : {}),
+        ...(msg.recapture_remaining !== undefined ? { recaptureRemaining: Number(msg.recapture_remaining) } : {}),
+      });
       const t = msg.track as Record<string, unknown> | null;
       if (!t || !t.spotify_uri) {
         base.current = null;

@@ -4,7 +4,7 @@ import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
 import { useBuilderStore } from './store';
-import { useAudioShapeData, useAudioShapeMeta, useLibrosa, useProfileByUri } from './queries';
+import { useAudioShapeData, useAudioShapeMeta, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
 import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
@@ -17,6 +17,10 @@ import ShapeControls from './components/ShapeControls';
 import TriggerDialog from './components/TriggerDialog';
 import TriggerList from './components/TriggerList';
 import PaletteCard from './components/PaletteCard';
+import OffsetBadge from './components/OffsetBadge';
+import ShiftAllControl from './components/ShiftAllControl';
+import ImportDialog from './components/ImportDialog';
+import { useBuilderWs } from './hooks/useBuilderWs';
 import { useTriggerInteractions } from './hooks/useTriggerInteractions';
 import { useIntensityKeyboard } from './hooks/useIntensityKeyboard';
 import { usePaletteKeyboard } from './hooks/usePaletteKeyboard';
@@ -51,9 +55,18 @@ export default function BuilderPage() {
   const { data: settings } = useSettings();
   const { data: profileData } = useProfileByUri(uri);
   const { data: meta } = useAudioShapeMeta(uri);
-  const { data: shape } = useAudioShapeData(uri, meta?.capture_complete ?? false);
+  const { data: storedShape } = useAudioShapeData(uri, meta?.capture_complete ?? false);
   const { data: librosa } = useLibrosa(uri);
   const { data: events } = useEvents();
+  const { data: setlists } = useSetlists();
+
+  // While capturing (analysis on, no completed shape yet) poll the live buffer.
+  const analysisOn = useBuilderStore((s) => s.modes.analysis);
+  const capturing = analysisOn && !!uri && !(meta?.capture_complete ?? false);
+  const { data: liveShape } = useLiveShape(uri, capturing);
+  const shape = storedShape ?? (capturing ? liveShape : undefined);
+
+  useBuilderWs(uri);
 
   // Load fetched profile into the editable store (never clobber unsaved edits).
   useEffect(() => {
@@ -146,6 +159,8 @@ export default function BuilderPage() {
        triggerPreviewOffsetMs, maxRms, intensityMode]);
 
   const [beatTip, setBeatTip] = useState<{ ms: number; values: Record<string, number> } | null>(null);
+  const [shiftOpen, setShiftOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [hoverTriggerId, setHoverTriggerId] = useState<string | null>(null);
   const selectedIds = useBuilderStore((s) => s.selectedIds);
   const librosaRef = useRef(librosa ?? null);
@@ -232,17 +247,32 @@ export default function BuilderPage() {
         id="shape"
         title="Audio Shape"
         headerExtra={
-          <button
-            style={{ fontSize: 12 }}
-            disabled={!profile}
-            title="Add a trigger at the current playhead"
-            onClick={() => {
-              const now = getNowMs() ?? 0;
-              useBuilderStore.getState().setEditingTrigger(`new:${Math.round(now / 20) * 20}`);
-            }}
-          >
-            + Add Trigger
-          </button>
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {capturing && (
+              <span style={{ fontSize: 11, color: 'var(--accent2)' }}>● capturing…</span>
+            )}
+            <OffsetBadge meta={meta ?? null} />
+            <button
+              style={{ fontSize: 12 }}
+              className={shiftOpen || triggerPreviewOffsetMs !== 0 ? 'primary' : ''}
+              disabled={!profile}
+              title="Shift every trigger by a fixed offset (preview + commit)"
+              onClick={() => setShiftOpen((v) => !v)}
+            >
+              ⇄
+            </button>
+            <button
+              style={{ fontSize: 12 }}
+              disabled={!profile}
+              title="Add a trigger at the current playhead"
+              onClick={() => {
+                const now = getNowMs() ?? 0;
+                useBuilderStore.getState().setEditingTrigger(`new:${Math.round(now / 20) * 20}`);
+              }}
+            >
+              + Add Trigger
+            </button>
+          </span>
         }
       >
         <TimelineCanvas
@@ -282,6 +312,7 @@ export default function BuilderPage() {
         >
           ⣀⣀⣀
         </div>
+        <ShiftAllControl open={shiftOpen} setOpen={setShiftOpen} durationMs={durationMs} />
         {beatTip && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             beat @ {fmtMs(beatTip.ms)} —{' '}
@@ -307,10 +338,13 @@ export default function BuilderPage() {
       </CollapsibleCard>
 
       <CollapsibleCard id="triggers" title="All Triggers">
-        <TriggerList triggers={workingTriggers} events={data.events} />
+        <TriggerList triggers={workingTriggers} events={data.events} onImport={() => setImportOpen(true)} />
       </CollapsibleCard>
 
       <TriggerDialog events={data.events} />
+      {importOpen && (
+        <ImportDialog uri={uri} setlists={setlists ?? []} onClose={() => setImportOpen(false)} />
+      )}
 
       {!uri && (
         <p className="empty-note">

@@ -10,9 +10,11 @@ import type { EventOption, MusicTrigger } from '../types';
 export default function TriggerList({
   triggers,
   events,
+  onImport,
 }: {
   triggers: MusicTrigger[];
   events: EventOption[];
+  onImport: () => void;
 }) {
   const setEditing = useBuilderStore((s) => s.setEditingTrigger);
   const mutateWorking = useBuilderStore((s) => s.mutateWorking);
@@ -47,6 +49,10 @@ export default function TriggerList({
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sorted.length} triggers</span>
         <span style={{ flex: 1 }} />
+        <button style={{ fontSize: 11, padding: '3px 8px' }} onClick={onImport}
+          title="Pull triggers from AI analysis or copy from another slot">
+          Import…
+        </button>
         <button className={listFollow ? 'primary' : ''} style={{ fontSize: 11, padding: '3px 8px' }}
           onClick={() => setListFollow((v) => !v)} title="Auto-scroll to the last fired trigger">
           Follow

@@ -7,7 +7,8 @@ import { GET, markActiveNav } from './app.js';
 const NAV_HTML = `<nav>
   <span class="logo">SpotFX</span>
   <a href="/">Now Playing</a>
-  <a href="/builder.html">Profile Builder</a>
+  <a href="/app/builder">Profile Builder</a>
+  <a href="/builder.html" class="advanced-only-inline">Builder (legacy)</a>
   <a href="/app/">Events</a>
   <a href="/events.html" class="advanced-only-inline">Events (legacy)</a>
   <a href="/color-sets.html">Color Sets</a>

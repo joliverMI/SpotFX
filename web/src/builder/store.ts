@@ -35,6 +35,9 @@ interface BuilderState {
   /** Preview-only shift offset (ms) applied visually to all triggers. */
   triggerPreviewOffsetMs: number;
   calibrationTargetsMs: number[];
+  /** Engine mode flags mirrored from the WS state message. */
+  modes: { analysis: boolean; autoGen: boolean; genreBlend: boolean; recaptureRemaining: number };
+  setModes: (m: Partial<{ analysis: boolean; autoGen: boolean; genreBlend: boolean; recaptureRemaining: number }>) => void;
 
   setTrack: (t: TrackInfo | null) => void;
   setManualUri: (uri: string | null) => void;
@@ -74,6 +77,8 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   lastSelectedId: null,
   triggerPreviewOffsetMs: 0,
   calibrationTargetsMs: [],
+  modes: { analysis: false, autoGen: false, genreBlend: false, recaptureRemaining: 0 },
+  setModes: (m) => set((st) => ({ modes: { ...st.modes, ...m } })),
 
   setTrack: (t) => set({ track: t }),
   setManualUri: (uri) => set({ manualUri: uri }),
