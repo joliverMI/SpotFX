@@ -666,6 +666,16 @@ class TriggerEngine:
             return None
         tp = TrainingProfile(**tp_data)
 
+        def _mk(t) -> MusicTrigger:
+            # Honor a per-record intensity if the analyzed pipeline ever
+            # provides one; otherwise default to the section energy level.
+            iv = getattr(t, "intensity", None)
+            return MusicTrigger(
+                id=t.id, timestamp_ms=t.timestamp_ms,
+                event_id=t.event_id, labels=list(t.labels or []),
+                intensity=iv if iv is not None else self._section_intensity(t.timestamp_ms),
+            )
+
         track_id = spotify_uri.split(":")[-1]
         cached = analyzed_trigger_store.load(track_id)
         if cached and analyzed_trigger_store.is_valid(cached, tp):
@@ -673,26 +683,25 @@ class TriggerEngine:
                 "Analyzed triggers: loaded %d cached for %s (profile: %s)",
                 len(cached.triggers), spotify_uri, tp.name,
             )
-            return [
-                MusicTrigger(
-                    id=t.id, timestamp_ms=t.timestamp_ms,
-                    event_id=t.event_id, labels=list(t.labels or []),
-                )
-                for t in cached.triggers
-            ]
+            return [_mk(t) for t in cached.triggers]
 
         generated = analyzed_trigger_store.generate_for_uri(spotify_uri, save_cache=True)
         if not generated:
             return None
-        return [
-            MusicTrigger(
-                id=t.id, timestamp_ms=t.timestamp_ms,
-                event_id=t.event_id, labels=list(t.labels or []),
-            )
-            for t in generated
-        ]
+        return [_mk(t) for t in generated]
 
     # ── Triggerless play helpers ────────────────────────────────────────────
+
+    def _section_intensity(self, ms: int) -> float:
+        """Default intensity for machine-generated (triggerless/analyzed)
+        triggers: the librosa section energy at that moment — the same lookup
+        the section_energy binding signal uses. Mid (0.5) without data."""
+        from services.signal_resolver import _section_energy
+        if self._sections_cache is None and self._profile:
+            from services.audio_analyzer import load_sections_for_uri
+            self._sections_cache = load_sections_for_uri(self._profile.spotify_uri)
+        v = _section_energy(self._sections_cache, ms)
+        return 0.5 if v is None else v
 
     def _should_use_triggerless(self) -> bool:
         """Check if triggerless mode should be active for the current song."""
@@ -766,6 +775,7 @@ class TriggerEngine:
             triggers.append(MusicTrigger(
                 id="tl_start_0", timestamp_ms=0,
                 event_id=start_eid, labels=["triggerless", "start"],
+                intensity=self._section_intensity(0),
             ))
 
         # 2. Scene events at regular intervals
@@ -778,6 +788,7 @@ class TriggerEngine:
                 triggers.append(MusicTrigger(
                     id=f"tl_scene_{t}", timestamp_ms=t,
                     event_id=scene_eid, labels=["triggerless", "scene"],
+                    intensity=self._section_intensity(t),
                 ))
                 t += interval_ms
 
@@ -790,6 +801,7 @@ class TriggerEngine:
                     triggers.append(MusicTrigger(
                         id=f"tl_flare_{t}", timestamp_ms=t,
                         event_id=flare_eid, labels=["triggerless", "flare"],
+                        intensity=self._section_intensity(t),
                     ))
                 t += flare_interval_ms
 
@@ -798,6 +810,7 @@ class TriggerEngine:
             triggers.append(MusicTrigger(
                 id=f"tl_end_{end_cutoff}", timestamp_ms=end_cutoff,
                 event_id=end_eid, labels=["triggerless", "end"],
+                intensity=self._section_intensity(end_cutoff),
             ))
 
         triggers.sort(key=lambda t: t.timestamp_ms)
@@ -1107,7 +1120,7 @@ class TriggerEngine:
             if event.event_type == "morph_set":
                 # Pre-pick one alternative per lane so the plan has a Now Playing
                 # summary; the color-group cycle cursor still advances at fire
-                # time (inside _execute_morph_color), not here.
+                # time (inside _execute_set_color), not here.
                 picks = self._pick_morph_lanes(event, lbls)
                 # Anchor the entry at the EARLIEST lane: fire_at = start_at +
                 # min(offset). Each lane then sleeps (offset - anchor) >= 0 at
@@ -1280,6 +1293,10 @@ class TriggerEngine:
                 if self._scope_is_empty(t.scope):
                     t.scope = scope.model_copy(deep=True)
             return new
+        if action.type == "morph_color":
+            if not self._scope_is_empty(action.scope):
+                return action
+            return action.model_copy(update={"scope": scope.model_copy(deep=True)})
         return action
 
     def _iter_leaf_actions(self, actions, resolved_picks: dict | None = None,
@@ -1480,11 +1497,16 @@ class TriggerEngine:
             n = len(action.targets)
             aspects = sorted({t.aspect for t in action.targets})
             return f"Morph {n}× ({', '.join(aspects) if aspects else 'no targets'})"
-        elif action.type == "morph_color":
+        elif action.type == "set_color":
             from services import color_set_store
             card = color_set_store.get_by_id(action.ref_id)
             name = card.name if card else "?"
             return f"Color → {name}"
+        elif action.type == "morph_color":
+            sign = "-" if action.direction == "backward" else "+"
+            scope_bits = list(action.scope.categories) + list(action.scope.virtual_ids) + list(action.scope.roles)
+            where = f" ({', '.join(scope_bits)})" if scope_bits else ""
+            return f"Rotate {sign}{action.degrees:g}°{where}"
         elif action.type == "device_settings":
             return f"Device settings ({len(action.targets)}×)"
         elif action.type == "event_ref":
@@ -1797,7 +1819,7 @@ class TriggerEngine:
         anchor_offset_ms: int = 0,
         skip_event_ids: Optional[set] = None,
     ) -> None:
-        """Fire only the `MorphColorAction` picks from a morph_set's lanes.
+        """Fire only the Set Color / Morph Color picks from a morph_set's lanes.
 
         The scene-override payload is built from MorphStepActions only (see
         `build_scene_state` / `_collect_morph_actions_for_event`), so a Color Set
@@ -1808,8 +1830,8 @@ class TriggerEngine:
         same offset as the activate and fire with it (rel == 0)."""
         if not picks:
             return
-        from models.music_event import MorphColorAction
-        color_picks = [p for p in picks if isinstance(p.action, MorphColorAction)]
+        from models.music_event import MorphColorAction, SetColorAction
+        color_picks = [p for p in picks if isinstance(p.action, (SetColorAction, MorphColorAction))]
         if color_picks:
             await self._fire_morph_picks(
                 color_picks, labels or [], skip_event_ids=skip_event_ids,
@@ -2263,6 +2285,9 @@ class TriggerEngine:
         elif action.type == "morph_step":
             await self._execute_morph_step(action, await_ramps=await_ramps)
 
+        elif action.type == "set_color":
+            await self._execute_set_color(action, await_ramps=await_ramps)
+
         elif action.type == "morph_color":
             await self._execute_morph_color(action, await_ramps=await_ramps)
 
@@ -2585,7 +2610,7 @@ class TriggerEngine:
             return fallback
         return None
 
-    async def _execute_morph_color(self, action, await_ramps: bool = False) -> None:
+    async def _execute_set_color(self, action, await_ramps: bool = False) -> None:
         """Apply a Color Set (or a Group's currently-selected Color Set) across
         every scoped device. Writes FG color, BG color, and background mode
         directly per virtual — resolving each param against the device's CURRENT
@@ -2600,7 +2625,7 @@ class TriggerEngine:
 
         card = color_set_store.get_by_id(action.ref_id)
         if card is None:
-            logger.warning("morph_color: unknown Color Set ref %s", action.ref_id)
+            logger.warning("set_color: unknown Color Set ref %s", action.ref_id)
             return
 
         if card.kind == "group":
@@ -2608,11 +2633,11 @@ class TriggerEngine:
                 card, action.pick_mode, action.advance, action.direction
             )
             if not chosen_id:
-                logger.info("morph_color: group '%s' has no members", card.name)
+                logger.info("set_color: group '%s' has no members", card.name)
                 return
             card = color_set_store.get_by_id(chosen_id)
             if card is None or card.kind != "set":
-                logger.warning("morph_color: group member %s missing or not a set", chosen_id)
+                logger.warning("set_color: group member %s missing or not a set", chosen_id)
                 return
 
         if not card.entries:
@@ -2762,10 +2787,132 @@ class TriggerEngine:
             if updates:
                 morph_effect_state.save_many(updates)
 
+    async def _execute_morph_color(self, action, await_ramps: bool = False) -> None:
+        """Morph the colors ALREADY showing on the scoped devices by rotating
+        every color param (FG gradient/color, BG color, accent) around the hue
+        wheel by `action.degrees` (backward = negative). Beat intensity can
+        modulate the rotation via `intensity_scale` (same factor math as morph
+        nudges). BG on melt effects is skipped when `preserve_melt_bg` is set;
+        power effects always get their BG rotated. Rotated strings ramp via
+        gradient interpolation; effect-resetting params follow the same
+        instant/server-tween rules as Set Color."""
+        action = resolve_action_bindings(action, self._signal_now)
+        from services import morph_aspects
+        from services import morph_effect_state
+        from services.gradient_interpolation import rotate_color_string
+        from services.morph_compiler import resolve_scope
+        from services.effect_params import get_param_meta
+
+        vids = resolve_scope(action.scope)
+        if not vids:
+            return
+        await self._refresh_effect_types(vids)
+
+        # Effective rotation: direction sets the sign, beat intensity scales the
+        # sweep (neutral 0.5 when no beat data — factor 1.0, the raw degrees).
+        degrees = float(action.degrees or 0.0)
+        if action.intensity_scale:
+            intensity = self._beat_intensity_now(action.intensity_source or "rms_total")
+            eff_intensity = intensity if intensity is not None else 0.5
+            degrees *= 1.0 + (eff_intensity - 0.5) * float(action.intensity_scale)
+        if action.direction == "backward":
+            degrees = -degrees
+        if not degrees:
+            return
+
+        ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+        instant_coros: list = []
+        touched: set[str] = set()
+
+        for vid in vids:
+            eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+            etype = eff.get("type")
+            if not etype:
+                continue
+            cfg = eff.setdefault("config", {})
+
+            instant: dict = {}
+            ramp_str: dict = {}
+
+            def _rotate_param(param: str) -> None:
+                cur = cfg.get(param)
+                if not isinstance(cur, str) or not cur.strip():
+                    return
+                rotated = rotate_color_string(cur, degrees)
+                if rotated is None or rotated.strip().lower() == cur.strip().lower():
+                    return
+                meta = get_param_meta(etype, param) or {}
+                smooth = meta.get("smooth", True) and ramp_ms > 0
+                if _param_resets_effect(etype, param):
+                    # Same rule as Set Color with preserve_effect off: a server-
+                    # side tween can ramp reset params smoothly; the legacy
+                    # client loop must write them instantly.
+                    if smooth and ledfx_client.server_tween_enabled():
+                        ramp_str[param] = rotated
+                    else:
+                        instant[param] = rotated
+                elif smooth:
+                    ramp_str[param] = rotated
+                else:
+                    instant[param] = rotated
+
+            pc = self._color_param_for(etype, "color", "gradient", cfg)
+            if pc:
+                _rotate_param(pc)
+
+            # BG: melt keeps its background when preserve_melt_bg is set;
+            # power is exempt from that guard and always rotates.
+            if not (action.preserve_melt_bg and etype == "melt"):
+                pb = self._color_param_for(etype, "bg_color", "background_color", cfg)
+                if pb:
+                    _rotate_param(pb)
+
+            ap = morph_aspects.accent_param_for(etype)
+            if ap:
+                _rotate_param(ap)
+                # Keep the per-vid accent memory in sync so a later effect
+                # switch carries the rotated accent, not the pre-rotation one.
+                new_accent = ramp_str.get(ap) or instant.get(ap)
+                if new_accent and vid in self._last_accent_by_vid:
+                    self._last_accent_by_vid[vid] = new_accent
+
+            if not instant and not ramp_str:
+                continue
+            touched.add(vid)
+
+            if instant:
+                instant_coros.append(ledfx_client.set_virtual_effect(vid, etype, instant))
+                cfg.update(instant)
+            if ramp_str:
+                if await_ramps:
+                    await ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
+                    cfg.update(ramp_str)
+                else:
+                    self._spawn_ramp(
+                        ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
+                    )
+                    # Optimistically mirror the ramp target so back-to-back
+                    # rotations compound instead of re-reading the pre-ramp value.
+                    cfg.update(ramp_str)
+
+        if instant_coros:
+            await asyncio.gather(*instant_coros, return_exceptions=True)
+
+        # Persist post-action state so a later effect switch-back resumes colors.
+        if touched:
+            updates = []
+            for vid in touched:
+                eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+                et, c = eff.get("type"), eff.get("config") or {}
+                if et and c:
+                    updates.append((vid, et, dict(c)))
+            if updates:
+                morph_effect_state.save_many(updates)
+
     async def fire_color_set_now(self, card_id: str) -> bool:
         """Preview-fire a Color Set or Group immediately, bypassing the audio-
         capture gate (mirrors fire_event_now's force_allow wrapper)."""
-        from models.music_event import MorphColorAction
+        from models.music_event import SetColorAction
         from services import color_set_store
         card = color_set_store.get_by_id(card_id)
         if card is None:
@@ -2775,8 +2922,8 @@ class TriggerEngine:
             # Preview shows the full set, so it must NOT honor preserve_effect —
             # otherwise effect-resetting params (e.g. background_color) get
             # silently dropped and the background never fires.
-            await self._execute_morph_color(
-                MorphColorAction(ref_id=card_id, pick_mode="default", preserve_effect=False),
+            await self._execute_set_color(
+                SetColorAction(ref_id=card_id, pick_mode="default", preserve_effect=False),
                 await_ramps=True,
             )
             await ledfx_client.drain_bus()
@@ -3137,6 +3284,8 @@ class TriggerEngine:
                     for _t in _a.targets:
                         if _t.aspect != "effect":
                             target_vids.update(resolve_scope(_t.scope))
+                elif _a.type == "morph_color":
+                    target_vids.update(resolve_scope(_a.scope))
         if target_vids:
             await _warm(list(target_vids))
 
@@ -3173,6 +3322,23 @@ class TriggerEngine:
                 elif action.type == "ledfx_ambient_color":
                     for vid in get_virtuals_for_role("ambient"):
                         _snap_effect(vid, ["gradient", "background_color", "sparks_color"])
+
+                elif action.type == "morph_color":
+                    # Snapshot the color params the rotation will touch on each
+                    # scoped virtual (FG / BG / accent for its current effect).
+                    from services.morph_aspects import accent_param_for
+                    for vid in resolve_scope(action.scope):
+                        cached = state.ledfx_virtual_cache.get(vid, {})
+                        etype = cached.get("effect", {}).get("type")
+                        if not etype:
+                            continue
+                        cfg = cached.get("effect", {}).get("config", {})
+                        pnames = [
+                            self._color_param_for(etype, "color", "gradient", cfg),
+                            self._color_param_for(etype, "bg_color", "background_color", cfg),
+                            accent_param_for(etype),
+                        ]
+                        _snap_effect(vid, [p for p in pnames if p])
 
                 elif action.type == "ledfx_global_transition":
                     for vid in get_all_virtual_ids():
@@ -3251,6 +3417,14 @@ class TriggerEngine:
         for a in leaf:
             if a.type in ("ledfx_ambient", "ledfx_ambient_color"):
                 return list(get_virtuals_for_role("ambient"))
+            if a.type == "morph_color":
+                # Scoped rotation (e.g. category "Singles"): counts as an
+                # ambient flip for the steal-snapshot path when its scope
+                # overlaps the ambient role.
+                from services.morph_compiler import resolve_scope as _rs
+                hit = set(get_virtuals_for_role("ambient")) & set(_rs(a.scope))
+                if hit:
+                    return sorted(hit)
         return []
 
     def _steal_pending_ambient_snapshot(self, vids: list[str]) -> Optional[dict]:
