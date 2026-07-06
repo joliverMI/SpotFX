@@ -1,9 +1,11 @@
 /** Keyboard palettes: full 36-key grid (1-0 / q-p / a-l / z-m). Click a
- * palette to activate it (sticky), double-click to edit. Press a key (or
- * click one) to arm its event — right-click the timeline places it. */
+ * palette to activate it (sticky), long-press (or double-click) to edit.
+ * Press a key (or click one) to arm its event — right-click the timeline
+ * places it. */
 import { useEffect, useState } from 'react';
 import SearchSelect from '../../components/forms/SearchSelect';
 import { useToast } from '../../components/Toast';
+import { useLongPress } from '../../lib/useLongPress';
 import { useSticky } from '../../lib/useSticky';
 import { useBuilderStore } from '../store';
 import { usePaletteMutations, usePalettes } from '../queries';
@@ -33,6 +35,12 @@ export default function PaletteCard({ events }: { events: EventOption[] }) {
 
   const [editing, setEditing] = useState<Palette | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const longPress = useLongPress();
+
+  const openEdit = (p: Palette) => {
+    setEditing(JSON.parse(JSON.stringify(p)));
+    setSelectedKey(null);
+  };
 
   const active = palettes?.find((p) => p.id === activePaletteId) ?? null;
   const armedEvent = armedKey && active ? events.find((e) => e.id === active.keys[armedKey]) : null;
@@ -56,7 +64,9 @@ export default function PaletteCard({ events }: { events: EventOption[] }) {
             return (
               <div
                 key={k}
-                title={ev ? `${k.toUpperCase()} → ${ev.name}` : k.toUpperCase()}
+                title={ev ? `${k.toUpperCase()} → ${ev.name}`
+                  : evId ? `${k.toUpperCase()} → (event ${evId.slice(0, 8)}… not loaded)`
+                  : k.toUpperCase()}
                 onClick={() => {
                   if (editMode) setSelectedKey(k);
                   else if (pal.id === activePaletteId) setArmedKey(armedKey === k ? null : k);
@@ -66,12 +76,14 @@ export default function PaletteCard({ events }: { events: EventOption[] }) {
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                   border: `1px solid ${isArmed || isSelected ? 'var(--accent)' : 'var(--border)'}`,
                   background: isArmed ? 'rgba(29,185,84,0.18)' : 'var(--surface2)',
-                  opacity: ev ? 1 : 0.4, fontSize: 12,
+                  // Assigned keys stay bright even if the events list hasn't
+                  // loaded (a failed fetch must not read as "deleted").
+                  opacity: evId ? 1 : 0.4, fontSize: 12,
                 }}
               >
                 <span>{k.toUpperCase()}</span>
                 <span style={{ width: 8, height: 8, borderRadius: '50%',
-                               background: ev?.color ?? 'transparent' }} />
+                               background: ev?.color ?? (evId ? '#888' : 'transparent') }} />
               </div>
             );
           })}
@@ -87,10 +99,11 @@ export default function PaletteCard({ events }: { events: EventOption[] }) {
           <button
             key={p.id}
             className={p.id === activePaletteId ? 'primary' : ''}
-            style={{ borderLeft: `4px solid ${p.color}` }}
-            title="Click: activate · double-click: edit"
+            style={{ borderLeft: `4px solid ${p.color}`, touchAction: 'none' }}
+            title="Click: activate · hold: edit"
             onClick={() => pick(p.id)}
-            onDoubleClick={() => { setEditing(JSON.parse(JSON.stringify(p))); setSelectedKey(null); }}
+            onDoubleClick={() => openEdit(p)}
+            {...longPress(() => openEdit(p))}
           >
             {p.name}
           </button>
@@ -100,7 +113,7 @@ export default function PaletteCard({ events }: { events: EventOption[] }) {
           onClick={() =>
             create.mutate(
               { name: 'New Palette', color: '#1db954', keys: {} },
-              { onSuccess: (p) => { setEditing(JSON.parse(JSON.stringify(p))); setSelectedKey(null); } },
+              { onSuccess: openEdit },
             )
           }
         >

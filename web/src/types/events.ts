@@ -152,14 +152,26 @@ export interface MorphStepAction extends ActionBase {
   targets: MorphTarget[];
 }
 
-export interface MorphColorAction extends ActionBase {
-  type: 'morph_color';
+export interface SetColorAction extends ActionBase {
+  type: 'set_color';
   ref_id: string;
   pick_mode: 'default' | 'cycle' | 'weighted';
   advance: Bindable<number>;
   direction: 'forward' | 'backward';
   ramp_ms: Bindable<number> | null;
   preserve_effect: boolean;
+}
+
+/** Rotate every showing color (FG/BG/accent) around the hue wheel. */
+export interface MorphColorAction extends ActionBase {
+  type: 'morph_color';
+  scope: MorphScope;              // empty = inherit nearest Target, else global
+  degrees: number;                // default 180 = complementary contrast
+  direction: 'forward' | 'backward';
+  ramp_ms: Bindable<number> | null;
+  intensity_scale: number;        // 0 = ignore beat intensity
+  intensity_source: IntensitySource;
+  preserve_melt_bg: boolean;      // true = keep melt BG; power BG always rotates
 }
 
 export interface DeviceSettingTarget {
@@ -246,6 +258,7 @@ export type Action =
   | LedFxGlobalTransitionAction
   | LedFxEffectParamAction
   | MorphStepAction
+  | SetColorAction
   | MorphColorAction
   | DeviceSettingsAction
   | RandomGroupAction

@@ -1,11 +1,13 @@
 /** Band + librosa filter buttons and the intensity-bg toggle. Band buttons keep
  * the classic multi-gesture: click = fill toggle, right-click = avg-line
  * toggle, long-press (400ms) + vertical drag = per-band scale (log, ±100px =
- * ×2/÷2, snap 1.0). All state arrives via props (sticky at the page level). */
-import { useRef } from 'react';
+ * ×2/÷2, snap 1.0). The ⚡ toggle: click = on/off, hold = source chooser,
+ * scroll = cycle sources. All state arrives via props (sticky at page level). */
+import { useRef, useState } from 'react';
 import type { ViewState } from '../canvas/frame';
 import { INTENSITY_MODES, INTENSITY_MODE_LABELS, type IntensityBgMode } from '../canvas/frame';
 import { SCALE_LABELS } from '../canvas/data';
+import { useLongPress } from '../../lib/useLongPress';
 
 type Band = 'total' | 'bass' | 'mid' | 'high';
 const BANDS: Band[] = ['total', 'bass', 'mid', 'high'];
@@ -33,6 +35,13 @@ export default function ShapeControls({
     band: Band; startY: number; startScale: number; timer: ReturnType<typeof setTimeout> | null;
     scaling: boolean; moved: boolean;
   } | null>(null);
+  const [modeChooser, setModeChooser] = useState(false);
+  const longPress = useLongPress();
+
+  // Which sources have data to draw right now.
+  const modeAvailable: Record<IntensityBgMode, boolean> = {
+    off: true, total: hasIntensityCurve, bass: true, section: hasLibrosa, triggers: true,
+  };
 
   const onBandPointerDown = (band: Band) => (ev: React.PointerEvent) => {
     if (ev.button !== 0) return;
@@ -96,24 +105,51 @@ export default function ShapeControls({
       >
         Marks
       </button>
-      <button
-        className={`chip filter ${view.intensityMode !== 'off' ? 'active' : ''}`}
-        title="Intensity background — click: on/off · scroll over the button: pick source (Total RMS / Bass RMS / Section energy / Trigger intensity)"
-        onClick={() => setIntensityMode(view.intensityMode === 'off'
-          ? (hasIntensityCurve ? 'total' : 'triggers') : 'off')}
-        onWheel={(e) => {
-          e.preventDefault();
-          const cur = INTENSITY_MODES.indexOf(view.intensityMode);
-          const dir = e.deltaY > 0 ? 1 : -1;
-          let next = (cur + dir + INTENSITY_MODES.length) % INTENSITY_MODES.length;
-          if (INTENSITY_MODES[next] === 'off') {
-            next = (next + dir + INTENSITY_MODES.length) % INTENSITY_MODES.length;
-          }
-          setIntensityMode(INTENSITY_MODES[next]);
-        }}
-      >
-        ⚡ {INTENSITY_MODE_LABELS[view.intensityMode]}
-      </button>
+      <span style={{ position: 'relative' }}>
+        <button
+          className={`chip filter ${view.intensityMode !== 'off' ? 'active' : ''}`}
+          style={{ touchAction: 'none' }}
+          title="Intensity background — click: on/off · hold: pick source · scroll: cycle sources"
+          onClick={() => setIntensityMode(view.intensityMode === 'off'
+            ? (hasIntensityCurve ? 'total' : 'triggers') : 'off')}
+          onWheel={(e) => {
+            e.preventDefault();
+            const cur = INTENSITY_MODES.indexOf(view.intensityMode);
+            const dir = e.deltaY > 0 ? 1 : -1;
+            let next = (cur + dir + INTENSITY_MODES.length) % INTENSITY_MODES.length;
+            if (INTENSITY_MODES[next] === 'off') {
+              next = (next + dir + INTENSITY_MODES.length) % INTENSITY_MODES.length;
+            }
+            setIntensityMode(INTENSITY_MODES[next]);
+          }}
+          {...longPress(() => setModeChooser(true))}
+        >
+          ⚡ {INTENSITY_MODE_LABELS[view.intensityMode]}
+        </button>
+        {modeChooser && (
+          <div
+            onMouseLeave={() => setModeChooser(false)}
+            style={{ position: 'absolute', top: '100%', left: 0, zIndex: 60, marginTop: 2,
+                     background: 'var(--surface)', border: '1px solid var(--border)',
+                     borderRadius: 8, padding: 4, boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
+                     display: 'flex', flexDirection: 'column', gap: 2, minWidth: 150 }}
+          >
+            {INTENSITY_MODES.map((m) => (
+              <button
+                key={m}
+                className={view.intensityMode === m ? 'primary' : ''}
+                disabled={!modeAvailable[m]}
+                title={modeAvailable[m] ? undefined : 'No data for this source on this song'}
+                style={{ fontSize: 12, textAlign: 'left', border: 'none',
+                         opacity: modeAvailable[m] ? 1 : 0.4 }}
+                onClick={() => { setIntensityMode(m); setModeChooser(false); }}
+              >
+                {m === 'off' ? 'Off' : `⚡ ${INTENSITY_MODE_LABELS[m]}`}
+              </button>
+            ))}
+          </div>
+        )}
+      </span>
       {hasLibrosa && (
         <>
           <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>librosa</span>

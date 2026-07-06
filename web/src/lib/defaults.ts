@@ -31,10 +31,16 @@ export function newAction(type: ActionType): Action {
       return { ...base, type, virtual_id: null, category: null, params: [], ramp_ms: null };
     case 'morph_step':
       return { ...base, type, ramp_ms: null, intensity_source: 'rms_total', targets: [] };
-    case 'morph_color':
+    case 'set_color':
       return {
         ...base, type, ref_id: '', pick_mode: 'default', advance: 1,
         direction: 'forward', ramp_ms: null, preserve_effect: true,
+      };
+    case 'morph_color':
+      return {
+        ...base, type, scope: { virtual_ids: [], categories: [], roles: [] },
+        degrees: 180, direction: 'forward', ramp_ms: null,
+        intensity_scale: 0, intensity_source: 'rms_total', preserve_melt_bg: false,
       };
     case 'device_settings':
       return { ...base, type, targets: [] };

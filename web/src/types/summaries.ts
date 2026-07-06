@@ -7,7 +7,7 @@ import type { Action, MusicEvent } from './events';
 export interface SummaryContext {
   /** id → event, for resolving event_ref names */
   events?: Record<string, MusicEvent>;
-  /** color-set card id → name, for morph_color */
+  /** color-set card id → name, for set_color */
   colorSetNames?: Record<string, string>;
 }
 
@@ -19,7 +19,8 @@ export const ACTION_ICONS: Record<Action['type'], string> = {
   ledfx_global_transition: '⏱️',
   ledfx_effect_param: '🎛️',
   morph_step: '🧬',
-  morph_color: '🖌️',
+  set_color: '🖌️',
+  morph_color: '🎡',
   device_settings: '⚙️',
   random_group: '🎲',
   sequence_group: '➡️',
@@ -34,6 +35,7 @@ export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
   ledfx_global_transition: 'Global Transition',
   ledfx_effect_param: 'Effect Params',
   morph_step: 'Morph Step',
+  set_color: 'Set Color',
   morph_color: 'Morph Color',
   device_settings: 'Device Settings',
   random_group: 'Random Group',
@@ -71,9 +73,15 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
       const aspects = [...new Set(action.targets.map((t) => t.aspect))].sort();
       return `Morph ${n}× (${aspects.length ? aspects.join(', ') : 'no targets'})${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
-    case 'morph_color': {
+    case 'set_color': {
       const name = ctx.colorSetNames?.[action.ref_id] ?? '?';
       return `Color → ${name}${hasBindingDeep(action) ? ' ⚡' : ''}`;
+    }
+    case 'morph_color': {
+      const sign = action.direction === 'backward' ? '-' : '+';
+      const bits = [...action.scope.categories, ...action.scope.virtual_ids, ...action.scope.roles];
+      const where = bits.length ? ` (${bits.join(', ')})` : '';
+      return `Rotate ${sign}${action.degrees}°${where}${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'device_settings':
       return `Device settings (${action.targets.length}×)`;

@@ -4,6 +4,7 @@ import type { Action } from '../../types/events';
 import { useColorSets, useEvents, useScenes } from '../../api/queries';
 import { LabelsInput, NumberInput, Row, Select, ColorInput, TextInput, Checkbox } from './inputs';
 import SearchSelect from './SearchSelect';
+import { ParentScopeToggle, emptyScope } from './ScopePicker';
 import { BindableNumber } from './BindingInput';
 import { isBinding } from '../../types/events';
 import EffectParamForm from './EffectParamForm';
@@ -57,6 +58,8 @@ function TypedForm({ action, update }: { action: Action; update: UpdateAction })
       return <EffectParamForm action={action} update={update as never} />;
     case 'morph_step':
       return <MorphStepForm action={action} update={update as never} />;
+    case 'set_color':
+      return <SetColorForm action={action} update={update} />;
     case 'morph_color':
       return <MorphColorForm action={action} update={update} />;
     case 'device_settings':
@@ -112,10 +115,10 @@ function AmbientForm({ action, update }: { action: Extract<Action, { type: 'ledf
   );
 }
 
-function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'morph_color' }>; update: UpdateAction }) {
+function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set_color' }>; update: UpdateAction }) {
   const { data: colorSets } = useColorSets();
-  const set = (fn: (a: Extract<Action, { type: 'morph_color' }>) => void) =>
-    update((a) => { if (a.type === 'morph_color') fn(a); });
+  const set = (fn: (a: Extract<Action, { type: 'set_color' }>) => void) =>
+    update((a) => { if (a.type === 'set_color') fn(a); });
   const opts = (colorSets ?? []).map((c) => ({ value: c.id, label: `${c.name}${c.kind === 'group' ? ' (group)' : ''}` }));
   return (
     <>
@@ -147,6 +150,47 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
       <Row label="Ramp (ms)"><BindableNumber value={action.ramp_ms} nullable onChange={(v) => set((a) => { a.ramp_ms = v; })} /></Row>
       <Row label="Preserve effect" help="Skip values that would reset the running LedFX effect">
         <Checkbox value={action.preserve_effect} onChange={(v) => set((a) => { a.preserve_effect = v; })} />
+      </Row>
+    </>
+  );
+}
+
+function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'morph_color' }>; update: UpdateAction }) {
+  const set = (fn: (a: Extract<Action, { type: 'morph_color' }>) => void) =>
+    update((a) => { if (a.type === 'morph_color') fn(a); });
+  return (
+    <>
+      <Row label="Target" help="Devices/categories whose colors rotate; parent = inherit the nearest group/lane Target">
+        <ParentScopeToggle scope={action.scope}
+          onChange={(s) => set((a) => { a.scope = s ?? emptyScope(); })} />
+      </Row>
+      <Row label="Degrees" help="Rotation around the hue wheel per fire — 180° = complementary contrast">
+        <NumberInput value={action.degrees} min={0} max={360} step={5}
+          onChange={(v) => set((a) => { a.degrees = v ?? 180; })} />
+      </Row>
+      <Row label="Direction">
+        <Select value={action.direction} width={140}
+          onChange={(v) => set((a) => { a.direction = v as typeof a.direction; })}
+          options={['forward', 'backward'].map((v) => ({ value: v, label: v }))} />
+      </Row>
+      <Row label="Ramp (ms)"><BindableNumber value={action.ramp_ms} nullable onChange={(v) => set((a) => { a.ramp_ms = v; })} /></Row>
+      <Row label="Intensity scale" help="0 = ignore beat intensity, 1 = fully scale the rotation with it">
+        <NumberInput value={action.intensity_scale} min={-2} max={2} step={0.1}
+          onChange={(v) => set((a) => { a.intensity_scale = v ?? 0; })} />
+      </Row>
+      {action.intensity_scale !== 0 && (
+        <Row label="Intensity source">
+          <Select value={action.intensity_source} width={140}
+            onChange={(v) => set((a) => { a.intensity_source = v as typeof a.intensity_source; })}
+            options={[
+              { value: 'rms_total', label: 'RMS Total' },
+              { value: 'rms_bass', label: 'RMS Bass' },
+              { value: 'onset_score', label: 'Onset Score' },
+            ]} />
+        </Row>
+      )}
+      <Row label="Preserve melt BG" help="Keep the background color on melt effects; power BG always rotates">
+        <Checkbox value={action.preserve_melt_bg} onChange={(v) => set((a) => { a.preserve_melt_bg = v; })} />
       </Row>
     </>
   );
