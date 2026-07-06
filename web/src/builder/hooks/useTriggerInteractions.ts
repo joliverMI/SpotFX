@@ -7,7 +7,8 @@
  *    drag out of the canvas = delete
  *  - dblclick → edit near a trigger (10px), else create at snapped time
  *  - right-click → place the armed palette event: time snaps to the nearest
- *    bass onset, intensity comes from the click Y (with prev-trigger snap) */
+ *    bass onset, intensity starts at the SECTION ENERGY level (fallback:
+ *    click Y); holding the right button slides the circle until release */
 import { useRef, useState } from 'react';
 import type { PointerHandlers, FrameGeom } from '../canvas/TimelineCanvas';
 import type { Hit } from '../canvas/frame';
@@ -23,6 +24,10 @@ interface Drag {
   baseIntensity: number;
   multi: boolean;
   outOfBounds: boolean;
+  /** Intensity drags only commit after real movement (>3px), so a plain
+   * press-release never nudges the value. */
+  moved: boolean;
+  startY: number | null;
 }
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, Math.round(v * 100) / 100));
@@ -88,6 +93,17 @@ export function useTriggerInteractions(opts: {
     return Math.round(rawMs / 20) * 20;
   };
 
+  /** Section energy (0-1) at a timestamp — the level the section curve draws. */
+  const sectionEnergyAt = (ms: number): number | null => {
+    const secs = opts.getLibrosa()?.sections;
+    if (!secs?.length) return null;
+    const off = opts.getLibrosaOffsetMs();
+    for (const s of secs) {
+      if (ms >= s.start_ms + off && ms <= s.end_ms + off) return clamp01(s.energy_rms);
+    }
+    return null;
+  };
+
   const nearTriggerId = (ms: number, g: FrameGeom): string | null => {
     const triggers = useBuilderStore.getState().workingTriggers();
     const x = g.timeToX(ms);
@@ -116,9 +132,11 @@ export function useTriggerInteractions(opts: {
         drag.current = {
           mode: 'intensity', triggerId: hit.triggerId, baseIntensity: base,
           multi: inSelection && st.selectedIds.length > 1, outOfBounds: false,
+          moved: false, startY: null,
         };
       } else if (hit?.kind === 'trigger-triangle') {
-        drag.current = { mode: 'time', triggerId: hit.triggerId, baseIntensity: 0, multi: false, outOfBounds: false };
+        drag.current = { mode: 'time', triggerId: hit.triggerId, baseIntensity: 0,
+          multi: false, outOfBounds: false, moved: false, startY: null };
       } else {
         // click on empty canvas clears the selection
         if (st.selectedIds.length) st.setSelection([]);
@@ -139,6 +157,9 @@ export function useTriggerInteractions(opts: {
       if (!d) return;
       const { x, y } = rel(ev);
       if (d.mode === 'intensity') {
+        if (d.startY === null) d.startY = y;
+        if (!d.moved && Math.abs(y - d.startY) > 3) d.moved = true;
+        if (!d.moved) return;
         setDraggingIntensity({
           triggerId: d.triggerId,
           intensity: clamp01(yToIntensity(g.mainH, y)),
@@ -159,9 +180,10 @@ export function useTriggerInteractions(opts: {
       drag.current = null;
       if (!d) return;
       if (d.mode === 'intensity') {
+        setDraggingIntensity(null);
+        if (!d.moved) return; // plain press: keep the value it started with
         const { y } = rel(ev);
         const raw = clamp01(yToIntensity(g.mainH, y));
-        setDraggingIntensity(null);
         const st = useBuilderStore.getState();
         if (d.multi) {
           // shift every selected circle by the drag delta
@@ -208,25 +230,39 @@ export function useTriggerInteractions(opts: {
         });
         return;
       }
-      // Place: time snaps to the nearest bass onset; intensity from click Y
-      // (with the same previous-trigger snap as dragging).
+      // Place: time snaps to the nearest bass onset; the circle starts at the
+      // SECTION ENERGY level for that moment (fallback: click Y with the
+      // previous-trigger snap).
       const placedMs = Math.max(0, snapToBassOnset(ms));
       const id = uuid();
-      const rawIntensity = y !== undefined && g ? clamp01(yToIntensity(g.mainH, y)) : 0.5;
+      const secV = sectionEnergyAt(placedMs);
+      let intensity = secV ?? (y !== undefined && g ? clamp01(yToIntensity(g.mainH, y)) : 0.5);
       mutateWorking((triggers) => {
         triggers.push({
           id, timestamp_ms: placedMs, event_id: armed,
-          labels: [], enabled: true, intensity: rawIntensity,
+          labels: [], enabled: true, intensity,
         });
       });
-      // prev-trigger snap needs the trigger in place (previous = by time)
-      const snapped = snapIntensity(rawIntensity, id);
-      if (snapped !== rawIntensity) {
-        mutateWorking((triggers) => {
-          const t = triggers.find((tt) => tt.id === id);
-          if (t) t.intensity = snapped;
-        });
+      if (secV === null) {
+        // prev-trigger snap needs the trigger in place (previous = by time)
+        const snapped = snapIntensity(intensity, id);
+        if (snapped !== intensity) {
+          intensity = snapped;
+          mutateWorking((triggers) => {
+            const t = triggers.find((tt) => tt.id === id);
+            if (t) t.intensity = snapped;
+          });
+        }
       }
+      // Select it (arrow keys / "." entry work immediately) and keep holding
+      // the right button to slide the circle: hand the new trigger back to
+      // the canvas as a live intensity drag.
+      useBuilderStore.getState().setSelection([id], id);
+      drag.current = {
+        mode: 'intensity', triggerId: id, baseIntensity: intensity,
+        multi: false, outOfBounds: false, moved: false, startY: null,
+      };
+      return id;
     },
   };
 

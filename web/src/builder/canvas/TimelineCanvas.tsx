@@ -9,7 +9,9 @@ export interface PointerHandlers {
   onHit?: (hit: Hit, ev: PointerEvent, frame: FrameGeom) => void;
   onHoverMove?: (hit: Hit) => void;
   onDoubleClick?: (ms: number, y: number, hit: Hit, frame: FrameGeom) => void;
-  onContextMenu?: (ms: number, hit: Hit, y?: number, frame?: FrameGeom) => void;
+  /** Right-click. May return a trigger id to start an intensity drag on it
+   * (hold-the-right-button-and-slide placement). */
+  onContextMenu?: (ms: number, hit: Hit, y?: number, frame?: FrameGeom) => string | void;
   onDragMove?: (ev: PointerEvent, frame: FrameGeom) => void;
   onDragEnd?: (ev: PointerEvent, frame: FrameGeom) => void;
   onPan?: (deltaMs: number) => void;
@@ -151,6 +153,17 @@ export default function TimelineCanvas({
         ev.preventDefault();
         return;
       }
+      if (ev.button === 2) {
+        // Context action fires on press (not the contextmenu event) so a
+        // placed trigger can be intensity-dragged while the button is held.
+        const dragId = s.pointer?.onContextMenu?.(g.xToTime(x), hitTest(x, y), y, g);
+        if (typeof dragId === 'string') {
+          dragging = true;
+          canvas.setPointerCapture(ev.pointerId);
+        }
+        ev.preventDefault();
+        return;
+      }
       if (ev.button !== 0) return;
       const hit = hitTest(x, y);
       s.pointer?.onHit?.(hit, ev, g);
@@ -198,14 +211,8 @@ export default function TimelineCanvas({
       const { x, y } = rel(ev);
       s.pointer?.onDoubleClick?.(g.xToTime(x), y, hitTest(x, y), g);
     };
-    const ctxMenu = (ev: MouseEvent) => {
-      const s = stateRef.current;
-      const g = geom();
-      if (!g) return;
-      ev.preventDefault();
-      const { x, y } = rel(ev);
-      s.pointer?.onContextMenu?.(g.xToTime(x), hitTest(x, y), y, g);
-    };
+    // The action already ran on pointerdown; just keep the menu suppressed.
+    const ctxMenu = (ev: MouseEvent) => ev.preventDefault();
 
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
