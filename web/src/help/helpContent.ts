@@ -357,9 +357,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'now-shape',
         title: 'Audio shape & recapture',
-        keywords: 'offset drift quality recapture badge',
+        keywords: 'offset drift quality recapture badge realign self-correction triggers shift',
         body: [
           'The Audio Shape card shows the captured waveform with the live offset status ("start +Xms → now +Yms, Q=quality"). A "recapture suggested" badge appears when the stored offset keeps disagreeing with live audio; Recapture deletes the stored shape (audio + analysis) so the song re-records on its next play.',
+          'Recapture self-corrects: when a song is force-recaptured, the new recording is cross-correlated against the old one and any timing shift between the two is applied automatically to the song\'s triggers (including per-Set-List overrides), pending AI suggestions, and learned offsets — so existing triggers keep landing on the same musical moments. If the shift can\'t be measured confidently, triggers are left untouched and offsets relearn from scratch.',
         ],
       },
     ],

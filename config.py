@@ -118,6 +118,19 @@ class Settings(BaseSettings):
     # mono float32: ~5.3 MB for 30s.
     pcm_ring_buffer_seconds: int = 30
 
+    # ── Recapture self-correction (services/capture_alignment.py) ─────────────
+    # After a force-recapture commits, the timebase shift between the old and
+    # new capture is measured (multi-band NCC of the stored npz signals) and
+    # triggers + learned xcorr offsets migrate by that shift so they keep
+    # firing at the same musical moments.
+    realign_enabled: bool = True
+    realign_search_ms: int = 6000        # max |shift| searched between captures
+    realign_window_s: float = 20.0       # per-probe template width (seconds)
+    realign_min_r: float = 0.6           # min per-window correlation to trust
+    realign_single_window_min_r: float = 0.75  # stricter when only one window fits
+    realign_agree_ms: int = 120          # max spread between the probe windows' shifts
+    realign_apply_min_ms: int = 40       # |shift| below this: offsets migrate, triggers stay put
+
     # ── Audio shape display averages ──────────────────────────────────────────
     # Sliding-window average width for the smoothed overlay lines (ms)
     shape_average_window_ms: int = 500

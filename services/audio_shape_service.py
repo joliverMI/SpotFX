@@ -66,6 +66,21 @@ class AudioShapeService:
                 # Transient API blip during song skip — ignore
                 logger.debug("Capture grace period: ignoring transient None URI (%.1fs old)", age)
                 return
+            # The boundary audio ARRIVES audio_latency_ms after the Spotify
+            # track change. With fast end-of-song burst polling the URI flip
+            # is often detected before the previous song's tail has reached
+            # the capture device — wait for it so (a) the ring buffer
+            # actually contains the boundary region for the acoustic search
+            # and (b) the previous capture's recorder receives its full tail
+            # (stopping immediately is what cut the end off captures).
+            if track and track.is_playing:
+                from config import settings as _cfg_w
+                hint = track.fetched_at - track.progress_ms / 1000.0
+                arrival_deadline = hint + _cfg_w.audio_latency_ms / 1000.0 + 0.5
+                wait_s = arrival_deadline - time.monotonic()
+                if 0 < wait_s <= 3.0:
+                    logger.debug("Boundary-wait: %.2fs for prev tail to arrive", wait_s)
+                    await asyncio.sleep(wait_s)
             # Compute one acoustic boundary that BOTH the prev capture's
             # _stop_and_save (tail trim) and the new song's _start (pre-roll
             # origin) will use. None when no new track is playing (pause /
@@ -248,8 +263,20 @@ class AudioShapeService:
             )
             from config import settings as _cfg
             sample_rate = _cfg.audio_sample_rate
+            # Spotify-time instant the track changed (progress_ms == 0).
             hint_monotonic = track.fetched_at - (track.progress_ms / 1000.0)
-            pcm_wide = pcm_ring_buffer.snapshot_since(hint_monotonic - DEFAULT_SEARCH_WINDOW_S)
+            # The audio pipeline delivers sound ~audio_latency_ms after
+            # Spotify's reported position, so the acoustic boundary ARRIVES
+            # at hint + latency. The ring buffer is stamped in arrival time —
+            # search around the arrival instant (searching around the raw
+            # hint centered the window a full latency early, which is what
+            # put the previous track's tail at the head of captures). The
+            # returned boundary stays in Spotify time, the same timebase as
+            # song_start and the latency-adjusted frame timestamps.
+            latency_s = _cfg.audio_latency_ms / 1000.0
+            pcm_wide = pcm_ring_buffer.snapshot_since(
+                hint_monotonic + latency_s - DEFAULT_SEARCH_WINDOW_S
+            )
             if pcm_wide.size == 0:
                 logger.info("Acoustic boundary: no PCM available, using Spotify estimate for %s", track.title)
                 return hint_monotonic
@@ -332,12 +359,19 @@ class AudioShapeService:
             try:
                 from api.pcm_ring_buffer import pcm_ring_buffer
                 from api.audio_capture import synthesize_frames_from_pcm
-                pcm = pcm_ring_buffer.snapshot_since(song_start)
                 from config import settings as _cfg
+                # Ring-buffer stamps are audio ARRIVAL time; song-time-0 audio
+                # arrives audio_latency_ms after the Spotify-time song_start.
+                # Snapshotting from song_start itself grabbed the previous
+                # track's tail and labeled it as this song's first second.
+                pcm = pcm_ring_buffer.snapshot_since(
+                    song_start + _cfg.audio_latency_ms / 1000.0
+                )
                 if pcm.size > 0:
                     pre_roll_seconds = pcm.size / _cfg.audio_sample_rate
-                    # ts of first pre-roll sample, in song-time ms
-                    pre_roll_start_ms = int(0)   # song_start back-dated → 0ms
+                    # First pre-roll sample = first audio to arrive after
+                    # song_start + latency → song-time 0
+                    pre_roll_start_ms = int(0)
                     frames = synthesize_frames_from_pcm(pcm, pre_roll_start_ms)
                     for f in frames:
                         self._recorder.ingest(f)
@@ -358,6 +392,7 @@ class AudioShapeService:
         # Seed the capture's raw PCM buffer so WAV write includes pre-roll
         if pre_roll_pcm:
             self._capture._pcm_chunks.extend(pre_roll_pcm)
+            self._capture.set_pcm_start_ms(0)   # pre-roll begins at song-time 0
         self._capture.start()
         self._task = asyncio.create_task(self._ingest_loop(), name="audio-capture")
         logger.info(
@@ -388,6 +423,22 @@ class AudioShapeService:
         deleted and the .bak files are restored (rollback) — original shape
         is preserved intact.
         """
+        # Let the previous song's tail finish ARRIVING before stopping the
+        # stream. The audio pipeline lags Spotify's reported position by
+        # audio_latency_ms, so at URI-change time the last ~second of the
+        # previous track hasn't reached the capture device yet — stopping
+        # immediately is what cut the end off captures. Wait until the
+        # boundary audio has arrived (plus a chunk margin); the acoustic
+        # trim below drops anything past the boundary.
+        boundary_wait = self._pending_boundary_monotonic
+        if boundary_wait is not None and self._capture is not None:
+            from config import settings as _cfg_t
+            tail_deadline = boundary_wait + _cfg_t.audio_latency_ms / 1000.0 + 0.3
+            wait_s = tail_deadline - time.monotonic()
+            if 0 < wait_s <= 3.0:
+                logger.debug("Tail-wait: %.2fs for boundary audio to arrive", wait_s)
+                await asyncio.sleep(wait_s)
+
         if self._capture:
             self._capture.stop()
         if self._task:
@@ -415,8 +466,9 @@ class AudioShapeService:
                 boundary_song_rel_ms = int((boundary - prev_song_start) * 1000)
                 if boundary_song_rel_ms > 0:
                     dropped_frames = self._recorder.trim_after(boundary_song_rel_ms)
-                    boundary_samples = int((boundary - prev_song_start) * _cfg_b.audio_sample_rate)
-                    dropped_samples = self._capture.truncate_pcm_to(boundary_samples)
+                    dropped_samples = self._capture.truncate_pcm_to(
+                        boundary_song_rel_ms, _cfg_b.audio_sample_rate
+                    )
                     if dropped_frames or dropped_samples:
                         logger.info(
                             "Acoustic trim: prev song tail trimmed at %d ms (-%d frames, -%d samples) for %s",
@@ -608,6 +660,22 @@ class AudioShapeService:
                         anchor_ok = len(meta.anchor_candidates) >= 1
                         commit = bool(wav_librosa_ok) and anchor_ok
                         if commit:
+                            # Self-correction BEFORE the .bak files are
+                            # deleted: measure the timebase shift between the
+                            # old capture (still on disk as *.bak) and the new
+                            # one, then migrate triggers + learned xcorr
+                            # offsets so they land on the same music.
+                            try:
+                                from services.capture_alignment import realign_after_recapture
+                                _stem_r = meta.npz_file[:-4]
+                                await asyncio.get_event_loop().run_in_executor(
+                                    None,
+                                    lambda: realign_after_recapture(
+                                        meta.spotify_uri, _stem_r, meta.duration_ms
+                                    ),
+                                )
+                            except Exception as exc:
+                                logger.warning("Realign failed (non-fatal): %s", exc)
                             for orig, bak in _bak_paths:
                                 try:
                                     bak.unlink()
@@ -911,6 +979,17 @@ async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> bool:
 
     librosa_result = await analyze_async(meta)
     librosa_ok = librosa_result is not None
+
+    # Any cached analyzed triggers were generated from the previous capture's
+    # librosa beats — stale for this fresh analysis. (Force-recapture also
+    # invalidates via realign_after_recapture; this covers first-time captures
+    # of songs whose old shape was deleted by the auto-recapture heuristics.)
+    if librosa_ok:
+        try:
+            from services.capture_alignment import invalidate_analyzed_cache
+            invalidate_analyzed_cache(meta.spotify_uri)
+        except Exception:
+            pass
 
     # All analysis complete (shape + WAV + librosa). Remove from recapture
     # playlist if present, and clear the needs_recapture flag on the sidecar.

@@ -107,3 +107,10 @@ class AudioShapeMeta(BaseModel):
     setlist_offsets: dict[str, dict] = Field(default_factory=dict)
     # Librosa analysis version: 0=none, 1=basic (no MFCC), 2=full (with MFCC)
     librosa_version: int = 0
+    # Post-recapture self-correction record (services/capture_alignment.py).
+    # shift_ms = new_label − old_label of the same musical moment. status:
+    # "applied" | "no_shift" | "low_confidence" | "no_baseline" | "disabled".
+    last_realign_status: str = ""
+    last_realign_shift_ms: int = 0
+    last_realign_r: float = 0.0
+    last_realign_at: str = ""

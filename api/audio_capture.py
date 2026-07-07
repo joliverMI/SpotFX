@@ -116,6 +116,11 @@ class AudioCaptureStream:
         self._loop = asyncio.get_event_loop()
         # Raw PCM buffer for WAV/librosa — list.append is GIL-atomic in CPython
         self._pcm_chunks: list[np.ndarray] = []
+        # Song-time (ms) of the first sample in _pcm_chunks. Set explicitly by
+        # the service when pre-roll PCM is seeded (0); otherwise recorded
+        # lazily from the first live chunk. truncate_pcm_to needs it to map a
+        # song-time boundary onto a buffer sample index.
+        self._pcm_start_song_ms: int | None = None
         # Diagnostic counter for queue-full drops (correlated with gap discards).
         self._dropped_frames: int = 0
 
@@ -142,6 +147,8 @@ class AudioCaptureStream:
         now_ms = int((time.monotonic() - adc_delay_s - self._song_start) * 1000)
         # Adjust for audio latency offset
         adjusted_ms = now_ms - settings.audio_latency_ms
+        if self._pcm_start_song_ms is None:
+            self._pcm_start_song_ms = adjusted_ms
 
         rms_total = float(np.sqrt(np.mean(pcm ** 2)))
         # Frequency decomposition — normalize FFT by chunk length so values
@@ -210,14 +217,25 @@ class AudioCaptureStream:
         self._pcm_chunks.clear()
         return pcm
 
-    def truncate_pcm_to(self, max_samples: int) -> int:
-        """Truncate the buffered PCM to at most `max_samples` samples,
-        counted from the start of the buffer (song-relative t=0).
+    def set_pcm_start_ms(self, ms: int) -> None:
+        """Declare the song-time of the first buffered PCM sample (0 when the
+        service seeds ring-buffer pre-roll). Must be called before start() so
+        the live-callback lazy default doesn't win."""
+        self._pcm_start_song_ms = ms
+
+    def truncate_pcm_to(self, boundary_song_ms: int, sample_rate: int) -> int:
+        """Truncate the buffered PCM so it ends at song-time
+        `boundary_song_ms`. The buffer's first sample sits at
+        `_pcm_start_song_ms` (0 with pre-roll; the first live chunk's
+        timestamp otherwise), so the boundary maps to sample index
+        (boundary − start) · rate.
 
         Used by audio_shape_service to drop the previous song's tail at the
         acoustic track boundary so the saved WAV stops at the boundary
         instead of bleeding into the new song. Returns samples dropped.
         """
+        start_ms = self._pcm_start_song_ms if self._pcm_start_song_ms is not None else 0
+        max_samples = int((boundary_song_ms - start_ms) / 1000.0 * sample_rate)
         if not self._pcm_chunks or max_samples < 0:
             return 0
         pcm = np.concatenate(self._pcm_chunks)
