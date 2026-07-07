@@ -15,11 +15,15 @@ export function useFollowWindow(opts: {
   durationMs: number;
   seedWindowS?: number;
   seedFutureS?: number;
+  /** Sticky-key namespace so other pages (Now Playing, Debug) don't share
+   * the builder's persisted zoom prefs. Default '' = builder keys. */
+  keyPrefix?: string;
 }) {
   const { getNowMs, durationMs } = opts;
-  const [follow, setFollow] = useSticky<boolean>('follow', true);
-  const [windowS, setWindowS] = useSticky<number>('zoomWindowS', 30, opts.seedWindowS);
-  const [futureS, setFutureS] = useSticky<number>('futureBufferS', 10, opts.seedFutureS);
+  const p = opts.keyPrefix ?? '';
+  const [follow, setFollow] = useSticky<boolean>(`${p}follow`, true);
+  const [windowS, setWindowS] = useSticky<number>(`${p}zoomWindowS`, 30, opts.seedWindowS);
+  const [futureS, setFutureS] = useSticky<number>(`${p}futureBufferS`, 10, opts.seedFutureS);
   const [manualWin, setManualWin] = useState<Win | null>(null);
 
   const stable = useRef({ follow, windowS, futureS, manualWin, durationMs, getNowMs });
@@ -59,17 +63,24 @@ export function useFollowWindow(opts: {
     ));
   }, [setFollow]);
 
-  /** Enabling follow snaps to the playhead keeping the CURRENT window size
-   * (the size you were looking at carries over; position jumps to now). */
+  /** Enabling follow snaps to the playhead keeping the CURRENT window size —
+   * but only when that size is a real zoom. A span covering (nearly) the
+   * whole song means "was at full song": zoom back in to the sticky size
+   * instead, and never let a song-sized span become the sticky size. */
   const setFollowSnapped = useCallback((on: boolean) => {
     if (on) {
       const s = stable.current;
-      const cur = !s.follow && s.manualWin
-        ? s.manualWin
-        : { startMs: 0, endMs: s.windowS * 1000 };
-      const spanS = Math.max(2, Math.round((cur.endMs - cur.startMs) / 1000));
+      const dur = Math.max(1, s.durationMs);
+      const isZoom = (secs: number) => secs * 1000 < dur * 0.8;
+      const manualSpanS = !s.follow && s.manualWin
+        ? Math.round((s.manualWin.endMs - s.manualWin.startMs) / 1000)
+        : null;
+      let spanS = manualSpanS !== null && isZoom(manualSpanS) ? manualSpanS : s.windowS;
+      if (!isZoom(spanS)) spanS = 30; // sticky size itself was song-sized
+      spanS = Math.max(2, spanS);
       setWindowS(spanS);
       setFutureS((f) => Math.min(f, Math.round(spanS / 3)));
+      setManualWin(null); // a stale full-song manual window must not linger
     }
     setFollow(on);
   }, [setFollow, setWindowS, setFutureS]);

@@ -32,6 +32,12 @@ interface BuilderState {
   selectedIds: string[];
   lastSelectedId: string | null;
 
+  /** Undo/redo: whole-profile snapshots (edits within 800ms coalesce). */
+  undoStack: SongProfile[];
+  redoStack: SongProfile[];
+  undo: () => void;
+  redo: () => void;
+
   /** Preview-only shift offset (ms) applied visually to all triggers. */
   triggerPreviewOffsetMs: number;
   calibrationTargetsMs: number[];
@@ -62,6 +68,13 @@ interface BuilderState {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+const MAX_HISTORY = 10;
+/** Edits landing within this window share one undo step (drags, key repeats). */
+const HISTORY_COALESCE_MS = 800;
+let lastHistoryPushAt = 0;
+
+const snapshot = (p: SongProfile): SongProfile => JSON.parse(JSON.stringify(p)) as SongProfile;
+
 export const useBuilderStore = create<BuilderState>((set, get) => ({
   track: null,
   manualUri: null,
@@ -75,6 +88,35 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   activePaletteId: null,
   selectedIds: [],
   lastSelectedId: null,
+  undoStack: [],
+  redoStack: [],
+  undo: () => {
+    const { profile, undoStack, redoStack } = get();
+    if (!profile || !undoStack.length) return;
+    set({
+      profile: undoStack[undoStack.length - 1],
+      undoStack: undoStack.slice(0, -1),
+      redoStack: [...redoStack.slice(-(MAX_HISTORY - 1)), snapshot(profile)],
+      dirty: true,
+    });
+    lastHistoryPushAt = 0; // the next edit starts a fresh undo step
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => void get().flushSave(), 400);
+  },
+  redo: () => {
+    const { profile, undoStack, redoStack } = get();
+    if (!profile || !redoStack.length) return;
+    set({
+      profile: redoStack[redoStack.length - 1],
+      redoStack: redoStack.slice(0, -1),
+      undoStack: [...undoStack.slice(-(MAX_HISTORY - 1)), snapshot(profile)],
+      dirty: true,
+    });
+    lastHistoryPushAt = 0;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => void get().flushSave(), 400);
+  },
+
   triggerPreviewOffsetMs: 0,
   calibrationTargetsMs: [],
   modes: { analysis: false, autoGen: false, genreBlend: false, recaptureRemaining: 0 },
@@ -98,13 +140,30 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    set({ profile: JSON.parse(JSON.stringify(p)) as SongProfile, dirty: false });
+    // History survives post-save refetches of the same song; a song change
+    // starts clean.
+    const sameSong = get().profile?.spotify_uri === p.spotify_uri;
+    set({
+      profile: snapshot(p),
+      dirty: false,
+      ...(sameSong ? {} : { undoStack: [], redoStack: [] }),
+    });
   },
 
   mutateProfile: (fn) => {
-    const { profile } = get();
+    const { profile, undoStack } = get();
     if (!profile) return;
-    set({ profile: produce(profile, fn), dirty: true });
+    const now = Date.now();
+    const pushHistory = now - lastHistoryPushAt > HISTORY_COALESCE_MS;
+    if (pushHistory) lastHistoryPushAt = now;
+    set({
+      profile: produce(profile, fn),
+      dirty: true,
+      redoStack: [],
+      ...(pushHistory
+        ? { undoStack: [...undoStack.slice(-(MAX_HISTORY - 1)), snapshot(profile)] }
+        : {}),
+    });
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void get().flushSave(), 400);
   },

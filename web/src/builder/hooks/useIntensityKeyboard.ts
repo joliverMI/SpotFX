@@ -4,13 +4,16 @@
  *  Enter = copy the PREVIOUS trigger's intensity, then advance to the next
  *  "." then 1-2 digits = set value (".9" → 0.90, ".09" → 0.09)
  *  Ctrl/Cmd+A = select all · Escape = deselect
+ *  Ctrl/Cmd+Z = undo · Ctrl/Cmd+Y (or Shift+Z) = redo · Ctrl/Cmd+F = follow
  * Registered in the capture phase so consumed keys never reach the palette
  * hook (digits stay palette keys except during "." entry). */
 import { useEffect, useRef } from 'react';
 import { useBuilderStore } from '../store';
 
-export function useIntensityKeyboard() {
+export function useIntensityKeyboard(opts?: { onFollow?: () => void }) {
   const entry = useRef<{ buf: string; timer: ReturnType<typeof setTimeout> | null } | null>(null);
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
   useEffect(() => {
     const clamp = (v: number) => Math.max(0, Math.min(1, Math.round(v * 100) / 100));
@@ -39,14 +42,19 @@ export function useIntensityKeyboard() {
       const st = useBuilderStore.getState();
       const consume = () => { e.preventDefault(); e.stopPropagation(); };
 
-      // Ctrl/Cmd+A — select all triggers
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-        const all = sortedTriggers().map((t) => t.id);
-        if (all.length) {
-          st.setSelection(all, all[all.length - 1]);
-          consume();
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'a') {
+          const all = sortedTriggers().map((t) => t.id);
+          if (all.length) {
+            st.setSelection(all, all[all.length - 1]);
+            consume();
+          }
+          return;
         }
-        return;
+        if (k === 'z' && !e.shiftKey) { st.undo(); consume(); return; }
+        if (k === 'y' || (k === 'z' && e.shiftKey)) { st.redo(); consume(); return; }
+        if (k === 'f') { optsRef.current?.onFollow?.(); consume(); return; }
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 

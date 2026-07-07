@@ -47,6 +47,28 @@ export interface LayerDataBag {
   draggingIntensity: { triggerId: string; intensity: number; baseIntensity: number } | null;
   selectedIds: string[];
   hoverTriggerId: string | null;
+
+  // ── Debug-page extensions (optional — builder layers ignore them) ─────────
+  /** live xcorr capture, already shifted into saved-shape time (mirrored down) */
+  live?: LiveShapeLayerData | null;
+  /** matcher's-view diff series, normalized ±1 (pos = live louder) */
+  diff?: DiffSeries | null;
+  /** confirmed mismatch spikes + their recovery windows (magenta) */
+  spikes?: SpikeMarker[];
+  /** per-window xcorr outcome brackets */
+  xcorrWindows?: XcorrWinMarker[];
+  /** rolling-R monitor history (song-time x, r y; null r = neutral gap) */
+  monitorHistory?: MonitorPoint[];
+  /** AI-triggers suggestion markers (draggable; index = suggestion index) */
+  aiMarkers?: AiMarker[];
+}
+
+export interface AiMarker {
+  ms: number;
+  /** state color: manual blue / approved green / rejected faded red / pending white */
+  color: string;
+  eventColor?: string | null;
+  highlighted?: boolean;
 }
 
 export interface CanvasFrame {
@@ -67,6 +89,7 @@ export interface CanvasFrame {
 export type Hit =
   | { kind: 'trigger-intensity'; triggerId: string }
   | { kind: 'trigger-triangle'; triggerId: string }
+  | { kind: 'ai-marker'; index: number }
   | { kind: 'beat'; beatMs: number; values: Record<string, number> }
   | null;
 
@@ -90,8 +113,7 @@ export function stripCountFor(data: Pick<LayerDataBag, 'librosa' | 'mfccDistance
   return n;
 }
 
-// ── Debug / ai_triggers layer data contracts (interfaces only — the layers
-// themselves are implemented when those pages migrate) ──────────────────────
+// ── Debug layer data shapes (rendered by src/debug/layers.ts) ────────────────
 export interface LiveShapeLayerData {
   timestamps_ms: number[];
   rms_total: number[];
@@ -99,12 +121,27 @@ export interface LiveShapeLayerData {
   rms_mid: number[];
   rms_high: number[];
 }
-export interface CustomMarker {
-  ms: number;
-  color: string;
-  shape: 'triangle' | 'diamond';
-  highlighted?: boolean;
+/** Pos/neg halves of the matcher's-view diff, both ≥0 on the same time grid. */
+export interface DiffSeries {
+  timestamps_ms: number[];
+  pos: number[];
+  neg: number[];
 }
-export interface AnchorCandidate { ms: number; score: number; }
-export interface XcorrWindowMarker { startMs: number; endMs: number; label?: string; }
-export interface MismatchSpike { ms: number; magnitude: number; }
+export interface SpikeMarker {
+  spike_ms: number;
+  win_start: number;
+  win_end: number;
+  strength: number;
+}
+export interface XcorrWinMarker {
+  win_start: number;
+  win_end: number;
+  winner?: string;
+  failed?: boolean;
+  new_offset_ms?: number | null;
+  new_r?: number | null;
+}
+export interface MonitorPoint {
+  ms: number;
+  r: number | null;
+}

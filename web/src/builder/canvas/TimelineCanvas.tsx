@@ -167,7 +167,7 @@ export default function TimelineCanvas({
       if (ev.button !== 0) return;
       const hit = hitTest(x, y);
       s.pointer?.onHit?.(hit, ev, g);
-      if (hit && (hit.kind === 'trigger-intensity' || hit.kind === 'trigger-triangle')) {
+      if (hit && (hit.kind === 'trigger-intensity' || hit.kind === 'trigger-triangle' || hit.kind === 'ai-marker')) {
         dragging = true;
         canvas.setPointerCapture(ev.pointerId);
       }

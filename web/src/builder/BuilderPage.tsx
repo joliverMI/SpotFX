@@ -133,7 +133,17 @@ export default function BuilderPage() {
     getPalettes: () => palettesRef.current,
     onToggleFollow: () => followWin.setFollowSnapped(!followWin.follow),
   });
-  useIntensityKeyboard();
+  useIntensityKeyboard({ onFollow: () => followWin.setFollowSnapped(true) });
+
+  // Opening the builder on a live song defaults to follow mode, zoomed in
+  // (once per page load — after that the user's choice rules).
+  const didInitFollow = useRef(false);
+  useEffect(() => {
+    if (didInitFollow.current || !liveMode || !track?.uri) return;
+    didInitFollow.current = true;
+    followWin.setFollowSnapped(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, track?.uri]);
 
   const averages = useMemo(
     () => (shape ? computeAverages(shape, Number(settings?.shape_average_window_ms ?? 4000)) : null),
@@ -158,6 +168,8 @@ export default function BuilderPage() {
   }), [bandFilters, avgFilters, markFilters, librosaFilters, scales, meta, librosa,
        triggerPreviewOffsetMs, maxRms, intensityMode]);
 
+  const canUndo = useBuilderStore((s) => s.undoStack.length > 0);
+  const canRedo = useBuilderStore((s) => s.redoStack.length > 0);
   const [beatTip, setBeatTip] = useState<{ ms: number; values: Record<string, number> } | null>(null);
   const [shiftOpen, setShiftOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -204,6 +216,14 @@ export default function BuilderPage() {
         title="Timeline"
         headerExtra={
           <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+            <button disabled={!canUndo} title="Undo (Ctrl+Z)"
+              onClick={() => useBuilderStore.getState().undo()}>
+              ↶
+            </button>
+            <button disabled={!canRedo} title="Redo (Ctrl+Y)"
+              onClick={() => useBuilderStore.getState().redo()}>
+              ↷
+            </button>
             <button onClick={() => followWin.setFollowSnapped(!followWin.follow)}
               className={followWin.follow ? 'primary' : ''}
               title="Toggle follow/manual zoom (` key) — enabling snaps to the playhead">
