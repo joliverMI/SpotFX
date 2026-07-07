@@ -84,6 +84,31 @@ def _encode_linear(angle: str, stops: list[tuple[str, str]]) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _rotate_hex(h: str, degrees: float) -> str:
+    """Rotate a #RRGGBB color around the hue wheel by `degrees` (sign = direction).
+    Saturation and value are preserved, so grays/white/black pass through."""
+    import colorsys
+    r, g, b = _hex_to_rgb(h)
+    hue, s, v = colorsys.rgb_to_hsv(r, g, b)
+    hue = (hue + degrees / 360.0) % 1.0
+    return _rgb_to_hex(*colorsys.hsv_to_rgb(hue, s, v))
+
+
+def rotate_color_string(value: str, degrees: float) -> str | None:
+    """Rotate a color value — solid #RRGGBB or linear-gradient string — around
+    the hue wheel by `degrees`. Every gradient stop rotates by the same amount,
+    so the gradient's internal relationships are preserved. Returns None when
+    the format isn't supported (caller should skip the param)."""
+    value = (value or "").strip()
+    if _HEX_FULL_RE.match(value):
+        return _rotate_hex(value, degrees)
+    parsed = _parse_linear(value)
+    if parsed:
+        angle, stops = parsed
+        return _encode_linear(angle, [(_rotate_hex(c, degrees), p) for c, p in stops])
+    return None
+
+
 def interpolate_gradient(start: str, end: str, t: float) -> str:
     """
     Interpolate between two gradient or color strings.

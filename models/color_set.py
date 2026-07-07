@@ -4,7 +4,7 @@ SpotFX — Color Set data models.
 A `ColorSetCard` is either:
   - kind="set":   a reusable bundle of FG/BG color entries, each scoped to a
                   device/category. Applied to many devices at once by a
-                  Morph Color step.
+                  Set Color step.
   - kind="group": an ordered list of references to Color Sets, picked one at a
                   time (sequential cycle or weighted random) when fired.
 
@@ -24,7 +24,7 @@ class ColorSetEntry(BaseModel):
     """One scoped FG/BG color definition within a Color Set. Both colors are
     optional — leave one unset to only change the other. `bg_mode` maps to the
     LedFX `background_mode` param (additive/overwrite); None = don't touch it.
-    `ramp_ms` overrides the Morph Color step's ramp only when assigned."""
+    `ramp_ms` overrides the Set Color step’s ramp only when assigned."""
     scope:       MorphScope = Field(default_factory=MorphScope)
     color_kind:  Optional[Literal["gradient", "solid"]] = None
     color_value: str | None = None

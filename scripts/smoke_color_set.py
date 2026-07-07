@@ -36,7 +36,7 @@ effect_params.load()
 from api import ledfx_client                              # noqa: E402
 from models.state import state                            # noqa: E402
 from models.color_set import ColorSetCard, ColorSetEntry, GroupMember  # noqa: E402
-from models.music_event import MorphColorAction, MorphScope            # noqa: E402
+from models.music_event import SetColorAction, MorphScope            # noqa: E402
 from services import color_set_store                       # noqa: E402
 from services.trigger_engine import TriggerEngine          # noqa: E402
 
@@ -102,7 +102,7 @@ async def main() -> None:
 
     try:
         print("\nFiring Morph Color step for Set '[smoke] Hot' (await_ramps=True)…")
-        await engine._execute_morph_color(MorphColorAction(ref_id=set_a.id, ramp_ms=400), await_ramps=True)
+        await engine._execute_set_color(SetColorAction(ref_id=set_a.id, ramp_ms=400), await_ramps=True)
         await asyncio.sleep(0.3)
         after = (await ledfx_client.get_all_virtuals() or {}).get("virtuals") or {}
         print("AFTER (Set):")
@@ -112,7 +112,7 @@ async def main() -> None:
 
         print("\nFiring Group 3× (cycle) — expect Hot → Cool → Hot:")
         for i in range(3):
-            await engine._execute_morph_color(MorphColorAction(ref_id=group.id, pick_mode="cycle", ramp_ms=200), await_ramps=True)
+            await engine._execute_set_color(SetColorAction(ref_id=group.id, pick_mode="cycle", ramp_ms=200), await_ramps=True)
             chosen = engine._color_cursor.get(group.id)
             picked = color_set_store.get_by_id(group.members[chosen].color_set_id)
             print(f"  fire {i+1}: cursor={chosen} → {picked.name if picked else '?'}")

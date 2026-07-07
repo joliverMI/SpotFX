@@ -198,7 +198,7 @@ class MorphStepAction(BaseModel):
     targets:          list[MorphTarget] = Field(default_factory=list)
 
 
-class MorphColorAction(BaseModel):
+class SetColorAction(BaseModel):
     """Apply a saved Color Set — or pick one from a Color Group — across many
     devices at once, setting FG color, BG color, and (optionally) background
     mode. `ref_id` points at a ColorSetCard (kind="set" or "group"). For a
@@ -208,8 +208,8 @@ class MorphColorAction(BaseModel):
     "cycle" (wrap or bounce): `advance` is how many members to move per fire (1 =
     next, 3 = skip 2). For wrap, `direction` is the absolute index direction; for
     bounce, "forward" continues the current travel direction and "backward"
-    reverses it. See `services/trigger_engine._execute_morph_color`."""
-    type:      Literal["morph_color"] = "morph_color"
+    reverses it. See `services/trigger_engine._execute_set_color`."""
+    type:      Literal["set_color"] = "set_color"
     labels:    list[str] = Field(default_factory=list)
     weight:    float = 1.0
     ref_id:    str = ""
@@ -221,6 +221,31 @@ class MorphColorAction(BaseModel):
     # effect (e.g. background_color), preserving the running effect. When False,
     # those values are still applied — but always instantly, never ramped.
     preserve_effect: bool = True
+
+
+class MorphColorAction(BaseModel):
+    """Morph the colors already showing on the scoped devices by rotating every
+    color (FG gradient/color, BG color, and accent) around the hue wheel by
+    `degrees`. The default 180° yields the complementary contrast. Like other
+    morphs: `scope` selects devices/categories (empty = inherit the nearest
+    group/lane Target, else global), `ramp_ms` smooths the change, and
+    `intensity_scale` lets beat intensity modulate the rotation
+    (factor = 1 + (intensity − 0.5) · intensity_scale, same math as nudges).
+
+    `direction`: "forward" rotates + degrees around the wheel, "backward" −.
+    `preserve_melt_bg`: when True, the BG color on melt effects is left
+    untouched; power effects ALWAYS get their BG rotated regardless.
+    See `services/trigger_engine._execute_morph_color`."""
+    type:      Literal["morph_color"] = "morph_color"
+    labels:    list[str] = Field(default_factory=list)
+    weight:    float = 1.0
+    scope:     MorphScope = Field(default_factory=MorphScope)
+    degrees:   float = 180.0
+    direction: Literal["forward", "backward"] = "forward"
+    ramp_ms:   int | ValueBinding | None = None
+    intensity_scale:  float = 0.0       # 0 = ignore beat intensity, 1 = full scaling
+    intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
+    preserve_melt_bg: bool = False
 
 
 class DeviceSettingTarget(BaseModel):
@@ -400,6 +425,7 @@ Action = Annotated[
     | LedFxGlobalTransitionAction
     | LedFxEffectParamAction
     | MorphStepAction
+    | SetColorAction
     | MorphColorAction
     | DeviceSettingsAction
     | RandomGroupAction

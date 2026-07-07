@@ -7,7 +7,7 @@ offline-testable with fabricated beats/sections — same philosophy as the
 `intensity_resolver` callable that morph_scene threads around.
 
 The engine applies `resolve_action_bindings` at the executor seams
-(_execute_morph_step / _execute_morph_color / effect_param leaf /
+(_execute_morph_step / _execute_set_color / _execute_morph_color / effect_param leaf /
 _build_scene_payload) so every dispatch path — bus, scene-override
 prestage, beat timelines — sees plain scalars. The morph compiler itself
 never learns about bindings.
@@ -201,8 +201,10 @@ def has_bindings(action) -> bool:
             if any(isinstance(getattr(av, f), ValueBinding) for f, _ in _ASPECT_FIELDS):
                 return True
         return False
-    if t == "morph_color":
+    if t == "set_color":
         return isinstance(action.advance, ValueBinding) or isinstance(action.ramp_ms, ValueBinding)
+    if t == "morph_color":
+        return isinstance(action.ramp_ms, ValueBinding)
     if t == "ledfx_effect_param":
         if isinstance(action.ramp_ms, ValueBinding):
             return True
@@ -243,9 +245,11 @@ def resolve_action_bindings(action, signal_fn: SignalFn):
             av = tgt.absolute_value
             for field, kind in _ASPECT_FIELDS:
                 setattr(av, field, rv(getattr(av, field), kind))
-    elif t == "morph_color":
+    elif t == "set_color":
         adv = rv(new.advance, "int1")
         new.advance = 1 if adv is None else adv
+        new.ramp_ms = rv(new.ramp_ms, "int0")
+    elif t == "morph_color":
         new.ramp_ms = rv(new.ramp_ms, "int0")
     elif t == "ledfx_effect_param":
         new.ramp_ms = rv(new.ramp_ms, "int0")

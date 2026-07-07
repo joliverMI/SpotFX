@@ -134,13 +134,13 @@ def main() -> None:
     ok("steps auto-sorted ascending")
 
     # ── 9. resolve_action_bindings: hot path, substitution, memoization ─────
-    from models.music_event import MorphColorAction, MorphStepAction, LedFxEffectParamAction
+    from models.music_event import SetColorAction, MorphStepAction, LedFxEffectParamAction
 
-    plain = MorphColorAction(ref_id="x", advance=2)
+    plain = SetColorAction(ref_id="x", advance=2)
     assert not has_bindings(plain)
     assert resolve_action_bindings(plain, lambda b: 0.9) is plain, "no-binding hot path returns same object"
 
-    bound = MorphColorAction(ref_id="x", advance={
+    bound = SetColorAction(ref_id="x", advance={
         "bind": "signal", "mode": "steps",
         "steps": [{"threshold": 0.0, "value": 1}, {"threshold": 0.75, "value": 4}],
     }, ramp_ms={"bind": "signal", "mode": "map", "out_min": 1200, "out_max": 150})
@@ -217,7 +217,7 @@ async def engine_seams() -> None:
     effect_params.load()
 
     import services.trigger_engine as te
-    from models.music_event import MorphColorAction, MorphStepAction, LedFxEffectParamAction, MusicEvent
+    from models.music_event import SetColorAction, MorphStepAction, LedFxEffectParamAction, MusicEvent
     from models.state import state
 
     engine = te.TriggerEngine()
@@ -256,15 +256,15 @@ async def engine_seams() -> None:
     assert isinstance(ms.ramp_ms, ValueBinding), "stored action untouched"
     ok("seam: _execute_morph_step resolves number + ramp (sig 0.5 → 0.5 / 550ms)")
 
-    # (b) morph_color: bound advance uses section_energy (0.6 @5000ms → tier 2)
-    mc = MorphColorAction(ref_id="nonexistent", advance={
+    # (b) set_color: bound advance uses section_energy (0.6 @5000ms → tier 2)
+    mc = SetColorAction(ref_id="nonexistent", advance={
         "bind": "signal", "signal": "section_energy", "mode": "steps",
         "steps": [{"threshold": 0.0, "value": 1}, {"threshold": 0.5, "value": 2},
                   {"threshold": 0.9, "value": 4}],
     })
-    await engine._execute_morph_color(mc)
-    assert last_of("morph_color").advance == 2
-    ok("seam: _execute_morph_color resolves advance from section_energy (0.6 → 2)")
+    await engine._execute_set_color(mc)
+    assert last_of("set_color").advance == 2
+    ok("seam: _execute_set_color resolves advance from section_energy (0.6 → 2)")
 
     # (c) effect_param leaf: bound toggle + no-op target_value drop
     ep = LedFxEffectParamAction(params=[
@@ -304,21 +304,21 @@ async def engine_seams() -> None:
     # (f) trigger_intensity threads through the per-fire ContextVar
     tok = te._FIRE_INTENSITY.set(0.9)
     try:
-        mc2 = MorphColorAction(ref_id="nonexistent", advance={
+        mc2 = SetColorAction(ref_id="nonexistent", advance={
             "bind": "signal", "signal": "trigger_intensity", "mode": "steps",
             "steps": [{"threshold": 0.0, "value": 1}, {"threshold": 0.75, "value": 4}],
         })
-        await engine._execute_morph_color(mc2)
-        assert last_of("morph_color").advance == 4
+        await engine._execute_set_color(mc2)
+        assert last_of("set_color").advance == 4
     finally:
         te._FIRE_INTENSITY.reset(tok)
     # without the var (manual fire): steps below-first → fallback → default 1
-    mc3 = MorphColorAction(ref_id="nonexistent", advance={
+    mc3 = SetColorAction(ref_id="nonexistent", advance={
         "bind": "signal", "signal": "trigger_intensity", "mode": "steps",
         "steps": [{"threshold": 0.5, "value": 4}],
     })
-    await engine._execute_morph_color(mc3)
-    assert last_of("morph_color").advance == 1, "manual fire → no-op → advance 1"
+    await engine._execute_set_color(mc3)
+    assert last_of("set_color").advance == 1, "manual fire → no-op → advance 1"
     ok("seam: trigger_intensity via ContextVar (0.9 → tier 4; manual fire → default)")
 
     te.resolve_action_bindings = real  # type: ignore

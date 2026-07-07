@@ -238,7 +238,7 @@ let scenes = [];
 let selectedId = null;
 let typeFilter    = null;
 let aiExFilter    = false;
-const _RAMP_TYPES = new Set(['ledfx_effect_param', 'morph_step', 'morph_color']);
+const _RAMP_TYPES = new Set(['ledfx_effect_param', 'morph_step', 'set_color', 'morph_color']);
 let allParamLabels = [];
 let effectParamsConfig = {};
 let savedGradients = [];
@@ -306,6 +306,7 @@ const ACTION_TYPES = [
   { value: 'ledfx_global_transition', label: 'Global Transition' },
   { value: 'ledfx_effect_param',      label: 'Effect Parameter'  },
   { value: 'morph_step',              label: 'Morph Step'        },
+  { value: 'set_color',               label: 'Set Color'         },
   { value: 'morph_color',             label: 'Morph Color'       },
   { value: 'device_settings',         label: 'Device Settings'   },
 ];
@@ -387,6 +388,53 @@ function actionFields(a) {
     }
 
     case 'morph_color': {
+      const rampVal = a.ramp_ms != null ? a.ramp_ms : '';
+      const scope = a.scope || { virtual_ids: [], categories: [], roles: [] };
+      const cats = Object.keys(effectParamsConfig.categories || {});
+      const allVirts = cats.flatMap(c =>
+        (effectParamsConfig.categories[c].virtuals || []).map(v => ({ v, c }))
+      );
+      const selCat = scope.categories?.[0] || null;
+      const selVid = scope.virtual_ids?.[0] || null;
+      const scopeMode = selVid ? 'device' : (selCat ? 'category' : 'all');
+      const catOptsHtml = cats.map(c =>
+        `<option value="${c}"${c === selCat ? ' selected' : ''}>${c}</option>`).join('');
+      const vidOptsHtml = allVirts.map(({ v, c }) =>
+        `<option value="${v}"${v === selVid ? ' selected' : ''}>${v} (${c})</option>`).join('');
+      const dir = a.direction || 'forward';
+      const dirOpts = [['forward','Forward'],['backward','Backward']]
+        .map(([v,l]) => `<option value="${v}"${v === dir ? ' selected' : ''}>${l}</option>`).join('');
+      const src = a.intensity_source || 'rms_total';
+      const srcOpts = [['rms_total','RMS Total'],['rms_bass','RMS Bass'],['onset_score','Onset Score']]
+        .map(([v,l]) => `<option value="${v}"${v === src ? ' selected' : ''}>${l}</option>`).join('');
+      const pmb = a.preserve_melt_bg === true;
+      const pmbStyle = pmb
+        ? 'background:var(--accent);color:#fff;'
+        : 'background:var(--surface);color:var(--text-muted);';
+      return `<div class="mr-root ep-root" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--text-muted);">Scope:</span>
+        <select class="ep-scope-sel" onchange="epScopeChange(this)">
+          <option value="all"${scopeMode === 'all' ? ' selected' : ''}>All / Parent</option>
+          <option value="category"${scopeMode === 'category' ? ' selected' : ''}>Category</option>
+          <option value="device"${scopeMode === 'device' ? ' selected' : ''}>Specific Device</option>
+        </select>
+        <select class="ep-scope-cat" style="${scopeMode === 'category' ? '' : 'display:none'}">${catOptsHtml}</select>
+        <select class="ep-scope-vid" style="${scopeMode === 'device' ? '' : 'display:none'}">${vidOptsHtml}</select>
+        <span style="font-size:11px;color:var(--text-muted);" title="Hue-wheel rotation per fire — 180° = complementary contrast.">Degrees</span>
+        <input type="number" class="mr-degrees" value="${a.degrees != null ? a.degrees : 180}" min="0" max="360" step="5" style="width:64px">
+        <select class="mr-direction" style="width:104px;font-size:11px;">${dirOpts}</select>
+        <span style="font-size:11px;color:var(--text-muted);">Ramp (ms)</span>
+        <input type="number" class="mr-ramp" value="${rampVal}" min="0" step="50" placeholder="global" style="width:80px">
+        <span style="font-size:11px;color:var(--text-muted);" title="0 = ignore beat intensity, 1 = fully scale the rotation with it.">Int. scale</span>
+        <input type="number" class="mr-int-scale" value="${a.intensity_scale != null ? a.intensity_scale : 0}" min="-2" max="2" step="0.1" style="width:60px">
+        <select class="mr-int-source" style="width:110px;font-size:11px;">${srcOpts}</select>
+        <button type="button" class="mr-preserve-melt" data-on="${pmb ? '1' : '0'}" onclick="mcPreserveToggle(this)"
+          title="Keep the background color on melt effects (power BG always rotates)"
+          style="height:26px;padding:0 10px;font-size:11px;border-radius:4px;cursor:pointer;border:1px solid var(--border);${pmbStyle}">Preserve Melt BG</button>
+      </div>`;
+    }
+
+    case 'set_color': {
       const rampVal = a.ramp_ms != null ? a.ramp_ms : '';
       const refId = a.ref_id || '';
       const inLib = (colorSets || []).some(c => c.id === refId);
@@ -1419,7 +1467,7 @@ function syncActionFromRow(row) {
       };
     }
 
-    case 'morph_color': {
+    case 'set_color': {
       const dyn = row.querySelector('.action-dynamic');
       const rampStr = dyn.querySelector('.mc-ramp')?.value;
       return {
@@ -1430,6 +1478,29 @@ function syncActionFromRow(row) {
         direction: dyn.querySelector('.mc-direction')?.value || 'forward',
         ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
         preserve_effect: dyn.querySelector('.mc-preserve')?.dataset.on !== '0',
+      };
+    }
+
+    case 'morph_color': {
+      const dyn = row.querySelector('.action-dynamic');
+      const rampStr = dyn.querySelector('.mr-ramp')?.value;
+      const scopeMode = dyn.querySelector('.ep-scope-sel')?.value || 'all';
+      const scope = { virtual_ids: [], categories: [], roles: [] };
+      if (scopeMode === 'device') {
+        const vid = dyn.querySelector('.ep-scope-vid')?.value;
+        if (vid) scope.virtual_ids = [vid];
+      } else if (scopeMode === 'category') {
+        const cat = dyn.querySelector('.ep-scope-cat')?.value;
+        if (cat) scope.categories = [cat];
+      }
+      return {
+        type, weight, labels, scope,
+        degrees: parseFloat(dyn.querySelector('.mr-degrees')?.value) || 180,
+        direction: dyn.querySelector('.mr-direction')?.value || 'forward',
+        ramp_ms: rampStr !== '' && rampStr != null ? parseInt(rampStr) : null,
+        intensity_scale: parseFloat(dyn.querySelector('.mr-int-scale')?.value) || 0,
+        intensity_source: dyn.querySelector('.mr-int-source')?.value || 'rms_total',
+        preserve_melt_bg: dyn.querySelector('.mr-preserve-melt')?.dataset.on === '1',
       };
     }
 
