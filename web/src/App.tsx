@@ -1,4 +1,5 @@
-import { Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import NavBar from './components/NavBar';
 import { ToastProvider } from './components/Toast';
 import BuilderPage from './builder/BuilderPage';
@@ -13,8 +14,34 @@ import SettingsPage from './settings/SettingsPage';
 import TriggerlessPage from './triggerless/TriggerlessPage';
 import TimingVizPage from './timingviz/TimingVizPage';
 import AITriggersPage from './aitriggers/AITriggersPage';
+import HelpPage from './help/HelpPage';
+
+const PAGE_TITLES: [string, string][] = [
+  ['/event', 'Events'],
+  ['/builder', 'Profile Builder'],
+  ['/now', 'Now Playing'],
+  ['/debug', 'Debug'],
+  ['/devices', 'Devices'],
+  ['/color-sets', 'Color Sets'],
+  ['/setlists', 'Set Lists'],
+  ['/settings', 'Settings'],
+  ['/triggerless', 'Triggerless'],
+  ['/timing', 'Timing'],
+  ['/ai-triggers', 'AI Triggers'],
+  ['/help', 'Help'],
+];
+
+/** The SPA serves one index.html — keep the tab title in sync per route. */
+function usePageTitle() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const hit = PAGE_TITLES.find(([prefix]) => pathname.startsWith(prefix));
+    document.title = `SpotFX — ${hit?.[1] ?? 'Events'}`;
+  }, [pathname]);
+}
 
 export default function App() {
+  usePageTitle();
   return (
     <>
       <ToastProvider>
@@ -33,6 +60,7 @@ export default function App() {
           <Route path="/triggerless" element={<TriggerlessPage />} />
           <Route path="/timing" element={<TimingVizPage />} />
           <Route path="/ai-triggers" element={<AITriggersPage />} />
+          <Route path="/help" element={<HelpPage />} />
         </Routes>
       </main>
       </ToastProvider>
