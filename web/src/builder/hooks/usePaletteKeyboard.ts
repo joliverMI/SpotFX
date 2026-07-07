@@ -57,7 +57,9 @@ export function usePaletteKeyboard(opts: {
       }
 
       if (!st.activePaletteId) return;
-      st.setArmedKey(st.armedKey === key ? null : key);
+      // Re-pressing the armed key keeps it armed (no toggle-off) — Escape or
+      // clicking the key in the grid disarms.
+      st.setArmedKey(key);
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
