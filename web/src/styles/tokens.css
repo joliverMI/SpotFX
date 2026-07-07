@@ -207,3 +207,102 @@ input:focus { border-color: var(--accent); }
 .meta-grid .k { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
 
 .empty-note { color: var(--text-muted); font-style: italic; font-size: 13px; }
+
+/* ── Status badges (ported from frontend/css/style.css) ── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge-green { background: #0e3a1f; color: var(--accent); }
+.badge-yellow { background: #3a2e00; color: var(--accent2); }
+.badge-red { background: #3a0e0e; color: var(--danger); }
+.badge-gray { background: var(--surface2); color: var(--text-muted); }
+
+/* ── Toggle buttons (Now Playing controls) ── */
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  height: 28px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toggle-btn:hover { background: #2e2e2e; border-color: #555; }
+.toggle-btn.active {
+  background: rgba(29, 185, 84, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Trigger list (Now Playing) ── */
+.trigger-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.trigger-row:hover { background: var(--surface2); }
+.trigger-row.next { border-left: 3px solid var(--accent2); padding-left: 7px; }
+.trigger-row.trigger-past { opacity: 0.38; transition: opacity 0.4s; }
+.trigger-row.trigger-current {
+  border-left: 3px solid rgba(255, 215, 0, 0.7);
+  padding-left: 7px;
+  background: rgba(255, 215, 0, 0.07);
+}
+.trigger-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.trigger-ts { font-variant-numeric: tabular-nums; color: var(--text-muted); min-width: 60px; }
+.trigger-name { flex: 1; }
+.trigger-action {
+  font-size: 11px; color: var(--text-muted); font-family: monospace;
+  min-width: 90px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; text-align: right;
+}
+.trigger-labels { font-size: 11px; color: var(--text-muted); }
+
+/* ── Two-pane list/editor pages (Devices, Color Sets) ── */
+.pane-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px;
+  border-radius: var(--radius); cursor: pointer;
+}
+.pane-row:hover { background: var(--surface2); }
+.pane-row.selected { background: var(--surface2); border-left: 3px solid var(--accent); padding-left: 7px; }
+
+.field { margin-bottom: 12px; }
+.field label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+input[type='number'], input[type='color'], select, textarea {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: var(--font);
+}
+select:focus, textarea:focus, input[type='number']:focus { outline: none; border-color: var(--accent); }
+input[type='checkbox'] { accent-color: var(--accent); }
+
+/* ── Debug page ── */
+.dbg-grid {
+  display: grid; grid-template-columns: auto auto auto;
+  gap: 4px 16px; font-size: 12px; color: var(--text-muted);
+}
+.dbg-grid b { color: var(--text); }
+.dbg-mono {
+  font-family: monospace; font-size: 11px; opacity: 0.85;
+  white-space: pre; max-height: 180px; overflow-y: auto;
+}

@@ -8,6 +8,13 @@ export function fmtMs(ms: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** Countdown to the next trigger: "37s" above 10s, "3.2s" below. */
+export function fmtCountdown(ms: number | null | undefined): string {
+  if (ms == null || Number.isNaN(ms) || ms < 0) return '';
+  if (ms >= 10000) return `${Math.floor(ms / 1000)}s`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 /** m:ss.t (tenths) — the trigger dialog's timestamp format. */
 export function fmtMsTenths(ms: number): string {
   const totalSec = ms / 1000;

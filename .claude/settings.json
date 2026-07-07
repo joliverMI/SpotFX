@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(journalctl --user -u *)",
+      "Bash(journalctl -u *)",
+      "Bash(systemctl --user is-active *)",
+      "Bash(systemctl --user status *)",
+      "Bash(curl -s http://localhost:8000/*)",
+      "Bash(curl -s \"http://localhost:8000/*)",
+      "Bash(iw dev *)",
+      "Bash(npm run build)",
+      "Bash(npm run build *)",
+      "Bash(.venv/bin/python scripts/check_event_roundtrip.py)",
+      "Bash(.venv/bin/python scripts/check_event_roundtrip.py *)",
+      "Bash(.venv/bin/python scripts/smoke_composite.py)",
+      "Bash(.venv/bin/python scripts/smoke_composite.py *)",
+      "Bash(.venv/bin/python scripts/smoke_random_group.py)",
+      "Bash(.venv/bin/python scripts/smoke_random_group.py *)",
+      "Bash(.venv/bin/python scripts/smoke_bindings.py)",
+      "Bash(.venv/bin/python scripts/smoke_bindings.py *)",
+      "Bash(.venv/bin/python scripts/smoke_shape_flare_fallback.py)",
+      "Bash(.venv/bin/python scripts/smoke_shape_flare_fallback.py *)",
+      "Bash(.venv/bin/python scripts/smoke_librosa_v3.py)",
+      "Bash(.venv/bin/python scripts/smoke_librosa_v3.py *)"
+    ]
+  }
+}
