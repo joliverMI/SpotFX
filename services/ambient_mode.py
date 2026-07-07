@@ -23,7 +23,12 @@ So Ambient Mode, for each Hue device in the target category:
      brightness over the Hue REST API (after the freeze, so the now-stopped stream
      can't override it).
 
-Disable simply unfreezes the devices, re-engaging their streams.
+Disable unfreezes the devices, then activates the configured wake scene
+(settings.ambient_wake_scene) and verifies its virtuals came up — unfreezing
+only re-arms the stream; if the driving Hue virtual has no active effect,
+nothing ever streams and the bulbs stay stuck on the ambient REST color. The
+wake scene puts a real effect on them; the next SpotFX trigger/scene change
+takes over from there.
 
 Bridge credentials (ip / app-key / entertainment id) are read live from the
 LedFX Hue device config — SpotFX stores no Hue secrets of its own.
@@ -268,15 +273,78 @@ async def _enable_impl() -> dict:
 
 async def _disable_impl() -> dict:
     """Deactivate ambient mode: UNFREEZE each Hue device so LedFX re-engages its
-    entertainment stream and music reactivity resumes. Nothing was parked, so
-    there's nothing to reactivate."""
+    entertainment stream, then kick the wake scene so the stream actually
+    restarts (see _wake_kick)."""
     hue_device_ids = sorted(await _resolve_hue_cfgs())
     unfrozen = 0
     for did in hue_device_ids:
         if await ledfx_client.freeze_hue_device(did, False):
             unfrozen += 1
     logger.info("Ambient DISABLED: unfroze %d Hue device(s): %s", unfrozen, hue_device_ids)
-    return {"status": "disabled", "unfrozen": hue_device_ids}
+    wake = await _wake_kick()
+    return {"status": "disabled", "unfrozen": hue_device_ids, "wake": wake}
+
+
+async def _wake_kick() -> dict:
+    """Restart the Hue entertainment stream after unfreeze.
+
+    Unfreezing only re-arms streaming: LedFX streams to a Hue device when its
+    driving virtual is active with an effect. If that virtual went inactive
+    while ambient held the bulbs, the bulbs stay stuck on the ambient REST
+    color indefinitely. Activating the wake scene puts a real effect on the
+    Hue virtuals, which restarts the stream; the next SpotFX trigger/scene
+    change then overwrites it through the normal path — no hand-back needed.
+
+    Verifies the scene's 'activate' virtuals actually came up (active + effect
+    present), re-firing the activate up to 3 times before giving up."""
+    scene_id = (settings.ambient_wake_scene or "").strip()
+    if not scene_id:
+        return {"status": "skipped"}
+
+    scene = next(
+        (s for s in await ledfx_client.get_scenes() if s.get("id") == scene_id), None
+    )
+    if scene is None:
+        logger.error(
+            "Ambient wake: scene %r not found on LedFX — Hue bulbs may stay on the "
+            "ambient color until the next scene change", scene_id,
+        )
+        return {"status": "scene_missing", "scene": scene_id}
+    watch = sorted(
+        vid for vid, spec in (scene.get("virtuals") or {}).items()
+        if isinstance(spec, dict) and spec.get("action") == "activate"
+    )
+    if not watch:
+        await ledfx_client.trigger_scene(scene_id)
+        logger.warning("Ambient wake: scene %r has no 'activate' virtuals — fired blind", scene_id)
+        return {"status": "unverified", "scene": scene_id}
+
+    dark: list[str] = watch
+    for attempt in range(1, 4):
+        await ledfx_client.trigger_scene(scene_id)
+        for _ in range(6):
+            await asyncio.sleep(0.5)
+            dark = []
+            for vid in watch:
+                rec = await ledfx_client.get_virtual(vid)
+                vobj = rec.get(vid, {}) if isinstance(rec, dict) else {}
+                if not (vobj.get("active") and vobj.get("effect")):
+                    dark.append(vid)
+            if not dark:
+                logger.info(
+                    "Ambient wake: scene %r on — virtual(s) %s active (attempt %d)",
+                    scene_id, watch, attempt,
+                )
+                return {"status": "on", "scene": scene_id, "virtuals": watch, "attempts": attempt}
+        logger.warning(
+            "Ambient wake: attempt %d — %s still inactive, re-firing %r",
+            attempt, dark, scene_id,
+        )
+    logger.error(
+        "Ambient wake: gave up after 3 attempts — %s never came up; bulbs may stay "
+        "on the ambient color until the next scene change", dark,
+    )
+    return {"status": "failed", "scene": scene_id, "dark": dark}
 
 
 async def reapply() -> dict:

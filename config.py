@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     ambient_color: str = "#ffffff"           # hex, used when ambient_color_mode == "color"
     ambient_kelvin: int = 2700               # used when ambient_color_mode == "white"
     ambient_brightness: int = 100            # 1..100 percent
+    ambient_wake_scene: str = "wake-hues"    # LedFX scene fired on disable to restart the Hue stream ("" = off)
 
     # ── App ───────────────────────────────────────────────────────────────────
     app_host: str = "0.0.0.0"
