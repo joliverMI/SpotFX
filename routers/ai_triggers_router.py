@@ -354,6 +354,7 @@ async def analyze_triggers(uri: str, category: str = "all"):
         "quiet_event_id": "scene", "scene_fill_event_id": "scene",
         "flare_event_id": "flare", "flare_low_event_id": "flare",
         "flare_mid_event_id": "flare", "flare_high_event_id": "flare",
+        "flare_scene_event_id": "flare",
     }
     available: set[str] = set()
     eid_to_role: dict[str, str] = {}
@@ -380,6 +381,7 @@ async def analyze_triggers(uri: str, category: str = "all"):
                 timestamp_ms=t["timestamp_ms"],
                 event_id=t["event_id"],
                 labels=list(t.get("labels") or []),
+                intensity=t.get("intensity"),
             )
             for t in raw
         ]
@@ -412,220 +414,107 @@ async def analyze_triggers(uri: str, category: str = "all"):
 
 
 # ── Training profile tuning ──────────────────────────────────────────────────
+# Execution, progress state, scheduling, and history live in
+# services/tune_scheduler.py — shared by immediate runs, scheduled runs,
+# and queued ("right after") runs.
 
-import time as _time
-
-# Global progress state keyed by profile_id
-_tune_progress: dict[str, dict] = {}
-_tune_cancel: dict[str, bool] = {}
+from services import tune_scheduler
 
 
 @router.get("/tune/active")
 async def tune_active():
     """Return progress for any currently running tune, or {running: false}."""
-    for pid, prog in _tune_progress.items():
-        if prog.get("running"):
-            return prog
-    return {"running": False}
+    return tune_scheduler.any_running() or {"running": False}
 
 
 @router.get("/training-profiles/{profile_id}/tune/progress")
 async def tune_progress(profile_id: str):
     """Poll current tuning progress for a profile."""
-    return _tune_progress.get(profile_id, {"running": False})
+    return tune_scheduler.tune_progress.get(profile_id, {"running": False})
 
 
 @router.post("/training-profiles/{profile_id}/tune/cancel")
 async def tune_cancel(profile_id: str):
     """Request cancellation of a running tune."""
-    if profile_id in _tune_progress and _tune_progress[profile_id].get("running"):
-        _tune_cancel[profile_id] = True
+    if tune_scheduler.tune_progress.get(profile_id, {}).get("running"):
+        tune_scheduler.tune_cancel[profile_id] = True
         return {"status": "cancel_requested"}
     return {"status": "not_running"}
 
 
 @router.post("/training-profiles/{profile_id}/tune")
 async def tune_profile(profile_id: str):
-    """Run the automated tuning loop for a training profile.
-    Returns the best parameters found and applies them to the profile."""
+    """Run the tuning loop for a training profile immediately.
+    Improved parameters are auto-applied inside the runner; every run is
+    recorded in tune history regardless of outcome."""
     import asyncio
-    from services.training_profile_manager import TrainingProfile, TRAINING_PROFILES_FILE
     import json
+    from services.training_profile_manager import TRAINING_PROFILES_FILE
 
     raw = json.loads(TRAINING_PROFILES_FILE.read_text(encoding="utf-8")) if TRAINING_PROFILES_FILE.exists() else {}
     if profile_id not in raw:
         raise HTTPException(404, f"Training profile {profile_id} not found")
 
-    if _tune_progress.get(profile_id, {}).get("running"):
+    if tune_scheduler.tune_progress.get(profile_id, {}).get("running"):
         raise HTTPException(409, "Tuning already in progress for this profile")
 
-    tp = TrainingProfile(**raw[profile_id])
-
-    # Run tuning in executor to avoid blocking
-    def _run_tune():
-        import sys
-        sys.path.insert(0, str(TRAINING_PROFILES_FILE.parent.parent))
-        from scripts.tune_triggers import _grid_combos, \
-            _apply_overrides, preload_songs, score_fast, SCENE_GRID, FLARE_GRID
-        from scripts.score_triggers import (
-            build_role_map, DEFAULT_SCORE_WEIGHTS, match_triggers,
-            SongScore, SCENE_CATEGORIES, FLARE_CATEGORIES,
-        )
-
-        _tune_cancel[profile_id] = False
-        _tune_progress[profile_id] = {
-            "running": True, "phase": "loading", "pct": 0,
-            "profile_name": tp.name, "profile_id": profile_id,
-        }
-
-        def _check_cancel():
-            if _tune_cancel.get(profile_id):
-                return True
-            return False
-
-        t_start = _time.monotonic()
-
-        role_map = build_role_map(tp)
-        weights = DEFAULT_SCORE_WEIGHTS
-        all_uris = list(set(tp.training_uris + tp.embedded_only_uris))
-        songs = preload_songs(all_uris)
-        if not songs:
-            return {"error": "No usable training songs", "improved": False}
-
-        song_list = [{"title": s["title"], "artist": s["artist"], "uri": s["uri"]} for s in songs]
-
-        beat_ms = (60_000 / songs[0]["analysis"].tempo_bpm) if songs[0]["analysis"].tempo_bpm else 500
-        tolerance_ms = int(2 * beat_ms)
-
-        baseline_f1 = score_fast(tp, songs, role_map, tolerance_ms, weights)
-
-        scene_combos = _grid_combos(SCENE_GRID)
-        flare_combos = _grid_combos(FLARE_GRID)
-        total_combos = len(scene_combos) + len(flare_combos)
-
-        # Scene tuning
-        _tune_progress[profile_id].update(phase="scene", pct=0)
-        best_scene = {}
-        best_f1 = baseline_f1
-        for i, overrides in enumerate(scene_combos):
-            if _check_cancel():
-                return {"improved": False, "cancelled": True}
-            trial = _apply_overrides(tp, overrides)
-            f1 = score_fast(trial, songs, role_map, tolerance_ms, weights)
-            if f1 > best_f1:
-                best_f1 = f1
-                best_scene = overrides.copy()
-            if (i + 1) % 50 == 0:
-                _time.sleep(0)  # release GIL so event loop can serve requests
-            if (i + 1) % 100 == 0 or i == len(scene_combos) - 1:
-                _tune_progress[profile_id].update(
-                    pct=round((i + 1) / total_combos * 100, 1),
-                    phase="scene",
-                    elapsed_s=round(_time.monotonic() - t_start, 1),
-                )
-
-        # Flare tuning (locked to best scene)
-        tp_scene = _apply_overrides(tp, best_scene) if best_scene else tp
-        scene_f1 = score_fast(tp_scene, songs, role_map, tolerance_ms, weights)
-        best_flare = {}
-        best_f1_flare = scene_f1
-        for i, overrides in enumerate(flare_combos):
-            if _check_cancel():
-                return {"improved": False, "cancelled": True}
-            all_ov = {**best_scene, **overrides}
-            trial = _apply_overrides(tp, all_ov)
-            f1 = score_fast(trial, songs, role_map, tolerance_ms, weights)
-            if f1 > best_f1_flare:
-                best_f1_flare = f1
-                best_flare = overrides.copy()
-            if (i + 1) % 50 == 0:
-                _time.sleep(0)  # release GIL
-            if (i + 1) % 100 == 0 or i == len(flare_combos) - 1:
-                _tune_progress[profile_id].update(
-                    pct=round((len(scene_combos) + i + 1) / total_combos * 100, 1),
-                    phase="flare",
-                    elapsed_s=round(_time.monotonic() - t_start, 1),
-                )
-
-        all_best = {**best_scene, **best_flare}
-        final_f1 = best_f1_flare if best_flare else best_f1
-        duration_s = round(_time.monotonic() - t_start, 1)
-
-        # Score breakdown: run final params on each song for detailed results
-        final_tp = _apply_overrides(tp, all_best) if all_best else tp
-        score_breakdown = {}
-        total_scene_triggers = 0
-        total_flare_triggers = 0
-        from services.embedded_trigger_service import suggest_triggers
-        for song in songs:
-            available = set(role_map.keys())
-            generated = suggest_triggers(
-                target_uri=song["uri"],
-                all_training_uris=[],
-                available_event_ids=available,
-                training_profile=final_tp,
-                _cached_analysis=song["analysis"],
-            )
-            categories = match_triggers(song["human"], generated, role_map, tolerance_ms)
-            ss = SongScore(categories=categories)
-            for cat, cs in categories.items():
-                if cat in SCENE_CATEGORIES:
-                    total_scene_triggers += cs.gen_count
-                elif cat in FLARE_CATEGORIES:
-                    total_flare_triggers += cs.gen_count
-                agg = score_breakdown.setdefault(cat, {
-                    "tp": 0.0, "fp": 0, "fn": 0.0,
-                    "human_count": 0, "gen_count": 0, "match_count": 0,
-                })
-                agg["tp"] += cs.tp
-                agg["fp"] += cs.fp
-                agg["fn"] += cs.fn
-                agg["human_count"] += cs.human_count
-                agg["gen_count"] += cs.gen_count
-                agg["match_count"] += cs.match_count
-
-        # Compute per-category F1
-        for cat, agg in score_breakdown.items():
-            p = agg["tp"] / (agg["tp"] + agg["fp"]) if (agg["tp"] + agg["fp"]) > 0 else 0.0
-            r = agg["tp"] / (agg["tp"] + agg["fn"]) if (agg["tp"] + agg["fn"]) > 0 else 0.0
-            agg["precision"] = round(p, 3)
-            agg["recall"] = round(r, 3)
-            agg["f1"] = round(2 * p * r / (p + r) if (p + r) > 0 else 0.0, 3)
-            agg["weight"] = weights.get(cat, 1.0)
-
-        return {
-            "baseline_f1": round(baseline_f1, 3),
-            "tuned_f1": round(final_f1, 3),
-            "improvement_pct": round((final_f1 - baseline_f1) / max(baseline_f1, 0.001) * 100, 1),
-            "best_params": all_best,
-            "songs_used": len(songs),
-            "song_list": song_list,
-            "improved": final_f1 > baseline_f1,
-            "duration_s": duration_s,
-            "score_breakdown": score_breakdown,
-            "scene_triggers": total_scene_triggers,
-            "flare_triggers": total_flare_triggers,
-            "total_triggers": total_scene_triggers + total_flare_triggers,
-            "timestamp": _time.time(),
-        }
-
     loop = asyncio.get_event_loop()
-    try:
-        result = await loop.run_in_executor(None, _run_tune)
-    finally:
-        _tune_progress[profile_id] = {"running": False}
-        _tune_cancel.pop(profile_id, None)
+    result = await loop.run_in_executor(
+        None, tune_scheduler.run_tune_blocking, profile_id, "immediate")
 
     if result.get("cancelled"):
         return {"improved": False, "cancelled": True}
-
     if result.get("error"):
         raise HTTPException(400, result["error"])
-
-    # Auto-apply if improved
-    if result["improved"] and result["best_params"]:
-        raw_data = json.loads(TRAINING_PROFILES_FILE.read_text(encoding="utf-8"))
-        raw_data[profile_id].update(result["best_params"])
-        TRAINING_PROFILES_FILE.write_text(json.dumps(raw_data, indent=2), encoding="utf-8")
-
     return result
+
+
+# ── Tune scheduling + history ─────────────────────────────────────────────────
+
+@router.get("/tune/schedule")
+async def tune_schedule_list():
+    """Pending schedule queue (in run order) + any currently running tune."""
+    entries = tune_scheduler.load_schedule()
+    for e in entries:
+        e["due_at"] = tune_scheduler.entry_due_at(e)
+    return {"entries": entries, "running": tune_scheduler.any_running()}
+
+
+@router.post("/tune/schedule")
+async def tune_schedule_add(body: dict):
+    """Queue a tuning run. body: {profile_id, at: "HH:MM" | "after"}.
+    "HH:MM" = next occurrence of that time (today if still ahead, else
+    tomorrow). "after" = chained right after whatever precedes it in the
+    queue (or the currently running tune)."""
+    import json
+    from services.training_profile_manager import TRAINING_PROFILES_FILE
+
+    profile_id = str(body.get("profile_id") or "")
+    at = str(body.get("at") or "")
+    raw = json.loads(TRAINING_PROFILES_FILE.read_text(encoding="utf-8")) if TRAINING_PROFILES_FILE.exists() else {}
+    if profile_id not in raw:
+        raise HTTPException(404, f"Training profile {profile_id} not found")
+    if at != "after":
+        parts = at.split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts) \
+                or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
+            raise HTTPException(400, f"Invalid time {at!r} — use HH:MM or \"after\"")
+
+    entry = tune_scheduler.add_schedule_entry(
+        profile_id, raw[profile_id].get("name", "?"), at)
+    entry["due_at"] = tune_scheduler.entry_due_at(entry)
+    return entry
+
+
+@router.delete("/tune/schedule/{entry_id}")
+async def tune_schedule_remove(entry_id: str):
+    if not tune_scheduler.remove_schedule_entry(entry_id):
+        raise HTTPException(404, "Schedule entry not found")
+    return {"status": "removed"}
+
+
+@router.get("/tune/history")
+async def tune_history(limit: int = 20):
+    """Recent tuning runs, newest first — including failures with their
+    error message (full tracebacks land in storage/tune_runs.log)."""
+    return {"runs": tune_scheduler.load_history()[:max(1, min(limit, 50))]}

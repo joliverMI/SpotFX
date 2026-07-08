@@ -132,12 +132,17 @@ async def lifespan(app: FastAPI):
     from api.pcm_ring_buffer import pcm_ring_buffer
     pcm_ring_buffer.start()
 
+    # Tune scheduler: processes storage/tune_schedule.json (queued/timed
+    # training runs) — armed here so pending schedules survive restarts.
+    from services import tune_scheduler
+
     # Launch background tasks
     tasks = [
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
         asyncio.create_task(engine.run(), name="trigger-engine"),
+        asyncio.create_task(tune_scheduler.worker_loop(), name="tune-scheduler"),
     ]
     # Re-assert Ambient Mode if it was left on across restarts (freeze the Hue
     # devices + hold them at the static color). Deferred as a task so a slow Hue

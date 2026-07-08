@@ -28,9 +28,10 @@ from services.training_profile_manager import TrainingProfile, TRAINING_PROFILES
 from services.profile_manager import load_profile_by_uri
 from services.librosa_service import get_analysis_by_uri
 from services.embedded_trigger_service import suggest_triggers
+from services.embedded_trigger_service import _section_energy_at
 from scripts.score_triggers import (
     load_training_profiles, build_role_map, match_triggers,
-    SongScore, DEFAULT_SCORE_WEIGHTS,
+    SongScore, DEFAULT_SCORE_WEIGHTS, USE_MANUAL_INTENSITY,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -54,14 +55,25 @@ SCENE_GRID = {
 
 FLARE_GRID = {
     "flare_bass_hit_weight":        [0.1, 0.2, 0.3],
-    "flare_bass_onset_weight":      [0.05, 0.15, 0.25],
+    "flare_bass_onset_weight":      [0.05, 0.15],
     "flare_onset_weight":           [0.1, 0.2, 0.3],
-    "flare_harmonic_weight":        [0.05, 0.15, 0.25],
-    "flare_energy_uptick_weight":   [0.05, 0.15, 0.25],
-    "flare_energy_weight":          [0.0, 0.1, 0.2],
+    "flare_harmonic_weight":        [0.05, 0.15],
+    "flare_energy_uptick_weight":   [0.05, 0.15],
+    "flare_energy_weight":          [0.0, 0.1],
     "flare_dip_weight":             [0.0, 0.1, 0.2],
+    "flare_snare_weight":           [0.0, 0.1, 0.2],
+    "flare_burst_weight":           [0.0, 0.1, 0.2],
     "flare_shape_thresh":           [0.10, 0.20, 0.30],
     "flare_shape_min_spacing":      [3, 4, 6],
+}
+
+# Tier 3: placement/intensity params, tuned with best scene+flare locked.
+# flare_scene_* only matter when the profile has a flare_scene_event_id.
+PLACEMENT_GRID = {
+    "onset_snap_radius_ms":         [0, 150, 250],
+    "flare_scene_thresh":           [0.70, 0.80, 0.90],
+    "flare_scene_min_spacing":      [16, 32],
+    "flare_intensity_blend":        [0.0, 0.3, 0.6],
 }
 
 
@@ -89,8 +101,14 @@ def preload_songs(uris: list[str]) -> list[dict]:
         la = get_analysis_by_uri(uri)
         if not la or not la.beats:
             continue
+        # Ground-truth intensity computed once per song (never per grid combo)
         human = [
-            {"timestamp_ms": t.timestamp_ms, "event_id": t.event_id}
+            {
+                "timestamp_ms": t.timestamp_ms,
+                "event_id": t.event_id,
+                "intensity": (t.intensity if USE_MANUAL_INTENSITY
+                              else _section_energy_at(la.sections or [], t.timestamp_ms)),
+            }
             for t in profile.triggers if t.enabled
         ]
         songs.append({
@@ -103,6 +121,11 @@ def preload_songs(uris: list[str]) -> list[dict]:
     return songs
 
 
+# Songs that raised during scoring — warned once, then skipped for the rest
+# of the tuning run (a bad song would otherwise raise on every grid combo).
+_SCORE_FAILED_URIS: set[str] = set()
+
+
 def score_fast(
     tp: TrainingProfile,
     songs: list[dict],
@@ -110,30 +133,44 @@ def score_fast(
     tolerance_ms: int,
     weights: dict[str, float],
 ) -> float:
-    """Score all pre-loaded songs. No disk I/O. Returns avg weighted F1."""
+    """Score all pre-loaded songs. No disk I/O. Returns avg weighted F1.
+    Self-healing: a song that raises is logged once and skipped thereafter."""
     available = set(role_map.keys())
     f1_sum = 0.0
+    scored = 0
     for song in songs:
-        generated = suggest_triggers(
-            target_uri=song["uri"],
-            all_training_uris=[],
-            available_event_ids=available,
-            training_profile=tp,
-            _cached_analysis=song["analysis"],
-        )
-        categories = match_triggers(song["human"], generated, role_map, tolerance_ms)
+        if song["uri"] in _SCORE_FAILED_URIS:
+            continue
+        try:
+            generated = suggest_triggers(
+                target_uri=song["uri"],
+                all_training_uris=[],
+                available_event_ids=available,
+                training_profile=tp,
+                _cached_analysis=song["analysis"],
+            )
+            categories = match_triggers(song["human"], generated, role_map, tolerance_ms)
+        except Exception:
+            _SCORE_FAILED_URIS.add(song["uri"])
+            logger.exception(
+                "Scoring failed for %s (%s) — skipping this song for the rest of the run",
+                song.get("title") or song["uri"], song["uri"],
+            )
+            continue
         ss = SongScore(categories=categories)
         f1_sum += ss.weighted_f1(weights)
-    return f1_sum / len(songs) if songs else 0.0
+        scored += 1
+    return f1_sum / scored if scored else 0.0
 
 
 # ── Main tuning loop ─────────────────────────────────────────────────────────
 
-def tune(profile_name: str, tier: str = "both", tolerance_beats: int = 2):
+def tune(profile_name: str, tier: str = "both", tolerance_beats: int = 2) -> dict:
+    """Run the grid search. Returns the best overrides found ({} = no improvement)."""
     profiles = load_training_profiles()
     if profile_name not in profiles:
         print(f"Profile '{profile_name}' not found. Available: {list(profiles.keys())}")
-        return
+        return {}
 
     tp = profiles[profile_name]
     role_map = build_role_map(tp)
@@ -148,7 +185,7 @@ def tune(profile_name: str, tier: str = "both", tolerance_beats: int = 2):
 
     if not songs:
         print("  No usable songs. Aborting.")
-        return
+        return {}
 
     # Compute tolerance_ms from first song's tempo
     beat_ms = (60_000 / songs[0]["analysis"].tempo_bpm) if songs[0]["analysis"].tempo_bpm else 500
@@ -229,8 +266,39 @@ def tune(profile_name: str, tier: str = "both", tolerance_beats: int = 2):
             print(f"\n  No improvement found. Default flare params are best ({scene_f1:.3f})")
             print(f"  Time: {elapsed:.1f}s")
 
+    # ── Tier 3: Placement / intensity (locked to best scene + flare) ─────
+    best_placement_overrides: dict = {}
+    if tier in ("placement", "both"):
+        tp_locked = _apply_overrides(tp, {**best_scene_overrides, **best_flare_overrides})
+        locked_f1 = score_fast(tp_locked, songs, role_map, tolerance_ms, weights)
+
+        combos = _grid_combos(PLACEMENT_GRID)
+        print(f"\n=== Tier 3: Placement / Intensity ({len(combos)} combinations) ===")
+        t0 = time.monotonic()
+
+        best_f1 = locked_f1
+        best_params = {}
+        for overrides in combos:
+            all_overrides = {**best_scene_overrides, **best_flare_overrides, **overrides}
+            tp_trial = _apply_overrides(tp, all_overrides)
+            f1 = score_fast(tp_trial, songs, role_map, tolerance_ms, weights)
+            if f1 > best_f1:
+                best_f1 = f1
+                best_params = overrides.copy()
+
+        elapsed = time.monotonic() - t0
+        if best_params:
+            print(f"\n  Best placement F1: {best_f1:.3f} (was {locked_f1:.3f}, +{(best_f1 - locked_f1)*100:.1f}%)")
+            print(f"  Time: {elapsed:.1f}s")
+            for k, v in sorted(best_params.items()):
+                print(f"    {k}: {v}")
+            best_placement_overrides = best_params
+        else:
+            print(f"\n  No improvement found. Default placement params are best ({locked_f1:.3f})")
+            print(f"  Time: {elapsed:.1f}s")
+
     # ── Summary ───────────────────────────────────────────────────────────
-    all_best = {**best_scene_overrides, **best_flare_overrides}
+    all_best = {**best_scene_overrides, **best_flare_overrides, **best_placement_overrides}
     if all_best:
         final_tp = _apply_overrides(tp, all_best)
         final_f1 = score_fast(final_tp, songs, role_map, tolerance_ms, weights)
@@ -244,12 +312,13 @@ def tune(profile_name: str, tier: str = "both", tolerance_beats: int = 2):
         print(f"{'='*60}")
     else:
         print(f"\n  No improvements found. Current parameters are optimal for this training set.")
+    return all_best
 
 
 def main():
     parser = argparse.ArgumentParser(description="Tune embedded trigger parameters via grid search")
     parser.add_argument("--profile", type=str, required=True, help="Training profile name")
-    parser.add_argument("--tier", choices=["scene", "flare", "both"], default="both",
+    parser.add_argument("--tier", choices=["scene", "flare", "placement", "both"], default="both",
                         help="Which tier to tune (default: both)")
     parser.add_argument("--tolerance-beats", type=int, default=2, help="Matching tolerance in beats")
     args = parser.parse_args()

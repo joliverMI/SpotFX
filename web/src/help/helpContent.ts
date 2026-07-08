@@ -538,6 +538,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'debug-analyzed-override',
+        title: 'Analyzed override',
+        keywords: 'force analyzed triggerless test training profile stored manual triggers',
+        body: [
+          'The "Analyzed override" toggle (track header) makes the current song ignore its stored triggers and run the analyzed-triggerless pipeline instead — useful for testing a tuned training profile against songs that already have hand-built profiles. Now Playing shows the source as "Analyzed Override" while it\'s on. The song needs librosa data and a genre-matching training profile; already-passed triggers re-evaluate from the current position when toggled.',
+        ],
+      },
+      {
         id: 'debug-lock',
         title: 'Lock badge & live nudge',
         keywords: 'locked suspect recovering pearson confidence buffer nudge',

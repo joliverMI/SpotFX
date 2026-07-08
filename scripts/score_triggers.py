@@ -23,7 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from services.training_profile_manager import TrainingProfile, TRAINING_PROFILES_FILE
 from services.profile_manager import load_profile_by_uri
-from services.embedded_trigger_service import suggest_triggers
+from services.embedded_trigger_service import suggest_triggers, _section_energy_at
 from services.librosa_service import get_analysis_by_uri
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -38,17 +38,27 @@ DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
     "flare_low":    0.8,
     "flare_mid":    1.0,
     "flare_high":   1.5,
+    "flare_scene":  2.0,
     "song_start":   1.0,
     "song_end":     1.0,
 }
 
 # Category groups for sub-scores
 SCENE_CATEGORIES = {"drop", "scene_change", "structural", "song_start", "song_end"}
-FLARE_CATEGORIES = {"flare", "flare_low", "flare_mid", "flare_high"}
+FLARE_CATEGORIES = {"flare", "flare_low", "flare_mid", "flare_high", "flare_scene"}
 
 # Cross-category partial credit: scene-family triggers in the right place but wrong type
 SCENE_FAMILY = {"drop", "scene_change", "structural"}
 CROSS_CATEGORY_CREDIT = 0.3  # credit for right-place-wrong-type within scene family
+
+# ── Intensity scoring ─────────────────────────────────────────────────────────
+# Ground-truth intensity for human triggers. Manual per-trigger intensities
+# haven't been scored across the training library yet, so ground truth is the
+# section energy (energy_rms) at the human trigger's timestamp. Flip this to
+# True to use the manually-set SongProfile trigger intensities instead.
+USE_MANUAL_INTENSITY = False
+# Matched-pair credit is multiplied by (1 - INTENSITY_ALPHA * |Δintensity|).
+INTENSITY_ALPHA = 0.5
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -81,6 +91,12 @@ class CategoryScore:
     match_count: int = 0  # how many human triggers had any match (for reporting)
     human_count: int = 0  # total human triggers in this category
     gen_count: int = 0    # total generated triggers in this category
+    intensity_err_sum: float = 0.0  # sum of |Δintensity| over matched pairs with both sides present
+    intensity_pairs: int = 0        # matched pairs that had intensity on both sides
+
+    @property
+    def intensity_mae(self) -> float | None:
+        return self.intensity_err_sum / self.intensity_pairs if self.intensity_pairs > 0 else None
 
     @property
     def precision(self) -> float:
@@ -148,6 +164,7 @@ def build_role_map(tp: TrainingProfile) -> dict[str, str]:
         "flare_low_event_id":   "flare_low",
         "flare_mid_event_id":   "flare_mid",
         "flare_high_event_id":  "flare_high",
+        "flare_scene_event_id": "flare_scene",
     }
 
     for attr, role in mapping.items():
@@ -186,23 +203,24 @@ def match_triggers(
 
     For each human trigger, find the nearest generated trigger of the same category
     within tolerance_ms. Each generated trigger can only match one human trigger.
+    When both sides of a matched pair carry an "intensity", the pair's credit is
+    scaled by (1 - INTENSITY_ALPHA * |Δintensity|).
 
     Returns per-category CategoryScore.
     """
-    # Group by category: list of (timestamp_ms, original_index)
-    human_by_cat: dict[str, list[int]] = {}
-    gen_by_cat: dict[str, list[tuple[int, str]]] = {}  # (ms, unique_key)
+    # Group by category: list of (timestamp_ms, intensity | None)
+    human_by_cat: dict[str, list[tuple[int, float | None]]] = {}
+    gen_by_cat: dict[str, list[tuple[int, float | None]]] = {}
 
     for t in human:
         cat = categorize_trigger(t, role_map)
-        human_by_cat.setdefault(cat, []).append(t.get("timestamp_ms", 0))
+        human_by_cat.setdefault(cat, []).append(
+            (t.get("timestamp_ms", 0), t.get("intensity")))
 
-    # Track generated triggers globally for cross-category matching
-    gen_all: list[tuple[int, str]] = []  # (ms, category)
     for t in generated:
         cat = categorize_trigger(t, role_map)
-        gen_by_cat.setdefault(cat, []).append(t.get("timestamp_ms", 0))
-        gen_all.append((t.get("timestamp_ms", 0), cat))
+        gen_by_cat.setdefault(cat, []).append(
+            (t.get("timestamp_ms", 0), t.get("intensity")))
 
     # All categories seen
     all_cats = set(human_by_cat.keys()) | set(gen_by_cat.keys())
@@ -215,16 +233,16 @@ def match_triggers(
     matched_gen_by_cat: dict[str, set[int]] = {}  # cat -> set of matched indices
 
     for cat in sorted(all_cats):
-        h_times = sorted(human_by_cat.get(cat, []))
-        g_times = sorted(gen_by_cat.get(cat, []))
+        h_times = sorted(human_by_cat.get(cat, []), key=lambda x: x[0])
+        g_times = sorted(gen_by_cat.get(cat, []), key=lambda x: x[0])
 
         cs = CategoryScore(human_count=len(h_times), gen_count=len(g_times))
         matched_gen: set[int] = set()
 
-        for h_ms in h_times:
+        for h_ms, h_int in h_times:
             best_idx = -1
             best_dist = max_match_ms + 1
-            for gi, g_ms in enumerate(g_times):
+            for gi, (g_ms, _) in enumerate(g_times):
                 if gi in matched_gen:
                     continue
                 dist = abs(h_ms - g_ms)
@@ -233,6 +251,12 @@ def match_triggers(
                     best_idx = gi
             if best_idx >= 0:
                 credit = _distance_credit(best_dist)
+                g_int = g_times[best_idx][1]
+                if h_int is not None and g_int is not None:
+                    err = abs(h_int - g_int)
+                    credit *= max(0.0, 1.0 - INTENSITY_ALPHA * err)
+                    cs.intensity_err_sum += err
+                    cs.intensity_pairs += 1
                 cs.tp += credit
                 cs.match_count += 1
                 matched_gen.add(best_idx)
@@ -244,26 +268,18 @@ def match_triggers(
         matched_gen_by_cat[cat] = matched_gen
 
     # Phase 2: cross-category partial credit within scene family
+    # (intensity-agnostic — operates on timestamps only)
     # For each unmatched human scene trigger, check if an unmatched generated
     # trigger from a different scene-family category is nearby.
     for cat in sorted(all_cats):
         if cat not in SCENE_FAMILY:
             continue
         cs = scores[cat]
-        h_times = sorted(human_by_cat.get(cat, []))
-        matched_h = matched_gen_by_cat.get(cat, set())
+        h_times = sorted(ms for ms, _ in human_by_cat.get(cat, []))
 
-        # Find unmatched human triggers in this category
-        unmatched_h: list[int] = []
-        matched_count = 0
-        for h_ms in h_times:
-            if matched_count < len(matched_h):
-                matched_count += 1
-            else:
-                unmatched_h.append(h_ms)
-        # More precise: rebuild which h_times were matched
+        # Rebuild which h_times were matched
         # A human trigger is unmatched if no same-category gen was within range
-        g_times = sorted(gen_by_cat.get(cat, []))
+        g_times = sorted(ms for ms, _ in gen_by_cat.get(cat, []))
         _matched_h_set: set[int] = set()
         _temp_matched_gen: set[int] = set()
         for hi, h_ms in enumerate(h_times):
@@ -280,7 +296,7 @@ def match_triggers(
                 continue
             # This human trigger was unmatched — look for cross-category gen
             for other_cat in sorted(SCENE_FAMILY - {cat}):
-                other_g = sorted(gen_by_cat.get(other_cat, []))
+                other_g = sorted(ms for ms, _ in gen_by_cat.get(other_cat, []))
                 other_matched = matched_gen_by_cat.get(other_cat, set())
                 for gi, g_ms in enumerate(other_g):
                     if gi in other_matched:
@@ -345,9 +361,14 @@ def score_song(
         _cached_analysis=la,
     )
 
-    # Build human trigger dicts
+    # Build human trigger dicts (ground-truth intensity: see USE_MANUAL_INTENSITY)
     human = [
-        {"timestamp_ms": t.timestamp_ms, "event_id": t.event_id}
+        {
+            "timestamp_ms": t.timestamp_ms,
+            "event_id": t.event_id,
+            "intensity": (t.intensity if USE_MANUAL_INTENSITY
+                          else _section_energy_at(la.sections or [], t.timestamp_ms)),
+        }
         for t in profile.triggers if t.enabled
     ]
 
@@ -371,10 +392,11 @@ def print_song_score(song: SongScore, weights: dict[str, float]) -> None:
     print(f"    Human triggers: {song.human_count}  |  Generated: {song.generated_count}")
     for cat, cs in sorted(song.categories.items(), key=lambda x: -weights.get(x[0], 1.0)):
         w = weights.get(cat, 1.0)
+        imae = f"  iMAE={cs.intensity_mae:.2f}" if cs.intensity_mae is not None else ""
         print(
             f"    {cat:20s} (x{w:.1f}):  P={cs.precision:.2f}  R={cs.recall:.2f}  "
             f"F1={cs.f1:.2f}  ({cs.match_count}/{cs.human_count} matched, {cs.fp} extra, "
-            f"{cs.human_count - cs.match_count} missed, credit={cs.tp:.1f})"
+            f"{cs.human_count - cs.match_count} missed, credit={cs.tp:.1f}){imae}"
         )
     scene_f1 = song.group_f1(SCENE_CATEGORIES, weights)
     flare_f1 = song.group_f1(FLARE_CATEGORIES, weights)
@@ -400,6 +422,8 @@ def print_aggregate(songs: list[SongScore], weights: dict[str, float]) -> None:
             agg.match_count += cs.match_count
             agg.human_count += cs.human_count
             agg.gen_count += cs.gen_count
+            agg.intensity_err_sum += cs.intensity_err_sum
+            agg.intensity_pairs += cs.intensity_pairs
 
     avg_wf1 = sum(s.weighted_f1(weights) for s in songs) / len(songs)
 
@@ -408,16 +432,21 @@ def print_aggregate(songs: list[SongScore], weights: dict[str, float]) -> None:
     print(f"{'='*60}")
     for cat, cs in sorted(all_cats.items(), key=lambda x: -weights.get(x[0], 1.0)):
         w = weights.get(cat, 1.0)
+        imae = f"  iMAE={cs.intensity_mae:.2f}" if cs.intensity_mae is not None else ""
         print(
             f"    {cat:20s} (x{w:.1f}):  P={cs.precision:.2f}  R={cs.recall:.2f}  "
             f"F1={cs.f1:.2f}  ({cs.match_count}/{cs.human_count} matched, {cs.fp} extra, "
-            f"{cs.human_count - cs.match_count} missed, credit={cs.tp:.1f})"
+            f"{cs.human_count - cs.match_count} missed, credit={cs.tp:.1f}){imae}"
         )
     avg_scene = sum(s.group_f1(SCENE_CATEGORIES, weights) for s in songs) / len(songs)
     avg_flare = sum(s.group_f1(FLARE_CATEGORIES, weights) for s in songs) / len(songs)
+    total_int_err = sum(cs.intensity_err_sum for cs in all_cats.values())
+    total_int_pairs = sum(cs.intensity_pairs for cs in all_cats.values())
     print(f"    {'AVG SCENE F1':20s}       {avg_scene:.3f}")
     print(f"    {'AVG FLARE F1':20s}       {avg_flare:.3f}")
     print(f"    {'AVG OVERALL F1':20s}       {avg_wf1:.3f}")
+    if total_int_pairs > 0:
+        print(f"    {'AVG INTENSITY MAE':20s}       {total_int_err / total_int_pairs:.3f}  ({total_int_pairs} pairs)")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -430,14 +459,21 @@ def load_training_profiles() -> dict[str, TrainingProfile]:
     return {v["name"]: TrainingProfile(**v) for v in data.values()}
 
 
-def run_scoring(profile_name: str, tolerance_beats: int = 2, verbose: bool = True) -> float:
-    """Score all training songs for a profile. Returns aggregate weighted F1."""
+def run_scoring(profile_name: str, tolerance_beats: int = 2, verbose: bool = True,
+                snap_ms: int | None = None) -> float:
+    """Score all training songs for a profile. Returns aggregate weighted F1.
+
+    snap_ms: optional onset_snap_radius_ms override for quick A/B comparison
+    without editing the stored profile.
+    """
     profiles = load_training_profiles()
     if profile_name not in profiles:
         print(f"Profile '{profile_name}' not found. Available: {list(profiles.keys())}")
         return 0.0
 
     tp = profiles[profile_name]
+    if snap_ms is not None:
+        tp = TrainingProfile(**{**tp.model_dump(), "onset_snap_radius_ms": snap_ms})
     role_map = build_role_map(tp)
     weights = getattr(tp, "score_weights", None) or DEFAULT_SCORE_WEIGHTS
 
@@ -480,6 +516,8 @@ def main():
     parser.add_argument("--all", action="store_true", help="Score all training profiles")
     parser.add_argument("--tolerance-beats", type=int, default=2, help="Matching tolerance in beats (default: 2)")
     parser.add_argument("--quiet", action="store_true", help="Only show aggregate scores")
+    parser.add_argument("--snap-ms", type=int, default=None,
+                        help="Override onset_snap_radius_ms for A/B comparison (0 = snapping off)")
     args = parser.parse_args()
 
     if not args.profile and not args.all:
@@ -489,10 +527,10 @@ def main():
     if args.all:
         profiles = load_training_profiles()
         for name in profiles:
-            run_scoring(name, args.tolerance_beats, verbose=not args.quiet)
+            run_scoring(name, args.tolerance_beats, verbose=not args.quiet, snap_ms=args.snap_ms)
             print()
     else:
-        run_scoring(args.profile, args.tolerance_beats, verbose=not args.quiet)
+        run_scoring(args.profile, args.tolerance_beats, verbose=not args.quiet, snap_ms=args.snap_ms)
 
 
 if __name__ == "__main__":

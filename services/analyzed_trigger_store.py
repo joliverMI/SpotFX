@@ -36,6 +36,7 @@ class CachedTrigger(BaseModel):
     timestamp_ms: int
     event_id: str
     labels: list[str] = []
+    intensity: Optional[float] = None  # generator intensity; None → runtime falls back to section energy
 
 
 class CachedAnalyzedTriggers(BaseModel):
@@ -125,6 +126,7 @@ def generate_for_uri(spotify_uri: str, *, save_cache: bool = True) -> Optional[l
         "drop_event_id", "lull_event_id", "charge_event_id",
         "quiet_event_id", "scene_fill_event_id", "flare_event_id",
         "flare_low_event_id", "flare_mid_event_id", "flare_high_event_id",
+        "flare_scene_event_id",
     ):
         eid = getattr(tp, attr, "")
         if eid:
@@ -148,6 +150,7 @@ def generate_for_uri(spotify_uri: str, *, save_cache: bool = True) -> Optional[l
             timestamp_ms=r["timestamp_ms"],
             event_id=r["event_id"],
             labels=list(r.get("labels") or []),
+            intensity=r.get("intensity"),
         )
         for r in raw
     ]
@@ -170,10 +173,12 @@ def _to_cached_trigger(t) -> CachedTrigger:
     elif isinstance(t, dict):
         d = t
     else:
-        d = {"id": t.id, "timestamp_ms": t.timestamp_ms, "event_id": t.event_id, "labels": list(t.labels or [])}
+        d = {"id": t.id, "timestamp_ms": t.timestamp_ms, "event_id": t.event_id,
+             "labels": list(t.labels or []), "intensity": getattr(t, "intensity", None)}
     return CachedTrigger(
         id=d.get("id", ""),
         timestamp_ms=int(d.get("timestamp_ms", 0)),
         event_id=d.get("event_id", ""),
         labels=list(d.get("labels") or []),
+        intensity=d.get("intensity"),
     )

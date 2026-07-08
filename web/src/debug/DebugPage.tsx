@@ -94,6 +94,7 @@ export default function DebugPage() {
   const timing = useLiveStore((s) => s.timing);
   const ledfxRttMs = useLiveStore((s) => s.ledfxRttMs);
   const lastPollAt = useLiveStore((s) => s.lastPollAt);
+  const analyzedOverride = useLiveStore((s) => s.analyzedOverride);
   const uri = track?.spotify_uri ?? null;
   const shapeOffsetMs = Number(timing.shape_offset_ms ?? 0);
 
@@ -285,6 +286,23 @@ export default function DebugPage() {
     }
   };
 
+  const toggleAnalyzedOverride = async () => {
+    try {
+      const r = await apiPost<{ analyzed_trigger_override: boolean; has_analyzed: boolean; count: number }>(
+        `/control/analyzed-trigger-override?enabled=${!analyzedOverride}`, {});
+      if (r.analyzed_trigger_override) {
+        toast(r.has_analyzed
+          ? `Analyzed override ON — ${r.count} analyzed triggers active`
+          : 'Analyzed override ON — no analyzed triggers for this song (no librosa data or no matching training profile)',
+          r.has_analyzed ? 'success' : 'error');
+      } else {
+        toast('Analyzed override OFF — stored triggers active', 'success');
+      }
+    } catch (e) {
+      toast(`Failed: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  };
+
   const liveSpan = feeds.live?.timestamps_ms.length
     ? feeds.live.timestamps_ms[feeds.live.timestamps_ms.length - 1] - feeds.live.timestamps_ms[0]
     : 0;
@@ -310,7 +328,16 @@ export default function DebugPage() {
             <div style={{ fontSize: 14, fontWeight: 600 }}>{track?.title ?? '—'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{track?.artist ?? ''}</div>
           </div>
-          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          <label
+            title="Ignore the song's stored triggers and run the analyzed-triggerless pipeline instead — for testing tuned training profiles on songs that already have manual profiles. Now Playing shows the source as “Analyzed Override” while on."
+            style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+                     fontSize: 12, cursor: 'pointer',
+                     color: analyzedOverride ? '#4caf50' : 'var(--text-muted)' }}>
+            <input type="checkbox" checked={analyzedOverride}
+              onChange={() => void toggleAnalyzedOverride()} />
+            Analyzed override
+          </label>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
             {uri ?? ''}
           </span>
         </div>

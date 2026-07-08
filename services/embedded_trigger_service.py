@@ -15,6 +15,7 @@ All detection thresholds are per-profile (TrainingProfile hidden tuning params).
 KNN functions are retained for the Claude-path but not called in suggest_triggers.
 """
 from __future__ import annotations
+import bisect
 import logging
 from collections import Counter
 from typing import Optional, TYPE_CHECKING
@@ -85,6 +86,70 @@ def _nearest_beat(beats, ms: int):
 
 def _covered(ms: int, placed: list[dict], gap_ms: int) -> bool:
     return any(abs(ms - p["timestamp_ms"]) < gap_ms for p in placed)
+
+
+def _section_energy_at(sections, ms: int) -> float:
+    """Section energy_rms at ms over LibrosaSection models (in-range section,
+    else nearest section, else 0.5). Same semantics as signal_resolver's
+    _section_energy, which operates on dicts instead."""
+    if not sections:
+        return 0.5
+    for sec in sections:
+        if sec.start_ms <= ms < sec.end_ms:
+            return float(sec.energy_rms)
+    nearest = min(sections, key=lambda s: min(abs(ms - s.start_ms), abs(ms - s.end_ms)))
+    return float(nearest.energy_rms)
+
+
+def _snap_to_onset(ms: int, bass_ms: list[int], onset_ms: list[int], radius_ms: int) -> int:
+    """Snap ms to the nearest bass onset within radius_ms; fall back to general
+    onsets; else return ms unchanged. Mirrors the Builder's snapToBassOnset
+    (useTriggerInteractions.ts) with a tunable radius. Lists must be sorted."""
+    if radius_ms <= 0:
+        return ms
+    for arr in (bass_ms, onset_ms):
+        if not arr:
+            continue
+        i = bisect.bisect_left(arr, ms)
+        best = None
+        for j in (i - 1, i):
+            if 0 <= j < len(arr):
+                d = abs(arr[j] - ms)
+                if d <= radius_ms and (best is None or d < abs(best - ms)):
+                    best = arr[j]
+        if best is not None:
+            return best
+    return ms
+
+
+# Per-song burst scores, memoized across grid-search combos. Keyed by URI:
+# the beat grid and onset lists are immutable per song, and the ±half-beat
+# window is fixed. (pydantic v2 models reject stashing attrs on the analysis.)
+_BURST_CACHE: dict[str, np.ndarray] = {}
+
+
+def _burst_scores(uri: str, la, beat_interval_ms: float) -> np.ndarray:
+    """Per-beat onset-burst score: summed strengths of raw onsets + snare
+    onsets within ±half a beat of each beat, normalized 0-1 per song."""
+    cached = _BURST_CACHE.get(uri)
+    if cached is not None and len(cached) == len(la.beats):
+        return cached
+    events = sorted(
+        [(o.ms, o.strength) for o in (la.onsets or [])]
+        + [(o.ms, o.strength) for o in (la.snare_onsets or [])]
+    )
+    ev_ms = [e[0] for e in events]
+    half = beat_interval_ms / 2.0
+    scores = np.zeros(len(la.beats), dtype=float)
+    for bi, b in enumerate(la.beats):
+        lo = bisect.bisect_left(ev_ms, b.ms - half)
+        hi = bisect.bisect_right(ev_ms, b.ms + half)
+        scores[bi] = sum(events[j][1] for j in range(lo, hi))
+    mx = scores.max()
+    if mx > 1e-9:
+        scores /= mx
+    _BURST_CACHE[uri] = scores
+    return scores
 
 
 def _knn_event(vec: np.ndarray, X_norm: np.ndarray, y_train: list[str],
@@ -502,6 +567,7 @@ def _detect_quiet_sections(beats, tp) -> list[int]:
 def _detect_energy_scenes(
     beats, tp, off: int, placed: list[dict],
     scene_event_id: str, gap_ms: int,
+    snap_fn=None, mk=None,
 ) -> list[dict]:
     """
     Detect scene-change moments by finding significant energy transitions.
@@ -589,16 +655,21 @@ def _detect_energy_scenes(
                     break
 
         ms = beats[chosen].ms + off
+        if snap_fn:
+            ms = snap_fn(ms)
         if _covered(ms, placed, spacing_ms) or _covered(ms, new_triggers, spacing_ms):
             continue
 
         confidence = round(min(ad / 0.20, 1.0), 3)  # normalize: 0.20 delta = 1.0 confidence
-        new_triggers.append({
-            "timestamp_ms": ms,
-            "event_id":     scene_event_id,
-            "confidence":   confidence,
-            "_exempt":      False,
-        })
+        if mk:
+            new_triggers.append(mk(ms, scene_event_id, confidence))
+        else:
+            new_triggers.append({
+                "timestamp_ms": ms,
+                "event_id":     scene_event_id,
+                "confidence":   confidence,
+                "_exempt":      False,
+            })
 
     return new_triggers
 
@@ -609,6 +680,7 @@ def _fill_standard_scenes(
     beats, placed: list[dict], off: int,
     event_id: str, coverage_gap_ms: int, fill_spacing_ms: int,
     uptick_thresh: float, harmonic_thresh: float,
+    snap_fn=None, mk=None,
 ) -> None:
     """
     Iteratively fill the timeline until no gap between placed triggers exceeds
@@ -684,12 +756,22 @@ def _fill_standard_scenes(
         if chosen_ms is None:
             chosen_ms, chosen_conf = window[0][1].ms + off, 0.40
 
-        placed.append({
-            "timestamp_ms": chosen_ms,
-            "event_id":     event_id,
-            "confidence":   chosen_conf,
-            "_exempt":      False,
-        })
+        if snap_fn:
+            snapped = snap_fn(chosen_ms)
+            # Keep the unsnapped position if snapping would violate min spacing
+            # (the fill loop relies on every iteration placing inside the gap).
+            if snapped != chosen_ms and not _covered(snapped, placed, fill_spacing_ms):
+                chosen_ms = snapped
+
+        if mk:
+            placed.append(mk(chosen_ms, event_id, chosen_conf))
+        else:
+            placed.append({
+                "timestamp_ms": chosen_ms,
+                "event_id":     event_id,
+                "confidence":   chosen_conf,
+                "_exempt":      False,
+            })
 
 
 # ── Confidence boost helpers ──────────────────────────────────────────────────
@@ -831,6 +913,7 @@ def suggest_triggers(
     flare_low_event_id  = getattr(tp, "flare_low_event_id",  "") or ""
     flare_mid_event_id  = getattr(tp, "flare_mid_event_id",  "") or ""
     flare_high_event_id = getattr(tp, "flare_high_event_id", "") or ""
+    flare_scene_event_id = getattr(tp, "flare_scene_event_id", "") or ""
     flare_max_gap_beats = getattr(tp, "flare_max_gap_beats",  32)
 
     # ── Per-profile spacing ───────────────────────────────────────────────────
@@ -853,6 +936,19 @@ def suggest_triggers(
     gap_ms           = max(MIN_GAP_MS, int(spacing_beats * beat_interval_ms))
     scene_gap_ms     = max(gap_ms, int(scene_spacing_beats * beat_interval_ms))
 
+    # ── Onset snapping + per-trigger intensity setup ─────────────────────────
+    sections    = la.sections or []
+    snap_radius = getattr(tp, "onset_snap_radius_ms", 0)
+    _bass_ms    = sorted(o.ms + off for o in (la.bass_onsets or []))
+    _onset_ms   = sorted(o.ms + off for o in (la.onsets or []))
+
+    def _snap(ms: int) -> int:
+        return _snap_to_onset(ms, _bass_ms, _onset_ms, snap_radius)
+
+    intensity_blend = getattr(tp, "flare_intensity_blend", 0.0)
+    drop_boost      = getattr(tp, "intensity_drop_boost",  0.0)
+    quiet_cap       = getattr(tp, "intensity_quiet_cap",   0.35)
+
     placed: list[dict] = []
 
     # Build event_id → labels map from training profile
@@ -864,20 +960,29 @@ def suggest_triggers(
         ("quiet_labels", "quiet_event_id"), ("scene_fill_labels", "scene_fill_event_id"),
         ("flare_labels", "flare_event_id"), ("flare_low_labels", "flare_low_event_id"),
         ("flare_mid_labels", "flare_mid_event_id"), ("flare_high_labels", "flare_high_event_id"),
+        ("flare_scene_labels", "flare_scene_event_id"),
     ]:
         _eid = getattr(tp, _eid_attr, "")
         _lbls = getattr(tp, _attr, [])
         if _eid and _lbls:
             _label_map[_eid] = _lbls
 
-    def _add(timestamp_ms: int, event_id: str, confidence: float, exempt: bool = False):
-        placed.append({
+    def _mk_candidate(timestamp_ms: int, event_id: str, confidence: float,
+                      exempt: bool = False, intensity: float | None = None) -> dict:
+        if intensity is None:
+            intensity = _section_energy_at(sections, timestamp_ms)
+        return {
             "timestamp_ms": timestamp_ms,
             "event_id":     event_id,
             "confidence":   confidence,
             "labels":       list(_label_map.get(event_id, [])),
+            "intensity":    round(min(max(intensity, 0.0), 1.0), 3),
             "_exempt":      exempt,
-        })
+        }
+
+    def _add(timestamp_ms: int, event_id: str, confidence: float,
+             exempt: bool = False, intensity: float | None = None):
+        placed.append(_mk_candidate(timestamp_ms, event_id, confidence, exempt, intensity))
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 0 — Song start (always ms=0)
@@ -921,10 +1026,12 @@ def suggest_triggers(
 
         # Bass Drop — always emitted when a valid gap is found
         if drop_event_id and drop_event_id in available_event_ids:
-            drop_ms = beats[drop_idx].ms + off
+            drop_ms = _snap(beats[drop_idx].ms + off)
             if not _covered(drop_ms, placed, gap_ms):
                 boost = _drop_score_boost(beats, drop_idx)
-                _add(drop_ms, drop_event_id, min(gap_score * boost, SCORE_BOOST_MAX))
+                drop_int = min(1.0, _section_energy_at(sections, drop_ms) + drop_boost)
+                _add(drop_ms, drop_event_id, min(gap_score * boost, SCORE_BOOST_MAX),
+                     intensity=drop_int)
 
         # Lull + Charge — only emitted together when a charge beat was found
         if charge_idx is not None:
@@ -932,10 +1039,12 @@ def suggest_triggers(
                 lull_ms = beats[gs].ms + off
                 if not _covered(lull_ms, placed, gap_ms):
                     boost = _quiet_score_boost(beats, gs)
-                    _add(lull_ms, lull_event_id, min(gap_score * boost, SCORE_BOOST_MAX))
+                    lull_int = min(_section_energy_at(sections, lull_ms), quiet_cap)
+                    _add(lull_ms, lull_event_id, min(gap_score * boost, SCORE_BOOST_MAX),
+                         intensity=lull_int)
 
             if charge_event_id and charge_event_id in available_event_ids:
-                cms = beats[charge_idx].ms + off
+                cms = _snap(beats[charge_idx].ms + off)
                 if not _covered(cms, placed, gap_ms):
                     boost = _charge_score_boost(beats, charge_idx)
                     _add(cms, charge_event_id, min(0.85 * boost, SCORE_BOOST_MAX))
@@ -948,7 +1057,9 @@ def suggest_triggers(
             qms = beats[qi].ms + off
             if not _covered(qms, placed, gap_ms):
                 boost = _quiet_score_boost(beats, qi)
-                _add(qms, quiet_event_id, min(0.80 * boost, SCORE_BOOST_MAX))
+                quiet_int = min(_section_energy_at(sections, qms), quiet_cap)
+                _add(qms, quiet_event_id, min(0.80 * boost, SCORE_BOOST_MAX),
+                     intensity=quiet_int)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 6a — Energy-change scene detection (analytical, transition-based)
@@ -956,6 +1067,7 @@ def suggest_triggers(
     if scene_fill_event_id and scene_fill_event_id in available_event_ids:
         energy_scenes = _detect_energy_scenes(
             beats, tp, off, placed, scene_fill_event_id, gap_ms,
+            snap_fn=_snap, mk=_mk_candidate,
         )
         placed.extend(energy_scenes)
 
@@ -971,6 +1083,7 @@ def suggest_triggers(
             beats, placed, off,
             scene_fill_event_id, scene_gap_ms, fill_spacing_ms,
             fill_uptick, fill_harmonic,
+            snap_fn=_snap, mk=_mk_candidate,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -978,10 +1091,11 @@ def suggest_triggers(
     # ─────────────────────────────────────────────────────────────────────────
     # Resolve which flare IDs are available (tiered or legacy single)
     _has_tiered_flares = any(eid and eid in available_event_ids
-                             for eid in [flare_low_event_id, flare_mid_event_id, flare_high_event_id])
+                             for eid in [flare_low_event_id, flare_mid_event_id,
+                                         flare_high_event_id, flare_scene_event_id])
     _has_any_flare = _has_tiered_flares or (flare_event_id and flare_event_id in available_event_ids)
     if _has_any_flare:
-        # Tunable weights — 7 components (per-profile or defaults)
+        # Tunable weights — 9 components (per-profile or defaults)
         w_bass_hit   = getattr(tp, "flare_bass_hit_weight",       0.20)  # bass energy × bass onset
         w_bass_onset = getattr(tp, "flare_bass_onset_weight",     0.10)  # bass onset alone
         w_onset      = getattr(tp, "flare_onset_weight",          0.15)  # general onset strength
@@ -989,6 +1103,8 @@ def suggest_triggers(
         w_uptick     = getattr(tp, "flare_energy_uptick_weight",  0.15)  # energy rise vs recent
         w_energy     = getattr(tp, "flare_energy_weight",         0.10)  # absolute rms_total
         w_dip        = getattr(tp, "flare_dip_weight",            0.15)  # energy dip then recovery
+        w_snare      = getattr(tp, "flare_snare_weight",          0.0)   # snare transient
+        w_burst      = getattr(tp, "flare_burst_weight",          0.0)   # clustered-onset burst
         uptick_lb    = getattr(tp, "flare_uptick_lookback",       3)
         dip_lb       = getattr(tp, "flare_dip_lookback",          2)
 
@@ -997,13 +1113,19 @@ def suggest_triggers(
         flash_thresh       = getattr(tp, "flare_flash_thresh",       0.60)
         combo_bass_thresh  = getattr(tp, "flare_combo_bass_thresh",  0.40)
         combo_harm_thresh  = getattr(tp, "flare_combo_harm_thresh",  0.30)
+        scene_flare_thresh = getattr(tp, "flare_scene_thresh",       0.85)
         shape_spacing      = getattr(tp, "flare_shape_min_spacing",  4)
         flash_spacing      = getattr(tp, "flare_flash_min_spacing",  8)
         combo_spacing      = getattr(tp, "flare_combo_min_spacing",  6)
+        scene_flare_spacing = getattr(tp, "flare_scene_min_spacing", 24)
 
         shape_spacing_ms = max(gap_ms, int(shape_spacing * beat_interval_ms))
         flash_spacing_ms = max(gap_ms, int(flash_spacing * beat_interval_ms))
         combo_spacing_ms = max(gap_ms, int(combo_spacing * beat_interval_ms))
+        scene_flare_spacing_ms = max(gap_ms, int(scene_flare_spacing * beat_interval_ms))
+
+        # Per-beat burst scores (lazy: only when the component is active)
+        burst = _burst_scores(target_uri, la, beat_interval_ms) if w_burst > 0 else None
 
         # Score every beat with 7 components
         n_beats = len(beats)
@@ -1035,10 +1157,16 @@ def suggest_triggers(
             else:
                 dip_comp = 0.0
 
+            # 8. Snare transient (HPSS mid-band percussive)
+            snare_comp = b.snare_onset_score
+            # 9. Onset burst: clustered raw onsets around this beat
+            burst_comp = float(burst[bi]) if burst is not None else 0.0
+
             total = (w_bass_hit * bass_hit_comp + w_bass_onset * bass_onset_comp
                      + w_onset * onset_comp + w_harm * harm_comp
                      + w_uptick * uptick_comp + w_energy * energy_comp
-                     + w_dip * dip_comp)
+                     + w_dip * dip_comp
+                     + w_snare * snare_comp + w_burst * burst_comp)
             # bass_comp for tier logic uses the combined bass signal
             bass_comp = bass_hit_comp + bass_onset_comp * 0.5
             scored.append((bi, total, bass_comp, harm_comp))
@@ -1049,10 +1177,16 @@ def suggest_triggers(
         for bi, total_score, bass_comp, harm_comp in scored:
             if total_score < shape_thresh:
                 break  # all remaining are below the lowest threshold
-            fms = beats[bi].ms + off
+            fms = _snap(beats[bi].ms + off)
 
-            # Determine tier, event ID, and spacing
-            if total_score >= flash_thresh:
+            # Determine tier, event ID, and spacing.
+            # Scene tier (strongest moments → scene update event) has no legacy
+            # fallback: when unset/unavailable the beat falls through to high/mid/low.
+            if (flare_scene_event_id and flare_scene_event_id in available_event_ids
+                    and total_score >= scene_flare_thresh):
+                tier_eid = flare_scene_event_id
+                tier_spacing_ms = scene_flare_spacing_ms
+            elif total_score >= flash_thresh:
                 tier_eid = flare_high_event_id or flare_event_id
                 tier_spacing_ms = flash_spacing_ms
             elif bass_comp >= combo_bass_thresh and harm_comp >= combo_harm_thresh:
@@ -1071,7 +1205,9 @@ def suggest_triggers(
 
             if _covered(fms, placed, tier_spacing_ms):
                 continue
-            _add(fms, tier_eid, round(min(total_score, 1.0), 3))
+            flare_int = ((1.0 - intensity_blend) * _section_energy_at(sections, fms)
+                         + intensity_blend * min(total_score, 1.0))
+            _add(fms, tier_eid, round(min(total_score, 1.0), 3), intensity=flare_int)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Density filter + final sort
