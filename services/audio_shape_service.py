@@ -65,6 +65,15 @@ class AudioShapeService:
         from models.state import state as app_state
         new_uri = track.spotify_uri if track else None
 
+        # Ring-buffer watchdog: the boundary search and force-recapture
+        # pre-roll both depend on it, and its stream can die silently.
+        if app_state.audio_analysis_enabled:
+            try:
+                from api.pcm_ring_buffer import pcm_ring_buffer
+                pcm_ring_buffer.ensure_alive()
+            except Exception as exc:
+                logger.debug("Ring-buffer watchdog error (ignored): %s", exc)
+
         # Stop recording if URI changed or nothing is playing
         if self._recording_uri and self._recording_uri != new_uri:
             age = time.monotonic() - self._capture_started_at
@@ -132,13 +141,18 @@ class AudioShapeService:
         if (app_state.recapture_active and app_state.recapture_remaining > 0
                 and track and track.is_playing
                 and new_uri != self._recording_uri):
+            # Count a song only when its capture actually starts — a deferred
+            # _start (stale poll) retries on the next poll and must not burn
+            # a second slot.
+            if not await self._start(track, force_recapture=True):
+                return
             app_state.recapture_remaining -= 1
             if app_state.recapture_remaining == 0:
                 app_state.recapture_active = False
                 logger.info("Recapture: counter exhausted, toggle disabled")
             else:
                 logger.info(
-                    "Recapture: starting force-recapture for %s — %d songs remaining",
+                    "Recapture: force-recapture started for %s — %d songs remaining",
                     new_uri, app_state.recapture_remaining,
                 )
             try:
@@ -146,7 +160,6 @@ class AudioShapeService:
                 await ws_manager.broadcast_state(app_state)
             except Exception:
                 pass
-            await self._start(track, force_recapture=True)
             return
 
         # Start recording if:
@@ -308,8 +321,9 @@ class AudioShapeService:
             logger.warning("Acoustic boundary: detection failed (%s), falling back to None", exc)
             return None
 
-    async def _start(self, track: SpotifyTrackInfo, force_recapture: bool = False) -> None:
-        """Open capture stream and kick off the ingest loop.
+    async def _start(self, track: SpotifyTrackInfo, force_recapture: bool = False) -> bool:
+        """Open capture stream and kick off the ingest loop. Returns True when
+        the capture actually started, False when deferred (stale poll).
 
         force_recapture=True signals an atomic-save force-recapture. The
         always-on PCM ring buffer is consulted for any audio that played
@@ -335,7 +349,7 @@ class AudioShapeService:
                 "awaiting fresh progress",
                 track.title, stale_ms, max_stale_ms,
             )
-            return
+            return False
 
         # song_start_monotonic offset so frame timestamps are song-relative.
         # Prefer the acoustic boundary computed in on_track_change when it was
@@ -417,6 +431,7 @@ class AudioShapeService:
         # Boundary has now been consumed by both _stop_and_save (prev) and _start (new)
         self._pending_boundary_monotonic = None
         self._pending_boundary_uri = None
+        return True
 
     async def _ingest_loop(self) -> None:
         """Consume frames from the capture stream into the recorder."""
@@ -559,13 +574,19 @@ class AudioShapeService:
                         "(first sample at %dms, duration %dms): %s",
                         ts_first, duration_ms, recorder.meta.npz_file,
                     )
-                    fail_meta = recorder.meta.model_copy(
-                        update={"capture_complete": False, "capture_failed": True}
-                    )
-                    from config import AUDIO_SHAPES_DIR
-                    sidecar = AUDIO_SHAPES_DIR / fail_meta.npz_file.replace(".npz", ".json")
-                    AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
-                    sidecar.write_text(fail_meta.model_dump_json(indent=2), encoding="utf-8")
+                    # Failure sidecar so on_track_change retries next play —
+                    # but never clobber the intact original in force mode
+                    # (the atomic-save backup hasn't been taken yet at this
+                    # point, so writing here would destroy the good sidecar's
+                    # learned offsets while its npz stays complete).
+                    if not force_recapture:
+                        fail_meta = recorder.meta.model_copy(
+                            update={"capture_complete": False, "capture_failed": True}
+                        )
+                        from config import AUDIO_SHAPES_DIR
+                        sidecar = AUDIO_SHAPES_DIR / fail_meta.npz_file.replace(".npz", ".json")
+                        AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
+                        sidecar.write_text(fail_meta.model_dump_json(indent=2), encoding="utf-8")
                     self._last_capture_status = "failed"
                     self._last_capture_reason = "bad_timestamps"
                     self._last_capture_uri = recording_uri
@@ -579,14 +600,18 @@ class AudioShapeService:
                             "Audio shape discarded — gap of %dms detected (limit %dms): %s",
                             max_gap, _s.audio_max_gap_ms, recorder.meta.npz_file,
                         )
-                        # Write failure sidecar so on_track_change retries on next play
-                        fail_meta = recorder.meta.model_copy(
-                            update={"capture_complete": False, "capture_failed": True}
-                        )
-                        from config import AUDIO_SHAPES_DIR
-                        sidecar = AUDIO_SHAPES_DIR / fail_meta.npz_file.replace(".npz", ".json")
-                        AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
-                        sidecar.write_text(fail_meta.model_dump_json(indent=2), encoding="utf-8")
+                        # Write failure sidecar so on_track_change retries on
+                        # next play — except in force mode, where the intact
+                        # original (npz still complete on disk) must survive a
+                        # discarded recapture attempt.
+                        if not force_recapture:
+                            fail_meta = recorder.meta.model_copy(
+                                update={"capture_complete": False, "capture_failed": True}
+                            )
+                            from config import AUDIO_SHAPES_DIR
+                            sidecar = AUDIO_SHAPES_DIR / fail_meta.npz_file.replace(".npz", ".json")
+                            AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
+                            sidecar.write_text(fail_meta.model_dump_json(indent=2), encoding="utf-8")
                         self._last_capture_status = "failed"
                         self._last_capture_reason = "gap"
                         self._last_capture_uri = recording_uri
@@ -627,7 +652,12 @@ class AudioShapeService:
                             len(_bak_paths), recorder.meta.npz_file,
                         )
 
-                npz_path = recorder.save()
+                # np.savez_compressed of a full song is seconds of CPU — keep
+                # it off the event loop or the poll loop (and the next song's
+                # capture start) stalls behind it.
+                npz_path = await asyncio.get_event_loop().run_in_executor(
+                    None, recorder.save
+                )
                 # Mark detection disabled — not useful right now
                 marks = []
                 meta = recorder.meta
@@ -642,19 +672,27 @@ class AudioShapeService:
                 if _s.anchor_enabled:
                     try:
                         from services import anchor_detector, librosa_service
-                        npz = np.load(npz_path)
+
                         # Tempo may not be available at first-capture time (librosa
                         # runs after). When missing, the beat-twin penalty inside
                         # _score_uniqueness silently no-ops — the backfill script
                         # re-runs anchor detection once librosa.json exists.
-                        analysis = librosa_service.get_analysis(meta)
-                        tempo_bpm = float(analysis.tempo_bpm) if analysis else None
-                        anchors = anchor_detector.detect_anchor_candidates(
-                            npz["timestamps_ms"],
-                            npz["rms_total"],
-                            npz["rms_low"],
-                            npz["rms_high"],
-                            tempo_bpm=tempo_bpm,
+                        def _detect_anchors():
+                            npz = np.load(npz_path)
+                            analysis = librosa_service.get_analysis(meta)
+                            tempo_bpm = float(analysis.tempo_bpm) if analysis else None
+                            return anchor_detector.detect_anchor_candidates(
+                                npz["timestamps_ms"],
+                                npz["rms_total"],
+                                npz["rms_low"],
+                                npz["rms_high"],
+                                tempo_bpm=tempo_bpm,
+                            )
+
+                        # Anchor detection is ~seconds of pure-Python CPU —
+                        # executor, same reason as recorder.save above.
+                        anchors = await asyncio.get_event_loop().run_in_executor(
+                            None, _detect_anchors
                         )
                         meta.anchor_candidates = [c.to_dict() for c in anchors]
                         if anchors:

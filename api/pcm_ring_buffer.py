@@ -107,6 +107,24 @@ class PCMRingBuffer:
             _, oldest = self._chunks.popleft()
             self._sample_count -= len(oldest)
 
+    def ensure_alive(self) -> None:
+        """Watchdog: restart the input stream if it silently stopped filling
+        (device hiccup, PortAudio abort — sounddevice gives no error signal
+        when this happens; live symptom was 'no pre-roll PCM available' after
+        hours of uptime). Cheap; called from the Spotify poll loop so a dead
+        stream heals within one poll instead of at the next capture."""
+        if self._stream is None:
+            self.start()
+            return
+        newest = self._chunks[-1][0] if self._chunks else self._started_at
+        if time.monotonic() - newest > 5.0:
+            logger.warning(
+                "PCM ring buffer stalled (%.1fs since last chunk) — restarting stream",
+                time.monotonic() - newest,
+            )
+            self.stop()
+            self.start()
+
     def snapshot_since(self, monotonic_ts: float) -> np.ndarray:
         """Return concatenated float32 mono PCM from `monotonic_ts` through now."""
         return self.snapshot_since_with_start(monotonic_ts)[0]
