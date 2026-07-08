@@ -1,6 +1,7 @@
 /** Trigger edit/create dialog: timestamp (m:ss.t), searchable event
  * (recents-first), filter labels, and the intensity slider + number. */
 import { useEffect, useMemo, useState } from 'react';
+import HelpLink from '../../help/HelpLink';
 import SearchSelect from '../../components/forms/SearchSelect';
 import { fmtMsTenths, parseMsTenths } from '../../lib/time';
 import { readSticky, writeSticky } from '../../lib/useSticky';
@@ -133,6 +134,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           <span style={{ width: 90, color: 'var(--text-muted)' }}>Labels</span>
           <input type="text" value={labels} onChange={(e) => setLabels(e.target.value)}
             placeholder="chorus, -quiet" style={{ flex: 1 }} />
+          <HelpLink topic="filter-labels" title="Label filter syntax" />
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}

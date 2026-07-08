@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import { useToast } from '../components/Toast';
+import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
 
 interface Setlist {
@@ -191,16 +192,12 @@ export default function SetlistsPage() {
             </select>
           </div>
 
-          <SectionTitle>xcorr / mix tolerance</SectionTitle>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, cursor: 'pointer', fontSize: 13 }}>
+          <SectionTitle>xcorr / mix tolerance <HelpLink topic="setlists-xcorr" title="Timing options help" /></SectionTitle>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer', fontSize: 13 }}>
             <input type="checkbox" checked={draft.xcorr_enabled !== false}
               onChange={(e) => setDraft({ ...draft, xcorr_enabled: e.target.checked })} />
             Run per-play xcorr while this Set List is active
           </label>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 10px 24px' }}>
-            Disable for non-mixed playlists where you've already dialed in good per-song offsets —
-            the stored offset is used as-is.
-          </div>
           <div className="field">
             <label>xcorr cut buffer (ms) — leave blank to use global default</label>
             <input type="number" min={0} step={500} placeholder="(global)" style={{ width: 110 }}
@@ -209,10 +206,6 @@ export default function SetlistsPage() {
                 ...draft,
                 xcorr_cut_buffer_ms: e.target.value === '' ? null : Math.max(0, parseInt(e.target.value, 10) || 0),
               })} />
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
-              Search range = base + max(0, captured − polled) + buffer. The buffer absorbs small
-              inaccuracies in the duration delta.
-            </div>
           </div>
 
           {!!drift.length && (

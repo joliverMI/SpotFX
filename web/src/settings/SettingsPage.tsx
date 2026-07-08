@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiGet, apiPost } from '../api/client';
 import { useToast } from '../components/Toast';
+import HelpLink from '../help/HelpLink';
 import { useLongPress } from '../lib/useLongPress';
 import { buildGradientCss, parseCssGradient, type Stop } from '../colorsets/GradientModal';
 import { useGradientMutations, useGradients } from '../colorsets/queries';
@@ -52,7 +53,6 @@ export default function SettingsPage() {
   const advanced = bool('show_advanced');
   const songSource = str('song_source', 'spotify');
   const sourceChanged = settings && songSource !== String(settings.song_source ?? 'spotify');
-  const [lastfmModal, setLastfmModal] = useState(false);
 
   // Ambient stored value may be a category id or (legacy) name — match either.
   const ambientCatId = useMemo(() => {
@@ -168,10 +168,9 @@ export default function SettingsPage() {
 
       {advanced && (
         <div className="card">
-          <div className="card-title">Audio Shape Display Scales</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-            Default scale factors for each graph layer. Can also be adjusted live in the builder
-            via long-press drag on the layer buttons.
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            Audio Shape Display Scales
+            <HelpLink topic="settings-timing" title="Graph scale help" />
           </div>
           {([['shape_scale_overall', 'Overall (applies to all layers)'], ['shape_scale_total', 'Total'],
              ['shape_scale_bass', 'Bass'], ['shape_scale_mid', 'Mids'], ['shape_scale_high', 'Highs']] as const)
@@ -214,10 +213,9 @@ export default function SettingsPage() {
 
       {advanced && (
         <div className="card">
-          <div className="card-title">Audio Shape Graph Averaging</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-            Sliding-window average width for the overlay lines on the audio shape graph.
-            Right-click a layer button in the builder to toggle its line.
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            Audio Shape Graph Averaging
+            <HelpLink topic="settings-timing" title="Graph averaging help" />
           </div>
           <Field label="Average Window (ms)">
             <input type="number" min={50} max={5000} step={50} value={num('shape_average_window_ms', 500)}
@@ -270,10 +268,7 @@ export default function SettingsPage() {
             <Field label={
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 Last.fm API Key
-                <button type="button" style={{ padding: '2px 8px', fontSize: 11, borderRadius: 10 }}
-                  onClick={() => setLastfmModal(true)}>
-                  How to →
-                </button>
+                <HelpLink topic="settings-lastfm" title="How to get a key" />
               </span>
             }>
               <input type="text" placeholder="Paste your API key here" value={str('lastfm_api_key')} style={{ width: '100%' }}
@@ -359,7 +354,6 @@ export default function SettingsPage() {
 
       <GradientProfiles />
 
-      {lastfmModal && <LastfmHowTo onClose={() => setLastfmModal(false)} />}
     </>
   );
 }
@@ -511,48 +505,6 @@ function GradientProfiles() {
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-function LastfmHowTo({ onClose }: { onClose: () => void }) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{
-        background: '#1a1a1a', border: '1px solid var(--border)', borderRadius: 10,
-        maxWidth: 520, width: '90%', padding: 28, position: 'relative', maxHeight: '85vh', overflowY: 'auto',
-      }}>
-        <button onClick={onClose} style={{
-          position: 'absolute', top: 14, right: 16, background: 'none', border: 'none',
-          color: 'var(--text-muted)', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1,
-        }}>✕</button>
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Getting a Last.fm API Key</div>
-        <ol style={{ paddingLeft: 18, margin: 0, lineHeight: 1.9, fontSize: 13 }}>
-          <li>Go to <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer">last.fm/api/account/create</a></li>
-          <li>Sign in or create a free Last.fm account if you don't have one</li>
-          <li>Fill in the form:
-            <ul style={{ marginTop: 4, marginBottom: 4 }}>
-              <li><strong>Application name</strong> — anything you like, e.g. <em>SpotFX</em></li>
-              <li><strong>Application description</strong> — e.g. <em>Genre lookup for music lighting</em></li>
-              <li><strong>Callback URL</strong> — leave blank</li>
-              <li><strong>Application homepage</strong> — leave blank</li>
-            </ul>
-          </li>
-          <li>Click <strong>Submit</strong></li>
-          <li>You'll see your new <strong>API key</strong> on the next page — copy it</li>
-          <li>Paste it into the <em>Last.fm API Key</em> field in SpotFX settings and save</li>
-        </ol>
-        <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-muted)' }}>
-          The API key is free and rate-limited to 5 req/s — well within SpotFX's usage.
-          Your username is optional; SpotFX only uses it for future scrobbling features.
-        </div>
-        <div style={{ marginTop: 18, textAlign: 'right' }}>
-          <button className="primary" style={{ padding: '7px 20px' }} onClick={onClose}>Done</button>
-        </div>
       </div>
     </div>
   );

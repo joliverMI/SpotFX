@@ -10,6 +10,7 @@ import TimelineCanvas, { type FrameGeom } from '../builder/canvas/TimelineCanvas
 import TimelineBar from '../builder/components/TimelineBar';
 import { avgLines, beatStrips, diamonds, librosaOverlays, musicMarks, playhead, rmsBands } from '../builder/canvas/layers';
 import { computeAverages, computeMfccDistances, snapTimestamp } from '../builder/canvas/data';
+import HelpLink from '../help/HelpLink';
 import type { Hit, LayerDataBag, ViewState } from '../builder/canvas/frame';
 import { useFollowWindow } from '../builder/hooks/useFollowWindow';
 import type { EventOption, MarkType } from '../builder/types';
@@ -256,6 +257,7 @@ export default function ReviewPanel({
           </span>
         )}
         <button style={{ fontSize: 11, padding: '3px 9px' }} onClick={() => onManualAdd(getNowMs())}>+ Add Trigger</button>
+        <HelpLink topic="aitriggers-review" title="Review panel help" />
         <div style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 2px' }} />
         {BAND_CHIPS.map((c) => (
           <button key={c.key}

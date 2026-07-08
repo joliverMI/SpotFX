@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CollapsibleCard from '../components/CollapsibleCard';
+import HelpLink from '../help/HelpLink';
 import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
@@ -233,6 +234,7 @@ export default function BuilderPage() {
             <span style={{ color: 'var(--text-muted)' }}>
               {fmtMs(coarseMs)} / {fmtMs(durationMs)}
             </span>
+            <HelpLink topic="builder" title="Builder help — shortcuts & gestures" />
           </span>
         }
       >

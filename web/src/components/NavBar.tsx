@@ -25,6 +25,7 @@ export default function NavBar() {
       )}
       <Link to="/debug" className={cls((p) => p === '/debug')}>Debug</Link>
       <Link to="/settings" className={cls((p) => p === '/settings')}>Settings</Link>
+      <Link to="/help" className="help-link" title="Help" aria-label="Help">?</Link>
     </nav>
   );
 }

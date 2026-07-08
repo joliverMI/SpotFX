@@ -13,6 +13,7 @@ import { diamonds, playhead } from '../builder/canvas/layers';
 import type { LayerDataBag, ViewState } from '../builder/canvas/frame';
 import { useFollowWindow } from '../builder/hooks/useFollowWindow';
 import CollapsibleCard from '../components/CollapsibleCard';
+import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { ensureLiveState, getLiveProgressMs, useLiveStore } from '../live/liveStore';
 import { DIFF_MIN_SPAN_MS } from './diff';
@@ -425,10 +426,8 @@ export default function DebugPage() {
             {followWin.follow ? 'Follow' : 'Manual'}
           </button>
           <button style={{ fontSize: 11, padding: '2px 8px' }} onClick={followWin.fullSong}>Full Song</button>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-            Saved shape draws upward from the centerline; live capture (25 ms bins) draws downward.
-            Pan: middle-mouse drag. Zoom: drag the timeline handles. Magenta = confirmed mismatch spike.
-          </span>
+          <span style={{ flex: 1 }} />
+          <HelpLink topic="debug-shape-canvas" title="How to read this canvas" />
         </div>
       </div>
 
@@ -439,6 +438,7 @@ export default function DebugPage() {
         headerExtra={
           <span style={{ fontSize: 11, display: 'flex', gap: 10, alignItems: 'center' }}>
             <span style={{ color: 'var(--text-muted)' }}>{diffStatus}</span>
+            <HelpLink topic="debug-diff-canvas" title="How to read this canvas" />
           </span>
         }
       >
@@ -457,13 +457,6 @@ export default function DebugPage() {
             },
           }}
         />
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-          Matcher's view: both signals squared, binned to 25 ms, z-scored — what the xcorr Pearson
-          correlator compares, so gain/volume differences cancel. Scale pinned at ±1 (≡ ±2.5σ).
-          Blue above center = live louder than expected; orange below = saved louder. The colored line is
-          the monitor's rolling r (lock confidence): green ≥ 0.5, amber ≥ 0.2, red below — gaps mean the
-          span was too quiet to testify. Sustained diff excursions or time-skewed mirror pairs = misalignment.
-        </div>
       </CollapsibleCard>
 
       {/* ── Shape status + recapture ── */}
