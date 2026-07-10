@@ -2616,9 +2616,14 @@ class TriggerEngine:
         directly per virtual — resolving each param against the device's CURRENT
         effect with a canonical-key fallback — so it works regardless of which
         effect a device is running (modeled or not). Color/BG strings ramp via
-        gradient interpolation; background mode is instant."""
+        gradient interpolation; background mode is instant.
+
+        A Group's own `entries` act as a field-level override layer on top of
+        whichever member Set gets picked — see the merge step below."""
         action = resolve_action_bindings(action, self._signal_now)
+        from models.color_set import ColorSetEntry
         from services import color_set_store
+        from services import morph_aspects
         from services import morph_effect_state
         from services.morph_compiler import resolve_scope
         from services.effect_params import get_param_meta
@@ -2628,7 +2633,9 @@ class TriggerEngine:
             logger.warning("set_color: unknown Color Set ref %s", action.ref_id)
             return
 
+        overrides: list = []
         if card.kind == "group":
+            overrides = list(card.entries or [])
             chosen_id = self._select_color_set_member(
                 card, action.pick_mode, action.advance, action.direction
             )
@@ -2640,138 +2647,176 @@ class TriggerEngine:
                 logger.warning("set_color: group member %s missing or not a set", chosen_id)
                 return
 
-        if not card.entries:
+        if not card.entries and not overrides:
             return
 
         state.last_color_set_id = card.id  # mirror for the Now Playing indicator
 
+        # ── Merge layers into one effective entry per virtual ────────────────
+        # Base layer: the Set's entries in order (on overlap, later entries win
+        # per field). Override layer: the Group's entries — every field they
+        # define replaces the base value for each virtual their scope resolves
+        # to. Because merging happens per VIRTUAL, a Group override scoped to a
+        # sub-category (or single device) inside a Set entry's scope only
+        # affects those nested devices — the Set keeps applying to the rest —
+        # while an override scope covering everything the Set touches simply
+        # wins everywhere. Group overrides also apply (explicit fields only) to
+        # virtuals the chosen Set doesn't cover, so a Group-level clamp behaves
+        # the same no matter which member gets picked.
+        merge_fields = (
+            "color_kind", "color_value", "bg_color", "bg_mode", "brightness",
+            "background_brightness", "accent_color", "ramp_ms",
+        )
+        merged: dict[str, ColorSetEntry] = {}
+
+        def _overlay(entries: list) -> set[str]:
+            covered: set[str] = set()
+            for entry in entries:
+                for vid in resolve_scope(entry.scope):
+                    covered.add(vid)
+                    tgt = merged.get(vid)
+                    if tgt is None:
+                        merged[vid] = tgt = ColorSetEntry()
+                    for f in merge_fields:
+                        v = getattr(entry, f)
+                        if v is not None:
+                            setattr(tgt, f, v)
+            return covered
+
+        base_vids = _overlay(card.entries)
+        _overlay(overrides)
+        if not merged:
+            return
+
         # Address each device by its LIVE active effect (not a stale cached one)
         # so these color writes update config in place instead of switching the
         # effect back to whatever was last polled.
-        scoped = [vid for entry in card.entries for vid in resolve_scope(entry.scope)]
-        await self._refresh_effect_types(scoped)
+        await self._refresh_effect_types(list(merged))
 
         default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
         instant_coros: list = []
         touched: set[str] = set()
 
-        for entry in card.entries:
+        for vid, entry in merged.items():
             ramp_ms = entry.ramp_ms if entry.ramp_ms is not None else default_ramp_ms
-            for vid in resolve_scope(entry.scope):
-                # Remember this set's 3rd color for the vid so a later effect
-                # switch can source the new effect's accent from it (None →
-                # black). Recorded for every scoped vid even if its current
-                # effect has no accent slot to write right now.
+            # Remember this set's 3rd color for the vid so a later effect
+            # switch can source the new effect's accent from it (None →
+            # black). Recorded for every base-covered vid even if its current
+            # effect has no accent slot to write right now. Override-only vids
+            # (Group scope beyond the Set's coverage) record only an EXPLICIT
+            # accent — a Group that doesn't set one leaves the device's accent
+            # state alone.
+            if vid in base_vids or entry.accent_color is not None:
                 self._last_accent_by_vid[vid] = entry.accent_color
-                eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
-                etype = eff.get("type")
-                if not etype:
-                    continue
-                cfg = eff.setdefault("config", {})
+            eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+            etype = eff.get("type")
+            if not etype:
+                continue
+            cfg = eff.setdefault("config", {})
 
-                instant: dict = {}
-                ramp_str: dict = {}
-                ramp_num: dict = {}
+            instant: dict = {}
+            ramp_str: dict = {}
+            ramp_num: dict = {}
 
-                def _unchanged(param: str, value) -> bool:
-                    # Skip params already at the target value. Critical for
-                    # non-pixels effects (melt/power/…): they have no color_blend
-                    # option, so LedFX RECREATES (restarts + transition) the
-                    # effect whenever a "color"-named key is in the PUT — even if
-                    # the value didn't change. Dropping an unchanged
-                    # background_color keeps a gradient-only change in-place.
-                    cur = cfg.get(param)
-                    if cur is None:
-                        return False
-                    if isinstance(value, (int, float)) and isinstance(cur, (int, float)):
-                        return abs(float(cur) - float(value)) < 1e-4
-                    return str(cur).strip().lower() == str(value).strip().lower()
+            def _unchanged(param: str, value) -> bool:
+                # Skip params already at the target value. Critical for
+                # non-pixels effects (melt/power/…): they have no color_blend
+                # option, so LedFX RECREATES (restarts + transition) the
+                # effect whenever a "color"-named key is in the PUT — even if
+                # the value didn't change. Dropping an unchanged
+                # background_color keeps a gradient-only change in-place.
+                cur = cfg.get(param)
+                if cur is None:
+                    return False
+                if isinstance(value, (int, float)) and isinstance(cur, (int, float)):
+                    return abs(float(cur) - float(value)) < 1e-4
+                return str(cur).strip().lower() == str(value).strip().lower()
 
-                def _place(param: str, value: str):
-                    if _unchanged(param, value):
+            def _place(param: str, value: str):
+                if _unchanged(param, value):
+                    return
+                meta = get_param_meta(etype, param) or {}
+                # gradients/colors are smooth by default; only skip the ramp
+                # when explicitly marked non-smooth or no ramp requested.
+                smooth = meta.get("smooth", True) and ramp_ms > 0
+                # Effect-resetting params (e.g. background_color): with
+                # preserve_effect (default) skip them entirely to keep the
+                # running effect. When the user wants them applied
+                # (preserve_effect=False), a server-side tween can ramp them
+                # smoothly (its PUT bypasses LedFX's effect-recreation); the
+                # legacy path must be instant (ramping would restart it).
+                if _param_resets_effect(etype, param):
+                    if getattr(action, "preserve_effect", True):
                         return
-                    meta = get_param_meta(etype, param) or {}
-                    # gradients/colors are smooth by default; only skip the ramp
-                    # when explicitly marked non-smooth or no ramp requested.
-                    smooth = meta.get("smooth", True) and ramp_ms > 0
-                    # Effect-resetting params (e.g. background_color): with
-                    # preserve_effect (default) skip them entirely to keep the
-                    # running effect. When the user wants them applied
-                    # (preserve_effect=False), a server-side tween can ramp them
-                    # smoothly (its PUT bypasses LedFX's effect-recreation); the
-                    # legacy path must be instant (ramping would restart it).
-                    if _param_resets_effect(etype, param):
-                        if getattr(action, "preserve_effect", True):
-                            return
-                        if smooth and ledfx_client.server_tween_enabled():
-                            ramp_str[param] = value
-                        else:
-                            instant[param] = value
-                        return
-                    if smooth:
+                    if smooth and ledfx_client.server_tween_enabled():
                         ramp_str[param] = value
                     else:
                         instant[param] = value
+                    return
+                if smooth:
+                    ramp_str[param] = value
+                else:
+                    instant[param] = value
 
-                def _place_num(param: str, value: float):
-                    if _unchanged(param, value):
-                        return
-                    meta = get_param_meta(etype, param) or {}
-                    if meta.get("smooth", True) and ramp_ms > 0:
-                        ramp_num[param] = value
-                    else:
-                        instant[param] = value
+            def _place_num(param: str, value: float):
+                if _unchanged(param, value):
+                    return
+                meta = get_param_meta(etype, param) or {}
+                if meta.get("smooth", True) and ramp_ms > 0:
+                    ramp_num[param] = value
+                else:
+                    instant[param] = value
 
-                def _has(param: str) -> bool:
-                    return get_param_meta(etype, param) is not None or param in cfg
+            def _has(param: str) -> bool:
+                return get_param_meta(etype, param) is not None or param in cfg
 
-                if entry.color_value:
-                    pc = self._color_param_for(etype, "color", "gradient", cfg)
-                    if pc:
-                        _place(pc, entry.color_value)
-                if entry.bg_color:
-                    pb = self._color_param_for(etype, "bg_color", "background_color", cfg)
-                    if pb:
-                        _place(pb, entry.bg_color)
-                # 3rd / accent color (sparks_color on power, peak_color on
-                # eq2d): write the set's 3rd color, or black when the set
-                # leaves it undefined — so an accent-capable effect never keeps
-                # a stale accent from a prior set. Effects without an accent
-                # param (melt, radial) silently skip.
-                from services import morph_aspects
-                ap = morph_aspects.accent_param_for(etype)
-                if ap:
-                    _place(ap, entry.accent_color or "#000000")
-                if entry.brightness is not None and _has("brightness"):
-                    _place_num("brightness", entry.brightness)
-                if entry.background_brightness is not None and _has("background_brightness"):
-                    _place_num("background_brightness", entry.background_brightness)
-                if entry.bg_mode and _has("background_mode") and not _unchanged("background_mode", entry.bg_mode):
-                    instant["background_mode"] = entry.bg_mode
+            if entry.color_value:
+                pc = self._color_param_for(etype, "color", "gradient", cfg)
+                if pc:
+                    _place(pc, entry.color_value)
+            if entry.bg_color:
+                pb = self._color_param_for(etype, "bg_color", "background_color", cfg)
+                if pb:
+                    _place(pb, entry.bg_color)
+            # 3rd / accent color (sparks_color on power, peak_color on
+            # eq2d): write the set's 3rd color, or black when the set
+            # leaves it undefined — so an accent-capable effect never keeps
+            # a stale accent from a prior set. Effects without an accent
+            # param (melt, radial) silently skip; so do override-only vids
+            # with no explicit Group accent.
+            ap = morph_aspects.accent_param_for(etype)
+            if ap and (vid in base_vids or entry.accent_color is not None):
+                _place(ap, entry.accent_color or "#000000")
+            if entry.brightness is not None and _has("brightness"):
+                _place_num("brightness", entry.brightness)
+            if entry.background_brightness is not None and _has("background_brightness"):
+                _place_num("background_brightness", entry.background_brightness)
+            if entry.bg_mode and _has("background_mode") and not _unchanged("background_mode", entry.bg_mode):
+                instant["background_mode"] = entry.bg_mode
 
-                if not instant and not ramp_str and not ramp_num:
-                    continue
-                touched.add(vid)
+            if not instant and not ramp_str and not ramp_num:
+                continue
+            touched.add(vid)
 
-                if instant:
-                    instant_coros.append(ledfx_client.set_virtual_effect(vid, etype, instant))
-                    cfg.update(instant)
-                if ramp_str:
-                    if await_ramps:
-                        await ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
-                        cfg.update(ramp_str)
-                    else:
-                        self._spawn_ramp(
-                            ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
-                        )
-                if ramp_num:
-                    if await_ramps:
-                        await ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
-                        cfg.update(ramp_num)
-                    else:
-                        self._spawn_ramp(
-                            ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
-                        )
+            if instant:
+                instant_coros.append(ledfx_client.set_virtual_effect(vid, etype, instant))
+                cfg.update(instant)
+            if ramp_str:
+                if await_ramps:
+                    await ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
+                    cfg.update(ramp_str)
+                else:
+                    self._spawn_ramp(
+                        ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
+                    )
+            if ramp_num:
+                if await_ramps:
+                    await ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
+                    cfg.update(ramp_num)
+                else:
+                    self._spawn_ramp(
+                        ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
+                    )
 
         if instant_coros:
             await asyncio.gather(*instant_coros, return_exceptions=True)

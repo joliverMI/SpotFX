@@ -372,7 +372,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Color Sets',
     keywords: 'palette gradients colors groups',
     intro:
-      'Named color palettes for events to draw from. A Set holds per-device/category entries (FG gradient or solid, BG color and mode, brightness, accent color, ramp). A Group plays Sets in a cycle (wrap/bounce) or weighted-random order.',
+      'Named color palettes for events to draw from. A Set holds per-device/category entries (FG gradient or solid, BG color and mode, brightness, accent color, ramp). A Group plays Sets in a cycle (wrap/bounce) or weighted-random order, and can layer its own per-device overrides on top of whichever Set it picks.',
     entries: [
       {
         id: 'colorsets-workflow',
@@ -386,6 +386,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
         kbd: false,
       },
+      {
+        id: 'colorsets-group-overrides',
+        title: 'Group overrides',
+        keywords: 'override layer bg brightness nested category subset clamp merge',
+        body: [
+          'A Group can carry its own entries (the "Overrides" list). When the Group fires, one member Set is picked as usual, then every field an override defines — color, BG color, BG mode, brightness, BG brightness, third color, ramp — replaces the Set\'s value on the devices the override\'s scope resolves to. Unset fields keep the Set\'s values.',
+          'Merging happens per device: an override scoped to a sub-category (or single device) inside a Set entry\'s scope only changes those nested devices, while the Set keeps applying to the rest. If the override\'s scope covers everything the Set touches, it simply wins everywhere. Devices in an override\'s scope that the picked Set doesn\'t cover still get the override\'s explicit fields — so a Group-level clamp (e.g. BG brightness on one category) behaves the same no matter which member is picked.',
+          'Third color: a Set clears the accent to black on devices where it leaves it undefined; an override only touches the accent when set explicitly (set it to black to force-clear).',
+        ],
+      },
     ],
   },
 
@@ -395,7 +405,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Devices',
     keywords: 'categories virtuals ledfx tree',
     intro:
-      'Organizes LedFX virtuals into a category tree that events and color sets target. A category has a name, optional parent, a role (e.g. ambient), its LedFX virtual IDs, and a list of supported effects.',
+      'Organizes LedFX virtuals into a category tree that events and color sets target. A category has a name, optional parent, a role (e.g. ambient), its LedFX virtual IDs, and a list of supported effects. Targeting a parent category includes every descendant category\'s devices.',
     entries: [
       {
         id: 'devices-import',

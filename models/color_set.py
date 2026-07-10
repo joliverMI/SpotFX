@@ -6,7 +6,10 @@ A `ColorSetCard` is either:
                   device/category. Applied to many devices at once by a
                   Set Color step.
   - kind="group": an ordered list of references to Color Sets, picked one at a
-                  time (sequential cycle or weighted random) when fired.
+                  time (sequential cycle or weighted random) when fired. A
+                  group may also carry its own `entries` — a field-level
+                  override layer merged per virtual on top of the picked Set
+                  at fire time (see trigger_engine._execute_set_color).
 
 A Color Set entry is essentially a restricted Morph Step target (color +
 bg_color), so it reuses `MorphScope` from models.music_event and is compiled
@@ -51,7 +54,9 @@ class ColorSetCard(BaseModel):
     kind:  Literal["set", "group"] = "set"
     labels: list[str] = Field(default_factory=list)
 
-    # kind == "set"
+    # kind == "set": the palette itself.
+    # kind == "group": optional overrides — any field set here replaces the
+    # picked member Set's value for the virtuals the entry's scope resolves to.
     entries: list[ColorSetEntry] = Field(default_factory=list)
 
     # kind == "group"

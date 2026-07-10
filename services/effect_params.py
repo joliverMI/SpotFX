@@ -21,9 +21,31 @@ def load() -> None:
 
 
 def get_virtuals_for_category(category: str) -> list[str]:
-    from services.device_category_service import get_category_by_name
+    """Virtuals of the named category AND every descendant category, so
+    targeting a parent covers its whole subtree (dedup'd, parent-first)."""
+    from services.device_category_service import get_category_by_name, list_categories
     cat = get_category_by_name(category)
-    return cat.virtuals if cat else []
+    if not cat:
+        return []
+    cats = list_categories()
+    out: list[str] = []
+    seen_v: set[str] = set()
+    seen_c: set[str] = set()  # guards against parent_id cycles
+
+    def _walk(c) -> None:
+        if c.id in seen_c:
+            return
+        seen_c.add(c.id)
+        for v in c.virtuals:
+            if v not in seen_v:
+                seen_v.add(v)
+                out.append(v)
+        for child in cats:
+            if child.parent_id == c.id:
+                _walk(child)
+
+    _walk(cat)
+    return out
 
 
 def get_effects_for_category(category: str) -> list[str]:

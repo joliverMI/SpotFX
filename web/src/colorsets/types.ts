@@ -24,6 +24,8 @@ export interface ColorSetCard {
   color: string;
   kind: 'set' | 'group';
   labels: string[];
+  /** kind=set: the palette. kind=group: per-device/category overrides merged
+   * onto the picked member Set at fire time (set fields win over the Set). */
   entries: ColorSetEntry[];
   members: GroupMember[];
   mode: 'cycle' | 'weighted';

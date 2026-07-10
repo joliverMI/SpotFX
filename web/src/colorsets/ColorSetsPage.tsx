@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../api/client';
 import { useParamConfig } from '../api/queries';
 import { useToast } from '../components/Toast';
+import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
 import EntryRow from './EntryRow';
 import GradientModal from './GradientModal';
@@ -266,7 +267,7 @@ export default function ColorSetsPage() {
                 </div>
               )}
               {(card.members ?? []).map((m, i) => (
-                <div key={i} style={{
+                <div key={`m${i}`} style={{
                   background: 'var(--surface2)', padding: 8, borderRadius: 'var(--radius)', marginBottom: 8,
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
@@ -298,6 +299,32 @@ export default function ColorSetsPage() {
                   <button className="danger" style={{ fontSize: 12 }} title="Remove"
                     onClick={() => setCard({ ...card, members: card.members.filter((_, j) => j !== i) })}>✕</button>
                 </div>
+              ))}
+              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                Overrides
+                <HelpLink topic="colorsets-group-overrides" />
+                <span style={{ fontWeight: 400, marginLeft: 2, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>
+                  replace the picked Set's values per device/category
+                </span>
+                <button style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
+                  onClick={() => setCard({ ...card, entries: [...(card.entries ?? []), emptyEntry()] })}>
+                  + Override
+                </button>
+              </div>
+              {!(card.entries ?? []).length && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 6 }}>
+                  No overrides. Fields set here win over the picked Set for the scoped devices; unset fields keep the Set's values.
+                </div>
+              )}
+              {(card.entries ?? []).map((entry, i) => (
+                <EntryRow
+                  key={i}
+                  entry={entry}
+                  gradients={gradients}
+                  onChange={(e) => setCard({ ...card, entries: card.entries.map((x, j) => (j === i ? e : x)) })}
+                  onRemove={() => setCard({ ...card, entries: card.entries.filter((_, j) => j !== i) })}
+                  onEditGradient={() => setGradEntryIdx(i)}
+                />
               ))}
             </>
           )}
