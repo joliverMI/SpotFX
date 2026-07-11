@@ -11,8 +11,19 @@ router = APIRouter(prefix="/api/effect-params", tags=["effect-params"])
 
 @router.get("/config")
 async def get_config():
-    """Return the full effect_params config (categories + effects)."""
-    return effect_params._CONFIG
+    """Return the effect_params config with `categories` swapped for the LIVE
+    device categories (storage/device_categories.json) — the static section in
+    config/effect_params.json is only the one-time seed and goes stale as soon
+    as categories are edited on the Devices page. Scope pickers and the Color
+    Set import dialog all populate from this endpoint."""
+    from services.device_category_service import list_categories
+    cfg = dict(effect_params._CONFIG)
+    cfg["categories"] = {
+        c.name: {"id": c.id, "parent_id": c.parent_id, "role": c.role,
+                 "virtuals": c.virtuals, "effects": c.effects}
+        for c in sorted(list_categories(), key=lambda c: c.sort_order)
+    }
+    return cfg
 
 
 @router.get("/labels")
