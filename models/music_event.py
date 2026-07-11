@@ -218,8 +218,10 @@ class SetColorAction(BaseModel):
     direction: Literal["forward", "backward"] = "forward"
     ramp_ms:   int | ValueBinding | None = None
     # When True (default), skip any color-set value that would reset the LedFX
-    # effect (e.g. background_color), preserving the running effect. When False,
-    # those values are still applied — but always instantly, never ramped.
+    # effect (params flagged `resets_effect`), preserving the running effect.
+    # When False, those values are still applied — but always instantly, never
+    # ramped. Since the 2026-07-10 ledfx-src background_* patch no stock param
+    # resets, so this flag is inert unless a param is flagged in effect_params.
     preserve_effect: bool = True
 
 

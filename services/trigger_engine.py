@@ -57,9 +57,12 @@ SCENE_EVENT_TYPES = (
 )
 # Params whose value change makes LedFX re-instantiate (reset) the effect.
 # These must be written instantly (ramping them flickers/restarts the effect),
-# and Morph Color's "preserve effect" mode skips them entirely. The canonical
-# key covers unmodeled effects; effect_params may also flag `resets_effect`.
-RESET_EFFECT_PARAMS = {"background_color"}
+# and Set Color's "preserve effect" mode skips them entirely. The canonical
+# set covers unmodeled effects; effect_params may also flag `resets_effect`.
+# Empty since the 2026-07-10 ledfx-src patch: virtual_effects.py excludes
+# background_* keys from the color-recreation branch, so background_color
+# (the only former member) now updates in place like gradient.
+RESET_EFFECT_PARAMS: set[str] = set()
 
 
 def _param_resets_effect(effect_type: str, param: str) -> bool:
@@ -2437,9 +2440,9 @@ class TriggerEngine:
             instant_str: dict = {}
             ramp_str: dict = {}
             # Server-side tweens bypass LedFX's color-recreation path, so
-            # effect-resetting colour params (e.g. background_color) CAN be
-            # tweened smoothly there. On the legacy client loop they must stay
-            # instant — ramming them through 40 frames restarts the effect.
+            # effect-resetting colour params (any flagged `resets_effect`) CAN
+            # be tweened smoothly there. On the legacy client loop they must
+            # stay instant — ramming them through 40 frames restarts the effect.
             _allow_reset_ramp = ledfx_client.server_tween_enabled()
             for k, v in str_patch.items():
                 pmeta = get_param_meta(w.effect_type, k)
@@ -2739,7 +2742,7 @@ class TriggerEngine:
                 # gradients/colors are smooth by default; only skip the ramp
                 # when explicitly marked non-smooth or no ramp requested.
                 smooth = meta.get("smooth", True) and ramp_ms > 0
-                # Effect-resetting params (e.g. background_color): with
+                # Effect-resetting params (flagged `resets_effect`): with
                 # preserve_effect (default) skip them entirely to keep the
                 # running effect. When the user wants them applied
                 # (preserve_effect=False), a server-side tween can ramp them
