@@ -210,7 +210,9 @@
       "Bash(journalctl --user -u spotfx --no-pager --since \"60 sec ago\" -o cat)",
       "Bash(journalctl --user -u ledfx --no-pager --since \"60 sec ago\" -o cat)",
       "Bash(curl -s -m 3 -w \"GET /api/info HTTP=%{http_code} time=%{time_total}s\\\\n\" http://localhost:8888/api/info -o /dev/null)",
-      "Bash(curl -s -m 3 -X PUT -H 'Content-Type: application/json' -d '{}' -w 'PUT /api/config #__TRACKED_VAR__: HTTP=%{http_code} time=%{time_total}s\\\\n' http://localhost:8888/api/config -o /dev/null)"
+      "Bash(curl -s -m 3 -X PUT -H 'Content-Type: application/json' -d '{}' -w 'PUT /api/config #__TRACKED_VAR__: HTTP=%{http_code} time=%{time_total}s\\\\n' http://localhost:8888/api/config -o /dev/null)",
+      "Bash(journalctl --user -u ledfx --no-pager -n 60)",
+      "Bash(journalctl --user -u spotfx --since \"today\" --no-pager -o cat)"
     ],
     "additionalDirectories": [
       "c:\\Users\\joliv\\.claude\\plans",

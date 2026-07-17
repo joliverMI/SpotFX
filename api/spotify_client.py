@@ -131,7 +131,7 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
 
     device_name = (data.get("device") or {}).get("name", "")
     state.on_target_device = (
-        device_name.lower() == settings.spotify_device_name.lower()
+        device_name.lower() in (n.lower() for n in settings.spotify_device_names)
         and bool(data.get("is_playing"))
     )
 

@@ -207,6 +207,15 @@ export const HELP_SECTIONS: HelpSection[] = [
             ],
             kbd: true,
           },
+          {
+            id: 'builder-trigger-dialog',
+            title: 'Trigger edit dialog',
+            keywords: 'double click edit timestamp event labels intensity open new tab reference palette assign',
+            body: [
+              'Double-click a trigger (or empty canvas) to open it: timestamp (m:ss.t), event (recently used float to the top), filter labels and intensity. Pressing a palette key while the dialog is open assigns that event and saves in one go.',
+              'The ↗ next to the event picker opens the chosen event\'s editor in a new tab, so the trigger you\'re editing stays put.',
+            ],
+          },
         ],
       },
       {
@@ -216,12 +225,15 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'builder-pan-zoom',
             title: 'Pan, zoom & follow',
-            keywords: 'middle drag scroll window playhead',
+            keywords: 'middle drag scroll window playhead resume auto',
+            body: [
+              'In Live mode, follow resumes automatically (zoomed to the sticky window size) when the page opens, when Live mode turns on, and when the song changes; within one song your pan/zoom choice sticks. In song-search mode there is no playhead, so the view stays where you leave it.',
+            ],
             table: [
               ['Middle-drag', 'Pan the zoom window (drag right → window moves right). Panning switches follow off.'],
-              ['` (backtick)', 'Toggle follow mode (auto-scroll with playback) vs. manual zoom.'],
+              ['` (backtick)', 'Toggle follow mode (auto-scroll with playback) vs. manual zoom. Turning follow off freezes the current view in place; use Full Song to zoom out.'],
               ['Ctrl+F', 'Also toggles follow mode.'],
-              ['Full-song bar', 'Drag the zoom region\'s center or edges to pan/resize; in follow mode this adjusts the look-ahead window.'],
+              ['Full-song bar', 'Drag the zoom region\'s center to pan — this switches follow off. Drag its edges to resize; in follow mode edge drags adjust the window size and look-ahead instead.'],
             ],
             kbd: false,
           },
@@ -287,9 +299,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'events-editor',
         title: 'Editing an event',
-        keywords: 'undo redo save fire duplicate drag reorder weight scope',
+        keywords: 'undo redo save fire duplicate drag reorder weight scope highlight flash glow green reference open link new tab',
         body: [
           'Edits are drafts — Save writes to the server; ▶ Fire is disabled while dirty because firing uses the stored event. Drag cards to reorder; every action can be copied and pasted into any track of any event (cross-tab too).',
+          'The block you just added, edited, moved or pasted glows green and fades over 5 s, so you can spot where the change landed in a big tree.',
+          'Cards that reference something else — an event_ref or a set_color — show a ↗ button that opens the referenced event or color set/group in a new tab (a new tab so your unsaved draft stays put).',
           'Group types: Sequence (children in order, ms or beat delays), Parallel (all at once, per-child offset), Random (weighted pick of one option). Scopes cascade: a child with no target inherits the nearest group/lane target.',
         ],
         table: [
@@ -312,7 +326,24 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['ledfx_ambient_color', 'Applies the complementary of the current ambient color.'],
           ['ledfx_global_transition / ledfx_effect_param', 'Set the global transition / a single effect parameter.'],
           ['device_settings', 'Apply raw device settings.'],
-          ['sequence / parallel / random group', 'Containers — run children in order / at once / pick one by weight.'],
+          ['sequence / parallel / random group', 'Containers — run children in order / at once / pick one by weight (random options can be energy-gated and tilted).'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'random-energy',
+        title: 'Random options: energy gate & tilt',
+        keywords: 'random group weight energy floor ceiling scale tilt intensity eligible',
+        body: [
+          'Each option of a Random group can be gated and scaled by the firing trigger\'s energy (its intensity, 0–1; machine-generated triggers default to section energy). "energy ≥" sets a floor and "≤" a ceiling — outside that window the option is never picked. If every option is gated out, the group fires nothing.',
+          'Within the window, "tilt" bends the option\'s weight with energy: 0 is flat, +1 ramps from 0× weight at the floor to 2× at the ceiling (favors high energy), −1 is the inverse (favors low energy). An empty floor/ceiling counts as 0/1 for the tilt ramp.',
+          'Manual ▶ test fires carry no energy, so gates and tilt are skipped — every option stays pickable.',
+        ],
+        table: [
+          ['energy ≥ 0.6', 'Option only fires in sections with energy 0.6 or higher.'],
+          ['≤ 0.3', 'Option only fires in quiet sections (energy 0.3 or lower).'],
+          ['tilt +1', 'Weight grows with energy across the window (0× → 2×).'],
+          ['tilt −1', 'Weight shrinks as energy rises (2× → 0×).'],
         ],
         kbd: false,
       },
@@ -347,6 +378,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         kbd: false,
       },
       {
+        id: 'now-next-changes',
+        title: 'Next-changes board',
+        keywords: 'next trigger preview flare combo shape color lane steps board upcoming',
+        body: [
+          'Below the control toggles, the board previews the next trigger down to the LEAF changes: event-ref chains and random branches are followed all the way, so each row shows the actual morph — which parameters change, to what values, and the ramp time (e.g. "effect → radial, star → 0.3, edges → 6 (1.5s)"). Intermediate event names (the route) are dropped; the row tag is the deepest lane/child/branch name. Named Morph Steps show their name; color swatches appear for color changes; hover a row for the untruncated description.',
+          'Everything is locked in when the preview appears — lane picks AND every random branch inside referenced events — so the trigger fires exactly what the board shows. Flares (Shape/Color/Combo) resolve against the currently active Scene Update; if a different Scene Update fires in between, the engine re-rolls at fire time so stale picks never run.',
+          'Devices receiving the identical change are merged into one row with combined tags. Color Group cycles deliberately show only the step count ("+2 steps in “Party”") — the destination Set stays a surprise. Rows firing off the trigger point show their offset ("+0.5s"); more rows than fit are summarized as "+N more" (hover for the full list).',
+        ],
+      },
+      {
         id: 'now-source-badge',
         title: 'Trigger source badge',
         keywords: 'manual ai generated simple auto triggerless override',
@@ -357,8 +398,9 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'now-shape',
         title: 'Audio shape & recapture',
-        keywords: 'offset drift quality recapture badge realign self-correction triggers shift',
+        keywords: 'offset drift quality recapture badge realign self-correction triggers shift zoom follow pan playhead',
         body: [
+          'The shape view follows the playhead. Drag to pan and inspect elsewhere in the song ("Follow playhead" snaps back); following always resumes when the song changes or the page reopens.',
           'The Audio Shape card shows the captured waveform with the live offset status ("start +Xms → now +Yms, Q=quality"). A "recapture suggested" badge appears when the stored offset keeps disagreeing with live audio; Recapture deletes the stored shape (audio + analysis) so the song re-records on its next play.',
           'Recapture self-corrects: when a song is force-recaptured, the new recording is cross-correlated against the old one and any timing shift between the two is applied automatically to the song\'s triggers (including per-Set-List overrides), pending AI suggestions, and learned offsets — so existing triggers keep landing on the same musical moments. If the shift can\'t be measured confidently, triggers are left untouched and offsets relearn from scratch.',
         ],
@@ -540,6 +582,23 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Advanced diagnostics. Timing (nav-gated by "Show advanced") is a read-only xcorr/anchor dump; Debug shows the live sync state.',
     entries: [
       {
+        id: 'timing-lock-history',
+        title: 'Lock history',
+        keywords: 'last 10 songs grade time to lock offset delta search recent plays',
+        body: [
+          'The panel at the top of the Timing page lists the last 10 distinct songs\' lock outcomes: how long into the song the hard lock landed ("time to lock"), the final offset, how far it had to move from the previous baseline (Δ needed), the lock quality Q, and a letter grade. Click any row to load that song\'s full timing dump below; type in the search box to switch to a full-history search (every stored play matching title, artist, uri, or device).',
+          'Grades: the base comes from the play\'s best Q (A ≥ 0.9, B ≥ 0.8, C ≥ 0.7, D ≥ 0.6, F below). A play that finished its windows without a hard lock drops one notch, and so does a hard lock that landed more than 30 s into the song (the song ran that long on the cold-start baseline).',
+        ],
+      },
+      {
+        id: 'timing-device-offsets',
+        title: 'Per-device timing offsets',
+        keywords: 'snapcast client multiple devices active device offset trim latency',
+        body: [
+          'Multiple snapcast client devices can play SpotFX audio, each with its own playback-chain latency. Settings → Latency & Timing → Timing devices lets you name each device, give it an offset (ms), and mark which one is active. The active device\'s offset is layered onto the resolved shape offset (visible as a "device" box in the fire-time pipeline), and lock history plus the systemic offset learner tag their samples with the active device so timing learned on one device never contaminates another.',
+        ],
+      },
+      {
         id: 'timing-pipeline',
         title: 'Trigger fire-time pipeline',
         keywords: 'shape offset buffer rtt effective audio latency',
@@ -572,7 +631,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Reading the shape canvas',
         keywords: 'saved live capture mismatch magenta centerline legend',
         body: [
-          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches. Middle-drag pans; the timeline handles zoom.',
+          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches. Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
           'Perception trim is a per-track manual offset layered on top of the xcorr result — negative fires lighting earlier, positive later.',
         ],
       },
@@ -606,9 +665,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'settings-lastfm',
         title: 'Song source & Last.fm API key',
-        keywords: 'spotify api credentials ledfx event driven genres lastfm how to',
+        keywords: 'spotify api credentials ledfx event driven genres lastfm how to target device name multiple comma',
         body: [
           'Song info comes from the Spotify API (needs client credentials from the Spotify Developer Dashboard) or from LedFX events, in which case genres are sourced from Last.fm.',
+          'Target Device Name(s) lists the Spotify Connect devices SpotFX reacts to — comma-separate multiple names (e.g. "Serenity, Living Room"). Playback on any listed device counts; anything else shows the Wrong Device badge on Now Playing and triggers stay quiet.',
           'Getting a Last.fm API key: sign in at last.fm/api/account/create, enter any application name and description, leave callback and homepage blank, submit, then copy the API key into the field here. The key is free and rate-limited to 5 requests/second — well within SpotFX\'s usage. Your username is optional; SpotFX only uses it for future scrobbling features.',
         ],
       },

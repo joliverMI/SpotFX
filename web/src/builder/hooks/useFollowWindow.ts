@@ -66,8 +66,13 @@ export function useFollowWindow(opts: {
   /** Enabling follow snaps to the playhead keeping the CURRENT window size —
    * but only when that size is a real zoom. A span covering (nearly) the
    * whole song means "was at full song": zoom back in to the sticky size
-   * instead, and never let a song-sized span become the sticky size. */
+   * instead, and never let a song-sized span become the sticky size.
+   * Disabling follow freezes the current window in place (manual mode)
+   * rather than zooming out to the full song — that's what fullSong is for. */
   const setFollowSnapped = useCallback((on: boolean) => {
+    if (!on && stable.current.follow) {
+      setManualWin(getWin());
+    }
     if (on) {
       const s = stable.current;
       const dur = Math.max(1, s.durationMs);
@@ -83,7 +88,7 @@ export function useFollowWindow(opts: {
       setManualWin(null); // a stale full-song manual window must not linger
     }
     setFollow(on);
-  }, [setFollow, setWindowS, setFutureS]);
+  }, [setFollow, setWindowS, setFutureS, getWin]);
 
   return {
     follow,

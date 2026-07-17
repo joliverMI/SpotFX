@@ -43,6 +43,8 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 class SettingsPatch(BaseModel):
     audio_latency_ms: Optional[int] = None
+    active_timing_device: Optional[str] = None
+    timing_device_offsets: Optional[dict[str, int]] = None
     ledfx_trigger_buffer_ms: Optional[int] = None
     builder_zoom_window_s: Optional[int] = None
     builder_future_buffer_s: Optional[int] = None
@@ -85,6 +87,8 @@ class SettingsPatch(BaseModel):
 async def get_settings():
     return {
         "audio_latency_ms": settings.audio_latency_ms,
+        "active_timing_device": settings.active_timing_device,
+        "timing_device_offsets": settings.timing_device_offsets,
         "ledfx_trigger_buffer_ms": settings.ledfx_trigger_buffer_ms,
         "builder_zoom_window_s": settings.builder_zoom_window_s,
         "builder_future_buffer_s": settings.builder_future_buffer_s,

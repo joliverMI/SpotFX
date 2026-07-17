@@ -71,7 +71,9 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
     case 'morph_step': {
       const n = action.targets.length;
       const aspects = [...new Set(action.targets.map((t) => t.aspect))].sort();
-      return `Morph ${n}× (${aspects.length ? aspects.join(', ') : 'no targets'})${hasBindingDeep(action) ? ' ⚡' : ''}`;
+      const body = aspects.length ? aspects.join(', ') : 'no targets';
+      const head = action.name ? `Morph “${action.name}”` : `Morph ${n}×`;
+      return `${head} (${body})${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'set_color': {
       const name = ctx.colorSetNames?.[action.ref_id] ?? '?';

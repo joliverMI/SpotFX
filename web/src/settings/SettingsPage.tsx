@@ -52,6 +52,14 @@ export default function SettingsPage() {
 
   const advanced = bool('show_advanced');
   const songSource = str('song_source', 'spotify');
+  // Timing devices: name → offset ms, layered onto the shape offset while
+  // that device is active. Kept as one draft object so Save PATCHes it whole.
+  const devOffsets = useMemo(
+    () => ({ ...((draft?.timing_device_offsets as Record<string, number>) ?? {}) }),
+    [draft?.timing_device_offsets],
+  );
+  const activeDevice = str('active_timing_device', 'default');
+  const [newDevice, setNewDevice] = useState('');
   const sourceChanged = settings && songSource !== String(settings.song_source ?? 'spotify');
 
   // Ambient stored value may be a category id or (legacy) name — match either.
@@ -66,6 +74,8 @@ export default function SettingsPage() {
     try {
       await api('PATCH', '/settings', {
         audio_latency_ms: num('audio_latency_ms'),
+        active_timing_device: str('active_timing_device', 'default'),
+        timing_device_offsets: devOffsets,
         ledfx_trigger_buffer_ms: num('ledfx_trigger_buffer_ms'),
         builder_zoom_window_s: num('builder_zoom_window_s'),
         builder_future_buffer_s: num('builder_future_buffer_s'),
@@ -141,6 +151,56 @@ export default function SettingsPage() {
           <input type="number" step={50} min={0} value={num('smooth_ramp_ms')}
             onChange={(e) => set('smooth_ramp_ms', parseInt(e.target.value) || 0)} />
         </Field>
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+            Timing devices (snapcast clients)
+            <HelpLink topic="timing-device-offsets" title="Per-device offset help" />
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+            Each snapcast device SpotFX can play through gets its own offset (ms), layered
+            onto learned timing while it's the active device. Lock history and the systemic
+            offset learner are kept separate per device.
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+            <input type="radio" name="active-timing-device" checked={activeDevice === 'default'}
+              onChange={() => set('active_timing_device', 'default')} />
+            <span style={{ flex: 1 }}>default</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>no extra offset</span>
+          </label>
+          {Object.entries(devOffsets).map(([name, off]) => (
+            <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+              <input type="radio" name="active-timing-device" checked={activeDevice === name}
+                onChange={() => set('active_timing_device', name)} />
+              <span style={{ flex: 1 }}>{name}</span>
+              <input type="number" step={50} value={Number(off) || 0} style={{ width: 90 }}
+                title="Extra offset (ms) applied while this device is active"
+                onChange={(e) => set('timing_device_offsets', { ...devOffsets, [name]: parseInt(e.target.value) || 0 })} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>ms</span>
+              <button className="danger" style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  const next = { ...devOffsets };
+                  delete next[name];
+                  set('timing_device_offsets', next);
+                  if (activeDevice === name) set('active_timing_device', 'default');
+                }}>✕</button>
+            </label>
+          ))}
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <input type="text" placeholder="New device name (e.g. Living Room Pi)" value={newDevice}
+              style={{ flex: 1 }} onChange={(e) => setNewDevice(e.target.value)} />
+            <button style={{ fontSize: 12 }}
+              disabled={!newDevice.trim() || newDevice.trim() === 'default' || newDevice.trim() in devOffsets}
+              onClick={(e) => {
+                e.preventDefault();
+                const name = newDevice.trim();
+                set('timing_device_offsets', { ...devOffsets, [name]: 0 });
+                setNewDevice('');
+              }}>
+              + Add device
+            </button>
+          </div>
+        </div>
         {advanced && (
           <Field label="Auto-generate mode — method used when audio capture completes">
             <select value={str('auto_generate_mode', 'embedded')}
@@ -243,8 +303,10 @@ export default function SettingsPage() {
         )}
         {songSource === 'spotify' ? (
           <>
-            <Field label="Target Device Name">
+            <Field label="Target Device Name(s)">
               <input type="text" value={str('spotify_device_name')} style={{ width: '100%' }}
+                placeholder="Serenity, Living Room"
+                title="Comma-separate multiple device names — SpotFX reacts when playback is on any of them"
                 onChange={(e) => set('spotify_device_name', e.target.value)} />
             </Field>
             <Field label="Client ID">

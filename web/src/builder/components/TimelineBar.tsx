@@ -64,7 +64,10 @@ export default function TimelineBar({
       const rect = bar.getBoundingClientRect();
       const deltaMs = ((e.clientX - lastX) / Math.max(1, rect.width)) * dur;
       lastX = e.clientX;
-      if (follow) {
+      // Center-drag means "look elsewhere": it detaches from the playhead
+      // into a manual pan (onManualWin switches follow off). Edge drags in
+      // follow mode resize the follow window / look-ahead instead.
+      if (follow && edge !== 'center') {
         onAdjustFollow(edge, deltaMs);
       } else {
         const w = getWin();

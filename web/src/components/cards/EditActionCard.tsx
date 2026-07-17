@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { FLASH_MS } from '../../lib/flashDiff';
 import type { Action } from '../../types/events';
 import { ACTION_ICONS, ACTION_TYPE_LABELS, summarizeAction } from '../../types/summaries';
 import { useSummaryCtx } from '../SummaryCtx';
@@ -12,6 +13,7 @@ import RandomGroupBody from './RandomGroupBody';
 import SequenceGroupBody from './SequenceGroupBody';
 import ParallelGroupBody from './ParallelGroupBody';
 import { writeClip } from '../../store/clipboard';
+import OpenRefLink from '../OpenRefLink';
 
 /** Editable HA-style card: drag handle, collapsed summary ⇄ expanded form, ⧉/✕ menu. */
 export default function EditActionCard({ action }: { action: Action }) {
@@ -23,6 +25,44 @@ export default function EditActionCard({ action }: { action: Action }) {
   const mutate = useEditorStore((s) => s.mutate);
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: uid });
+
+  // Freshly created/updated blocks glow accent-green and fade out. Timestamps
+  // (not booleans) let a card remounted mid-fade resume at the right point.
+  const flashAt = useEditorStore((s) => s.flashes[uid]);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!flashAt || !el) return;
+    const elapsed = Date.now() - flashAt;
+    if (elapsed >= FLASH_MS) return;
+    // rgba(29,185,84,…) = --accent; box-shadow only, so the card bg is untouched
+    const anim = el.animate(
+      {
+        boxShadow: [
+          '0 0 0 2px rgba(29, 185, 84, 0.9), 0 0 14px 2px rgba(29, 185, 84, 0.35), inset 0 0 0 999px rgba(29, 185, 84, 0.12)',
+          '0 0 0 2px rgba(29, 185, 84, 0), 0 0 14px 2px rgba(29, 185, 84, 0), inset 0 0 0 999px rgba(29, 185, 84, 0)',
+        ],
+      },
+      { duration: FLASH_MS, easing: 'ease-out' },
+    );
+    anim.currentTime = elapsed;
+    return () => anim.cancel();
+  }, [flashAt]);
+
+  // Reference-holding actions get a ↗ that opens the referenced thing.
+  // New tab on purpose: same-tab navigation would drop the unsaved draft.
+  const ref =
+    action.type === 'event_ref' && action.event_id
+      ? {
+          to: `/event/${action.event_id}`,
+          title: `Open event “${ctx.events?.[action.event_id]?.name ?? action.event_id}” in a new tab`,
+        }
+      : action.type === 'set_color' && action.ref_id
+        ? {
+            to: `/color-sets?id=${encodeURIComponent(action.ref_id)}`,
+            title: `Open “${ctx.colorSetNames?.[action.ref_id] ?? action.ref_id}” in Color Sets (new tab)`,
+          }
+        : null;
 
   const duplicate = () =>
     mutate((d) => {
@@ -37,7 +77,10 @@ export default function EditActionCard({ action }: { action: Action }) {
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(el) => {
+        setNodeRef(el);
+        cardRef.current = el;
+      }}
       className="action-card"
       style={{
         transform: CSS.Transform.toString(transform),
@@ -63,6 +106,7 @@ export default function EditActionCard({ action }: { action: Action }) {
           <span key={l} className="chip">{l}</span>
         ))}
         <span className="action-card-type">{ACTION_TYPE_LABELS[action.type] ?? action.type}</span>
+        {ref && <OpenRefLink to={ref.to} title={ref.title} />}
         <button title="Copy (paste in any track, any event)" style={{ padding: '2px 7px', fontSize: 12 }}
           onClick={(e) => { e.stopPropagation(); writeClip('action', action, summarizeAction(action, ctx)); }}>📋</button>
         <button title="Duplicate" style={{ padding: '2px 7px', fontSize: 12 }}

@@ -19,7 +19,13 @@ class Settings(BaseSettings):
     spotipy_client_id: str = ""
     spotipy_client_secret: str = ""
     spotipy_redirect_uri: str = "http://127.0.0.1:8000/api/spotify/callback"
+    # Comma-separated list of Spotify Connect device names SpotFX reacts to.
     spotify_device_name: str = "Serenity"
+
+    @property
+    def spotify_device_names(self) -> list[str]:
+        """spotify_device_name split on commas, trimmed, empties dropped."""
+        return [n.strip() for n in self.spotify_device_name.split(",") if n.strip()]
 
     # ── LedFX ────────────────────────────────────────────────────────────────
     # Accept either a full base URL (LEDFX_BASE_URL) or separate host/port.
@@ -58,6 +64,14 @@ class Settings(BaseSettings):
     # ── Latency / timing ──────────────────────────────────────────────────────
     # Milliseconds between audio playback and Spotify timestamp
     audio_latency_ms: int = 1000
+    # Multiple snapcast client devices can feed SpotFX; each has its own
+    # playback-chain latency, so offsets learned on one don't transfer 1:1.
+    # timing_device_offsets maps device name → extra offset (ms) layered onto
+    # the resolved shape offset while that device is active; lock-history and
+    # systemic-offset samples are tagged with the active device so learned
+    # data doesn't cross-contaminate between devices.
+    active_timing_device: str = "default"
+    timing_device_offsets: dict = {}
     # Positive = trigger earlier, negative = trigger later
     ledfx_trigger_buffer_ms: int = 250
     # Global default ramp duration for brightness/effect param changes; 0 = instant

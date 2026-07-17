@@ -153,7 +153,7 @@ input:focus { border-color: var(--accent); }
   border-radius: var(--radius);
   background: var(--surface2);
   margin-bottom: 8px;
-  overflow: hidden;
+  /* no overflow:hidden — SearchSelect dropdowns must escape the card box */
 }
 .action-card-row {
   display: flex;
@@ -162,6 +162,7 @@ input:focus { border-color: var(--accent); }
   padding: 10px 12px;
   cursor: pointer;
   user-select: none;
+  border-radius: calc(var(--radius) - 1px);
 }
 .action-card-row:hover { background: rgba(255, 255, 255, 0.03); }
 .action-card-icon { font-size: 16px; flex: none; }

@@ -191,6 +191,7 @@ class MorphStepAction(BaseModel):
     beat-level signal feeds every per-target / per-sub-field nudge math.
     """
     type:             Literal["morph_step"] = "morph_step"
+    name:             str = ""  # optional editor display name, shown in summaries/previews
     labels:           list[str] = Field(default_factory=list)
     weight:           float = 1.0
     ramp_ms:          int | ValueBinding | None = None  # default for targets that don't override
@@ -314,6 +315,15 @@ class RandomOption(BaseModel):
     name:    str = ""                     # optional editor display name
     labels:  list[str] = Field(default_factory=list)
     weight:  float = 1.0
+    # ── Energy gate/scale — evaluated against the firing trigger's intensity
+    # (0-1; machine triggers default it to section energy). Option is eligible
+    # only when floor <= energy <= ceiling (None = unbounded). energy_scale
+    # tilts the weight across that window: 0 = flat, +1 = 0x weight at the
+    # window's low edge up to 2x at the high edge, -1 = the inverse. Fires
+    # with no energy context (manual test fires) skip the gate entirely.
+    energy_floor:   Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    energy_ceiling: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    energy_scale:   float = Field(default=0.0, ge=-1.0, le=1.0)
     # None = inherit the group's scope; set = override for this option.
     scope:   Optional[MorphScope] = None
     actions: list[Action] = Field(default_factory=list)

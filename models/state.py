@@ -67,7 +67,7 @@ class AppState:
 
     # ── Service control ───────────────────────────────────────────────────────
     paused: bool = False          # True = triggers suppressed, polling continues
-    on_target_device: bool = False  # True = playing on settings.spotify_device_name
+    on_target_device: bool = False  # True = playing on one of settings.spotify_device_names
     audio_analysis_enabled: bool = False  # True = capture audio shapes for new songs
     # Force-recapture mode (was recapture_wavs — now force-recaptures every song
     # that plays while active, with a session-bound counter that auto-disables

@@ -725,6 +725,10 @@ class AutoOffsetService:
         # watching this URI" guard prevents a fresh xcorr task from spawning
         # for the rest of this play. Cleared on the next URI change.
         _locked_via_stop = False
+        # Song position (ms) when lock-and-stop fired — the play's time-to-lock
+        # for the Timing page's lock history. Stays None when the play only
+        # runs out its planned windows without a hard lock.
+        _lock_song_ms: Optional[int] = None
 
         # Early-feature anchor match: consumes the first N seconds of frames
         # and snap-aligns before the per-window sweep starts evaluating.
@@ -1277,6 +1281,8 @@ class AutoOffsetService:
                     monitor.recovery_done()
                     if locked:
                         _locked_via_stop = True
+                        if _lock_song_ms is None:
+                            _lock_song_ms = int(frame.timestamp_ms)
                         if not _monitor_active:
                             break
                         monitor_mode = True
@@ -1301,6 +1307,8 @@ class AutoOffsetService:
                 locked = await _run_window(win_start, win_end)
                 if locked:
                     _locked_via_stop = True
+                    if _lock_song_ms is None:
+                        _lock_song_ms = int(frame.timestamp_ms)
                     if not _monitor_active:
                         break          # flags-off: byte-identical exit
                     monitor_mode = True
@@ -1323,6 +1331,8 @@ class AutoOffsetService:
                     from main import engine as _engine_for_lock
                     if evaluator.lock_and_stop(float(_engine_for_lock._play_best_quality)):
                         _locked_via_stop = True
+                        if _lock_song_ms is None:
+                            _lock_song_ms = int(frame.timestamp_ms)
                         break
                 except Exception:
                     pass
@@ -1383,6 +1393,24 @@ class AutoOffsetService:
                 meta_path.write_text(hist_meta.model_dump_json(indent=2), encoding="utf-8")
         except Exception as exc:
             logger.warning("Auto-offset xcorr: failed to save offset history: %s", exc)
+
+        # Timing-page lock history: one entry per completed play. Uses the
+        # shape's title/artist (current_track may already be the next song).
+        from services import lock_history
+        lock_history.record(
+            uri=uri,
+            title=meta.title or "",
+            artist=meta.artist or "",
+            device=getattr(settings, "active_timing_device", "default"),
+            setlist_id=app_state.active_setlist_id,
+            play_type=play_type,
+            locked=_locked_via_stop,
+            time_to_lock_ms=_lock_song_ms,
+            offset_ms=int(final.best_offset),
+            prev_offset_ms=prev_offset_ms,
+            quality=float(final.best_quality),
+            n_windows=int(final.n_measurements),
+        )
 
         try:
             from services.websocket_manager import ws_manager

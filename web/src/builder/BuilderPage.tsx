@@ -136,12 +136,12 @@ export default function BuilderPage() {
   });
   useIntensityKeyboard({ onFollow: () => followWin.setFollowSnapped(true) });
 
-  // Opening the builder on a live song defaults to follow mode, zoomed in
-  // (once per page load — after that the user's choice rules).
-  const didInitFollow = useRef(false);
+  // In live mode, follow resumes (zoomed) on page open, on entering live
+  // mode, and whenever the live song changes — a past pan or Full Song view
+  // shouldn't leave the editor zoomed out. Within one song the user's choice
+  // rules. Search mode has no playhead, so the manual view sticks there.
   useEffect(() => {
-    if (didInitFollow.current || !liveMode || !track?.uri) return;
-    didInitFollow.current = true;
+    if (!liveMode || !track?.uri) return;
     followWin.setFollowSnapped(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveMode, track?.uri]);
@@ -227,7 +227,7 @@ export default function BuilderPage() {
             </button>
             <button onClick={() => followWin.setFollowSnapped(!followWin.follow)}
               className={followWin.follow ? 'primary' : ''}
-              title="Toggle follow/manual zoom (` key) — enabling snaps to the playhead">
+              title="Toggle follow/manual zoom (` key) — enabling snaps to the playhead, disabling freezes the current view">
               {followWin.follow ? 'Follow' : 'Manual'}
             </button>
             <button onClick={followWin.fullSong}>Full Song</button>

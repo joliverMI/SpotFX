@@ -147,6 +147,7 @@ export interface LedFxEffectParamAction extends ActionBase {
 
 export interface MorphStepAction extends ActionBase {
   type: 'morph_step';
+  name?: string; // optional editor display name, shown in summaries/previews
   ramp_ms: Bindable<number> | null;
   intensity_source: IntensitySource;
   targets: MorphTarget[];
@@ -192,6 +193,12 @@ export interface RandomOption {
   name: string;
   labels: string[];
   weight: number;
+  /** Eligible only when trigger energy >= floor (null = no floor). */
+  energy_floor?: number | null;
+  /** Eligible only when trigger energy <= ceiling (null = no ceiling). */
+  energy_ceiling?: number | null;
+  /** -1..1 weight tilt across the floor..ceiling window; 0 = flat. */
+  energy_scale?: number;
   scope: MorphScope | null; // null = inherit group Target
   actions: Action[];
 }

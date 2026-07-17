@@ -3,6 +3,7 @@
  * ScopeSelect; gradients share the /gradients library. Edits live in local
  * drafts until Save (legacy in-memory semantics). */
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../api/client';
 import { useParamConfig } from '../api/queries';
@@ -23,7 +24,9 @@ export default function ColorSetsPage() {
   const saveMut = useSaveColorSet();
   const delMut = useDeleteColorSet();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ?id=<card id> deep-links to a set/group (used by the event editor's ↗).
+  const [searchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('id'));
   const [search, setSearch] = useState('');
   const [drafts, setDrafts] = useState<Record<string, ColorSetCard>>({});
   const [gradEntryIdx, setGradEntryIdx] = useState<number | null>(null);

@@ -130,9 +130,10 @@ export default function DebugPage() {
     keyPrefix: 'dbg.',
   });
 
-  // Re-enable follow on song change (legacy behavior).
+  // Follow resumes (zoomed) on page open and song change; a past pan,
+  // Full Song view, or song-sized zoom window doesn't stick across songs.
   useEffect(() => {
-    if (uri) followWin.setFollow(true);
+    if (uri) followWin.setFollowSnapped(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uri]);
 

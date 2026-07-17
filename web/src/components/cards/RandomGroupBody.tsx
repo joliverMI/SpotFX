@@ -6,8 +6,13 @@ import { groupPathOf } from './groupPath';
 import { Checkbox, LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import { ParentScopeToggle } from '../forms/ScopePicker';
 import EditableActionContainer from '../tracks/EditableActionContainer';
+import HelpLink from '../../help/HelpLink';
 
-const newOption = (): RandomOption => ({ id: uuid(), name: '', labels: [], weight: 1, scope: null, actions: [] });
+const newOption = (): RandomOption => ({
+  id: uuid(), name: '', labels: [], weight: 1,
+  energy_floor: null, energy_ceiling: null, energy_scale: 0,
+  scope: null, actions: [],
+});
 
 /** Expanded body of a random_group card: weighted options, each holding a nested
  * (droppable, sortable) action list. Recursion happens naturally — options can
@@ -50,6 +55,25 @@ export default function RandomGroupBody({ uid, action }: { uid: string; action: 
               <NumberInput value={opt.weight} min={0} step={0.1} width={80}
                 onChange={(v) => set((g) => { g.options[j].weight = v ?? 1; })} />
             </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              title="Eligible only when trigger energy is at least this (empty = no floor)">
+              <span style={{ color: 'var(--text-muted)' }}>energy ≥</span>
+              <NumberInput value={opt.energy_floor ?? null} nullable min={0} max={1} step={0.05} width={64}
+                onChange={(v) => set((g) => { g.options[j].energy_floor = v; })} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              title="Eligible only when trigger energy is at most this (empty = no ceiling)">
+              <span style={{ color: 'var(--text-muted)' }}>≤</span>
+              <NumberInput value={opt.energy_ceiling ?? null} nullable min={0} max={1} step={0.05} width={64}
+                onChange={(v) => set((g) => { g.options[j].energy_ceiling = v; })} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              title="Tilt weight across the floor–ceiling window: +1 favors high energy (0× at floor → 2× at ceiling), −1 favors low, 0 = flat">
+              <span style={{ color: 'var(--text-muted)' }}>tilt</span>
+              <NumberInput value={opt.energy_scale ?? 0} min={-1} max={1} step={0.1} width={64}
+                onChange={(v) => set((g) => { g.options[j].energy_scale = v ?? 0; })} />
+            </label>
+            <HelpLink topic="random-energy" />
             <span style={{ flex: 1 }} />
             <button title="Copy option" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => writeClip('random_option', opt, `option “${opt.name || j + 1}” · ${opt.actions.length} actions`)}>📋</button>

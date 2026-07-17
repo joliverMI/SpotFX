@@ -30,7 +30,7 @@ export function newAction(type: ActionType): Action {
     case 'ledfx_effect_param':
       return { ...base, type, virtual_id: null, category: null, params: [], ramp_ms: null };
     case 'morph_step':
-      return { ...base, type, ramp_ms: null, intensity_source: 'rms_total', targets: [] };
+      return { ...base, type, name: '', ramp_ms: null, intensity_source: 'rms_total', targets: [] };
     case 'set_color':
       return {
         ...base, type, ref_id: '', pick_mode: 'default', advance: 1,

@@ -243,12 +243,20 @@ def save_event(event: MusicEvent) -> None:
 def get_event_map() -> dict[str, dict]:
     """Return {event_id: {name, color, energy_level, ai_exposed}} for quick UI joins."""
     raw = _load_events_raw()
-    return {eid: {
+    events = {eid: {
         "name":         v.get("name", ""),
         "color":        v.get("color", "#888"),
         "energy_level": v.get("energy_level"),
         "ai_exposed":   v.get("ai_exposed", False),
     } for eid, v in raw.items()}
+    for eid, ev in _fixed_events().items():
+        events[eid] = {
+            "name":         ev.name,
+            "color":        ev.color,
+            "energy_level": ev.energy_level,
+            "ai_exposed":   ev.ai_exposed,
+        }
+    return events
 
 
 def delete_event(event_id: str) -> bool:

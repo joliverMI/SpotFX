@@ -31,11 +31,27 @@ const ALL_MARKS: Record<MarkType, boolean> = {
 
 const NP_LAYERS = [rmsBands, avgLines, diamonds, librosaOverlays, musicMarks, triggersLayer, playhead, beatStrips];
 
+interface PreviewRow {
+  tag: string;      // lane / child-event name ("Shape", "Color", …)
+  scope: string;    // device categories / roles / virtual ids
+  text: string;     // capped change description ("twist → 4, blur +0.3")
+  full: string;     // uncapped description for the tooltip ('' = same as text)
+  colors: string[]; // hex swatches referenced by the change
+  at_ms: number;    // fire offset relative to the trigger point
+}
+
 interface NextPreview {
   trigger_id: string;
   event_name: string;
   event_color?: string;
   action_label?: string;
+  rows?: PreviewRow[];
+}
+
+const BOARD_ROWS = 3; // rows shown on the next-changes board (fixed height)
+
+function fmtAt(atMs: number): string {
+  return `${atMs > 0 ? '+' : '−'}${(Math.abs(atMs) / 1000).toFixed(1)}s`;
 }
 
 export default function NowPlayingPage() {
@@ -189,6 +205,14 @@ export default function NowPlayingPage() {
     seedFutureS: settings ? Number(settings.builder_future_buffer_s ?? 5) : undefined,
     keyPrefix: 'np.',
   });
+  // Live view: always resume following on page open and track change. Follow
+  // is sticky but manual bounds are not, so a persisted follow=false from a
+  // past pan would otherwise open the page zoomed out to the full song.
+  const { setFollow: setWinFollow, setManualWin: setWinManual } = followWin;
+  useEffect(() => {
+    setWinFollow(true);
+    setWinManual(null);
+  }, [uri, setWinFollow, setWinManual]);
 
   const canvasTriggers: MusicTrigger[] = useMemo(
     () => triggers.map((t) => ({
@@ -393,28 +417,82 @@ export default function NowPlayingPage() {
             )}
           </div>
         )}
-        {/* Next-trigger preview — fixed height so the card never jumps. */}
-        <div style={{
-          visibility: nextPreview ? 'visible' : 'hidden', marginTop: 8,
-          height: 'calc(1.3em * 3 + 4px)', display: 'flex', alignItems: 'flex-start', gap: 8, overflow: 'hidden',
-        }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.3 }}>Next:</span>
-          <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, whiteSpace: 'nowrap', color: nextPreview?.event_color ?? 'var(--text)' }}>
-            {nextPreview?.event_name}
-          </span>
-          {nextPreview?.action_label && (
-            <>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.3 }}>▸</span>
-              <span title={nextPreview.action_label} style={{
-                fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', flex: '1 1 0', minWidth: 0,
-                display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
-                overflow: 'hidden', lineHeight: 1.3, wordBreak: 'break-word',
-              }}>
-                {nextPreview.action_label}
-              </span>
-            </>
-          )}
-        </div>
+        {/* Next-changes board — fixed height so the card never jumps. Shows
+            the locked-in plan for the next trigger: one row per lane/pick
+            (what parameters change and to what). */}
+        {(() => {
+          const rows = nextPreview?.rows ?? [];
+          const shown = rows.slice(0, BOARD_ROWS);
+          const extra = rows.length - shown.length;
+          return (
+            <div style={{
+              visibility: nextPreview ? 'visible' : 'hidden', marginTop: 8,
+              height: 'calc(1.4em * 4 + 10px)', overflow: 'hidden',
+              border: '1px solid var(--border)', borderRadius: 6, padding: '3px 8px',
+              background: 'var(--surface2)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, lineHeight: 1.4 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Next</span>
+                <span style={{
+                  fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden',
+                  textOverflow: 'ellipsis', color: nextPreview?.event_color ?? 'var(--text)',
+                }}>
+                  {nextPreview?.event_name}
+                </span>
+                {extra > 0 && (
+                  <span title={rows.map((r) => `${r.tag ? `${r.tag}: ` : ''}${r.full || r.text}`).join('\n')}
+                    style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                    +{extra} more
+                  </span>
+                )}
+              </div>
+              {shown.length > 0 ? shown.map((r, i) => (
+                <div key={i} title={`${r.tag ? `${r.tag} ` : ''}${r.scope ? `(${r.scope}) ` : ''}— ${r.full || r.text}`}
+                  style={{ display: 'flex', alignItems: 'baseline', gap: 8, lineHeight: 1.4, minWidth: 0 }}>
+                  {r.tag && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+                      color: 'var(--accent2)', whiteSpace: 'nowrap', flex: '0 1 auto', maxWidth: '35%',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {r.tag}{r.at_ms !== 0 && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> {fmtAt(r.at_ms)}</span>}
+                    </span>
+                  )}
+                  {r.scope && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {r.scope}
+                    </span>
+                  )}
+                  <span style={{
+                    fontSize: 12, color: 'var(--text)', fontFamily: 'monospace', flex: '1 1 0', minWidth: 0,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {r.text}
+                  </span>
+                  {r.colors.length > 0 && (
+                    <span style={{ display: 'inline-flex', gap: 3, flex: '0 0 auto', alignSelf: 'center' }}>
+                      {r.colors.map((c, j) => (
+                        <span key={j} style={{
+                          width: 9, height: 9, borderRadius: '50%', background: c,
+                          border: '1px solid var(--border)', display: 'inline-block',
+                        }} />
+                      ))}
+                    </span>
+                  )}
+                </div>
+              )) : nextPreview?.action_label && (
+                // Fallback for previews without structured rows.
+                <span title={nextPreview.action_label} style={{
+                  fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace',
+                  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden', lineHeight: 1.4, wordBreak: 'break-word',
+                }}>
+                  {nextPreview.action_label}
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Song Timeline ── */}

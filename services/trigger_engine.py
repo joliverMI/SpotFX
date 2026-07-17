@@ -123,6 +123,13 @@ class _PlanEntry:
     # tree (group.id → RandomOption.id) so previews match fires and scene-override
     # can pre-stage. Fire-time falls back to fresh picks when None.
     resolved_picks: Optional[dict] = None
+    # For scene-family events — lane picks locked at plan time (list of
+    # (lane_index, Action)) so the Now Playing preview shows exactly what will
+    # change. `scene_picks_sid` is the _last_scene_update_id the picks were
+    # rolled against; fire-time re-rolls when it no longer matches (a Scene
+    # Update fired in between), so a stale preview never fires stale lanes.
+    preselected_scene_picks: Optional[list] = None
+    scene_picks_sid: Optional[str] = None
     snapshot_task: Optional[asyncio.Task] = None  # pre-fire snapshot of the LedFX state this event will change
     # Scene-override lookahead: planner pre-stages the temp scene + transition_times
     # ahead of fire_at_ms; fire-time just activates the prepared scene.
@@ -173,19 +180,36 @@ def _resolve_shape_offset(meta) -> tuple[int, float, str]:
 
 
 def _layer_systemic(offset_ms: int, quality: float, source: str) -> tuple[int, float, str]:
-    """Add the device-wide systemic starting-offset bias on top of the
-    per-song / per-Set-List resolution. Cold-start aid only — this play's own
-    xcorr re-lock overrides it via apply_save. Inert (no-op) unless the learner
-    is enabled and confident (see services/systemic_offset.py)."""
+    """Add the systemic starting-offset bias, then the active timing device's
+    offset, on top of the per-song / per-Set-List resolution. The systemic
+    layer is a cold-start aid only — this play's own xcorr re-lock overrides
+    it via apply_save; inert unless the learner is enabled and confident
+    (see services/systemic_offset.py). The device layer is the manual trim
+    for the active snapcast client (settings.timing_device_offsets keyed by
+    settings.active_timing_device) and applies unconditionally."""
     try:
         from services import systemic_offset
         pred = systemic_offset.predict()
+        if pred.bias_ms != 0:
+            offset_ms += pred.bias_ms
+            source = f"{source}+systemic:{pred.bias_ms:+d}@{pred.confidence:.2f}"
     except Exception:
-        return offset_ms, quality, source
-    if pred.bias_ms == 0:
-        return offset_ms, quality, source
-    return (offset_ms + pred.bias_ms, quality,
-            f"{source}+systemic:{pred.bias_ms:+d}@{pred.confidence:.2f}")
+        pass
+    dev_ms, dev_name = _device_offset()
+    if dev_ms != 0:
+        offset_ms += dev_ms
+        source = f"{source}+dev:{dev_name}:{dev_ms:+d}"
+    return offset_ms, quality, source
+
+
+def _device_offset() -> tuple[int, str]:
+    """(offset_ms, name) for the active timing device — 0 when unset."""
+    name = str(getattr(settings, "active_timing_device", "default") or "default")
+    offsets = getattr(settings, "timing_device_offsets", {}) or {}
+    try:
+        return int(offsets.get(name, 0) or 0), name
+    except (TypeError, ValueError):
+        return 0, name
 
 
 def _perception_trim_for(meta) -> int:
@@ -1144,7 +1168,11 @@ class TriggerEngine:
 
             if event.event_type == "composite":
                 root = event.root
-                resolved = self._resolve_random_picks(root, list(lbls)) if root is not None else {}
+                resolved = (
+                    self._resolve_random_picks(
+                        root, list(lbls), energy=getattr(trigger, "intensity", None))
+                    if root is not None else {}
+                )
                 # Anchor mirrors legacy: beats root shifts by start_offset_beats;
                 # parallel root shifts by min(child offset) (children then sleep
                 # offset - anchor at fire time).
@@ -1217,16 +1245,37 @@ class TriggerEngine:
                         if root is not None else event.name)
 
             if event.event_type in SCENE_EVENT_TYPES:
-                # Which lane runs depends on live state at fire time, so emit a
-                # plain entry and resolve it in _execute_plan_entry.
+                # Lock the lane picks in NOW so the preview can say exactly
+                # what will change — including every random branch inside
+                # referenced composites (deep resolution). _execute_plan_entry
+                # re-rolls only if the active Scene Update changes between
+                # plan and fire (the scene_picks_sid guard).
+                scene_sid = self._last_scene_update_id
+                scene_picks = self._pick_scene_lanes(event, lbls)
+                scene_resolved: dict = {}
+                for _i, _a in scene_picks:
+                    self._resolve_random_picks_deep(
+                        _a, list(lbls), scene_resolved,
+                        energy=getattr(trigger, "intensity", None))
+                parts = []
+                for i, a in scene_picks:
+                    nm = SCENE_LANE_NAMES[i] if 0 <= i < len(SCENE_LANE_NAMES) else str(i)
+                    leaves = self._collect_leaves(a, scene_resolved, tag=nm)
+                    if leaves:
+                        t0 = self._describe_action_detail(leaves[0][2], inherited_scope=leaves[0][1])[0]
+                        more = f" +{len(leaves) - 1}" if len(leaves) > 1 else ""
+                        parts.append(f"{nm}: {t0}{more}")
                 entries.append(_PlanEntry(
                     fire_at_ms=start_at, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
                     trigger_id=trigger.id,
                     trigger_intensity=getattr(trigger, "intensity", 0.5),
                     is_root=(event.id == root_event.id),
+                    preselected_scene_picks=scene_picks or None,
+                    scene_picks_sid=scene_sid,
+                    resolved_picks=scene_resolved or None,
                 ))
-                return event.name
+                return f"{event.name}: {' · '.join(parts)}" if parts else event.name
 
             if event.event_type == "device_settings":
                 entries.append(_PlanEntry(
@@ -1344,12 +1393,14 @@ class TriggerEngine:
 
     def _resolve_random_picks(
         self, action, labels: list[str], out: dict | None = None, _depth: int = 0,
+        energy: float | None = None,
     ) -> dict:
         """Plan-time resolution of every random_group in an action tree:
         {group.id: RandomOption.id}. Picking here advances the _last_action
         dedupe memory — same precedent as plan-time _select_action for singles.
         Recurses only into the PICKED option of each group; sequence/parallel
-        children are all walked (merging child labels like lane picks do)."""
+        children are all walked (merging child labels like lane picks do).
+        `energy` = the firing trigger's intensity, for option energy gates."""
         if out is None:
             out = {}
         if action is None or _depth > 6:
@@ -1359,16 +1410,53 @@ class TriggerEngine:
             if not action.dedupe:
                 self._last_action.pop(action.id, None)
             opt = self._pick_from_actions(action.options, labels, dedupe_key=action.id,
-                                          desc="random group (plan)")
+                                          desc="random group (plan)", energy=energy)
             if opt is not None:
                 out[action.id] = opt.id
                 for a in opt.actions:
-                    self._resolve_random_picks(a, labels + list(opt.labels or []), out, _depth + 1)
+                    self._resolve_random_picks(a, labels + list(opt.labels or []), out, _depth + 1, energy)
         elif t in ("sequence_group", "parallel_group"):
             for c in action.children:
                 merged = labels + list(c.labels or [])
                 for a in c.actions:
-                    self._resolve_random_picks(a, merged, out, _depth + 1)
+                    self._resolve_random_picks(a, merged, out, _depth + 1, energy)
+        return out
+
+    def _resolve_random_picks_deep(
+        self, action, labels: list[str], out: dict | None = None, _depth: int = 0,
+        energy: float | None = None,
+    ) -> dict:
+        """_resolve_random_picks plus event_ref drilling: referenced composite
+        events get their random_groups resolved into the same map, so a locked
+        scene-lane pick pins the ENTIRE subtree it will fire (group ids are
+        uuids, so maps can't collide across events). Used for scene-family
+        plan entries, whose picks execute inline via _execute_action instead
+        of being planned as child entries."""
+        if out is None:
+            out = {}
+        if action is None or _depth > 6:
+            return out
+        t = getattr(action, "type", "")
+        if t == "event_ref" and action.event_id:
+            sub = get_event(action.event_id)
+            if sub is not None and sub.event_type == "composite" and sub.root is not None:
+                self._resolve_random_picks_deep(
+                    sub.root, labels + list(action.labels or []), out, _depth + 1, energy)
+            return out
+        if t == "random_group":
+            if not action.dedupe:
+                self._last_action.pop(action.id, None)
+            opt = self._pick_from_actions(action.options, labels, dedupe_key=action.id,
+                                          desc="random group (plan)", energy=energy)
+            if opt is not None:
+                out[action.id] = opt.id
+                for a in opt.actions:
+                    self._resolve_random_picks_deep(a, labels + list(opt.labels or []), out, _depth + 1, energy)
+        elif t in ("sequence_group", "parallel_group"):
+            for c in action.children:
+                merged = labels + list(c.labels or [])
+                for a in c.actions:
+                    self._resolve_random_picks_deep(a, merged, out, _depth + 1, energy)
         return out
 
     def _composite_scene_picks(self, event, resolved_picks: dict | None):
@@ -1432,11 +1520,18 @@ class TriggerEngine:
         labels: list[str],
         dedupe_key: str,
         desc: str = "",
+        energy: float | None = None,
     ) -> Optional[Action]:
         """Weighted random pick from a list of Actions, honoring positive/
         negative label filters and de-weighting whatever was picked last under
         the same `dedupe_key`. Used by both `_select_action` (single-event
         action pool) and `_execute_morph_set` (per-lane alternatives pool).
+
+        `energy` (trigger intensity 0-1) drives the RandomOption energy gate:
+        options with a floor/ceiling outside it are excluded outright (all
+        gated out = fire nothing), and energy_scale tilts surviving weights
+        across the window. Plan-time callers pass it explicitly; fire-time
+        callers inherit the per-task _FIRE_INTENSITY. None = gate off.
         """
         if not actions:
             return None
@@ -1462,10 +1557,37 @@ class TriggerEngine:
         if not candidates:
             return None
 
+        if energy is None:
+            energy = _FIRE_INTENSITY.get()
+        energy_mult: dict[int, float] = {}
+        if energy is not None:
+            gated: list[tuple[int, Action]] = []
+            for i, a in candidates:
+                lo = getattr(a, "energy_floor", None)
+                hi = getattr(a, "energy_ceiling", None)
+                if lo is not None and energy < lo:
+                    continue
+                if hi is not None and energy > hi:
+                    continue
+                scale = getattr(a, "energy_scale", 0.0) or 0.0
+                if scale:
+                    w_lo = lo if lo is not None else 0.0
+                    w_hi = hi if hi is not None else 1.0
+                    t = 0.5 if w_hi <= w_lo else min(1.0, max(0.0, (energy - w_lo) / (w_hi - w_lo)))
+                    energy_mult[i] = max(0.0, 1.0 + scale * (2.0 * t - 1.0))
+                gated.append((i, a))
+            if not gated:
+                logger.info(
+                    "Every option energy-gated out (energy=%.2f) for %s; firing nothing.",
+                    energy, desc or dedupe_key,
+                )
+                return None
+            candidates = gated
+
         last_idx = self._last_action.get(dedupe_key)
-        weights = [0.0 if i == last_idx else a.weight for i, a in candidates]
+        weights = [0.0 if i == last_idx else a.weight * energy_mult.get(i, 1.0) for i, a in candidates]
         if sum(weights) == 0:
-            weights = [a.weight for _, a in candidates]
+            weights = [a.weight * energy_mult.get(i, 1.0) for i, a in candidates]
         if sum(weights) == 0:
             weights = [1.0] * len(candidates)
 
@@ -1499,7 +1621,11 @@ class TriggerEngine:
         elif action.type == "morph_step":
             n = len(action.targets)
             aspects = sorted({t.aspect for t in action.targets})
-            return f"Morph {n}× ({', '.join(aspects) if aspects else 'no targets'})"
+            body = ", ".join(aspects) if aspects else "no targets"
+            name = getattr(action, "name", "") or ""
+            if name:
+                return f"Morph “{name}” ({body})"
+            return f"Morph {n}× ({body})"
         elif action.type == "set_color":
             from services import color_set_store
             card = color_set_store.get_by_id(action.ref_id)
@@ -1550,6 +1676,306 @@ class TriggerEngine:
                 parts.append(f"{c.name}: {desc}" if c.name else desc)
             return " · ".join(parts) if parts else "Parallel (empty)"
         return action.type
+
+    _SIGNAL_SHORT = {
+        "rms_total": "rms", "rms_bass": "bass", "onset_score": "onset",
+        "section_energy": "energy", "trigger_intensity": "intensity",
+    }
+
+    @classmethod
+    def _fmt_val(cls, v) -> str:
+        """Short display value for the preview board: numbers trimmed,
+        signal bindings shown as live·<signal>, tri-states as on/off/toggle."""
+        from models.value_binding import ValueBinding
+        if v is None:
+            return "?"
+        if isinstance(v, ValueBinding):
+            return f"live·{cls._SIGNAL_SHORT.get(v.signal, v.signal)}"
+        if isinstance(v, bool):
+            return "on" if v else "off"
+        if isinstance(v, str):
+            return v
+        return f"{float(v):g}"
+
+    @staticmethod
+    def _fmt_ramp(v) -> str:
+        from models.value_binding import ValueBinding
+        if isinstance(v, ValueBinding):
+            return "live ramp"
+        return "instant" if int(v) == 0 else f"{int(v) / 1000:g}s"
+
+    @staticmethod
+    def _scope_to_str(scope) -> str:
+        if scope is None:
+            return ""
+        return ", ".join(
+            list(scope.categories) + list(scope.roles) + list(scope.virtual_ids))
+
+    def _collect_leaves(
+        self, action, resolved: dict | None = None, tag: str = "",
+        scope=None, skip_ids: set | None = None, _depth: int = 0,
+        out: list | None = None,
+    ) -> list[tuple[str, object, Action]]:
+        """Flatten an action tree to the LEAF actions the fire will execute,
+        following the same branches the executor takes: resolved random picks,
+        event_ref → referenced composite roots, container scope inheritance.
+        Returns [(tag, inherited_scope, action)] where `tag` is the deepest
+        named container along the path (lane / child / option name) —
+        intermediate event names are dropped (preview shows leaves, not the
+        route). `skip_ids` mirrors the executor's skip_event_ids: event_refs
+        planned as their own entries are excluded so rows aren't duplicated."""
+        if out is None:
+            out = []
+        if action is None or _depth > 6:
+            return out
+        t = getattr(action, "type", "")
+        if t == "random_group":
+            eff = self._effective_scope(getattr(action, "scope", None), scope)
+            opt = None
+            if resolved and action.id in resolved:
+                opt = next((o for o in action.options if o.id == resolved[action.id]), None)
+            if opt is None and len(action.options) == 1:
+                opt = action.options[0]
+            if opt is None:
+                out.append((tag, eff, action))  # unresolved 🎲 — described as-is
+                return out
+            opt_scope = self._effective_scope(opt.scope, eff)
+            for a in opt.actions:
+                self._collect_leaves(a, resolved, opt.name or tag, opt_scope,
+                                     skip_ids, _depth + 1, out)
+            return out
+        if t in ("sequence_group", "parallel_group"):
+            eff = self._effective_scope(getattr(action, "scope", None), scope)
+            for c in action.children:
+                c_scope = self._effective_scope(getattr(c, "scope", None), eff)
+                for a in c.actions:
+                    self._collect_leaves(a, resolved, c.name or tag, c_scope,
+                                         skip_ids, _depth + 1, out)
+            return out
+        if t == "event_ref" and action.event_id:
+            if skip_ids and action.event_id in skip_ids:
+                return out  # planned as its own entry — that entry makes the rows
+            sub = get_event(action.event_id)
+            if sub is None:
+                return out
+            if sub.event_type == "composite" and sub.root is not None:
+                # Referenced events keep their own scoping — don't inherit.
+                return self._collect_leaves(sub.root, resolved, tag, None,
+                                            skip_ids, _depth + 1, out)
+            if sub.event_type == "single" and len(sub.actions) == 1:
+                return self._collect_leaves(sub.actions[0], resolved, tag, None,
+                                            skip_ids, _depth + 1, out)
+            out.append((tag, scope, action))  # scene events / multi-pick singles
+            return out
+        out.append((tag, scope, action))
+        return out
+
+    def _describe_action_detail(
+        self, action: Action, inherited_scope=None,
+    ) -> tuple[str, list[str], str, str]:
+        """Rich description of one pre-picked action for the Now Playing
+        "next changes" board: WHAT parameters change and TO WHAT. Returns
+        (text, swatch_colors, scope, full_text) — `text` is capped for the
+        board row, `full_text` is the uncapped version for a tooltip. Color
+        Group cycles deliberately show only the step count (the destination
+        set stays a surprise); action types without a richer story fall back
+        to _describe_action."""
+        hexes: list[str] = []
+
+        def _grab_hex(val: str | None) -> list[str]:
+            # Gradients store rgb(r,g,b) stops; solids/BGs store #rrggbb.
+            found = re.findall(r"#[0-9a-fA-F]{6}", val or "")
+            for r, g, b in re.findall(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", val or ""):
+                found.append(f"#{int(r):02x}{int(g):02x}{int(b):02x}")
+            hexes.extend(found)
+            return found
+
+        _scope_str = self._scope_to_str
+
+        def _cap(parts: list[str], scope: str = "", name: str = "",
+                 suffix: str = "") -> tuple[str, list[str], str, str]:
+            full = ", ".join(parts)
+            text = full if len(parts) <= 4 else ", ".join(parts[:3]) + f", +{len(parts) - 3} more"
+            if name:  # named morph step: lead with the name the user gave it
+                full = f"“{name}” — {full}"
+                text = f"“{name}” — {text}"
+            return text + suffix, hexes[:6], scope, full + suffix
+
+        if action.type == "morph_step":
+
+            def _target_parts(t) -> list[str]:
+                av = t.absolute_value
+                a = t.aspect
+                if a in ("brightness", "reactivity", "blur"):
+                    if t.mode == "nudge":
+                        return [f"{a} {t.nudge_amount:+g}"]
+                    return [f"{a} → {self._fmt_val(av.number)}"]
+                if a == "shape":
+                    parts: list[str] = []
+                    for name in ("star", "edges", "twist", "x_offset", "y_offset"):
+                        if t.mode == "nudge":
+                            sp = getattr(av, f"{name}_nudge", None)
+                            if sp is not None and sp.amount:
+                                parts.append(f"{name} {sp.amount:+g}")
+                        else:
+                            v = getattr(av, name)
+                            if v is not None:
+                                parts.append(f"{name} → {self._fmt_val(v)}")
+                    for name in ("polygon", "flip"):
+                        v = getattr(av, name)
+                        if v is not None:
+                            parts.append(f"{name} {'toggle' if v == 'toggle' else self._fmt_val(v)}")
+                    return parts or ["shape"]
+                if a == "color":
+                    found = _grab_hex(av.color_value)
+                    if av.color_kind == "solid" and found:
+                        return [f"color → {found[0]}"]
+                    return [f"color → {'gradient' if av.color_kind == 'gradient' else (av.color_value or '?')}"]
+                if a == "bg_color":
+                    found = _grab_hex(av.bg_color)
+                    return [f"bg → {found[0] if found else (av.bg_color or '?')}"]
+                if a == "effect":
+                    return [f"effect → {av.effect_type or '?'}"]
+                return [a]
+
+            name = getattr(action, "name", "") or ""
+            ramp = f" ({self._fmt_ramp(action.ramp_ms)})" if action.ramp_ms is not None else ""
+            eff = [self._effective_scope(t.scope, inherited_scope) for t in action.targets]
+            scopes = {_scope_str(s) for s in eff}
+            if len(scopes) <= 1:
+                parts = [p for t in action.targets for p in _target_parts(t)]
+                return _cap(parts, next(iter(scopes), ""), name, ramp)
+            parts = [
+                f"{_scope_str(s) or 'all'}: {p}"
+                for t, s in zip(action.targets, eff) for p in _target_parts(t)
+            ]
+            return _cap(parts, "", name, ramp)
+
+        if action.type == "set_color":
+            from services import color_set_store
+            ramp = f" ({self._fmt_ramp(action.ramp_ms)})" if action.ramp_ms is not None else ""
+            card = color_set_store.get_by_id(action.ref_id)
+            if card is None:
+                return "Color → ?", [], "", "Color → ?"
+            if card.kind == "group":
+                mode = card.mode if action.pick_mode == "default" else action.pick_mode
+                n = len(card.members or [])
+                if mode == "cycle":
+                    adv = self._fmt_val(action.advance)
+                    sign = "-" if action.direction == "backward" else "+"
+                    text = f"{sign}{adv} step{'' if adv == '1' else 's'} in “{card.name}” ({n} sets){ramp}"
+                else:
+                    text = f"random set from “{card.name}” ({n} sets){ramp}"
+                return text, [], "", text
+            for e in card.entries or []:
+                for f in ("color_value", "bg_color", "accent_color"):
+                    _grab_hex(getattr(e, f, None))
+            seen: set[str] = set()
+            swatches = [h for h in hexes if not (h.lower() in seen or seen.add(h.lower()))]
+            text = f"Color Set “{card.name}”{ramp}"
+            return text, swatches[:6], "", text
+
+        if action.type == "morph_color":
+            sign = "-" if action.direction == "backward" else "+"
+            ramp = f" ({self._fmt_ramp(action.ramp_ms)})" if action.ramp_ms is not None else ""
+            text = f"rotate hue {sign}{action.degrees:g}°{ramp}"
+            scope = self._effective_scope(action.scope, inherited_scope)
+            return text, [], _scope_str(scope), text
+
+        if action.type == "ledfx_scene":
+            text = f"Scene {action.scene_id}"
+            return text, [], "", text
+
+        text = self._describe_action(action)
+        return text, [], "", text
+
+    def _preview_rows(self, root_event: MusicEvent, plan: list[_PlanEntry]) -> list[dict]:
+        """Structured rows for the Now Playing "next changes" board. Every plan
+        entry is flattened to its LEAF actions (following locked random picks
+        and event_ref chains — see _collect_leaves), each described in detail
+        (params → values + ramp), then rows with identical change text are
+        merged with combined tags/scopes. Each row: {tag, scope, text, full,
+        colors, at_ms}; `at_ms` is the fire offset from the trigger point.
+        JSON-safe."""
+        rows: list[dict] = []
+        trigger_ms = plan[0].trigger_ms if plan else 0
+
+        def _add_leaves(entry: _PlanEntry, leaves: list, default_tag: str = "") -> None:
+            for tag, l_scope, act in leaves:
+                text, colors, scope, full = self._describe_action_detail(act, inherited_scope=l_scope)
+                if not scope:
+                    scope = self._scope_to_str(l_scope)
+                rows.append({
+                    "tag": tag or default_tag, "scope": scope, "text": text,
+                    "full": full if full != text else "",
+                    "colors": colors,
+                    "at_ms": int(entry.fire_at_ms - trigger_ms),
+                })
+
+        for entry in plan:
+            evt = entry.event
+            et = evt.event_type
+            child_tag = evt.name if evt.id != root_event.id else ""
+            skip = entry.planned_descendant_ids or None
+            if et in SCENE_EVENT_TYPES:
+                if entry.preselected_scene_picks:
+                    for i, act in entry.preselected_scene_picks:
+                        nm = SCENE_LANE_NAMES[i] if 0 <= i < len(SCENE_LANE_NAMES) else str(i)
+                        _add_leaves(entry, self._collect_leaves(
+                            act, entry.resolved_picks, tag=nm, skip_ids=skip))
+                else:
+                    rows.append({
+                        "tag": child_tag or evt.name, "scope": "",
+                        "text": "resolved at fire time (no active scene yet)",
+                        "full": "", "colors": [],
+                        "at_ms": int(entry.fire_at_ms - trigger_ms),
+                    })
+            elif et == "morph_set" and entry.preselected_morph_picks:
+                for p in entry.preselected_morph_picks:
+                    _add_leaves(entry, self._collect_leaves(
+                        p.action, entry.resolved_picks, tag=p.lane_name, skip_ids=skip))
+            elif et == "single" and entry.preselected_action is not None:
+                _add_leaves(entry, self._collect_leaves(
+                    entry.preselected_action, entry.resolved_picks,
+                    tag=child_tag, skip_ids=skip))
+            elif et == "composite" and evt.root is not None:
+                _add_leaves(entry, self._collect_leaves(
+                    evt.root, entry.resolved_picks, tag=child_tag, skip_ids=skip))
+            elif et in ("sequence", "beat_sequence"):
+                for step in (evt.sequence_steps if et == "sequence" else evt.beat_sequence_steps):
+                    if step.step_type != "action":
+                        continue
+                    for a in self._resolve_step_actions(step):
+                        if a.type == "event_ref":
+                            continue  # referenced events plan their own entries
+                        _add_leaves(entry, self._collect_leaves(
+                            a, entry.resolved_picks, tag=child_tag, skip_ids=skip))
+            elif et == "device_settings":
+                rows.append({
+                    "tag": child_tag, "scope": "",
+                    "text": f"Device settings ({len(evt.device_targets)}×)",
+                    "full": "", "colors": [],
+                    "at_ms": int(entry.fire_at_ms - trigger_ms),
+                })
+
+        # ── Merge rows whose change text is identical (per-device children
+        # firing the same morph collapse into one row with combined scope). ──
+        merged: list[dict] = []
+        by_text: dict[str, dict] = {}
+        for r in rows:
+            m = by_text.get(r["text"])
+            if m is None:
+                by_text[r["text"]] = r
+                merged.append(r)
+                continue
+            for f in ("tag", "scope"):
+                if r[f] and r[f] not in (m[f].split(", ") if m[f] else []):
+                    m[f] = f"{m[f]}, {r[f]}" if m[f] else r[f]
+            for c in r["colors"]:
+                if c not in m["colors"]:
+                    m["colors"].append(c)
+            m["at_ms"] = min(m["at_ms"], r["at_ms"])
+        return merged
 
     def _preselect_sequence_steps(
         self, event: MusicEvent, trigger_labels: list[str]
@@ -2019,8 +2445,12 @@ class TriggerEngine:
             elif sub.event_type == "morph_set":
                 await self._execute_morph_set(sub, labels or [], skip_event_ids=skip_event_ids)
             elif sub.event_type == "composite":
-                # Other events own their trees — fresh picks, not our resolved map.
-                await self._execute_composite(sub, labels or [], skip_event_ids=skip_event_ids)
+                # Forward the resolved map: group ids are uuids, so entries can
+                # only match this sub-tree's own groups (deep plan-time locks —
+                # e.g. scene-lane picks — resolve into the same map). Groups
+                # not in the map still roll fresh.
+                await self._execute_composite(sub, labels or [], skip_event_ids=skip_event_ids,
+                                              resolved_picks=resolved_picks)
             elif sub.event_type in SCENE_EVENT_TYPES:
                 await self._execute_scene_event(sub, labels or [], skip_event_ids=skip_event_ids)
             else:
@@ -2029,6 +2459,7 @@ class TriggerEngine:
                     await self._execute_action(
                         sub_action, labels, await_ramps=await_ramps,
                         skip_event_ids=skip_event_ids, _depth=_depth + 1,
+                        resolved_picks=resolved_picks,
                     )
             return
 
@@ -3056,38 +3487,86 @@ class TriggerEngine:
         await self._fire_morph_picks(picks, labels, skip_event_ids=skip_event_ids)
 
     # ── Scene events (scene_update / update_scene / reset_scene) ───────────────
+    def _pick_lane_action(
+        self, event: MusicEvent, lane_index: int, labels: list[str],
+    ) -> Optional[Action]:
+        """Pick one alternative from `event.morph_lanes[lane_index]` (weighted,
+        with the same dedupe key the fire path uses) WITHOUT executing it."""
+        lanes = event.morph_lanes or []
+        if lane_index < 0 or lane_index >= len(lanes):
+            return None
+        lane = lanes[lane_index]
+        merged = list(labels or []) + list(lane.labels or [])
+        return self._pick_from_actions(
+            lane.alternatives, merged,
+            dedupe_key=f"{event.id}:lane:{lane_index}",
+            desc=f"lane '{lane.name or lane_index}' of '{event.name}'",
+        )
+
+    def _scene_lane_indices(self, event: MusicEvent) -> list[int]:
+        """Lane indices a scene-family event runs against the last Scene
+        Update (with Shape Flare's empty-lane fallback to Color)."""
+        indices = list(_FLARE_LANES.get(event.event_type) or [])
+        if event.event_type == "shape_flare" and self._scene_lane_is_empty(2):
+            indices = [3]  # Color
+        return indices
+
+    def _pick_scene_lanes(
+        self, event: MusicEvent, labels: list[str],
+    ) -> list[tuple[int, Action]]:
+        """Resolve which lanes a scene-family event would run RIGHT NOW and
+        pick one alternative per lane. Used at plan time so the Now Playing
+        preview can describe the exact changes; the picks are locked into the
+        plan entry and fired as-is (unless the active Scene Update changes).
+        Returns [(lane_index, action), ...] — empty when no scene is active."""
+        if event.event_type == "scene_update":
+            lane_index = 1 if self._last_scene_update_id == event.id else 0
+            picked = self._pick_lane_action(event, lane_index, labels)
+            return [(lane_index, picked)] if picked is not None else []
+        last = get_event(self._last_scene_update_id) if self._last_scene_update_id else None
+        if last is None or last.event_type != "scene_update":
+            return []
+        out: list[tuple[int, Action]] = []
+        for i in self._scene_lane_indices(event):
+            picked = self._pick_lane_action(last, i, labels)
+            if picked is not None:
+                out.append((i, picked))
+        return out
+
     async def _run_one_lane(
         self,
         event: MusicEvent,
         lane_index: int,
         labels: list[str],
         skip_event_ids: Optional[set] = None,
+        preselected: Optional[Action] = None,
+        resolved_picks: Optional[dict] = None,
     ) -> Optional[Action]:
-        """Pick one alternative from `event.morph_lanes[lane_index]` (weighted,
-        like a morph lane) and fire it. Returns the picked Action (for the
-        Now-Playing summary) or None."""
-        lanes = event.morph_lanes or []
-        if lane_index < 0 or lane_index >= len(lanes):
-            return None
-        lane = lanes[lane_index]
-        merged = list(labels or []) + list(lane.labels or [])
-        picked = self._pick_from_actions(
-            lane.alternatives, merged,
-            dedupe_key=f"{event.id}:lane:{lane_index}",
-            desc=f"lane '{lane.name or lane_index}' of '{event.name}'",
-        )
+        """Fire one alternative from `event.morph_lanes[lane_index]` — the
+        plan-time `preselected` pick when given, else a fresh weighted pick.
+        `resolved_picks` pins random branches inside the pick's subtree.
+        Returns the Action (for the Now-Playing summary) or None."""
+        picked = preselected or self._pick_lane_action(event, lane_index, labels)
         if picked is not None:
-            await self._execute_action(picked, labels or [], skip_event_ids=skip_event_ids)
+            await self._execute_action(picked, labels or [],
+                                       skip_event_ids=skip_event_ids,
+                                       resolved_picks=resolved_picks)
         return picked
 
     async def _execute_scene_update(
         self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
+        preselected: Optional[dict] = None,
+        resolved_picks: Optional[dict] = None,
     ) -> str:
         """Run First (lane 0) when this isn't the last Scene Update fired, else
         Rest (lane 1). Always becomes the new 'last scene update'."""
         repeat = self._last_scene_update_id == event.id
         lane_index = 1 if repeat else 0
-        picked = await self._run_one_lane(event, lane_index, labels, skip_event_ids)
+        picked = await self._run_one_lane(
+            event, lane_index, labels, skip_event_ids,
+            preselected=(preselected or {}).get(lane_index),
+            resolved_picks=resolved_picks,
+        )
         self._last_scene_update_id = event.id
         state.last_scene_update_id = event.id  # mirror for the Now Playing indicator
         tag = "Rest" if repeat else "First"
@@ -3095,6 +3574,8 @@ class TriggerEngine:
 
     async def _run_last_scene_lanes(
         self, indices: list[int], labels: list[str], skip_event_ids: Optional[set] = None,
+        preselected: Optional[dict] = None,
+        resolved_picks: Optional[dict] = None,
     ) -> str:
         """Run one or more lanes of the last fired Scene Update — concurrently
         when more than one (e.g. Combo Flare = Shape + Color). No-op when no
@@ -3104,7 +3585,10 @@ class TriggerEngine:
             logger.info("scene: no active Scene Update to run lanes %s", indices)
             return "(no active scene)"
         picks = await asyncio.gather(
-            *(self._run_one_lane(last, i, labels, skip_event_ids) for i in indices)
+            *(self._run_one_lane(last, i, labels, skip_event_ids,
+                                 preselected=(preselected or {}).get(i),
+                                 resolved_picks=resolved_picks)
+              for i in indices)
         )
         parts: list[str] = []
         for i, p in zip(indices, picks):
@@ -3126,19 +3610,24 @@ class TriggerEngine:
 
     async def _execute_scene_event(
         self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
+        preselected: Optional[dict] = None,
+        resolved_picks: Optional[dict] = None,
     ) -> str:
         """Dispatch any scene event type. Returns a short summary string for the
-        Now-Playing broadcast."""
+        Now-Playing broadcast. `preselected` (lane_index → Action) carries the
+        plan-time picks and `resolved_picks` their deep-resolved random
+        branches, so the fire matches the Now Playing preview; lanes missing
+        from them fall back to fresh picks."""
         if event.event_type == "scene_update":
-            return await self._execute_scene_update(event, labels, skip_event_ids)
-        indices = _FLARE_LANES.get(event.event_type)
-        if indices is None:
+            return await self._execute_scene_update(
+                event, labels, skip_event_ids, preselected, resolved_picks)
+        if event.event_type not in _FLARE_LANES:
             return ""
         # Shape Flare falls back to the Color lane when the Shape lane (2) is
         # empty, so an event with only color alternatives still flares.
-        if event.event_type == "shape_flare" and self._scene_lane_is_empty(2):
-            indices = [3]  # Color
-        return await self._run_last_scene_lanes(indices, labels, skip_event_ids)
+        indices = self._scene_lane_indices(event)
+        return await self._run_last_scene_lanes(
+            indices, labels, skip_event_ids, preselected, resolved_picks)
 
     def _plan_ramp_ms(self, action) -> int:
         """Effective ramp for beat-timeline math — resolves a bound ramp_ms
@@ -3982,7 +4471,19 @@ class TriggerEngine:
                 precomputed_snapshot=snap,
             )
         elif evt.event_type in SCENE_EVENT_TYPES:
-            await self._execute_scene_event(evt, entry.labels, skip_event_ids=skip_ids)
+            # Use the plan-time lane picks (and their deep-resolved random
+            # branches) only while the Scene Update they were rolled against
+            # is still the active one; otherwise re-roll everything so a
+            # stale preview can't fire lanes of a replaced scene.
+            picks = None
+            resolved = None
+            if (entry.preselected_scene_picks
+                    and entry.scene_picks_sid == self._last_scene_update_id):
+                picks = dict(entry.preselected_scene_picks)
+                resolved = entry.resolved_picks
+            await self._execute_scene_event(
+                evt, entry.labels, skip_event_ids=skip_ids,
+                preselected=picks, resolved_picks=resolved)
 
     async def _execute_beat_sequence(
         self,
@@ -4293,6 +4794,7 @@ class TriggerEngine:
                             "event_name":   event.name,
                             "event_color":  event.color,
                             "action_label": desc or None,
+                            "rows":         self._preview_rows(event, plan),
                             "locked":       False,
                         }))
 

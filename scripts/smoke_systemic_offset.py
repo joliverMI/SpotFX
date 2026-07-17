@@ -16,10 +16,16 @@ Exit code 0 = all assertions passed.
 from __future__ import annotations
 
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from config import settings
 from services import systemic_offset as so
+
+# Never touch the live storage/offset_bias.json — reset()/record() persist,
+# so an un-redirected run wipes the learner's real samples.
+so._STORE_PATH = Path(tempfile.mkstemp(suffix="_offset_bias_smoke.json")[1])
 
 T0 = datetime(2026, 6, 30, 2, 0, 0, tzinfo=timezone.utc)
 PASS, FAIL = "\033[32mPASS\033[0m", "\033[31mFAIL\033[0m"

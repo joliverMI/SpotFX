@@ -147,6 +147,10 @@ export default function MorphStepForm({
 
   return (
     <div>
+      <Row label="Name" help="Optional display name — shown in summaries and the Now Playing next-changes preview">
+        <TextInput value={action.name ?? ''} placeholder="e.g. Punch"
+          onChange={(v) => update((a) => { a.name = v; })} />
+      </Row>
       <Row label="Ramp (ms)" help="Default for targets without their own ramp">
         <BindableNumber value={action.ramp_ms} nullable onChange={(v) => update((a) => { a.ramp_ms = v; })} />
       </Row>
@@ -258,7 +262,7 @@ export default function MorphStepForm({
                   <BindableTri value={av.polygon ?? null} onChange={(v) => setAV((x) => { x.polygon = v; })}
                     renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
                 </Row>
-                <Row label="Flip">
+                <Row label="Flip" help="tri-state: on / off / toggle current. Melt reverses its motion direction (continuous, no restart); power mirrors the strip; radial flips spin; eq2d toggles ring">
                   <BindableTri value={av.flip ?? null} onChange={(v) => setAV((x) => { x.flip = v; })}
                     renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
                 </Row>
