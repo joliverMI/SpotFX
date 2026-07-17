@@ -1,8 +1,10 @@
 /** Full-keyboard palette arming: press a key to arm its event (right-click
  * the timeline to place), Escape disarms, backquote ` toggles follow/manual
- * zoom (the legacy `b` binding moved so b is palette-usable). While the
- * trigger dialog is open, a palette key assigns that key's event directly
- * (dispatched to the dialog via a window event). Inputs are ignored. */
+ * zoom (the legacy `b` binding moved so b is palette-usable). "[" / "]" arm
+ * the Override Blend brush (paint / erase via right-click on triggers);
+ * Escape disarms the brush before the palette. While the trigger dialog is
+ * open, a palette key assigns that key's event directly (dispatched to the
+ * dialog via a window event). Inputs are ignored. */
 import { useEffect } from 'react';
 import { useBuilderStore } from '../store';
 import type { Palette } from '../types';
@@ -31,10 +33,22 @@ export function usePaletteKeyboard(opts: {
       const st = useBuilderStore.getState();
 
       if (e.key === 'Escape') {
+        if (st.blendBrush) {
+          st.setBlendBrush(null);
+          e.preventDefault();
+          return;
+        }
         if (st.armedKey) {
           st.setArmedKey(null);
           e.preventDefault();
         }
+        return;
+      }
+      if (e.key === '[' || e.key === ']') {
+        const mode = e.key === '[' ? 'set' : 'clear';
+        // Re-press toggles the brush off.
+        st.setBlendBrush(st.blendBrush === mode ? null : mode);
+        e.preventDefault();
         return;
       }
       if (e.key === '`') {

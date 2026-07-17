@@ -992,12 +992,19 @@ class TriggerEngine:
         root_event: MusicEvent,
         trigger: MusicTrigger,
         labels: list[str],
+        time_scale: float = 1.0,
     ) -> tuple[list[_PlanEntry], str]:
         """
         Walk the resolved event tree and produce a flat list of _PlanEntry
         with absolute song-ms fire times. Offsets (event_offset_ms,
         sequence step.delay_ms, and beat-sequence step spacing) compound
         through the walk. Also returns a drill-down preview string.
+
+        `time_scale` (Override Blend) stretches the plan's ms spacing —
+        sequence step delays and parallel/morph lane offsets — by that
+        factor. event_offset_ms (a latency trim, not ramping) and
+        beat-anchored spacing stay unscaled; the fire-time counterpart
+        (event-body sleeps + ramps) is scaled by _blend_scale_plan.
 
         Offset semantics:
           - Every event has `event_offset_ms`: shifts this event's own start
@@ -1096,7 +1103,7 @@ class TriggerEngine:
                 preselected_steps: list = []
                 parts: list[str] = []
                 for step in event.sequence_steps:
-                    step_time += step.delay_ms
+                    step_time += round(step.delay_ms * time_scale)
                     merged = lbls + list(step.labels or [])
                     label, step_child_ids = _walk_step_body(
                         step, step_time, merged, depth, visited_next,
@@ -1154,7 +1161,7 @@ class TriggerEngine:
                 # dispatch. All-equal offsets (incl. all-zero) → anchor == that
                 # value, no relative sleeps. Offsets live on the lane, so the
                 # anchor is stable across the fire-time re-roll of alternatives.
-                morph_anchor = min((p.offset_ms for p in picks), default=0)
+                morph_anchor = round(min((p.offset_ms for p in picks), default=0) * time_scale)
                 entries.append(_PlanEntry(
                     fire_at_ms=start_at + morph_anchor, event=event, labels=list(lbls),
                     trigger_ms=trigger.timestamp_ms,
@@ -1182,7 +1189,7 @@ class TriggerEngine:
                     interval = self._local_beat_interval_ms(start_at)
                     fire_at = start_at + root.start_offset_beats * interval
                 elif root is not None and root.type == "parallel_group" and root.children:
-                    anchor_off = min(int(c.offset_ms or 0) for c in root.children)
+                    anchor_off = round(min(int(c.offset_ms or 0) for c in root.children) * time_scale)
                     fire_at = start_at + anchor_off
 
                 # Plan event_ref children on RESOLVED branches with compounded
@@ -1217,14 +1224,14 @@ class TriggerEngine:
                                 if i > 0:
                                     tcur += (1 + c.delay_beats) * interval
                             else:
-                                tcur += c.delay_ms
+                                tcur += c.delay_ms * time_scale
                             for a in c.actions:
                                 _plan_refs(a, tcur, merged + list(c.labels or []), d + 1)
                         return
                     if t == "parallel_group":
                         for c in action.children:
                             for a in c.actions:
-                                _plan_refs(a, base_ms + int(c.offset_ms or 0),
+                                _plan_refs(a, base_ms + int(c.offset_ms or 0) * time_scale,
                                            merged + list(c.labels or []), d + 1)
                         return
 
@@ -1292,6 +1299,299 @@ class TriggerEngine:
         description = walk(root_event, trigger.timestamp_ms, list(labels))
         entries.sort(key=lambda e: e.fire_at_ms)
         return entries, description
+
+    # ── Override Blend ───────────────────────────────────────────────────────
+    # A trigger with override_blend=True stretches (or compresses) its event's
+    # ms timing so the last ramp completes exactly at the NEXT enabled trigger
+    # (or song end). Ramps and ms delays/offsets scale proportionally;
+    # event_offset_ms (latency trim) and beat-anchored spacing stay unscaled —
+    # for beat-timed bodies only the ramps scale, so completion is exact only
+    # for ms-timed trees. Scene-family fires scale via their plan-time lane
+    # picks; a stale-scene re-roll at fire time falls back to natural speed.
+
+    def _blend_ramp_of(self, action) -> int:
+        """Effective ramp of one leaf action (None / unresolvable binding →
+        the settings.smooth_ramp_ms default the executors would use)."""
+        r = static_ramp_ms(getattr(action, "ramp_ms", None), self._signal_now)
+        return r if r is not None else settings.smooth_ramp_ms
+
+    def _blend_action_tail_ms(
+        self, action, at_ms: int, depth: int = 0, visited: frozenset = frozenset(),
+    ) -> float:
+        """Ms from an action's invoke moment until its last ramp completes.
+        Pick-independent: random groups use the slowest option (upper bound —
+        a shorter pick just finishes early). `at_ms` anchors beat intervals."""
+        if action is None or depth > 6:
+            return 0.0
+        t = getattr(action, "type", "")
+        if t == "morph_step":
+            base = self._blend_ramp_of(action)
+            per: list[float] = []
+            for tg in action.targets:
+                if tg.ramp_ms is not None:
+                    r = static_ramp_ms(tg.ramp_ms, self._signal_now)
+                    per.append(float(r if r is not None else base))
+                else:
+                    per.append(float(base))
+            return max(per) if per else float(base)
+        if t in ("set_color", "morph_color", "ledfx_effect_param"):
+            return float(self._blend_ramp_of(action))
+        if t == "event_ref" and action.event_id:
+            child = get_event(action.event_id)
+            if child and child.id not in visited:
+                return child.event_offset_ms + self._blend_event_tail_ms(
+                    child, at_ms, depth + 1, visited | {child.id})
+            return 0.0
+        if t == "random_group":
+            return max(
+                (max((self._blend_action_tail_ms(a, at_ms, depth + 1, visited)
+                      for a in opt.actions), default=0.0)
+                 for opt in action.options),
+                default=0.0,
+            )
+        if t == "sequence_group":
+            if action.timing == "beats":
+                interval = self._local_beat_interval_ms(at_ms)
+                tcur = float(action.start_offset_beats * interval)
+                end = 0.0
+                for i, c in enumerate(action.children):
+                    if i > 0:
+                        tcur += (1 + c.delay_beats) * interval
+                    tail = max((self._blend_action_tail_ms(a, at_ms, depth + 1, visited)
+                                for a in c.actions), default=0.0)
+                    # pre_ramp completes ON the beat; otherwise the ramp runs past it
+                    end = max(end, tcur + (0.0 if c.pre_ramp else tail))
+                if action.revert and action.revert.enabled:
+                    end += action.revert.delay_beats * interval
+                    if not action.revert.pre_ramp:
+                        end += action.revert.transition_ms
+                return end
+            # ms mode is sequential INCLUDING ramps (children await ramps)
+            tcur = 0.0
+            for c in action.children:
+                tcur += c.delay_ms
+                tcur += max((self._blend_action_tail_ms(a, at_ms, depth + 1, visited)
+                             for a in c.actions), default=0.0)
+            if action.revert and action.revert.enabled:
+                tcur += action.revert.delay_ms + action.revert.transition_ms
+            return tcur
+        if t == "parallel_group":
+            offs = [int(c.offset_ms or 0) for c in action.children if c.actions]
+            anchor = min(offs, default=0)
+            end = 0.0
+            for c in action.children:
+                if not c.actions:
+                    continue
+                rel = int(c.offset_ms or 0) - anchor
+                end = max(end, rel + max((self._blend_action_tail_ms(a, at_ms, depth + 1, visited)
+                                          for a in c.actions), default=0.0))
+            return end
+        return 0.0  # scene/ambient/global-transition/device leaves are instant
+
+    def _blend_event_tail_ms(
+        self, event: MusicEvent, at_ms: int, depth: int = 0, visited: frozenset = frozenset(),
+    ) -> float:
+        """Ms from an event's invoke moment until its last ramp completes."""
+        if event is None or depth > 5 or event.id in visited:
+            return 0.0
+        visited = visited | {event.id}
+        et = event.event_type
+        if et == "single":
+            return max((self._blend_action_tail_ms(a, at_ms, depth, visited)
+                        for a in event.actions), default=0.0)
+        if et == "sequence":
+            tcur = 0.0
+            for step in event.sequence_steps:
+                tcur += step.delay_ms
+                if step.step_type == "event" and step.event_id:
+                    child = get_event(step.event_id)
+                    if child:
+                        tcur += self._blend_event_tail_ms(child, at_ms, depth + 1, visited)
+                else:
+                    tcur += max((self._blend_action_tail_ms(a, at_ms, depth, visited)
+                                 for a in self._resolve_step_actions(step)), default=0.0)
+            if event.revert and event.revert.enabled:
+                tcur += event.revert.delay_ms + event.revert.transition_ms
+            return tcur
+        if et == "beat_sequence":
+            interval = self._local_beat_interval_ms(at_ms)
+            tcur = float(event.beat_sequence_start_offset_beats * interval)
+            end = 0.0
+            for i, step in enumerate(event.beat_sequence_steps):
+                if i > 0:
+                    tcur += (1 + step.delay_beats) * interval
+                tail = max((self._blend_action_tail_ms(a, at_ms, depth, visited)
+                            for a in self._resolve_step_actions(step)), default=0.0)
+                end = max(end, tcur + (0.0 if step.pre_ramp else tail))
+            if event.beat_revert and event.beat_revert.enabled:
+                end += event.beat_revert.delay_beats * interval
+                if not event.beat_revert.pre_ramp:
+                    end += event.beat_revert.transition_ms
+            return end
+        if et == "morph_set":
+            offs = [int(l.offset_ms or 0) for l in event.morph_lanes if l.alternatives]
+            anchor = min(offs, default=0)
+            end = 0.0
+            for lane in event.morph_lanes:
+                if not lane.alternatives:
+                    continue
+                tail = max((self._blend_action_tail_ms(a, at_ms, depth, visited)
+                            for a in lane.alternatives), default=0.0)
+                end = max(end, int(lane.offset_ms or 0) - anchor + tail)
+            return end
+        if et == "composite":
+            return self._blend_action_tail_ms(event.root, at_ms, depth, visited)
+        if et in SCENE_EVENT_TYPES:
+            if et == "scene_update":
+                lane_index = 1 if self._last_scene_update_id == event.id else 0
+                lanes = event.morph_lanes or []
+                if 0 <= lane_index < len(lanes):
+                    return max((self._blend_action_tail_ms(a, at_ms, depth, visited)
+                                for a in lanes[lane_index].alternatives), default=0.0)
+                return 0.0
+            last = get_event(self._last_scene_update_id) if self._last_scene_update_id else None
+            if last is None or last.event_type != "scene_update":
+                return 0.0
+            lanes = last.morph_lanes or []
+            end = 0.0
+            for i in self._scene_lane_indices(event):
+                if 0 <= i < len(lanes):
+                    end = max(end, max((self._blend_action_tail_ms(a, at_ms, depth, visited)
+                                        for a in lanes[i].alternatives), default=0.0))
+            return end
+        return 0.0  # device_settings and friends are instant
+
+    def _blend_factor_for(self, trigger: MusicTrigger, event: MusicEvent) -> Optional[float]:
+        """Override Blend scale factor for this trigger: gap to the next
+        enabled trigger (or song end) ÷ the event's natural tail.
+        None = leave the plan at natural speed."""
+        if self._profile is None:
+            return None
+        nxt = min(
+            (t.timestamp_ms for t in self._get_active_triggers()
+             if t.enabled and t.id != trigger.id and t.timestamp_ms > trigger.timestamp_ms),
+            default=None,
+        )
+        end_ms = nxt if nxt is not None else int(self._profile.duration_ms or 0)
+        gap = end_ms - trigger.timestamp_ms
+        if gap <= 0:
+            return None
+        tail = self._blend_event_tail_ms(event, trigger.timestamp_ms)
+        if tail <= 0:
+            return None
+        factor = gap / tail
+        if abs(factor - 1.0) < 0.01:
+            return None
+        return factor
+
+    def _blend_scale_ramp(self, value, factor: float, default_ms: Optional[int] = None):
+        """Scale one ramp_ms field. None → materialize the default it would
+        have used (when given); ValueBindings resolve to a static int first
+        so the scaled plan is deterministic."""
+        if value is None:
+            return None if default_ms is None else max(0, round(default_ms * factor))
+        r = static_ramp_ms(value, self._signal_now)
+        if r is None:
+            r = settings.smooth_ramp_ms
+        return max(0, round(r * factor))
+
+    def _blend_scale_action(self, action, factor: float) -> None:
+        """Scale ms timing in place on a deep-COPIED Action tree: ramps
+        (explicit or defaulted), ms delays/offsets, reverts. Beat-anchored
+        spacing (delay_beats) stays musical."""
+        if action is None:
+            return
+        t = getattr(action, "type", "")
+        if t == "morph_step":
+            for tg in action.targets:
+                if tg.ramp_ms is not None:
+                    tg.ramp_ms = self._blend_scale_ramp(tg.ramp_ms, factor)
+            action.ramp_ms = self._blend_scale_ramp(action.ramp_ms, factor, settings.smooth_ramp_ms)
+            return
+        if t in ("set_color", "morph_color", "ledfx_effect_param"):
+            action.ramp_ms = self._blend_scale_ramp(action.ramp_ms, factor, settings.smooth_ramp_ms)
+            if t == "set_color":
+                # Color Set entries may override ramp_ms per entry (card data,
+                # not on the action) — the executor multiplies those by this.
+                action.ramp_scale = factor
+            return
+        if t == "random_group":
+            for opt in action.options:
+                for a in opt.actions:
+                    self._blend_scale_action(a, factor)
+            return
+        if t == "sequence_group":
+            for c in action.children:
+                if action.timing == "ms":
+                    c.delay_ms = round(c.delay_ms * factor)
+                for a in c.actions:
+                    self._blend_scale_action(a, factor)
+            if action.revert:
+                action.revert.delay_ms = round(action.revert.delay_ms * factor)
+                action.revert.transition_ms = round(action.revert.transition_ms * factor)
+            return
+        if t == "parallel_group":
+            for c in action.children:
+                c.offset_ms = round(int(c.offset_ms or 0) * factor)
+                for a in c.actions:
+                    self._blend_scale_action(a, factor)
+            return
+        # event_ref children get their own (scaled) plan entries; ramp-less
+        # leaves (scene/ambient/device) have nothing to scale.
+
+    def _blend_scale_event(self, event: MusicEvent, factor: float) -> MusicEvent:
+        """Deep-copied event with all ms timing scaled. event_offset_ms is a
+        latency trim, not ramping — intentionally left alone."""
+        ev = event.model_copy(deep=True)
+        for step in ev.sequence_steps:
+            step.delay_ms = round(step.delay_ms * factor)
+            for a in self._resolve_step_actions(step):
+                self._blend_scale_action(a, factor)
+        if ev.revert:
+            ev.revert.delay_ms = round(ev.revert.delay_ms * factor)
+            ev.revert.transition_ms = round(ev.revert.transition_ms * factor)
+        for step in ev.beat_sequence_steps:
+            for a in self._resolve_step_actions(step):
+                self._blend_scale_action(a, factor)
+        if ev.beat_revert:
+            ev.beat_revert.transition_ms = round(ev.beat_revert.transition_ms * factor)
+        for lane in ev.morph_lanes:
+            lane.offset_ms = round(int(lane.offset_ms or 0) * factor)
+            for a in lane.alternatives:
+                self._blend_scale_action(a, factor)
+        for a in ev.actions:
+            self._blend_scale_action(a, factor)
+        if ev.root is not None:
+            self._blend_scale_action(ev.root, factor)
+        return ev
+
+    def _blend_scale_plan(self, plan: list[_PlanEntry], factor: float) -> None:
+        """Apply Override Blend to a built plan: swap each entry's event and
+        its plan-time picks for time-scaled copies. The plan's fire_at_ms
+        spacing was already scaled by _plan_timeline(time_scale=...)."""
+        for entry in plan:
+            entry.event = self._blend_scale_event(entry.event, factor)
+            if entry.preselected_action is not None:
+                a = entry.preselected_action.model_copy(deep=True)
+                self._blend_scale_action(a, factor)
+                entry.preselected_action = a
+            if entry.preselected_morph_picks:
+                entry.preselected_morph_picks = [
+                    MorphPick(p.lane_name,
+                              self._blend_scaled_copy(p.action, factor),
+                              round(p.offset_ms * factor))
+                    for p in entry.preselected_morph_picks
+                ]
+            if entry.preselected_scene_picks:
+                entry.preselected_scene_picks = [
+                    (i, self._blend_scaled_copy(a, factor))
+                    for i, a in entry.preselected_scene_picks
+                ]
+
+    def _blend_scaled_copy(self, action, factor: float):
+        c = action.model_copy(deep=True)
+        self._blend_scale_action(c, factor)
+        return c
 
     @staticmethod
     def _resolve_step_actions(step) -> list:
@@ -3131,8 +3431,12 @@ class TriggerEngine:
         instant_coros: list = []
         touched: set[str] = set()
 
+        ramp_scale = float(getattr(action, "ramp_scale", 1.0) or 1.0)
         for vid, entry in merged.items():
-            ramp_ms = entry.ramp_ms if entry.ramp_ms is not None else default_ramp_ms
+            # Per-entry card ramps bypass action.ramp_ms, so Override Blend's
+            # scaled copies carry ramp_scale to stretch them here.
+            ramp_ms = (max(0, round(entry.ramp_ms * ramp_scale))
+                       if entry.ramp_ms is not None else default_ramp_ms)
             # Remember this set's 3rd color for the vid so a later effect
             # switch can source the new effect's accent from it (None →
             # black). Recorded for every base-covered vid even if its current
@@ -4765,7 +5069,19 @@ class TriggerEngine:
                         # _plan_timeline also pre-selects actions (for singles it
                         # resolves event_refs), so the preview and the firing use
                         # the same choices.
-                        plan, desc = self._plan_timeline(event, next_t, list(next_t.labels))
+                        blend = (self._blend_factor_for(next_t, event)
+                                 if getattr(next_t, "override_blend", False) else None)
+                        plan, desc = self._plan_timeline(
+                            event, next_t, list(next_t.labels),
+                            time_scale=blend if blend is not None else 1.0,
+                        )
+                        if blend is not None:
+                            self._blend_scale_plan(plan, blend)
+                            desc = f"{desc} [blend ×{blend:.2f}]"
+                            logger.info(
+                                "Override Blend: trigger %s (event '%s') scaled ×%.3f",
+                                next_t.id, event.name, blend,
+                            )
                         self._plan[next_t.id] = plan
                         self._plan_desc[next_t.id] = desc
                         # Pre-snapshot at plan-time was tried here and REMOVED:

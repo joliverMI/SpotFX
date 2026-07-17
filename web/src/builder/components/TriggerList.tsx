@@ -89,6 +89,10 @@ export default function TriggerList({
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {ev?.name ?? t.event_id}
               </span>
+              {t.override_blend && (
+                <span title="Override Blend — ramps until the next trigger"
+                  style={{ color: 'var(--accent)', flex: 'none' }}>⤳</span>
+              )}
               {t.labels.map((l) => <span key={l} className="chip">{l}</span>)}
               <span
                 title={`Intensity ${(t.intensity ?? 0.5).toFixed(2)}`}

@@ -176,6 +176,7 @@ def delete_profile(spotify_uri: str) -> bool:
 FIXED_EVENT_IDS = {
     "fixed-update-scene", "fixed-reset-scene",
     "fixed-shape-flare", "fixed-color-flare", "fixed-combo-flare",
+    "fixed-no-action",
 }
 
 
@@ -200,6 +201,12 @@ def _fixed_events() -> dict[str, MusicEvent]:
         "fixed-combo-flare": MusicEvent(
             id="fixed-combo-flare", name="Combo Flare", color="#FFFFFF",
             event_type="combo_flare", fixed=True,
+        ),
+        # Deliberate no-op (composite with no root). Place it on a trigger to
+        # end an Override Blend span without changing the lights.
+        "fixed-no-action": MusicEvent(
+            id="fixed-no-action", name="No Action", color="#607080",
+            event_type="composite", fixed=True,
         ),
     }
 

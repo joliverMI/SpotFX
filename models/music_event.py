@@ -218,6 +218,10 @@ class SetColorAction(BaseModel):
     advance:   Union[Annotated[int, Field(ge=1)], ValueBinding] = 1
     direction: Literal["forward", "backward"] = "forward"
     ramp_ms:   int | ValueBinding | None = None
+    # Runtime multiplier for per-entry ramp overrides that live on the Color
+    # Set card (not on this action). Set by the Override Blend plan scaler on
+    # its deep copies; 1.0 (inert) on stored events.
+    ramp_scale: float = 1.0
     # When True (default), skip any color-set value that would reset the LedFX
     # effect (params flagged `resets_effect`), preserving the running effect.
     # When False, those values are still applied — but always instantly, never

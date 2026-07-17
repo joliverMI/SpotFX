@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MusicTrigger, EventOption } from '../types';
 import type { Win } from '../canvas/frame';
+import { computeBlendSpans } from '../canvas/data';
 
 export default function TimelineBar({
   durationMs,
@@ -121,6 +122,16 @@ export default function TimelineBar({
         userSelect: 'none', touchAction: 'none',
       }}
     >
+      {computeBlendSpans(triggers, dur).map((span) => {
+        const color = events.find((e) => e.id === span.eventId)?.color ?? '#888';
+        return (
+          <div key={`blend-${span.triggerId}`} style={{
+            position: 'absolute', top: 2, bottom: 2, left: pct(span.startMs),
+            width: `${Math.max(0.2, ((span.endMs - span.startMs) / dur) * 100)}%`,
+            background: color, opacity: 0.22, borderRadius: 2, pointerEvents: 'none',
+          }} />
+        );
+      })}
       {now !== null && (
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: pct(now),
                       background: 'rgba(29,185,84,0.18)', pointerEvents: 'none' }} />

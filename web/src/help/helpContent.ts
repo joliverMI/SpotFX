@@ -155,7 +155,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             ],
             table: [
               ['1–0, Q–P, A–L, Z–M', 'Arm that key\'s event from the active palette (36 keys); re-pressing keeps it armed.'],
-              ['Esc', 'Disarm the armed key (after clearing any selection).'],
+              ['Esc', 'Disarm the blend brush, then the armed key (after clearing any selection).'],
             ],
             kbd: true,
           },
@@ -183,7 +183,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             table: [
               ['Right-click empty canvas', 'Place the armed event — time snaps to the nearest bass onset, intensity starts at the section\'s energy.'],
               ['Hold right button', 'Keep holding after placing to slide the intensity live until you release.'],
-              ['Right-click a trigger', 'Reassign that trigger to the armed event.'],
+              ['Right-click a trigger', 'Reassign that trigger to the armed event — or, with the blend brush armed ([ / ]), paint/clear its Override Blend.'],
               ['Drag a circle ↕', 'Change intensity — snaps to the previous trigger\'s value and to 0.5. With a multi-selection, all selected circles shift together.'],
               ['Drag a triangle ↔', 'Move the trigger in time (20 ms grid, snaps to librosa markers by row).'],
               ['Drag off the canvas', 'Delete the trigger (pull it more than ~24 px out).'],
@@ -210,11 +210,27 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'builder-trigger-dialog',
             title: 'Trigger edit dialog',
-            keywords: 'double click edit timestamp event labels intensity open new tab reference palette assign',
+            keywords: 'double click edit timestamp event labels intensity open new tab reference palette assign blend',
             body: [
-              'Double-click a trigger (or empty canvas) to open it: timestamp (m:ss.t), event (recently used float to the top), filter labels and intensity. Pressing a palette key while the dialog is open assigns that event and saves in one go.',
+              'Double-click a trigger (or empty canvas) to open it: timestamp (m:ss.t), event (recently used float to the top), filter labels, intensity, and the Override Blend toggle.',
               'The ↗ next to the event picker opens the chosen event\'s editor in a new tab, so the trigger you\'re editing stays put.',
             ],
+          },
+          {
+            id: 'override-blend',
+            title: 'Override Blend',
+            keywords: 'blend ramp stretch scale slow fast transition next trigger no action paint brush bracket',
+            body: [
+              'A trigger with Override Blend on rescales its event\'s ramps and delays — proportionally — so the last ramp completes exactly at the next enabled trigger (or at song end when none follows). An event that would ramp 200 ms then 300 ms, fired 5 s before the next trigger, ramps 2 s then 3 s instead; if the next trigger comes sooner than the natural timing, ramps compress to fit.',
+              'Beat-timed steps stay on their beats — only their ramps scale — so completion is exact only for ms-timed events. The event\'s fire offset (latency trim) is never scaled.',
+              'Use the built-in "No Action" event on a trigger to end a blend span without changing the lights.',
+              'On both timelines the blended span is tinted in the event\'s color from the blend trigger to the trigger that ends it.',
+            ],
+            table: [
+              ['[', 'Arm the blend brush — right-click triggers to turn Override Blend ON. Re-press or Esc disarms.'],
+              [']', 'Arm the eraser — right-click triggers to turn Override Blend OFF.'],
+            ],
+            kbd: true,
           },
         ],
       },
@@ -245,7 +261,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               ['Drag a marker', 'Move that trigger in time; drag well above/below the bar to delete it.'],
               ['Click a marker', 'Edit the trigger.'],
               ['Double-click empty bar', 'Create a trigger there.'],
-              ['Right-click', 'Place the armed event (on a marker: reassign it).'],
+              ['Right-click', 'Place the armed event (on a marker: reassign it). With the blend brush armed ([ / ]), a marker right-click paints/clears Override Blend instead.'],
             ],
             kbd: false,
           },

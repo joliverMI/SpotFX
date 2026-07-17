@@ -3,7 +3,7 @@
  * circles. Debug-only layers (live mirror, anchors, xcorr windows, spikes)
  * have data contracts in frame.ts and are implemented when debug migrates. */
 import type { CanvasFrame, CanvasLayer, Hit } from './frame';
-import { AVG_COLORS, MARK_ABBR, MARK_COLOR } from './data';
+import { AVG_COLORS, MARK_ABBR, MARK_COLOR, computeBlendSpans } from './data';
 import type { MarkType } from '../types';
 
 const TRI_H = 8;
@@ -310,6 +310,34 @@ export const musicMarks: CanvasLayer = {
   },
 };
 
+// ── 2: Override Blend spans — tinted background between a blend trigger and
+//      the next enabled trigger (or song end), in the blending event's color ──
+export const blendSpans: CanvasLayer = {
+  id: 'blendSpans',
+  z: 2,
+  visible: (f) => f.data.triggers.some((t) => t.override_blend && t.enabled !== false),
+  draw(f) {
+    const { ctx } = f;
+    const durationMs = f.data.meta?.duration_ms ?? f.win.endMs;
+    ctx.save();
+    for (const span of computeBlendSpans(f.data.triggers, durationMs)) {
+      const s = span.startMs + f.view.triggerOffsetMs;
+      const e = span.endMs + f.view.triggerOffsetMs;
+      if (e < f.win.startMs || s > f.win.endMs) continue;
+      const x0 = f.timeToX(Math.max(s, f.win.startMs));
+      const x1 = f.timeToX(Math.min(e, f.win.endMs));
+      const color = f.data.events.find((ev) => ev.id === span.eventId)?.color || '#888';
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.09;
+      ctx.fillRect(x0, 0, Math.max(1, x1 - x0), f.mainH);
+      // Baseline strip keeps the span readable over busy waveforms.
+      ctx.globalAlpha = 0.4;
+      ctx.fillRect(x0, f.mainH - 3, Math.max(1, x1 - x0), 3);
+    }
+    ctx.restore();
+  },
+};
+
 // ── 60: triggers (scan-lines + triangles + NEW intensity circles) ───────────
 export const triggers: CanvasLayer = {
   id: 'triggers',
@@ -575,6 +603,6 @@ export const beatStrips: CanvasLayer = {
 };
 
 export const BUILDER_LAYERS: CanvasLayer[] = [
-  intensityBackground, rmsBands, avgLines, diamonds, librosaOverlays,
+  intensityBackground, blendSpans, rmsBands, avgLines, diamonds, librosaOverlays,
   musicMarks, triggers, calibration, playhead, beatStrips,
 ];

@@ -22,6 +22,11 @@ class MusicTrigger(BaseModel):
     # circle on the builder timeline; consumed by value bindings via the
     # "trigger_intensity" signal.
     intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Override Blend: rescale the fired event's ms timing (ramps + delays,
+    # proportionally) so its last ramp completes exactly at the NEXT enabled
+    # trigger (or song end). Beat-anchored spacing stays musical — only its
+    # ramps scale. See trigger_engine._apply_override_blend.
+    override_blend: bool = False
 
 
 class SongProfile(BaseModel):

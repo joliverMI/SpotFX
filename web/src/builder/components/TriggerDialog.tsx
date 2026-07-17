@@ -30,6 +30,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
   const [eventId, setEventId] = useState('');
   const [labels, setLabels] = useState('');
   const [intensity, setIntensity] = useState(0.5);
+  const [overrideBlend, setOverrideBlend] = useState(false);
 
   useEffect(() => {
     if (!editingId) return;
@@ -38,11 +39,13 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       setEventId(readSticky<string>('lastEventId', ''));
       setLabels('');
       setIntensity(0.5);
+      setOverrideBlend(false);
     } else if (existing) {
       setTsText(fmtMsTenths(existing.timestamp_ms));
       setEventId(existing.event_id);
       setLabels(existing.labels.join(', '));
       setIntensity(existing.intensity ?? 0.5);
+      setOverrideBlend(existing.override_blend ?? false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
@@ -86,7 +89,8 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
     mutateWorking((triggers) => {
       if (isNew) {
         triggers.push({ id: uuid(), timestamp_ms: ms, event_id: evId,
-                        labels: labelList, enabled: true, intensity });
+                        labels: labelList, enabled: true, intensity,
+                        override_blend: overrideBlend });
       } else {
         const t = triggers.find((tt) => tt.id === editingId);
         if (t) {
@@ -94,6 +98,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           t.event_id = evId;
           t.labels = labelList;
           t.intensity = intensity;
+          t.override_blend = overrideBlend;
         }
       }
     });
@@ -153,6 +158,17 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
             onChange={(e) => setIntensity(Math.max(0, Math.min(1, Number(e.target.value))))}
             style={{ width: 70, background: 'var(--bg)', color: 'var(--text)',
                      border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px' }} />
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+          title="Stretch or compress this event's ramps and delays so it completes exactly at the next enabled trigger (or song end). Beat-timed spacing stays on the beat — only its ramps scale.">
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>Blend ⤳</span>
+          <input type="checkbox" checked={overrideBlend}
+            onChange={(e) => setOverrideBlend(e.target.checked)} />
+          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            Override blend — ramp until the next trigger
+          </span>
+          <HelpLink topic="override-blend" title="Override Blend" />
         </label>
 
         <div style={{ display: 'flex', gap: 8 }}>

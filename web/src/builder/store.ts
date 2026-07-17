@@ -28,6 +28,10 @@ interface BuilderState {
   editingTriggerId: string | null; // 'new:<ms>' opens create dialog
   armedKey: string | null;
   activePaletteId: string | null;
+  /** Override Blend brush: "[" arms set, "]" arms clear; right-click a
+   * trigger to paint it. Escape disarms. Takes precedence over the armed
+   * palette event while active. */
+  blendBrush: 'set' | 'clear' | null;
   /** Multi-selected trigger ids for keyboard intensity editing. */
   selectedIds: string[];
   lastSelectedId: string | null;
@@ -54,6 +58,7 @@ interface BuilderState {
   setSelection: (ids: string[], last?: string | null) => void;
   setArmedKey: (k: string | null) => void;
   setActivePaletteId: (id: string | null) => void;
+  setBlendBrush: (b: 'set' | 'clear' | null) => void;
   setTriggerPreviewOffset: (ms: number) => void;
   setCalibrationTargets: (ms: number[]) => void;
 
@@ -86,6 +91,7 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   editingTriggerId: null,
   armedKey: null,
   activePaletteId: null,
+  blendBrush: null,
   selectedIds: [],
   lastSelectedId: null,
   undoStack: [],
@@ -132,6 +138,7 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
     set({ selectedIds: ids, lastSelectedId: last !== undefined ? last : ids[ids.length - 1] ?? null }),
   setArmedKey: (k) => set({ armedKey: k }),
   setActivePaletteId: (id) => set({ activePaletteId: id }),
+  setBlendBrush: (b) => set({ blendBrush: b }),
   setTriggerPreviewOffset: (ms) => set({ triggerPreviewOffsetMs: ms }),
   setCalibrationTargets: (ms) => set({ calibrationTargetsMs: ms }),
 

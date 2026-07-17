@@ -171,6 +171,7 @@ export default function BuilderPage() {
 
   const canUndo = useBuilderStore((s) => s.undoStack.length > 0);
   const canRedo = useBuilderStore((s) => s.redoStack.length > 0);
+  const blendBrush = useBuilderStore((s) => s.blendBrush);
   const [beatTip, setBeatTip] = useState<{ ms: number; values: Record<string, number> } | null>(null);
   const [shiftOpen, setShiftOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -217,6 +218,18 @@ export default function BuilderPage() {
         title="Timeline"
         headerExtra={
           <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+            {blendBrush && (
+              <span
+                title="Override Blend brush armed — right-click triggers to apply; Esc or re-press to disarm"
+                style={{
+                  padding: '1px 8px', borderRadius: 10, fontSize: 11,
+                  background: blendBrush === 'set' ? 'rgba(29,185,84,0.25)' : 'rgba(231,76,60,0.25)',
+                  border: '1px solid var(--border)', color: 'var(--text)',
+                }}
+              >
+                ⤳ {blendBrush === 'set' ? 'paint blend [' : 'clear blend ]'}
+              </span>
+            )}
             <button disabled={!canUndo} title="Undo (Ctrl+Z)"
               onClick={() => useBuilderStore.getState().undo()}>
               ↶
