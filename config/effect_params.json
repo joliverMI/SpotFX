@@ -1,11 +1,11 @@
 {
   "categories": {
-    "Matrix":  { "virtuals": ["crystal-mapper"],                           "effects": ["radial","noise","concentric","equalizer2d","blender"] },
+    "Matrix":  { "virtuals": ["crystal-mapper"],                           "effects": ["radial","noise","concentric","equalizer2d","blender","keybeat2d","gifplayer"] },
     "Strips":  { "virtuals": ["strip-effect","radial-dummy"],              "effects": ["melt","power"] },
     "Singles": { "virtuals": ["single-color-effect"],                      "effects": ["power"] }
   },
   "morph": {
-    "supported_effects": ["power", "melt", "radial", "equalizer2d"],
+    "supported_effects": ["power", "melt", "radial", "equalizer2d", "keybeat2d"],
     "aspect_labels": {
       "shape": "Shape",
       "effect": "Effect",
@@ -141,6 +141,48 @@
         "source_virtual": "radial-dummy"
       }
     },
-    "blender": {}
+    "blender": {},
+    "keybeat2d": {
+      "params": {
+        "image_location":     { "label":"Dance GIF",   "type":"string",  "smooth":false, "options_source":"gif_assets", "resets_effect":true,
+                                "note":"LedFX asset path (spotfx/dancer/*.gif). ALWAYS patch together with beat_frames" },
+        "beat_frames":        { "label":"Beat Frames", "type":"string",  "smooth":false, "resets_effect":true,
+                                "note":"Frame indices that land on beats; comes from the gifsmith manifest" },
+        "tint":               { "label":"Dancer Color","type":"color",   "smooth":true,                   "aspect":"color" },
+        "image_brightness":   { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0.1,"max":3.0, "aspect":"brightness", "aspect_scale":1.0 },
+        "stretch_horizontal": { "label":"Dancer Width",  "type":"integer","smooth":true, "min":1,"max":200,  "aspect":"shape" },
+        "stretch_vertical":   { "label":"Dancer Height", "type":"integer","smooth":true, "min":1,"max":200,  "aspect":"shape" },
+        "center_horizontal":  { "label":"Dancer X",    "type":"integer", "smooth":true, "min":-95,"max":95, "scale_offset":true, "aspect":"shape" },
+        "center_vertical":    { "label":"Dancer Y",    "type":"integer", "smooth":true, "min":-95,"max":95, "scale_offset":true, "aspect":"shape" },
+        "half_beat":          { "label":"Half Beat",   "type":"toggle",  "smooth":false,                  "aspect":"reactivity" },
+        "ping_pong":          { "label":"Ping Pong",   "type":"toggle",  "smooth":false,                  "aspect":"shape" },
+        "flip_horizontal":    { "label":"Flip",        "type":"toggle",  "smooth":false,                  "aspect":"shape" },
+        "force_fit":          { "label":"Force Fit",   "type":"toggle",  "smooth":false },
+        "keep_aspect_ratio":  { "label":"Keep Aspect", "type":"toggle",  "smooth":false }
+      },
+      "defaults": {
+        "image_location":     "spotfx/dancer/dancer_basic.gif",
+        "beat_frames":        "0 3 6 9 12 15 18 21",
+        "tint":               "#ffffff",
+        "image_brightness":   1.0,
+        "force_fit":          true,
+        "keep_aspect_ratio":  false,
+        "stretch_horizontal": 100,
+        "stretch_vertical":   100,
+        "center_horizontal":  0,
+        "center_vertical":    0
+      }
+    },
+    "gifplayer": {
+      "params": {
+        "image_location": { "label":"Dance GIF", "type":"string",  "smooth":false, "options_source":"gif_assets", "resets_effect":true },
+        "gif_fps":        { "label":"GIF FPS",   "type":"integer", "smooth":true,  "min":1,"max":60, "aspect":"reactivity" },
+        "bounce":         { "label":"Ping Pong", "type":"toggle",  "smooth":false, "aspect":"shape" }
+      },
+      "defaults": {
+        "image_location": "spotfx/dancer/dancer_basic.gif",
+        "gif_fps":        10
+      }
+    }
   }
 }

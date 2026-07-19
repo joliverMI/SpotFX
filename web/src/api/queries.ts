@@ -39,15 +39,35 @@ export function useScenes() {
 
 export interface ParamLabel {
   label: string;
-  type: string; // numeric | color | toggle | gradient | polar | move_xy | move_polar
+  type: string; // numeric | color | toggle | gradient | polar | move_xy | move_polar | string
   min: number | null;
   max: number | null;
+  options_source?: string | null; // e.g. "gif_assets" → populate a dropdown
 }
 
 export function useParamLabels() {
   return useQuery({
     queryKey: ['param-labels'],
     queryFn: () => apiGet<ParamLabel[]>('/effect-params/labels'),
+    staleTime: 60_000,
+  });
+}
+
+export interface GifAsset {
+  id: string;
+  path: string;
+  style?: string;
+  energy?: string;
+  frames?: number;
+  beat_frames?: string;
+  big_variant?: string;
+  uploaded: boolean;
+}
+
+export function useGifAssets() {
+  return useQuery({
+    queryKey: ['gif-assets'],
+    queryFn: () => apiGet<{ assets: GifAsset[] }>('/gif-assets'),
     staleTime: 60_000,
   });
 }

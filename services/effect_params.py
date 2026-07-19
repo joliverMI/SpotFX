@@ -87,16 +87,17 @@ def _collect_labels(effect_list: list[str]) -> list[dict]:
     for eff in effect_list:
         for name, meta in _CONFIG.get("effects", {}).get(eff, {}).get("params", {}).items():
             lbl = meta["label"]
-            if lbl not in seen and meta["type"] in ("numeric", "integer", "toggle", "color", "gradient", "polar", "move_xy", "move_polar"):
+            if lbl not in seen and meta["type"] in ("numeric", "integer", "toggle", "color", "gradient", "polar", "move_xy", "move_polar", "string"):
                 seen.add(lbl)
                 out.append({
-                    "label":        lbl,
-                    "type":         meta["type"],
-                    "smooth":       meta.get("smooth", False),
-                    "min":          meta.get("min"),
-                    "max":          meta.get("max"),
-                    "flip_sign":    meta.get("flip_sign", False),
-                    "scale_offset": meta.get("scale_offset", False),
+                    "label":          lbl,
+                    "type":           meta["type"],
+                    "smooth":         meta.get("smooth", False),
+                    "min":            meta.get("min"),
+                    "max":            meta.get("max"),
+                    "flip_sign":      meta.get("flip_sign", False),
+                    "scale_offset":   meta.get("scale_offset", False),
+                    "options_source": meta.get("options_source"),
                 })
     return out
 

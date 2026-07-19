@@ -374,6 +374,49 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
 
+  /* ── Matrix dancers / GIF effects ────────────────────────────── */
+  {
+    id: 'matrix-gifs',
+    title: 'Matrix Dancers & GIF Effects',
+    keywords: 'dancing stick figure gif keybeat animation matrix crystal dancer asset',
+    intro:
+      'Animated GIFs (like the dancing stick figure) run on matrix devices via LedFX\'s keybeat2d effect: frames tagged as "beat frames" land on musical beats and LedFX interpolates between them, so the figure dances to the music with no per-beat traffic from SpotFX. Silence freezes the dance.',
+    entries: [
+      {
+        id: 'gif-params',
+        title: 'Dancer parameters',
+        keywords: 'dance gif beat frames tint dancer color position stretch half beat',
+        table: [
+          ['Dance GIF', 'Which asset plays (dropdown lists the manifest; "(missing!)" = not uploaded to LedFX). Always change together with Beat Frames.'],
+          ['Beat Frames', 'Frame indices that land on beats — comes from the asset manifest; never hand-edit for stock dances.'],
+          ['Dancer Color', 'Runtime tint of the white master GIF (keybeat2d tint param). Ramps smoothly.'],
+          ['Dancer X / Y', 'Position offset on the matrix (% of width/height).'],
+          ['Dancer Width / Height', 'Stretch (100 = fit). Used by the flare stretch burst.'],
+          ['Half Beat', 'Dance at half speed — nice for mellow sections.'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'gif-dancer-event',
+        title: 'The "Dancer" scene',
+        keywords: 'scene update flare big move fallback burst style disco wave',
+        body: [
+          'The seeded "Dancer" Scene Update switches the Matrix to keybeat2d (First lane). Scene updates (Rest lane) randomly swap dance style (basic / disco / wave), shuffle position, toggle half-beat or flip, or recolor. Shape/Combo flares fire a BIG move — an exaggerated 4-beat GIF burst or a stretch burst — using a "Fallback (s)" burst: LedFX itself restores whatever was dancing before after the burst, so the normal dance always comes back. Color flares change the dancer tint.',
+          'Re-seed or update with scripts/seed_dancer_event.py.',
+        ],
+      },
+      {
+        id: 'gif-assets',
+        title: 'Creating new dance GIFs (agents)',
+        keywords: 'gifsmith toolkit render preview publish poses skill claude',
+        body: [
+          'Assets are authored procedurally with the gifsmith toolkit (tools/gifsmith; see .claude/skills/led-gif-assets/SKILL.md): compose poses → render → mask-aware preview → publish to LedFX\'s asset store + the manifest (storage/gif_assets.json). The hex matrix only lights ~1/3 of its grid cells, so the toolkit previews assets through the real-pixel mask — ask Claude to "add a new dance style" and it takes it from there.',
+          'Fallback burst editing: on a ledfx_effect_param action, setting "Fallback (s)" makes it fire as a burst that auto-reverts.',
+        ],
+      },
+    ],
+  },
+
   /* ── Now Playing ─────────────────────────────────────────────── */
   {
     id: 'nowplaying',

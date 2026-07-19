@@ -143,6 +143,9 @@ export interface LedFxEffectParamAction extends ActionBase {
   category: string | null;
   params: EffectParamChange[];
   ramp_ms: Bindable<number> | null;
+  // If set: fire as a full-config POST with LedFX server-side fallback — the
+  // prior effect auto-restores after this many seconds (flare bursts).
+  fallback_s?: number | null;
 }
 
 export interface MorphStepAction extends ActionBase {

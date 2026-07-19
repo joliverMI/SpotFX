@@ -1,0 +1,164 @@
+{
+  "assets": {
+    "dancer_basic": {
+      "beat_frames": "0 3 6 9 12 15 18 21",
+      "big_variant": "dancer_basic_big",
+      "device_overrides": {
+        "crystal-mapper": {
+          "center_horizontal": 0,
+          "center_vertical": 0,
+          "force_fit": true,
+          "keep_aspect_ratio": false,
+          "stretch_horizontal": 100,
+          "stretch_vertical": 100
+        }
+      },
+      "energy": "normal",
+      "frames": 24,
+      "half_beat": false,
+      "kind": "dance",
+      "master_color": "#ffffff",
+      "master_file": "tools/gifsmith/masters/dancer_basic.gif",
+      "path": "spotfx/dancer/dancer_basic.gif",
+      "ping_pong": false,
+      "style": "basic",
+      "tags": [
+        "dancer",
+        "stick-figure"
+      ]
+    },
+    "dancer_basic_big": {
+      "beat_frames": "0 4 8 12",
+      "device_overrides": {
+        "crystal-mapper": {
+          "center_horizontal": 0,
+          "center_vertical": 0,
+          "force_fit": true,
+          "keep_aspect_ratio": false,
+          "stretch_horizontal": 100,
+          "stretch_vertical": 100
+        }
+      },
+      "energy": "big",
+      "frames": 16,
+      "half_beat": false,
+      "kind": "dance",
+      "master_color": "#ffffff",
+      "master_file": "tools/gifsmith/masters/dancer_basic_big.gif",
+      "path": "spotfx/dancer/dancer_basic_big.gif",
+      "ping_pong": false,
+      "style": "basic",
+      "tags": [
+        "dancer",
+        "stick-figure"
+      ]
+    },
+    "dancer_disco": {
+      "beat_frames": "0 3 6 9 12 15 18 21",
+      "big_variant": "dancer_disco_big",
+      "device_overrides": {
+        "crystal-mapper": {
+          "center_horizontal": 0,
+          "center_vertical": 0,
+          "force_fit": true,
+          "keep_aspect_ratio": false,
+          "stretch_horizontal": 100,
+          "stretch_vertical": 100
+        }
+      },
+      "energy": "normal",
+      "frames": 24,
+      "half_beat": false,
+      "kind": "dance",
+      "master_color": "#ffffff",
+      "master_file": "tools/gifsmith/masters/dancer_disco.gif",
+      "path": "spotfx/dancer/dancer_disco.gif",
+      "ping_pong": false,
+      "style": "disco",
+      "tags": [
+        "dancer",
+        "stick-figure"
+      ]
+    },
+    "dancer_disco_big": {
+      "beat_frames": "0 4 8 12",
+      "device_overrides": {
+        "crystal-mapper": {
+          "center_horizontal": 0,
+          "center_vertical": 0,
+          "force_fit": true,
+          "keep_aspect_ratio": false,
+          "stretch_horizontal": 100,
+          "stretch_vertical": 100
+        }
+      },
+      "energy": "big",
+      "frames": 16,
+      "half_beat": false,
+      "kind": "dance",
+      "master_color": "#ffffff",
+      "master_file": "tools/gifsmith/masters/dancer_disco_big.gif",
+      "path": "spotfx/dancer/dancer_disco_big.gif",
+      "ping_pong": false,
+      "style": "disco",
+      "tags": [
+        "dancer",
+        "stick-figure"
+      ]
+    },
+    "dancer_wave": {
+      "beat_frames": "0 3 6 9 12 15 18 21",
+      "big_variant": "dancer_wave_big",
+      "device_overrides": {
+        "crystal-mapper": {
+          "center_horizontal": 0,
+          "center_vertical": 0,
+          "force_fit": true,
+          "keep_aspect_ratio": false,
+          "stretch_horizontal": 100,
+          "stretch_vertical": 100
+        }
+      },
+      "energy": "normal",
+      "frames": 24,
+      "half_beat": false,
+      "kind": "dance",
+      "master_color": "#ffffff",
+      "master_file": "tools/gifsmith/masters/dancer_wave.gif",
+      "path": "spotfx/dancer/dancer_wave.gif",
+      "ping_pong": false,
+      "style": "wave",
+      "tags": [
+        "dancer",
+        "stick-figure"
+      ]
+    },
+    "dancer_wave_big": {
+      "beat_frames": "0 4 8 12",
+      "device_overrides": {
+        "crystal-mapper": {
+          "center_horizontal": 0,
+          "center_vertical": 0,
+          "force_fit": true,
+          "keep_aspect_ratio": false,
+          "stretch_horizontal": 100,
+          "stretch_vertical": 100
+        }
+      },
+      "energy": "big",
+      "frames": 16,
+      "half_beat": false,
+      "kind": "dance",
+      "master_color": "#ffffff",
+      "master_file": "tools/gifsmith/masters/dancer_wave_big.gif",
+      "path": "spotfx/dancer/dancer_wave_big.gif",
+      "ping_pong": false,
+      "style": "wave",
+      "tags": [
+        "dancer",
+        "stick-figure"
+      ]
+    }
+  },
+  "version": 1
+}

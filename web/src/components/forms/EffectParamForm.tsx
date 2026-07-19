@@ -1,7 +1,7 @@
 /** Full-fidelity form for ledfx_effect_param — all six param kinds:
  * numeric (+flip_sign), toggle, color, gradient, polar, move_xy, move_polar. */
 import type { EffectParamChange, LedFxEffectParamAction, MorphScope } from '../../types/events';
-import { useParamLabels } from '../../api/queries';
+import { useGifAssets, useParamLabels } from '../../api/queries';
 import { Checkbox, ColorInput, NumberInput, Row, Select, TextInput } from './inputs';
 import { ParentScopeToggle } from './ScopePicker';
 import SearchSelect from './SearchSelect';
@@ -29,6 +29,7 @@ export default function EffectParamForm({
   update: (fn: (a: LedFxEffectParamAction) => void) => void;
 }) {
   const { data: labels } = useParamLabels();
+  const { data: gifAssets } = useGifAssets();
   const labelInfo = (name: string) => labels?.find((l) => l.label === name);
   const setP = (i: number, fn: (p: EffectParamChange) => void) =>
     update((a) => { fn(a.params[i]); });
@@ -54,6 +55,10 @@ export default function EffectParamForm({
       </Row>
       <Row label="Ramp (ms)" help="Blank = settings default, 0 = instant">
         <BindableNumber value={action.ramp_ms} nullable onChange={(v) => update((a) => { a.ramp_ms = v; })} />
+      </Row>
+      <Row label="Fallback (s)" help="If set: fires as a burst — LedFX restores the prior effect after this many seconds (used for flare big moves). Ramp is ignored.">
+        <NumberInput value={action.fallback_s ?? null} nullable min={0.5} max={60} step={0.5} width={90}
+          onChange={(v) => update((a) => { a.fallback_s = v; })} />
       </Row>
 
       <div className="card-title" style={{ marginTop: 10 }}>Parameters</div>
@@ -109,6 +114,27 @@ export default function EffectParamForm({
                   placeholder="CSS gradient string"
                   width={280}
                 />
+              )}
+              {kind === 'string' && (
+                info?.options_source === 'gif_assets' && gifAssets?.assets.length ? (
+                  <SearchSelect
+                    value={p.string_value ?? ''}
+                    onChange={(v) => setP(i, (q) => { q.string_value = v || null; })}
+                    options={gifAssets.assets.map((a) => ({
+                      value: a.path,
+                      label: `${a.id}${a.uploaded ? '' : ' (missing!)'}`,
+                      group: a.energy === 'big' ? 'big moves' : 'dances',
+                    }))}
+                    width={260}
+                  />
+                ) : (
+                  <TextInput
+                    value={p.string_value ?? ''}
+                    onChange={(v) => setP(i, (q) => { q.string_value = v || null; })}
+                    placeholder={p.param_label === 'Beat Frames' ? 'e.g. 0 3 6 9' : 'value'}
+                    width={260}
+                  />
+                )
               )}
               {kind === 'polar' && (
                 <>

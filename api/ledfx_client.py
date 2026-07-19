@@ -783,6 +783,63 @@ async def get_scenes() -> list[dict]:
     return [{"id": sid, **meta} for sid, meta in scenes_dict.items()]
 
 
+async def set_virtual_effect_fallback(
+    virtual_id: str, effect_type: str, config: dict, fallback_s: float
+) -> bool:
+    """POST a full effect config with LedFX's server-side fallback: the prior
+    effect+config auto-restores after fallback_s seconds. Used for flare
+    bursts (e.g. dancer big moves) — zero revert bookkeeping on our side.
+    Bypasses the coalescing bus (flares are rare, and coalescing a fallback
+    POST with a PUT patch would drop the revert)."""
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
+    resp = await _request(
+        "POST", f"/api/virtuals/{virtual_id}/effects",
+        json={"type": effect_type, "config": config, "fallback": fallback_s},
+        label=f"effect_fallback:{virtual_id}",
+    )
+    return resp is not None
+
+
+# ── Asset store (GIF assets for keybeat2d/gifplayer) ──────────────────────────
+# Not effect writes: they skip the capture-gate and use longer timeouts.
+
+async def upload_asset(dest_path: str, data: bytes, filename: str = "asset.gif") -> bool:
+    """Upload bytes into LedFX's asset store at a relative dest path
+    (e.g. 'spotfx/dancer/dancer_basic.gif'). Overwrites if present."""
+    resp = await _request(
+        "POST", "/api/assets",
+        files={"file": (filename, data, "image/gif")},
+        data={"path": dest_path},
+        timeout=httpx.Timeout(15.0),
+        label="asset_upload",
+    )
+    return resp is not None
+
+
+async def list_assets() -> list[dict]:
+    """List LedFX user assets (path/size/n_frames/... dicts). [] on failure."""
+    resp = await _request(
+        "GET", "/api/assets", timeout=httpx.Timeout(10.0), label="asset_list"
+    )
+    if resp is None:
+        return []
+    return (resp.json() or {}).get("assets", [])
+
+
+async def get_gif_frames(asset_path: str) -> int | None:
+    """Round-trip check: frame count of an asset as LedFX decodes it."""
+    resp = await _request(
+        "POST", "/api/get_gif_frames",
+        json={"path_url": asset_path},
+        timeout=httpx.Timeout(15.0),
+        label="gif_frames",
+    )
+    if resp is None:
+        return None
+    return (resp.json() or {}).get("frame_count")
+
+
 async def get_config() -> dict:
     """Fetch LedFX global config (GET /api/config). Returns {} on failure."""
     if _capture_in_progress():

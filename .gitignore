@@ -47,3 +47,4 @@ storage/lock_history.json
 storage/tune_history.json
 storage/tune_runs.log
 storage/tune_schedule.json
+build/

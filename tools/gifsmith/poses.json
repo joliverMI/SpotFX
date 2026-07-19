@@ -1,0 +1,31 @@
+{
+  "_README": "Named stick-figure poses. Angles in degrees. Limb angles are ABSOLUTE from straight-down; positive rotates OUTWARD for that side (90 = horizontal out, 180 = straight up, negative = inward across the body). torso is from straight-up, positive leans right. dx/dy shift the hip in figure-heights (positive dy = down). Any pose name can be suffixed with !mirror. Non-angle key 'tags' is ignored by the renderer.",
+
+  "idle": {"l_arm": 12, "r_arm": 12, "l_fore": 8, "r_fore": 8, "l_leg": 10, "r_leg": 10, "l_shin": 5, "r_shin": 5, "tags": ["neutral"]},
+
+  "sway_r": {"torso": 12, "dx": 0.05, "r_arm": 40, "r_fore": 30, "l_arm": 15, "l_fore": 10, "r_leg": 18, "l_leg": 4, "r_shin": 8, "l_shin": 2, "tags": ["groove"]},
+
+  "arms_up": {"l_arm": 165, "r_arm": 165, "l_fore": 175, "r_fore": 175, "l_leg": 12, "r_leg": 12, "l_shin": 6, "r_shin": 6, "tags": ["celebrate"]},
+
+  "arm_up_r": {"r_arm": 160, "r_fore": 172, "l_arm": 15, "l_fore": 10, "l_leg": 10, "r_leg": 10, "l_shin": 5, "r_shin": 5, "tags": ["celebrate"]},
+
+  "step_r": {"dy": 0.02, "r_leg": 35, "r_shin": 8, "l_leg": 6, "l_shin": 2, "l_arm": 25, "r_arm": 18, "l_fore": 18, "r_fore": 12, "torso": 4, "tags": ["step"]},
+
+  "clap": {"l_arm": 60, "r_arm": 60, "l_fore": -35, "r_fore": -35, "l_leg": 10, "r_leg": 10, "l_shin": 5, "r_shin": 5, "tags": ["accent"]},
+
+  "disco_point_r": {"r_arm": 135, "r_fore": 148, "l_arm": -18, "l_fore": -28, "torso": 8, "dx": 0.03, "r_leg": 14, "l_leg": 6, "r_shin": 6, "l_shin": 3, "tags": ["disco"]},
+
+  "hips_r": {"dx": 0.09, "torso": -8, "l_arm": 25, "r_arm": 35, "l_fore": 15, "r_fore": 25, "l_leg": 14, "r_leg": 8, "l_shin": 6, "r_shin": 4, "tags": ["disco", "groove"]},
+
+  "star_jump": {"dy": -0.12, "l_arm": 135, "r_arm": 135, "l_fore": 140, "r_fore": 140, "l_leg": 40, "r_leg": 40, "l_shin": 42, "r_shin": 42, "tags": ["big", "jump"]},
+
+  "jump_tuck": {"dy": -0.18, "l_arm": 168, "r_arm": 168, "l_fore": 178, "r_fore": 178, "l_leg": 55, "r_leg": 55, "l_shin": 100, "r_shin": 100, "tags": ["big", "jump"]},
+
+  "deep_squat": {"dy": 0.16, "l_leg": 70, "r_leg": 70, "l_shin": 0, "r_shin": 0, "l_arm": 88, "r_arm": 88, "l_fore": 92, "r_fore": 92, "tags": ["big", "low"]},
+
+  "wave_big_r": {"torso": -10, "dx": -0.04, "r_arm": 170, "r_fore": 158, "l_arm": 22, "l_fore": 14, "r_leg": 12, "l_leg": 8, "r_shin": 5, "l_shin": 4, "tags": ["big", "wave"]},
+
+  "kick_big_r": {"torso": -18, "r_leg": 72, "r_shin": 55, "l_leg": 5, "l_shin": 2, "l_arm": 120, "r_arm": 140, "l_fore": 130, "r_fore": 150, "dx": -0.05, "tags": ["big", "kick"]},
+
+  "disco_big_r": {"r_arm": 150, "r_fore": 165, "l_arm": -25, "l_fore": -35, "torso": 16, "dx": 0.06, "dy": -0.05, "r_leg": 22, "l_leg": 8, "r_shin": 10, "l_shin": 4, "tags": ["big", "disco"]}
+}

@@ -2878,7 +2878,7 @@ class TriggerEngine:
                             if change.polar_angle is not None and change.polar_radius is not None:
                                 polar_changes[vid] = (change.polar_angle, change.polar_radius, effect_type)
                             continue
-                        elif meta and meta.get("type") in ("color", "gradient"):
+                        elif meta and meta.get("type") in ("color", "gradient", "string"):
                             if change.string_value is not None:
                                 patch[pname] = change.string_value
                         elif meta and meta.get("sign_control"):
@@ -2953,6 +2953,18 @@ class TriggerEngine:
                         else:
                             patch[pname] = change.target_value
                 if not patch:
+                    continue
+                if action.fallback_s is not None:
+                    # Flare-style burst: POST the full merged config with LedFX's
+                    # server-side fallback so the prior effect auto-restores after
+                    # fallback_s seconds. Cache is left untouched — it keeps the
+                    # canonical (restored-to) state.
+                    merged = {**effect_cfg, **patch}
+                    instant_coros.append(
+                        ledfx_client.set_virtual_effect_fallback(
+                            vid, effect_type, merged, action.fallback_s
+                        )
+                    )
                     continue
                 # Booleans fire instantly; strings split into instant vs ramp by smooth flag; numerics can ramp
                 bool_patch = {k: v for k, v in patch.items() if isinstance(v, bool)}

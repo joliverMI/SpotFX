@@ -309,6 +309,9 @@ class LedFxEffectParamAction(BaseModel):
     category: str | None = None     # e.g. "Matrix" | "Strips" | "Singles"
     params: list[EffectParamChange] = Field(default_factory=list)
     ramp_ms: int | ValueBinding | None = None  # None = use settings.smooth_ramp_ms; 0 = instant
+    fallback_s: float | None = None  # if set: POST full merged config with LedFX server-side
+                                     # fallback — prior effect auto-restores after this many
+                                     # seconds (flare bursts; ramp_ms is ignored)
 
 
 class RandomOption(BaseModel):
