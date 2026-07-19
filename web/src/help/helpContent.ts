@@ -418,6 +418,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Field Radius', 'Where blobs spawn, as a fraction of the panel edge.'],
           ['Trail Length', '0 = crisp dots, 1 = long comet smear.'],
           ['Spawn Rate / Beat Burst', 'Continuous blobs per second + extras on each beat.'],
+          ['Max Blobs / Edge Speed', 'Density controls: hard cap on live blobs, and rim speed as a fraction of center speed (low = blobs linger and crowd the rim).'],
           ['Audio Spawn / Audio Speed', 'How much the chosen Audio Band boosts spawning / infall speed.'],
           ['Color Mode', 'band: lows/mids/highs pick gradient positions (Color Spin drifts the mapping over time); random: uniform gradient sampling.'],
         ],
