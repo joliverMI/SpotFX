@@ -152,6 +152,45 @@ async def main() -> None:
           any(c[0] == "gradient_ramp" and c[3].get("tint") == "#ffd020" for c in calls),
           repr(calls))
 
+    # 3b — blackhole params: numeric ramp, gradient ramp, toggle
+    state.ledfx_virtual_cache[VID] = {
+        "effect": {"type": "blackhole", "config": {"swirl": 1.2, "reverse": False}},
+        "config": {},
+    }
+    calls.clear()
+    rec_ramps: list[tuple] = []
+
+    def rec_ramp_effect_params(vid, etype, patch, ramp_ms, step_ms=25):
+        rec_ramps.append((vid, etype, dict(patch), ramp_ms))
+        async def _noop():
+            pass
+        return _noop()
+
+    ledfx_client.ramp_effect_params = rec_ramp_effect_params
+    await engine._execute_action(LedFxEffectParamAction(
+        virtual_id=VID, ramp_ms=500,
+        params=[EffectParamChange(param_label="Swirl", target_value=-2.0)],
+    ))
+    check("blackhole Swirl ramps as numeric",
+          any(p.get("swirl") == -2.0 for _, _, p, _ in rec_ramps), repr(rec_ramps))
+    calls.clear()
+    await engine._execute_action(LedFxEffectParamAction(
+        virtual_id=VID, ramp_ms=400,
+        params=[EffectParamChange(
+            param_label="Gradient",
+            string_value="linear-gradient(90deg, rgb(0,255,0) 0%, rgb(0,0,255) 100%)",
+        )],
+    ))
+    check("blackhole Gradient routes to gradient ramp",
+          any(c[0] == "gradient_ramp" and "gradient" in c[3] for c in calls), repr(calls))
+    calls.clear()
+    await engine._execute_action(LedFxEffectParamAction(
+        virtual_id=VID,
+        params=[EffectParamChange(param_label="Reverse Flow", toggle_action="toggle")],
+    ))
+    check("blackhole Reverse Flow toggles instantly",
+          any(c[0] == "put" and c[3].get("reverse") is True for c in calls), repr(calls))
+
     # 4 — the seeded Dancer event parses with the expected lane shapes
     from services import profile_manager
     dancer = next((e for e in profile_manager.list_events() if e.name == "Dancer"), None)

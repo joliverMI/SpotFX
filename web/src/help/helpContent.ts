@@ -377,8 +377,8 @@ export const HELP_SECTIONS: HelpSection[] = [
   /* ── Matrix dancers / GIF effects ────────────────────────────── */
   {
     id: 'matrix-gifs',
-    title: 'Matrix Dancers & GIF Effects',
-    keywords: 'dancing stick figure gif keybeat animation matrix crystal dancer asset',
+    title: 'Matrix Dancers, GIFs & Blackhole',
+    keywords: 'dancing stick figure gif keybeat animation matrix crystal dancer asset blackhole',
     intro:
       'Animated GIFs (like the dancing stick figure) run on matrix devices via LedFX\'s keybeat2d effect: frames tagged as "beat frames" land on musical beats and LedFX interpolates between them, so the figure dances to the music with no per-beat traffic from SpotFX. Silence freezes the dance.',
     entries: [
@@ -404,6 +404,24 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The seeded "Dancer" Scene Update switches the Matrix to keybeat2d (First lane). Scene updates (Rest lane) randomly swap dance style (basic / disco / wave), shuffle position, toggle half-beat or flip, or recolor. Shape/Combo flares fire a BIG move — an exaggerated 4-beat GIF burst or a stretch burst — using a "Fallback (s)" burst: LedFX itself restores whatever was dancing before after the burst, so the normal dance always comes back. Color flares change the dancer tint.',
           'Re-seed or update with scripts/seed_dancer_event.py.',
         ],
+      },
+      {
+        id: 'matrix-blackhole',
+        title: 'Blackhole effect',
+        keywords: 'swirl vortex spiral blobs gradient infall reverse trail comet',
+        body: [
+          'A custom LedFX matrix effect: gradient-colored blobs spawn at the perimeter, spiral into the center, speed up and stretch into comet trails as they fall, and blend where they overlap. Fully audio-reactive without SpotFX traffic.',
+        ],
+        table: [
+          ['Swirl', 'Spiral amount; sign sets direction, 0 = straight infall.'],
+          ['Reverse Flow', 'Blobs erupt from the center outward instead.'],
+          ['Field Radius', 'Where blobs spawn, as a fraction of the panel edge.'],
+          ['Trail Length', '0 = crisp dots, 1 = long comet smear.'],
+          ['Spawn Rate / Beat Burst', 'Continuous blobs per second + extras on each beat.'],
+          ['Audio Spawn / Audio Speed', 'How much the chosen Audio Band boosts spawning / infall speed.'],
+          ['Color Mode', 'band: lows/mids/highs pick gradient positions (Color Spin drifts the mapping over time); random: uniform gradient sampling.'],
+        ],
+        kbd: false,
       },
       {
         id: 'gif-assets',
