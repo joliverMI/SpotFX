@@ -311,12 +311,95 @@ def _breaker_is_open() -> bool:
     return _breaker_open_until > time.monotonic()
 
 
+# ── Post-outage state re-assert ───────────────────────────────────────────────
+# When LedFX comes back after being down (crash, watchdog restart), it boots
+# from its own lazily-saved config — often minutes stale. SpotFX's virtual
+# cache holds the pre-outage truth, so we push that back: every polled virtual
+# gets its cached effect re-POSTed, then the cache is refreshed and the source
+# watchdog runs once. Rate-limited; snapshot is taken synchronously at
+# schedule time so post-restart polls can't overwrite the pre-outage state
+# before we use it.
+
+_REASSERT_MIN_OUTAGE_S = 8.0
+_REASSERT_MIN_INTERVAL_S = 60.0
+_last_reassert = 0.0
+
+
+def _schedule_reassert(reason: str) -> None:
+    global _last_reassert
+    now = time.monotonic()
+    if now - _last_reassert < _REASSERT_MIN_INTERVAL_S:
+        return
+    _last_reassert = now
+    snapshot = {
+        vid: {
+            "type": eff.get("type"),
+            "config": dict(eff.get("config") or {}),
+        }
+        for vid, vstate in state.ledfx_virtual_cache.items()
+        if (eff := (vstate or {}).get("effect") or {}).get("type")
+    }
+    if not snapshot:
+        return
+    try:
+        asyncio.get_running_loop().create_task(
+            _reassert_effects(snapshot, reason)
+        )
+    except RuntimeError:
+        pass  # no running loop (offline tooling) — nothing to recover
+
+
+async def _reassert_effects(snapshot: dict, reason: str) -> None:
+    # Wait until the API actually answers (no-op if already up).
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        try:
+            resp = await _get_probe_client().get("/api/info")
+            if resp.status_code == 200:
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+    else:
+        logger.warning("LedFX recovery: API never came back — skipping re-assert")
+        return
+    logger.warning(
+        "LedFX recovery: re-asserting %d cached effects (%s)",
+        len(snapshot), reason,
+    )
+    # force_allow: a LedFX restart mid-song must be repaired even while the
+    # capture gate is muting ordinary writes — a dark room is worse than a
+    # few HTTP calls during capture.
+    with force_allow():
+        for vid, eff in snapshot.items():
+            await post_virtual_effect(vid, eff["type"], eff["config"])
+        # Refresh the cache from live LedFX, then let the watchdog tidy up.
+        for vid in snapshot:
+            data = await get_virtual(vid)
+            if data:
+                state.ledfx_virtual_cache[vid] = data.get(vid, data)
+        try:
+            from services import source_watchdog
+            await source_watchdog.check_and_repair()
+            await source_watchdog.check_and_repair()  # second pass clears strikes
+        except Exception as exc:
+            logger.debug("LedFX recovery watchdog pass failed: %r", exc)
+        await drain_bus()
+    logger.warning("LedFX recovery: re-assert complete")
+
+
 def _on_success() -> None:
     global _consecutive_failures, _breaker_open_until, _first_failure_at
     if _breaker_open_until:                 # was open or half-open → recovered
+        outage_s = time.monotonic() - _first_failure_at if _first_failure_at else 0.0
         _breaker_open_until = 0.0
         _record_event("recovered")
         logger.info("LedFX circuit recovered after %d consecutive failures", _consecutive_failures)
+        if outage_s >= _REASSERT_MIN_OUTAGE_S:
+            # LedFX was down long enough to have restarted — it boots from its
+            # lazily-saved config, which can be minutes stale (broken radial
+            # sources, wrong effects). Re-assert OUR pre-outage state.
+            _schedule_reassert(f"outage {outage_s:.0f}s")
     _consecutive_failures = 0
     _first_failure_at = 0.0
 
@@ -1121,16 +1204,43 @@ async def poll_virtual_states() -> None:
     while True:
         if _server_tween_supported is None:
             await refresh_capabilities()
+        if _capture_in_progress():
+            # Captures run song-to-song during playback, and the gate mutes
+            # normal polling + writes — but a broken radial source must still
+            # heal WHILE music plays (that's when effects switch and break).
+            # Light pass: refresh only the source-consumer chain (a couple of
+            # GETs) and let the watchdog repair inside force_allow().
+            chain: set[str] = set()
+            for vid, vstate in state.ledfx_virtual_cache.items():
+                cfg = ((vstate or {}).get("effect") or {}).get("config") or {}
+                if "source_virtual" in cfg:
+                    chain.add(vid)
+                    src = cfg.get("source_virtual")
+                    if src and src != "unknown":
+                        chain.add(src)
+            if chain:
+                try:
+                    with force_allow():
+                        for vid in chain:
+                            data = await get_virtual(vid)
+                            if data:
+                                state.ledfx_virtual_cache[vid] = data.get(vid, data)
+                        from services import source_watchdog
+                        await source_watchdog.check_and_repair()
+                        await drain_bus()  # coalesced repairs must land inside the gate
+                except Exception as exc:
+                    logger.debug("source watchdog capture-pass failed: %r", exc)
+            await asyncio.sleep(5)
+            continue
         for vid in _get_polled_virtuals():
             data = await get_virtual(vid)
             if data:
                 state.ledfx_virtual_cache[vid] = data.get(vid, data)
-        if not _capture_in_progress():
-            try:
-                from services import source_watchdog
-                await source_watchdog.check_and_repair()
-            except Exception as exc:
-                logger.debug("source watchdog pass failed: %r", exc)
+        try:
+            from services import source_watchdog
+            await source_watchdog.check_and_repair()
+        except Exception as exc:
+            logger.debug("source watchdog pass failed: %r", exc)
         await asyncio.sleep(5)
 
 
@@ -1149,6 +1259,9 @@ async def _restart_ledfx_service() -> None:
         if proc.returncode == 0:
             logger.warning("LedFX watchdog: ledfx service restarted")
             _record_event("ledfx_restart", "watchdog: sustained high RTT")
+            # The cache still holds pre-restart truth (polls fail while LedFX
+            # is down, so nothing overwrote it) — push it back once LedFX is up.
+            _schedule_reassert("watchdog restart")
         else:
             logger.error("LedFX watchdog: ledfx restart failed (rc=%s): %s",
                          proc.returncode, (err or b"").decode()[:200])
