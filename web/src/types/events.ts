@@ -63,11 +63,17 @@ export interface AspectValue {
   x_offset?: Bindable<number> | null;
   y_offset?: Bindable<number> | null;
   effect_type?: string | null;
+  // blackhole-only shape sub-fields (ignored by effects without the params)
+  swirl?: Bindable<number> | null;
+  horizon_scale?: Bindable<number> | null;
+  reverse?: Bindable<boolean | 'toggle'> | null;
   star_nudge?: NumericNudge | null;
   edges_nudge?: NumericNudge | null;
   twist_nudge?: NumericNudge | null;
   x_offset_nudge?: NumericNudge | null;
   y_offset_nudge?: NumericNudge | null;
+  swirl_nudge?: NumericNudge | null;
+  horizon_scale_nudge?: NumericNudge | null;
 }
 
 export type MorphAspect =

@@ -312,7 +312,7 @@ def _patch_shape(
     name_set = set(shape_params)
     is_nudge = (mode == "nudge")
 
-    # Booleans (polygon, flip) — always absolute-mode tri-state regardless of target.mode
+    # Booleans (polygon, flip, reverse) — always absolute-mode tri-state regardless of target.mode
     if val.polygon is not None and "polygon" in name_set:
         out["polygon"] = _resolve_bool_aspect(val.polygon, current_config.get("polygon", False))
     if val.flip is not None:
@@ -321,11 +321,13 @@ def _patch_shape(
             if candidate in name_set:
                 out[candidate] = _resolve_bool_aspect(val.flip, current_config.get(candidate, False))
                 break
+    if val.reverse is not None and "reverse" in name_set:  # blackhole flow direction
+        out["reverse"] = _resolve_bool_aspect(val.reverse, current_config.get("reverse", False))
 
     # Numerics: nudge if mode=nudge AND nudge spec present; else absolute.
     # `scale_offset` params (x_offset / y_offset) live in frontend −1..1 space
     # on the AspectValue but in LedFX 0..1 space on the wire — convert at write.
-    for key in ("star", "edges", "twist", "x_offset", "y_offset"):
+    for key in ("star", "edges", "twist", "x_offset", "y_offset", "swirl", "horizon_scale"):
         if key not in name_set:
             continue
         meta = _ep.get_param_meta(effect_type, key) or {}
@@ -343,8 +345,18 @@ def _patch_shape(
             if scale_offset:
                 # frontend −1..1 → LedFX 0..1
                 out[key] = round(float(abs_val) / 2.0 + 0.5, 4)
+            elif key == "edges":
+                out[key] = int(abs_val)
             else:
-                out[key] = int(abs_val) if key == "edges" else abs_val
+                # clamp to the param's registered range so bound/edge values
+                # can't fail LedFX schema validation (e.g. horizon_scale ≤ 0.8)
+                lo, hi = meta.get("min"), meta.get("max")
+                v = float(abs_val)
+                if lo is not None:
+                    v = max(lo, v)
+                if hi is not None:
+                    v = min(hi, v)
+                out[key] = round(v, 4)
     return out
 
 

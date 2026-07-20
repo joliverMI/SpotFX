@@ -141,6 +141,10 @@ class AspectValue(BaseModel):
     edges:        int | ValueBinding | None = None
     twist:        float | ValueBinding | None = None
     flip:         Optional[bool | Literal["toggle"] | ValueBinding] = None
+    # blackhole-only shape sub-fields (ignored by effects without the params)
+    swirl:          float | ValueBinding | None = None
+    horizon_scale:  float | ValueBinding | None = None
+    reverse:        Optional[bool | Literal["toggle"] | ValueBinding] = None
     # x_offset / y_offset live in the FRONTEND −1..1 space. The compiler converts
     # to LedFX's 0..1 storage via the `scale_offset` flag in effect_params.json.
     x_offset:     float | ValueBinding | None = None
@@ -154,6 +158,8 @@ class AspectValue(BaseModel):
     twist_nudge:    NumericNudge | None = None
     x_offset_nudge: NumericNudge | None = None
     y_offset_nudge: NumericNudge | None = None
+    swirl_nudge:         NumericNudge | None = None
+    horizon_scale_nudge: NumericNudge | None = None
 
 
 MorphAspect = Literal[

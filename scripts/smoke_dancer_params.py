@@ -191,6 +191,46 @@ async def main() -> None:
     check("blackhole Reverse Flow toggles instantly",
           any(c[0] == "put" and c[3].get("reverse") is True for c in calls), repr(calls))
 
+    # 3c — morph_step Shape aspect drives blackhole swirl/horizon/reverse
+    from models.music_event import (
+        AspectValue,
+        MorphScope,
+        MorphStepAction,
+        MorphTarget,
+    )
+    state.ledfx_virtual_cache[VID] = {
+        "effect": {
+            "type": "blackhole",
+            "config": {"swirl": 3.0, "reverse": True, "horizon_scale": 0.25},
+        },
+        "config": {},
+    }
+    calls.clear()
+    rec_ramps.clear()
+    await engine._execute_action(MorphStepAction(
+        ramp_ms=300,
+        targets=[MorphTarget(
+            scope=MorphScope(virtual_ids=[VID]),
+            aspect="shape",
+            absolute_value=AspectValue(
+                swirl=-4.0, horizon_scale=0.9, reverse="toggle"
+            ),
+        )],
+    ))
+    ramp_patches: dict = {}
+    for _, _, p, _ in rec_ramps:
+        ramp_patches.update(p)
+    put_patches: dict = {}
+    for c in calls:
+        if c[0] == "put":
+            put_patches.update(c[3])
+    check("morph shape ramps blackhole swirl",
+          ramp_patches.get("swirl") == -4.0, repr(rec_ramps))
+    check("morph shape clamps horizon_scale to its 0.8 max",
+          ramp_patches.get("horizon_scale") == 0.8, repr(rec_ramps))
+    check("morph shape toggles reverse (True -> False)",
+          put_patches.get("reverse") is False, repr(calls))
+
     # 4 — the seeded Dancer event parses with the expected lane shapes
     from services import profile_manager
     dancer = next((e for e in profile_manager.list_events() if e.name == "Dancer"), None)

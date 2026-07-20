@@ -186,6 +186,9 @@ _ASPECT_FIELDS = (
     ("y_offset", "float_pm1"),
     ("polygon", "tri_bool"),
     ("flip", "tri_bool"),
+    ("swirl", "float_free"),
+    ("horizon_scale", "float01"),
+    ("reverse", "tri_bool"),
 )
 
 

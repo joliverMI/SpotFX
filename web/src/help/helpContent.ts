@@ -422,6 +422,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Audio Spawn / Audio Speed', 'How much the chosen Audio Band boosts spawning / infall speed.'],
           ['Color Mode', 'wheel: gradient wraps the circle and rotates with Gradient Spin (direction follows the swirl); band: lows/mids/highs pick gradient positions; random: uniform (spin invisible).'],
           ['Horizon Size / Horizon Audio', 'Event horizon: blobs fall into orbit at this radius (grows with sound when Horizon Audio is positive), turn the Accent Color while circling, then fade. The disc inside shows the BG color. 0 = classic fall-to-center.'],
+          ['Morph Steps', 'The Shape aspect has blackhole-only sub-fields: Swirl, Horizon size (absolute or nudge, bindable) and Reverse (tri-state) — morph the vortex from scene lanes and flares like any other shape.'],
         ],
         kbd: false,
       },
@@ -502,10 +503,26 @@ export const HELP_SECTIONS: HelpSection[] = [
         table: [
           ['⤓ Import', 'Read the current FG/BG colors off selected LedFX devices into a new Set.'],
           ['▶ Preview', 'Apply the selected Set to LedFX right now.'],
-          ['Labels', 'Comma-separated; label filters on triggers/actions pick which sets are eligible.'],
+          ['Labels', 'Comma-separated, applied when the field loses focus; label filters on triggers/actions pick which sets are eligible.'],
+          ['Members', "A Group's member picker is a searchable dropdown — type to filter Sets by name."],
           ['Gradients', 'Live in a shared library — edit stops and direction, then "Update current" or "Save as new".'],
         ],
         kbd: false,
+      },
+      {
+        id: 'colorsets-copy-entries',
+        title: 'Copying entries between sets',
+        keywords: 'copy paste clipboard multi-select shift click entries overrides',
+        body: [
+          'Entry boxes (and Group overrides) support multi-select: Shift+click a box to select it, Shift+click again to deselect, Esc to clear. Copied entries land on the same clipboard the event editor uses, so they survive reloads and work across tabs — open another Set or Group and paste to append them.',
+        ],
+        table: [
+          ['Shift+click', 'Toggle an entry box in/out of the selection.'],
+          ['Ctrl+C', 'Copy the selected entries to the clipboard.'],
+          ['Ctrl+V', 'Append the copied entries to the open Set (or Group overrides) — same as the 📋 Paste button.'],
+          ['Esc', 'Clear the selection.'],
+        ],
+        kbd: true,
       },
       {
         id: 'colorsets-group-overrides',

@@ -266,6 +266,10 @@ export default function MorphStepForm({
                   <BindableTri value={av.flip ?? null} onChange={(v) => setAV((x) => { x.flip = v; })}
                     renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
                 </Row>
+                <Row label="Reverse" help="Blackhole only: flow direction — tri-state on / off / toggle current">
+                  <BindableTri value={av.reverse ?? null} onChange={(v) => setAV((x) => { x.reverse = v; })}
+                    renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
+                </Row>
                 {!nudgeMode && (
                   <>
                     <Row label="Star (0–1)">
@@ -288,6 +292,14 @@ export default function MorphStepForm({
                       <BindableNumber value={av.y_offset ?? null} nullable min={-1} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.y_offset = v; })} />
                     </Row>
+                    <Row label="Swirl (−6..6)" help="Blackhole only: swirl amount, sign = direction">
+                      <BindableNumber value={av.swirl ?? null} nullable min={-6} max={6} step={0.1}
+                        onChange={(v) => setAV((x) => { x.swirl = v; })} />
+                    </Row>
+                    <Row label="Horizon size" help="Blackhole only: event-horizon radius baseline (0 disables)">
+                      <BindableNumber value={av.horizon_scale ?? null} nullable min={0} max={0.8} step={0.05}
+                        onChange={(v) => setAV((x) => { x.horizon_scale = v; })} />
+                    </Row>
                   </>
                 )}
                 {nudgeMode && (
@@ -303,6 +315,10 @@ export default function MorphStepForm({
                       onChange={(n) => setAV((x) => { x.x_offset_nudge = n; })} />
                     <NudgeInput label="y offset" nudge={av.y_offset_nudge}
                       onChange={(n) => setAV((x) => { x.y_offset_nudge = n; })} />
+                    <NudgeInput label="swirl" nudge={av.swirl_nudge}
+                      onChange={(n) => setAV((x) => { x.swirl_nudge = n; })} />
+                    <NudgeInput label="horizon size" nudge={av.horizon_scale_nudge}
+                      onChange={(n) => setAV((x) => { x.horizon_scale_nudge = n; })} />
                   </div>
                 )}
               </>
