@@ -783,6 +783,33 @@ async def get_scenes() -> list[dict]:
     return [{"id": sid, **meta} for sid, meta in scenes_dict.items()]
 
 
+async def post_virtual_effect(virtual_id: str, effect_type: str, config: dict) -> bool:
+    """Set/replace a virtual's effect via POST — unlike the PUT patch path,
+    this works when NO effect is active (e.g. after a DELETE) and reactivates
+    the virtual. Used by the source watchdog's restore."""
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
+    resp = await _request(
+        "POST", f"/api/virtuals/{virtual_id}/effects",
+        json={"type": effect_type, "config": config},
+        label=f"effect_post:{virtual_id}",
+    )
+    return resp is not None
+
+
+async def set_virtual_active(virtual_id: str, active: bool) -> bool:
+    """Activate/deactivate a virtual (PUT /api/virtuals/{id} {"active": ...}).
+    Used by the source watchdog to revive a consumer effect's source virtual."""
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
+    resp = await _request(
+        "PUT", f"/api/virtuals/{virtual_id}",
+        json={"active": active},
+        label=f"virtual_active:{virtual_id}",
+    )
+    return resp is not None
+
+
 async def set_virtual_effect_fallback(
     virtual_id: str, effect_type: str, config: dict, fallback_s: float
 ) -> bool:
@@ -1098,6 +1125,12 @@ async def poll_virtual_states() -> None:
             data = await get_virtual(vid)
             if data:
                 state.ledfx_virtual_cache[vid] = data.get(vid, data)
+        if not _capture_in_progress():
+            try:
+                from services import source_watchdog
+                await source_watchdog.check_and_repair()
+            except Exception as exc:
+                logger.debug("source watchdog pass failed: %r", exc)
         await asyncio.sleep(5)
 
 

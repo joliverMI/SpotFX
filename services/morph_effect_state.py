@@ -63,6 +63,16 @@ def get(virtual_id: str, effect_type: str) -> dict | None:
     return dict(entry) if isinstance(entry, dict) else None
 
 
+def all_for_virtual(virtual_id: str) -> dict[str, dict]:
+    """Return {effect_type: config} snapshots recorded for a virtual (copies)."""
+    entries = _STATE.get(virtual_id, {})
+    return {
+        etype: dict(cfg)
+        for etype, cfg in entries.items()
+        if isinstance(cfg, dict)
+    }
+
+
 def save(virtual_id: str, effect_type: str, config: dict) -> None:
     """Persist one (virtual_id, effect_type) → config snapshot."""
     save_many([(virtual_id, effect_type, config)])

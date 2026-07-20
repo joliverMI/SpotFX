@@ -474,9 +474,13 @@ def compile_target(
                 continue
 
             # Resume the user's last-known config for this (virtual, effect)
-            # pair if we have one; otherwise fall back to taste-neutral defaults
-            # from effect_params.json.
-            starter = morph_effect_state.get(vid, new_type) or morph_aspects.effect_defaults(new_type) or {}
+            # pair, with taste-neutral defaults from effect_params.json filling
+            # any keys the snapshot is missing — an incomplete snapshot must
+            # never drop structural params (e.g. radial's source_virtual, which
+            # LedFX would otherwise default to "unknown" and render black).
+            resume = morph_effect_state.get(vid, new_type)
+            defaults = morph_aspects.effect_defaults(new_type) or {}
+            starter = {**defaults, **resume} if resume else dict(defaults)
 
             # Always write the accent so a switch never inherits a stale
             # per-effect default (LedFX fills power's sparks_color with white
