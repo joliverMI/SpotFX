@@ -56,8 +56,9 @@ class Settings(BaseSettings):
     ambient_kelvin: int = 2700               # used when ambient_color_mode == "white"
     ambient_brightness: int = 100            # 1..100 percent
     ambient_wake_scene: str = "wake-hues"    # LedFX scene fired on disable to restart the Hue stream ("" = off)
-    ambient_transition_s: float = 4.0        # ambient-off fade: Hue REST dynamics duration toward the wake color before unfreezing (0 = instant)
+    ambient_transition_s: float = 1.5        # ambient-off fade: Hue REST dynamics duration toward the wake color before unfreezing (0 = instant)
     ambient_fade_brightness: int = 35        # brightness % the off-fade lands on before the entertainment stream takes over
+    ambient_catchup_s: float = 8.0           # after the wake scene, tween the Hue virtual's effect back to the pre-wake (current music) look over this long (0 = jump at next trigger)
 
     # ── App ───────────────────────────────────────────────────────────────────
     app_host: str = "0.0.0.0"

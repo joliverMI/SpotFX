@@ -1,5 +1,5 @@
 """
-Offline smoke test: per-group Ambient Mode + the off-fade handoff.
+Offline smoke test: per-group Ambient Mode + the off-fade handoff + catch-up.
 
 Verifies services.ambient_mode.set_groups():
   1. want=None holds ALL resolved Hue groups (freeze → REST order per device);
@@ -11,7 +11,10 @@ Verifies services.ambient_mode.set_groups():
   5. transition_s per-call override is used and capped at 15 s;
   6. newly-held groups get a dynamics ramp-up, already-held groups re-assert
      instantly (no dynamics);
-  7. _wake_fade_color() derives the wake scene's background_color.
+  7. _wake_fade_color() derives the wake scene's background_color;
+  8. catch-up: the pre-wake music effect is captured and tweened back over
+     ambient_catchup_s AFTER the wake kick (same effect type), set directly
+     when the type differs, and skipped when catchup=0 or no active effect.
 
 No LedFX / Hue / disk writes: ledfx_client calls, _apply_hue, _wake_kick and
 _commit_state are stubbed to recorders (so the real settings.json is never
@@ -39,9 +42,16 @@ CFGS = {
 }
 
 frozen: dict[str, bool] = {}
-events: list[tuple] = []          # ordered ('freeze'|'rest'|'wake'|'commit', ...)
+events: list[tuple] = []          # ordered ('freeze'|'rest'|'wake'|'commit'|'tween'|'direct', ...)
 committed: list[list[str]] = []
 ORIG_WAKE_COLOR = None            # real _wake_fade_color, saved before stubbing
+
+MUSIC_EFFECT = {"type": "power", "config": {"background_color": "#00ff07", "brightness": 0.75}}
+WAKE_SCENE = {"id": "wake-hues", "virtuals": {
+    "hues": {"action": "activate", "type": "power",
+             "config": {"background_color": "#ffb675", "gradient": "#fd1313"}},
+    "hue-lights": {"action": "ignore", "type": "", "config": {}},
+}}
 
 
 def _set(key, val):
@@ -93,6 +103,24 @@ def _install_stubs():
         return "#ffb675"
     am._wake_fade_color = fake_wake_color
 
+    # Catch-up plumbing: real _capture_wake_targets/_catchup run against these.
+    async def fake_scenes():
+        return [WAKE_SCENE]
+    am.ledfx_client.get_scenes = fake_scenes
+
+    async def fake_get_virtual(vid):
+        return {vid: {"active": True, "effect": dict(MUSIC_EFFECT)}}
+    am.ledfx_client.get_virtual = fake_get_virtual
+
+    async def fake_tween(vid, etype, config, transition_ms, easing="linear"):
+        events.append(("tween", vid, etype, dict(config), transition_ms))
+    am.ledfx_client.set_virtual_effect_tween = fake_tween
+
+    async def fake_direct(vid, etype, config):
+        events.append(("direct", vid, etype, dict(config)))
+        return True
+    am.ledfx_client._set_virtual_effect_direct = fake_direct
+
 
 async def main() -> int:
     _install_stubs()
@@ -100,6 +128,8 @@ async def main() -> int:
     _set("ambient_fade_brightness", 35)
     _set("ambient_brightness", 100)
     _set("ambient_color_mode", "white")
+    _set("ambient_wake_scene", "wake-hues")
+    _set("ambient_catchup_s", 5.0)
 
     ok = True
 
@@ -141,6 +171,14 @@ async def main() -> int:
         check("fade duration 50ms", body["dynamics"]["duration"] == 50)
     check("wake kicked after release", ("wake",) in events
           and events.index(("wake",)) > (unfz[0] if unfz else -1))
+    tweens = [(i, e) for i, e in enumerate(events) if e[0] == "tween"]
+    check("catch-up tween fired", bool(tweens))
+    if tweens:
+        i, (_k, vid, etype, cfg, ms) = tweens[0]
+        check("tween AFTER wake", i > events.index(("wake",)))
+        check("tween eases hues back to captured music look",
+              vid == "hues" and etype == "power" and cfg == MUSIC_EFFECT["config"])
+        check("tween uses ambient_catchup_s", ms == 5000)
     # kept group re-asserts instantly (no dynamics)
     dining_rest = [e for e in events if e[0] == "rest" and e[1] == "2.2.2.2"]
     check("kept group re-asserts w/o ramp",
@@ -183,7 +221,45 @@ async def main() -> int:
     check("transition capped at 15s", slept and max(slept) == 15.0,
           f"slept={slept} ({asyncio.get_event_loop().time() - t0:.2f}s wall)")
 
-    # ── 6) wake fade color derivation (real impl, stubbed scenes) ────────────
+    # ── 6) catch-up edge cases ───────────────────────────────────────────────
+    # Different effect type → direct set (normal crossfade), no tween.
+    _reset()
+    frozen.update({"hue-lights": True})
+    MUSIC_EFFECT["type"] = "melt"
+    await am.set_groups(set())
+    check("type mismatch → direct set", any(
+        e[0] == "direct" and e[1] == "hues" and e[2] == "melt" for e in events)
+        and not any(e[0] == "tween" for e in events))
+    MUSIC_EFFECT["type"] = "power"
+
+    # catchup 0 → no ease-back at all.
+    _reset()
+    frozen.update({"hue-lights": True})
+    _set("ambient_catchup_s", 0.0)
+    await am.set_groups(set())
+    check("catchup=0 skips ease-back",
+          not any(e[0] in ("tween", "direct") for e in events))
+    _set("ambient_catchup_s", 5.0)
+
+    # Per-call catchup override.
+    _reset()
+    frozen.update({"hue-lights": True})
+    await am.set_groups(set(), catchup_s=2.5)
+    ms = next((e[4] for e in events if e[0] == "tween"), None)
+    check("per-call catchup_s used", ms == 2500, f"ms={ms}")
+
+    # No active effect on the wake virtual → nothing captured, no ease-back.
+    _reset()
+    frozen.update({"hue-lights": True})
+
+    async def dark_virtual(vid):
+        return {vid: {"active": False, "effect": {}}}
+    am.ledfx_client.get_virtual = dark_virtual
+    await am.set_groups(set())
+    check("no active effect → no ease-back",
+          not any(e[0] in ("tween", "direct") for e in events))
+
+    # ── 7) wake fade color derivation (real impl, stubbed scenes) ────────────
     async def fake_scenes():
         return [{"id": "wake-hues", "virtuals": {
             "hues": {"action": "activate", "type": "power",

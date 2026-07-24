@@ -494,8 +494,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'long press hold hue group room dining living picker per-group transition fade home assistant',
         body: [
           'Long-press the Ambient button to pick which Hue groups (one per Hue entertainment room) are held in ambient. Each checkbox applies immediately; the button shows a count (e.g. "1/2") when only some groups are held. A short press still toggles all groups at once.',
-          'Turning a group off fades its bulbs on the Hue bridge toward the wake scene\'s color over the "Off transition" set in Settings → Ambient Mode, then hands them back to the music stream — instead of an abrupt cut at the next trigger. Turning on ramps up over the same time.',
-          'Home Assistant: POST /api/control/ambient-mode?enabled=true&groups=dining-hues&transition_s=6 — `groups` is a comma-separated list of group ids (GET /api/control/ambient-groups lists them); omit it to affect all groups. enabled=true adds the groups to the held set, enabled=false removes them. `transition_s` optionally overrides the configured fade for that call.',
+          'Turning a group off runs a two-stage handoff: a quick fade on the Hue bridge to the wake scene\'s look ("Fade to wake" in Settings → Ambient Mode), then a slow ease from that look back to the current music scene ("Catch-up to current scene") — no snap at the next trigger. Turning on ramps up over the fade time.',
+          'Home Assistant: POST /api/control/ambient-mode?enabled=true&groups=dining-hues&transition_s=2&catchup_s=10 — `groups` is a comma-separated list of group ids (GET /api/control/ambient-groups lists them); omit it to affect all groups. enabled=true adds the groups to the held set, enabled=false removes them. `transition_s` / `catchup_s` optionally override the configured fade / catch-up for that call.',
         ],
       },
       {
@@ -844,7 +844,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'hue full brightness white temp category dinner transition fade wake scene',
         body: [
           'When the Now Playing (or Home Assistant) Ambient toggle is on, the chosen device category\'s Hue groups are held at the configured color at full brightness via the Hue REST API while the music stream is muted for them. Long-press the Now Playing Ambient button to hold only some groups.',
-          '"Off transition" fades the bulbs toward the wake scene\'s color on the bridge before the music stream takes back over (and ramps the turn-on); "Fade-out brightness" is the level that fade lands on — set it near how bright the bulbs look while music-reactive so the handoff is seamless. 0 s = the old instant cut.',
+          'Turning off runs in two stages. "Fade to wake" quickly fades the bulbs toward the wake scene\'s color on the bridge before the music stream takes back over ("Fade-out brightness" is the level it lands on); then "Catch-up to current scene" slowly eases the bulbs from the wake look back to the music scene that\'s currently playing, instead of snapping at the next trigger. Set either to 0 for the old instant behavior.',
         ],
       },
     ],

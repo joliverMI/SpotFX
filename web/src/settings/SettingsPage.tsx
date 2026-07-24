@@ -109,8 +109,9 @@ export default function SettingsPage() {
         ambient_kelvin: num('ambient_kelvin', 2700),
         ambient_color: str('ambient_color', '#ffffff'),
         ambient_brightness: num('ambient_brightness', 100),
-        ambient_transition_s: num('ambient_transition_s', 4),
+        ambient_transition_s: num('ambient_transition_s', 1.5),
         ambient_fade_brightness: num('ambient_fade_brightness', 35),
+        ambient_catchup_s: num('ambient_catchup_s', 8),
       });
       void qc.invalidateQueries({ queryKey: ['settings'] });
       setSavedFlash(true);
@@ -405,10 +406,10 @@ export default function SettingsPage() {
             style={{ width: '100%', accentColor: 'var(--accent)' }}
             onChange={(e) => set('ambient_brightness', parseInt(e.target.value))} />
         </Field>
-        <Field label={`Off transition (s): ${num('ambient_transition_s', 4)}`}>
-          <input type="range" min={0} max={15} step={0.5} value={num('ambient_transition_s', 4)}
+        <Field label={`Fade to wake (s): ${num('ambient_transition_s', 1.5)}`}>
+          <input type="range" min={0} max={15} step={0.5} value={num('ambient_transition_s', 1.5)}
             style={{ width: '100%', accentColor: 'var(--accent)' }}
-            title="Turning ambient off fades the bulbs toward the wake scene's color on the Hue bridge over this many seconds before the music stream takes back over (0 = instant). Also ramps the turn-on. Home Assistant can override per call with transition_s="
+            title="Turning ambient off first fades the bulbs to the wake scene's color on the Hue bridge over this many seconds, then the music stream takes back over (0 = instant). Also ramps the turn-on. Home Assistant can override per call with transition_s="
             onChange={(e) => set('ambient_transition_s', parseFloat(e.target.value))} />
         </Field>
         <Field label={`Fade-out brightness (%): ${num('ambient_fade_brightness', 35)}`}>
@@ -416,6 +417,12 @@ export default function SettingsPage() {
             style={{ width: '100%', accentColor: 'var(--accent)' }}
             title="Brightness the off-fade lands on just before the entertainment stream resumes — roughly match how bright the bulbs look while music-reactive"
             onChange={(e) => set('ambient_fade_brightness', parseInt(e.target.value))} />
+        </Field>
+        <Field label={`Catch-up to current scene (s): ${num('ambient_catchup_s', 8)}`}>
+          <input type="range" min={0} max={30} step={0.5} value={num('ambient_catchup_s', 8)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            title="After the wake scene lands, the released Hue groups ease back to the current music scene's look over this many seconds instead of snapping at the next trigger (0 = old snap behavior). Home Assistant: catchup_s="
+            onChange={(e) => set('ambient_catchup_s', parseFloat(e.target.value))} />
         </Field>
       </div>
 

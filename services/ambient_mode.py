@@ -38,7 +38,18 @@ only re-arms the stream; if the driving Hue virtual has no active effect,
 nothing ever streams and the bulbs stay stuck on the ambient REST color. The
 wake scene puts a real effect on them, and because the fade already landed
 near the wake color the REST→stream handoff is gentle instead of a hard cut.
-The next SpotFX trigger/scene change takes over from there.
+
+Catch-up: the wake scene look is only a landing pad — the music look it
+replaced should ease back in rather than snap in at the next trigger. Right
+before the wake scene fires we capture the current effect (type + config) on
+its 'activate' virtuals; after the wake verifies, we ask LedFX to TWEEN the
+config back to that capture over settings.ambient_catchup_s (server-side
+param interpolation, the same mechanism SpotFX color ramps use — nothing
+temporary to restore, so no cleanup/watchdog is needed). If the captured
+effect is a different type than the wake effect (rare — 34/37 scenes drive
+the Hues with 'power', same as wake), we set it directly and the virtual's
+own transition_time crossfades it. The next SpotFX trigger/scene change then
+takes over from a look that already matches.
 
 Bridge credentials (ip / app-key / entertainment id) are read live from the
 LedFX Hue device config — SpotFX stores no Hue secrets of its own.
@@ -268,11 +279,12 @@ async def resolve_groups(force: bool = False) -> dict[str, str]:
     return names
 
 
-async def set_groups(want: set[str] | None, transition_s: float | None = None) -> dict:
+async def set_groups(want: set[str] | None, transition_s: float | None = None,
+                     catchup_s: float | None = None) -> dict:
     """Reconcile ambient to exactly `want` (None = all target groups).
     Locked so rapid toggles / HA calls can't overlap mid-fade."""
     async with _get_lock():
-        return await _set_groups_impl(want, transition_s)
+        return await _set_groups_impl(want, transition_s, catchup_s)
 
 
 async def enable() -> dict:
@@ -326,6 +338,65 @@ async def _wake_fade_color() -> str | None:
     return None
 
 
+async def _capture_wake_targets() -> dict[str, dict]:
+    """Snapshot the current (music) effect on the wake scene's 'activate'
+    virtuals, taken just before the wake scene replaces it, so the catch-up
+    can ease back to it: {vid: {type, config, wake_type}}. Virtuals with no
+    active effect are skipped (nothing to return to)."""
+    scene_id = (settings.ambient_wake_scene or "").strip()
+    if not scene_id:
+        return {}
+    captured: dict[str, dict] = {}
+    try:
+        scene = next(
+            (s for s in await ledfx_client.get_scenes() if s.get("id") == scene_id), None
+        )
+        for vid, spec in ((scene or {}).get("virtuals") or {}).items():
+            if not (isinstance(spec, dict) and spec.get("action") == "activate"):
+                continue
+            rec = await ledfx_client.get_virtual(vid)
+            vobj = rec.get(vid, {}) if isinstance(rec, dict) else {}
+            eff = vobj.get("effect") or {}
+            if vobj.get("active") and eff.get("type"):
+                captured[vid] = {
+                    "type": eff["type"],
+                    "config": dict(eff.get("config") or {}),
+                    "wake_type": spec.get("type"),
+                }
+    except Exception as exc:
+        logger.warning("Ambient catch-up: could not capture pre-wake effects: %r", exc)
+    return captured
+
+
+async def _catchup(captured: dict[str, dict], catchup_s: float | None) -> None:
+    """Ease the wake virtuals from the wake look back to the captured music
+    look. Same effect type → server-side config tween over catchup_s;
+    different type → direct set (the virtual's own transition_time
+    crossfades). Fire-and-forget on LedFX — nothing to restore afterward."""
+    t_s = settings.ambient_catchup_s if catchup_s is None else catchup_s
+    t_s = max(0.0, min(float(t_s), 60.0))
+    if t_s <= 0 or not captured:
+        return
+    for vid, eff in captured.items():
+        try:
+            if eff.get("wake_type") == eff["type"]:
+                await ledfx_client.set_virtual_effect_tween(
+                    vid, eff["type"], eff["config"], int(t_s * 1000)
+                )
+                logger.info(
+                    "Ambient catch-up: tweening %s back to its %s look over %.1fs",
+                    vid, eff["type"], t_s,
+                )
+            else:
+                await ledfx_client._set_virtual_effect_direct(vid, eff["type"], eff["config"])
+                logger.info(
+                    "Ambient catch-up: %s pre-wake effect %r ≠ wake type %r — "
+                    "restored via normal crossfade", vid, eff["type"], eff.get("wake_type"),
+                )
+        except Exception as exc:
+            logger.error("Ambient catch-up failed for %s: %r", vid, exc)
+
+
 async def _commit_state(want: set[str]) -> None:
     """Make `want` the authoritative held-group set: state, disk, UI broadcast."""
     from models.state import state
@@ -346,7 +417,8 @@ async def _commit_state(want: set[str]) -> None:
         pass
 
 
-async def _set_groups_impl(want: set[str] | None, transition_s: float | None) -> dict:
+async def _set_groups_impl(want: set[str] | None, transition_s: float | None,
+                           catchup_s: float | None = None) -> dict:
     """Drive per-device freeze + Hue REST toward `want`.
 
     ON  (wanted): freeze (LedFX stops that device's entertainment stream so the
@@ -357,7 +429,8 @@ async def _set_groups_impl(want: set[str] | None, transition_s: float | None) ->
     OFF (held but no longer wanted): fade toward the wake color on the bridge
         (`dynamics.duration`; the device is still frozen so REST owns the bulbs
         for the whole fade), then unfreeze and kick the wake scene so the
-        stream takes over at roughly the color it starts streaming."""
+        stream takes over at roughly the color it starts streaming — then ease
+        back to the captured pre-wake music look over catchup_s (_catchup)."""
     hue_cfgs = await _resolve_hue_cfgs()
     if not hue_cfgs:
         logger.warning("Ambient: no Hue devices resolved from category %r",
@@ -395,9 +468,15 @@ async def _set_groups_impl(want: set[str] | None, transition_s: float | None) ->
             for did in to_off:
                 await _apply_hue(hue_cfgs[did], body=fade)
             await asyncio.sleep(t_s)  # bridge runs the fade; reconciler skips while busy()
+        # Capture the current music look as late as possible (triggers keep
+        # updating the still-rendering effect during ambient) but BEFORE the
+        # wake scene replaces it.
+        captured = await _capture_wake_targets()
         for did in to_off:
             await ledfx_client.freeze_hue_device(did, False)
         wake = await _wake_kick()
+        if wake.get("status") == "on":
+            await _catchup(captured, catchup_s)
 
     await _commit_state(want)
     logger.info(

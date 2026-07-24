@@ -86,6 +86,7 @@ class SettingsPatch(BaseModel):
     ambient_wake_scene: Optional[str] = None
     ambient_transition_s: Optional[float] = None
     ambient_fade_brightness: Optional[int] = None
+    ambient_catchup_s: Optional[float] = None
 
 
 @router.get("")
@@ -139,6 +140,7 @@ async def get_settings():
         "ambient_wake_scene": settings.ambient_wake_scene,
         "ambient_transition_s": settings.ambient_transition_s,
         "ambient_fade_brightness": settings.ambient_fade_brightness,
+        "ambient_catchup_s": settings.ambient_catchup_s,
     }
 
 

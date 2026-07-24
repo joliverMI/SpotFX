@@ -150,7 +150,8 @@ async def set_dinner_party(enabled: bool):
 
 @router.post("/ambient-mode")
 async def set_ambient_mode(enabled: bool, groups: str | None = None,
-                           transition_s: float | None = None):
+                           transition_s: float | None = None,
+                           catchup_s: float | None = None):
     """Enable/disable Ambient Mode: freeze Hue groups in LedFX (stop their
     entertainment stream) and hold them at a static full-brightness color via
     Hue REST. HA-callable, same shape as /dinner-party and /pause.
@@ -160,6 +161,9 @@ async def set_ambient_mode(enabled: bool, groups: str | None = None,
     enabled=false REMOVES them; omitted = all groups on / all off.
     `transition_s`: one-shot override of settings.ambient_transition_s for the
     bridge-side fade (turn-on ramp / turn-off fade toward the wake color).
+    `catchup_s`: one-shot override of settings.ambient_catchup_s — how long the
+    released groups take to ease from the wake look back to the current music
+    look (0 = jump at the next trigger, the old behavior).
 
     The actual Hue work (freeze + REST light writes + fade) runs in a
     BACKGROUND task: freezing awaits the bridge stream-stop, the REST writes
@@ -200,7 +204,7 @@ async def set_ambient_mode(enabled: bool, groups: str | None = None,
     saved["ambient_groups"] = state.ambient_groups if want is not None else []
     _save_settings_file(saved)
 
-    asyncio.create_task(ambient_mode.set_groups(want, transition_s))
+    asyncio.create_task(ambient_mode.set_groups(want, transition_s, catchup_s))
     await ws_manager.broadcast_state(state)
     return {
         "ambient_mode_enabled": state.ambient_mode_enabled,
