@@ -482,11 +482,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         table: [
           ['Activate', 'Master switch — pause/resume trigger firing.'],
           ['Dinner Party', 'Ignore song triggers; use automatic ambient lighting.'],
-          ['Ambient', 'Hold the configured devices at a static full-brightness color (Hue REST) and exclude them from triggers.'],
+          ['Ambient', 'Hold the Hue groups at a static full-brightness color (Hue REST). Short press: all groups on/off. Long-press: pick individual groups — see "Ambient Hue groups" below.'],
           ['Analyzed', 'Use analyzed (auto-generated) triggers for songs without user triggers.'],
           ['Force Scene', 'Hold one scene: whenever a new scene would be picked, reassert the forced scene instead. See "Force Scene" below.'],
         ],
         kbd: false,
+      },
+      {
+        id: 'ambient-groups',
+        title: 'Ambient Hue groups',
+        keywords: 'long press hold hue group room dining living picker per-group transition fade home assistant',
+        body: [
+          'Long-press the Ambient button to pick which Hue groups (one per Hue entertainment room) are held in ambient. Each checkbox applies immediately; the button shows a count (e.g. "1/2") when only some groups are held. A short press still toggles all groups at once.',
+          'Turning a group off fades its bulbs on the Hue bridge toward the wake scene\'s color over the "Off transition" set in Settings → Ambient Mode, then hands them back to the music stream — instead of an abrupt cut at the next trigger. Turning on ramps up over the same time.',
+          'Home Assistant: POST /api/control/ambient-mode?enabled=true&groups=dining-hues&transition_s=6 — `groups` is a comma-separated list of group ids (GET /api/control/ambient-groups lists them); omit it to affect all groups. enabled=true adds the groups to the held set, enabled=false removes them. `transition_s` optionally overrides the configured fade for that call.',
+        ],
       },
       {
         id: 'now-force-scene',
@@ -831,9 +841,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'settings-ambient',
         title: 'Ambient mode',
-        keywords: 'hue full brightness white temp category dinner',
+        keywords: 'hue full brightness white temp category dinner transition fade wake scene',
         body: [
-          'When the Now Playing (or Home Assistant) Ambient toggle is on, the chosen device category is held at the configured color at full brightness via the Hue REST API and excluded from music triggers.',
+          'When the Now Playing (or Home Assistant) Ambient toggle is on, the chosen device category\'s Hue groups are held at the configured color at full brightness via the Hue REST API while the music stream is muted for them. Long-press the Now Playing Ambient button to hold only some groups.',
+          '"Off transition" fades the bulbs toward the wake scene\'s color on the bridge before the music stream takes back over (and ramps the turn-on); "Fade-out brightness" is the level that fade lands on — set it near how bright the bulbs look while music-reactive so the handoff is seamless. 0 s = the old instant cut.',
         ],
       },
     ],

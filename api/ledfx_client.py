@@ -1344,15 +1344,22 @@ async def _ledfx_watchdog_tick() -> None:
 
 
 async def _reconcile_ambient() -> None:
-    """Self-heal ambient drift, both directions. state.ambient_mode_enabled is the
-    single source of truth (set by the toggle, persisted, restored on startup,
-    broadcast to the UI). Device freeze is in-memory in LedFX and is LOST on a
-    LedFX restart, so a device can silently re-engage its stream while ambient is
-    meant to be on. Drive each target Hue device's freeze state toward the flag:
-    ON  → any device not frozen gets re-frozen + REST re-applied;
-    OFF → any device still frozen gets unfrozen."""
+    """Self-heal ambient drift, both directions. state.ambient_groups is the
+    single source of truth (set by the toggle / group picker / HA, persisted,
+    restored on startup, broadcast to the UI). Device freeze is in-memory in
+    LedFX and is LOST on a LedFX restart, so a device can silently re-engage
+    its stream while its group is meant to be held. Drive each target Hue
+    device's freeze state toward its group membership:
+    HELD     → not frozen gets re-frozen + REST re-applied;
+    NOT HELD → still frozen gets unfrozen + the wake scene kicked (else the
+               bulbs sit stuck on the ambient REST color until the next scene)."""
     from services import ambient_mode
-    want = bool(state.ambient_mode_enabled)
+    if ambient_mode.busy():
+        return  # enable/disable/fade mid-flight — don't unfreeze under a fade
+
+    want_ids = set(state.ambient_groups)
+    if state.ambient_mode_enabled and not want_ids:
+        want_ids = None  # legacy: flag on with no group detail = all targets
 
     all_v = await ambient_mode._all_virtuals()
     target_devices: set[str] = set()
@@ -1366,33 +1373,42 @@ async def _reconcile_ambient() -> None:
             hue_cfgs[did] = cfg
     if not hue_cfgs:
         return
+    if want_ids is None:
+        want_ids = set(hue_cfgs)
 
-    drift = []
+    refreeze, release = [], []
     for did in hue_cfgs:
         is_frozen = await get_hue_frozen(did)
         if is_frozen is None:
             continue                 # LedFX unreachable for this device — next tick
-        if is_frozen != want:
-            drift.append(did)
-    if not drift:
+        want = did in want_ids
+        if want and not is_frozen:
+            refreeze.append(did)
+        elif is_frozen and not want:
+            release.append(did)
+    if not refreeze and not release:
         return
 
-    if want:
+    if refreeze:
         logger.warning(
             "Ambient reconcile: %d Hue device(s) lost freeze (LedFX restart?) — re-asserting",
-            len(drift),
+            len(refreeze),
         )
-        for did in drift:
+        for did in refreeze:
             await freeze_hue_device(did, True)
-        for did in drift:            # re-write REST only AFTER re-freezing
+        for did in refreeze:         # re-write REST only AFTER re-freezing
             await ambient_mode._apply_hue(hue_cfgs[did])
-    else:
+    if release:
         logger.warning(
-            "Ambient reconcile: flag OFF but %d Hue device(s) still frozen — unfreezing",
-            len(drift),
+            "Ambient reconcile: %d Hue device(s) frozen outside held groups — unfreezing",
+            len(release),
         )
-        for did in drift:
+        for did in release:
             await freeze_hue_device(did, False)
+        try:
+            await ambient_mode._wake_kick()
+        except Exception as exc:
+            logger.error("Ambient reconcile: wake kick failed: %r", exc)
 
 
 async def latency_loop() -> None:

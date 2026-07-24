@@ -109,6 +109,8 @@ export default function SettingsPage() {
         ambient_kelvin: num('ambient_kelvin', 2700),
         ambient_color: str('ambient_color', '#ffffff'),
         ambient_brightness: num('ambient_brightness', 100),
+        ambient_transition_s: num('ambient_transition_s', 4),
+        ambient_fade_brightness: num('ambient_fade_brightness', 35),
       });
       void qc.invalidateQueries({ queryKey: ['settings'] });
       setSavedFlash(true);
@@ -402,6 +404,18 @@ export default function SettingsPage() {
           <input type="range" min={1} max={100} step={1} value={num('ambient_brightness', 100)}
             style={{ width: '100%', accentColor: 'var(--accent)' }}
             onChange={(e) => set('ambient_brightness', parseInt(e.target.value))} />
+        </Field>
+        <Field label={`Off transition (s): ${num('ambient_transition_s', 4)}`}>
+          <input type="range" min={0} max={15} step={0.5} value={num('ambient_transition_s', 4)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            title="Turning ambient off fades the bulbs toward the wake scene's color on the Hue bridge over this many seconds before the music stream takes back over (0 = instant). Also ramps the turn-on. Home Assistant can override per call with transition_s="
+            onChange={(e) => set('ambient_transition_s', parseFloat(e.target.value))} />
+        </Field>
+        <Field label={`Fade-out brightness (%): ${num('ambient_fade_brightness', 35)}`}>
+          <input type="range" min={1} max={100} step={1} value={num('ambient_fade_brightness', 35)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            title="Brightness the off-fade lands on just before the entertainment stream resumes — roughly match how bright the bulbs look while music-reactive"
+            onChange={(e) => set('ambient_fade_brightness', parseInt(e.target.value))} />
         </Field>
       </div>
 

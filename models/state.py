@@ -79,7 +79,8 @@ class AppState:
     analyzed_trigger_override: bool = False    # True = override user triggers with analyzed (debug/testing)
     auto_generate_enabled: bool = False       # True = auto-generate triggers after shape capture
     dinner_party_mode: bool = False            # True = ignore song triggers, use Dinner Party triggerless profile
-    ambient_mode_enabled: bool = False         # True = target Hue devices frozen (LedFX stream stopped) + held at static full-brightness via Hue REST
+    ambient_mode_enabled: bool = False         # True = at least one Hue group frozen (LedFX stream stopped) + held at static full-brightness via Hue REST
+    ambient_groups: list = field(default_factory=list)  # LedFX Hue device ids currently held in ambient (subset of the target category)
 
     # ── Genre Blending ────────────────────────────────────────────────────────
     # Snapshot of the outgoing track captured just before current_track is replaced.

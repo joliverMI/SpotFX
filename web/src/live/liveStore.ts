@@ -41,6 +41,8 @@ interface LiveState {
   lastCapture: LastCapture | null;
   dinnerParty: boolean;
   ambient: boolean;
+  /** LedFX Hue device ids currently held in Ambient Mode */
+  ambientGroups: string[];
   useAnalyzed: boolean;
   analyzedOverride: boolean;
   useAiTriggers: boolean;
@@ -64,6 +66,7 @@ export const useLiveStore = create<LiveState>(() => ({
   lastCapture: null,
   dinnerParty: false,
   ambient: false,
+  ambientGroups: [],
   useAnalyzed: true,
   analyzedOverride: false,
   useAiTriggers: false,
@@ -118,6 +121,7 @@ export function ensureLiveState(): void {
       lastCapture: (msg.last_capture as LastCapture) ?? null,
       dinnerParty: Boolean(msg.dinner_party_mode ?? false),
       ambient: Boolean(msg.ambient_mode_enabled ?? false),
+      ambientGroups: (msg.ambient_groups as string[]) ?? [],
       useAnalyzed: Boolean(msg.use_analyzed_triggerless ?? true),
       analyzedOverride: Boolean(msg.analyzed_trigger_override ?? false),
       useAiTriggers: Boolean(msg.use_unreviewed_ai_triggers ?? false),

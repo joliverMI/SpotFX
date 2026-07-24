@@ -44,6 +44,7 @@ async def status():
         "ledfx_rtt_ms": round(state.ledfx_rtt_ms, 1),
         "dinner_party_mode": state.dinner_party_mode,
         "ambient_mode_enabled": state.ambient_mode_enabled,
+        "ambient_groups": state.ambient_groups,
     }
 
 
@@ -148,26 +149,82 @@ async def set_dinner_party(enabled: bool):
 
 
 @router.post("/ambient-mode")
-async def set_ambient_mode(enabled: bool):
-    """Enable/disable Ambient Mode: freeze the target Hue devices in LedFX (stop
-    their entertainment stream) and hold them at a static full-brightness color
-    via Hue REST. HA-callable, same shape as /dinner-party and /pause.
+async def set_ambient_mode(enabled: bool, groups: str | None = None,
+                           transition_s: float | None = None):
+    """Enable/disable Ambient Mode: freeze Hue groups in LedFX (stop their
+    entertainment stream) and hold them at a static full-brightness color via
+    Hue REST. HA-callable, same shape as /dinner-party and /pause.
 
-    The actual Hue work (freeze + REST light writes) runs in a BACKGROUND task:
-    freezing awaits the bridge stream-stop and the REST writes hit two bridges, so
-    awaiting it here would hang the toggle (and pile up if toggled repeatedly). The
-    task is serialized by a lock in ambient_mode, so rapid toggles can't overlap.
-    The endpoint returns immediately; lights follow within a few seconds."""
+    `groups`: comma-separated Hue group ids (LedFX device ids — see
+    GET /control/ambient-groups). enabled=true ADDS them to the held set,
+    enabled=false REMOVES them; omitted = all groups on / all off.
+    `transition_s`: one-shot override of settings.ambient_transition_s for the
+    bridge-side fade (turn-on ramp / turn-off fade toward the wake color).
+
+    The actual Hue work (freeze + REST light writes + fade) runs in a
+    BACKGROUND task: freezing awaits the bridge stream-stop, the REST writes
+    hit two bridges, and the off-fade sleeps for the transition — awaiting it
+    here would hang the toggle. The task is serialized by a lock in
+    ambient_mode, so rapid toggles can't overlap. The endpoint returns
+    immediately; lights follow within a few seconds."""
     import asyncio
-    state.ambient_mode_enabled = enabled
+    from services import ambient_mode
+
+    want: set[str] | None
+    if groups is not None and groups.strip():
+        ids = {g.strip() for g in groups.split(",") if g.strip()}
+        known = await ambient_mode.resolve_groups()
+        unknown = sorted(ids - set(known))
+        ids &= set(known)
+        if unknown and not ids:
+            raise HTTPException(
+                404,
+                f"Unknown ambient group(s): {', '.join(unknown)}. "
+                f"Known: {', '.join(sorted(known))}",
+            )
+        current = set(state.ambient_groups)
+        want = (current | ids) if enabled else (current - ids)
+    else:
+        unknown = []
+        want = None if enabled else set()
+
+    # Optimistic state for instant UI feedback + persist the intent so a crash
+    # mid-apply restores it; set_groups() re-commits the resolved truth
+    # (including the want=None → all-groups expansion) when it finishes.
+    state.ambient_mode_enabled = enabled if want is None else bool(want)
+    if want is not None:
+        state.ambient_groups = sorted(want)
     from routers.settings_router import _load_settings_file, _save_settings_file
     saved = _load_settings_file()
-    saved["ambient_mode_enabled"] = enabled
+    saved["ambient_mode_enabled"] = state.ambient_mode_enabled
+    saved["ambient_groups"] = state.ambient_groups if want is not None else []
     _save_settings_file(saved)
-    from services import ambient_mode
-    asyncio.create_task(ambient_mode.enable() if enabled else ambient_mode.disable())
+
+    asyncio.create_task(ambient_mode.set_groups(want, transition_s))
     await ws_manager.broadcast_state(state)
-    return {"ambient_mode_enabled": enabled, "status": "applying"}
+    return {
+        "ambient_mode_enabled": state.ambient_mode_enabled,
+        "ambient_groups": "all" if (want is None) else sorted(want),
+        "unknown_groups": unknown,
+        "status": "applying",
+    }
+
+
+@router.get("/ambient-groups")
+async def ambient_groups():
+    """Hue groups Ambient Mode can hold (from the target category), with their
+    current held state — feeds the long-press group picker and HA discovery."""
+    from config import settings
+    from services import ambient_mode
+    known = await ambient_mode.resolve_groups()
+    active = set(state.ambient_groups)
+    return {
+        "groups": [
+            {"id": did, "name": name, "ambient": did in active}
+            for did, name in sorted(known.items())
+        ],
+        "transition_s": settings.ambient_transition_s,
+    }
 
 
 @router.get("/active-triggers")

@@ -84,6 +84,8 @@ class SettingsPatch(BaseModel):
     ambient_kelvin: Optional[int] = None
     ambient_brightness: Optional[int] = None
     ambient_wake_scene: Optional[str] = None
+    ambient_transition_s: Optional[float] = None
+    ambient_fade_brightness: Optional[int] = None
 
 
 @router.get("")
@@ -135,6 +137,8 @@ async def get_settings():
         "ambient_kelvin": settings.ambient_kelvin,
         "ambient_brightness": settings.ambient_brightness,
         "ambient_wake_scene": settings.ambient_wake_scene,
+        "ambient_transition_s": settings.ambient_transition_s,
+        "ambient_fade_brightness": settings.ambient_fade_brightness,
     }
 
 

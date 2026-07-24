@@ -104,6 +104,7 @@ class WebSocketManager:
             "auto_generate_enabled": state.auto_generate_enabled,
             "dinner_party_mode": state.dinner_party_mode,
             "ambient_mode_enabled": state.ambient_mode_enabled,
+            "ambient_groups": list(state.ambient_groups),
             "genre_blending_enabled": _settings.genre_blending_enabled,
             "track": None,
         }

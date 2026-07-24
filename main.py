@@ -116,6 +116,8 @@ async def lifespan(app: FastAPI):
         state.use_analyzed_triggerless = bool(_saved["use_analyzed_triggerless"])
     if "ambient_mode_enabled" in _saved:
         state.ambient_mode_enabled = bool(_saved["ambient_mode_enabled"])
+    if "ambient_groups" in _saved:
+        state.ambient_groups = [str(g) for g in (_saved["ambient_groups"] or [])]
 
     # Select song source based on settings
     if settings.song_source == "ledfx":
@@ -150,7 +152,9 @@ async def lifespan(app: FastAPI):
     # longer deactivates virtuals.
     if state.ambient_mode_enabled:
         from services import ambient_mode
-        tasks.append(asyncio.create_task(ambient_mode.enable(), name="ambient-restore"))
+        # Restore the held group subset; legacy saves without group detail = all.
+        _want = set(state.ambient_groups) or None
+        tasks.append(asyncio.create_task(ambient_mode.set_groups(_want), name="ambient-restore"))
 
     logger.info("SpotFX started — http://%s:%d", settings.app_host, settings.app_port)
     yield

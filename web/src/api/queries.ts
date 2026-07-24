@@ -118,6 +118,20 @@ export function useSettings() {
   });
 }
 
+export interface AmbientGroup {
+  id: string;      // LedFX Hue device id
+  name: string;    // friendly name from the device config
+  ambient: boolean; // currently held in Ambient Mode
+}
+
+export function useAmbientGroups() {
+  return useQuery({
+    queryKey: ['ambient-groups'],
+    queryFn: () => apiGet<{ groups: AmbientGroup[]; transition_s: number }>('/control/ambient-groups'),
+    staleTime: 300_000, // topology is stable; live held-state comes from the WS store
+  });
+}
+
 export function usePatchSettings() {
   const qc = useQueryClient();
   return useMutation({

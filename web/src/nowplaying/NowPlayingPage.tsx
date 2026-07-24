@@ -22,6 +22,7 @@ import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { fmtCountdown, fmtMs } from '../lib/time';
 import { ensureLiveState, getLiveProgressMs, useLiveStore, useLiveTick } from '../live/liveStore';
+import AmbientButton from './AmbientButton';
 import TriggerListCard from './TriggerListCard';
 import { SOURCE_BADGE, useNowProfile } from './useNowProfile';
 import type { MarkType, MusicTrigger } from '../builder/types';
@@ -67,7 +68,6 @@ export default function NowPlayingPage() {
   const recordingActive = useLiveStore((s) => s.recordingActive);
   const lastCapture = useLiveStore((s) => s.lastCapture);
   const dinnerParty = useLiveStore((s) => s.dinnerParty);
-  const ambient = useLiveStore((s) => s.ambient);
   const useAnalyzed = useLiveStore((s) => s.useAnalyzed);
   const lastScene = useLiveStore((s) => s.lastScene);
   const lastColorSet = useLiveStore((s) => s.lastColorSet);
@@ -370,11 +370,7 @@ export default function NowPlayingPage() {
             onClick={() => void apiPost(`/control/dinner-party?enabled=${!dinnerParty}`)}>
             Dinner Party
           </button>
-          <button className={`toggle-btn ${ambient ? 'active' : ''}`}
-            title="Hold the configured devices at a static full-brightness color (Hue REST) and skip them in triggers"
-            onClick={() => void apiPost(`/control/ambient-mode?enabled=${!ambient}`)}>
-            Ambient
-          </button>
+          <AmbientButton />
           <button className={`toggle-btn ${useAnalyzed ? 'active' : ''}`}
             title="Use analyzed triggers for songs without user triggers"
             onClick={() => void apiPost(`/control/use-analyzed-triggerless?enabled=${!useAnalyzed}`)}>

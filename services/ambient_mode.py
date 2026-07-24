@@ -23,12 +23,22 @@ So Ambient Mode, for each Hue device in the target category:
      brightness over the Hue REST API (after the freeze, so the now-stopped stream
      can't override it).
 
-Disable unfreezes the devices, then activates the configured wake scene
-(settings.ambient_wake_scene) and verifies its virtuals came up — unfreezing
+Ambient is held PER GROUP: each Hue device in the target category (one
+entertainment group / room per LedFX device) can be frozen independently.
+`state.ambient_groups` is the source of truth for which groups are held;
+`state.ambient_mode_enabled` stays in sync as "any group held" for the UI/HA.
+
+Disable (per group) first FADES the bulbs on the bridge itself — a Hue REST
+write with `dynamics.duration` toward the wake scene's color at a dimmed
+brightness (settings.ambient_transition_s / ambient_fade_brightness) — while
+the device is still frozen, so REST owns the bulbs for the whole fade. Only
+then does it unfreeze and activate the configured wake scene
+(settings.ambient_wake_scene), verifying its virtuals came up — unfreezing
 only re-arms the stream; if the driving Hue virtual has no active effect,
 nothing ever streams and the bulbs stay stuck on the ambient REST color. The
-wake scene puts a real effect on them; the next SpotFX trigger/scene change
-takes over from there.
+wake scene puts a real effect on them, and because the fade already landed
+near the wake color the REST→stream handoff is gentle instead of a hard cut.
+The next SpotFX trigger/scene change takes over from there.
 
 Bridge credentials (ip / app-key / entertainment id) are read live from the
 LedFX Hue device config — SpotFX stores no Hue secrets of its own.
@@ -39,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import httpx
 
@@ -62,6 +73,12 @@ def _get_lock() -> asyncio.Lock:
     if _lock is None:
         _lock = asyncio.Lock()
     return _lock
+
+
+def busy() -> bool:
+    """True while an enable/disable/fade is mid-flight (lock held). The ambient
+    reconciler checks this so it can't unfreeze a device mid-fade."""
+    return _lock is not None and _lock.locked()
 
 
 # ── Color math ───────────────────────────────────────────────────────────────
@@ -91,8 +108,9 @@ def _hex_to_xy(hex_color: str) -> tuple[float, float]:
     return X / total, Y / total
 
 
-def _light_payload() -> dict:
-    """Build the Hue REST light state from current settings (full-brightness)."""
+def _light_payload(transition_ms: int | None = None) -> dict:
+    """Build the Hue REST light state from current settings (full-brightness).
+    transition_ms > 0 adds a bridge-side dynamics ramp toward that state."""
     bri = max(1, min(100, int(settings.ambient_brightness)))
     body: dict = {"on": {"on": True}, "dimming": {"brightness": float(bri)}}
     if settings.ambient_color_mode == "color":
@@ -102,6 +120,23 @@ def _light_payload() -> dict:
         kelvin = max(2000, min(6500, int(settings.ambient_kelvin)))
         mirek = max(153, min(500, round(1_000_000 / kelvin)))
         body["color_temperature"] = {"mirek": mirek}
+    if transition_ms and transition_ms > 0:
+        body["dynamics"] = {"duration": int(transition_ms)}
+    return body
+
+
+def _fade_payload(color: str | None, transition_ms: int) -> dict:
+    """Hue REST state for the ambient-OFF fade: dim toward the wake color over
+    transition_ms on the bridge itself. color=None fades brightness only."""
+    bri = max(1, min(100, int(settings.ambient_fade_brightness)))
+    body: dict = {
+        "on": {"on": True},
+        "dimming": {"brightness": float(bri)},
+        "dynamics": {"duration": int(transition_ms)},
+    }
+    if color:
+        x, y = _hex_to_xy(color)
+        body["color"] = {"xy": {"x": round(x, 4), "y": round(y, 4)}}
     return body
 
 
@@ -186,16 +221,17 @@ async def _resolve_lights(cfg: dict) -> list[str]:
     return rids
 
 
-async def _apply_hue(cfg: dict) -> int:
-    """Set every light in the group to the static color via REST.
-    Returns the number of lights set.
+async def _apply_hue(cfg: dict, body: dict | None = None) -> int:
+    """Set every light in the group to a REST state (default: the configured
+    static full-brightness color). Returns the number of lights set.
 
     The entertainment stream is NOT stopped here: callers deactivate the LedFX
     virtuals first, so LedFX itself tears the stream down. Sending our own
     'action stop' directly to the bridge while LedFX still owns the session
     raced LedFX's Hue socket and could wedge its (synchronous) flush — so we
     leave stream lifecycle entirely to LedFX."""
-    body = _light_payload()
+    if body is None:
+        body = _light_payload()
     try:
         async with _bridge_client(cfg) as client:
             lights = await _resolve_lights(cfg)
@@ -212,16 +248,41 @@ async def _apply_hue(cfg: dict) -> int:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-async def enable() -> dict:
-    """Locked wrapper around _enable_impl (serializes with disable)."""
+# Cached {device_id: friendly name} of the target category's Hue groups —
+# used by the group picker UI / HA and the control endpoint's id validation.
+_groups_cache: tuple[float, dict[str, str]] | None = None
+_GROUPS_CACHE_TTL_S = 300.0
+
+
+async def resolve_groups(force: bool = False) -> dict[str, str]:
+    """{device_id: friendly name} for every Hue group ambient can hold,
+    resolved from the target category (cached — topology is stable)."""
+    global _groups_cache
+    now = time.monotonic()
+    if not force and _groups_cache and now - _groups_cache[0] < _GROUPS_CACHE_TTL_S:
+        return dict(_groups_cache[1])
+    hue_cfgs = await _resolve_hue_cfgs()
+    names = {did: str(cfg.get("name") or did) for did, cfg in hue_cfgs.items()}
+    if names:
+        _groups_cache = (now, names)
+    return names
+
+
+async def set_groups(want: set[str] | None, transition_s: float | None = None) -> dict:
+    """Reconcile ambient to exactly `want` (None = all target groups).
+    Locked so rapid toggles / HA calls can't overlap mid-fade."""
     async with _get_lock():
-        return await _enable_impl()
+        return await _set_groups_impl(want, transition_s)
+
+
+async def enable() -> dict:
+    """All target groups on (legacy entry point — HA `enabled=true` w/o groups)."""
+    return await set_groups(None)
 
 
 async def disable() -> dict:
-    """Locked wrapper around _disable_impl (serializes with enable)."""
-    async with _get_lock():
-        return await _disable_impl()
+    """All groups off."""
+    return await set_groups(set())
 
 
 async def _resolve_hue_cfgs() -> dict[str, dict]:
@@ -241,48 +302,111 @@ async def _resolve_hue_cfgs() -> dict[str, dict]:
     return hue_cfgs
 
 
-async def _enable_impl() -> dict:
-    """Activate ambient mode: FREEZE each target Hue device (LedFX stops its
-    entertainment stream so the bridge reverts to REST mode and drops flush
-    frames), THEN write the static full-brightness color via REST. Order matters —
-    freeze must complete before REST, else a live stream frame overrides REST.
-    The driving virtuals stay active; LedFX just mutes the device output, so
-    triggers/scenes need no ambient knowledge."""
-    hue_cfgs = await _resolve_hue_cfgs()
-    hue_device_ids = sorted(hue_cfgs)
+async def _wake_fade_color() -> str | None:
+    """Color the off-fade should land on: the wake scene's dominant color on
+    its 'activate' virtual (background_color, else a plain-hex gradient/color).
+    None = fade brightness only, keeping the current color."""
+    scene_id = (settings.ambient_wake_scene or "").strip()
+    if not scene_id:
+        return None
+    try:
+        scene = next(
+            (s for s in await ledfx_client.get_scenes() if s.get("id") == scene_id), None
+        )
+        for spec in ((scene or {}).get("virtuals") or {}).values():
+            if not (isinstance(spec, dict) and spec.get("action") == "activate"):
+                continue
+            cfg = spec.get("config") or {}
+            for key in ("background_color", "gradient", "color"):
+                val = cfg.get(key)
+                if isinstance(val, str) and val.startswith("#"):
+                    return val
+    except Exception as exc:
+        logger.warning("Ambient: could not derive wake fade color: %r", exc)
+    return None
 
-    # 1) Freeze each Hue device — LedFX awaits the stream-stop server-side.
+
+async def _commit_state(want: set[str]) -> None:
+    """Make `want` the authoritative held-group set: state, disk, UI broadcast."""
+    from models.state import state
+    state.ambient_groups = sorted(want)
+    state.ambient_mode_enabled = bool(want)
+    try:
+        from routers.settings_router import _load_settings_file, _save_settings_file
+        saved = _load_settings_file()
+        saved["ambient_mode_enabled"] = state.ambient_mode_enabled
+        saved["ambient_groups"] = state.ambient_groups
+        _save_settings_file(saved)
+    except Exception as exc:
+        logger.error("Ambient: failed to persist group state: %r", exc)
+    try:
+        from services.websocket_manager import ws_manager
+        await ws_manager.broadcast_state(state)
+    except Exception:
+        pass
+
+
+async def _set_groups_impl(want: set[str] | None, transition_s: float | None) -> dict:
+    """Drive per-device freeze + Hue REST toward `want`.
+
+    ON  (wanted): freeze (LedFX stops that device's entertainment stream so the
+        bridge reverts to REST mode), THEN write the static color via REST —
+        freeze must complete first, else a live stream frame overrides REST.
+        Idempotent for already-held groups (re-asserts stop + color instantly);
+        newly-held groups ramp up over the transition.
+    OFF (held but no longer wanted): fade toward the wake color on the bridge
+        (`dynamics.duration`; the device is still frozen so REST owns the bulbs
+        for the whole fade), then unfreeze and kick the wake scene so the
+        stream takes over at roughly the color it starts streaming."""
+    hue_cfgs = await _resolve_hue_cfgs()
+    if not hue_cfgs:
+        logger.warning("Ambient: no Hue devices resolved from category %r",
+                       settings.ambient_target_category)
+    if want is None:
+        want = set(hue_cfgs)
+    else:
+        unknown = sorted(want - set(hue_cfgs))
+        if unknown:
+            logger.warning("Ambient: ignoring unknown group id(s) %s (known: %s)",
+                           unknown, sorted(hue_cfgs))
+        want = want & set(hue_cfgs)
+
+    frozen: set[str] = set()
+    for did in hue_cfgs:
+        if await ledfx_client.get_hue_frozen(did):
+            frozen.add(did)
+    to_off = sorted(frozen - want)
+
+    t_s = settings.ambient_transition_s if transition_s is None else transition_s
+    t_s = max(0.0, min(float(t_s), 15.0))
+
     frozen_ok = 0
-    for did in hue_device_ids:
+    total_lights = 0
+    for did in sorted(want):
+        ramp_ms = int(t_s * 1000) if did not in frozen else None
         if await ledfx_client.freeze_hue_device(did, True):
             frozen_ok += 1
+        total_lights += await _apply_hue(hue_cfgs[did], body=_light_payload(ramp_ms))
 
-    # 2) Streams are down now — write the static color via REST.
-    total_lights = 0
-    for cfg in hue_cfgs.values():
-        total_lights += await _apply_hue(cfg)
+    wake: dict | None = None
+    if to_off:
+        if t_s > 0:
+            fade = _fade_payload(await _wake_fade_color(), int(t_s * 1000))
+            for did in to_off:
+                await _apply_hue(hue_cfgs[did], body=fade)
+            await asyncio.sleep(t_s)  # bridge runs the fade; reconciler skips while busy()
+        for did in to_off:
+            await ledfx_client.freeze_hue_device(did, False)
+        wake = await _wake_kick()
 
-    if not hue_device_ids:
-        logger.warning("Ambient: no Hue devices resolved from category %r", settings.ambient_target_category)
+    await _commit_state(want)
     logger.info(
-        "Ambient ENABLED: %d/%d Hue device(s) frozen, %d light(s) set.",
-        frozen_ok, len(hue_device_ids), total_lights,
+        "Ambient groups → %s: %d/%d frozen, %d light(s) set, released %s (fade %.1fs)",
+        sorted(want) or "none", frozen_ok, len(want), total_lights,
+        to_off or "none", t_s if to_off else 0.0,
     )
-    return {"hue_devices": hue_device_ids, "frozen": frozen_ok, "lights_set": total_lights}
-
-
-async def _disable_impl() -> dict:
-    """Deactivate ambient mode: UNFREEZE each Hue device so LedFX re-engages its
-    entertainment stream, then kick the wake scene so the stream actually
-    restarts (see _wake_kick)."""
-    hue_device_ids = sorted(await _resolve_hue_cfgs())
-    unfrozen = 0
-    for did in hue_device_ids:
-        if await ledfx_client.freeze_hue_device(did, False):
-            unfrozen += 1
-    logger.info("Ambient DISABLED: unfroze %d Hue device(s): %s", unfrozen, hue_device_ids)
-    wake = await _wake_kick()
-    return {"status": "disabled", "unfrozen": hue_device_ids, "wake": wake}
+    return {"ambient_groups": sorted(want), "frozen": frozen_ok,
+            "lights_set": total_lights, "released": to_off, "wake": wake}
 
 
 async def _wake_kick() -> dict:
@@ -348,10 +472,12 @@ async def _wake_kick() -> dict:
 
 
 async def reapply() -> dict:
-    """Re-run enable() if ambient mode is currently active (e.g. settings changed).
-    enable() is idempotent (re-freeze is a no-op that re-asserts the stop, then
-    re-writes REST), so this just refreshes the static color."""
+    """Re-assert ambient for the currently-held groups (e.g. settings changed).
+    set_groups is idempotent for held groups (re-freeze is a no-op that
+    re-asserts the stop, then re-writes REST), so this just refreshes the color."""
     from models.state import state
-    if state.ambient_mode_enabled:
-        return await enable()
+    if state.ambient_groups:
+        return await set_groups(set(state.ambient_groups))
+    if state.ambient_mode_enabled:  # legacy: flag on with no group detail = all
+        return await set_groups(None)
     return {"status": "inactive"}
