@@ -31,6 +31,10 @@ export interface ColorSetCard {
   mode: 'cycle' | 'weighted';
   cycle_behavior: 'wrap' | 'bounce';
   exclude_current: boolean;
+  /** Synced groups share one room-wide palette position: a fire starts from
+   * the member nearest the room's current palette hue, not this group's own
+   * private cursor. */
+  palette_sync: boolean;
   [k: string]: unknown;
 }
 
@@ -64,5 +68,6 @@ export function newCard(kind: 'set' | 'group', id: string): ColorSetCard {
     mode: 'cycle',
     cycle_behavior: 'wrap',
     exclude_current: true,
+    palette_sync: false,
   };
 }

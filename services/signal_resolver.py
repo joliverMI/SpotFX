@@ -188,8 +188,32 @@ _ASPECT_FIELDS = (
     ("flip", "tri_bool"),
     ("swirl", "float_free"),
     ("horizon_scale", "float01"),
+    ("radius_scale", "float_free"),
+    ("blob_size", "float_free"),
     ("reverse", "tri_bool"),
 )
+
+
+def _reactivity_kind(pname: str) -> FieldKind:
+    """Field kind for a per-param reactivity binding (AspectValue.
+    reactivity_values). Resolved from the param's registry entry: toggle →
+    tri_bool, integer → int0, else float_free (the morph compiler clamps to
+    the param's registered [min, max] at patch time). Scans every effect —
+    param names are expected to keep one type across effects."""
+    try:
+        from services import effect_params as _ep
+        for spec in _ep._CONFIG.get("effects", {}).values():
+            meta = spec.get("params", {}).get(pname)
+            if meta:
+                t = meta.get("type")
+                if t == "toggle":
+                    return "tri_bool"
+                if t == "integer":
+                    return "int0"
+                return "float_free"
+    except Exception:
+        pass
+    return "float_free"
 
 
 def has_bindings(action) -> bool:
@@ -202,6 +226,10 @@ def has_bindings(action) -> bool:
                 return True
             av = tgt.absolute_value
             if any(isinstance(getattr(av, f), ValueBinding) for f, _ in _ASPECT_FIELDS):
+                return True
+            if av.reactivity_values and any(
+                isinstance(v, ValueBinding) for v in av.reactivity_values.values()
+            ):
                 return True
         return False
     if t == "set_color":
@@ -248,6 +276,13 @@ def resolve_action_bindings(action, signal_fn: SignalFn):
             av = tgt.absolute_value
             for field, kind in _ASPECT_FIELDS:
                 setattr(av, field, rv(getattr(av, field), kind))
+            if av.reactivity_values:
+                resolved = {}
+                for pname, pval in av.reactivity_values.items():
+                    r = rv(pval, _reactivity_kind(pname))
+                    if r is not None:  # binding resolved to no-op → drop the param
+                        resolved[pname] = r
+                av.reactivity_values = resolved or None
     elif t == "set_color":
         adv = rv(new.advance, "int1")
         new.advance = 1 if adv is None else adv

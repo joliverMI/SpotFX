@@ -63,9 +63,11 @@ export interface AspectValue {
   x_offset?: Bindable<number> | null;
   y_offset?: Bindable<number> | null;
   effect_type?: string | null;
-  // blackhole-only shape sub-fields (ignored by effects without the params)
+  // blackhole/orbits shape sub-fields (ignored by effects without the params)
   swirl?: Bindable<number> | null;
   horizon_scale?: Bindable<number> | null;
+  radius_scale?: Bindable<number> | null;
+  blob_size?: Bindable<number> | null;
   reverse?: Bindable<boolean | 'toggle'> | null;
   star_nudge?: NumericNudge | null;
   edges_nudge?: NumericNudge | null;
@@ -74,6 +76,14 @@ export interface AspectValue {
   y_offset_nudge?: NumericNudge | null;
   swirl_nudge?: NumericNudge | null;
   horizon_scale_nudge?: NumericNudge | null;
+  radius_scale_nudge?: NumericNudge | null;
+  blob_size_nudge?: NumericNudge | null;
+  // Per-param Reactivity sub-fields, keyed by raw LedFX param name. Values are
+  // in the param's OWN range (not 0..1); toggle params take the tri-state.
+  // Set = write, absent = ignore, binding = variable; *_nudges drive the
+  // per-param nudge math when the target's mode is "nudge".
+  reactivity_values?: Record<string, Bindable<number | boolean | 'toggle'>> | null;
+  reactivity_nudges?: Record<string, NumericNudge> | null;
 }
 
 export type MorphAspect =

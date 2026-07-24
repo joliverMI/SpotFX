@@ -134,11 +134,12 @@ function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set
       {(action.pick_mode === 'cycle' || action.pick_mode === 'default') && (
         <>
           <Row label="Advance"
-            help={action.pick_mode === 'default'
+            help={(action.pick_mode === 'default'
               ? "Members to move per fire — used when the group's own mode resolves to cycle/bounce; ignored for random"
-              : 'Members to move per fire'}>
-            <BindableNumber value={action.advance} min={1} step={1}
-              onChange={(v) => set((a) => { a.advance = isBinding(v) || v == null ? (v ?? 1) : Math.max(1, Math.round(v)); })} />
+              : 'Members to move per fire')
+              + '. 0 = stay: re-apply the current member (on a Palette Sync group, repaint in the room’s current color family)'}>
+            <BindableNumber value={action.advance} min={0} step={1}
+              onChange={(v) => set((a) => { a.advance = isBinding(v) || v == null ? (v ?? 1) : Math.max(0, Math.round(v)); })} />
           </Row>
           <Row label="Direction">
             <Select value={action.direction} width={140}

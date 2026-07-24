@@ -80,6 +80,15 @@ def get_param_meta(effect_type: str, param_name: str) -> dict | None:
     return _CONFIG.get("effects", {}).get(effect_type, {}).get("params", {}).get(param_name)
 
 
+def bg_color_blocked(effect_type: str) -> bool:
+    """True when the effect opts out of background_color writes via the
+    registry's `no_background_color` flag (radial: it renders a source
+    virtual's frames, so a non-black background just washes the panel with
+    light — and no UI exposes it). LedFX still has the base-class param on
+    the live config, which is exactly why writes must be blocked here."""
+    return bool(_CONFIG.get("effects", {}).get(effect_type, {}).get("no_background_color"))
+
+
 def _collect_labels(effect_list: list[str]) -> list[dict]:
     """Return deduplicated label metadata for a list of effect type names."""
     seen: set[str] = set()

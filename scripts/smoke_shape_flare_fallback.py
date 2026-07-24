@@ -36,7 +36,7 @@ def _scene(shape_alts, color_alts) -> MusicEvent:
 async def _run_case(label, scene, expect_fired_scene_ids) -> bool:
     fired: list[str] = []
 
-    async def _fake_execute_action(action, labels, skip_event_ids=None):
+    async def _fake_execute_action(action, labels, skip_event_ids=None, **kwargs):
         fired.append(getattr(action, "scene_id", "?"))
 
     engine = te.TriggerEngine()

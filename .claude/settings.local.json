@@ -218,7 +218,8 @@
       "c:\\Users\\joliv\\.claude\\plans",
       "/home/javi/.config/systemd/user",
       "/home/javi/spotify-stack",
-      "/home/javi/ledfx-src/ledfx/api"
+      "/home/javi/ledfx-src/ledfx/api",
+      "/home/javi/ledfx-src/ledfx/effects"
     ]
   }
 }

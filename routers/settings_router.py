@@ -63,10 +63,13 @@ class SettingsPatch(BaseModel):
     quiet_min_duration_ms: Optional[int] = None
     audio_shape_min_capture_pct: Optional[float] = None
     smooth_ramp_ms: Optional[int] = None
+    hue_blend_transitions: Optional[bool] = None
     auto_generate_mode: Optional[str] = None   # "embedded" | "claude"
     show_ai_triggers: Optional[bool] = None
     show_advanced: Optional[bool] = None
     genre_blending_enabled: Optional[bool] = None
+    force_scene_enabled: Optional[bool] = None
+    force_scene_event_id: Optional[str] = None
     suppress_triggers_during_capture: Optional[bool] = None
     xcorr_monitor_enabled: Optional[bool] = None
     song_source: Optional[str] = None          # "spotify" | "ledfx"
@@ -111,10 +114,13 @@ async def get_settings():
         "quiet_min_duration_ms": settings.quiet_min_duration_ms,
         "audio_shape_min_capture_pct": settings.audio_shape_min_capture_pct,
         "smooth_ramp_ms": settings.smooth_ramp_ms,
+        "hue_blend_transitions": settings.hue_blend_transitions,
         "auto_generate_mode": settings.auto_generate_mode,
         "show_ai_triggers": settings.show_ai_triggers,
         "show_advanced": settings.show_advanced,
         "genre_blending_enabled": settings.genre_blending_enabled,
+        "force_scene_enabled": settings.force_scene_enabled,
+        "force_scene_event_id": settings.force_scene_event_id,
         "suppress_triggers_during_capture": settings.suppress_triggers_during_capture,
         "xcorr_monitor_enabled": settings.xcorr_monitor_enabled,
         "song_source": settings.song_source,
@@ -159,6 +165,8 @@ async def restart_server():
 async def patch_settings(patch: SettingsPatch):
     """Apply non-None values from patch to the live settings object and persist to disk."""
     data = patch.model_dump(exclude_none=True)
+    prev_force_on = settings.force_scene_enabled
+    prev_force_eid = settings.force_scene_event_id
     for key, val in data.items():
         if hasattr(settings, key):
             object.__setattr__(settings, key, val)
@@ -170,7 +178,15 @@ async def patch_settings(patch: SettingsPatch):
     if any(k.startswith("ambient_") for k in data):
         from models.state import state
         if state.ambient_mode_enabled:
-            import asyncio
             from services import ambient_mode
             asyncio.create_task(ambient_mode.reapply())
+    # Force Scene: turning it on or picking a different scene asserts the
+    # forced scene right away instead of waiting for the next scene pick.
+    # Fired in the background — lane ramps can take seconds.
+    if (settings.force_scene_enabled and settings.force_scene_event_id
+            and (not prev_force_on
+                 or settings.force_scene_event_id != prev_force_eid)):
+        from main import engine
+        asyncio.create_task(
+            engine.fire_event_now(settings.force_scene_event_id))
     return {"status": "updated"}

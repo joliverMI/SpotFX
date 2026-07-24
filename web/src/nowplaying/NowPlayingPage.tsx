@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api/client';
 import { onMessage } from '../api/ws';
-import { useEvents, useSettings } from '../api/queries';
+import { useEvents, usePatchSettings, useSettings } from '../api/queries';
 import {
   useAudioShapeData, useAudioShapeMeta, useLibrosa,
 } from '../builder/queries';
@@ -17,6 +17,8 @@ import { BEAT_STRIP_H, stripCountFor, type LayerDataBag, type ViewState } from '
 import { computeAverages, computeMfccDistances } from '../builder/canvas/data';
 import { useFollowWindow } from '../builder/hooks/useFollowWindow';
 import CollapsibleCard from '../components/CollapsibleCard';
+import SearchSelect from '../components/forms/SearchSelect';
+import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { fmtCountdown, fmtMs } from '../lib/time';
 import { ensureLiveState, getLiveProgressMs, useLiveStore, useLiveTick } from '../live/liveStore';
@@ -85,6 +87,19 @@ export default function NowPlayingPage() {
   const { triggers, source } = useNowProfile(uri);
   const { data: settings } = useSettings();
   const { data: events } = useEvents();
+  const patchSettings = usePatchSettings();
+
+  // Force Scene — persisted in settings; while enabled, every new-scene pick
+  // reasserts the chosen Scene Update (normal First/Rest lanes) instead.
+  const forceScene = settings?.force_scene_enabled === true;
+  const forceSceneEventId = (settings?.force_scene_event_id as string | undefined) ?? '';
+  const sceneOptions = useMemo(
+    () => (events ?? [])
+      .filter((e) => e.event_type === 'scene_update')
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((e) => ({ value: e.id, label: e.name, keywords: (e.labels ?? []).join(' ') })),
+    [events],
+  );
   const { data: meta } = useAudioShapeMeta(uri);
   const { data: shape } = useAudioShapeData(uri, meta?.capture_complete ?? false);
   const { data: librosa } = useLibrosa(uri);
@@ -365,6 +380,19 @@ export default function NowPlayingPage() {
             onClick={() => void apiPost(`/control/use-analyzed-triggerless?enabled=${!useAnalyzed}`)}>
             Analyzed
           </button>
+          <button className={`toggle-btn ${forceScene ? 'active' : ''}`}
+            title="Hold one scene: whenever a new scene would be picked, reassert the forced scene instead"
+            onClick={() => patchSettings.mutate({ force_scene_enabled: !forceScene })}>
+            Force Scene
+          </button>
+          {forceScene && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <SearchSelect value={forceSceneEventId} options={sceneOptions} width={200}
+                placeholder="— pick scene —" allowEmpty={false}
+                onChange={(v) => patchSettings.mutate({ force_scene_event_id: v })} />
+              <HelpLink topic="now-force-scene" />
+            </span>
+          )}
           {srcBadge && (
             <span style={{
               fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,

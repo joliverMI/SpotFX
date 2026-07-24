@@ -538,12 +538,29 @@ def _get_probe_client() -> httpx.AsyncClient:
 
 # ── Internal direct-fire helpers (bypass bus) ─────────────────────────────────
 
+def _round_int_params(effect_type: str, config: dict) -> dict:
+    """Return `config` with integer-typed params (per the effect_params
+    registry) rounded to real ints. Ramp math produces floats like 2.0/2.5,
+    and LedFX effects use these as numpy sizes/slice indices — a float there
+    kills the render thread. Every outgoing effect config passes through here."""
+    from services import effect_params as _ep
+    out = config
+    for k, v in config.items():
+        if isinstance(v, float):
+            meta = _ep.get_param_meta(effect_type, k)
+            if meta and meta.get("type") == "integer":
+                if out is config:
+                    out = dict(config)
+                out[k] = int(round(v))
+    return out
+
+
 async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: dict) -> bool:
     if _capture_in_progress():
         return True   # capture-in-progress mute (acts like success so callers don't error)
     resp = await _request(
         "PUT", f"/api/virtuals/{virtual_id}/effects",
-        json={"type": effect_type, "config": config},
+        json={"type": effect_type, "config": _round_int_params(effect_type, config)},
         label=f"effect:{virtual_id}",
     )
     return resp is not None
@@ -568,9 +585,14 @@ async def _set_virtual_effect_tween_direct(
         "PUT", f"/api/virtuals/{virtual_id}/effects",
         json={
             "type": effect_type,
-            "config": config,
+            "config": _round_int_params(effect_type, config),
             "transition_ms": int(transition_ms),
             "easing": easing,
+            # Colour/gradient travel: hue-wheel rotation vs straight RGB lerp.
+            # Older LedFX ignores unknown keys → falls back to RGB.
+            "transition_blend": (
+                "hue" if settings.hue_blend_transitions else "rgb"
+            ),
         },
         label=f"tween:{virtual_id}",
     )
@@ -874,7 +896,7 @@ async def post_virtual_effect(virtual_id: str, effect_type: str, config: dict) -
         return True   # capture-in-progress mute
     resp = await _request(
         "POST", f"/api/virtuals/{virtual_id}/effects",
-        json={"type": effect_type, "config": config},
+        json={"type": effect_type, "config": _round_int_params(effect_type, config)},
         label=f"effect_post:{virtual_id}",
     )
     return resp is not None
@@ -905,7 +927,7 @@ async def set_virtual_effect_fallback(
         return True   # capture-in-progress mute
     resp = await _request(
         "POST", f"/api/virtuals/{virtual_id}/effects",
-        json={"type": effect_type, "config": config, "fallback": fallback_s},
+        json={"type": effect_type, "config": _round_int_params(effect_type, config), "fallback": fallback_s},
         label=f"effect_fallback:{virtual_id}",
     )
     return resp is not None
@@ -1138,10 +1160,14 @@ async def ramp_gradient_params(
     from services.gradient_interpolation import interpolate_gradient
     cfg = state.ledfx_virtual_cache.get(virtual_id, {}).get("effect", {}).get("config", {})
     starts = {p: (cfg.get(p) or "") for p in patch}
+    hue = bool(settings.hue_blend_transitions)
     steps = max(1, ramp_ms // step_ms)
     for i in range(1, steps + 1):
         t = i / steps
-        frame = {p: interpolate_gradient(starts[p], patch[p], t) for p in patch}
+        frame = {
+            p: interpolate_gradient(starts[p], patch[p], t, hue_blend=hue)
+            for p in patch
+        }
         await set_virtual_effect(virtual_id, effect_type, frame)
         if i < steps:
             await asyncio.sleep(step_ms / 1000)

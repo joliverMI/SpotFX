@@ -130,6 +130,9 @@ class _PlanEntry:
     # Update fired in between), so a stale preview never fires stale lanes.
     preselected_scene_picks: Optional[list] = None
     scene_picks_sid: Optional[str] = None
+    # Event the scene picks were rolled against (the Force Scene target when
+    # active, else the entry's own event / last Scene Update for flares).
+    scene_picks_event_id: Optional[str] = None
     snapshot_task: Optional[asyncio.Task] = None  # pre-fire snapshot of the LedFX state this event will change
     # Scene-override lookahead: planner pre-stages the temp scene + transition_times
     # ahead of fire_at_ms; fire-time just activates the prepared scene.
@@ -269,6 +272,11 @@ class TriggerEngine:
         # Index served two fires ago per group — used to break a bounce ping-pong
         # when advance > 1 (e.g. n=3 advance=2 would otherwise loop 0,2,0,2).
         self._color_cursor_prev: dict[str, int] = {}
+        # Palette Sync: room-wide hue (0..360) of the last set applied via a
+        # palette_sync group. Unlike the cursors this survives track changes —
+        # it mirrors what's physically showing on the lights, so the next song
+        # (or another synced group) continues from the room's actual palette.
+        self._palette_hue: Optional[float] = None
         # Last fired Color Set's 3rd (accent) color per virtual, recorded as a
         # Color Set is applied. value may be None when that set's entry left the
         # accent undefined. On an effect switch to an accent-capable effect
@@ -328,6 +336,24 @@ class TriggerEngine:
         self._ramp_tasks.add(task)
         task.add_done_callback(self._ramp_tasks.discard)
         return task
+
+    @staticmethod
+    async def _await_ramps_parallel(jobs: list) -> None:
+        """Await one step's collected per-device ramps CONCURRENTLY: every
+        device starts its ramp together and the step completes with the
+        slowest. (Awaiting them inline chained device after device — with
+        server-side tween each call holds for its full ramp_ms, so an N-device
+        Set Color visibly cascaded for N x ramp_ms instead of changing as one.)
+
+        jobs: (coro, cfg_or_None, patch_or_None); each cache patch is applied
+        after the gather so a following sequence step reads post-ramp values.
+        One device's ramp failure doesn't abort its siblings'."""
+        if not jobs:
+            return
+        await asyncio.gather(*(c for c, _, _ in jobs), return_exceptions=True)
+        for _, cfg, patch in jobs:
+            if cfg is not None and patch:
+                cfg.update(patch)
 
     def load_profile(self, profile: SongProfile) -> None:
         self._profile = profile
@@ -1258,6 +1284,10 @@ class TriggerEngine:
                 # re-rolls only if the active Scene Update changes between
                 # plan and fire (the scene_picks_sid guard).
                 scene_sid = self._last_scene_update_id
+                if event.event_type == "scene_update":
+                    picks_src = (self._forced_scene_event() or event).id
+                else:
+                    picks_src = scene_sid  # flares roll against the last scene
                 scene_picks = self._pick_scene_lanes(event, lbls)
                 scene_resolved: dict = {}
                 for _i, _a in scene_picks:
@@ -1280,6 +1310,7 @@ class TriggerEngine:
                     is_root=(event.id == root_event.id),
                     preselected_scene_picks=scene_picks or None,
                     scene_picks_sid=scene_sid,
+                    scene_picks_event_id=picks_src,
                     resolved_picks=scene_resolved or None,
                 ))
                 return f"{event.name}: {' · '.join(parts)}" if parts else event.name
@@ -1443,6 +1474,9 @@ class TriggerEngine:
             return self._blend_action_tail_ms(event.root, at_ms, depth, visited)
         if et in SCENE_EVENT_TYPES:
             if et == "scene_update":
+                forced = self._forced_scene_event()
+                if forced is not None:
+                    event = forced  # Force Scene: reassert with normal First/Rest
                 lane_index = 1 if self._last_scene_update_id == event.id else 0
                 lanes = event.morph_lanes or []
                 if 0 <= lane_index < len(lanes):
@@ -2107,12 +2141,24 @@ class TriggerEngine:
                 av = t.absolute_value
                 a = t.aspect
                 if a in ("brightness", "reactivity", "blur"):
-                    if t.mode == "nudge":
-                        return [f"{a} {t.nudge_amount:+g}"]
-                    return [f"{a} → {self._fmt_val(av.number)}"]
-                if a == "shape":
                     parts: list[str] = []
-                    for name in ("star", "edges", "twist", "x_offset", "y_offset"):
+                    if t.mode == "nudge":
+                        if t.nudge_amount:
+                            parts.append(f"{a} {t.nudge_amount:+g}")
+                    elif av.number is not None:
+                        parts.append(f"{a} → {self._fmt_val(av.number)}")
+                    if a == "reactivity":
+                        for pname, v in (av.reactivity_values or {}).items():
+                            parts.append(f"{pname} → {self._fmt_val(v)}")
+                        if t.mode == "nudge":
+                            for pname, sp in (av.reactivity_nudges or {}).items():
+                                if sp is not None and sp.amount:
+                                    parts.append(f"{pname} {sp.amount:+g}")
+                    return parts or [a]
+                if a == "shape":
+                    parts = []
+                    for name in ("star", "edges", "twist", "x_offset", "y_offset",
+                                 "swirl", "horizon_scale"):
                         if t.mode == "nudge":
                             sp = getattr(av, f"{name}_nudge", None)
                             if sp is not None and sp.amount:
@@ -2121,7 +2167,7 @@ class TriggerEngine:
                             v = getattr(av, name)
                             if v is not None:
                                 parts.append(f"{name} → {self._fmt_val(v)}")
-                    for name in ("polygon", "flip"):
+                    for name in ("polygon", "flip", "reverse"):
                         v = getattr(av, name)
                         if v is not None:
                             parts.append(f"{name} {'toggle' if v == 'toggle' else self._fmt_val(v)}")
@@ -2745,6 +2791,24 @@ class TriggerEngine:
             elif sub.event_type == "morph_set":
                 await self._execute_morph_set(sub, labels or [], skip_event_ids=skip_event_ids)
             elif sub.event_type == "composite":
+                # Honor scene_override on referenced setters (scene First
+                # lanes fire them via event_ref): the atomic activate switches
+                # every device FIRST and asserts the Color Set picks AFTER, so
+                # a concurrent set_color can never address the pre-switch
+                # effect and flip a device back to it (radial→orbits→radial
+                # flicker). Bus dispatch remains the fallback.
+                if getattr(sub, "scene_override", False):
+                    _rp = resolved_picks
+                    if _rp is None and sub.root is not None:
+                        _rp = self._resolve_random_picks(sub.root, list(labels or []))
+                    _sp = self._composite_scene_picks(sub, _rp)
+                    if self._event_eligible_for_scene_override(sub, picks=_sp):
+                        with ledfx_client.force_allow():
+                            fired = await self._maybe_fire_scene_override(
+                                sub, labels=labels, picks=_sp)
+                            if fired:
+                                await ledfx_client.drain_bus()
+                                return
                 # Forward the resolved map: group ids are uuids, so entries can
                 # only match this sub-tree's own groups (deep plan-time locks —
                 # e.g. scene-lane picks — resolve into the same map). Groups
@@ -2854,6 +2918,7 @@ class TriggerEngine:
                 virtuals = get_all_virtual_ids()
             ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
             instant_coros = []
+            ramp_jobs: list = []
             polar_changes: dict = {}  # vid → (angle, radius, effect_type)
             for vid in virtuals:
                 cached = ledfx_client.get_virtual_cache(vid)
@@ -2985,26 +3050,24 @@ class TriggerEngine:
                     effect_cfg.update({**bool_patch, **instant_str})
                 if num_patch:
                     if ramp_ms > 0:
+                        coro = ledfx_client.ramp_effect_params(vid, effect_type, num_patch, ramp_ms)
                         if await_ramps:
-                            await ledfx_client.ramp_effect_params(vid, effect_type, num_patch, ramp_ms)
-                            # Update cache AFTER the ramp so the next step's ramp_effect_params
-                            # reads the correct post-ramp start value (not the pre-ramp value).
-                            # Revert snapshot was taken before the sequence, so it's unaffected.
-                            effect_cfg.update(num_patch)
+                            # Cache patch lands AFTER the gather so the next step's
+                            # ramp_effect_params reads the correct post-ramp start value
+                            # (not the pre-ramp value). Revert snapshot was taken before
+                            # the sequence, so it's unaffected.
+                            ramp_jobs.append((coro, effect_cfg, num_patch))
                         else:
-                            self._spawn_ramp(
-                                ledfx_client.ramp_effect_params(vid, effect_type, num_patch, ramp_ms)
-                            )
+                            self._spawn_ramp(coro)
                     else:
                         instant_coros.append(ledfx_client.set_virtual_effect(vid, effect_type, num_patch))
                         effect_cfg.update(num_patch)
                 if ramp_str:
+                    coro = ledfx_client.ramp_gradient_params(vid, effect_type, ramp_str, ramp_ms)
                     if await_ramps:
-                        await ledfx_client.ramp_gradient_params(vid, effect_type, ramp_str, ramp_ms)
+                        ramp_jobs.append((coro, None, None))
                     else:
-                        self._spawn_ramp(
-                            ledfx_client.ramp_gradient_params(vid, effect_type, ramp_str, ramp_ms)
-                        )
+                        self._spawn_ramp(coro)
             if instant_coros:
                 await asyncio.gather(*instant_coros)
             # Dispatch polar offset ramps (x_offset + y_offset interpolated in polar space)
@@ -3015,7 +3078,7 @@ class TriggerEngine:
                     if ramp_ms > 0:
                         coro = ledfx_client.ramp_polar_offset(_vid, _etype, _angle, _radius, ramp_ms)
                         if await_ramps:
-                            await coro
+                            ramp_jobs.append((coro, None, None))
                         else:
                             self._spawn_ramp(coro)
                     else:
@@ -3027,6 +3090,7 @@ class TriggerEngine:
                         )
                 if polar_instant_coros:
                     await asyncio.gather(*polar_instant_coros)
+            await self._await_ramps_parallel(ramp_jobs)
 
         elif action.type == "morph_step":
             await self._execute_morph_step(action, await_ramps=await_ramps)
@@ -3168,6 +3232,7 @@ class TriggerEngine:
         default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
         touched: set[str] = {w.virtual_id for w in switch_writes}
         instant_coros: list = []
+        ramp_jobs: list = []
 
         for w in patch_writes:
             ramp_ms = w.ramp_ms if w.ramp_ms is not None else default_ramp_ms
@@ -3208,13 +3273,13 @@ class TriggerEngine:
 
             if num_patch:
                 if ramp_ms > 0:
+                    coro = ledfx_client.ramp_effect_params(w.virtual_id, w.effect_type, num_patch, ramp_ms)
                     if await_ramps:
-                        await ledfx_client.ramp_effect_params(w.virtual_id, w.effect_type, num_patch, ramp_ms)
-                        effect_cfg.update(num_patch)
+                        # Cache patch lands post-gather so the next step's
+                        # ramp_effect_params reads the post-ramp start value.
+                        ramp_jobs.append((coro, effect_cfg, num_patch))
                     else:
-                        self._spawn_ramp(
-                            ledfx_client.ramp_effect_params(w.virtual_id, w.effect_type, num_patch, ramp_ms)
-                        )
+                        self._spawn_ramp(coro)
                 else:
                     instant_coros.append(
                         ledfx_client.set_virtual_effect(w.virtual_id, w.effect_type, num_patch)
@@ -3223,15 +3288,15 @@ class TriggerEngine:
                     _vt(w.virtual_id)["config"].update(num_patch)
 
             if ramp_str:
+                coro = ledfx_client.ramp_gradient_params(w.virtual_id, w.effect_type, ramp_str, ramp_ms)
                 if await_ramps:
-                    await ledfx_client.ramp_gradient_params(w.virtual_id, w.effect_type, ramp_str, ramp_ms)
+                    ramp_jobs.append((coro, None, None))
                 else:
-                    self._spawn_ramp(
-                        ledfx_client.ramp_gradient_params(w.virtual_id, w.effect_type, ramp_str, ramp_ms)
-                    )
+                    self._spawn_ramp(coro)
 
         if instant_coros:
             await asyncio.gather(*instant_coros, return_exceptions=True)
+        await self._await_ramps_parallel(ramp_jobs)
 
         # ── Verify non-ramping writes landed; re-issue any that didn't ─────────
         # Sparks-when-power guarantee: for any verified virtual now on the
@@ -3276,9 +3341,17 @@ class TriggerEngine:
         members to move per fire (1 = next, 3 = skip 2) and `direction`
         ("forward"|"backward") sets travel: absolute index direction for wrap,
         and relative to the current bounce direction for bounce ("backward"
-        reverses it). A move never settles on the set currently showing; in
+        reverses it). A move never settles on the set currently showing —
+        except advance=0, which deliberately stays put (repaint/align); in
         bounce with advance > 1 it also avoids the set from two fires ago, so an
         even advance can't ping-pong between two endpoints (e.g. n=3 advance=2).
+
+        Palette Sync (group.palette_sync): instead of this group's private
+        cursor, the move starts from the member matching the room's CURRENT
+        palette — the exact last-applied set when it's a member here, else the
+        member nearest the shared palette hue — and the pick's hue is published
+        back. Synced groups therefore walk one shared palette position instead
+        of each jumping to wherever its own cursor last sat.
         Returns the color_set_id."""
         members = group.members or []
         if not members:
@@ -3287,13 +3360,28 @@ class TriggerEngine:
         mode = group.mode if pick_mode == "default" else pick_mode
         cur = self._color_cursor.get(group.id)
         prev = self._color_cursor_prev.get(group.id)
-        adv = max(1, int(advance))
+        adv = max(0, int(advance))
         back = direction == "backward"
+
+        sync = bool(getattr(group, "palette_sync", False))
+        member_hues: list[Optional[float]] = []
+        if sync:
+            member_hues = self._member_palette_hues(members)
+            anchor = self._palette_sync_anchor(members, member_hues)
+            if anchor is not None and anchor != cur:
+                # Re-anchored to the room's palette: the private bounce
+                # history no longer applies.
+                cur, prev = anchor, None
 
         if mode == "cycle":
             if cur is None:
                 idx = 0
                 self._color_cursor_dir[group.id] = -1 if back else 1
+            elif adv == 0:
+                # advance 0 = stay: re-apply the current member (for a Palette
+                # Sync group, `cur` was just re-anchored to the room's palette,
+                # so this repaints the scoped devices in the current family).
+                idx = cur
             elif group.cycle_behavior == "bounce" and n > 1:
                 d = self._color_cursor_dir.get(group.id, 1)
                 if back:
@@ -3340,15 +3428,60 @@ class TriggerEngine:
         self._color_cursor[group.id] = idx
         return members[idx].color_set_id
 
+    def _member_palette_hues(self, members) -> list[Optional[float]]:
+        """Representative hue per group member (None when underivable) —
+        derived from the member card's swatch color first, then its entries'
+        FG values. One store read for the whole member list."""
+        from services import color_set_store
+        from services.gradient_interpolation import representative_hue
+        cards = {c.id: c for c in color_set_store.list_all()}
+        hues: list[Optional[float]] = []
+        for m in members:
+            card = cards.get(m.color_set_id)
+            if card is None:
+                hues.append(None)
+                continue
+            candidates = [card.color] + [e.color_value for e in card.entries]
+            hues.append(representative_hue(candidates))
+        return hues
+
+    def _palette_sync_anchor(
+        self, members, member_hues: list[Optional[float]]
+    ) -> Optional[int]:
+        """Index of the member representing the room's current palette: the
+        exact last-applied Color Set when it's a member of this group, else
+        the member with the smallest hue distance to the shared palette hue.
+        None when neither anchor resolves (fall back to the private cursor)."""
+        from services.gradient_interpolation import hue_distance
+        last_id = state.last_color_set_id
+        if last_id:
+            for i, m in enumerate(members):
+                if m.color_set_id == last_id:
+                    return i
+        if self._palette_hue is None:
+            return None
+        best: Optional[int] = None
+        best_d = 1e9
+        for i, h in enumerate(member_hues):
+            if h is None:
+                continue
+            d = hue_distance(h, self._palette_hue)
+            if d < best_d:
+                best, best_d = i, d
+        return best
+
     @staticmethod
     def _color_param_for(etype: str, aspect: str, fallback: str, cfg: dict) -> Optional[str]:
         """Raw param name to write for a Color Set aspect on `etype`. Uses the
         effect's mapped aspect param when SpotFX models it, else falls back to
         LedFX's canonical key (`gradient` / `background_color`) when the live
         effect actually exposes it — so unmodeled effects (e.g. crawler) still
-        receive colors."""
+        receive colors. Effects flagged `no_background_color` in the registry
+        (radial) never receive bg writes, not even via the fallback."""
         from services import morph_aspects
-        from services.effect_params import get_param_meta
+        from services.effect_params import bg_color_blocked, get_param_meta
+        if aspect == "bg_color" and bg_color_blocked(etype):
+            return None
         params = morph_aspects.params_for_aspect(etype, aspect)
         if params:
             return params[0]
@@ -3398,6 +3531,17 @@ class TriggerEngine:
 
         state.last_color_set_id = card.id  # mirror for the Now Playing indicator
 
+        # Publish the room's palette hue for Palette Sync groups. Every
+        # color-carrying Set application updates it (group pick or direct
+        # fire) so the shared hue tracks what's physically showing; sets with
+        # no derivable hue (brightness-only, rainbows) leave it untouched.
+        from services.gradient_interpolation import representative_hue
+        applied_hue = representative_hue(
+            [card.color] + [e.color_value for e in card.entries]
+        )
+        if applied_hue is not None:
+            self._palette_hue = applied_hue
+
         # ── Merge layers into one effective entry per virtual ────────────────
         # Base layer: the Set's entries in order (on overlap, later entries win
         # per field). Override layer: the Group's entries — every field they
@@ -3432,6 +3576,7 @@ class TriggerEngine:
         base_vids = _overlay(card.entries)
         _overlay(overrides)
         if not merged:
+            logger.info("set_color '%s': no virtuals resolved from entry scopes — nothing to do", card.name)
             return
 
         # Address each device by its LIVE active effect (not a stale cached one)
@@ -3441,6 +3586,7 @@ class TriggerEngine:
 
         default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
         instant_coros: list = []
+        ramp_jobs: list = []   # awaited ramps, gathered in parallel after the loop
         touched: set[str] = set()
 
         ramp_scale = float(getattr(action, "ramp_scale", 1.0) or 1.0)
@@ -3461,6 +3607,7 @@ class TriggerEngine:
             eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
             etype = eff.get("type")
             if not etype:
+                logger.debug("set_color '%s': %s has no cached effect type — skipped", card.name, vid)
                 continue
             cfg = eff.setdefault("config", {})
 
@@ -3545,31 +3692,36 @@ class TriggerEngine:
                 instant["background_mode"] = entry.bg_mode
 
             if not instant and not ramp_str and not ramp_num:
+                logger.debug(
+                    "set_color '%s': %s/%s nothing to write (no fields for this vid, or all already at target)",
+                    card.name, vid, etype,
+                )
                 continue
             touched.add(vid)
+            logger.info(
+                "set_color '%s': %s/%s instant=%s ramp_str=%s ramp_num=%s ramp_ms=%s",
+                card.name, vid, etype, instant, ramp_str, ramp_num, ramp_ms,
+            )
 
             if instant:
                 instant_coros.append(ledfx_client.set_virtual_effect(vid, etype, instant))
                 cfg.update(instant)
             if ramp_str:
+                coro = ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
                 if await_ramps:
-                    await ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
-                    cfg.update(ramp_str)
+                    ramp_jobs.append((coro, cfg, ramp_str))
                 else:
-                    self._spawn_ramp(
-                        ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
-                    )
+                    self._spawn_ramp(coro)
             if ramp_num:
+                coro = ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
                 if await_ramps:
-                    await ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
-                    cfg.update(ramp_num)
+                    ramp_jobs.append((coro, cfg, ramp_num))
                 else:
-                    self._spawn_ramp(
-                        ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
-                    )
+                    self._spawn_ramp(coro)
 
         if instant_coros:
             await asyncio.gather(*instant_coros, return_exceptions=True)
+        await self._await_ramps_parallel(ramp_jobs)
 
         # Persist post-action state so a later effect switch-back resumes colors.
         if touched:
@@ -3617,6 +3769,7 @@ class TriggerEngine:
 
         ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
         instant_coros: list = []
+        ramp_jobs: list = []
         touched: set[str] = set()
 
         for vid in vids:
@@ -3679,19 +3832,18 @@ class TriggerEngine:
                 instant_coros.append(ledfx_client.set_virtual_effect(vid, etype, instant))
                 cfg.update(instant)
             if ramp_str:
+                coro = ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
                 if await_ramps:
-                    await ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
-                    cfg.update(ramp_str)
+                    ramp_jobs.append((coro, cfg, ramp_str))
                 else:
-                    self._spawn_ramp(
-                        ledfx_client.ramp_gradient_params(vid, etype, ramp_str, ramp_ms)
-                    )
+                    self._spawn_ramp(coro)
                     # Optimistically mirror the ramp target so back-to-back
                     # rotations compound instead of re-reading the pre-ramp value.
                     cfg.update(ramp_str)
 
         if instant_coros:
             await asyncio.gather(*instant_coros, return_exceptions=True)
+        await self._await_ramps_parallel(ramp_jobs)
 
         # Persist post-action state so a later effect switch-back resumes colors.
         if touched:
@@ -3819,6 +3971,15 @@ class TriggerEngine:
             desc=f"lane '{lane.name or lane_index}' of '{event.name}'",
         )
 
+    def _forced_scene_event(self) -> Optional[MusicEvent]:
+        """The Scene Update that Force Scene redirects every scene pick to, or
+        None when the setting is off / points at a missing or non-scene event."""
+        if not settings.force_scene_enabled:
+            return None
+        eid = settings.force_scene_event_id
+        ev = get_event(eid) if eid else None
+        return ev if ev is not None and ev.event_type == "scene_update" else None
+
     def _scene_lane_indices(self, event: MusicEvent) -> list[int]:
         """Lane indices a scene-family event runs against the last Scene
         Update (with Shape Flare's empty-lane fallback to Color)."""
@@ -3836,6 +3997,9 @@ class TriggerEngine:
         plan entry and fired as-is (unless the active Scene Update changes).
         Returns [(lane_index, action), ...] — empty when no scene is active."""
         if event.event_type == "scene_update":
+            forced = self._forced_scene_event()
+            if forced is not None:
+                event = forced  # Force Scene: reassert with normal First/Rest
             lane_index = 1 if self._last_scene_update_id == event.id else 0
             picked = self._pick_lane_action(event, lane_index, labels)
             return [(lane_index, picked)] if picked is not None else []
@@ -3928,15 +4092,22 @@ class TriggerEngine:
         self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
         preselected: Optional[dict] = None,
         resolved_picks: Optional[dict] = None,
+        picks_event_id: Optional[str] = None,
     ) -> str:
         """Dispatch any scene event type. Returns a short summary string for the
         Now-Playing broadcast. `preselected` (lane_index → Action) carries the
         plan-time picks and `resolved_picks` their deep-resolved random
         branches, so the fire matches the Now Playing preview; lanes missing
-        from them fall back to fresh picks."""
+        from them fall back to fresh picks. `picks_event_id` records which event
+        the picks were rolled against — a mismatch with the event that actually
+        runs (e.g. Force Scene toggled between plan and fire) drops them."""
         if event.event_type == "scene_update":
+            forced = self._forced_scene_event()
+            target = forced if forced is not None else event
+            if picks_event_id is not None and picks_event_id != target.id:
+                preselected, resolved_picks = None, None
             return await self._execute_scene_update(
-                event, labels, skip_event_ids, preselected, resolved_picks)
+                target, labels, skip_event_ids, preselected, resolved_picks)
         if event.event_type not in _FLARE_LANES:
             return ""
         # Shape Flare falls back to the Color lane when the Shape lane (2) is
@@ -4790,16 +4961,21 @@ class TriggerEngine:
             # Use the plan-time lane picks (and their deep-resolved random
             # branches) only while the Scene Update they were rolled against
             # is still the active one; otherwise re-roll everything so a
-            # stale preview can't fire lanes of a replaced scene.
+            # stale preview can't fire lanes of a replaced scene. Scene Updates
+            # roll against their own lanes (the Force Scene target when active),
+            # so their picks stay valid regardless of which scene is live —
+            # _execute_scene_event drops them if the target event changed.
             picks = None
             resolved = None
-            if (entry.preselected_scene_picks
-                    and entry.scene_picks_sid == self._last_scene_update_id):
+            if entry.preselected_scene_picks and (
+                    evt.event_type == "scene_update"
+                    or entry.scene_picks_sid == self._last_scene_update_id):
                 picks = dict(entry.preselected_scene_picks)
                 resolved = entry.resolved_picks
             await self._execute_scene_event(
                 evt, entry.labels, skip_event_ids=skip_ids,
-                preselected=picks, resolved_picks=resolved)
+                preselected=picks, resolved_picks=resolved,
+                picks_event_id=entry.scene_picks_event_id)
 
     async def _execute_beat_sequence(
         self,

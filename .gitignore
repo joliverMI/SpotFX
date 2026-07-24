@@ -48,3 +48,6 @@ storage/tune_history.json
 storage/tune_runs.log
 storage/tune_schedule.json
 build/
+
+# TypeScript incremental build
+web/tsconfig.tsbuildinfo

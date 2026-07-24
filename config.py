@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # (GET /api/info → features.param_transition). Kill-switch: set False to force
     # the legacy client-side ramps. Effective only when LedFX actually supports it.
     server_side_tween: bool = True
+    # How colour/gradient transitions travel: True = rotate around the hue
+    # wheel (HSV shortest arc — red→cyan sweeps through magenta/blue or
+    # yellow/green instead of desaturating through grey), False = straight
+    # RGB lerp (legacy). Applies to both the server-side tween and the
+    # legacy client-side ramp loop.
+    hue_blend_transitions: bool = True
 
     # ── Write verification (non-ramping reconciliation) ────────────────────────
     # After a morph step's non-ramping writes (effect switch, colors incl. the
@@ -576,6 +582,12 @@ class Settings(BaseSettings):
     # Genre Blending — when ON, suppress song-start triggers if the previous song
     # ended naturally and the new song shares any genre with it.
     genre_blending_enabled: bool = True
+    # Force Scene — when ON, every Scene Update fire (the moment SpotFX would
+    # pick a new scene) reasserts the chosen scene instead (normal First/Rest
+    # lanes), so the room stays on that scene. Flares still run against it.
+    # Toggled from Now Playing.
+    force_scene_enabled: bool = False
+    force_scene_event_id: str = ""   # id of the scene_update event to hold
     # Suppress Triggers During Capture — when ON, the LedFX gate mutes trigger
     # writes while audio_shape_service is recording so capture doesn't compete
     # with LedFX writes. Turn OFF to let triggers fire during capture.

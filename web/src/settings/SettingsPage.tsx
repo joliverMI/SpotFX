@@ -98,6 +98,7 @@ export default function SettingsPage() {
         audio_wav_max_songs: num('audio_wav_max_songs', 50),
         shape_average_window_ms: num('shape_average_window_ms', 500),
         smooth_ramp_ms: num('smooth_ramp_ms'),
+        hue_blend_transitions: bool('hue_blend_transitions', true),
         auto_generate_mode: str('auto_generate_mode', 'embedded'),
         show_ai_triggers: bool('show_ai_triggers'),
         show_advanced: bool('show_advanced'),
@@ -151,6 +152,12 @@ export default function SettingsPage() {
           <input type="number" step={50} min={0} value={num('smooth_ramp_ms')}
             onChange={(e) => set('smooth_ramp_ms', parseInt(e.target.value) || 0)} />
         </Field>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, marginTop: 8 }}>
+          <input type="checkbox" checked={bool('hue_blend_transitions', true)}
+            onChange={(e) => set('hue_blend_transitions', e.target.checked)} />
+          Hue-rotation color blending — transitions travel around the color wheel instead of fading through gray
+          <HelpLink topic="hue-blend-transitions" title="Hue blending help" />
+        </label>
         <div style={{ marginTop: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
             Timing devices (snapcast clients)

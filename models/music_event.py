@@ -110,14 +110,23 @@ class AspectValue(BaseModel):
                                                 brightness / reactivity may also carry
                                                 scale_overrides (per-param weight overrides
                                                 — e.g. split fg vs bg brightness; see below)
+                                                reactivity additionally supports per-param
+                                                sub-fields (reactivity_values /
+                                                reactivity_nudges — see below) that override
+                                                the single-number distribution per param
       aspect=color                            → color_kind + color_value
       aspect=bg_color                         → bg_color
-      aspect=shape                            → any subset of {polygon, star, edges, twist, flip}
+      aspect=shape                            → any subset of {polygon, star, edges, twist, flip,
+                                                reverse, swirl, horizon_scale, radius_scale,
+                                                blob_size, x_offset, y_offset}.
+                                                `edges` doubles as the particle count on effects
+                                                with a `particle_count` param (orbits) — the UI
+                                                shows it as "Edge / Particle Count".
                                                 Booleans (polygon, flip) accept True, False,
                                                 or "toggle" (flip the current cached value).
                                                 When target.mode='nudge', the numeric sub-fields
-                                                (star, edges, twist) use their *_nudge specs
-                                                instead of their absolute value.
+                                                use their *_nudge specs instead of their
+                                                absolute value.
       aspect=effect                           → effect_type
     """
     number:       float | ValueBinding | None = None
@@ -141,9 +150,11 @@ class AspectValue(BaseModel):
     edges:        int | ValueBinding | None = None
     twist:        float | ValueBinding | None = None
     flip:         Optional[bool | Literal["toggle"] | ValueBinding] = None
-    # blackhole-only shape sub-fields (ignored by effects without the params)
+    # blackhole/orbits shape sub-fields (ignored by effects without the params)
     swirl:          float | ValueBinding | None = None
     horizon_scale:  float | ValueBinding | None = None
+    radius_scale:   float | ValueBinding | None = None
+    blob_size:      float | ValueBinding | None = None
     reverse:        Optional[bool | Literal["toggle"] | ValueBinding] = None
     # x_offset / y_offset live in the FRONTEND −1..1 space. The compiler converts
     # to LedFX's 0..1 storage via the `scale_offset` flag in effect_params.json.
@@ -160,6 +171,20 @@ class AspectValue(BaseModel):
     y_offset_nudge: NumericNudge | None = None
     swirl_nudge:         NumericNudge | None = None
     horizon_scale_nudge: NumericNudge | None = None
+    radius_scale_nudge:  NumericNudge | None = None
+    blob_size_nudge:     NumericNudge | None = None
+    # Per-param Reactivity sub-fields (aspect="reactivity"), mirroring the Shape
+    # sub-field semantics but keyed by raw LedFX param name so any effect's
+    # reactivity params (accel, edge_speed, beat_burst, spawn_rate, …) are
+    # addressable without a model field each. Values are in the param's OWN
+    # range (not abstract 0..1): set = write, absent = ignore, ValueBinding =
+    # variable (e.g. section energy). Toggle params (keybeat2d half_beat) take
+    # the usual tri-state True / False / "toggle". When target.mode="nudge",
+    # reactivity_nudges entries drive the per-param nudge math instead; the
+    # single-number distribution (nudge_amount × aspect_scale) still applies to
+    # params without an entry. Params the current effect lacks are ignored.
+    reactivity_values: dict[str, float | bool | Literal["toggle"] | ValueBinding] | None = None
+    reactivity_nudges: dict[str, NumericNudge] | None = None
 
 
 MorphAspect = Literal[
@@ -213,7 +238,9 @@ class SetColorAction(BaseModel):
     the group's own `mode`. `ramp_ms` is the step default; each Color Set entry
     may override it. `advance`/`direction` apply only when the resolved mode is
     "cycle" (wrap or bounce): `advance` is how many members to move per fire (1 =
-    next, 3 = skip 2). For wrap, `direction` is the absolute index direction; for
+    next, 3 = skip 2, 0 = stay — re-apply the current member without moving,
+    which on a Palette Sync group means "repaint in the room's current color
+    family"). For wrap, `direction` is the absolute index direction; for
     bounce, "forward" continues the current travel direction and "backward"
     reverses it. See `services/trigger_engine._execute_set_color`."""
     type:      Literal["set_color"] = "set_color"
@@ -221,7 +248,7 @@ class SetColorAction(BaseModel):
     weight:    float = 1.0
     ref_id:    str = ""
     pick_mode: Literal["default", "cycle", "weighted"] = "default"
-    advance:   Union[Annotated[int, Field(ge=1)], ValueBinding] = 1
+    advance:   Union[Annotated[int, Field(ge=0)], ValueBinding] = 1
     direction: Literal["forward", "backward"] = "forward"
     ramp_ms:   int | ValueBinding | None = None
     # Runtime multiplier for per-entry ramp overrides that live on the Color

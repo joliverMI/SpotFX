@@ -131,6 +131,12 @@ def _patch_numeric(
         meta = _ep.get_param_meta(effect_type, pname) or {}
         if meta.get("type") not in ("numeric", "integer"):
             continue
+        # distribute:false params (accel, edge_speed, …) are reactivity-menu
+        # only: addressable via reactivity_values / reactivity_nudges but
+        # excluded from the single-number distribution so pre-existing events
+        # don't suddenly drive them.
+        if meta.get("distribute") is False:
+            continue
         scale = meta.get("aspect_scale")
         if scale is None:
             scale = 1.0
@@ -160,7 +166,7 @@ def _patch_numeric(
             new_val = lo + (hi - lo) * scaled
 
         new_val = max(lo, min(hi, new_val))
-        out[pname] = round(new_val, 4)
+        out[pname] = int(round(new_val)) if meta.get("type") == "integer" else round(new_val, 4)
     return out
 
 
@@ -295,7 +301,7 @@ def _patch_shape(
     Sub-field → param mapping (resolved via the `aspect` tag in effect_params.json):
       polygon → `polygon`  (radial only)
       star    → `star`     (radial only)
-      edges   → `edges`    (radial only)
+      edges   → `edges` (radial) or `particle_count` (orbits) — "Edge / Particle Count"
       twist   → `twist`    (radial only)
       flip    → `flip` (power/melt) or `ring` (equalizer2d) or `spin_sign` (radial)
 
@@ -327,26 +333,31 @@ def _patch_shape(
     # Numerics: nudge if mode=nudge AND nudge spec present; else absolute.
     # `scale_offset` params (x_offset / y_offset) live in frontend −1..1 space
     # on the AspectValue but in LedFX 0..1 space on the wire — convert at write.
-    for key in ("star", "edges", "twist", "x_offset", "y_offset", "swirl", "horizon_scale"):
-        if key not in name_set:
+    for key in ("star", "edges", "twist", "x_offset", "y_offset", "swirl",
+                "horizon_scale", "radius_scale", "blob_size"):
+        # `edges` doubles as the particle count on effects that have one
+        # (orbits) — the UI presents them as a single "Edge / Particle Count".
+        pname = key
+        if key == "edges" and key not in name_set and "particle_count" in name_set:
+            pname = "particle_count"
+        if pname not in name_set:
             continue
-        meta = _ep.get_param_meta(effect_type, key) or {}
+        meta = _ep.get_param_meta(effect_type, pname) or {}
         scale_offset = bool(meta.get("scale_offset"))
+        is_integer = meta.get("type") == "integer"
         nudge_spec = getattr(val, f"{key}_nudge", None)
         if is_nudge and nudge_spec is not None:
-            # _nudged_numeric already returns LedFX-space when scale_offset is set
-            v = _nudged_numeric(effect_type, key, nudge_spec, current_config, intensity,
-                                vid=vid, nudge_dir=nudge_dir)
-            out[key] = int(v) if key == "edges" else v
+            # _nudged_numeric already returns LedFX-space when scale_offset is
+            # set, and nearest-integer for integer params.
+            out[pname] = _nudged_numeric(effect_type, pname, nudge_spec, current_config,
+                                         intensity, vid=vid, nudge_dir=nudge_dir)
         else:
             abs_val = getattr(val, key, None)
             if abs_val is None:
                 continue
             if scale_offset:
                 # frontend −1..1 → LedFX 0..1
-                out[key] = round(float(abs_val) / 2.0 + 0.5, 4)
-            elif key == "edges":
-                out[key] = int(abs_val)
+                out[pname] = round(float(abs_val) / 2.0 + 0.5, 4)
             else:
                 # clamp to the param's registered range so bound/edge values
                 # can't fail LedFX schema validation (e.g. horizon_scale ≤ 0.8)
@@ -356,7 +367,80 @@ def _patch_shape(
                     v = max(lo, v)
                 if hi is not None:
                     v = min(hi, v)
-                out[key] = round(v, 4)
+                out[pname] = int(round(v)) if is_integer else round(v, 4)
+    return out
+
+
+def _patch_reactivity(
+    effect_type: str,
+    target: MorphTarget,
+    current_config: dict,
+    intensity: Optional[float],
+    vid: Optional[str] = None,
+    nudge_dir: Optional[dict] = None,
+) -> dict:
+    """reactivity aspect — the single-number distribution plus Shape-style
+    per-param sub-fields (AspectValue.reactivity_values / reactivity_nudges).
+
+    Ordering: the distribution runs first, then per-param entries overwrite it
+    — a param addressed explicitly always wins over the spread value.
+
+    Per-param semantics mirror _patch_shape:
+      - only params tagged aspect=reactivity on the CURRENT effect are written
+        (a target scoped over mixed effect types silently skips the rest);
+      - toggle params (keybeat2d half_beat) take tri-state True / False /
+        "toggle" via reactivity_values regardless of mode;
+      - numeric / integer reactivity_values are ABSOLUTE values in the param's
+        own range, clamped to the registered [min, max];
+      - when target.mode == "nudge", reactivity_nudges entries run the shared
+        per-param nudge math (_nudged_numeric: wrap/bounce, custom lo/hi,
+        intensity factor) from the current cached value.
+    """
+    val = target.absolute_value
+    is_nudge = target.mode == "nudge"
+
+    # A zero nudge_amount distribution is "current + 0" for every distributed
+    # param — skip it so a per-param-only nudge target doesn't emit no-op
+    # writes for the whole aspect bucket.
+    if is_nudge and not (target.nudge_amount or 0.0):
+        out: dict = {}
+    else:
+        out = _patch_numeric(effect_type, "reactivity", target, current_config, intensity)
+
+    react_params = set(morph_aspects.params_for_aspect(effect_type, "reactivity"))
+
+    for pname, pval in (val.reactivity_values or {}).items():
+        if pval is None or pname not in react_params:
+            continue
+        meta = _ep.get_param_meta(effect_type, pname) or {}
+        ptype = meta.get("type")
+        if ptype == "toggle":
+            out[pname] = _resolve_bool_aspect(pval, current_config.get(pname, False))
+            continue
+        if ptype not in ("numeric", "integer"):
+            continue
+        if is_nudge and pname in (val.reactivity_nudges or {}):
+            continue  # the nudge spec owns this param in nudge mode
+        try:
+            v = float(pval)
+        except (TypeError, ValueError):
+            continue
+        lo, hi = meta.get("min"), meta.get("max")
+        if lo is not None:
+            v = max(lo, v)
+        if hi is not None:
+            v = min(hi, v)
+        out[pname] = int(round(v)) if ptype == "integer" else round(v, 4)
+
+    if is_nudge:
+        for pname, spec in (val.reactivity_nudges or {}).items():
+            if spec is None or pname not in react_params:
+                continue
+            meta = _ep.get_param_meta(effect_type, pname) or {}
+            if meta.get("type") not in ("numeric", "integer"):
+                continue
+            out[pname] = _nudged_numeric(effect_type, pname, spec, current_config,
+                                         intensity, vid=vid, nudge_dir=nudge_dir)
     return out
 
 
@@ -370,7 +454,10 @@ def _patch_for_aspect(
     nudge_dir: Optional[dict] = None,
 ) -> dict:
     val = target.absolute_value
-    if aspect_id in ("brightness", "reactivity", "blur"):
+    if aspect_id == "reactivity":
+        return _patch_reactivity(effect_type, target, current_config, intensity,
+                                 vid=vid, nudge_dir=nudge_dir)
+    if aspect_id in ("brightness", "blur"):
         return _patch_numeric(effect_type, aspect_id, target, current_config, intensity)
     # Non-numeric aspects: nudge has no meaning, silently behave as absolute.
     if aspect_id == "color":

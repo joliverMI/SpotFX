@@ -64,3 +64,8 @@ class ColorSetCard(BaseModel):
     mode:           Literal["cycle", "weighted"] = "cycle"
     cycle_behavior: Literal["wrap", "bounce"] = "wrap"
     exclude_current: bool = True
+    # Palette Sync: synced groups share one room-wide "current palette hue".
+    # A synced group starts its pick from the member nearest that hue (instead
+    # of its own private cursor), then publishes the pick's hue back — so
+    # switching between synced groups keeps the room on one color family.
+    palette_sync:   bool = False

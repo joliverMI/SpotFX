@@ -5,6 +5,8 @@ export interface SearchOption {
   label: string;
   /** optional group heading shown as a prefix chip (e.g. "category" / "virtual") */
   group?: string;
+  /** extra search-only text (e.g. an event's labels) — matched but not shown */
+  keywords?: string;
 }
 
 /** Searchable dropdown: shows the selected label, filters options as you type.
@@ -44,7 +46,8 @@ export default function SearchSelect({
     const needle = q.trim().toLowerCase();
     const filtered = needle
       ? options.filter(
-          (o) => o.label.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle),
+          (o) => o.label.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle)
+            || (o.keywords ?? '').toLowerCase().includes(needle),
         )
       : options;
     return filtered.slice(0, 200);

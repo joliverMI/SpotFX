@@ -335,7 +335,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'event_ref ledfx scene ambient transition effect param morph color device settings',
         table: [
           ['event_ref', "Fire another event's action pool."],
-          ['morph_step', 'Multi-target aspect changes (brightness / reactivity / blur / color / bg color / effect / shape), absolute or nudge, with ramps.'],
+          ['morph_step', 'Multi-target aspect changes (brightness / reactivity / blur / color / bg color / effect / shape), absolute or nudge, with ramps. Shape sub-fields cover radial (star, twist, polygon) plus blackhole/orbits (swirl, horizon size, field radius, blob size, offsets); "Edge / particle count" is one sub-field that lands on radial\'s polygon edges or orbits\' particle count, whichever the running effect has. The Reactivity aspect has a Shape-style per-param menu: add any reactivity param (Spawn Rate, Beat Burst, Accel, Edge Speed, …), set it exactly, bind it to a signal (⚡), or give it its own nudge — per-param entries win over the single spread slider.'],
           ['morph_color', 'Rotate the showing colors around the hue wheel (180° = complementary).'],
           ['set_color', 'Sets gradient + background + sparks together.'],
           ['ledfx_scene / ledfx_ambient', 'Activate a LedFX scene / ambient behavior.'],
@@ -377,8 +377,8 @@ export const HELP_SECTIONS: HelpSection[] = [
   /* ── Matrix dancers / GIF effects ────────────────────────────── */
   {
     id: 'matrix-gifs',
-    title: 'Matrix Dancers, GIFs & Blackhole',
-    keywords: 'dancing stick figure gif keybeat animation matrix crystal dancer asset blackhole',
+    title: 'Matrix Dancers, GIFs, Blackhole & Orbits',
+    keywords: 'dancing stick figure gif keybeat animation matrix crystal dancer asset blackhole orbits particles',
     intro:
       'Animated GIFs (like the dancing stick figure) run on matrix devices via LedFX\'s keybeat2d effect: frames tagged as "beat frames" land on musical beats and LedFX interpolates between them, so the figure dances to the music with no per-beat traffic from SpotFX. Silence freezes the dance.',
     entries: [
@@ -419,10 +419,40 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Trail Length', '0 = crisp dots, 1 = long comet smear.'],
           ['Spawn Rate / Beat Burst', 'Continuous blobs per second + extras on each beat.'],
           ['Max Blobs / Edge Speed', 'Density controls: hard cap on live blobs, and rim speed as a fraction of center speed (low = blobs linger and crowd the rim).'],
-          ['Audio Spawn / Audio Speed', 'How much the chosen Audio Band boosts spawning / infall speed.'],
+          ['Accel / Kill Radius / Horizon Hold', 'Speed-curve exponent (higher = slower rim, harder fall), the radius where blobs are consumed, and how long a blob orbits the horizon before fading.'],
+          ['Audio Spawn / Audio Speed', 'How much the chosen Audio Band boosts spawning / infall speed. Audio Speed goes to 5, multiplying speed by up to 1 + 2×value on a full-power hit (11× at max) — above ~2 the swirl saturates at its 3 rev/s cap, so extra value goes into radial motion.'],
           ['Color Mode', 'wheel: gradient wraps the circle and rotates with Gradient Spin (direction follows the swirl); band: lows/mids/highs pick gradient positions; random: uniform (spin invisible).'],
           ['Horizon Size / Horizon Audio', 'Event horizon: blobs fall into orbit at this radius (grows with sound when Horizon Audio is positive), turn the Accent Color while circling, then fade. The disc inside shows the BG color. 0 = classic fall-to-center.'],
-          ['Morph Steps', 'The Shape aspect has blackhole-only sub-fields: Swirl, Horizon size (absolute or nudge, bindable) and Reverse (tri-state) — morph the vortex from scene lanes and flares like any other shape.'],
+          ['X / Y Offset', 'Move the center point around the matrix — same sub-fields as radial and orbits, so one morph step can steer whichever of the three is running.'],
+          ['Particle handoff', 'Switching between Blackhole and Orbits (either direction, or recreating the same effect) hands the on-screen particles, trails AND the live gradient to the incoming effect — blobs become orbiting particles and vice versa instead of vanishing, and colors stay continuous until the next SpotFX color action repaints. Handoff Ease sets how many seconds adopted particles take to wind up to full infall speed.'],
+          ['Morph Steps', 'The Shape aspect sub-fields Swirl, Horizon size, Blob size, X/Y offset (absolute or nudge, bindable) and Reverse (tri-state) morph the vortex from scene lanes and flares like any other shape. The Reactivity aspect\'s per-param menu reaches everything else: Spawn Rate, Beat Burst, Infall Speed, Accel, Edge Speed, Max Blobs, Horizon Hold, Impulse Decay….'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'matrix-orbits',
+        title: 'Orbits effect',
+        keywords: 'orbits particles tether ring jiggle trail spin color jump fly in off',
+        body: [
+          'A custom LedFX matrix effect, sibling of Blackhole: a fixed set of particles (default 6) stays on the matrix permanently. Each is tethered to a point on a ring around the center and orbits it with comet trails; the ring itself spins. Changing the particle count animates — a removed particle flies off in a random direction, a new one flies in and the rest re-space around the ring.',
+        ],
+        table: [
+          ['Particles', 'How many particles live on the matrix (1–16). Morphable via the Shape aspect\'s "Edge / particle count" sub-field (shared with radial\'s polygon edges).'],
+          ['X / Y Offset & Field Radius', 'Center point and overall scale — same params as radial/blackhole, so shape morphs steer all three.'],
+          ['Tether Radius', 'Ring the tether points sit on (the Horizon size shape sub-field). 0 = everything orbits the center.'],
+          ['Orbit Radius / Particle Size', 'Radius of each particle\'s path around its tether, and its drawn size in pixels.'],
+          ['Ring Spin / Orbit Speed / Reverse Spin', 'Ring rotation (fraction of base speed), base orbit revolutions per second, and direction flip (the Reverse shape sub-field).'],
+          ['Jiggle', '0 = clean synchronized orbits; 1 = each particle wanders smoothly and randomly within its orbit radius, and audio reactions fully decorrelate between particles.'],
+          ['Tether Scatter', '0 = tether points perfectly equidistant around the ring; 1 = each tether sits at its own random ring position (no equidistance bias).'],
+          ['Reactivity (master)', 'One knob, exposed to the Reactivity aspect spread: multiplies Speed Jump Max, Speed Jump Jog, Brightness Audio and Size Audio — balance those once, then scale the whole response with this.'],
+          ['Speed Jump Max / Speed Jump Jog', 'Cap on the music-driven speed boost, and how hard onsets/beats knock particles off course (a decaying bounce).'],
+          ['Brightness / Size Audio', 'Music pumps particle brightness and inflates particle size.'],
+          ['Colors', 'Particles sample the gradient at evenly spaced points; Gradient Spin rolls the colors over time; trails are each particle\'s own color fading out, exactly like Blackhole.'],
+          ['Particle handoff', 'Switching from Blackhole adopts its brightest blobs: they glide from where they are into tether orbits over Enter Time seconds, colors morphing from carried-over to slot colors. Switching away hands the particles to Blackhole (its Handoff Ease winds them up). Trails survive in both directions.'],
+          ['Enter Time', 'Seconds a new or adopted particle takes to glide into its orbit — governs count-increase fly-ins and the Blackhole→Orbits handoff.'],
+          ['Color Jump', 'Integer slot rotation of the particle→color assignment. Nudge it +1 from a morph step (Reactivity per-param menu) to make colors jump A,B,C → C,A,B on cue.'],
+          ['Morph Steps', 'Shape aspect: X/Y offset, Horizon size (= tether radius), Field radius, Edge / particle count (= Particles), Blob size (= Particle Size) and Reverse apply directly. Reactivity per-param menu reaches Jiggle, Tether Scatter, Ring Spin, Orbit Speed, the jump/jog/brightness/size reactivities and Color Jump.'],
+          ['The "Orbits" scene', 'Seeded scene mirroring Black Hole: First fires the Orbits Scene Setter (tuned matrix look + Strips melt / Singles power + Black Hole starter sets); Rest cycles the Black Holes color group by 3 and reverses spin; Shape randomly reverses spin or adds/removes a particle (bounded 3–10); Color randomly color-jumps or cycles the group. Re-seed with scripts/seed_orbits_scene.py.'],
         ],
         kbd: false,
       },
@@ -448,14 +478,24 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'now-controls',
         title: 'Control toggles',
-        keywords: 'activate pause dinner party ambient analyzed',
+        keywords: 'activate pause dinner party ambient analyzed force scene',
         table: [
           ['Activate', 'Master switch — pause/resume trigger firing.'],
           ['Dinner Party', 'Ignore song triggers; use automatic ambient lighting.'],
           ['Ambient', 'Hold the configured devices at a static full-brightness color (Hue REST) and exclude them from triggers.'],
           ['Analyzed', 'Use analyzed (auto-generated) triggers for songs without user triggers.'],
+          ['Force Scene', 'Hold one scene: whenever a new scene would be picked, reassert the forced scene instead. See "Force Scene" below.'],
         ],
         kbd: false,
+      },
+      {
+        id: 'now-force-scene',
+        title: 'Force Scene',
+        keywords: 'force scene hold pin lock reset first lane override picker search',
+        body: [
+          'When enabled, every Scene Update fire — the moment SpotFX would pick a new scene — reasserts the scene chosen in the picker instead: its First lane when it isn\'t the active scene yet, then its Rest lane on repeats, exactly like a natural fire of that scene. The room stays on it for as long as the toggle is on; flares (Shape/Color/Combo) and Update/Reset Scene keep running against it, so the lights still move with the music.',
+          'The picker lists Scene Update events; type to filter by name or label. Turning the toggle on (with a scene chosen) or picking a different scene asserts it immediately — no waiting for the next scene pick. Manual fires of other Scene Updates are redirected too while the toggle is on. The setting persists across restarts and is OFF by default; with no scene chosen it does nothing.',
+        ],
       },
       {
         id: 'now-next-changes',
@@ -532,6 +572,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'A Group can carry its own entries (the "Overrides" list). When the Group fires, one member Set is picked as usual, then every field an override defines — color, BG color, BG mode, brightness, BG brightness, third color, ramp — replaces the Set\'s value on the devices the override\'s scope resolves to. Unset fields keep the Set\'s values.',
           'Merging happens per device: an override scoped to a sub-category (or single device) inside a Set entry\'s scope only changes those nested devices, while the Set keeps applying to the rest. If the override\'s scope covers everything the Set touches, it simply wins everywhere. Devices in an override\'s scope that the picked Set doesn\'t cover still get the override\'s explicit fields — so a Group-level clamp (e.g. BG brightness on one category) behaves the same no matter which member is picked.',
           'Third color: a Set clears the accent to black on devices where it leaves it undefined; an override only touches the accent when set explicitly (set it to black to force-clear).',
+        ],
+      },
+      {
+        id: 'colorsets-palette-sync',
+        title: 'Palette Sync (groups)',
+        keywords: 'sync synced hue shared cursor position family disjointed devices categories together',
+        body: [
+          'Normally each Group cycles from its own private position — so when different Groups drive different devices or scenes (e.g. one for strips, one for Hue lamps, one per scene family), each fires from wherever ITS cycle last sat and the room\'s palettes drift apart.',
+          'Palette Sync (Group Settings checkbox) makes a Group follow the room instead: every Set application publishes a room-wide "current palette" (the applied Set itself, plus a hue derived from its card swatch color, falling back to its FG colors). A synced Group starts its pick from the member matching that palette — the exact Set when it\'s a member, else the nearest member by hue — then advances from there as the fire requests. Enable it on all the Groups you want moving as one color family.',
+          'The hue comes from the card\'s swatch color first, so give parallel families matching swatches (e.g. "Mid - Ice" and "Power - Ice" the same cyan) for exact correspondences. Sets with no usable hue — brightness-only cards, white/grey swatches with rainbow gradients — neither move nor disturb the shared palette.',
+          'A Set Color step with Advance 0 stays put instead of moving: on a synced Group it repaints the scoped devices in the room\'s current family — handy in scene-set events so entering a scene re-themes without shifting the palette.',
         ],
       },
     ],
@@ -756,6 +807,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'audio latency buffer ramp graph scales averaging',
         body: [
           'Audio latency shifts the drawn playhead to the audible moment; the LedFX trigger buffer delays fires to absorb network jitter (nudgeable live on Debug with [ and ]). Graph layer scales and averaging widths set defaults for the builder canvas — both are also adjustable live via the builder\'s layer-button gestures.',
+        ],
+      },
+      {
+        id: 'hue-blend-transitions',
+        title: 'Hue-rotation color blending',
+        keywords: 'color wheel rotate gradient transition gray desaturate rgb hsv blend tween ramp',
+        body: [
+          'Controls how color and gradient transitions travel between two colors. On (default), colors rotate around the hue wheel (HSV, shortest arc) — red→cyan sweeps through magenta/blue or yellow/green at full saturation. Off, colors take the straight RGB path, which desaturates through gray/muddy midpoints on distant hues (the classic washed-out mid-transition).',
+          'Applies everywhere SpotFX ramps a color: morph steps, Set Color actions, gradient params on any effect, both the LedFX server-side tween and the legacy client-side ramp loop. Grays, black, and white have no hue, so blends into or out of them fade saturation in place instead of picking an arbitrary rotation.',
         ],
       },
       {

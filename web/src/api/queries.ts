@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiDel } from './client';
+import { api, apiGet, apiPost, apiDel } from './client';
 import type { MusicEvent } from '../types/events';
 
 export interface ColorSetCard {
@@ -72,10 +72,22 @@ export function useGifAssets() {
   });
 }
 
+export interface AspectParamMeta {
+  label: string;
+  type: string;
+  min: number | null;
+  max: number | null;
+  aspect: string | null;
+  aspect_scale: number | null;
+  distribute: boolean;
+}
+
 export interface MorphAspectsInfo {
   aspect_ids: string[];
   aspect_labels: Record<string, string>;
   supported_effects: string[];
+  // {effect_type: {param_name: meta}} for every aspect-tagged param
+  param_meta?: Record<string, Record<string, AspectParamMeta>>;
 }
 
 export interface ParamConfig {
@@ -103,6 +115,14 @@ export function useSettings() {
     queryKey: ['settings'],
     queryFn: () => apiGet<Record<string, unknown>>('/settings'),
     staleTime: 60_000,
+  });
+}
+
+export function usePatchSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Record<string, unknown>) => api('PATCH', '/settings', patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
   });
 }
 
