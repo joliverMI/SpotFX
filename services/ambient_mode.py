@@ -232,6 +232,81 @@ async def _resolve_lights(cfg: dict) -> list[str]:
     return rids
 
 
+async def _stream_active(cfg: dict) -> bool | None:
+    """Is the device's entertainment session running on its bridge?
+    None = bridge unreachable / unknown (treat as healthy — don't heal blind)."""
+    try:
+        async with _bridge_client(cfg) as client:
+            ec = (await client.get(
+                f"/clip/v2/resource/entertainment_configuration/{cfg['entertainment_id']}"
+            )).json()["data"][0]
+            return ec.get("status") == "active"
+    except Exception as exc:
+        logger.warning("Ambient: stream status check failed for %s: %r",
+                       cfg.get("ip_address"), exc)
+        return None
+
+
+def _driven_and_should_stream(did: str, all_v: dict) -> bool:
+    """True when some ACTIVE virtual with an effect covers this device — i.e.
+    LedFX should be streaming to it. An intentionally-dark scene leaves the
+    driving virtual inactive → False, so the heal never fights an off-scene."""
+    for vid, vobj in all_v.items():
+        if not isinstance(vobj, dict):
+            continue
+        if ((vid == did or did in _segment_devices(vobj))
+                and vobj.get("active") and vobj.get("effect")):
+            return True
+    return False
+
+
+async def _check_released_streams(released: dict[str, dict], attempts: int = 3,
+                                  delay: float = 2.0) -> list[str]:
+    """Released devices whose driving virtual is active+effect but whose bridge
+    entertainment session stays inactive across `attempts` checks (retries give
+    a just-kicked stream time to come up)."""
+    stuck = set(released)
+    for i in range(attempts):
+        all_v = await _all_virtuals()
+        still: set[str] = set()
+        for did in stuck:
+            if not _driven_and_should_stream(did, all_v):
+                continue
+            if await _stream_active(released[did]) is False:
+                still.add(did)
+        stuck = still
+        if not stuck or i == attempts - 1:
+            break
+        await asyncio.sleep(delay)
+    return sorted(stuck)
+
+
+async def _heal_stuck(stuck: list[str], hue_cfgs: dict[str, dict],
+                      catchup_s: float | None = None) -> dict:
+    """Recover released devices whose entertainment stream is dead — the bridge
+    reverts their bulbs to the pre-session state (typically the ambient white)
+    with zero reactivity, while the freeze flag reads correct so freeze-drift
+    reconciling never fires (bug seen live 2026-07-24 after a LedFX restart).
+    Freeze→unfreeze forces LedFX to tear down and re-arm the DTLS session
+    (exactly what the manual select+deselect workaround did), then the wake
+    kick restarts streaming and the catch-up eases back to the music look."""
+    captured = await _capture_wake_targets()
+    for did in stuck:
+        await ledfx_client.freeze_hue_device(did, True)
+    for did in stuck:
+        await ledfx_client.freeze_hue_device(did, False)
+    wake = await _wake_kick()
+    if wake.get("status") == "on":
+        await _catchup(captured, catchup_s)
+    still = [did for did in stuck if await _stream_active(hue_cfgs[did]) is False]
+    if still:
+        logger.error("Ambient heal: %s STILL have no entertainment stream after "
+                     "freeze-cycle + wake", still)
+    else:
+        logger.info("Ambient heal: entertainment stream restored for %s", stuck)
+    return {"healed": [d for d in stuck if d not in still], "still_stuck": still}
+
+
 async def _apply_hue(cfg: dict, body: dict | None = None) -> int:
     """Set every light in the group to a REST state (default: the configured
     static full-brightness color). Returns the number of lights set.
@@ -477,6 +552,19 @@ async def _set_groups_impl(want: set[str] | None, transition_s: float | None,
         wake = await _wake_kick()
         if wake.get("status") == "on":
             await _catchup(captured, catchup_s)
+
+    # Stream-health check on every released device (not just the ones released
+    # this call): a dead entertainment session leaves bulbs stuck on the
+    # bridge's pre-session state — typically the ambient white — with the
+    # freeze flag reading correct. Covers startup restore after a LedFX
+    # restart and a failed wake above.
+    released = {did: hue_cfgs[did] for did in hue_cfgs if did not in want}
+    if released:
+        stuck = await _check_released_streams(released)
+        if stuck:
+            logger.warning("Ambient: released device(s) %s have a dead "
+                           "entertainment stream — healing", stuck)
+            await _heal_stuck(stuck, hue_cfgs, catchup_s)
 
     await _commit_state(want)
     logger.info(

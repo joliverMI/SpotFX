@@ -1343,6 +1343,11 @@ async def _ledfx_watchdog_tick() -> None:
     await _restart_ledfx_service()
 
 
+# Consecutive dead-stream ticks per released Hue device (see the stream-health
+# watchdog at the end of _reconcile_ambient). 2 strikes → heal.
+_ambient_stream_strikes: dict[str, int] = {}
+
+
 async def _reconcile_ambient() -> None:
     """Self-heal ambient drift, both directions. state.ambient_groups is the
     single source of truth (set by the toggle / group picker / HA, persisted,
@@ -1386,8 +1391,6 @@ async def _reconcile_ambient() -> None:
             refreeze.append(did)
         elif is_frozen and not want:
             release.append(did)
-    if not refreeze and not release:
-        return
 
     if refreeze:
         logger.warning(
@@ -1409,6 +1412,44 @@ async def _reconcile_ambient() -> None:
             await ambient_mode._wake_kick()
         except Exception as exc:
             logger.error("Ambient reconcile: wake kick failed: %r", exc)
+
+    # Stream-health watchdog for RELEASED devices. A LedFX restart/death ends
+    # the entertainment session and the bridge reverts the bulbs to their
+    # pre-session state (typically the ambient white, zero reactivity); if the
+    # stream then fails to re-engage, the freeze flag still reads correct so
+    # the drift checks above never fire (bug seen live 2026-07-24). Two
+    # consecutive bad ticks (~60s) → freeze-cycle + wake + catch-up heal.
+    # Devices unfrozen this very tick are skipped — their stream needs a
+    # moment; strikes start next tick.
+    for did in list(_ambient_stream_strikes):
+        if did in want_ids or did not in hue_cfgs:
+            _ambient_stream_strikes.pop(did, None)
+    stuck = []
+    for did in hue_cfgs:
+        if did in want_ids or did in refreeze or did in release:
+            continue
+        if not ambient_mode._driven_and_should_stream(did, all_v):
+            _ambient_stream_strikes.pop(did, None)
+            continue
+        if await ambient_mode._stream_active(hue_cfgs[did]) is False:
+            n = _ambient_stream_strikes.get(did, 0) + 1
+            _ambient_stream_strikes[did] = n
+            if n >= 2:
+                stuck.append(did)
+        else:
+            _ambient_stream_strikes.pop(did, None)
+    if stuck:
+        for did in stuck:
+            _ambient_stream_strikes.pop(did, None)
+        logger.warning(
+            "Ambient reconcile: released device(s) %s have a dead entertainment "
+            "stream (bulbs stuck on pre-session state) — freeze-cycling + wake",
+            stuck,
+        )
+        try:
+            await ambient_mode._heal_stuck(stuck, hue_cfgs)
+        except Exception as exc:
+            logger.error("Ambient reconcile: stream heal failed: %r", exc)
 
 
 async def latency_loop() -> None:

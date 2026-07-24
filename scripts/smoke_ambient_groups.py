@@ -14,7 +14,11 @@ Verifies services.ambient_mode.set_groups():
   7. _wake_fade_color() derives the wake scene's background_color;
   8. catch-up: the pre-wake music effect is captured and tweened back over
      ambient_catchup_s AFTER the wake kick (same effect type), set directly
-     when the type differs, and skipped when catchup=0 or no active effect.
+     when the type differs, and skipped when catchup=0 or no active effect;
+  9. stream heal: a released device whose bridge entertainment session is dead
+     while its driving virtual is active (bulbs stuck on the ambient white —
+     the 2026-07-24 LedFX-restart bug) gets freeze-cycled + wake + catch-up;
+     no heal when the driving virtual is intentionally inactive or healthy.
 
 No LedFX / Hue / disk writes: ledfx_client calls, _apply_hue, _wake_kick and
 _commit_state are stubbed to recorders (so the real settings.json is never
@@ -46,6 +50,9 @@ events: list[tuple] = []          # ordered ('freeze'|'rest'|'wake'|'commit'|'tw
 committed: list[list[str]] = []
 ORIG_WAKE_COLOR = None            # real _wake_fade_color, saved before stubbing
 
+stream_up: dict[str, bool] = {}   # bridge ip → entertainment session active
+hues_virtual_active = True        # driving virtual state for _all_virtuals stub
+
 MUSIC_EFFECT = {"type": "power", "config": {"background_color": "#00ff07", "brightness": 0.75}}
 WAKE_SCENE = {"id": "wake-hues", "virtuals": {
     "hues": {"action": "activate", "type": "power",
@@ -62,6 +69,7 @@ def _reset():
     frozen.clear()
     events.clear()
     committed.clear()
+    stream_up.clear()   # default healthy (True) via .get fallback
 
 
 def _install_stubs():
@@ -72,8 +80,19 @@ def _install_stubs():
     async def fake_freeze(did, want):
         frozen[did] = want
         events.append(("freeze", did, want))
+        if not want:  # unfreezing re-arms the DTLS session → stream recovers
+            stream_up[CFGS[did]["ip_address"]] = True
         return True
     am.ledfx_client.freeze_hue_device = fake_freeze
+
+    async def fake_all_virtuals():
+        return {"hues": {"active": hues_virtual_active, "effect": {"type": "power"},
+                         "segments": [["hue-lights", 0, 9], ["dining-hues", 0, 6]]}}
+    am._all_virtuals = fake_all_virtuals
+
+    async def fake_stream_active(cfg):
+        return stream_up.get(cfg["ip_address"], True)
+    am._stream_active = fake_stream_active
 
     async def fake_get_frozen(did):
         return frozen.get(did, False)
@@ -259,7 +278,50 @@ async def main() -> int:
     check("no active effect → no ease-back",
           not any(e[0] in ("tween", "direct") for e in events))
 
-    # ── 7) wake fade color derivation (real impl, stubbed scenes) ────────────
+    # ── 7) stream heal: dead session on a released device ────────────────────
+    global hues_virtual_active
+    async def fake_get_virtual2(vid):
+        return {vid: {"active": True, "effect": dict(MUSIC_EFFECT)}}
+    am.ledfx_client.get_virtual = fake_get_virtual2  # undo dark_virtual stub
+
+    real_sleep2 = asyncio.sleep
+
+    async def fast_sleep(s):
+        await real_sleep2(0)
+    am.asyncio.sleep = fast_sleep
+    try:
+        # hue-lights bridge session dead, driving virtual active → heal.
+        _reset()
+        stream_up["1.1.1.1"] = False
+        await am.set_groups(set())
+        fz_on = [i for i, e in enumerate(events) if e == ("freeze", "hue-lights", True)]
+        fz_off = [i for i, e in enumerate(events) if e == ("freeze", "hue-lights", False)]
+        wk = [i for i, e in enumerate(events) if e == ("wake",)]
+        check("heal freeze-cycles the stuck device",
+              fz_on and fz_off and fz_on[0] < fz_off[0])
+        check("heal wake-kicks after the cycle", wk and wk[0] > fz_off[0])
+        check("heal eases back via catch-up", any(e[0] == "tween" for e in events))
+        check("stream recovered", stream_up.get("1.1.1.1") is True)
+
+        # Driving virtual intentionally inactive (off-scene) → never heal.
+        _reset()
+        stream_up["1.1.1.1"] = False
+        hues_virtual_active = False
+        await am.set_groups(set())
+        check("no heal when driving virtual inactive",
+              not any(e[0] == "freeze" for e in events)
+              and ("wake",) not in events)
+        hues_virtual_active = True
+
+        # Healthy streams → no heal on a plain no-op reconcile.
+        _reset()
+        await am.set_groups(set())
+        check("no heal when streams healthy",
+              not any(e[0] == "freeze" for e in events))
+    finally:
+        am.asyncio.sleep = real_sleep2
+
+    # ── 8) wake fade color derivation (real impl, stubbed scenes) ────────────
     async def fake_scenes():
         return [{"id": "wake-hues", "virtuals": {
             "hues": {"action": "activate", "type": "power",
