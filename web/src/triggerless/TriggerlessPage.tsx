@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import { useEvents } from '../api/queries';
 import SearchSelect from '../components/forms/SearchSelect';
+import { CsvInput } from '../components/forms/inputs';
 import { useToast } from '../components/Toast';
 import { useLongPress } from '../lib/useLongPress';
 import { uuid } from '../lib/uid';
@@ -428,14 +429,23 @@ export default function TriggerlessPage() {
           </div>
           <div className="field">
             <label>Genres (comma-separated)</label>
-            <input type="text" placeholder="reggaeton, trap latino" value={(draft.genres ?? []).join(', ')} style={{ width: '100%' }}
-              onChange={(e) => set('genres', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+            <CsvInput key={`${draft.id}-genres`} placeholder="reggaeton, trap latino"
+              value={draft.genres ?? []} style={{ width: '100%' }}
+              onChange={(v) => set('genres', v)} />
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, marginBottom: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, marginBottom: 8 }}>
             <input type="checkbox" checked={!!draft.is_default}
               onChange={(e) => set('is_default', e.target.checked)} />
             Default profile (fallback when no genre match)
           </label>
+          <div className="field" style={{ marginBottom: 12 }}>
+            <label title="Starting intensity scale for songs matching these genres. Songs with their own (user/auto) value ignore this; a future backfill may stamp it onto un-set songs.">
+              Intensity scale (genre default) — {Math.round(((draft.default_intensity_scale as number) ?? 1) * 100)}%
+            </label>
+            <input type="range" min={0} max={200} step={5} style={{ width: 260, accentColor: 'var(--accent)' }}
+              value={Math.round(((draft.default_intensity_scale as number) ?? 1) * 100)}
+              onChange={(e) => set('default_intensity_scale', parseInt(e.target.value, 10) / 100)} />
+          </div>
 
           {/* Event sections */}
           {EVENT_SECTIONS.map(([title, slots], si) => (
@@ -450,10 +460,10 @@ export default function TriggerlessPage() {
                     placeholder="-- None --"
                     width="100%"
                   />
-                  <input type="text" placeholder="Filter labels (e.g. -rainbow)"
-                    value={((draft[`${key}_labels`] as string[]) ?? []).join(', ')}
+                  <CsvInput key={`${draft.id}-${key}`} placeholder="Filter labels (e.g. -rainbow)"
+                    value={(draft[`${key}_labels`] as string[]) ?? []}
                     style={{ width: '100%', fontSize: 11, padding: '3px 6px', marginTop: 3, color: 'var(--text-muted)' }}
-                    onChange={(e) => set(`${key}_labels`, e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+                    onChange={(v) => set(`${key}_labels`, v)} />
                 </div>
               ))}
               {title.startsWith('Analyzed') && (

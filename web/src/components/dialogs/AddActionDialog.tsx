@@ -12,10 +12,12 @@ const DESCRIPTIONS: Record<ActionType, string> = {
   morph_step: 'Multi-target aspect changes (shape/effect/color/…)',
   set_color: 'Apply a saved Color Set or Color Group',
   morph_color: 'Rotate the showing colors around the hue wheel',
+  scene_morph: 'Step the active Scene Group ±N scenes and fire the result',
   device_settings: 'Virtual-config changes (max brightness, freq band)',
   random_group: 'Pick one weighted option; its actions fire together',
   sequence_group: 'Run children in order with ms or beat delays',
   parallel_group: 'Run children at once, each with its own offset',
+  intensity_chooser: 'Trigger intensity picks one threshold lane; it fires alone',
 };
 
 /** HA-style searchable "Add action" dialog. `types` limits what can be added here. */

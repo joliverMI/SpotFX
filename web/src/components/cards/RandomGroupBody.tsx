@@ -7,6 +7,8 @@ import { Checkbox, LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import { ParentScopeToggle } from '../forms/ScopePicker';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import HelpLink from '../../help/HelpLink';
+import PreviewButton from '../PreviewButton';
+import { previewRandomOption } from '../../lib/preview';
 
 const newOption = (): RandomOption => ({
   id: uuid(), name: '', labels: [], weight: 1,
@@ -83,6 +85,8 @@ export default function RandomGroupBody({ uid, action }: { uid: string; action: 
                 clone.id = uuid();
                 g.options.splice(j + 1, 0, clone);
               })}>⧉</button>
+            <PreviewButton title="Preview — fire this option now (forced pick, energy gate ignored)"
+              run={() => previewRandomOption(action, opt)} />
             <button className="danger" title="Delete option" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => { g.options.splice(j, 1); })}>✕</button>
           </div>

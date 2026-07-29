@@ -2,6 +2,8 @@ import type { MusicEvent } from '../../types/events';
 import { useEditorStore } from '../../store/editorStore';
 import { LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import EditableActionContainer from './EditableActionContainer';
+import PreviewButton from '../PreviewButton';
+import { previewMorphLane } from '../../lib/preview';
 
 /** morph_set / scene_update lanes: one weighted pick per lane, all fire in parallel.
  * scene_update pins its four named lanes (First/Rest/Shape/Color) — no add/delete/rename. */
@@ -34,15 +36,17 @@ export default function EditableParallelLanes({ event }: { event: MusicEvent }) 
             <span className="chip">🎲 1 of {lane.alternatives.length}</span>
             <span style={{ flex: 1 }} />
             {!pinned && (
-              <>
-                <button title="Move lane up" disabled={i === 0} style={{ padding: '2px 7px', fontSize: 12 }}
-                  onClick={() => mutate((d) => {
-                    const [l] = d.morph_lanes.splice(i, 1);
-                    d.morph_lanes.splice(i - 1, 0, l);
-                  })}>↑</button>
-                <button className="danger" title="Delete lane" style={{ padding: '2px 7px', fontSize: 12 }}
-                  onClick={() => mutate((d) => { d.morph_lanes.splice(i, 1); })}>✕</button>
-              </>
+              <button title="Move lane up" disabled={i === 0} style={{ padding: '2px 7px', fontSize: 12 }}
+                onClick={() => mutate((d) => {
+                  const [l] = d.morph_lanes.splice(i, 1);
+                  d.morph_lanes.splice(i - 1, 0, l);
+                })}>↑</button>
+            )}
+            <PreviewButton title="Preview — pick one alternative and fire it now (offset ignored)"
+              run={() => previewMorphLane(lane)} />
+            {!pinned && (
+              <button className="danger" title="Delete lane" style={{ padding: '2px 7px', fontSize: 12 }}
+                onClick={() => mutate((d) => { d.morph_lanes.splice(i, 1); })}>✕</button>
             )}
           </div>
           <div style={{ marginBottom: 6 }}>

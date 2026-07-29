@@ -106,3 +106,40 @@ SpotFX/
 | trigger engine tick | 50 ms |
 | builder zoom default | 20 s |
 | live future buffer | 5 s |
+
+## 2026-07-29 — Intensity Chooser, Intensity Scaling, Scene-Group Color Override
+
+### Intensity Chooser (`intensity_chooser` action)
+New composite container: the firing trigger's intensity (0–1, after the song's
+intensity scale) deterministically selects ONE lane; that lane's actions fire
+concurrently. Lanes are ascending lower-bound thresholds; `lanes[0]` is the
+default lane (fires below the first threshold, with no intensity context, or
+when no other lanes exist). Ties resolve to the later lane. Picks are resolved
+at plan time into `resolved_picks` (same map as random groups) so previews
+match fires. Editor: `IntensityChooserBody` with a draggable-dot threshold
+strip; deleting a lane merges its actions into the lane to its left.
+
+### Intensity scaling (0–200%)
+`SongProfile.intensity_scale` (0–2, None = unset) + `intensity_scale_source`
+("user" | "auto" | "genre"). Resolution at fire time: song value → matching
+training profile's `default_intensity_scale` → 1.0. Applied as a pure
+multiplier wherever the intensity signal originates (plan-time gates/picks and
+the fire-time `_FIRE_INTENSITY` ContextVar), clamped back to 0–1.
+- Now Playing slider saves via `PATCH /api/profiles/by-uri` (source "user");
+  `GET /api/profiles/intensity-scale?uri=` returns stored/effective/genre.
+- Auto-normalization (`services/intensity_scale_service.py`): on first play of
+  an unset song, rank it against the library on mean NPZ RMS (dB), tempo_bpm
+  and onset density; map the mean percentile to 60–140% and stamp it as
+  source "auto". Features cached in storage/cache/intensity_scale_features.json.
+- Genre backfill NOT run — "user" vs inherited sources stay distinguishable.
+
+### Scene-group color override (per trigger)
+`MusicTrigger.color_group_override` (ColorSetCard id, kind "group"; None =
+unchanged behavior). Carried by `_FIRE_COLOR_GROUP` ContextVar (set alongside
+`_FIRE_INTENSITY` at both fire paths + plan-entry prep) and consulted first in
+`_resolve_color_ref` for the `__scene_group__` sentinel; deleted/non-group
+cards fall back to the designated group. Editor: "Colors" picker in the
+builder's trigger dialog. NOTE: scene groups are SpotFX events (not parsed
+from LedFX scene names — that idea is obsolete; no parser exists or is needed).
+
+Smoke: `scripts/smoke_intensity_features.py` (24 checks).

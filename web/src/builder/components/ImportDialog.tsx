@@ -9,7 +9,7 @@ import { useBuilderStore } from '../store';
 import type { MusicTrigger, Setlist } from '../types';
 
 interface AnalyzeResp {
-  triggers?: { timestamp_ms: number; event_id: string }[];
+  triggers?: { timestamp_ms: number; event_id: string; intensity?: number | null }[];
   training_profile?: string;
 }
 
@@ -53,7 +53,7 @@ export default function ImportDialog({
         }
         const added = mergeIn(resp.triggers.map((t) => ({
           id: uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id,
-          labels: [], enabled: true, intensity: 0.5,
+          labels: [], enabled: true, intensity: t.intensity ?? 0.5,
         })));
         toast(`Added ${added} ${cat}${resp.training_profile ? ` (profile: ${resp.training_profile})` : ''}`,
           'success');

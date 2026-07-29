@@ -100,10 +100,19 @@ class AppState:
     # scene the fixed Update/Reset Scene events act on. Mirrored from the engine
     # so broadcast_state can show a "last scene" indicator. Persists across songs.
     last_scene_update_id: str = ""
+    # Id of the scene_group event currently driving the scene ("" = none) —
+    # set when a group fires or Scene Morph steps it, cleared when a plain
+    # scene_update is picked directly. Mirrored from the engine. Persists
+    # across songs.
+    active_scene_group_id: str = ""
     # Id of the most recent Color Set the engine applied (the resolved member id
     # when a Group was fired). Mirrored from the engine for the Now Playing
     # indicator. Persists across songs.
     last_color_set_id: str = ""
+    # Id of the most recent Color GROUP a set_color fire drew from (the group
+    # card itself, not the picked member). Set Color actions with
+    # ref_id == CURRENT_COLOR_GROUP_REF re-use it. Persists across songs.
+    last_color_group_id: str = ""
 
     # ── Set List context ─────────────────────────────────────────────────────
     next_track_uri: str = ""           # spotify URI of queue[0] after the current track

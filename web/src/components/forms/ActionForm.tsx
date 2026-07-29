@@ -6,7 +6,7 @@ import { LabelsInput, NumberInput, Row, Select, ColorInput, TextInput, Checkbox 
 import SearchSelect from './SearchSelect';
 import { ParentScopeToggle, emptyScope } from './ScopePicker';
 import { BindableNumber } from './BindingInput';
-import { isBinding } from '../../types/events';
+import { isBinding, SCENE_GROUP_COLOR_REF, CURRENT_COLOR_GROUP_REF } from '../../types/events';
 import EffectParamForm from './EffectParamForm';
 import MorphStepForm from './MorphStepForm';
 import DeviceSettingsForm from './DeviceSettingsForm';
@@ -62,12 +62,15 @@ function TypedForm({ action, update }: { action: Action; update: UpdateAction })
       return <SetColorForm action={action} update={update} />;
     case 'morph_color':
       return <MorphColorForm action={action} update={update} />;
+    case 'scene_morph':
+      return <SceneMorphForm action={action} update={update} />;
     case 'device_settings':
       return <DeviceSettingsForm action={action} update={update as never} />;
     case 'random_group':
     case 'sequence_group':
     case 'parallel_group':
-      return null; // container bodies render above (RandomGroup/SequenceGroup/ParallelGroupBody)
+    case 'intensity_chooser':
+      return null; // container bodies render above (RandomGroup/SequenceGroup/ParallelGroupBody/IntensityChooserBody)
   }
 }
 
@@ -119,10 +122,15 @@ function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set
   const { data: colorSets } = useColorSets();
   const set = (fn: (a: Extract<Action, { type: 'set_color' }>) => void) =>
     update((a) => { if (a.type === 'set_color') fn(a); });
-  const opts = (colorSets ?? []).map((c) => ({ value: c.id, label: `${c.name}${c.kind === 'group' ? ' (group)' : ''}` }));
+  const opts = [
+    { value: SCENE_GROUP_COLOR_REF, label: "🎬 Scene Group's Color Group", keywords: 'scene group follow' },
+    { value: CURRENT_COLOR_GROUP_REF, label: '↻ Current Color Group', keywords: 'current last group' },
+    ...(colorSets ?? []).map((c) => ({ value: c.id, label: `${c.name}${c.kind === 'group' ? ' (group)' : ''}` })),
+  ];
   return (
     <>
-      <Row label="Color set / group">
+      <Row label="Color set / group"
+        help="A specific Color Set/Group, or: Scene Group's = the Color Group designated by the active Scene Group (falls back to the current group); Current = whatever Color Group last fired">
         <SearchSelect value={action.ref_id} width={280} onChange={(v) => set((a) => { a.ref_id = v; })}
           options={opts} placeholder="— pick a color set —" />
       </Row>
@@ -151,6 +159,28 @@ function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set
       <Row label="Ramp (ms)"><BindableNumber value={action.ramp_ms} nullable onChange={(v) => set((a) => { a.ramp_ms = v; })} /></Row>
       <Row label="Preserve effect" help="Skip values that would reset the running LedFX effect">
         <Checkbox value={action.preserve_effect} onChange={(v) => set((a) => { a.preserve_effect = v; })} />
+      </Row>
+    </>
+  );
+}
+
+function SceneMorphForm({ action, update }: { action: Extract<Action, { type: 'scene_morph' }>; update: UpdateAction }) {
+  const set = (fn: (a: Extract<Action, { type: 'scene_morph' }>) => void) =>
+    update((a) => { if (a.type === 'scene_morph') fn(a); });
+  return (
+    <>
+      <p className="empty-note">
+        Operates on the currently active Scene Group — no-op when none is
+        active or Force Scene holds a single scene.
+      </p>
+      <Row label="Advance" help="Scenes to move per fire. 0 = re-fire the current member (its Rest lane)">
+        <NumberInput value={action.advance} min={0} step={1}
+          onChange={(v) => set((a) => { a.advance = Math.max(0, Math.round(v ?? 1)); })} />
+      </Row>
+      <Row label="Direction" help="For wrap groups: index direction. For bounce groups: forward keeps the current travel, backward reverses it">
+        <Select value={action.direction} width={140}
+          onChange={(v) => set((a) => { a.direction = v as typeof a.direction; })}
+          options={['forward', 'backward'].map((v) => ({ value: v, label: v }))} />
       </Row>
     </>
   );

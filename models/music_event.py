@@ -230,10 +230,22 @@ class MorphStepAction(BaseModel):
     targets:          list[MorphTarget] = Field(default_factory=list)
 
 
+# SetColorAction.ref_id sentinels — resolved to a real ColorSetCard id at fire
+# time by trigger_engine._execute_set_color:
+#   SCENE_GROUP_COLOR_REF   → the Color Group designated by the ACTIVE scene
+#                             group (scene_group_color_ref_id); falls back to
+#                             the current group when none designates one.
+#   CURRENT_COLOR_GROUP_REF → the last Color Group any set_color fire used.
+SCENE_GROUP_COLOR_REF = "__scene_group__"
+CURRENT_COLOR_GROUP_REF = "__current__"
+
+
 class SetColorAction(BaseModel):
     """Apply a saved Color Set — or pick one from a Color Group — across many
     devices at once, setting FG color, BG color, and (optionally) background
-    mode. `ref_id` points at a ColorSetCard (kind="set" or "group"). For a
+    mode. `ref_id` points at a ColorSetCard (kind="set" or "group"), or one of
+    the sentinels above (follow the active Scene Group's designated Color
+    Group / re-use the current Color Group). For a
     group, `pick_mode` overrides the group's default selection; "default" uses
     the group's own `mode`. `ramp_ms` is the step default; each Color Set entry
     may override it. `advance`/`direction` apply only when the resolved mode is
@@ -286,6 +298,23 @@ class MorphColorAction(BaseModel):
     intensity_scale:  float = 0.0       # 0 = ignore beat intensity, 1 = full scaling
     intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
     preserve_melt_bg: bool = False
+
+
+class SceneMorphAction(BaseModel):
+    """Step the ACTIVE Scene Group forward/backward `advance` members and fire
+    the resulting member scene (normal First/Rest lane behavior). Carries no
+    group reference — it acts on whichever scene_group event last fired or is
+    held by Force Scene; when none is active (or Force Scene holds a single
+    scene) it is a no-op. `advance` = members to move per fire (0 = re-fire
+    the current member, which runs its Rest lane). Stepping is always ordinal
+    ("cycle"), even on weighted-mode groups; bounce groups honor their bounce
+    travel, where "backward" reverses it — same semantics as SetColorAction.
+    See `services/trigger_engine._execute_scene_morph`."""
+    type:      Literal["scene_morph"] = "scene_morph"
+    labels:    list[str] = Field(default_factory=list)
+    weight:    float = 1.0
+    advance:   Annotated[int, Field(ge=0)] = 1
+    direction: Literal["forward", "backward"] = "forward"
 
 
 class DeviceSettingTarget(BaseModel):
@@ -416,6 +445,12 @@ class SequenceChild(BaseModel):
     labels:      list[str] = Field(default_factory=list)
     delay_ms:    int = 0
     delay_beats: int = 0
+    # ms mode only: also fire this child after this many scene-family fires
+    # (scene picks, Update/Reset Scene, flares, Scene Morph) — whichever of
+    # delay_ms / delay_updates completes first. delay_ms == 0 with updates set
+    # waits on updates alone (released early by a track change). Ignored in
+    # beats mode and by the legacy event-level sequence editor.
+    delay_updates: Optional[int] = None
     pre_ramp:    bool = True
     # None = inherit the parent group's scope ("parent" in the editor);
     # set = override for this step's subtree.
@@ -468,6 +503,44 @@ class ParallelGroupAction(BaseModel):
     children: list[ParallelChild] = Field(default_factory=list)
 
 
+class IntensityLane(BaseModel):
+    """One lane of an IntensityChooserAction. When selected, all `actions`
+    fire concurrently (same semantics as RandomOption.actions).
+
+    `threshold` is the lane's LOWER bound on the 0-1 intensity scale; a lane
+    covers [threshold, next lane's threshold). lanes[0] is the DEFAULT lane —
+    it covers everything below the first thresholded lane and its own
+    threshold is ignored."""
+    id:        str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name:      str = ""
+    labels:    list[str] = Field(default_factory=list)
+    threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    # None = inherit the group's scope; set = override for this lane.
+    scope:     Optional[MorphScope] = None
+    actions:   list[Action] = Field(default_factory=list)
+
+
+class IntensityChooserAction(BaseModel):
+    """Deterministic sibling of RandomGroupAction: the firing trigger's
+    intensity (0-1, after the song/genre intensity scaler) selects exactly ONE
+    lane, whose actions fire concurrently. Among lanes[1:], the highest lane
+    whose threshold <= intensity wins (equal thresholds -> the later lane).
+    lanes[0] is the default lane: it fires when intensity is below every
+    threshold, when it is the only lane, or when the fire carries no intensity
+    context (manual test fires).
+
+    `source` is pluggable for future signals; only the trigger's intensity is
+    implemented today."""
+    type:   Literal["intensity_chooser"] = "intensity_chooser"
+    id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
+    labels: list[str] = Field(default_factory=list)
+    weight: float = 1.0        # weight of the group itself inside a parent pool
+    source: Literal["trigger_intensity"] = "trigger_intensity"
+    # Default target for every lane (lanes inherit unless they override).
+    scope:  Optional[MorphScope] = None
+    lanes:  list[IntensityLane] = Field(default_factory=list)
+
+
 # Discriminated union of all action types
 Action = Annotated[
     EventRefAction
@@ -479,16 +552,19 @@ Action = Annotated[
     | MorphStepAction
     | SetColorAction
     | MorphColorAction
+    | SceneMorphAction
     | DeviceSettingsAction
     | RandomGroupAction
     | SequenceGroupAction
-    | ParallelGroupAction,
+    | ParallelGroupAction
+    | IntensityChooserAction,
     Field(discriminator="type"),
 ]
 
 # These models reference the Action union recursively.
 for _m in (RandomOption, RandomGroupAction, SequenceChild, SequenceGroupAction,
-           ParallelChild, ParallelGroupAction):
+           ParallelChild, ParallelGroupAction, IntensityLane,
+           IntensityChooserAction):
     _m.model_rebuild()
 
 
@@ -551,6 +627,13 @@ class BeatRevertConfig(BaseModel):
     pre_ramp: bool = True      # start revert ramp early so it completes on the target beat
 
 
+class SceneGroupMember(BaseModel):
+    """One reference to a scene_update event within a scene_group event.
+    `weight` matters only when the group's mode is "weighted"."""
+    event_id: str
+    weight:   float = 1.0
+
+
 class MusicEvent(BaseModel):
     """
     A named, reusable music event that defines what happens at a trigger point.
@@ -566,6 +649,12 @@ class MusicEvent(BaseModel):
         # shape_flare→Shape, color_flare→Color, combo_flare→Shape+Color.
         "scene_update", "update_scene", "reset_scene",
         "shape_flare", "color_flare", "combo_flare",
+        # Ordered set of member Scene Updates picked one at a time, like a
+        # Color Group: cycle (wrap/bounce) or weighted random. Firing the
+        # group advances its cursor and fires the picked member (normal
+        # First/Rest). Force Scene may hold a scene_group — every new-scene
+        # pick then rotates the group. See scene_group_* fields below.
+        "scene_group",
         # Sets LedFX virtual-config Device Settings (max_brightness / freq band).
         "device_settings",
         # Unified node-tree event: the entire body is `root` (an Action, usually
@@ -611,6 +700,18 @@ class MusicEvent(BaseModel):
     # For event_type == "composite" — the whole event body as one Action tree.
     # None = empty event (executors no-op).
     root: Optional[Action] = None
+
+    # For event_type == "scene_group" — member Scene Updates + selection
+    # behavior (mirrors ColorSetCard group semantics; cursor lives in the
+    # engine, keyed by this event's id, and persists across track changes).
+    scene_group_members: list[SceneGroupMember] = Field(default_factory=list)
+    scene_group_mode: Literal["cycle", "weighted"] = "cycle"
+    scene_group_cycle_behavior: Literal["wrap", "bounce"] = "wrap"
+    scene_group_exclude_current: bool = True
+    # Optional ColorSetCard (kind="group") id this scene group designates.
+    # Set Color actions with ref_id == SCENE_GROUP_COLOR_REF resolve to it
+    # while this group is active — the room's colors follow the scene group.
+    scene_group_color_ref_id: str = ""
 
     # Timing offset: shift when this event fires (negative = earlier, positive = later)
     event_offset_ms: int = 0

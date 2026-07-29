@@ -27,7 +27,7 @@ function effectiveType(ev: MusicEvent): EventType {
 
 function matchesFilter(ev: MusicEvent, f: Filter): boolean {
   if (f === 'all') return true;
-  if (f === 'scene') return SCENE_EVENT_TYPES.includes(ev.event_type);
+  if (f === 'scene') return SCENE_EVENT_TYPES.includes(ev.event_type) || ev.event_type === 'scene_group';
   return effectiveType(ev) === (f as EventType);
 }
 
@@ -89,6 +89,8 @@ export default function EventListPage() {
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=random_group')}>+ Random</button>
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=sequence_group')}>+ Sequence</button>
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=parallel_group')}>+ Parallel</button>
+            <button className="primary" onClick={() => navigate('/event/new?type=composite&root=intensity_chooser')}>+ Intensity</button>
+            <button className="primary" onClick={() => navigate('/event/new?type=scene_group')}>+ Scene Group</button>
           </span>
         </div>
       </div>

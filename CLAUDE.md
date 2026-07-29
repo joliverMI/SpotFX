@@ -15,3 +15,91 @@ without updating its `topic=` callers (grep `topic="`).
 
 Prefer adding a `HelpLink` next to a complex control over embedding
 instructional prose in the UI; short tooltips (`title=`) are fine.
+
+## Run / deploy
+
+SpotFX runs as the **user systemd unit `spotfx.service`** (`.venv/bin/python
+main.py`, port 8000). Backend changes: `systemctl --user restart spotfx`.
+React UI (`/app/`) is served from `web/dist` — rebuild with
+`cd web && npx vite build` (frontend-only changes need no restart; refresh
+the browser).
+
+## Editor Preview (per-level test fires)
+
+`POST /api/events/preview` fires an UNSAVED payload: `{event: MusicEvent}`
+(whole draft) or `{action: Action}` (subtree, wrapped in an in-memory
+composite). Engine entry: `trigger_engine.fire_event_object_now()` (the body
+of `fire_event_now`, which now resolves the id and delegates). Frontend
+wrappers live in `web/src/lib/preview.ts` — group children (lanes / steps /
+options / morph lanes) are re-wrapped in a single-child copy of their parent
+group with delays/offsets/energy gates neutralized. UI: `PreviewButton`
+(▶, sits between ⧉ Duplicate and ✕ Delete at every editor level).
+
+## Shared TopBar
+
+`web/src/components/TopBar.tsx`, mounted in `App.tsx` under the nav on every
+page: engine play/pause (`/control/pause|resume`), Dinner Party 🍽️ and
+Ambient 💡 icon toggles (AmbientButton has a `compact` prop), active Scene /
+Color Set chips, sync-lock status (listens to `xcorr_monitor` WS), track
+title/artist + position/duration, and a color-coded ⚡ intensity score for
+the last fired trigger (`trigger_fired` WS now carries `intensity`; both
+engine broadcast sites pass `trigger.intensity`). Now Playing no longer
+shows these controls/info.
+
+## `librosa_offset_ms` is unreliable — don't shift section/beat times by it
+
+`LibrosaAnalysis.librosa_offset_ms` is meant to convert WAV-capture time to
+song-relative time, but the stored values can't be trusted: nonzero on ~74% of
+the 671 analyses, with outliers into the tens of thousands of seconds (one is
+75,308,324 ms). The codebase is split on it — `ai_trigger_service` and
+`embedded_trigger_service` add it, while `load_sections_for_uri()` and its
+consumers (`signal_resolver._section_energy`, the `section_energy` binding,
+`trigger_engine._section_intensity`) read section/beat ms **raw**.
+
+**Follow the raw convention for anything that has to line up with playback
+position at runtime**, so baked values agree with the live bindings. Evidence:
+user-authored triggers in profiles with `offset == 0` snap exactly to librosa
+beats (median distance 0 ms, 70% within 40 ms). On nonzero-offset songs a
+per-song best-fit shift (voting over `beat_ms - trigger_ms`) matched the stored
+offset in **0 of 126** files — the stored number is noise, not a real shift.
+
+## Backfilling trigger intensity from section energy
+
+`scripts/backfill_trigger_intensity.py` sets each `MusicTrigger.intensity` from
+the librosa section energy at its timestamp; a trigger within 2 beats *before* a
+section line takes the **next** section's energy (a build placed just ahead of
+the drop should fire at the drop's level). Dry-run by default; `--apply` writes
+and first copies `storage/profiles/` to `storage/backups/profiles-preintensity-<stamp>/`.
+Idempotent. Current library state: `--curve minmax --floor 0.05`.
+
+### Raw `energy_rms` skews high — renormalize it
+
+`librosa_service._detect_sections` divides by the loudest section only
+(`energy / max_e`) with **no floor subtraction**, so a song's quietest section
+lands at `min/max` — median **0.33** library-wide, never near 0. It also works
+in **linear RMS**, and modern masters are heavily limited (median song-wide
+dynamic range only **~9.6 dB**), compressing real loudness differences into a
+narrow band near the top. Raw trigger intensities came out p25=0.68, median=0.84.
+
+`--curve` picks the mapping (all per-song):
+- `minmax` (default) — linear min-max stretch. Fixes the missing floor, keeps
+  relative magnitude. Gives p25=0.50, median=0.76, 25% below 0.5.
+- `raw` — original behavior.
+- `rank` — percentile rank. Uniform spread (p25=0.27, median=0.54, 45% below
+  0.5) but discards magnitude; near-equal sections can land far apart.
+- `dbstretch` — **counterintuitive: pushes values UP, not down.** Because energy
+  is already max-normalized, linear 0.5 is only −6 dB, so dB mapping raises it.
+  Does not help if the complaint is "everything reads too high".
+
+`--gamma` post-shapes (>1 pushes down), `--floor` lifts the bottom. A floor is
+worth keeping: under bare `minmax` the quietest section maps to exactly 0.0,
+which hit **427 triggers (4.2%)** and makes any effect scaled by
+`trigger_intensity` a no-op.
+
+### Safe to run against a live app
+
+`profile_manager` caches only a `{uri: filename}` index and re-parses each
+profile from disk on every `load_profile_by_uri`, so there is no in-memory
+profile object to clobber the edit (unlike the HA storage-file gotcha). Writes
+are atomic (tmp + replace) and use `ensure_ascii=True` to match how the app
+serializes profiles (`\uXXXX`).

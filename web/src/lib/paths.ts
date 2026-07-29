@@ -21,6 +21,8 @@ export function collectActionContainers(ev: MusicEvent): ActionContainer[] {
       a.options.forEach((opt, j) => addWithNested(`${basePath}.options.${j}.actions`, opt.actions));
     } else if (a.type === 'sequence_group' || a.type === 'parallel_group') {
       a.children.forEach((c, j) => addWithNested(`${basePath}.children.${j}.actions`, c.actions));
+    } else if (a.type === 'intensity_chooser') {
+      a.lanes.forEach((l, j) => addWithNested(`${basePath}.lanes.${j}.actions`, l.actions));
     }
   };
   const addWithNested = (path: string, actions: Action[]) => {

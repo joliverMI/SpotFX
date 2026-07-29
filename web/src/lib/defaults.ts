@@ -3,11 +3,13 @@ import type {
   Action,
   ActionType,
   BeatSequenceStep,
+  IntensityLane,
   MusicEvent,
   ParallelChild,
   SequenceChild,
   SequenceStep,
 } from '../types/events';
+import { SCENE_GROUP_COLOR_REF } from '../types/events';
 import { uuid } from './uid';
 
 export function newAction(type: ActionType): Action {
@@ -33,7 +35,7 @@ export function newAction(type: ActionType): Action {
       return { ...base, type, name: '', ramp_ms: null, intensity_source: 'rms_total', targets: [] };
     case 'set_color':
       return {
-        ...base, type, ref_id: '', pick_mode: 'default', advance: 1,
+        ...base, type, ref_id: SCENE_GROUP_COLOR_REF, pick_mode: 'default', advance: 1,
         direction: 'forward', ramp_ms: null, preserve_effect: true,
       };
     case 'morph_color':
@@ -42,6 +44,8 @@ export function newAction(type: ActionType): Action {
         degrees: 180, direction: 'forward', ramp_ms: null,
         intensity_scale: 0, intensity_source: 'rms_total', preserve_melt_bg: false,
       };
+    case 'scene_morph':
+      return { ...base, type, advance: 1, direction: 'forward' };
     case 'device_settings':
       return { ...base, type, targets: [] };
     case 'random_group':
@@ -53,15 +57,26 @@ export function newAction(type: ActionType): Action {
       };
     case 'parallel_group':
       return { ...base, type, id: uuid(), children: [] };
+    case 'intensity_chooser':
+      // Starts with the default lane; threshold dots add more.
+      return {
+        ...base, type, id: uuid(), source: 'trigger_intensity', scope: null,
+        lanes: [newIntensityLane(0)],
+      };
   }
 }
 
 export const newSequenceChild = (): SequenceChild => ({
-  id: uuid(), name: '', labels: [], delay_ms: 0, delay_beats: 0, pre_ramp: true, scope: null, actions: [],
+  id: uuid(), name: '', labels: [], delay_ms: 0, delay_beats: 0, delay_updates: null,
+  pre_ramp: true, scope: null, actions: [],
 });
 
 export const newParallelChild = (): ParallelChild => ({
   id: uuid(), name: '', labels: [], offset_ms: 0, scope: null, actions: [],
+});
+
+export const newIntensityLane = (threshold = 0.5): IntensityLane => ({
+  id: uuid(), name: '', labels: [], threshold, scope: null, actions: [],
 });
 
 export const newSequenceStep = (): SequenceStep => ({
@@ -104,6 +119,11 @@ export function newEvent(event_type: MusicEvent['event_type'] = 'single'): Music
     morph_lanes: [],
     device_targets: [],
     root: null,
+    scene_group_members: [],
+    scene_group_mode: 'cycle',
+    scene_group_cycle_behavior: 'wrap',
+    scene_group_exclude_current: true,
+    scene_group_color_ref_id: '',
     event_offset_ms: 0,
   };
 }

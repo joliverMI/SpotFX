@@ -376,3 +376,104 @@ kbd {
   font-family: monospace; font-size: 11px; opacity: 0.85;
   white-space: pre; max-height: 180px; overflow-y: auto;
 }
+
+/* ── Shared top bar (all pages) ── */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  font-size: 12px;
+  min-height: 42px;
+}
+.top-bar .playpause {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex: none;
+}
+.top-bar .playpause.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06130a;
+  box-shadow: 0 0 10px rgba(29, 185, 84, 0.45);
+}
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex: none;
+}
+.icon-btn.active {
+  border-color: var(--accent2);
+  background: rgba(255, 215, 0, 0.14);
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.35);
+}
+.top-bar .tb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  max-width: 160px;
+  min-width: 0;
+}
+.top-bar .tb-chip-text {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.top-bar .tb-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.top-bar .tb-lock {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  flex: none;
+}
+.top-bar .tb-track {
+  flex: 1 1 120px;
+  min-width: 80px;
+  text-align: right;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.top-bar .tb-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
+}
+.top-bar .tb-intensity {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}

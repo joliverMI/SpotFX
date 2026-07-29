@@ -3,6 +3,7 @@
  * card summaries match the preview strings SpotFX shows on Now Playing.
  */
 import type { Action, MusicEvent } from './events';
+import { SCENE_GROUP_COLOR_REF, CURRENT_COLOR_GROUP_REF } from './events';
 
 export interface SummaryContext {
   /** id → event, for resolving event_ref names */
@@ -21,10 +22,12 @@ export const ACTION_ICONS: Record<Action['type'], string> = {
   morph_step: '🧬',
   set_color: '🖌️',
   morph_color: '🎡',
+  scene_morph: '🎞️',
   device_settings: '⚙️',
   random_group: '🎲',
   sequence_group: '➡️',
   parallel_group: '⫴',
+  intensity_chooser: '⚡',
 };
 
 export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
@@ -37,10 +40,12 @@ export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
   morph_step: 'Morph Step',
   set_color: 'Set Color',
   morph_color: 'Morph Color',
+  scene_morph: 'Scene Morph',
   device_settings: 'Device Settings',
   random_group: 'Random Group',
   sequence_group: 'Sequence',
   parallel_group: 'Parallel',
+  intensity_chooser: 'Intensity Chooser',
 };
 
 /** Cheap deep scan: does this action contain any value binding? */
@@ -76,7 +81,11 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
       return `${head} (${body})${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'set_color': {
-      const name = ctx.colorSetNames?.[action.ref_id] ?? '?';
+      const name = action.ref_id === SCENE_GROUP_COLOR_REF
+        ? "Scene Group's colors"
+        : action.ref_id === CURRENT_COLOR_GROUP_REF
+          ? 'current group'
+          : ctx.colorSetNames?.[action.ref_id] ?? '?';
       return `Color → ${name}${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'morph_color': {
@@ -84,6 +93,10 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
       const bits = [...action.scope.categories, ...action.scope.virtual_ids, ...action.scope.roles];
       const where = bits.length ? ` (${bits.join(', ')})` : '';
       return `Rotate ${sign}${action.degrees}°${where}${hasBindingDeep(action) ? ' ⚡' : ''}`;
+    }
+    case 'scene_morph': {
+      const sign = action.direction === 'backward' ? '-' : '+';
+      return `Scene morph ${sign}${action.advance}`;
     }
     case 'device_settings':
       return `Device settings (${action.targets.length}×)`;
@@ -99,5 +112,7 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
         : `➡️ Seq · ${action.children.length} steps`;
     case 'parallel_group':
       return `⫴ ${action.children.length} lanes`;
+    case 'intensity_chooser':
+      return `⚡ 1 of ${action.lanes.length} lanes`;
   }
 }

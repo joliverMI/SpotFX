@@ -11,6 +11,9 @@ export interface MusicTrigger {
   // Override Blend: stretch/compress the event's ramps + delays so it
   // completes exactly at the next enabled trigger (or song end).
   override_blend?: boolean;
+  // Scene-group color override: ColorSetCard id (kind "group") used instead of
+  // the scene group's designated Color Group when this trigger fires one.
+  color_group_override?: string | null;
   // joined by GET /profiles/current only:
   event_name?: string;
   event_color?: string;

@@ -7,6 +7,7 @@ import { api, apiDel, apiGet, apiPost } from '../api/client';
 import { onMessage } from '../api/ws';
 import { useEvents } from '../api/queries';
 import SearchSelect from '../components/forms/SearchSelect';
+import { CsvInput } from '../components/forms/inputs';
 import { useToast } from '../components/Toast';
 import { ensureLiveState, useLiveStore } from '../live/liveStore';
 import { uuid } from '../lib/uid';
@@ -534,9 +535,10 @@ export default function AITriggersPage() {
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 10 }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>Genre tags (comma-separated)</label>
-                <input type="text" placeholder="e.g. edm, dubstep, bass music" style={{ width: '100%' }}
-                  value={(profile.genres ?? []).join(', ')}
-                  onChange={(e) => set('genres', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+                <CsvInput key={`${profileId}-genres`} placeholder="e.g. edm, dubstep, bass music"
+                  style={{ width: '100%' }}
+                  value={profile.genres ?? []}
+                  onChange={(v) => set('genres', v)} />
               </div>
               <label style={{ fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, paddingBottom: 6, marginBottom: 0 }}>
                 <input type="checkbox" checked={!!profile.is_default}

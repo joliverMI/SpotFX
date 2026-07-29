@@ -3,7 +3,7 @@
  * widgets (trim, nudge, sync panels) live on /debug. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from '../api/client';
+import { api, apiGet, apiPost } from '../api/client';
 import { onMessage } from '../api/ws';
 import { useEvents, usePatchSettings, useSettings } from '../api/queries';
 import {
@@ -22,7 +22,6 @@ import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { fmtCountdown, fmtMs } from '../lib/time';
 import { ensureLiveState, getLiveProgressMs, useLiveStore, useLiveTick } from '../live/liveStore';
-import AmbientButton from './AmbientButton';
 import TriggerListCard from './TriggerListCard';
 import { SOURCE_BADGE, useNowProfile } from './useNowProfile';
 import type { MarkType, MusicTrigger } from '../builder/types';
@@ -69,8 +68,7 @@ export default function NowPlayingPage() {
   const lastCapture = useLiveStore((s) => s.lastCapture);
   const dinnerParty = useLiveStore((s) => s.dinnerParty);
   const useAnalyzed = useLiveStore((s) => s.useAnalyzed);
-  const lastScene = useLiveStore((s) => s.lastScene);
-  const lastColorSet = useLiveStore((s) => s.lastColorSet);
+  const activeSceneGroup = useLiveStore((s) => s.activeSceneGroup);
   const ledfxRttMs = useLiveStore((s) => s.ledfxRttMs);
   const timing = useLiveStore((s) => s.timing);
   const nextTrackUri = useLiveStore((s) => s.nextTrackUri);
@@ -85,19 +83,46 @@ export default function NowPlayingPage() {
   });
 
   const { triggers, source } = useNowProfile(uri);
+
+  // Per-song intensity scale (0-200%) — multiplies every trigger's intensity
+  // at fire time. Stored on the song profile; unset falls back to genre/auto.
+  const { data: iScale } = useQuery({
+    queryKey: ['intensity-scale', uri],
+    queryFn: () => apiGet<{
+      intensity_scale: number | null; source: string | null;
+      genre_default: number; effective: number;
+    }>(`/profiles/intensity-scale?uri=${encodeURIComponent(uri!)}`),
+    enabled: !!uri,
+  });
+  const [scaleDrag, setScaleDrag] = useState<number | null>(null);
+  const commitScale = useCallback(async (v: number | null) => {
+    if (!uri) return;
+    setScaleDrag(null);
+    await api('PATCH', `/profiles/by-uri?uri=${encodeURIComponent(uri)}`,
+      v == null ? { clear: true } : { intensity_scale: v / 100 });
+    void qc.invalidateQueries({ queryKey: ['intensity-scale', uri] });
+  }, [uri, qc]);
+
   const { data: settings } = useSettings();
   const { data: events } = useEvents();
   const patchSettings = usePatchSettings();
 
   // Force Scene — persisted in settings; while enabled, every new-scene pick
-  // reasserts the chosen Scene Update (normal First/Rest lanes) instead.
+  // reasserts the chosen Scene Update (normal First/Rest lanes) — or, when a
+  // Scene Group is chosen, rotates one member of the group per pick.
   const forceScene = settings?.force_scene_enabled === true;
   const forceSceneEventId = (settings?.force_scene_event_id as string | undefined) ?? '';
   const sceneOptions = useMemo(
     () => (events ?? [])
-      .filter((e) => e.event_type === 'scene_update')
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((e) => ({ value: e.id, label: e.name, keywords: (e.labels ?? []).join(' ') })),
+      .filter((e) => e.event_type === 'scene_update' || e.event_type === 'scene_group')
+      .sort((a, b) =>
+        Number(a.event_type === 'scene_group') - Number(b.event_type === 'scene_group')
+        || a.name.localeCompare(b.name))
+      .map((e) => ({
+        value: e.id,
+        label: e.event_type === 'scene_group' ? `${e.name} (group)` : e.name,
+        keywords: (e.labels ?? []).join(' ') + (e.event_type === 'scene_group' ? ' group' : ''),
+      })),
     [events],
   );
   const { data: meta } = useAudioShapeMeta(uri);
@@ -208,13 +233,26 @@ export default function NowPlayingPage() {
   // ── Canvas plumbing (reuses the builder stack) ─────────────────────────────
   const audioLatencyRef = useRef(0);
   audioLatencyRef.current = Number(settings?.audio_latency_ms ?? 0);
+  // Canvas x-axis is capture-data time; the drawn playhead lands at
+  // (progress − audio latency) + offsetMs (see the playhead layer). Everything
+  // that must agree with the playhead — the follow window pin, the upcoming
+  // trigger and its countdown — uses this same clock, so the line stays pinned
+  // when shape offsets update mid-song and the countdown hits 0 as the flash
+  // fires, instead of drifting by latency ± live offset.
+  const canvasOffsetMs = (shapeOffset ?? meta?.timestamp_offset_ms ?? 0) - (trim?.perception_trim_ms ?? 0);
+  const canvasOffsetRef = useRef(0);
+  canvasOffsetRef.current = canvasOffsetMs;
   const getCanvasNowMs = useCallback(() => {
     const now = getLiveProgressMs();
     return now === null ? null : now - audioLatencyRef.current;
   }, []);
+  const getPlayheadMs = useCallback(() => {
+    const now = getLiveProgressMs();
+    return now === null ? null : now - audioLatencyRef.current + canvasOffsetRef.current;
+  }, []);
   const durationMs = track?.duration_ms || meta?.duration_ms || 1;
   const followWin = useFollowWindow({
-    getNowMs: getLiveProgressMs,
+    getNowMs: getPlayheadMs,
     durationMs,
     seedWindowS: settings ? Number(settings.builder_zoom_window_s ?? 20) : undefined,
     seedFutureS: settings ? Number(settings.builder_future_buffer_s ?? 5) : undefined,
@@ -255,7 +293,7 @@ export default function NowPlayingPage() {
     scaleOverall: Number(settings?.shape_scale_overall ?? 1),
     // The engine's xcorr baseline (median of saves, minus the perception trim)
     // shifts the playhead — legacy _engineXcorrOffsetMs().
-    offsetMs: (shapeOffset ?? meta?.timestamp_offset_ms ?? 0) - (trim?.perception_trim_ms ?? 0),
+    offsetMs: canvasOffsetMs,
     librosaOffsetMs: Number((librosa as { librosa_offset_ms?: number } | undefined)?.librosa_offset_ms ?? 0),
     triggerOffsetMs: 0,
     maxRms,
@@ -280,10 +318,16 @@ export default function NowPlayingPage() {
   const stripCount = stripCountFor(data, view.librosaFilters);
 
   // ── Derived UI bits ────────────────────────────────────────────────────────
+  // Trigger timestamps live on the canvas (capture-time) axis — compare them
+  // against the playhead clock, not raw Spotify progress, so "upcoming" and
+  // the countdown agree with the playhead line and the fired flash.
+  const playheadMs = progressMs == null
+    ? null
+    : progressMs - audioLatencyRef.current + canvasOffsetMs;
   const upcoming = useMemo(() => {
-    if (progressMs == null) return null;
-    return triggers.find((t) => t.timestamp_ms > progressMs) ?? null;
-  }, [triggers, progressMs]);
+    if (playheadMs == null) return null;
+    return triggers.find((t) => t.timestamp_ms > playheadMs) ?? null;
+  }, [triggers, playheadMs]);
 
   const service = paused
     ? { label: 'Paused', cls: 'badge-yellow' }
@@ -325,13 +369,9 @@ export default function NowPlayingPage() {
         </div>
       )}
 
-      {/* ── Now Playing ── */}
+      {/* ── Now Playing (track name/artist/time live in the shared top bar) ── */}
       <div className="card">
         <div className="card-title">Now Playing</div>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>{track?.title ?? '—'}</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {track ? (track.artist.length > 40 ? `${track.artist.slice(0, 40)}…` : track.artist) : ''}
-        </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
           {(track?.genres ?? []).join(' · ')}
         </div>
@@ -360,17 +400,6 @@ export default function NowPlayingPage() {
       {/* ── Controls ── */}
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <button className={`toggle-btn ${!paused ? 'active' : ''}`}
-            title="Activate / pause trigger firing"
-            onClick={() => void apiPost(paused ? '/control/resume' : '/control/pause')}>
-            Activate
-          </button>
-          <button className={`toggle-btn ${dinnerParty ? 'active' : ''}`}
-            title="Ignore song triggers, use automatic ambient lighting"
-            onClick={() => void apiPost(`/control/dinner-party?enabled=${!dinnerParty}`)}>
-            Dinner Party
-          </button>
-          <AmbientButton />
           <button className={`toggle-btn ${useAnalyzed ? 'active' : ''}`}
             title="Use analyzed triggers for songs without user triggers"
             onClick={() => void apiPost(`/control/use-analyzed-triggerless?enabled=${!useAnalyzed}`)}>
@@ -419,26 +448,44 @@ export default function NowPlayingPage() {
               fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
               color: 'var(--accent2)', letterSpacing: '-0.02em', minWidth: 70, textAlign: 'right',
             }}>
-              {upcoming && progressMs != null ? fmtCountdown(upcoming.timestamp_ms - progressMs) : ''}
+              {upcoming && playheadMs != null ? fmtCountdown(upcoming.timestamp_ms - playheadMs) : ''}
             </span>
           </div>
         </div>
-        {(lastScene || lastColorSet) && (
+        {uri && iScale && (
+          <div style={{ display: 'flex', marginTop: 8, gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+            <span title="Multiplies every trigger's intensity for THIS song (0–200%) before gates, chooser lanes and bindings. Saved on the song profile.">
+              ⚡ Intensity scale
+            </span>
+            <input type="range" min={0} max={200} step={5}
+              key={`${uri}:${iScale.intensity_scale ?? 'unset'}`}
+              defaultValue={Math.round(iScale.effective * 100)}
+              onChange={(e) => setScaleDrag(parseInt(e.currentTarget.value, 10))}
+              onPointerUp={(e) => void commitScale(parseInt((e.target as HTMLInputElement).value, 10))}
+              onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') void commitScale(parseInt((e.target as HTMLInputElement).value, 10)); }}
+              style={{ width: 180, accentColor: 'var(--accent)' }}
+            />
+            <span style={{ minWidth: 42, fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+              {scaleDrag ?? Math.round(iScale.effective * 100)}%
+            </span>
+            <span className="chip" title="Where this value comes from: user = this slider, auto = ranked vs the library, genre = triggerless profile default">
+              {iScale.source ?? (iScale.genre_default !== 1 ? 'genre' : 'default')}
+            </span>
+            {iScale.intensity_scale != null && (
+              <button style={{ fontSize: 11, padding: '2px 6px' }}
+                title="Clear — fall back to the auto/genre starting value"
+                onClick={() => void commitScale(null)}>×</button>
+            )}
+            <HelpLink topic="intensity-scale" />
+          </div>
+        )}
+        {activeSceneGroup && (
           <div style={{ display: 'flex', marginTop: 8, gap: 16, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-            {lastScene && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                Scene:
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: lastScene.color, display: 'inline-block' }} />
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{lastScene.name}</span>
-              </span>
-            )}
-            {lastColorSet && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                Color:
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: lastColorSet.color, display: 'inline-block' }} />
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{lastColorSet.name}</span>
-              </span>
-            )}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              title="Scene Group currently driving the scene — Scene Morph actions step this group">
+              Group:
+              <span style={{ fontWeight: 600, color: 'var(--text)' }}>{activeSceneGroup.name}</span>
+            </span>
           </div>
         )}
         {/* Next-changes board — fixed height so the card never jumps. Shows
@@ -536,11 +583,6 @@ export default function NowPlayingPage() {
               background: t.color,
             }} />
           ))}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-          <span>{fmtMs(progressMs ?? 0)}</span>
-          <span>{track && progressMs != null ? `-${fmtMs(track.duration_ms - progressMs)}` : ''}</span>
-          <span>{fmtMs(track?.duration_ms ?? 0)}</span>
         </div>
       </div>
 

@@ -7,6 +7,8 @@ import { useEditorStore } from '../../store/editorStore';
 import { useEvents } from '../../api/queries';
 import { Checkbox, LabelsInput, NumberInput, Row, Select } from '../forms/inputs';
 import EditableActionContainer from './EditableActionContainer';
+import PreviewButton from '../PreviewButton';
+import { previewSequenceStep } from '../../lib/preview';
 
 function StepCard({ step, index }: { step: SequenceStep; index: number }) {
   const uid = getUid(step);
@@ -54,6 +56,8 @@ function StepCard({ step, index }: { step: SequenceStep; index: number }) {
         />
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           <button title="Duplicate step" style={{ padding: '2px 7px', fontSize: 12 }} onClick={duplicate}>⧉</button>
+          <PreviewButton title="Preview — fire this step now (delay skipped)"
+            run={() => previewSequenceStep(step)} />
           <button className="danger" title="Delete step" style={{ padding: '2px 7px', fontSize: 12 }}
             onClick={() => removeByUid(uid)}>✕</button>
         </span>

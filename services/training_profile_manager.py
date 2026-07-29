@@ -157,6 +157,12 @@ class TrainingProfile(BaseModel):
     intensity_drop_boost: float = 0.0    # added to section energy for drops, clamped to 1.0
     intensity_quiet_cap: float = 0.35    # intensity ceiling for quiet/lull triggers
 
+    # Genre-level intensity scaler (0-2 = 0-200%): fire-time fallback for songs
+    # matching this profile's genres whose SongProfile.intensity_scale is unset.
+    # A future backfill may stamp it onto songs (source="genre"); user-set and
+    # auto-computed song values always win over this.
+    default_intensity_scale: float = Field(default=1.0, ge=0.0, le=2.0)
+
 
 def _load_raw() -> dict:
     if TRAINING_PROFILES_FILE.exists():

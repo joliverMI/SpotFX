@@ -8,6 +8,7 @@ import { fmtMsTenths, parseMsTenths } from '../../lib/time';
 import { readSticky, writeSticky } from '../../lib/useSticky';
 import { uuid } from '../../lib/uid';
 import { useBuilderStore } from '../store';
+import { useColorSets } from '../../api/queries';
 import type { EventOption, MusicTrigger } from '../types';
 
 const LABELS_HELP =
@@ -31,6 +32,8 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
   const [labels, setLabels] = useState('');
   const [intensity, setIntensity] = useState(0.5);
   const [overrideBlend, setOverrideBlend] = useState(false);
+  const [colorGroup, setColorGroup] = useState('');
+  const { data: colorSets } = useColorSets();
 
   useEffect(() => {
     if (!editingId) return;
@@ -40,12 +43,14 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       setLabels('');
       setIntensity(0.5);
       setOverrideBlend(false);
+      setColorGroup('');
     } else if (existing) {
       setTsText(fmtMsTenths(existing.timestamp_ms));
       setEventId(existing.event_id);
       setLabels(existing.labels.join(', '));
       setIntensity(existing.intensity ?? 0.5);
       setOverrideBlend(existing.override_blend ?? false);
+      setColorGroup(existing.color_group_override ?? '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
@@ -90,7 +95,8 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       if (isNew) {
         triggers.push({ id: uuid(), timestamp_ms: ms, event_id: evId,
                         labels: labelList, enabled: true, intensity,
-                        override_blend: overrideBlend });
+                        override_blend: overrideBlend,
+                        color_group_override: colorGroup || null });
       } else {
         const t = triggers.find((tt) => tt.id === editingId);
         if (t) {
@@ -99,6 +105,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           t.labels = labelList;
           t.intensity = intensity;
           t.override_blend = overrideBlend;
+          t.color_group_override = colorGroup || null;
         }
       }
     });
@@ -158,6 +165,17 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
             onChange={(e) => setIntensity(Math.max(0, Math.min(1, Number(e.target.value))))}
             style={{ width: 70, background: 'var(--bg)', color: 'var(--text)',
                      border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px' }} />
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+          title="When this trigger fires a Scene Group, use THIS Color Group instead of the group's designated one. Blank = group's normal colors. Missing/deleted groups fall back to normal.">
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>Colors 🖌️</span>
+          <SearchSelect value={colorGroup} width={220}
+            options={(colorSets ?? []).filter((c) => c.kind === 'group')
+              .map((c) => ({ value: c.id, label: c.name }))}
+            placeholder="— group's own colors —" allowEmpty
+            onChange={(v) => setColorGroup(v ?? '')} />
+          <HelpLink topic="trigger-color-override" title="Scene-group color override" />
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}

@@ -12,8 +12,11 @@ import ActionForm from '../forms/ActionForm';
 import RandomGroupBody from './RandomGroupBody';
 import SequenceGroupBody from './SequenceGroupBody';
 import ParallelGroupBody from './ParallelGroupBody';
+import IntensityChooserBody from './IntensityChooserBody';
 import { writeClip } from '../../store/clipboard';
 import OpenRefLink from '../OpenRefLink';
+import PreviewButton from '../PreviewButton';
+import { previewAction } from '../../lib/preview';
 
 /** Editable HA-style card: drag handle, collapsed summary ⇄ expanded form, ⧉/✕ menu. */
 export default function EditActionCard({ action }: { action: Action }) {
@@ -57,7 +60,7 @@ export default function EditActionCard({ action }: { action: Action }) {
           to: `/event/${action.event_id}`,
           title: `Open event “${ctx.events?.[action.event_id]?.name ?? action.event_id}” in a new tab`,
         }
-      : action.type === 'set_color' && action.ref_id
+      : action.type === 'set_color' && action.ref_id && !action.ref_id.startsWith('__')
         ? {
             to: `/color-sets?id=${encodeURIComponent(action.ref_id)}`,
             title: `Open “${ctx.colorSetNames?.[action.ref_id] ?? action.ref_id}” in Color Sets (new tab)`,
@@ -111,6 +114,7 @@ export default function EditActionCard({ action }: { action: Action }) {
           onClick={(e) => { e.stopPropagation(); writeClip('action', action, summarizeAction(action, ctx)); }}>📋</button>
         <button title="Duplicate" style={{ padding: '2px 7px', fontSize: 12 }}
           onClick={(e) => { e.stopPropagation(); duplicate(); }}>⧉</button>
+        <PreviewButton title="Preview — fire this action now" run={() => previewAction(action)} />
         <button className="danger" title="Delete" style={{ padding: '2px 7px', fontSize: 12 }}
           onClick={(e) => { e.stopPropagation(); removeByUid(uid); }}>✕</button>
       </div>
@@ -119,6 +123,7 @@ export default function EditActionCard({ action }: { action: Action }) {
           {action.type === 'random_group' && <RandomGroupBody uid={uid} action={action} />}
           {action.type === 'sequence_group' && <SequenceGroupBody uid={uid} action={action} />}
           {action.type === 'parallel_group' && <ParallelGroupBody uid={uid} action={action} />}
+          {action.type === 'intensity_chooser' && <IntensityChooserBody uid={uid} action={action} />}
           <ActionForm action={action} update={(fn) => updateAction(uid, fn)} />
         </div>
       )}

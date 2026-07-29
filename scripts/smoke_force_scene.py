@@ -48,6 +48,13 @@ async def main() -> int:
 
     te = object.__new__(TriggerEngine)
     te._last_scene_update_id = None
+    # Scene Group / updates-wait state the scene dispatch now touches.
+    te._scene_cursor = {}
+    te._scene_cursor_dir = {}
+    te._scene_cursor_prev = {}
+    te._active_scene_group_id = None
+    te._scene_fire_seq = 0
+    te._scene_fire_cond = asyncio.Condition()
 
     async def _fake_run_one_lane(event, lane_index, labels, skip_event_ids=None,
                                  preselected=None, resolved_picks=None):

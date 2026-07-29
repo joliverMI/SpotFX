@@ -301,7 +301,7 @@ def _patch_shape(
     Sub-field → param mapping (resolved via the `aspect` tag in effect_params.json):
       polygon → `polygon`  (radial only)
       star    → `star`     (radial only)
-      edges   → `edges` (radial) or `particle_count` (orbits) — "Edge / Particle Count"
+      edges   → `edges` (radial) or `particle_count` (orbits) or `burst_size` (fireworks) — "Edge / Particle Count"
       twist   → `twist`    (radial only)
       flip    → `flip` (power/melt) or `ring` (equalizer2d) or `spin_sign` (radial)
 
@@ -336,10 +336,14 @@ def _patch_shape(
     for key in ("star", "edges", "twist", "x_offset", "y_offset", "swirl",
                 "horizon_scale", "radius_scale", "blob_size"):
         # `edges` doubles as the particle count on effects that have one
-        # (orbits) — the UI presents them as a single "Edge / Particle Count".
+        # (orbits: particle_count, fireworks: burst_size) — the UI presents
+        # them as a single "Edge / Particle Count".
         pname = key
-        if key == "edges" and key not in name_set and "particle_count" in name_set:
-            pname = "particle_count"
+        if key == "edges" and key not in name_set:
+            for alias in ("particle_count", "burst_size"):
+                if alias in name_set:
+                    pname = alias
+                    break
         if pname not in name_set:
             continue
         meta = _ep.get_param_meta(effect_type, pname) or {}

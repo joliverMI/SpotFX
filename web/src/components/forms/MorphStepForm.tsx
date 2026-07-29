@@ -418,7 +418,7 @@ export default function MorphStepForm({
                       <BindableNumber value={av.star ?? null} nullable min={0} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.star = v; })} />
                     </Row>
-                    <Row label="Edge / particle count" help="Radial: polygon edges (0–8); Orbits: particle count (1–16, count changes animate — removed particles fly off, new ones fly in)">
+                    <Row label="Edge / particle count" help="Radial: polygon edges (0–8); Orbits: particle count (1–16, count changes animate — removed particles fly off, new ones fly in; Orbits Strip: new ones explode in); Fireworks: burst size (3–30 particles per firework)">
                       <BindableNumber value={av.edges ?? null} nullable min={0} step={1}
                         onChange={(v) => setAV((x) => { x.edges = typeof v === 'number' ? Math.round(v) : v; })} />
                     </Row>
@@ -426,7 +426,7 @@ export default function MorphStepForm({
                       <BindableNumber value={av.twist ?? null} nullable step={0.05}
                         onChange={(v) => setAV((x) => { x.twist = v; })} />
                     </Row>
-                    <Row label="X offset (−1..1)" help="Center point X — radial, blackhole and orbits">
+                    <Row label="X offset (−1..1)" help="Center point X — radial, blackhole and orbits; strip variants rotate the pattern around the strip">
                       <BindableNumber value={av.x_offset ?? null} nullable min={-1} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.x_offset = v; })} />
                     </Row>
@@ -434,15 +434,15 @@ export default function MorphStepForm({
                       <BindableNumber value={av.y_offset ?? null} nullable min={-1} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.y_offset = v; })} />
                     </Row>
-                    <Row label="Swirl (−6..6)" help="Blackhole only: swirl amount, sign = direction">
+                    <Row label="Swirl (−6..6)" help="Blackhole (2D and Strip): swirl amount, sign = direction">
                       <BindableNumber value={av.swirl ?? null} nullable min={-6} max={6} step={0.1}
                         onChange={(v) => setAV((x) => { x.swirl = v; })} />
                     </Row>
-                    <Row label="Horizon size" help="Blackhole: event-horizon radius (0 disables); Orbits: tether ring radius">
+                    <Row label="Horizon size" help="Blackhole: event-horizon radius (0 disables); Orbits: tether ring radius (2D only)">
                       <BindableNumber value={av.horizon_scale ?? null} nullable min={0} max={0.8} step={0.05}
                         onChange={(v) => setAV((x) => { x.horizon_scale = v; })} />
                     </Row>
-                    <Row label="Field radius" help="Blackhole/orbits: overall field scale as a fraction of the panel edge (0.2–2)">
+                    <Row label="Field radius" help="Blackhole/orbits: overall field scale as a fraction of the panel edge (0.2–2); Blackhole Strip: sample-ring radius along the fall">
                       <BindableNumber value={av.radius_scale ?? null} nullable min={0.2} max={2} step={0.05}
                         onChange={(v) => setAV((x) => { x.radius_scale = v; })} />
                     </Row>

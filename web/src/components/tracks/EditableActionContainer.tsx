@@ -13,8 +13,8 @@ import AddActionDialog from '../dialogs/AddActionDialog';
 export const EDITABLE_ACTION_TYPES: ActionType[] = [
   'event_ref', 'ledfx_scene', 'ledfx_ambient', 'ledfx_ambient_color',
   'ledfx_global_transition', 'ledfx_effect_param',
-  'morph_step', 'set_color', 'morph_color', 'device_settings',
-  'random_group', 'sequence_group', 'parallel_group',
+  'morph_step', 'set_color', 'morph_color', 'scene_morph', 'device_settings',
+  'random_group', 'sequence_group', 'parallel_group', 'intensity_chooser',
 ];
 
 /** A sortable, droppable Action[] list at `containerPath` with a "+ Add action" footer. */

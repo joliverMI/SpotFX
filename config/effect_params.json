@@ -1,11 +1,55 @@
 {
   "categories": {
-    "Matrix":  { "virtuals": ["crystal-mapper"],                           "effects": ["radial","noise","concentric","equalizer2d","blender","keybeat2d","gifplayer","blackhole","orbits"] },
-    "Strips":  { "virtuals": ["strip-effect","radial-dummy"],              "effects": ["melt","power"] },
-    "Singles": { "virtuals": ["single-color-effect"],                      "effects": ["power"] }
+    "Matrix": {
+      "virtuals": [
+        "crystal-mapper"
+      ],
+      "effects": [
+        "radial",
+        "noise",
+        "concentric",
+        "equalizer2d",
+        "blender",
+        "keybeat2d",
+        "gifplayer",
+        "blackhole",
+        "orbits",
+        "fireworks"
+      ]
+    },
+    "Strips": {
+      "virtuals": [
+        "strip-effect",
+        "radial-dummy"
+      ],
+      "effects": [
+        "melt",
+        "power"
+      ]
+    },
+    "Singles": {
+      "virtuals": [
+        "single-color-effect"
+      ],
+      "effects": [
+        "power"
+      ]
+    }
   },
   "morph": {
-    "supported_effects": ["power", "melt", "radial", "equalizer2d", "keybeat2d", "blackhole", "orbits"],
+    "supported_effects": [
+      "power",
+      "melt",
+      "radial",
+      "equalizer2d",
+      "keybeat2d",
+      "blackhole",
+      "orbits",
+      "blackhole1d",
+      "orbits1d",
+      "fireworks",
+      "fireworks1d"
+    ],
     "aspect_labels": {
       "shape": "Shape",
       "effect": "Effect",
@@ -19,126 +63,463 @@
   "effects": {
     "power": {
       "params": {
-        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
-        "background_color":      { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
-        "background_mode":       { "label":"BG Mode",              "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
-        "sparks_color":          { "label":"Accent Color",         "type":"color",  "smooth":true,                  "aspect":"reactivity", "accent":true },
-        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
-        "blur":                  { "label":"Blur",                 "type":"numeric","smooth":true, "min":0,"max":10,"aspect":"blur",       "aspect_scale":1.0 },
-        "bass_decay_rate":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity", "aspect_scale":1.0 },
-        "sparks_decay_rate":     { "label":"Sparks Decay Rate",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity", "aspect_scale":0.6 },
-        "flip":                  { "label":"Flip",                 "type":"toggle", "smooth":false,                 "aspect":"shape" },
-        "gradient_roll":         { "label":"Gradient Roll",        "type":"numeric","smooth":false,"min":1,"max":10 },
-        "gradient":              { "label":"Gradient",             "type":"gradient","smooth":true,                 "aspect":"color" }
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_mode": {
+          "label": "BG Mode",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "additive",
+            "overwrite"
+          ]
+        },
+        "sparks_color": {
+          "label": "Accent Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "reactivity",
+          "accent": true
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "blur": {
+          "label": "Blur",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 10,
+          "aspect": "blur",
+          "aspect_scale": 1.0
+        },
+        "bass_decay_rate": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0
+        },
+        "sparks_decay_rate": {
+          "label": "Sparks Decay Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6
+        },
+        "flip": {
+          "label": "Flip",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "gradient_roll": {
+          "label": "Gradient Roll",
+          "type": "numeric",
+          "smooth": false,
+          "min": 1,
+          "max": 10
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        }
       },
       "defaults": {
         "background_brightness": 0.3,
-        "background_color":      "#000000",
-        "sparks_color":          "#FFFFFF",
-        "brightness":            0.8,
-        "blur":                  1.0,
-        "bass_decay_rate":       0.4,
-        "sparks_decay_rate":     0.4,
-        "flip":                  false,
-        "gradient_roll":         1,
-        "gradient":              "linear-gradient(90deg, #ff0000 0%, #00ff00 50%, #0000ff 100%)"
+        "background_color": "#000000",
+        "sparks_color": "#FFFFFF",
+        "brightness": 0.8,
+        "blur": 1.0,
+        "bass_decay_rate": 0.4,
+        "sparks_decay_rate": 0.4,
+        "flip": false,
+        "gradient_roll": 1,
+        "gradient": "linear-gradient(90deg, #ff0000 0%, #00ff00 50%, #0000ff 100%)"
       }
     },
     "melt": {
       "params": {
-        "background_color":{ "label":"BG Color",        "type":"color",  "smooth":true,                  "aspect":"bg_color" },
-        "background_mode":{ "label":"BG Mode",          "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
-        "brightness":    { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
-        "gradient_roll": { "label":"Gradient Roll",     "type":"numeric","smooth":false,"min":1,"max":10 },
-        "flip":          { "label":"Flip",              "type":"toggle", "smooth":false,                 "aspect":"shape" },
-        "blur":          { "label":"Blur",              "type":"numeric","smooth":true, "min":0,"max":10,"aspect":"blur",       "aspect_scale":1.0 },
-        "speed":         { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":1 },
-        "reactivity":    { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"reactivity", "aspect_scale":1.0 },
-        "gradient":      { "label":"Gradient",          "type":"gradient","smooth":true,                 "aspect":"color" }
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_mode": {
+          "label": "BG Mode",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "additive",
+            "overwrite"
+          ]
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "gradient_roll": {
+          "label": "Gradient Roll",
+          "type": "numeric",
+          "smooth": false,
+          "min": 1,
+          "max": 10
+        },
+        "flip": {
+          "label": "Flip",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "blur": {
+          "label": "Blur",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 10,
+          "aspect": "blur",
+          "aspect_scale": 1.0
+        },
+        "speed": {
+          "label": "Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1
+        },
+        "reactivity": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        }
       },
       "defaults": {
         "background_color": "#000000",
-        "brightness":    0.8,
+        "brightness": 0.8,
         "gradient_roll": 1,
-        "flip":          false,
-        "blur":          1.0,
-        "speed":         0.4,
-        "reactivity":    0.5,
-        "gradient":      "linear-gradient(90deg, #ff0000 0%, #00ff00 50%, #0000ff 100%)"
+        "flip": false,
+        "blur": 1.0,
+        "speed": 0.4,
+        "reactivity": 0.5,
+        "gradient": "linear-gradient(90deg, #ff0000 0%, #00ff00 50%, #0000ff 100%)"
       }
     },
     "noise": {
       "params": {
-        "gradient":   { "label":"Gradient",          "type":"gradient","smooth":true },
-        "brightness": { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1 },
-        "multiplier": { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":4 },
-        "speed":      { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":5 },
-        "zoom":       { "label":"Zoom",              "type":"numeric","smooth":true, "min":0,"max":5 }
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1
+        },
+        "multiplier": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 4
+        },
+        "speed": {
+          "label": "Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5
+        },
+        "zoom": {
+          "label": "Zoom",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5
+        }
       }
     },
     "concentric": {
       "params": {
-        "gradient":         { "label":"Gradient",          "type":"gradient","smooth":true },
-        "brightness":       { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0,"max":1 },
-        "power_multiplier": { "label":"Reactivity",        "type":"numeric","smooth":true, "min":0,"max":1 },
-        "speed":            { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":1 },
-        "gradient_scale":   { "label":"Zoom",              "type":"numeric","smooth":true, "min":0,"max":5 },
-        "invert":           { "label":"Flip",              "type":"toggle", "smooth":false },
-        "idle_speed":       { "label":"Speed",             "type":"numeric","smooth":true, "min":0,"max":1 },
-        "center_smoothing": { "label":"Blur",              "type":"numeric","smooth":true, "min":0,"max":5 }
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1
+        },
+        "power_multiplier": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1
+        },
+        "speed": {
+          "label": "Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1
+        },
+        "gradient_scale": {
+          "label": "Zoom",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5
+        },
+        "invert": {
+          "label": "Flip",
+          "type": "toggle",
+          "smooth": false
+        },
+        "idle_speed": {
+          "label": "Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1
+        },
+        "center_smoothing": {
+          "label": "Blur",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5
+        }
       }
     },
     "equalizer2d": {
       "params": {
-        "background_color":      { "label":"BG Color",             "type":"color",  "smooth":true,                  "aspect":"bg_color" },
-        "background_mode":       { "label":"BG Mode",              "type":"enum",   "smooth":false, "options":["additive","overwrite"] },
-        "background_brightness": { "label":"Background Brightness","type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
-        "brightness":            { "label":"Effect Brightness",    "type":"numeric","smooth":true, "min":0,"max":1, "aspect":"brightness", "aspect_scale":1.0 },
-        "peak_color":            { "label":"Accent Color",         "type":"color",  "smooth":true,                                          "accent":true },
-        "gradient_roll":         { "label":"Gradient Roll",        "type":"numeric","smooth":false,"min":1,"max":10 },
-        "ring":                  { "label":"Flip",                 "type":"toggle", "smooth":true,                  "aspect":"shape" },
-        "spin_multiplier":       { "label":"Reactivity",           "type":"numeric","smooth":true, "min":0,"max":5, "aspect":"reactivity", "aspect_scale":1.0 },
-        "spin":                  { "label":"Spin",                 "type":"toggle", "smooth":false }
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_mode": {
+          "label": "BG Mode",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "additive",
+            "overwrite"
+          ]
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "peak_color": {
+          "label": "Accent Color",
+          "type": "color",
+          "smooth": true,
+          "accent": true
+        },
+        "gradient_roll": {
+          "label": "Gradient Roll",
+          "type": "numeric",
+          "smooth": false,
+          "min": 1,
+          "max": 10
+        },
+        "ring": {
+          "label": "Flip",
+          "type": "toggle",
+          "smooth": true,
+          "aspect": "shape"
+        },
+        "spin_multiplier": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0
+        },
+        "spin": {
+          "label": "Spin",
+          "type": "toggle",
+          "smooth": false
+        }
       },
       "defaults": {
-        "background_color":      "#000000",
+        "background_color": "#000000",
         "background_brightness": 0.3,
-        "brightness":            0.8,
-        "peak_color":            "#FFFFFF",
-        "gradient_roll":         1,
-        "ring":                  false,
-        "spin_multiplier":       1.0,
-        "spin":                  false
+        "brightness": 0.8,
+        "peak_color": "#FFFFFF",
+        "gradient_roll": 1,
+        "ring": false,
+        "spin_multiplier": 1.0,
+        "spin": false
       }
     },
     "radial": {
       "no_background_color": true,
       "params": {
-        "polygon":   { "label":"Polygon",  "type":"toggle",  "smooth":false,                                  "aspect":"shape" },
-        "spin":      { "label":"Speed",    "type":"numeric", "smooth":false, "min":0,"max":1,
-                       "aspect":"reactivity", "aspect_scale":1.0,
-                       "magnitude_only":true, "note":"Reactivity drives the magnitude; spin_sign/Flip owns the sign (magnitude_only preserves it on write)" },
-        "spin_sign": { "label":"Flip",     "type":"toggle",  "smooth":false,
-                       "maps_to":"spin",   "sign_control":true,                                              "aspect":"shape",
-                       "note":"On=positive spin, Off=negative spin, Toggle=negate sign" },
-        "twist":     { "label":"Twist",    "type":"numeric", "smooth":true,  "min":0,"max":10, "flip_sign":true, "aspect":"shape" },
-        "star":      { "label":"Star",     "type":"numeric", "smooth":true,  "min":-1,"max":1, "flip_sign":true, "aspect":"shape" },
-        "edges":     { "label":"Edges",    "type":"integer", "smooth":false, "min":0,"max":8,                    "aspect":"shape" },
-        "x_offset":     { "label":"X Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true, "aspect":"shape" },
-        "y_offset":     { "label":"Y Offset",     "type":"numeric","smooth":true, "min":-1,"max":1, "flip_sign":true, "scale_offset":true, "aspect":"shape" },
-        "offset_polar": { "label":"Polar Offset", "type":"polar",  "smooth":true, "maps_x":"x_offset","maps_y":"y_offset" },
-        "move_xy":      { "label":"Move by XY",    "type":"move_xy",    "smooth":true },
-        "move_polar":   { "label":"Move by Polar", "type":"move_polar", "smooth":true }
+        "polygon": {
+          "label": "Polygon",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "spin": {
+          "label": "Speed",
+          "type": "numeric",
+          "smooth": false,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "magnitude_only": true,
+          "note": "Reactivity drives the magnitude; spin_sign/Flip owns the sign (magnitude_only preserves it on write)"
+        },
+        "spin_sign": {
+          "label": "Flip",
+          "type": "toggle",
+          "smooth": false,
+          "maps_to": "spin",
+          "sign_control": true,
+          "aspect": "shape",
+          "note": "On=positive spin, Off=negative spin, Toggle=negate sign"
+        },
+        "twist": {
+          "label": "Twist",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 10,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "star": {
+          "label": "Star",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "edges": {
+          "label": "Edges",
+          "type": "integer",
+          "smooth": false,
+          "min": 0,
+          "max": 8,
+          "aspect": "shape"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "offset_polar": {
+          "label": "Polar Offset",
+          "type": "polar",
+          "smooth": true,
+          "maps_x": "x_offset",
+          "maps_y": "y_offset"
+        },
+        "move_xy": {
+          "label": "Move by XY",
+          "type": "move_xy",
+          "smooth": true
+        },
+        "move_polar": {
+          "label": "Move by Polar",
+          "type": "move_polar",
+          "smooth": true
+        }
       },
       "defaults": {
-        "polygon":        false,
-        "spin":           0.2,
-        "spin_sign":      true,
-        "twist":          0.0,
-        "star":           0.0,
-        "edges":          6,
-        "x_offset":       0.0,
-        "y_offset":       0.0,
+        "polygon": false,
+        "spin": 0.2,
+        "spin_sign": true,
+        "twist": 0.0,
+        "star": 0.0,
+        "edges": 6,
+        "x_offset": 0.0,
+        "y_offset": 0.0,
         "source_virtual": "radial-dummy",
         "background_color": "#000000"
       }
@@ -146,140 +527,1607 @@
     "blender": {},
     "keybeat2d": {
       "params": {
-        "image_location":     { "label":"Dance GIF",   "type":"string",  "smooth":false, "options_source":"gif_assets", "resets_effect":true,
-                                "note":"LedFX asset path (spotfx/dancer/*.gif). ALWAYS patch together with beat_frames" },
-        "beat_frames":        { "label":"Beat Frames", "type":"string",  "smooth":false, "resets_effect":true,
-                                "note":"Frame indices that land on beats; comes from the gifsmith manifest" },
-        "tint":               { "label":"Dancer Color","type":"color",   "smooth":true,                   "aspect":"color" },
-        "image_brightness":   { "label":"Effect Brightness", "type":"numeric","smooth":true, "min":0.1,"max":3.0, "aspect":"brightness", "aspect_scale":1.0 },
-        "stretch_horizontal": { "label":"Dancer Width",  "type":"integer","smooth":true, "min":1,"max":200,  "aspect":"shape" },
-        "stretch_vertical":   { "label":"Dancer Height", "type":"integer","smooth":true, "min":1,"max":200,  "aspect":"shape" },
-        "center_horizontal":  { "label":"Dancer X",    "type":"integer", "smooth":true, "min":-95,"max":95, "scale_offset":true, "aspect":"shape" },
-        "center_vertical":    { "label":"Dancer Y",    "type":"integer", "smooth":true, "min":-95,"max":95, "scale_offset":true, "aspect":"shape" },
-        "half_beat":          { "label":"Half Beat",   "type":"toggle",  "smooth":false,                  "aspect":"reactivity" },
-        "ping_pong":          { "label":"Ping Pong",   "type":"toggle",  "smooth":false,                  "aspect":"shape" },
-        "flip_horizontal":    { "label":"Flip",        "type":"toggle",  "smooth":false,                  "aspect":"shape" },
-        "force_fit":          { "label":"Force Fit",   "type":"toggle",  "smooth":false },
-        "keep_aspect_ratio":  { "label":"Keep Aspect", "type":"toggle",  "smooth":false }
+        "image_location": {
+          "label": "Dance GIF",
+          "type": "string",
+          "smooth": false,
+          "options_source": "gif_assets",
+          "resets_effect": true,
+          "note": "LedFX asset path (spotfx/dancer/*.gif). ALWAYS patch together with beat_frames"
+        },
+        "beat_frames": {
+          "label": "Beat Frames",
+          "type": "string",
+          "smooth": false,
+          "resets_effect": true,
+          "note": "Frame indices that land on beats; comes from the gifsmith manifest"
+        },
+        "tint": {
+          "label": "Dancer Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "image_brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 3.0,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "stretch_horizontal": {
+          "label": "Dancer Width",
+          "type": "integer",
+          "smooth": true,
+          "min": 1,
+          "max": 200,
+          "aspect": "shape"
+        },
+        "stretch_vertical": {
+          "label": "Dancer Height",
+          "type": "integer",
+          "smooth": true,
+          "min": 1,
+          "max": 200,
+          "aspect": "shape"
+        },
+        "center_horizontal": {
+          "label": "Dancer X",
+          "type": "integer",
+          "smooth": true,
+          "min": -95,
+          "max": 95,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "center_vertical": {
+          "label": "Dancer Y",
+          "type": "integer",
+          "smooth": true,
+          "min": -95,
+          "max": 95,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "half_beat": {
+          "label": "Half Beat",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "reactivity"
+        },
+        "ping_pong": {
+          "label": "Ping Pong",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "flip_horizontal": {
+          "label": "Flip",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "force_fit": {
+          "label": "Force Fit",
+          "type": "toggle",
+          "smooth": false
+        },
+        "keep_aspect_ratio": {
+          "label": "Keep Aspect",
+          "type": "toggle",
+          "smooth": false
+        }
       },
       "defaults": {
-        "image_location":     "spotfx/dancer/dancer_basic.gif",
-        "beat_frames":        "0 3 6 9 12 15 18 21",
-        "tint":               "#ffffff",
-        "image_brightness":   1.0,
-        "force_fit":          true,
-        "keep_aspect_ratio":  false,
+        "image_location": "spotfx/dancer/dancer_basic.gif",
+        "beat_frames": "0 3 6 9 12 15 18 21",
+        "tint": "#ffffff",
+        "image_brightness": 1.0,
+        "force_fit": true,
+        "keep_aspect_ratio": false,
         "stretch_horizontal": 100,
-        "stretch_vertical":   100,
-        "center_horizontal":  0,
-        "center_vertical":    0
+        "stretch_vertical": 100,
+        "center_horizontal": 0,
+        "center_vertical": 0
       }
     },
     "blackhole": {
       "params": {
-        "swirl":                 { "label":"Swirl",                 "type":"numeric","smooth":true,  "min":-6,"max":6,      "flip_sign":true, "aspect":"shape" },
-        "reverse":               { "label":"Reverse Flow",          "type":"toggle", "smooth":false,                        "aspect":"shape" },
-        "radius_scale":          { "label":"Field Radius",          "type":"numeric","smooth":true,  "min":0.2,"max":2.0,   "aspect":"shape" },
-        "blob_size":             { "label":"Blob Size",             "type":"numeric","smooth":true,  "min":0.5,"max":6,     "aspect":"shape" },
-        "gradient_spin":         { "label":"Gradient Spin",         "type":"numeric","smooth":true,  "min":-1,"max":1,      "flip_sign":true, "aspect":"shape" },
-        "trail_decay":           { "label":"Trail Length",          "type":"numeric","smooth":true,  "min":0,"max":1,       "aspect":"shape" },
-        "horizon_scale":         { "label":"Horizon Size",          "type":"numeric","smooth":true,  "min":0,"max":0.8,     "aspect":"shape" },
-        "x_offset":              { "label":"X Offset",              "type":"numeric","smooth":true,  "min":-1,"max":1,      "flip_sign":true, "scale_offset":true, "aspect":"shape" },
-        "y_offset":              { "label":"Y Offset",              "type":"numeric","smooth":true,  "min":-1,"max":1,      "flip_sign":true, "scale_offset":true, "aspect":"shape" },
-        "horizon_audio":         { "label":"Horizon Audio",         "type":"numeric","smooth":true,  "min":-1,"max":1,      "aspect":"reactivity", "aspect_scale":0.4 },
-        "horizon_color":         { "label":"Accent Color",          "type":"color",  "smooth":true,                         "aspect":"reactivity", "accent":true },
-        "base_speed":            { "label":"Infall Speed",          "type":"numeric","smooth":true,  "min":0.05,"max":2.0,  "aspect":"reactivity", "aspect_scale":0.8 },
-        "accel":                 { "label":"Accel",                 "type":"numeric","smooth":true,  "min":0.5,"max":5.0,   "aspect":"reactivity", "distribute":false },
-        "spawn_rate":            { "label":"Spawn Rate",            "type":"numeric","smooth":true,  "min":0,"max":60,      "aspect":"reactivity", "aspect_scale":1.0 },
-        "beat_burst":            { "label":"Beat Burst",            "type":"integer","smooth":true,  "min":0,"max":12,      "aspect":"reactivity", "aspect_scale":0.6 },
-        "spawn_audio":           { "label":"Audio Spawn",           "type":"numeric","smooth":true,  "min":0,"max":2,       "aspect":"reactivity", "aspect_scale":0.5 },
-        "speed_audio":           { "label":"Audio Speed",           "type":"numeric","smooth":true,  "min":0,"max":5,       "aspect":"reactivity", "aspect_scale":0.5 },
-        "impulse_decay":         { "label":"Impulse Decay",         "type":"numeric","smooth":true,  "min":0.01,"max":0.3,  "aspect":"reactivity", "distribute":false },
-        "max_blobs":             { "label":"Max Blobs",             "type":"integer","smooth":true,  "min":20,"max":1024,   "aspect":"reactivity", "aspect_scale":0.4 },
-        "edge_speed":            { "label":"Edge Speed",            "type":"numeric","smooth":true,  "min":0.05,"max":1.0,  "aspect":"reactivity", "distribute":false },
-        "kill_radius":           { "label":"Kill Radius",           "type":"numeric","smooth":true,  "min":0.01,"max":0.2 },
-        "horizon_hold":          { "label":"Horizon Hold",          "type":"numeric","smooth":true,  "min":0.5,"max":10.0,  "aspect":"reactivity", "distribute":false },
-        "handoff_ease":          { "label":"Handoff Ease",          "type":"numeric","smooth":true,  "min":0,"max":5,       "aspect":"reactivity", "distribute":false,
-                                   "note":"Seconds adopted particles wind up to full speed after an orbits->blackhole switch" },
-        "color_mode":            { "label":"Color Mode",            "type":"enum",   "smooth":false, "options":["wheel","band","random"] },
-        "frequency_range":       { "label":"Audio Band",            "type":"enum",   "smooth":false, "options":["Beat","Bass","Lows (beat+bass)","Mids","High"] },
-        "gradient":              { "label":"Gradient",              "type":"gradient","smooth":true,                        "aspect":"color" },
-        "background_color":      { "label":"BG Color",              "type":"color",  "smooth":true,                        "aspect":"bg_color" },
-        "background_brightness": { "label":"Background Brightness", "type":"numeric","smooth":true,  "min":0,"max":1,      "aspect":"brightness", "aspect_scale":1.0 },
-        "brightness":            { "label":"Effect Brightness",     "type":"numeric","smooth":true,  "min":0,"max":1,      "aspect":"brightness", "aspect_scale":1.0 }
+        "swirl": {
+          "label": "Swirl",
+          "type": "numeric",
+          "smooth": true,
+          "min": -6,
+          "max": 6,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "reverse": {
+          "label": "Reverse Flow",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "radius_scale": {
+          "label": "Field Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.0,
+          "aspect": "shape"
+        },
+        "blob_size": {
+          "label": "Blob Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape"
+        },
+        "gradient_spin": {
+          "label": "Gradient Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape"
+        },
+        "horizon_scale": {
+          "label": "Horizon Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.8,
+          "aspect": "shape"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "horizon_audio": {
+          "label": "Horizon Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 0.4
+        },
+        "horizon_color": {
+          "label": "Accent Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "reactivity",
+          "accent": true
+        },
+        "base_speed": {
+          "label": "Infall Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.8
+        },
+        "accel": {
+          "label": "Accel",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 5.0,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "spawn_rate": {
+          "label": "Spawn Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 60,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0
+        },
+        "beat_burst": {
+          "label": "Beat Burst",
+          "type": "integer",
+          "smooth": true,
+          "min": 0,
+          "max": 12,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6
+        },
+        "spawn_audio": {
+          "label": "Audio Spawn",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "speed_audio": {
+          "label": "Audio Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "max_blobs": {
+          "label": "Max Blobs",
+          "type": "integer",
+          "smooth": true,
+          "min": 20,
+          "max": 1024,
+          "aspect": "reactivity",
+          "aspect_scale": 0.4
+        },
+        "edge_speed": {
+          "label": "Edge Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 1.0,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "kill_radius": {
+          "label": "Kill Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.2
+        },
+        "horizon_hold": {
+          "label": "Horizon Hold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 10.0,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "handoff_ease": {
+          "label": "Handoff Ease",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Seconds adopted particles wind up to full speed after an orbits->blackhole switch"
+        },
+        "color_mode": {
+          "label": "Color Mode",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "wheel",
+            "band",
+            "random"
+          ]
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        }
       },
       "defaults": {
-        "swirl": 3.0, "reverse": true, "radius_scale": 1.0, "blob_size": 1.0,
-        "trail_decay": 0.4, "base_speed": 1.0, "spawn_rate": 1.0, "beat_burst": 1,
-        "spawn_audio": 1.0, "speed_audio": 1.0, "impulse_decay": 0.06,
-        "max_blobs": 50, "edge_speed": 0.25, "accel": 2.5,
-        "kill_radius": 0.04, "horizon_hold": 2.5, "handoff_ease": 1.5,
-        "color_mode": "wheel", "gradient_spin": 0.1,
-        "horizon_scale": 0.25, "horizon_audio": 0.3, "horizon_color": "#ffffff",
-        "x_offset": 0.5, "y_offset": 0.5,
+        "swirl": 3.0,
+        "reverse": true,
+        "radius_scale": 1.0,
+        "blob_size": 1.0,
+        "trail_decay": 0.4,
+        "base_speed": 1.0,
+        "spawn_rate": 1.0,
+        "beat_burst": 1,
+        "spawn_audio": 1.0,
+        "speed_audio": 1.0,
+        "impulse_decay": 0.06,
+        "max_blobs": 50,
+        "edge_speed": 0.25,
+        "accel": 2.5,
+        "kill_radius": 0.04,
+        "horizon_hold": 2.5,
+        "handoff_ease": 1.5,
+        "color_mode": "wheel",
+        "gradient_spin": 0.1,
+        "horizon_scale": 0.25,
+        "horizon_audio": 0.3,
+        "horizon_color": "#ffffff",
+        "x_offset": 0.5,
+        "y_offset": 0.5,
         "frequency_range": "Lows (beat+bass)",
         "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
-        "background_color": "#000000", "background_brightness": 1.0, "brightness": 1.0
+        "background_color": "#000000",
+        "background_brightness": 1.0,
+        "brightness": 1.0
       }
     },
     "orbits": {
       "params": {
-        "particle_count":        { "label":"Particles",             "type":"integer","smooth":false, "min":1,"max":16,      "aspect":"shape",
-                                   "note":"Count changes animate: removed particles fly off, new ones fly in" },
-        "x_offset":              { "label":"X Offset",              "type":"numeric","smooth":true,  "min":-1,"max":1,      "flip_sign":true, "scale_offset":true, "aspect":"shape" },
-        "y_offset":              { "label":"Y Offset",              "type":"numeric","smooth":true,  "min":-1,"max":1,      "flip_sign":true, "scale_offset":true, "aspect":"shape" },
-        "radius_scale":          { "label":"Field Radius",          "type":"numeric","smooth":true,  "min":0.2,"max":2.0,   "aspect":"shape" },
-        "horizon_scale":         { "label":"Tether Radius",         "type":"numeric","smooth":true,  "min":0,"max":0.8,     "aspect":"shape" },
-        "orbit_radius":          { "label":"Orbit Radius",          "type":"numeric","smooth":true,  "min":0.02,"max":0.8,  "aspect":"shape" },
-        "blob_size":             { "label":"Particle Size",         "type":"numeric","smooth":true,  "min":0.5,"max":6,     "aspect":"shape" },
-        "spin":                  { "label":"Ring Spin",             "type":"numeric","smooth":true,  "min":0,"max":1,       "aspect":"reactivity", "distribute":false },
-        "base_speed":            { "label":"Orbit Speed",           "type":"numeric","smooth":true,  "min":0.05,"max":2.0,  "aspect":"reactivity", "distribute":false },
-        "reverse":               { "label":"Reverse Spin",          "type":"toggle", "smooth":false,                        "aspect":"shape" },
-        "jiggle":                { "label":"Jiggle",                "type":"numeric","smooth":true,  "min":0,"max":1,       "aspect":"reactivity", "distribute":false,
-                                   "note":"0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity" },
-        "tether_scatter":        { "label":"Tether Scatter",        "type":"numeric","smooth":true,  "min":0,"max":1,       "aspect":"reactivity", "distribute":false,
-                                   "note":"0 = perfectly equidistant tethers, 1 = fully random ring placement" },
-        "enter_time":            { "label":"Enter Time",            "type":"numeric","smooth":true,  "min":0.2,"max":5,     "aspect":"reactivity", "distribute":false,
-                                   "note":"Seconds a new or adopted particle glides into its orbit (fly-ins + blackhole->orbits handoff)" },
-        "reactivity_scale":      { "label":"Reactivity",            "type":"numeric","smooth":true,  "min":0,"max":2,       "aspect":"reactivity", "aspect_scale":1.0,
-                                   "note":"Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio" },
-        "speed_jump":            { "label":"Speed Jump Max",        "type":"numeric","smooth":true,  "min":0,"max":3,       "aspect":"reactivity", "distribute":false },
-        "speed_jog":             { "label":"Speed Jump Jog",        "type":"numeric","smooth":true,  "min":0,"max":3,       "aspect":"reactivity", "distribute":false },
-        "brightness_audio":      { "label":"Brightness Audio",      "type":"numeric","smooth":true,  "min":0,"max":2,       "aspect":"reactivity", "distribute":false },
-        "size_audio":            { "label":"Size Audio",            "type":"numeric","smooth":true,  "min":0,"max":2,       "aspect":"reactivity", "distribute":false },
-        "trail_decay":           { "label":"Trail Length",          "type":"numeric","smooth":true,  "min":0,"max":1,       "aspect":"shape" },
-        "gradient_spin":         { "label":"Gradient Spin",         "type":"numeric","smooth":true,  "min":-1,"max":1,      "flip_sign":true, "aspect":"shape" },
-        "color_shift":           { "label":"Color Jump",            "type":"integer","smooth":false, "min":0,"max":96,      "aspect":"reactivity", "distribute":false,
-                                   "note":"Nudge +1 on a morph to make colors jump A,B,C -> C,A,B" },
-        "impulse_decay":         { "label":"Impulse Decay",         "type":"numeric","smooth":true,  "min":0.01,"max":0.3,  "aspect":"reactivity", "distribute":false },
-        "frequency_range":       { "label":"Audio Band",            "type":"enum",   "smooth":false, "options":["Beat","Bass","Lows (beat+bass)","Mids","High"] },
-        "gradient":              { "label":"Gradient",              "type":"gradient","smooth":true,                        "aspect":"color" },
-        "background_color":      { "label":"BG Color",              "type":"color",  "smooth":true,                        "aspect":"bg_color" },
-        "background_brightness": { "label":"Background Brightness", "type":"numeric","smooth":true,  "min":0,"max":1,      "aspect":"brightness", "aspect_scale":1.0 },
-        "brightness":            { "label":"Effect Brightness",     "type":"numeric","smooth":true,  "min":0,"max":1,      "aspect":"brightness", "aspect_scale":1.0 }
+        "particle_count": {
+          "label": "Particles",
+          "type": "integer",
+          "smooth": false,
+          "min": 1,
+          "max": 16,
+          "aspect": "shape",
+          "note": "Count changes animate: removed particles fly off, new ones fly in"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "radius_scale": {
+          "label": "Field Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.0,
+          "aspect": "shape"
+        },
+        "horizon_scale": {
+          "label": "Tether Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.8,
+          "aspect": "shape"
+        },
+        "orbit_radius": {
+          "label": "Orbit Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.02,
+          "max": 0.8,
+          "aspect": "shape"
+        },
+        "blob_size": {
+          "label": "Particle Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape"
+        },
+        "spin": {
+          "label": "Ring Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "base_speed": {
+          "label": "Orbit Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "reverse": {
+          "label": "Reverse Spin",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "jiggle": {
+          "label": "Jiggle",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity"
+        },
+        "tether_scatter": {
+          "label": "Tether Scatter",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "0 = perfectly equidistant tethers, 1 = fully random ring placement"
+        },
+        "enter_time": {
+          "label": "Enter Time",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 5,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Seconds a new or adopted particle glides into its orbit (fly-ins + blackhole->orbits handoff)"
+        },
+        "reactivity_scale": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "note": "Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio"
+        },
+        "speed_jump": {
+          "label": "Speed Jump Max",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "speed_jog": {
+          "label": "Speed Jump Jog",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "brightness_audio": {
+          "label": "Brightness Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "size_audio": {
+          "label": "Size Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape"
+        },
+        "gradient_spin": {
+          "label": "Gradient Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "color_shift": {
+          "label": "Color Jump",
+          "type": "integer",
+          "smooth": false,
+          "min": 0,
+          "max": 96,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Nudge +1 on a morph to make colors jump A,B,C -> C,A,B"
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        }
       },
       "defaults": {
-        "particle_count": 6, "x_offset": 0.5, "y_offset": 0.5,
-        "radius_scale": 1.8, "horizon_scale": 0.19, "orbit_radius": 0.53,
-        "blob_size": 1.0, "spin": 0.37, "base_speed": 0.3, "reverse": false,
-        "jiggle": 0.15, "tether_scatter": 0.0, "enter_time": 2.0, "reactivity_scale": 1.0, "speed_jump": 1.0,
-        "speed_jog": 1.0, "brightness_audio": 0.5, "size_audio": 0.5,
-        "trail_decay": 0.15, "gradient_spin": 0.0,
-        "color_shift": 1, "impulse_decay": 0.06,
+        "particle_count": 6,
+        "x_offset": 0.5,
+        "y_offset": 0.5,
+        "radius_scale": 1.8,
+        "horizon_scale": 0.19,
+        "orbit_radius": 0.53,
+        "blob_size": 1.0,
+        "spin": 0.37,
+        "base_speed": 0.3,
+        "reverse": false,
+        "jiggle": 0.15,
+        "tether_scatter": 0.0,
+        "enter_time": 2.0,
+        "reactivity_scale": 1.0,
+        "speed_jump": 1.0,
+        "speed_jog": 1.0,
+        "brightness_audio": 0.5,
+        "size_audio": 0.5,
+        "trail_decay": 0.15,
+        "gradient_spin": 0.0,
+        "color_shift": 1,
+        "impulse_decay": 0.06,
         "frequency_range": "Lows (beat+bass)",
         "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
-        "background_color": "#000000", "background_brightness": 1.0, "brightness": 1.0
+        "background_color": "#000000",
+        "background_brightness": 1.0,
+        "brightness": 1.0
       }
     },
     "gifplayer": {
       "params": {
-        "image_location": { "label":"Dance GIF", "type":"string",  "smooth":false, "options_source":"gif_assets", "resets_effect":true },
-        "gif_fps":        { "label":"GIF FPS",   "type":"integer", "smooth":true,  "min":1,"max":60, "aspect":"reactivity" },
-        "bounce":         { "label":"Ping Pong", "type":"toggle",  "smooth":false, "aspect":"shape" }
+        "image_location": {
+          "label": "Dance GIF",
+          "type": "string",
+          "smooth": false,
+          "options_source": "gif_assets",
+          "resets_effect": true
+        },
+        "gif_fps": {
+          "label": "GIF FPS",
+          "type": "integer",
+          "smooth": true,
+          "min": 1,
+          "max": 60,
+          "aspect": "reactivity"
+        },
+        "bounce": {
+          "label": "Ping Pong",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        }
       },
       "defaults": {
         "image_location": "spotfx/dancer/dancer_basic.gif",
-        "gif_fps":        10
+        "gif_fps": 10
+      }
+    },
+    "blackhole1d": {
+      "params": {
+        "swirl": {
+          "label": "Swirl",
+          "type": "numeric",
+          "smooth": true,
+          "min": -6,
+          "max": 6,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "reverse": {
+          "label": "Reverse Flow",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "radius_scale": {
+          "label": "Field Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.0,
+          "aspect": "shape",
+          "note": "Sample-ring radius: where along the fall blobs peak"
+        },
+        "blob_size": {
+          "label": "Blob Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape"
+        },
+        "gradient_spin": {
+          "label": "Gradient Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape",
+          "note": "Rotates the whole pattern around the strip"
+        },
+        "base_speed": {
+          "label": "Infall Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.8
+        },
+        "accel": {
+          "label": "Accel",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 5.0,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "spawn_rate": {
+          "label": "Spawn Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 60,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0
+        },
+        "beat_burst": {
+          "label": "Beat Burst",
+          "type": "integer",
+          "smooth": true,
+          "min": 0,
+          "max": 12,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6
+        },
+        "spawn_audio": {
+          "label": "Audio Spawn",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "speed_audio": {
+          "label": "Audio Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "max_blobs": {
+          "label": "Max Blobs",
+          "type": "integer",
+          "smooth": true,
+          "min": 20,
+          "max": 1024,
+          "aspect": "reactivity",
+          "aspect_scale": 0.4
+        },
+        "edge_speed": {
+          "label": "Edge Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 1.0,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "color_mode": {
+          "label": "Color Mode",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "wheel",
+            "band",
+            "random"
+          ]
+        },
+        "approach_width": {
+          "label": "Approach Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 0.5,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Radial width of the approach/pass/trail brightness envelope"
+        }
+      },
+      "defaults": {
+        "swirl": 3.1,
+        "reverse": true,
+        "radius_scale": 1.0,
+        "blob_size": 0.5,
+        "trail_decay": 0.56,
+        "base_speed": 1.0,
+        "spawn_rate": 0.1,
+        "beat_burst": 2,
+        "spawn_audio": 1.0,
+        "speed_audio": 2.3,
+        "impulse_decay": 0.06,
+        "max_blobs": 50,
+        "edge_speed": 1.0,
+        "accel": 5.0,
+        "gradient_spin": 0.1,
+        "x_offset": 0.5,
+        "frequency_range": "Lows (beat+bass)",
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "background_color": "#000000",
+        "background_brightness": 1.0,
+        "brightness": 1.0,
+        "color_mode": "wheel",
+        "approach_width": 0.16
+      }
+    },
+    "orbits1d": {
+      "params": {
+        "particle_count": {
+          "label": "Particles",
+          "type": "integer",
+          "smooth": false,
+          "min": 1,
+          "max": 16,
+          "aspect": "shape",
+          "note": "Count changes animate: removed particles fade out, new ones explode in"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape",
+          "note": "Rotates the whole tether ring around the strip"
+        },
+        "orbit_radius": {
+          "label": "Orbit Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.02,
+          "max": 0.8,
+          "aspect": "shape",
+          "note": "Oscillation reach as a fraction of particle spacing"
+        },
+        "blob_size": {
+          "label": "Particle Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape"
+        },
+        "spin": {
+          "label": "Ring Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "base_speed": {
+          "label": "Orbit Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "reverse": {
+          "label": "Reverse Spin",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape"
+        },
+        "jiggle": {
+          "label": "Jiggle",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity"
+        },
+        "tether_scatter": {
+          "label": "Tether Scatter",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "0 = perfectly equidistant tethers, 1 = fully random ring placement"
+        },
+        "reactivity_scale": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "note": "Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio"
+        },
+        "speed_jump": {
+          "label": "Speed Jump Max",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "speed_jog": {
+          "label": "Jog Reverse Chance",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Chance per spike/beat that the speed jump runs backward (jiggle correlates the rolls)"
+        },
+        "brightness_audio": {
+          "label": "Brightness Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "size_audio": {
+          "label": "Size Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape"
+        },
+        "gradient_spin": {
+          "label": "Gradient Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "aspect": "shape"
+        },
+        "color_shift": {
+          "label": "Color Jump",
+          "type": "integer",
+          "smooth": false,
+          "min": 0,
+          "max": 96,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Nudge +1 on a morph to make colors jump A,B,C -> C,A,B"
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "overlap_blend": {
+          "label": "Overlap Blend",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Overlapping blobs: 0 = no brightness gain (hue midpoint), 1 = fully additive"
+        },
+        "bounce_chance": {
+          "label": "Bounce Chance",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Chance per spike/beat that a particle bounces and travels backward along the strip"
+        },
+        "implode_fade": {
+          "label": "Implode Fade",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 3.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Seconds an add-implosion takes: fragments converge while the particle fades in"
+        },
+        "implode_reach": {
+          "label": "Implode Reach",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 1.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Fraction of the strip away the implosion fragments start"
+        }
+      },
+      "defaults": {
+        "particle_count": 6,
+        "x_offset": 0.5,
+        "orbit_radius": 0.25,
+        "blob_size": 1.5,
+        "spin": 0.15,
+        "base_speed": 0.5,
+        "reverse": false,
+        "jiggle": 0.2,
+        "tether_scatter": 0.0,
+        "reactivity_scale": 1.0,
+        "speed_jump": 1.0,
+        "speed_jog": 0.3,
+        "brightness_audio": 0.5,
+        "size_audio": 0.5,
+        "trail_decay": 0.4,
+        "gradient_spin": 0.0,
+        "color_shift": 1,
+        "impulse_decay": 0.06,
+        "frequency_range": "Lows (beat+bass)",
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "background_color": "#000000",
+        "background_brightness": 1.0,
+        "brightness": 1.0,
+        "overlap_blend": 1.0,
+        "bounce_chance": 0.2,
+        "implode_fade": 0.5,
+        "implode_reach": 0.4
+      }
+    },
+    "fireworks": {
+      "params": {
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "radius_scale": {
+          "label": "Field Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2,
+          "aspect": "shape"
+        },
+        "blob_size": {
+          "label": "Blob Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape"
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape",
+          "note": "Forward: comet-trail length. Reverse: how faint and gradual the imploding burst STARTS (its end is always a fast wink-out)"
+        },
+        "spawn_rate": {
+          "label": "Spawn Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 60,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "note": "Fireworks launched per second; 0 = beat bursts only"
+        },
+        "beat_burst": {
+          "label": "Beat Burst",
+          "type": "integer",
+          "smooth": true,
+          "min": 0,
+          "max": 12,
+          "aspect": "reactivity",
+          "note": "Extra fireworks launched on each beat"
+        },
+        "spawn_audio": {
+          "label": "Audio Spawn",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "note": "How much the chosen band boosts the launch rate"
+        },
+        "burst_size": {
+          "label": "Burst Size",
+          "type": "integer",
+          "smooth": false,
+          "min": 3,
+          "max": 30,
+          "aspect": "shape",
+          "note": "Particles per firework; the shared Edge / particle count shape sub-field lands here on fireworks"
+        },
+        "burst_speed": {
+          "label": "Burst Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 3,
+          "aspect": "reactivity",
+          "note": "Base explosion speed in radii per second"
+        },
+        "burst_life": {
+          "label": "Burst Life",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.3,
+          "max": 3,
+          "aspect": "reactivity",
+          "note": "Seconds a particle lives after the explosion"
+        },
+        "speed_audio": {
+          "label": "Audio Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "note": "How much the music boosts the explosion speed"
+        },
+        "brightness_audio": {
+          "label": "Audio Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "note": "How much the music pumps firework brightness"
+        },
+        "max_blobs": {
+          "label": "Max Particles",
+          "type": "integer",
+          "smooth": true,
+          "min": 20,
+          "max": 1024,
+          "aspect": "reactivity"
+        },
+        "drag": {
+          "label": "Drag",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "How hard particles decelerate after the burst"
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color",
+          "note": "Each firework picks ONE random color from this gradient for all its particles"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "BG Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness"
+        },
+        "brightness": {
+          "label": "Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness"
+        },
+        "reverse": {
+          "label": "Reverse",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "note": "Implode: particles are born dim at their flight distance and brighten as they converge onto the burst point (same Reverse morph sub-field as Blackhole)"
+        },
+        "burst_audio": {
+          "label": "Audio Burst Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "note": "How much volume grows each firework's particle count; 0 pins it at Burst Size"
+        }
+      },
+      "defaults": {
+        "x_offset": 0.5,
+        "y_offset": 0.5,
+        "radius_scale": 1.0,
+        "blob_size": 2.0,
+        "trail_decay": 0.27,
+        "spawn_rate": 0.0,
+        "beat_burst": 4,
+        "spawn_audio": 2.0,
+        "burst_size": 8,
+        "burst_speed": 1.8,
+        "burst_life": 1.9,
+        "speed_audio": 3.2,
+        "brightness_audio": 2.0,
+        "max_blobs": 100,
+        "drag": 0.69,
+        "impulse_decay": 0.06,
+        "frequency_range": "Lows (beat+bass)",
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "background_color": "#000000",
+        "background_brightness": 1.0,
+        "brightness": 1.0,
+        "reverse": false,
+        "burst_audio": 1.0,
+        "background_mode": "overwrite"
+      }
+    },
+    "fireworks1d": {
+      "params": {
+        "blob_size": {
+          "label": "Blob Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape"
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape",
+          "note": "Forward: comet-trail length. Reverse: how faint and gradual the imploding burst STARTS (its end is always a fast wink-out)"
+        },
+        "spawn_rate": {
+          "label": "Spawn Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 60,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "note": "Fireworks (particle pairs) launched per second; 0 = beat bursts only"
+        },
+        "beat_burst": {
+          "label": "Beat Burst",
+          "type": "integer",
+          "smooth": true,
+          "min": 0,
+          "max": 12,
+          "aspect": "reactivity",
+          "note": "Extra fireworks launched on each beat"
+        },
+        "spawn_audio": {
+          "label": "Audio Spawn",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "note": "How much the chosen band boosts the launch rate"
+        },
+        "burst_speed": {
+          "label": "Burst Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 1.5,
+          "aspect": "reactivity",
+          "note": "Base separation speed as a fraction of the strip per second"
+        },
+        "burst_life": {
+          "label": "Burst Life",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.3,
+          "max": 3,
+          "aspect": "reactivity",
+          "note": "Seconds a particle lives after the launch"
+        },
+        "speed_audio": {
+          "label": "Audio Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "note": "How much the music boosts the separation speed"
+        },
+        "brightness_audio": {
+          "label": "Audio Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "note": "How much the music pumps firework brightness"
+        },
+        "max_blobs": {
+          "label": "Max Particles",
+          "type": "integer",
+          "smooth": true,
+          "min": 4,
+          "max": 96,
+          "aspect": "reactivity"
+        },
+        "drag": {
+          "label": "Drag",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "How hard particles decelerate after the launch"
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color",
+          "note": "Each firework picks ONE random color from this gradient for both its particles"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "BG Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness"
+        },
+        "brightness": {
+          "label": "Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness"
+        },
+        "reverse": {
+          "label": "Reverse",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "note": "Implode: the pair races toward each other, brightening into the meeting point"
+        }
+      },
+      "defaults": {
+        "blob_size": 1.7,
+        "trail_decay": 0.24,
+        "spawn_rate": 0.0,
+        "beat_burst": 2,
+        "spawn_audio": 0.0,
+        "burst_speed": 0.5,
+        "burst_life": 1.2,
+        "speed_audio": 2.5,
+        "brightness_audio": 2.0,
+        "max_blobs": 6,
+        "drag": 0.5,
+        "impulse_decay": 0.06,
+        "frequency_range": "Lows (beat+bass)",
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "background_color": "#000000",
+        "background_brightness": 1.0,
+        "brightness": 1.0,
+        "reverse": false,
+        "background_mode": "additive"
       }
     }
   }

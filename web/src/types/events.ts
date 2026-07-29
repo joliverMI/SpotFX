@@ -172,8 +172,14 @@ export interface MorphStepAction extends ActionBase {
   targets: MorphTarget[];
 }
 
+/** SetColorAction.ref_id sentinels — resolved to a real Color Group at fire
+ *  time: the active Scene Group's designated group / the last group fired. */
+export const SCENE_GROUP_COLOR_REF = '__scene_group__';
+export const CURRENT_COLOR_GROUP_REF = '__current__';
+
 export interface SetColorAction extends ActionBase {
   type: 'set_color';
+  /** ColorSetCard id, or SCENE_GROUP_COLOR_REF / CURRENT_COLOR_GROUP_REF */
   ref_id: string;
   pick_mode: 'default' | 'cycle' | 'weighted';
   advance: Bindable<number>;
@@ -192,6 +198,16 @@ export interface MorphColorAction extends ActionBase {
   intensity_scale: number;        // 0 = ignore beat intensity
   intensity_source: IntensitySource;
   preserve_melt_bg: boolean;      // true = keep melt BG; power BG always rotates
+}
+
+/** Step the ACTIVE Scene Group ±advance members and fire the result.
+ *  No group reference — acts on the last-fired / forced group; no-op when
+ *  none is active or Force Scene pins a single scene. advance 0 = re-fire
+ *  the current member (its Rest lane). */
+export interface SceneMorphAction extends ActionBase {
+  type: 'scene_morph';
+  advance: number;
+  direction: 'forward' | 'backward';
 }
 
 export interface DeviceSettingTarget {
@@ -245,6 +261,10 @@ export interface SequenceChild {
   labels: string[];
   delay_ms: number;    // ms mode: slept before this child (honored on child 0)
   delay_beats: number; // beats mode: extra beats skipped (ignored on child 0)
+  /** ms mode only: also fire after this many scene-family fires (scene picks,
+   *  Update/Reset Scene, flares, Scene Morph) — whichever of delay_ms /
+   *  delay_updates comes first; delay_ms 0 waits on updates alone. */
+  delay_updates: number | null;
   pre_ramp: boolean;   // beats mode only
   scope: MorphScope | null; // null = inherit group Target
   actions: Action[];   // fire concurrently
@@ -276,6 +296,23 @@ export interface ParallelGroupAction extends ActionBase {
   children: ParallelChild[];
 }
 
+export interface IntensityLane {
+  id: string;
+  name: string;
+  labels: string[];
+  threshold: number; // lower bound on the 0-1 intensity scale; lanes[0] = default (ignored)
+  scope: MorphScope | null; // per-lane Target
+  actions: Action[];
+}
+
+export interface IntensityChooserAction extends ActionBase {
+  type: 'intensity_chooser';
+  id: string;
+  source: 'trigger_intensity';
+  scope: MorphScope | null; // default Target for lanes
+  lanes: IntensityLane[];
+}
+
 export type Action =
   | EventRefAction
   | LedFxSceneAction
@@ -286,10 +323,12 @@ export type Action =
   | MorphStepAction
   | SetColorAction
   | MorphColorAction
+  | SceneMorphAction
   | DeviceSettingsAction
   | RandomGroupAction
   | SequenceGroupAction
-  | ParallelGroupAction;
+  | ParallelGroupAction
+  | IntensityChooserAction;
 
 export type ActionType = Action['type'];
 
@@ -338,7 +377,14 @@ export type EventType =
   | 'single' | 'sequence' | 'beat_sequence' | 'morph_set'
   | 'scene_update' | 'update_scene' | 'reset_scene'
   | 'shape_flare' | 'color_flare' | 'combo_flare'
+  | 'scene_group'
   | 'device_settings' | 'composite';
+
+/** One member of a scene_group event (weight matters in weighted mode). */
+export interface SceneGroupMember {
+  event_id: string;
+  weight: number;
+}
 
 export interface MusicEvent {
   id: string;
@@ -368,10 +414,21 @@ export interface MusicEvent {
   /** event_type "composite": the whole body as one Action tree (null = empty). */
   root: Action | null;
 
+  /** event_type "scene_group": member Scene Updates + selection behavior
+   *  (cursor lives in the engine and persists across songs). */
+  scene_group_members: SceneGroupMember[];
+  scene_group_mode: 'cycle' | 'weighted';
+  scene_group_cycle_behavior: 'wrap' | 'bounce';
+  scene_group_exclude_current: boolean;
+  /** Color Group (ColorSetCard kind="group") this scene group designates —
+   *  Set Color actions set to "Scene Group" pull from it. '' = none. */
+  scene_group_color_ref_id: string;
+
   event_offset_ms: number;
 }
 
-/** Scene-family event types that render as morph lanes. */
+/** Scene-family event types that render as morph lanes. scene_group is
+ *  deliberately NOT here — it renders a members editor, not lanes. */
 export const SCENE_EVENT_TYPES: EventType[] = [
   'scene_update', 'update_scene', 'reset_scene',
   'shape_flare', 'color_flare', 'combo_flare',
@@ -388,6 +445,7 @@ export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   shape_flare: 'Shape Flare',
   color_flare: 'Color Flare',
   combo_flare: 'Combo Flare',
+  scene_group: 'Scene Group',
   device_settings: 'Device Settings',
   composite: 'Composite',
 };

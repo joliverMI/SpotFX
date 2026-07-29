@@ -10,7 +10,7 @@ import HelpLink from '../help/HelpLink';
 import { useLongPress } from '../lib/useLongPress';
 import { useLiveStore } from '../live/liveStore';
 
-export default function AmbientButton() {
+export default function AmbientButton({ compact = false }: { compact?: boolean }) {
   const ambient = useLiveStore((s) => s.ambient);
   const held = useLiveStore((s) => s.ambientGroups);
   const [open, setOpen] = useState(false);
@@ -34,12 +34,12 @@ export default function AmbientButton() {
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'inline-block' }}>
       <button
-        className={`toggle-btn ${ambient ? 'active' : ''}`}
-        title="Hold the Hue groups at a static full-brightness color (Hue REST); long-press to pick groups"
+        className={compact ? `icon-btn ${ambient ? 'active' : ''}` : `toggle-btn ${ambient ? 'active' : ''}`}
+        title={`Ambient Mode${partial ? ` (${held.length}/${groups.length} groups)` : ''} — hold the Hue groups at a static full-brightness color; long-press to pick groups`}
         {...longPress(() => setOpen(true))}
         onClick={() => void apiPost(`/control/ambient-mode?enabled=${!ambient}`)}
       >
-        Ambient{partial ? ` ${held.length}/${groups.length}` : ''}
+        {compact ? '💡' : `Ambient${partial ? ` ${held.length}/${groups.length}` : ''}`}
       </button>
       {open && (
         <div

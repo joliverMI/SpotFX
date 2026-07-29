@@ -45,6 +45,7 @@ _probe_client: Optional[httpx.AsyncClient] = None
 
 # ── Command bus ────────────────────────────────────────────────────────────────
 _effect_bus: dict[tuple, dict] = {}   # (virtual_id, effect_type) → merged config patch
+_effect_bus_switch: set[tuple] = set()  # keys queued with switch intent
 _config_bus: dict = {}                # global config patch (global_brightness, etc.)
 _bus_task: Optional[asyncio.Task] = None
 BUS_WINDOW_MS = 8  # coalesce window; must be << ramp step_ms (25 ms)
@@ -555,12 +556,21 @@ def _round_int_params(effect_type: str, config: dict) -> dict:
     return out
 
 
-async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: dict) -> bool:
+async def _set_virtual_effect_direct(
+    virtual_id: str, effect_type: str, config: dict, patch_only: bool = False
+) -> bool:
     if _capture_in_progress():
         return True   # capture-in-progress mute (acts like success so callers don't error)
+    body = {"type": effect_type, "config": _round_int_params(effect_type, config)}
+    if patch_only:
+        # Tag non-switch writes: LedFX drops a patch-tagged PUT whose type no
+        # longer matches the active effect (a stale-addressed patch racing an
+        # effect switch must not switch the effect BACK). Older LedFX ignores
+        # the key.
+        body["patch"] = True
     resp = await _request(
         "PUT", f"/api/virtuals/{virtual_id}/effects",
-        json={"type": effect_type, "config": _round_int_params(effect_type, config)},
+        json=body,
         label=f"effect:{virtual_id}",
     )
     return resp is not None
@@ -626,12 +636,16 @@ async def _flush_bus() -> None:
     global _bus_task
     await asyncio.sleep(BUS_WINDOW_MS / 1000)
     effect_snap = dict(_effect_bus)
+    switch_snap = set(_effect_bus_switch)
     config_snap = dict(_config_bus)
     _effect_bus.clear()
+    _effect_bus_switch.clear()
     _config_bus.clear()
     _bus_task = None
     coros = [
-        _set_virtual_effect_direct(vid, etype, patch)
+        _set_virtual_effect_direct(
+            vid, etype, patch, patch_only=(vid, etype) not in switch_snap
+        )
         for (vid, etype), patch in effect_snap.items()
     ]
     if config_snap:
@@ -648,14 +662,21 @@ def _schedule_bus_flush() -> None:
 
 # ── Public write API (goes through bus) ───────────────────────────────────────
 
-async def set_virtual_effect(virtual_id: str, effect_type: str, config: dict) -> None:
+async def set_virtual_effect(
+    virtual_id: str, effect_type: str, config: dict, *, is_switch: bool = False
+) -> None:
     """
-    Queue a virtual effect patch into the coalesce bus.
-    Patches for the same (virtual_id, effect_type) within the bus window are merged;
-    later keys overwrite earlier ones.
+    Queue a virtual effect write into the coalesce bus.
+    Writes for the same (virtual_id, effect_type) within the bus window are
+    merged; later keys overwrite earlier ones. `is_switch=True` marks an
+    intentional effect switch — everything else flushes as a patch-tagged PUT
+    that LedFX drops when its type no longer matches the active effect (so a
+    stale-addressed patch can never switch the effect back).
     """
     key = (virtual_id, effect_type)
     _effect_bus[key] = {**_effect_bus.get(key, {}), **config}
+    if is_switch:
+        _effect_bus_switch.add(key)
     _schedule_bus_flush()
 
 

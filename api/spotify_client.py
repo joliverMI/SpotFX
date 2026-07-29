@@ -120,6 +120,12 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
     try:
         sp = get_spotify()
         data = sp.current_playback()
+        # Stamp the progress clock NOW — before the genre lookup below, which
+        # can add hundreds of ms (sp.artist + Last.fm fallback) on the first
+        # poll of a new artist. Stamping after it made interpolated progress
+        # run behind by that amount until the next poll — a visible playhead
+        # (and trigger-timing) stutter right at song start.
+        t_fetched = time.monotonic()
     except Exception as exc:
         logger.error("Spotify poll failed: %s", exc)
         return None
@@ -150,7 +156,7 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
         duration_ms=item["duration_ms"],
         progress_ms=data["progress_ms"] or 0,
         is_playing=data["is_playing"],
-        fetched_at=time.monotonic(),
+        fetched_at=t_fetched,
         device_name=device_name,
         genres=genres,
         context_uri=context_uri,

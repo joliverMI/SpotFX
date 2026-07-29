@@ -133,6 +133,16 @@ class WebSocketManager:
                     payload["last_scene_color"] = last_scene.color
             except Exception:
                 pass
+        # Scene Group currently driving the scene (Scene Morph's target).
+        if state.active_scene_group_id:
+            try:
+                from services.profile_manager import get_event
+                grp = get_event(state.active_scene_group_id)
+                if grp is not None and grp.event_type == "scene_group":
+                    payload["active_scene_group_id"] = grp.id
+                    payload["active_scene_group_name"] = grp.name
+            except Exception:
+                pass
         # Last Color Set the engine applied.
         if state.last_color_set_id:
             try:
@@ -169,7 +179,7 @@ class WebSocketManager:
     async def broadcast_trigger_fired(
         self, trigger_id: str, event_name: str, color: str,
         scheduled_ms: int = 0, fired_at_ms: int = 0, effective_offset_ms: int = 0,
-        event_type: str = "", summary: str = "",
+        event_type: str = "", summary: str = "", intensity: float | None = None,
     ) -> None:
         """Notify the UI that a trigger just fired (for the flash indicator).
 
@@ -191,6 +201,8 @@ class WebSocketManager:
             payload["event_type"] = event_type
         if summary:
             payload["summary"] = summary
+        if intensity is not None:
+            payload["intensity"] = intensity
         await self.broadcast(payload)
 
 

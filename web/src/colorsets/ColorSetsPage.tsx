@@ -233,12 +233,12 @@ export default function ColorSetsPage() {
           <div className="card-title">{card.kind === 'group' ? 'Edit Group' : 'Edit Color Set'}</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
             <button className="primary" onClick={() => void save()}>Save</button>
-            <button className="danger" style={{ fontSize: 12 }} onClick={() => void del()}>Delete</button>
             <button style={{ fontSize: 12 }} onClick={duplicate}>Duplicate</button>
-            <button style={{ fontSize: 12, marginLeft: 'auto' }} title="Apply now to LedFX"
+            <button style={{ fontSize: 12 }} title="Apply now to LedFX"
               onClick={() => void preview()}>
               ▶ Preview
             </button>
+            <button className="danger" style={{ fontSize: 12 }} onClick={() => void del()}>Delete</button>
           </div>
 
           <div className="field">

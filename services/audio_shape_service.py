@@ -113,6 +113,15 @@ class AudioShapeService:
             if progress_ms < self._RESTART_THRESHOLD_MS:
                 logger.info("Re-learn block lifted for %s (progress %.0f ms)", new_uri, progress_ms)
                 self._blocked_uris.discard(new_uri)
+        # A different song playing also lifts pending blocks: the block only
+        # exists to stop the cancelled song's CURRENT play from re-capturing.
+        # (Restart detection alone is fragile — late URI-change detection plus
+        # the boundary-wait can push the first progress check past the
+        # threshold, leaving the block stuck forever.)
+        elif new_uri and self._blocked_uris and new_uri not in self._blocked_uris:
+            logger.info("Re-learn block lifted for %s (different song playing)",
+                        ", ".join(sorted(self._blocked_uris)))
+            self._blocked_uris.clear()
 
         # Run auto-offset detection for complete but unverified shapes (independent of capture state)
         try:

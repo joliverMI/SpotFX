@@ -27,8 +27,8 @@ export default function RootSlot({ event }: { event: MusicEvent }) {
       ) : (
         <>
           <p className="empty-note">
-            Empty event — pick a root: a Sequence, Parallel, or Random group
-            (or a single action).
+            Empty event — pick a root: a Sequence, Parallel, Random, or
+            Intensity Chooser group (or a single action).
           </p>
           <button className="primary" style={{ fontSize: 12 }} onClick={() => setAdding(true)}>
             + Set root

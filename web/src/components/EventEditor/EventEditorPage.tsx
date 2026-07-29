@@ -22,15 +22,18 @@ import { newAction, newEvent } from '../../lib/defaults';
 import { uuid } from '../../lib/uid';
 import EventMetaPanel from './EventMetaPanel';
 import RootSlot from './RootSlot';
+import PreviewButton from '../PreviewButton';
+import { previewEvent } from '../../lib/preview';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import EditableSequenceTrack from '../tracks/EditableSequenceTrack';
 import EditableParallelLanes from '../tracks/EditableParallelLanes';
 import BeatSequenceTrack from '../tracks/BeatSequenceTrack';
 import ParallelLanes from '../tracks/ParallelLanes';
 import DeviceTargetsTrack from '../tracks/DeviceTargetsTrack';
+import SceneGroupTrack from '../tracks/SceneGroupTrack';
 
 /** Event types with full track editing; the rest render read-only tracks. */
-const EDITABLE_TYPES = ['single', 'sequence', 'morph_set', 'scene_update', 'composite'];
+const EDITABLE_TYPES = ['single', 'sequence', 'morph_set', 'scene_update', 'composite', 'scene_group'];
 
 const collision: CollisionDetection = (args) => {
   const within = pointerWithin(args);
@@ -180,12 +183,11 @@ export default function EventEditorPage() {
         <button onClick={onFire} disabled={isNew || dirty} title={dirty ? 'Save first — fire uses the stored event' : 'Test-fire'}>
           {fired ? '✔ Fired' : '▶ Fire'}
         </button>
-        {!isNew && !draft.fixed && (
-          <>
-            <button onClick={doDuplicate}>⧉ Duplicate</button>
-            <button className="danger" onClick={doDelete}>Delete</button>
-          </>
-        )}
+        {!isNew && !draft.fixed && <button onClick={doDuplicate}>⧉ Duplicate</button>}
+        <PreviewButton label="Preview" style={{ padding: '6px 12px', fontSize: 14 }}
+          title="Fire the current draft as-is, without saving"
+          run={() => previewEvent(serialize())} />
+        {!isNew && !draft.fixed && <button className="danger" onClick={doDelete}>Delete</button>}
       </div>
 
       {save.isError && <p style={{ color: 'var(--danger)', fontSize: 13 }}>Save failed: {String(save.error)}</p>}
@@ -208,6 +210,7 @@ export default function EventEditorPage() {
               <EditableParallelLanes event={draft} />
             )}
             {draft.event_type === 'composite' && <RootSlot event={draft} />}
+            {draft.event_type === 'scene_group' && <SceneGroupTrack event={draft} />}
             <DragOverlay>
               {dragged?.kind === 'action' && (
                 <div className="action-card" style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>

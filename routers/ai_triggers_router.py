@@ -36,6 +36,7 @@ from services.suggestion_store import (
 )
 from models.song_profile import MusicTrigger
 from models.ai_suggestion_set import AISuggestionSet, SavedSuggestion
+from models.state import state
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,8 @@ async def get_training_profiles():
 @router.post("/training-profiles")
 async def upsert_training_profile(profile: TrainingProfile):
     save_training_profile(profile)
+    from main import engine
+    engine._genre_scale_uri = None  # genre intensity-scale fallback may have changed
     return {"status": "saved", "id": profile.id}
 
 
@@ -325,17 +328,22 @@ async def analyze_triggers(uri: str, category: str = "all"):
     category: "all", "scenes", or "flares"
     Returns list of {timestamp_ms, event_id, confidence, role}.
     """
-    from services.librosa_service import get_analysis_by_uri
+    from services.librosa_service import get_analysis_by_uri, get_analysis_by_title_artist
     from services.embedded_trigger_service import suggest_triggers
     from services.audio_shape_service import _find_profile_for_genres
     from services.training_profile_manager import TrainingProfile
     from services.profile_manager import load_profile_by_uri
 
+    profile = load_profile_by_uri(uri)
     la = get_analysis_by_uri(uri)
+    if (not la or not la.beats) and profile:
+        # The capture may be keyed to a different release URI of the same
+        # song — rescue through the profile's title/artist like the profile
+        # layer does.
+        la = get_analysis_by_title_artist(profile.artist, profile.title)
     if not la or not la.beats:
         raise HTTPException(400, "No librosa analysis available for this song")
 
-    profile = load_profile_by_uri(uri)
     genres = profile.artist_genre if profile and profile.artist_genre else []
     if not genres and state.current_track and state.current_track.spotify_uri == uri:
         genres = state.current_track.genres or []
@@ -402,6 +410,7 @@ async def analyze_triggers(uri: str, category: str = "all"):
             "timestamp_ms": t["timestamp_ms"],
             "event_id": t["event_id"],
             "confidence": t.get("confidence", 0.5),
+            "intensity": t.get("intensity"),
             "role": role,
         })
 
