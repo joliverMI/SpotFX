@@ -2884,7 +2884,8 @@ class TriggerEngine:
         try:
             from services.intensity_scale_service import compute_auto_scale
             scale = await asyncio.get_running_loop().run_in_executor(
-                None, compute_auto_scale, profile.spotify_uri)
+                None, compute_auto_scale, profile.spotify_uri,
+                list(profile.artist_genre or []) or None)
         except Exception:
             logger.warning("auto intensity-scale failed", exc_info=True)
             return
@@ -2917,19 +2918,12 @@ class TriggerEngine:
             return max(0.0, min(2.0, float(prof.intensity_scale)))
         uri = prof.spotify_uri
         if self._genre_scale_uri != uri:
-            scale = 1.0
-            try:
-                from services.audio_shape_service import _find_profile_for_genres
-                genres = state.current_track.genres if state.current_track else []
-                if not genres:
-                    genres = prof.artist_genre or []
-                tp = _find_profile_for_genres(genres)
-                if tp:
-                    scale = float(tp.get("default_intensity_scale", 1.0) or 1.0)
-            except Exception:
-                logger.debug("genre intensity-scale lookup failed", exc_info=True)
+            from services.intensity_scale_service import resolve_genre_scale
+            genres = state.current_track.genres if state.current_track else []
+            if not genres:
+                genres = prof.artist_genre or []
             self._genre_scale_uri = uri
-            self._genre_scale_cache = max(0.0, min(2.0, scale))
+            self._genre_scale_cache = resolve_genre_scale(genres)
         return self._genre_scale_cache
 
     def _scaled_intensity(self, raw: float | None) -> float | None:

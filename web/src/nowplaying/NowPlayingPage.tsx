@@ -270,7 +270,7 @@ export default function NowPlayingPage() {
   const canvasTriggers: MusicTrigger[] = useMemo(
     () => triggers.map((t) => ({
       id: t.id, timestamp_ms: t.timestamp_ms, event_id: t.event_id,
-      labels: t.labels, enabled: true, intensity: 0.5,
+      labels: t.labels, enabled: true, intensity: t.intensity,
     })),
     [triggers],
   );

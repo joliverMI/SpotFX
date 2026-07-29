@@ -35,8 +35,14 @@ export default function EventListPage() {
   const { data: events, isLoading, error } = useEvents();
   const fire = useFireEvent();
   const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  // Search + chip survive navigating into an event and back (per-tab).
+  const [search, setSearchState] = useState(() => sessionStorage.getItem('spotfx.events.search') ?? '');
+  const [filter, setFilterState] = useState<Filter>(() => {
+    const f = sessionStorage.getItem('spotfx.events.filter') as Filter | null;
+    return f && FILTERS.some((x) => x.key === f) ? f : 'all';
+  });
+  const setSearch = (v: string) => { setSearchState(v); sessionStorage.setItem('spotfx.events.search', v); };
+  const setFilter = (v: Filter) => { setFilterState(v); sessionStorage.setItem('spotfx.events.filter', v); };
   const [firedId, setFiredId] = useState<string | null>(null);
 
   const visible = useMemo(() => {

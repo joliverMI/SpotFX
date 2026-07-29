@@ -143,3 +143,17 @@ builder's trigger dialog. NOTE: scene groups are SpotFX events (not parsed
 from LedFX scene names — that idea is obsolete; no parser exists or is needed).
 
 Smoke: `scripts/smoke_intensity_features.py` (24 checks).
+
+### 2026-07-29 (later) — intensity scale v2 + backfill + UI feedback
+Auto formula retuned on Javi's references (Dopamine 120%, Let It Be 50%,
+Soy Peor ~100%): v1's mean-RMS/tempo/onset-density metrics were wrong (librosa
+octave-doubles ballads; onset density anti-correlates with energy). v2:
+`genre_to_song_scale(g) = 0.6g + 0.1` (genre slider = relative dial) ×
+bass-rank factor (0.9–1.1 from mean rms_low dB, bass ratio, bass-onset
+density), clamped 30–125% — only the user slider may exceed 125%. Fire-time
+genre fallback + GET endpoint use the same mapping. Backfill applied
+2026-07-29: 1069 profiles stamped (684 auto / 385 genre, 1 user kept),
+backup storage/backups/profiles-preintensityscale-20260729-143626.
+UI: NP shape-graph circles now use real trigger intensity (was hardcoded
+0.5), chooser dots show threshold values, Events search/chip persist across
+editor back-nav (sessionStorage).

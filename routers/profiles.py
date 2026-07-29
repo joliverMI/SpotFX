@@ -65,23 +65,19 @@ async def get_intensity_scale(uri: str):
     profile = load_profile_by_uri(uri)
     if profile is None:
         raise HTTPException(404, "Profile not found")
-    genre_default = 1.0
-    try:
-        from services.audio_shape_service import _find_profile_for_genres
-        genres = list(profile.artist_genre or [])
-        if not genres and state.current_track and state.current_track.spotify_uri == uri:
-            genres = list(state.current_track.genres or [])
-        tp = _find_profile_for_genres(genres)
-        if tp:
-            genre_default = float(tp.get("default_intensity_scale", 1.0) or 1.0)
-    except Exception:
-        pass
+    from services.intensity_scale_service import resolve_genre_scale
+    genres = list(profile.artist_genre or [])
+    if not genres and state.current_track and state.current_track.spotify_uri == uri:
+        genres = list(state.current_track.genres or [])
+    # Song-space value (the genre slider is a relative dial — see
+    # intensity_scale_service.genre_to_song_scale).
+    genre_default = round(resolve_genre_scale(genres), 3)
     effective = (profile.intensity_scale
                  if profile.intensity_scale is not None else genre_default)
     return {
         "intensity_scale": profile.intensity_scale,
         "source": profile.intensity_scale_source,
-        "genre_default": max(0.0, min(2.0, genre_default)),
+        "genre_default": genre_default,
         "effective": max(0.0, min(2.0, effective)),
     }
 

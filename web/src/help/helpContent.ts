@@ -621,8 +621,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'intensity scale slider percent 200 boost quiet loud song profile genre auto normalize library rank',
         body: [
           'The ⚡ Intensity scale slider (Controls card) multiplies EVERY trigger\'s intensity for the current song — 0–200%, applied before energy gates, Intensity Chooser lanes and trigger_intensity bindings (the result stays clamped to 0–1). It saves to the song\'s profile immediately and takes effect on the next fire, no track change needed. The ⚡ readout in the top bar shows the scaled value.',
-          'The chip shows where the value comes from: "user" = this slider (never overwritten automatically), "auto" = a starting value computed when the song first plays — the song is ranked against the analyzed library on absolute loudness, tempo and onset density, landing most songs in 60–140% — "genre" / "default" = the matching Triggerless profile\'s genre scaler, or 100%. The × button clears a user value back to the automatic one.',
-          'The genre starting value is set per Triggerless training profile ("Intensity scale (genre default)" in its editor) and applies to songs that have no own value yet.',
+          'The chip shows where the value comes from: "user" = this slider (never overwritten automatically); "auto" = the computed starting value — the genre base nudged ±10% by how the song\'s bass (level, bass ratio, bass-onset density) ranks against the analyzed library; "genre" = the genre base alone (songs without captured audio). Automatic values never exceed 125% — only this slider can go higher. The × button clears a user value back to the automatic one.',
+          'The genre slider on a Triggerless training profile is a RELATIVE energy dial, not the final percentage: it maps to a song starting value as 0.6 × slider + 0.1 (so 185% → ~121%, 70% → ~52%, capped 30–125%). scripts/backfill_intensity_scale.py re-stamps every non-user song from the current sliders (backs up first; run it after retuning genres).',
         ],
       },
       {

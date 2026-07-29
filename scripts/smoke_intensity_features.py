@@ -127,7 +127,8 @@ async def main() -> None:
     try:
         eng._profile = P()
         eng._genre_scale_uri = None
-        check("genre fallback 50%", eng._scaled_intensity(0.8) == 0.4)
+        # genre slider 0.5 → song scale 0.6*0.5+0.1 = 0.4 → 0.8*0.4 = 0.32
+        check("genre fallback (compressed)", abs(eng._scaled_intensity(0.8) - 0.32) < 1e-9)
         P.intensity_scale = 1.5
         check("song value beats genre", eng._scaled_intensity(0.8) == 1.0)  # 1.2 clamped
         check("clamps to 1.0", eng._scaled_intensity(0.9) == 1.0)

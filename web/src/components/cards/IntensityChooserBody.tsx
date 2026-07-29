@@ -81,7 +81,7 @@ export default function IntensityChooserBody({ uid, action }: { uid: string; act
       </p>
 
       {/* Threshold strip with draggable dots */}
-      <div ref={stripRef} style={{ position: 'relative', height: 34, margin: '4px 6px 14px' }}>
+      <div ref={stripRef} style={{ position: 'relative', height: 34, margin: '4px 6px 26px' }}>
         <div style={{
           position: 'absolute', inset: '12px 0', borderRadius: 6,
           background: 'linear-gradient(90deg, color-mix(in srgb, var(--accent) 12%, transparent), color-mix(in srgb, var(--accent) 55%, transparent))',
@@ -100,18 +100,28 @@ export default function IntensityChooserBody({ uid, action }: { uid: string; act
             }}>{j === 0 ? 'default' : j}</span>
           );
         })}
-        {/* draggable dots for lanes 1..N */}
+        {/* draggable dots for lanes 1..N, each with its threshold value below */}
         {action.lanes.slice(1).map((lane, k) => (
-          <div key={lane.id} onPointerDown={dragDot(lane.id)}
-            title={`Lane ${k + 1} starts at ${lane.threshold.toFixed(2)} — drag to move`}
-            style={{
-              position: 'absolute', top: 3, left: `${lane.threshold * 100}%`,
-              transform: 'translateX(-50%)', width: 20, height: 20, borderRadius: '50%',
-              background: 'var(--accent)', color: 'var(--bg, #fff)', cursor: 'ew-resize',
-              fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', userSelect: 'none', touchAction: 'none',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.4)', zIndex: 2,
-            }}>{k + 1}</div>
+          <div key={lane.id} style={{
+            position: 'absolute', top: 3, left: `${lane.threshold * 100}%`,
+            transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', zIndex: 2,
+          }}>
+            <div onPointerDown={dragDot(lane.id)}
+              title={`Lane ${k + 1} starts at ${lane.threshold.toFixed(2)} — drag to move`}
+              style={{
+                width: 20, height: 20, borderRadius: '50%',
+                background: 'var(--accent)', color: 'var(--bg, #fff)', cursor: 'ew-resize',
+                fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', userSelect: 'none', touchAction: 'none',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+              }}>{k + 1}</div>
+            <span style={{
+              fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+              background: 'var(--bg)', padding: '0 3px', borderRadius: 4, marginTop: 14,
+              pointerEvents: 'none', userSelect: 'none',
+            }}>{lane.threshold.toFixed(2)}</span>
+          </div>
         ))}
       </div>
 

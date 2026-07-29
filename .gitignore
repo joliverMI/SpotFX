@@ -51,3 +51,4 @@ build/
 
 # TypeScript incremental build
 web/tsconfig.tsbuildinfo
+storage/cache/

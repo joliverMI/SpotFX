@@ -1,26 +1,30 @@
 """
-SpotFX — auto-computed per-song intensity scale (0-2 = 0-200%).
+SpotFX — auto-computed per-song intensity scale (v2, genre-anchored).
 
-Ranks a song against the analyzed library on a composite of three
-cross-song-comparable signals and maps the rank to a starting
-SongProfile.intensity_scale (stored with source="auto"; a user's Now Playing
-slider always wins over it):
+The genre slider on a Triggerless training profile is a RELATIVE energy dial;
+it maps to a song-space starting scale via
 
-  - mean RMS in dB from the captured audio-shape NPZ. This is the raw loopback
-    capture, so it IS comparable across songs — everything in the librosa JSON
-    (beat rms, section energy_rms) is per-song normalized and useless here.
-  - tempo_bpm from the librosa analysis
-  - onset density: full-spectrum onsets per second of capture
+    genre_to_song_scale(g) = clamp(0.6 * g + 0.1, 0.30, 1.25)
 
-Each metric is percentile-ranked over the library; the mean rank r in [0,1]
-maps to scale = 0.6 + 0.8*r — the library median lands at 100%, the spread is
-60-140% — then clamps to 0-2. Songs missing the NPZ or librosa file yield None
-(caller falls through to the genre scaler, then 100%).
+calibrated 2026-07-29 against Javi's reference songs (Dopamine ≈ 120%,
+Let It Be ≈ 50%, Soy Peor ≈ 100% with sliders EDM 1.85 / Rock 0.7 /
+Trap 1.35). A per-song BASS factor then nudges within the genre:
 
-Per-song features are cached in storage/cache/intensity_scale_features.json
-keyed by file stem + source mtimes, so the first library sweep (~700 NPZ
-loads, seconds) is one-time and later calls are incremental. All functions are
-synchronous; the engine calls them via run_in_executor.
+    auto = clamp(genre_base * (0.9 + 0.2 * r_bass), 0.30, 1.25)
+
+where r_bass is the song's mean percentile rank over the analyzed library on
+three bass-forward signals from the raw loopback capture + librosa v3:
+mean rms_low in dB, bass ratio (mean rms_low / mean rms_total), and bass-onset
+density. v1 used mean-RMS/tempo/onset-density — all three proved wrong on the
+reference songs (librosa octave-doubles ballad tempos, onset density is
+ANTI-correlated with perceived energy, and loudness-war masters compress mean
+RMS into a ~1 dB band).
+
+No auto/genre value ever exceeds 125% — only the user's manual slider can.
+
+Per-song features are cached in storage/cache/intensity_scale_features_v2.json
+keyed by stem + source mtimes; the first library sweep is one-time. All
+functions are synchronous; the engine calls them via run_in_executor.
 """
 from __future__ import annotations
 
@@ -37,35 +41,56 @@ from config import AUDIO_SHAPES_DIR
 
 logger = logging.getLogger(__name__)
 
-CACHE_FILE = Path("storage/cache/intensity_scale_features.json")
+CACHE_FILE = Path("storage/cache/intensity_scale_features_v2.json")
+
+SCALE_MIN = 0.30
+SCALE_MAX = 1.25   # hard cap for anything not set by hand
+
+_METRICS = ("bass_db", "bass_ratio", "bass_onset_ps")
 
 _lock = threading.Lock()
-_features: dict[str, dict] | None = None  # stem -> {mtime, rms_db, tempo_bpm, onset_density}
+_features: dict[str, dict] | None = None  # stem -> {mtime, bass_db, ...}
+
+
+def genre_to_song_scale(genre_value: float | None) -> float:
+    """Map a raw genre-slider value to a song-space starting scale."""
+    g = 1.0 if genre_value is None else float(genre_value)
+    return max(SCALE_MIN, min(SCALE_MAX, 0.6 * g + 0.1))
+
+
+def resolve_genre_scale(genres: list[str]) -> float:
+    """Song-space starting scale for a genre list (matching training profile's
+    slider through genre_to_song_scale; no match → the default profile's)."""
+    try:
+        from services.audio_shape_service import _find_profile_for_genres
+        tp = _find_profile_for_genres(genres or [])
+        raw = tp.get("default_intensity_scale", 1.0) if tp else 1.0
+        return genre_to_song_scale(raw if raw is not None else 1.0)
+    except Exception:
+        logger.debug("genre scale lookup failed", exc_info=True)
+        return genre_to_song_scale(1.0)
 
 
 def _compute_stem_features(npz_path: Path) -> Optional[dict]:
-    """Feature dict for one song, or None when either source file is unusable."""
+    """Bass feature dict for one song, or None when a source file is unusable."""
     lib_path = npz_path.parent / (npz_path.stem + ".librosa.json")
     try:
         with np.load(npz_path) as z:
-            rms = np.asarray(z["rms_total"], dtype=np.float64)
+            rms_total = np.asarray(z["rms_total"], dtype=np.float64)
+            rms_low = np.asarray(z["rms_low"], dtype=np.float64)
             ts = np.asarray(z["timestamps_ms"], dtype=np.float64)
-        if rms.size == 0 or ts.size < 2:
+        if rms_total.size == 0 or ts.size < 2:
             return None
         duration_s = float(ts[-1] - ts[0]) / 1000.0
         if duration_s <= 0:
             return None
-        mean_rms = float(np.mean(rms))
-        rms_db = 20.0 * math.log10(max(mean_rms, 1e-9))
         raw = json.loads(lib_path.read_text(encoding="utf-8"))
-        tempo = float(raw.get("tempo_bpm") or 0.0)
-        onsets = raw.get("onsets") or []
-        if tempo <= 0:
-            return None
+        mean_total = float(np.mean(rms_total))
+        mean_low = float(np.mean(rms_low))
         return {
-            "rms_db": rms_db,
-            "tempo_bpm": tempo,
-            "onset_density": len(onsets) / duration_s,
+            "bass_db": 20.0 * math.log10(max(mean_low, 1e-9)),
+            "bass_ratio": mean_low / max(mean_total, 1e-9),
+            "bass_onset_ps": len(raw.get("bass_onsets") or []) / duration_s,
         }
     except FileNotFoundError:
         return None
@@ -136,27 +161,36 @@ def _percentile_rank(values: list[float], v: float) -> float:
     return (below + 0.5 * ties) / len(values)
 
 
-def compute_auto_scale(spotify_uri: str) -> Optional[float]:
-    """Auto intensity scale for a song, or None when it can't be ranked
-    (missing capture/librosa data, or a too-small library)."""
+def bass_rank(spotify_uri: str) -> Optional[float]:
+    """The song's mean bass percentile rank (0-1) over the analyzed library,
+    or None when it has no capture/librosa data or the library is too small."""
     from services.audio_analyzer import load_audio_shape_meta
 
     meta = load_audio_shape_meta(spotify_uri)
-    if meta is None:
+    if meta is None or not getattr(meta, "npz_file", None):
         return None
     feats_by_stem = _load_features()
-    stem = Path(meta.npz_file).stem if getattr(meta, "npz_file", None) else None
-    song = feats_by_stem.get(stem or "")
-    if not song or "rms_db" not in song:
+    song = feats_by_stem.get(Path(meta.npz_file).stem)
+    if not song or _METRICS[0] not in song:
         return None
-    usable = [f for f in feats_by_stem.values() if "rms_db" in f]
-    if len(usable) < 20:  # not enough library to rank against
+    usable = [f for f in feats_by_stem.values() if _METRICS[0] in f]
+    if len(usable) < 20:
         return None
-    ranks = [
-        _percentile_rank([f["rms_db"] for f in usable], song["rms_db"]),
-        _percentile_rank([f["tempo_bpm"] for f in usable], song["tempo_bpm"]),
-        _percentile_rank([f["onset_density"] for f in usable], song["onset_density"]),
-    ]
-    r = sum(ranks) / len(ranks)
-    scale = 0.6 + 0.8 * r
-    return round(max(0.0, min(2.0, scale)), 3)
+    ranks = [_percentile_rank([f[m] for f in usable], song[m]) for m in _METRICS]
+    return sum(ranks) / len(ranks)
+
+
+def compute_auto_scale(spotify_uri: str, genres: list[str] | None = None) -> Optional[float]:
+    """Auto intensity scale: genre base × bass-rank factor (0.9–1.1), clamped
+    to 30–125%. None when the song can't be ranked (caller may fall back to
+    the genre base alone). `genres` defaults to the capture meta's genre list."""
+    r = bass_rank(spotify_uri)
+    if r is None:
+        return None
+    if genres is None:
+        from services.audio_analyzer import load_audio_shape_meta
+        meta = load_audio_shape_meta(spotify_uri)
+        genres = list(getattr(meta, "genres", None) or []) if meta else []
+    base = resolve_genre_scale(genres)
+    scale = base * (0.9 + 0.2 * r)
+    return round(max(SCALE_MIN, min(SCALE_MAX, scale)), 3)
