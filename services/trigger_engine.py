@@ -126,6 +126,7 @@ class _PlanEntry:
     preselected_steps: Optional[list] = None      # for "sequence" events — per-step action pre-selection
     preselected_morph_picks: Optional[list] = None  # for "morph_set" events — per-lane pre-picks (list[MorphPick])
     morph_anchor_offset_ms: int = 0               # earliest lane offset; fire_at_ms is start_at + this (lanes sleep offset - anchor)
+    transition_lead_ms: int = 0                   # phased-transition lead: fire_at_ms was moved this many ms EARLY so the payoff phase (bloom/erupt/morph) lands on the planned time
     # For "composite" events — plan-time resolution of every random_group in the
     # tree (group.id → RandomOption.id) so previews match fires and scene-override
     # can pre-stage. Fire-time falls back to fresh picks when None.
@@ -137,6 +138,11 @@ class _PlanEntry:
     # Update fired in between), so a stale preview never fires stale lanes.
     preselected_scene_picks: Optional[list] = None
     scene_picks_sid: Optional[str] = None
+    # For scene_group fires (direct or Force-Scene-redirected): the planner's
+    # peeked member pick (_peek_scene_group_fire) — lets the lead computation
+    # and Now Playing preview see the member's lane actions. Honored at fire
+    # time only while the observed cursor/active-group state is unchanged.
+    scene_group_pick: Optional[dict] = None
     # Event the scene picks were rolled against (the Force Scene target when
     # active, else the entry's own event / last Scene Update for flares).
     scene_picks_event_id: Optional[str] = None
@@ -1340,14 +1346,31 @@ class TriggerEngine:
                 # re-rolls only if the active Scene Update changes between
                 # plan and fire (the scene_picks_sid guard).
                 scene_sid = self._last_scene_update_id
+                group_pick: Optional[dict] = None
                 if event.event_type in ("scene_update", "scene_group"):
-                    # Scene Groups get no plan-time picks (member resolves at
-                    # fire time), but picks_src still records the redirect
-                    # target so the staleness guard compares like-for-like.
+                    # picks_src records the redirect target so the staleness
+                    # guard compares like-for-like.
                     picks_src = (self._forced_scene_event() or event).id
                 else:
                     picks_src = scene_sid  # flares roll against the last scene
                 scene_picks = self._pick_scene_lanes(event, lbls)
+                if event.event_type in ("scene_update", "scene_group") and not scene_picks:
+                    # Scene-group fire (direct or Force-Scene-redirected):
+                    # peek the member the fire would pick — cursors move only
+                    # at fire time — and roll its First/Rest lane now, so the
+                    # phased-transition lead sees the member's effect switches
+                    # and the preview can name them. Stale-state guards at
+                    # fire time re-roll fresh instead of honoring a bad peek.
+                    target = self._forced_scene_event() or event
+                    if target.event_type == "scene_group":
+                        group_pick = self._peek_scene_group_fire(target)
+                        if group_pick is not None:
+                            member = get_event(group_pick["member_id"])
+                            if member is not None:
+                                lane_index = 1 if scene_sid == member.id else 0
+                                picked = self._pick_lane_action(member, lane_index, lbls)
+                                if picked is not None:
+                                    scene_picks = [(lane_index, picked)]
                 scene_resolved: dict = {}
                 for _i, _a in scene_picks:
                     self._resolve_random_picks_deep(
@@ -1372,7 +1395,13 @@ class TriggerEngine:
                     scene_picks_sid=scene_sid,
                     scene_picks_event_id=picks_src,
                     resolved_picks=scene_resolved or None,
+                    scene_group_pick=group_pick,
                 ))
+                if group_pick is not None:
+                    _m = get_event(group_pick["member_id"])
+                    if _m is not None:
+                        head = f"{event.name} → {_m.name}"
+                        return f"{head}: {' · '.join(parts)}" if parts else head
                 return f"{event.name}: {' · '.join(parts)}" if parts else event.name
 
             if event.event_type == "device_settings":
@@ -1389,8 +1418,191 @@ class TriggerEngine:
             return event.name
 
         description = walk(root_event, trigger.timestamp_ms, list(labels))
+        # Phased-transition lead: entries whose anchor-time morph steps switch
+        # an effect pair with multi-phase choreography (radial⇄particles,
+        # pacman→particles) fire EARLY so the payoff phase lands on the
+        # planned time instead of the switch instant.
+        for e in entries:
+            lead = self._entry_transition_lead_ms(e, time_scale)
+            if lead > 0:
+                e.transition_lead_ms = lead
+                e.fire_at_ms -= lead
         entries.sort(key=lambda e: e.fire_at_ms)
         return entries, description
+
+    # ── Phased-transition lead (services/transition_phases) ──────────────────
+
+    def _anchor_morph_steps(self, entry: _PlanEntry, time_scale: float = 1.0) -> list:
+        """The MorphStepActions that will fire AT the entry's anchor time.
+        Only offset-0 / min-offset paths count — a switch buried in a delayed
+        sequence child or a staggered lane must not drag the whole entry (and
+        every sibling that fires at the anchor) earlier. Unresolved random
+        branches are skipped (conservative: no lead rather than a wrong one)."""
+        from models.music_event import MorphStepAction
+        out: list = []
+
+        def _walk(action, resolved: dict | None, depth: int = 0,
+                  follow_refs: bool = True) -> None:
+            if action is None or depth > 6:
+                return
+            if isinstance(action, MorphStepAction):
+                out.append(action)
+                return
+            t = getattr(action, "type", "")
+            if t == "random_group":
+                opt_id = (resolved or {}).get(action.id)
+                opt = next((o for o in action.options if o.id == opt_id), None)
+                if opt is None and len(action.options) == 1:
+                    opt = action.options[0]
+                if opt is not None:
+                    for a in opt.actions:
+                        _walk(a, resolved, depth + 1, follow_refs)
+                return
+            if t == "intensity_chooser":
+                lane_id = (resolved or {}).get(action.id)
+                lane = next((l for l in action.lanes if l.id == lane_id), None)
+                if lane is None and len(action.lanes) == 1:
+                    lane = action.lanes[0]
+                if lane is not None:
+                    for a in lane.actions:
+                        _walk(a, resolved, depth + 1, follow_refs)
+                return
+            if t == "parallel_group":
+                offs = [int(c.offset_ms or 0) for c in action.children]
+                m = min(offs, default=0)
+                for c in action.children:
+                    if int(c.offset_ms or 0) == m:
+                        for a in c.actions:
+                            _walk(a, resolved, depth + 1, follow_refs)
+                return
+            if t == "sequence_group":
+                if action.timing == "beats":
+                    if action.children:
+                        for a in action.children[0].actions:
+                            _walk(a, resolved, depth + 1, follow_refs)
+                else:
+                    for c in action.children:
+                        if int(c.delay_ms or 0) > 0:
+                            break
+                        for a in c.actions:
+                            _walk(a, resolved, depth + 1, follow_refs)
+                return
+            if t == "event_ref" and action.event_id and follow_refs:
+                # Only contexts that execute refs INLINE follow them (scene
+                # lane picks — scene setters are event_refs to composites —
+                # singles and morph picks). Composite trees and sequence
+                # steps plan their refs as separate entries with their own
+                # lead, so following here would double-count.
+                sub = get_event(action.event_id)
+                if sub is not None and int(sub.event_offset_ms or 0) == 0:
+                    if sub.event_type == "single":
+                        for a in (sub.actions or []):
+                            _walk(a, resolved, depth + 1, follow_refs)
+                    elif sub.event_type == "composite" and sub.root is not None:
+                        _walk(sub.root, resolved, depth + 1, follow_refs)
+                return
+            # leaf actions of other types can't switch effects.
+
+        ev = entry.event
+        if ev.event_type == "single":
+            _walk(entry.preselected_action, None)
+        elif ev.event_type == "morph_set":
+            for p in (entry.preselected_morph_picks or []):
+                if round(p.offset_ms * time_scale) == entry.morph_anchor_offset_ms:
+                    _walk(p.action, None)
+        elif ev.event_type == "composite":
+            _walk(ev.root, entry.resolved_picks, follow_refs=False)
+        elif ev.event_type in SCENE_EVENT_TYPES:
+            for _i, a in (entry.preselected_scene_picks or []):
+                _walk(a, entry.resolved_picks)
+        elif ev.event_type == "sequence":
+            for step in ev.sequence_steps:
+                if int(step.delay_ms or 0) > 0:
+                    break
+                if step.step_type == "action":
+                    for a in ([step.action] if step.action else []) + list(step.actions or []):
+                        _walk(a, None, follow_refs=False)
+        elif ev.event_type == "beat_sequence":
+            steps = ev.beat_sequence_steps
+            if steps and steps[0].step_type == "action":
+                for a in ([steps[0].action] if steps[0].action else []) + list(steps[0].actions or []):
+                    _walk(a, None, follow_refs=False)
+        return out
+
+    def _entry_transition_lead_ms(self, entry: _PlanEntry, time_scale: float = 1.0) -> int:
+        """Ms EARLY this entry must fire so that any phased effect transition
+        it starts (registry: services/transition_phases) has its payoff phase
+        land on the planned time. 0 when no registered switch fires at the
+        entry's anchor.
+
+        The crossfade the choreography rides depends on the dispatch path:
+        scene-override fires set every touched virtual's transition_time to
+        the step's max ramp_ms, while bus fires ride each virtual's existing
+        transition_time config. Multiple matching switches take the max lead
+        (the dominant transition lands on the beat; shorter ones bloom a hair
+        early)."""
+        from services import transition_phases
+        from services.morph_compiler import resolve_scope
+
+        steps = self._anchor_morph_steps(entry, time_scale)
+        if not steps:
+            return 0
+
+        # Candidate (from, to, vid) switches first — cheap; only then decide
+        # the crossfade source.
+        candidates: list[tuple[str, str, str]] = []
+        for action in steps:
+            for target in action.targets:
+                if target.aspect != "effect" or target.mode != "absolute":
+                    continue
+                new_type = getattr(target.absolute_value, "effect_type", None) \
+                    if target.absolute_value is not None else None
+                if not isinstance(new_type, str) or not new_type:
+                    continue
+                for vid in resolve_scope(target.scope):
+                    cur = ((state.ledfx_virtual_cache.get(vid) or {})
+                           .get("effect") or {}).get("type")
+                    if transition_phases.find(cur, new_type) is not None:
+                        candidates.append((cur, new_type, vid))
+        if not candidates:
+            return 0
+
+        scene_override = False
+        if entry.is_root and getattr(entry.event, "scene_override", False):
+            picks = entry.preselected_morph_picks
+            if entry.event.event_type == "composite" and picks is None:
+                picks = self._composite_scene_picks(entry.event, entry.resolved_picks)
+            scene_override = self._event_eligible_for_scene_override(
+                entry.event, picks=picks)
+        max_ramp = 0
+        if scene_override:
+            # Mirror morph_scene._collect_writes: action ramp (None→0) and
+            # per-target overrides feed the scene's transition_time. Unresolved
+            # ValueBinding ramps are skipped (they resolve at fire time).
+            for action in steps:
+                if isinstance(action.ramp_ms, (int, float)):
+                    max_ramp = max(max_ramp, int(action.ramp_ms))
+                for t in action.targets:
+                    if isinstance(t.ramp_ms, (int, float)):
+                        max_ramp = max(max_ramp, int(t.ramp_ms))
+
+        lead = 0
+        for cur, new_type, vid in candidates:
+            if scene_override:
+                t_ms = max_ramp
+            else:
+                vcfg = (state.ledfx_virtual_cache.get(vid) or {}).get("config") or {}
+                mode = vcfg.get("transition_mode", "Add")
+                t_ms = 0 if mode in (None, "None") else \
+                    int(float(vcfg.get("transition_time") or 0.0) * 1000)
+            ms = transition_phases.lead_ms(cur, new_type, t_ms)
+            if ms > lead:
+                lead = ms
+                logger.debug(
+                    "transition lead: %s→%s on %s rides a %dms crossfade → fire %dms early",
+                    cur, new_type, vid, t_ms, ms,
+                )
+        return lead
 
     # ── Override Blend ───────────────────────────────────────────────────────
     # A trigger with override_blend=True stretches (or compresses) its event's
@@ -3717,28 +3929,31 @@ class TriggerEngine:
         self._color_cursor[group.id] = idx
         return members[idx].color_set_id
 
-    def _select_scene_group_member(
+    def _peek_scene_group_member(
         self,
         group: MusicEvent,
         advance: int = 1,
         direction: str = "forward",
         pick_mode: str = "default",
-    ) -> Optional[MusicEvent]:
-        """Advance a scene_group's cursor and return the picked member
-        scene_update EVENT (None when no valid member exists). Deliberate
-        near-duplicate of _select_color_set_member's cycle/bounce/weighted
-        math (kept separate: that method's Palette Sync anchoring makes a
-        shared abstraction riskier than the duplication) — semantics of
-        advance/direction/bounce/exclude_current match it exactly. Members
-        whose event is missing or no longer a scene_update are skipped by
-        stepping once more (bounded by n). The cursor is committed only for
-        the finally-returned index; cursors persist across track changes."""
+        cur_override: Optional[int] = None,
+    ) -> Optional[tuple[int, MusicEvent, int, Optional[int]]]:
+        """Compute which member a cursor advance WOULD pick, without touching
+        any cursor state. Returns (idx, member_event, bounce_dir, cur_read) or
+        None. Weighted mode rolls its randomness HERE — either lock the result
+        in (commit at fire time) or throw the whole peek away; peeking never
+        moves cursors. `cur_override` substitutes for the stored cursor (the
+        random-start seed path). Deliberate near-duplicate of
+        _select_color_set_member's cycle/bounce/weighted math (kept separate:
+        that method's Palette Sync anchoring makes a shared abstraction riskier
+        than the duplication) — semantics of advance/direction/bounce/
+        exclude_current match it exactly. Members whose event is missing or no
+        longer a scene_update are skipped by stepping once more (bounded by n)."""
         members = group.scene_group_members or []
         if not members:
             return None
         n = len(members)
         mode = group.scene_group_mode if pick_mode == "default" else pick_mode
-        cur = self._scene_cursor.get(group.id)
+        cur = cur_override if cur_override is not None else self._scene_cursor.get(group.id)
         prev = self._scene_cursor_prev.get(group.id)
         adv = max(0, int(advance))
         back = direction == "backward"
@@ -3805,11 +4020,67 @@ class TriggerEngine:
                 idx = (idx + step_dir) % n
         if member_ev is None:
             return None
+        return idx, member_ev, d, cur
 
-        self._scene_cursor_prev[group.id] = cur
-        self._scene_cursor[group.id] = idx
-        self._scene_cursor_dir[group.id] = d
+    def _commit_scene_group_cursor(
+        self, group_id: str, idx: int, d: int, prev_cur: Optional[int],
+    ) -> None:
+        """Persist a peeked pick: exactly the cursor writes the old
+        _select_scene_group_member commit tail performed."""
+        self._scene_cursor_prev[group_id] = prev_cur
+        self._scene_cursor[group_id] = idx
+        self._scene_cursor_dir[group_id] = d
+
+    def _select_scene_group_member(
+        self,
+        group: MusicEvent,
+        advance: int = 1,
+        direction: str = "forward",
+        pick_mode: str = "default",
+    ) -> Optional[MusicEvent]:
+        """Advance a scene_group's cursor and return the picked member
+        scene_update EVENT (None when no valid member exists). Peek + commit;
+        cursors persist across track changes."""
+        peeked = self._peek_scene_group_member(group, advance, direction, pick_mode)
+        if peeked is None:
+            return None
+        idx, member_ev, d, cur = peeked
+        self._commit_scene_group_cursor(group.id, idx, d, cur)
         return member_ev
+
+    def _peek_scene_group_fire(self, group: MusicEvent) -> Optional[dict]:
+        """Predict exactly which member _execute_scene_group would fire RIGHT
+        NOW — including the fresh-group random-start seed and weighted-mode
+        roll, both rolled here and locked into the returned pick — without
+        committing cursors or active-group state. The planner stores the pick
+        on the plan entry (so the phased-transition lead can be computed and
+        the Now Playing preview can name the member); at fire time the pick is
+        honored iff `observed_*` still match live state, else the fire re-rolls
+        fresh. Returns None when the group has no valid member."""
+        n = len(group.scene_group_members or [])
+        if n == 0:
+            return None
+        fresh = self._active_scene_group_id != group.id
+        cur_override: Optional[int] = None
+        advance = 1
+        if (fresh and group.scene_group_random_start
+                and group.scene_group_mode == "cycle" and n > 1):
+            cur_override = random.randrange(n)
+            advance = 0  # fire the seeded member itself, then cycle onward
+        peeked = self._peek_scene_group_member(
+            group, advance=advance, cur_override=cur_override)
+        if peeked is None:
+            return None
+        idx, member_ev, d, cur = peeked
+        return {
+            "group_id": group.id,
+            "idx": idx,
+            "dir": d,
+            "prev_cur": cur,                    # commit tail's prev value
+            "member_id": member_ev.id,
+            "observed_cur": self._scene_cursor.get(group.id),
+            "observed_active": self._active_scene_group_id,
+        }
 
     def _member_palette_hues(self, members) -> list[Optional[float]]:
         """Representative hue per group member (None when underivable) —
@@ -4485,15 +4756,54 @@ class TriggerEngine:
 
     async def _execute_scene_group(
         self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
+        preselected: Optional[dict] = None,
+        resolved_picks: Optional[dict] = None,
+        pre_pick: Optional[dict] = None,
     ) -> str:
         """Advance the group's cursor one step and fire the picked member
         Scene Update (normal First/Rest — a newly rotated-to member runs
         First, a repeat runs Rest). Marks the group as the active one that
         Scene Morph steps. `_last_scene_update_id` ends up pointing at the
-        MEMBER, so flares / Update / Reset Scene keep working unchanged."""
+        MEMBER, so flares / Update / Reset Scene keep working unchanged.
+        With `scene_group_random_start`, a fresh call (this group wasn't the
+        active one) seeds the cycle cursor at a random member and fires it;
+        later fires cycle onward from there.
+
+        `pre_pick` is the planner's _peek_scene_group_fire result: honored —
+        cursor committed to the peeked index, member fired with the plan-time
+        lane `preselected`/`resolved_picks` — only while the state it observed
+        (active group, this group's cursor, the member event) is unchanged, so
+        anything that moved the rotation between plan and fire (another group
+        fire, a Scene Morph, an edit) safely re-rolls fresh instead."""
+        member: Optional[MusicEvent] = None
+        if (pre_pick
+                and pre_pick.get("group_id") == event.id
+                and pre_pick.get("observed_active") == self._active_scene_group_id
+                and pre_pick.get("observed_cur") == self._scene_cursor.get(event.id)):
+            m = get_event(pre_pick.get("member_id") or "")
+            if m is not None and m.event_type == "scene_update":
+                member = m
+        fresh = self._active_scene_group_id != event.id
         self._active_scene_group_id = event.id
         state.active_scene_group_id = event.id
-        member = self._select_scene_group_member(event, advance=1, direction="forward")
+        if member is not None:
+            self._commit_scene_group_cursor(
+                event.id, pre_pick["idx"], pre_pick["dir"], pre_pick["prev_cur"])
+            tag = await self._execute_scene_update(
+                member, labels, skip_event_ids, preselected, resolved_picks)
+            return f"{event.name} → {member.name} · {tag}"
+        if pre_pick:
+            logger.info(
+                "scene_group '%s': plan-time member pick stale — re-rolling fresh",
+                event.name)
+        advance = 1
+        n = len(event.scene_group_members or [])
+        if (fresh and event.scene_group_random_start
+                and event.scene_group_mode == "cycle" and n > 1):
+            self._scene_cursor[event.id] = random.randrange(n)
+            self._scene_cursor_prev.pop(event.id, None)
+            advance = 0  # fire the seeded member itself, then cycle onward
+        member = self._select_scene_group_member(event, advance=advance, direction="forward")
         if member is None:
             logger.info("scene_group '%s': no valid members — no-op", event.name)
             return "(empty scene group)"
@@ -4574,6 +4884,7 @@ class TriggerEngine:
         preselected: Optional[dict] = None,
         resolved_picks: Optional[dict] = None,
         picks_event_id: Optional[str] = None,
+        scene_group_pick: Optional[dict] = None,
     ) -> str:
         """Dispatch any scene event type. Returns a short summary string for the
         Now-Playing broadcast. `preselected` (lane_index → Action) carries the
@@ -4582,6 +4893,10 @@ class TriggerEngine:
         from them fall back to fresh picks. `picks_event_id` records which event
         the picks were rolled against — a mismatch with the event that actually
         runs (e.g. Force Scene toggled between plan and fire) drops them.
+        `scene_group_pick` is the planner's peeked group member (see
+        _peek_scene_group_fire) — _execute_scene_group validates it against its
+        own group id and live cursor state, so passing it to a redirected fire
+        is safe.
 
         Every call bumps the scene-fire counter feeding sequence "updates"
         waits — including flares that end up no-ops (predictable and simple)."""
@@ -4591,18 +4906,26 @@ class TriggerEngine:
             if forced is not None and forced.id != event.id:
                 # Force Scene wins: redirect like any other scene pick.
                 if forced.event_type == "scene_group":
-                    return await self._execute_scene_group(forced, labels, skip_event_ids)
+                    return await self._execute_scene_group(
+                        forced, labels, skip_event_ids,
+                        preselected, resolved_picks, pre_pick=scene_group_pick)
                 self._active_scene_group_id = None
                 state.active_scene_group_id = ""
                 return await self._execute_scene_update(forced, labels, skip_event_ids)
-            return await self._execute_scene_group(event, labels, skip_event_ids)
+            return await self._execute_scene_group(
+                event, labels, skip_event_ids,
+                preselected, resolved_picks, pre_pick=scene_group_pick)
         if event.event_type == "scene_update":
             forced = self._forced_scene_event()
             if forced is not None and forced.event_type == "scene_group":
                 # Forced group: every redirected scene pick rotates it by one.
-                # Plan-time picks were rolled against a scene_update — always
-                # stale for a group fire, so drop them.
-                return await self._execute_scene_group(forced, labels, skip_event_ids)
+                # Plan-time picks rolled against a scene_update are always
+                # stale for a group fire (dropped by the pre_pick group-id
+                # check); picks rolled against the forced group's peeked
+                # member ride along with scene_group_pick.
+                return await self._execute_scene_group(
+                    forced, labels, skip_event_ids,
+                    preselected, resolved_picks, pre_pick=scene_group_pick)
             target = forced if forced is not None else event
             if picks_event_id is not None and picks_event_id != target.id:
                 preselected, resolved_picks = None, None
@@ -5525,7 +5848,8 @@ class TriggerEngine:
             await self._execute_scene_event(
                 evt, entry.labels, skip_event_ids=skip_ids,
                 preselected=picks, resolved_picks=resolved,
-                picks_event_id=entry.scene_picks_event_id)
+                picks_event_id=entry.scene_picks_event_id,
+                scene_group_pick=entry.scene_group_pick)
 
     async def _execute_beat_sequence(
         self,
@@ -5977,10 +6301,12 @@ class TriggerEngine:
                             _entry.fired = True
                             _is_root = (_entry.event.id == _trigger.event_id)
                             logger.info(
-                                "Plan fire: %s at ~%dms (trigger=%s, %s, plan_offset=%+dms)",
+                                "Plan fire: %s at ~%dms (trigger=%s, %s, plan_offset=%+dms%s)",
                                 _entry.event.name, now_ms, _tid,
                                 "root" if _is_root else "child",
                                 _entry.fire_at_ms - _trigger.timestamp_ms,
+                                (", transition_lead=%dms" % _entry.transition_lead_ms
+                                 if _entry.transition_lead_ms else ""),
                             )
                             # For morph_set: ensure lanes are picked so the broadcast
                             # carries the per-lane outcome summary. Reuse the planner's
