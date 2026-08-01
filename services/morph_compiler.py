@@ -199,6 +199,30 @@ def _resolve_bool_aspect(value, current) -> bool:
     return bool(value)
 
 
+def _sign_control_patch(
+    effect_type: str, pname: str, tri, current_config: dict,
+    true_is_positive: bool = True,
+) -> dict:
+    """Resolve a tri-state against a `sign_control` virtual param (radial's
+    spin_sign): the write goes to the REAL param (`maps_to`, e.g. `spin`) with
+    only its sign changed — LedFX has no bool to receive, so writing the
+    virtual name would be an inert no-op key.
+      tri True  → sign := + (or − when true_is_positive=False, the Reverse
+                  convention: True means reversed)
+      tri False → the opposite sign
+      "toggle"  → negate the current value
+    A current value of 0 stays 0 (sign is meaningless)."""
+    meta = _ep.get_param_meta(effect_type, pname) or {}
+    real = meta.get("maps_to") or pname
+    cur = float(current_config.get(real) or 0.0)
+    if tri == "toggle":
+        new = -cur
+    else:
+        positive = bool(tri) == true_is_positive
+        new = abs(cur) if positive else -abs(cur)
+    return {real: round(new, 4)}
+
+
 def _nudged_numeric(
     effect_type: str,
     param_name: str,
@@ -303,7 +327,11 @@ def _patch_shape(
       star    → `star`     (radial only)
       edges   → `edges` (radial) or `particle_count` (orbits) or `burst_size` (fireworks) — "Edge / Particle Count"
       twist   → `twist`    (radial only)
-      flip    → `flip` (power/melt) or `ring` (equalizer2d) or `spin_sign` (radial)
+      flip    → `flip` (power/melt) or `ring` (equalizer2d) or signed `spin` (radial, via spin_sign)
+      reverse → `reverse` (blackhole/orbits/fireworks/pacman); on radial it reverses the
+                full perceived motion: signed `spin` AND the `twist` sign (apparent
+                rotation = sign(twist) × source scroll — what the handoff carries).
+                True = reversed = negative; an explicit twist in the same step wins.
 
     Booleans (polygon, flip): tri-state True / False / "toggle" regardless of mode —
     "toggle" reads current cached value and flips it; nudge doesn't have a natural
@@ -317,18 +345,51 @@ def _patch_shape(
     shape_params = morph_aspects.params_for_aspect(effect_type, "shape")
     name_set = set(shape_params)
     is_nudge = (mode == "nudge")
+    _SHAPE_SUBFIELD_ALIASES = {
+        "edges": ("particle_count", "burst_size", "ghost_count"),
+        "blob_size": ("entity_size",),
+    }
 
     # Booleans (polygon, flip, reverse) — always absolute-mode tri-state regardless of target.mode
     if val.polygon is not None and "polygon" in name_set:
         out["polygon"] = _resolve_bool_aspect(val.polygon, current_config.get("polygon", False))
     if val.flip is not None:
-        # power / melt use "flip"; equalizer2d uses "ring"; radial uses "spin_sign"
+        # power / melt use "flip"; equalizer2d uses "ring"; radial uses
+        # "spin_sign" — a sign_control virtual param, so the write must land
+        # on the real signed param (spin), not the virtual bool name.
         for candidate in ("flip", "ring", "spin_sign"):
             if candidate in name_set:
-                out[candidate] = _resolve_bool_aspect(val.flip, current_config.get(candidate, False))
+                meta = _ep.get_param_meta(effect_type, candidate) or {}
+                if meta.get("sign_control"):
+                    out.update(_sign_control_patch(
+                        effect_type, candidate, val.flip, current_config,
+                        true_is_positive=True))  # On=positive spin (Flip note)
+                else:
+                    out[candidate] = _resolve_bool_aspect(val.flip, current_config.get(candidate, False))
                 break
-    if val.reverse is not None and "reverse" in name_set:  # blackhole flow direction
-        out["reverse"] = _resolve_bool_aspect(val.reverse, current_config.get("reverse", False))
+    if val.reverse is not None:
+        if "reverse" in name_set:  # particle-family flow direction
+            out["reverse"] = _resolve_bool_aspect(val.reverse, current_config.get("reverse", False))
+        elif "spin_sign" in name_set:
+            # radial has no `reverse` — reverse the full perceived motion.
+            # Radial's APPARENT rotation is sign(twist) × source scroll (its
+            # own handoff code carries direction via the twist sign); `spin`
+            # only adds the slower audio-driven pattern rotation. Flip BOTH
+            # signs so Reverse visibly reverses the motion, keeping meaning
+            # across the whole particle family.
+            # True (= reversed) → negative; False → positive; toggle → negate.
+            out.update(_sign_control_patch(
+                effect_type, "spin_sign", val.reverse, current_config,
+                true_is_positive=False))
+            if "twist" in name_set:
+                cur_tw = float(current_config.get("twist") or 0.0)
+                if val.reverse == "toggle":
+                    new_tw = -cur_tw
+                else:
+                    new_tw = -abs(cur_tw) if bool(val.reverse) else abs(cur_tw)
+                # An explicit twist value in the same step wins — the numerics
+                # loop below runs after this and overwrites the key.
+                out["twist"] = round(new_tw, 4)
 
     # Numerics: nudge if mode=nudge AND nudge spec present; else absolute.
     # `scale_offset` params (x_offset / y_offset) live in frontend −1..1 space
@@ -336,11 +397,12 @@ def _patch_shape(
     for key in ("star", "edges", "twist", "x_offset", "y_offset", "swirl",
                 "horizon_scale", "radius_scale", "blob_size"):
         # `edges` doubles as the particle count on effects that have one
-        # (orbits: particle_count, fireworks: burst_size) — the UI presents
-        # them as a single "Edge / Particle Count".
+        # (orbits: particle_count, fireworks: burst_size, pacman:
+        # ghost_count) and `blob_size` covers pacman's entity_size — the UI
+        # presents each as one shared sub-field.
         pname = key
-        if key == "edges" and key not in name_set:
-            for alias in ("particle_count", "burst_size"):
+        if key not in name_set:
+            for alias in _SHAPE_SUBFIELD_ALIASES.get(key, ()):
                 if alias in name_set:
                     pname = alias
                     break

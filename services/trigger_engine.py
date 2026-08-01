@@ -3478,6 +3478,8 @@ class TriggerEngine:
             _HANDOFF_FAMILY = {
                 "orbits", "blackhole", "radial", "fireworks",
                 "orbits1d", "blackhole1d", "fireworks1d",
+                "pacman",  # entities fly off as particles/fireworks
+                "squiggles",
             }
             handoff_pair = (
                 pre_eff.get("type") in _HANDOFF_FAMILY

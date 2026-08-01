@@ -14,7 +14,8 @@
         "gifplayer",
         "blackhole",
         "orbits",
-        "fireworks"
+        "fireworks",
+        "pacman"
       ]
     },
     "Strips": {
@@ -48,7 +49,9 @@
       "blackhole1d",
       "orbits1d",
       "fireworks",
-      "fireworks1d"
+      "fireworks1d",
+      "pacman",
+      "squiggles"
     ],
     "aspect_labels": {
       "shape": "Shape",
@@ -2128,6 +2131,371 @@
         "brightness": 1.0,
         "reverse": false,
         "background_mode": "additive"
+      }
+    },
+    "pacman": {
+      "no_background_color": true,
+      "params": {
+        "gradient": {
+          "label": "Wall Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "wall_brightness": {
+          "label": "Wall Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 1.0,
+          "aspect": "brightness"
+        },
+        "dot_brightness": {
+          "label": "Dot Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "brightness",
+          "aspect_scale": 0.5
+        },
+        "wall_cycle": {
+          "label": "Wall Color Roll",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape"
+        },
+        "wall_audio": {
+          "label": "Wall Roll Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "base_speed": {
+          "label": "Pacman Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 1.0,
+          "max": 12.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.8
+        },
+        "speed_audio": {
+          "label": "Speed Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "beat_jump": {
+          "label": "Beat Jump",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 4.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6
+        },
+        "reverse": {
+          "label": "Reverse",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "note": "Forces power-dot mode: ghosts stay blue, she hunts them"
+        },
+        "fright_time": {
+          "label": "Fright Time",
+          "type": "numeric",
+          "smooth": true,
+          "min": 2.0,
+          "max": 15.0,
+          "aspect": "shape",
+          "distribute": false
+        },
+        "ghost_count": {
+          "label": "Ghosts",
+          "type": "integer",
+          "smooth": true,
+          "min": 1,
+          "max": 4,
+          "aspect": "shape"
+        },
+        "ghost_speed": {
+          "label": "Ghost Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 0.95,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "entity_size": {
+          "label": "Blob Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 1.0,
+          "max": 6.0,
+          "aspect": "shape"
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape"
+        },
+        "smooth_motion": {
+          "label": "Smooth Motion",
+          "type": "toggle",
+          "smooth": false,
+          "note": "Entities glide between positions (beat jumps/recoils ease); game logic unchanged"
+        }
+      },
+      "defaults": {
+        "gradient": "linear-gradient(90deg, #0020ff 0.00%, #00c0ff 45.00%, #a000ff 100.00%)",
+        "wall_brightness": 0.34,
+        "dot_brightness": 0.78,
+        "wall_cycle": 0.41,
+        "wall_audio": 1.3,
+        "base_speed": 2.0,
+        "speed_audio": 3.3,
+        "beat_jump": 1.5,
+        "reverse": false,
+        "fright_time": 6.0,
+        "ghost_count": 4,
+        "ghost_speed": 0.73,
+        "entity_size": 3.0,
+        "frequency_range": "Lows (beat+bass)",
+        "impulse_decay": 0.09,
+        "brightness": 1.0,
+        "trail_decay": 0.35,
+        "smooth_motion": true
+      }
+    },
+    "squiggles": {
+      "params": {
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "spawn_rate": {
+          "label": "Spawn Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 30,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0
+        },
+        "beat_burst": {
+          "label": "Beat Burst",
+          "type": "integer",
+          "smooth": true,
+          "min": 0,
+          "max": 12,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6
+        },
+        "spawn_audio": {
+          "label": "Audio Spawn",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "max_blobs": {
+          "label": "Max Chains",
+          "type": "integer",
+          "smooth": true,
+          "min": 2,
+          "max": 64,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "base_speed": {
+          "label": "Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 2,
+          "max": 60,
+          "aspect": "reactivity",
+          "aspect_scale": 0.8
+        },
+        "speed_audio": {
+          "label": "Audio Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "step_size": {
+          "label": "Step Size",
+          "type": "integer",
+          "smooth": true,
+          "min": 1,
+          "max": 10,
+          "aspect": "shape"
+        },
+        "step_count": {
+          "label": "Step Count",
+          "type": "integer",
+          "smooth": true,
+          "min": 2,
+          "max": 24,
+          "aspect": "shape"
+        },
+        "length_audio": {
+          "label": "Audio Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5
+        },
+        "blob_size": {
+          "label": "Blob Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape",
+          "note": "Chain thickness \u2014 shares the family Blob Size sub-field"
+        },
+        "jiggle": {
+          "label": "Jiggle",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Per-chain step-size and thickness wander"
+        },
+        "horizontal_gap": {
+          "label": "Horizontal Gap",
+          "type": "numeric",
+          "smooth": true,
+          "min": 5,
+          "max": 80,
+          "aspect": "shape",
+          "distribute": false,
+          "note": "Degrees headings must stay away from horizontal"
+        },
+        "brightness_audio": {
+          "label": "Brightness Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "reverse": {
+          "label": "Reverse",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "note": "Every chain turns around and retraces its path; new chains keep entering from the edge"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        }
+      },
+      "defaults": {
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "spawn_rate": 0.0,
+        "beat_burst": 2,
+        "spawn_audio": 0.5,
+        "max_blobs": 14,
+        "base_speed": 38.0,
+        "speed_audio": 2.7,
+        "step_size": 3,
+        "step_count": 4,
+        "length_audio": 1.0,
+        "blob_size": 1.0,
+        "jiggle": 0.24,
+        "horizontal_gap": 25.0,
+        "brightness_audio": 1.0,
+        "reverse": false,
+        "x_offset": 0.5,
+        "y_offset": 0.5,
+        "frequency_range": "Lows (beat+bass)",
+        "impulse_decay": 0.06,
+        "brightness": 1.0
       }
     }
   }
