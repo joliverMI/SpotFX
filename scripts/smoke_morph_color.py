@@ -4,7 +4,8 @@ Offline smoke test for the NEW Morph Color action (hue rotation).
 No LedFX needed — the client calls are stubbed and every write is recorded.
 Verifies:
   1. 180° rotation hits FG gradient, BG color, and accent on power effects.
-  2. preserve_melt_bg=True keeps melt's background_color; power BG still rotates.
+  2. morph_bg=False keeps every background_color (FG/accent still rotate);
+     legacy preserve_melt_bg=True payloads load as morph_bg=False.
   3. direction="backward" rotates the other way (90° back == 270° forward).
   4. intensity_scale modulates the sweep via the beat-intensity factor.
   5. Empty leaf scope adopts the inherited group Target (parent/override).
@@ -108,17 +109,26 @@ async def main() -> None:
         assert rec.writes[("hues", "background_color")] == "#808000"
         ok("180°: power FG/BG rotate, hueless accent skipped, melt gradient stops rotate")
 
-        # ── 2. preserve_melt_bg: melt BG kept, power BG still rotates ──────────
+        # ── 2. morph_bg off: every BG kept, FG/accent still rotate ─────────────
         seed_cache()
         rec.writes.clear()
         await engine._execute_morph_color(
-            MorphColorAction(scope=singles, degrees=180, preserve_melt_bg=True),
+            MorphColorAction(scope=singles, degrees=180, morph_bg=False),
             await_ramps=True)
         assert ("hues", "background_color") not in rec.writes, "melt BG must be preserved"
         assert rec.writes[("hues", "gradient")], "melt FG still rotates"
-        assert rec.writes[("single-color-effect", "background_color")] == "#808000", \
-            "power BG must ALWAYS rotate"
-        ok("preserve_melt_bg: melt BG untouched, power BG still rotates")
+        assert ("single-color-effect", "background_color") not in rec.writes, \
+            "morph_bg off skips power BG too"
+        assert rec.writes[("single-color-effect", "gradient")] == "#00ffff", \
+            "power FG still rotates"
+        ok("morph_bg off: all BGs untouched, FGs still rotate")
+
+        # ── 2b. legacy preserve_melt_bg payload loads as morph_bg=False ────────
+        legacy = MorphColorAction(**{"scope": singles.model_dump(), "degrees": 180,
+                                     "preserve_melt_bg": True})
+        assert legacy.morph_bg is False
+        assert MorphColorAction(degrees=180).morph_bg is True
+        ok("legacy preserve_melt_bg=true → morph_bg=False (default stays True)")
 
         # ── 3. backward = negative rotation ────────────────────────────────────
         seed_cache()

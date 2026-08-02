@@ -15,6 +15,10 @@ Signals (all 0–1, from the precomputed librosa analysis):
   trigger_intensity — the firing MusicTrigger's user-set intensity (0-1,
       drawn on the builder timeline; window_* ignored). Manual event fires
       have no trigger → resolves None → the binding's fallback applies.
+  random — a fresh uniform roll in [0, 1) per bound field per fire (never
+      memoized, needs no track context, never falls back). With map mode
+      this yields a uniform value in [out_min, out_max]; with steps it makes
+      a threshold-weighted random pick.
 
 Mapping modes:
   map   — linear range map: signal in [in_min, in_max] → [out_min, out_max]
@@ -38,7 +42,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-SignalName = Literal["rms_total", "rms_bass", "onset_score", "section_energy", "trigger_intensity"]
+SignalName = Literal["rms_total", "rms_bass", "onset_score", "section_energy", "trigger_intensity", "random"]
 
 # Values a binding may produce: numbers, bools, or toggle-ish strings.
 BindingValue = float | bool | str
@@ -61,6 +65,10 @@ class ValueBinding(BaseModel):
     out_max: float = 1.0
     steps: list[BindingStep] = Field(default_factory=list)
     fallback: Optional[BindingValue] = None
+    # Numeric results (map output, steps values, fallback) get their sign
+    # flipped with 50% probability per fire. Ignored for bools / toggle
+    # strings. Clamped kinds still clamp AFTER the flip (float01 → 0).
+    random_sign: bool = False
 
     @model_validator(mode="after")
     def _sort_steps(self) -> "ValueBinding":

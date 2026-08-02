@@ -33,6 +33,11 @@ class MusicTrigger(BaseModel):
     # this group instead of the scene group's designated Color Group. None /
     # missing card → normal behavior, byte-identical to before the field.
     color_group_override: Optional[str] = None
+    # Dark/Light display-mode override for this fire. "default" = defer to the
+    # levels below (scene group → scene → set_color → color cards); "dark" /
+    # "light" force the mode for everything this trigger fires. The global
+    # TopBar mode still outranks it. See services/display_mode.resolve().
+    display_mode: Literal["default", "dark", "light"] = "default"
 
 
 class SongProfile(BaseModel):

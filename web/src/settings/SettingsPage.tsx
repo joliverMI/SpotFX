@@ -112,6 +112,10 @@ export default function SettingsPage() {
         ambient_transition_s: num('ambient_transition_s', 1.5),
         ambient_fade_brightness: num('ambient_fade_brightness', 35),
         ambient_catchup_s: num('ambient_catchup_s', 8),
+        display_light_bg_color: str('display_light_bg_color', '#201830'),
+        display_light_bg_brightness: num('display_light_bg_brightness', 0.3),
+        display_shield_categories: (draft.display_shield_categories as string[]) ?? ['Singles'],
+        display_shield_virtuals: (draft.display_shield_virtuals as string[]) ?? [],
       });
       void qc.invalidateQueries({ queryKey: ['settings'] });
       setSavedFlash(true);
@@ -423,6 +427,56 @@ export default function SettingsPage() {
             style={{ width: '100%', accentColor: 'var(--accent)' }}
             title="After the wake scene lands, the released Hue groups ease back to the current music scene's look over this many seconds instead of snapping at the next trigger (0 = old snap behavior). Home Assistant: catchup_s="
             onChange={(e) => set('ambient_catchup_s', parseFloat(e.target.value))} />
+        </Field>
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          Dark / Light Mode
+          <HelpLink topic="display-modes" />
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+          The 🌗 TopBar toggle — or a trigger, scene group, scene, Set Color step or color
+          card — can force Dark (backgrounds black, hard-locked in LedFX) or Light
+          (backgrounds on). Shielded devices always keep their own backgrounds.
+        </div>
+        <Field label="Light mode default background"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input type="color" value={str('display_light_bg_color', '#201830')}
+              style={{ width: 48, height: 30, padding: 1 }}
+              onChange={(e) => set('display_light_bg_color', e.target.value)} />
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              applied when Light mode is on and the fired Color Set has no background of its own
+            </span>
+          </div>
+        </Field>
+        <Field label={`Default background brightness: ${Math.round(num('display_light_bg_brightness', 0.3) * 100)}%`}>
+          <input type="range" min={0} max={1} step={0.05} value={num('display_light_bg_brightness', 0.3)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            onChange={(e) => set('display_light_bg_brightness', parseFloat(e.target.value))} />
+        </Field>
+        <Field label="Shielded device categories">
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}
+            title="Checked categories are never touched by Dark/Light forcing — they always keep their authored backgrounds (default: Singles)">
+            {categories.map((c) => {
+              const cats = (draft.display_shield_categories as string[]) ?? [];
+              return (
+                <label key={c.id} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13 }}>
+                  <input type="checkbox" checked={cats.includes(c.name)}
+                    onChange={(e) => set('display_shield_categories',
+                      e.target.checked ? [...cats, c.name] : cats.filter((n) => n !== c.name))} />
+                  {c.name}
+                </label>
+              );
+            })}
+          </div>
+        </Field>
+        <Field label="Extra shielded virtuals (comma-separated ids)">
+          <input type="text" style={{ width: '100%' }} placeholder="e.g. single-color-effect"
+            value={((draft.display_shield_virtuals as string[]) ?? []).join(', ')}
+            onChange={(e) => set('display_shield_virtuals',
+              e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
         </Field>
       </div>
 

@@ -33,6 +33,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
   const [intensity, setIntensity] = useState(0.5);
   const [overrideBlend, setOverrideBlend] = useState(false);
   const [colorGroup, setColorGroup] = useState('');
+  const [displayMode, setDisplayMode] = useState<'default' | 'dark' | 'light'>('default');
   const { data: colorSets } = useColorSets();
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       setIntensity(0.5);
       setOverrideBlend(false);
       setColorGroup('');
+      setDisplayMode('default');
     } else if (existing) {
       setTsText(fmtMsTenths(existing.timestamp_ms));
       setEventId(existing.event_id);
@@ -51,6 +53,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       setIntensity(existing.intensity ?? 0.5);
       setOverrideBlend(existing.override_blend ?? false);
       setColorGroup(existing.color_group_override ?? '');
+      setDisplayMode(existing.display_mode ?? 'default');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
@@ -96,7 +99,8 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
         triggers.push({ id: uuid(), timestamp_ms: ms, event_id: evId,
                         labels: labelList, enabled: true, intensity,
                         override_blend: overrideBlend,
-                        color_group_override: colorGroup || null });
+                        color_group_override: colorGroup || null,
+                        display_mode: displayMode });
       } else {
         const t = triggers.find((tt) => tt.id === editingId);
         if (t) {
@@ -106,6 +110,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           t.intensity = intensity;
           t.override_blend = overrideBlend;
           t.color_group_override = colorGroup || null;
+          t.display_mode = displayMode;
         }
       }
     });
@@ -176,6 +181,19 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
             placeholder="— group's own colors —" allowEmpty
             onChange={(v) => setColorGroup(v ?? '')} />
           <HelpLink topic="trigger-color-override" title="Scene-group color override" />
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+          title="Force Dark or Light mode while this trigger fires. Default defers to the scene group / scene / color levels; the TopBar toggle still outranks this.">
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>Mode 🌗</span>
+          <select value={displayMode}
+            onChange={(e) => setDisplayMode(e.target.value as 'default' | 'dark' | 'light')}
+            style={{ width: 160 }}>
+            <option value="default">Default (defer)</option>
+            <option value="dark">🌙 Dark</option>
+            <option value="light">☀️ Light</option>
+          </select>
+          <HelpLink topic="display-modes" title="Dark / Light mode" />
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}

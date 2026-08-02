@@ -105,6 +105,8 @@ class WebSocketManager:
             "dinner_party_mode": state.dinner_party_mode,
             "ambient_mode_enabled": state.ambient_mode_enabled,
             "ambient_groups": list(state.ambient_groups),
+            "display_mode": state.display_mode,
+            "display_mode_resolved": state.display_mode_resolved,
             "genre_blending_enabled": _settings.genre_blending_enabled,
             "track": None,
         }

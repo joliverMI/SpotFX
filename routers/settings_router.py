@@ -87,6 +87,10 @@ class SettingsPatch(BaseModel):
     ambient_transition_s: Optional[float] = None
     ambient_fade_brightness: Optional[int] = None
     ambient_catchup_s: Optional[float] = None
+    display_light_bg_color: Optional[str] = None
+    display_light_bg_brightness: Optional[float] = None
+    display_shield_categories: Optional[list[str]] = None
+    display_shield_virtuals: Optional[list[str]] = None
 
 
 @router.get("")
@@ -141,6 +145,10 @@ async def get_settings():
         "ambient_transition_s": settings.ambient_transition_s,
         "ambient_fade_brightness": settings.ambient_fade_brightness,
         "ambient_catchup_s": settings.ambient_catchup_s,
+        "display_light_bg_color": settings.display_light_bg_color,
+        "display_light_bg_brightness": settings.display_light_bg_brightness,
+        "display_shield_categories": settings.display_shield_categories,
+        "display_shield_virtuals": settings.display_shield_virtuals,
     }
 
 
@@ -186,6 +194,11 @@ async def patch_settings(patch: SettingsPatch):
         if state.ambient_mode_enabled:
             from services import ambient_mode
             asyncio.create_task(ambient_mode.reapply())
+    # Dark/Light mode: shield-list or light-bg changes re-reconcile the LedFX
+    # dark locks from scratch (newly shielded virtuals unlock, and vice versa).
+    if any(k.startswith("display_") for k in data):
+        from services import display_mode as _dm
+        _dm.resync()
     # Force Scene: turning it on or picking a different scene asserts the
     # forced scene right away instead of waiting for the next scene pick.
     # Fired in the background — lane ramps can take seconds.

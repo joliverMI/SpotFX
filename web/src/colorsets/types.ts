@@ -24,6 +24,9 @@ export interface ColorSetCard {
   color: string;
   kind: 'set' | 'group';
   labels: string[];
+  /** Dark/Light cascade levels 6 (group card) / 7 (set card) — only consulted
+   * when every level above left the mode at 'default'. */
+  display_mode: 'default' | 'dark' | 'light';
   /** kind=set: the palette. kind=group: per-device/category overrides merged
    * onto the picked member Set at fire time (set fields win over the Set). */
   entries: ColorSetEntry[];
@@ -63,6 +66,7 @@ export function newCard(kind: 'set' | 'group', id: string): ColorSetCard {
     color: '#FFD700',
     kind,
     labels: [],
+    display_mode: 'default',
     entries: [],
     members: [],
     mode: 'cycle',

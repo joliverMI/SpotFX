@@ -15,6 +15,7 @@ A `ConcreteWrite` is either:
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -278,6 +279,9 @@ def _nudged_numeric(
         delta = float(nudge.amount or 0.0) * factor
     else:
         delta = float(nudge.amount or 0.0) * (hi - lo) * factor
+    # Random sign: nudge up or down by the same magnitude, 50/50 per fire.
+    if getattr(nudge, "random_sign", False) and random.random() < 0.5:
+        delta = -delta
     delta *= direction
 
     cur_raw = current_config.get(param_name)

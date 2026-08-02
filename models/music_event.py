@@ -13,7 +13,7 @@ Supported action types:
 """
 from __future__ import annotations
 from typing import Annotated, Literal, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import uuid
 
 from models.value_binding import ValueBinding
@@ -88,15 +88,20 @@ class MorphScope(BaseModel):
 
 class NumericNudge(BaseModel):
     """Per-element nudge spec used in Shape sub-fields when mode='nudge'.
-    amount: nudge magnitude in abstract 0..1 space (negative ok)
+    amount: nudge magnitude in abstract 0..1 space (negative ok). May be a
+            ValueBinding (⚡ intensity map / 🎲 random roll) — resolved to a
+            scalar at the executor seam like every other bound field.
     scale:  intensity_scale — 0 ignores intensity, 1 fully modulates.
+    random_sign: flip the delta's sign with 50% probability per fire — the
+            param randomly nudges up or down by the same magnitude.
     wrap:   when True, reflect off min/max and reverse direction on future
             fires so the value bounces instead of sticking at a boundary.
     lo/hi:  optional custom nudge range (None = the effect param's full range);
             clamping/bounce use these bounds. For x/y offset they are in the
             frontend −1..1 space."""
-    amount: float = 0.0
+    amount: float | ValueBinding = 0.0
     scale:  float = 0.0
+    random_sign: bool = False
     wrap:   bool = False
     lo:     float | None = None
     hi:     float | None = None
@@ -267,6 +272,11 @@ class SetColorAction(BaseModel):
     # Set card (not on this action). Set by the Override Blend plan scaler on
     # its deep copies; 1.0 (inert) on stored events.
     ramp_scale: float = 1.0
+    # Dark/Light display mode for this step. "default" = defer to the color
+    # cards (group, then set); "dark" / "light" force it — but the global
+    # TopBar mode, trigger, scene group and scene all outrank this action.
+    # See services/display_mode.resolve().
+    display_mode: Literal["default", "dark", "light"] = "default"
     # When True (default), skip any color-set value that would reset the LedFX
     # effect (params flagged `resets_effect`), preserving the running effect.
     # When False, those values are still applied — but always instantly, never
@@ -285,19 +295,32 @@ class MorphColorAction(BaseModel):
     (factor = 1 + (intensity − 0.5) · intensity_scale, same math as nudges).
 
     `direction`: "forward" rotates + degrees around the wheel, "backward" −.
-    `preserve_melt_bg`: when True, the BG color on melt effects is left
-    untouched; power effects ALWAYS get their BG rotated regardless.
+    `degrees` may be a ValueBinding (⚡ intensity map / 🎲 random roll per
+    fire; its ± flips rotation direction) — resolved at the executor seam.
+    `morph_bg`: when True (default) the BG color rotates along with FG and
+    accent; False leaves every effect's background untouched. Replaces the
+    old melt-only `preserve_melt_bg` (legacy True loads as morph_bg=False).
     See `services/trigger_engine._execute_morph_color`."""
     type:      Literal["morph_color"] = "morph_color"
     labels:    list[str] = Field(default_factory=list)
     weight:    float = 1.0
     scope:     MorphScope = Field(default_factory=MorphScope)
-    degrees:   float = 180.0
+    degrees:   float | ValueBinding = 180.0
     direction: Literal["forward", "backward"] = "forward"
     ramp_ms:   int | ValueBinding | None = None
     intensity_scale:  float = 0.0       # 0 = ignore beat intensity, 1 = full scaling
     intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
-    preserve_melt_bg: bool = False
+    morph_bg: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_preserve_melt_bg(cls, data):
+        # Old payloads carried melt-only `preserve_melt_bg`; map it onto the
+        # general toggle when the new field is absent.
+        if isinstance(data, dict) and "morph_bg" not in data:
+            if data.pop("preserve_melt_bg", False):
+                data["morph_bg"] = False
+        return data
 
 
 class SceneMorphAction(BaseModel):
@@ -708,10 +731,26 @@ class MusicEvent(BaseModel):
     scene_group_mode: Literal["cycle", "weighted"] = "cycle"
     scene_group_cycle_behavior: Literal["wrap", "bounce"] = "wrap"
     scene_group_exclude_current: bool = True
+    # Cycle mode only: when the group is freshly called (it wasn't the active
+    # scene group), start cycling from a random member instead of the
+    # persisted cursor. Weighted mode ignores it (every pick is random).
+    scene_group_random_start: bool = False
     # Optional ColorSetCard (kind="group") id this scene group designates.
     # Set Color actions with ref_id == SCENE_GROUP_COLOR_REF resolve to it
     # while this group is active — the room's colors follow the scene group.
     scene_group_color_ref_id: str = ""
+    # Dark/Light variants of the designated Color Group. When the resolved
+    # display mode (global → trigger → this group → scene → set_color) is
+    # dark/light and the matching ref is set, SCENE_GROUP_COLOR_REF resolves
+    # to it instead of scene_group_color_ref_id. "" = no variant, use the base.
+    scene_group_dark_color_ref_id: str = ""
+    scene_group_light_color_ref_id: str = ""
+
+    # Dark/Light display mode carried by this event. Meaningful on
+    # event_type == "scene_group" (the group's default mode, level 3) and
+    # "scene_update" (the scene's mode, level 4). "default" = defer downward.
+    # See services/display_mode.resolve() for the full precedence chain.
+    display_mode: Literal["default", "dark", "light"] = "default"
 
     # Timing offset: shift when this event fires (negative = earlier, positive = later)
     event_offset_ms: int = 0

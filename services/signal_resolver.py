@@ -15,6 +15,7 @@ never learns about bindings.
 from __future__ import annotations
 
 import logging
+import random
 from bisect import bisect_left
 from typing import Callable, Optional
 
@@ -50,7 +51,10 @@ def resolve_signal(
     """Current value of the binding's signal at song position now_ms, 0-1.
     `trigger_intensity` is the firing trigger's user-set intensity (None for
     manual fires — the binding's fallback applies). window_* are ignored for
-    trigger_intensity and section_energy."""
+    trigger_intensity and section_energy. `random` needs no context and
+    never returns None — a fresh uniform roll every call."""
+    if binding.signal == "random":
+        return random.random()
     if binding.signal == "trigger_intensity":
         if trigger_intensity is None:
             return None
@@ -122,10 +126,20 @@ def _beat_signal(beats: list | None, binding: ValueBinding, now_ms: int) -> Opti
 
 # ── value coercion ───────────────────────────────────────────────────────────
 
+def _maybe_flip_sign(binding: ValueBinding, value):
+    """With `random_sign`, negate a numeric value 50% of the time (fresh roll
+    per call → independent per bound field). Bools / strings pass through."""
+    if (binding.random_sign and isinstance(value, (int, float))
+            and not isinstance(value, bool) and random.random() < 0.5):
+        return -value
+    return value
+
+
 def apply_binding(binding: ValueBinding, sig: Optional[float], kind: FieldKind):
     """Coerce the signal into the field's value space. Returns the resolved
     value, or None meaning "no-op — leave the field unset" (callers decide
-    what unset means per field)."""
+    what unset means per field). `random_sign` flips the sign of any numeric
+    result (including fallbacks) with 50% probability, BEFORE kind clamping."""
     if binding.mode == "map" and kind in _TOGGLE_KINDS:
         logger.warning(
             "ValueBinding: map mode is invalid for toggle fields — using fallback")
@@ -133,19 +147,19 @@ def apply_binding(binding: ValueBinding, sig: Optional[float], kind: FieldKind):
 
     if binding.mode == "steps":
         if sig is None:
-            return binding.fallback
+            return _maybe_flip_sign(binding, binding.fallback)
         chosen = None
         for step in binding.steps:  # validator keeps these ascending
             if sig >= step.threshold:
                 chosen = step.value
         if chosen is None:
-            return binding.fallback
-        return _coerce(chosen, kind)
+            return _maybe_flip_sign(binding, binding.fallback)
+        return _coerce(_maybe_flip_sign(binding, chosen), kind)
 
     # map mode
     if sig is None:
         if binding.fallback is not None:
-            return _coerce(binding.fallback, kind)
+            return _coerce(_maybe_flip_sign(binding, binding.fallback), kind)
         sig = 0.5  # neutral — matches the compiler's eff_intensity convention
     span = binding.in_max - binding.in_min
     if span == 0:
@@ -153,7 +167,7 @@ def apply_binding(binding: ValueBinding, sig: Optional[float], kind: FieldKind):
     else:
         t = max(0.0, min(1.0, (sig - binding.in_min) / span))
     out = binding.out_min + t * (binding.out_max - binding.out_min)
-    return _coerce(out, kind)
+    return _coerce(_maybe_flip_sign(binding, out), kind)
 
 
 def _coerce(value, kind: FieldKind):
@@ -193,6 +207,21 @@ _ASPECT_FIELDS = (
     ("reverse", "tri_bool"),
 )
 
+# Shape sub-field nudge specs whose `amount` may be bound (mode="nudge").
+_NUDGE_FIELDS = (
+    "star_nudge", "edges_nudge", "twist_nudge", "x_offset_nudge",
+    "y_offset_nudge", "swirl_nudge", "horizon_scale_nudge",
+    "radius_scale_nudge", "blob_size_nudge",
+)
+
+
+def _nudge_specs(av):
+    """Every NumericNudge hanging off an AspectValue — shape sub-field specs
+    plus per-param reactivity_nudges entries."""
+    specs = [getattr(av, f) for f in _NUDGE_FIELDS]
+    specs.extend((av.reactivity_nudges or {}).values())
+    return [n for n in specs if n is not None]
+
 
 def _reactivity_kind(pname: str) -> FieldKind:
     """Field kind for a per-param reactivity binding (AspectValue.
@@ -231,11 +260,14 @@ def has_bindings(action) -> bool:
                 isinstance(v, ValueBinding) for v in av.reactivity_values.values()
             ):
                 return True
+            if any(isinstance(n.amount, ValueBinding) for n in _nudge_specs(av)):
+                return True
         return False
     if t == "set_color":
         return isinstance(action.advance, ValueBinding) or isinstance(action.ramp_ms, ValueBinding)
     if t == "morph_color":
-        return isinstance(action.ramp_ms, ValueBinding)
+        return (isinstance(action.ramp_ms, ValueBinding)
+                or isinstance(action.degrees, ValueBinding))
     if t == "ledfx_effect_param":
         if isinstance(action.ramp_ms, ValueBinding):
             return True
@@ -250,13 +282,16 @@ def resolve_action_bindings(action, signal_fn: SignalFn):
     """Return a copy of `action` with every ValueBinding replaced by its
     resolved scalar. Returns the SAME object when nothing is bound (hot path).
     Signals are memoized per (signal, window, dir) so all bound fields in one
-    action read one coherent instant."""
+    action read one coherent instant — except `random`, which rolls fresh per
+    field so each bound parameter gets an independent value."""
     if not has_bindings(action):
         return action
 
     cache: dict[tuple, Optional[float]] = {}
 
     def sig_for(b: ValueBinding) -> Optional[float]:
+        if b.signal == "random":
+            return signal_fn(b)
         key = (b.signal, b.window_beats, b.window_dir)
         if key not in cache:
             cache[key] = signal_fn(b)
@@ -283,12 +318,22 @@ def resolve_action_bindings(action, signal_fn: SignalFn):
                     if r is not None:  # binding resolved to no-op → drop the param
                         resolved[pname] = r
                 av.reactivity_values = resolved or None
+            for nd in _nudge_specs(av):
+                if isinstance(nd.amount, ValueBinding):
+                    # Amount is in abstract nudge space (negative ok) — no
+                    # clamp; a no-op resolution neutralizes the nudge (0).
+                    amt = rv(nd.amount, "float_free")
+                    nd.amount = 0.0 if amt is None else amt
     elif t == "set_color":
         adv = rv(new.advance, "int1")
         new.advance = 1 if adv is None else adv
         new.ramp_ms = rv(new.ramp_ms, "int0")
     elif t == "morph_color":
         new.ramp_ms = rv(new.ramp_ms, "int0")
+        # Signed float — a bound rotation may go negative (± random sign);
+        # a no-op resolution (None) becomes 0° = the executor's no-op path.
+        deg = rv(new.degrees, "float_free")
+        new.degrees = 0.0 if deg is None else deg
     elif t == "ledfx_effect_param":
         new.ramp_ms = rv(new.ramp_ms, "int0")
         kept = []

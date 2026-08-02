@@ -257,6 +257,17 @@ export default function ColorSetsPage() {
               <LabelsInput value={card.labels ?? []} placeholder="e.g. warm, drop"
                 onChange={(labels) => setCard({ ...card, labels })} />
             </div>
+            <div title={card.kind === 'group'
+              ? 'Dark/Light mode this Group asserts when fired and nothing above (TopBar, trigger, scene group, scene, Set Color step) forces one. Outranks the picked member Set.'
+              : 'Dark/Light mode this Set asserts when fired and nothing above it forces one — the LAST word in the cascade.'}>
+              <label>Mode 🌗</label>
+              <select value={(card.display_mode as string) ?? 'default'} style={{ width: 130 }}
+                onChange={(e) => setCard({ ...card, display_mode: e.target.value as ColorSetCard['display_mode'] })}>
+                <option value="default">Default</option>
+                <option value="dark">🌙 Dark</option>
+                <option value="light">☀️ Light</option>
+              </select>
+            </div>
           </div>
 
           {card.kind === 'set' ? (

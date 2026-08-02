@@ -14,6 +14,8 @@ export interface MusicTrigger {
   // Scene-group color override: ColorSetCard id (kind "group") used instead of
   // the scene group's designated Color Group when this trigger fires one.
   color_group_override?: string | null;
+  // Dark/Light override for this fire ('default' = defer down the cascade).
+  display_mode?: 'default' | 'dark' | 'light';
   // joined by GET /profiles/current only:
   event_name?: string;
   event_color?: string;

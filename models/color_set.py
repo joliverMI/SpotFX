@@ -53,6 +53,11 @@ class ColorSetCard(BaseModel):
     color: str = "#FFD700"     # swatch shown in the card list
     kind:  Literal["set", "group"] = "set"
     labels: list[str] = Field(default_factory=list)
+    # Dark/Light display mode carried by this card — the LAST two levels of the
+    # display-mode cascade (group card outranks the picked member set). Only
+    # consulted when every level above (TopBar, trigger, scene group, scene,
+    # set_color action) left the mode at "default".
+    display_mode: Literal["default", "dark", "light"] = "default"
 
     # kind == "set": the palette itself.
     # kind == "group": optional overrides — any field set here replaces the

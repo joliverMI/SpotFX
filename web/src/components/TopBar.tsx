@@ -16,6 +16,44 @@ const LOCK_COLOR: Record<string, string> = { ok: '#00ff88', suspect: '#ffb300', 
 /** Cool blue (0) → hot red (1). */
 const intensityHue = (v: number) => Math.round(215 - 215 * Math.min(1, Math.max(0, v)));
 
+// ── Dark/Light display mode (global level — top of the cascade) ─────────────
+const MODE_CYCLE = ['default', 'dark', 'light'] as const;
+type TopMode = (typeof MODE_CYCLE)[number];
+const MODE_ICON: Record<TopMode, string> = { default: '🌗', dark: '🌙', light: '☀️' };
+const MODE_TITLE: Record<TopMode, string> = {
+  default: 'Display mode: Default — defer to trigger / scene group / scene / color levels',
+  dark: 'Display mode: Dark — force backgrounds black (shielded devices keep theirs)',
+  light: 'Display mode: Light — keep backgrounds on; fill in the default light background',
+};
+
+/** Cycles Default → Dark → Light. The icon flips immediately but the mode is
+ * committed 1 s after the last click, so cycling past a mode never applies it. */
+function DisplayModeButton() {
+  const stored = useLiveStore((s) => s.displayMode);
+  const [pending, setPending] = useState<TopMode | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const mode: TopMode = pending ?? (MODE_CYCLE.includes(stored as TopMode) ? (stored as TopMode) : 'default');
+  const click = () => {
+    const next = MODE_CYCLE[(MODE_CYCLE.indexOf(mode) + 1) % MODE_CYCLE.length];
+    setPending(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      // The endpoint broadcasts the new state before responding, so the store
+      // is already correct when pending clears — no flicker back.
+      void apiPost(`/control/display-mode?mode=${next}`).finally(() => setPending(null));
+    }, 1000);
+  };
+
+  return (
+    <button className={`icon-btn ${mode !== 'default' ? 'active' : ''}`} title={MODE_TITLE[mode]} onClick={click}>
+      {MODE_ICON[mode]}
+    </button>
+  );
+}
+
 interface LastFire {
   intensity: number;
   name: string;
@@ -88,6 +126,7 @@ export default function TopBar() {
         🍽️
       </button>
       <AmbientButton compact />
+      <DisplayModeButton />
 
       {lastScene && (
         <span className="tb-chip" title={`Active scene${activeSceneGroup ? ` (group: ${activeSceneGroup.name})` : ''}`}>

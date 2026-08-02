@@ -6,7 +6,7 @@ import { LabelsInput, NumberInput, Row, Select, ColorInput, TextInput, Checkbox 
 import SearchSelect from './SearchSelect';
 import { ParentScopeToggle, emptyScope } from './ScopePicker';
 import { BindableNumber } from './BindingInput';
-import { isBinding, SCENE_GROUP_COLOR_REF, CURRENT_COLOR_GROUP_REF } from '../../types/events';
+import { isBinding, SCENE_GROUP_COLOR_REF, CURRENT_COLOR_GROUP_REF, DISPLAY_MODE_OPTIONS } from '../../types/events';
 import EffectParamForm from './EffectParamForm';
 import MorphStepForm from './MorphStepForm';
 import DeviceSettingsForm from './DeviceSettingsForm';
@@ -157,6 +157,12 @@ function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set
         </>
       )}
       <Row label="Ramp (ms)"><BindableNumber value={action.ramp_ms} nullable onChange={(v) => set((a) => { a.ramp_ms = v; })} /></Row>
+      <Row label="Mode 🌗"
+        help="Force Dark/Light for this step. Default defers to the picked Color Group / Set's own mode; TopBar, trigger, scene group and scene all outrank this.">
+        <Select value={action.display_mode ?? 'default'} width={160}
+          onChange={(v) => set((a) => { a.display_mode = v as typeof a.display_mode; })}
+          options={DISPLAY_MODE_OPTIONS} />
+      </Row>
       <Row label="Preserve effect" help="Skip values that would reset the running LedFX effect">
         <Checkbox value={action.preserve_effect} onChange={(v) => set((a) => { a.preserve_effect = v; })} />
       </Row>
@@ -195,8 +201,8 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
         <ParentScopeToggle scope={action.scope}
           onChange={(s) => set((a) => { a.scope = s ?? emptyScope(); })} />
       </Row>
-      <Row label="Degrees" help="Rotation around the hue wheel per fire — 180° = complementary contrast">
-        <NumberInput value={action.degrees} min={0} max={360} step={5}
+      <Row label="Degrees" help="Rotation around the hue wheel per fire — 180° = complementary contrast; ⚡ maps it to a music signal, 🎲 rolls it fresh every fire (the binding's +/− randomizes direction)">
+        <BindableNumber value={action.degrees} min={0} max={360} step={5}
           onChange={(v) => set((a) => { a.degrees = v ?? 180; })} />
       </Row>
       <Row label="Direction">
@@ -220,8 +226,8 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
             ]} />
         </Row>
       )}
-      <Row label="Preserve melt BG" help="Keep the background color on melt effects; power BG always rotates">
-        <Checkbox value={action.preserve_melt_bg} onChange={(v) => set((a) => { a.preserve_melt_bg = v; })} />
+      <Row label="Morph background" help="On (default): the background color rotates along with FG and accent. Off: backgrounds stay put on every effect — only FG and accent rotate">
+        <Checkbox value={action.morph_bg} onChange={(v) => set((a) => { a.morph_bg = v; })} />
       </Row>
     </>
   );

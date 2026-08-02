@@ -1112,6 +1112,20 @@ async def set_virtual_config(virtual_id: str, config: dict) -> bool:
     return False
 
 
+async def set_virtual_dark_lock(virtual_id: str, locked: bool) -> bool:
+    """Set/clear the per-virtual dark-mode background lock (SpotFX patch in
+    ledfx-src: Virtual.CONFIG_SCHEMA `dark_lock`). While locked LedFX clamps
+    background_color→#000000 / background_brightness→0 inside _apply_config,
+    so no write path can light a background. Deliberately NOT muted during
+    capture — lock flips are rare, tiny, and must not be silently dropped."""
+    resp = await _request(
+        "POST", "/api/virtuals",
+        json={"id": virtual_id, "config": {"dark_lock": bool(locked)}},
+        label=f"dark_lock:{virtual_id}",
+    )
+    return resp is not None
+
+
 def get_virtual_cache(virtual_id: str) -> dict:
     """Return the cached virtual state dict (from the last poll). Empty dict if not cached."""
     return state.ledfx_virtual_cache.get(virtual_id, {})

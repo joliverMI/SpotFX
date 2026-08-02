@@ -26,7 +26,7 @@ const newTarget = (): MorphTarget => ({
   ramp_ms: null,
 });
 
-const newNudge = (): NumericNudge => ({ amount: 0, scale: 0, wrap: false, lo: null, hi: null });
+const newNudge = (): NumericNudge => ({ amount: 0, scale: 0, random_sign: false, wrap: false, lo: null, hi: null });
 
 const NUMERIC_ASPECTS: MorphAspect[] = ['brightness', 'reactivity', 'blur'];
 const OVERRIDE_ASPECTS: MorphAspect[] = ['brightness', 'reactivity'];
@@ -49,7 +49,7 @@ function TriState({ value, onChange }: {
   );
 }
 
-/** One NumericNudge spec: amount/scale/wrap/lo/hi. */
+/** One NumericNudge spec: amount (bindable ⚡/🎲) / ± / scale / wrap / lo / hi. */
 function NudgeInput({ label, nudge, onChange }: {
   label: string;
   nudge: NumericNudge | null | undefined;
@@ -64,10 +64,19 @@ function NudgeInput({ label, nudge, onChange }: {
       {n && (
         <>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: 'var(--text-muted)' }} title="magnitude in 0..1 space (negative ok)">amt</span>
-            <NumberInput value={n.amount} min={-1} max={1} step={0.05} width={72}
+            <span style={{ color: 'var(--text-muted)' }} title="magnitude in 0..1 space (negative ok); ⚡ maps it to a music signal, 🎲 rolls it fresh every fire">amt</span>
+            <BindableNumber value={n.amount} min={-1} max={1} step={0.05} width={72}
               onChange={(v) => onChange({ ...n, amount: v ?? 0 })} />
           </label>
+          <button title="Random sign — nudge up or down by the same magnitude, 50/50 per fire"
+            style={{
+              padding: '2px 6px', fontSize: 12, flex: 'none',
+              borderColor: n.random_sign ? 'var(--accent)' : 'var(--border)',
+              color: n.random_sign ? 'var(--accent)' : 'var(--text-muted)',
+            }}
+            onClick={() => onChange({ ...n, random_sign: !n.random_sign })}>
+            +/−
+          </button>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ color: 'var(--text-muted)' }} title="0 = ignore beat intensity, 1 = full">scale</span>
             <NumberInput value={n.scale} min={0} max={1} step={0.05} width={72}

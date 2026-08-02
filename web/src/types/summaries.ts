@@ -92,7 +92,9 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
       const sign = action.direction === 'backward' ? '-' : '+';
       const bits = [...action.scope.categories, ...action.scope.virtual_ids, ...action.scope.roles];
       const where = bits.length ? ` (${bits.join(', ')})` : '';
-      return `Rotate ${sign}${action.degrees}°${where}${hasBindingDeep(action) ? ' ⚡' : ''}`;
+      const deg = typeof action.degrees === 'number' ? `${action.degrees}°`
+        : action.degrees.signal === 'random' ? '🎲°' : '⚡°';
+      return `Rotate ${sign}${deg}${where}${hasBindingDeep(action) ? ' ⚡' : ''}`;
     }
     case 'scene_morph': {
       const sign = action.direction === 'backward' ? '-' : '+';

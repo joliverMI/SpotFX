@@ -118,6 +118,9 @@ async def lifespan(app: FastAPI):
         state.ambient_mode_enabled = bool(_saved["ambient_mode_enabled"])
     if "ambient_groups" in _saved:
         state.ambient_groups = [str(g) for g in (_saved["ambient_groups"] or [])]
+    if _saved.get("display_mode") in ("default", "dark", "light"):
+        state.display_mode = _saved["display_mode"]
+        state.display_mode_resolved = state.display_mode
 
     # Select song source based on settings
     if settings.song_source == "ledfx":

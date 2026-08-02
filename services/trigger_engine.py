@@ -43,6 +43,10 @@ _FIRE_INTENSITY: ContextVar[float | None] = ContextVar("spotfx_fire_intensity", 
 # whenever this fire resolves the "__scene_group__" sentinel. Same task-scoped
 # lifetime as _FIRE_INTENSITY; unset/None = normal resolution.
 _FIRE_COLOR_GROUP: ContextVar[str | None] = ContextVar("spotfx_fire_color_group", default=None)
+# Per-fire Dark/Light display-mode override (MusicTrigger.display_mode): level
+# 2 of the display-mode cascade (services/display_mode). Same task-scoped
+# lifetime as _FIRE_INTENSITY; unset/None/"default" = defer to lower levels.
+_FIRE_DISPLAY_MODE: ContextVar[str | None] = ContextVar("spotfx_fire_display_mode", default=None)
 from services.effect_params import get_all_virtual_ids
 from services.websocket_manager import ws_manager
 from api import ledfx_client
@@ -120,6 +124,7 @@ class _PlanEntry:
     trigger_id: str = ""                          # root trigger id (to check _pre_fired at exec time)
     trigger_intensity: float = 0.5                # firing trigger's intensity (0-1, scaler applied at plan time)
     trigger_color_group: Optional[str] = None     # firing trigger's scene-group color override (card id)
+    trigger_display_mode: Optional[str] = None    # firing trigger's dark/light override ("default"/None = defer)
     is_root: bool = False                         # True only for the root entry of a trigger's plan
     planned_descendant_ids: set[str] = dc_field(default_factory=set)
     preselected_action: Optional[Action] = None   # for "single" events — action chosen at plan time
@@ -1169,6 +1174,7 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     preselected_action=action,
                 ))
@@ -1195,6 +1201,7 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
                     preselected_steps=preselected_steps,
@@ -1225,6 +1232,7 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
                 ))
@@ -1247,6 +1255,7 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     preselected_morph_picks=picks,
                     morph_anchor_offset_ms=morph_anchor,
@@ -1331,6 +1340,7 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
                     resolved_picks=resolved,
@@ -1390,6 +1400,7 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     preselected_scene_picks=scene_picks or None,
                     scene_picks_sid=scene_sid,
@@ -1411,6 +1422,7 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                 ))
                 return f"Device settings ({len(event.device_targets)}×)"
@@ -2299,7 +2311,7 @@ class TriggerEngine:
             sign = "-" if action.direction == "backward" else "+"
             scope_bits = list(action.scope.categories) + list(action.scope.virtual_ids) + list(action.scope.roles)
             where = f" ({', '.join(scope_bits)})" if scope_bits else ""
-            return f"Rotate {sign}{action.degrees:g}°{where}"
+            return f"Rotate {sign}{self._fmt_degrees(action.degrees)}{where}"
         elif action.type == "scene_morph":
             sign = "-" if action.direction == "backward" else "+"
             return f"Scene morph {sign}{action.advance}"
@@ -2381,6 +2393,13 @@ class TriggerEngine:
         if isinstance(v, ValueBinding):
             return "live ramp"
         return "instant" if int(v) == 0 else f"{int(v) / 1000:g}s"
+
+    @staticmethod
+    def _fmt_degrees(v) -> str:
+        from models.value_binding import ValueBinding
+        if isinstance(v, ValueBinding):
+            return "🎲°" if v.signal == "random" else "⚡°"
+        return f"{float(v or 0):g}°"
 
     @staticmethod
     def _scope_to_str(scope) -> str:
@@ -2589,7 +2608,7 @@ class TriggerEngine:
         if action.type == "morph_color":
             sign = "-" if action.direction == "backward" else "+"
             ramp = f" ({self._fmt_ramp(action.ramp_ms)})" if action.ramp_ms is not None else ""
-            text = f"rotate hue {sign}{action.degrees:g}°{ramp}"
+            text = f"rotate hue {sign}{self._fmt_degrees(action.degrees)}{ramp}"
             scope = self._effective_scope(action.scope, inherited_scope)
             return text, [], _scope_str(scope), text
 
@@ -3035,6 +3054,10 @@ class TriggerEngine:
             return
         _FIRE_INTENSITY.set(self._scaled_intensity(getattr(trigger, "intensity", 0.5)))
         _FIRE_COLOR_GROUP.set(getattr(trigger, "color_group_override", None))
+        _FIRE_DISPLAY_MODE.set(getattr(trigger, "display_mode", None))
+        if getattr(trigger, "display_mode", None) in ("dark", "light"):
+            from services import display_mode as dm
+            dm.sync_dark_locks_bg(dm.resolve(state.display_mode, trigger.display_mode))
 
         event = get_event(trigger.event_id)
         if event is None:
@@ -4143,13 +4166,18 @@ class TriggerEngine:
             return fallback
         return None
 
-    def _resolve_color_ref(self, ref_id: str) -> str:
+    def _resolve_color_ref(self, ref_id: str, action_mode: str | None = None) -> str:
         """Resolve a SetColorAction ref to a real ColorSetCard id. The
         SCENE_GROUP_COLOR_REF sentinel follows the Color Group designated by
         the active scene_group, falling back to the current group when none is
         active (or the active one designates nothing); CURRENT_COLOR_GROUP_REF
         re-uses the last group any set_color fire drew from. Real ids pass
-        through untouched; "" = nothing resolves."""
+        through untouched; "" = nothing resolves.
+
+        Dark/Light: when the group designates a dark/light variant Color Group
+        and the display mode resolved from the levels ABOVE the color cards
+        (global → trigger → scene group → scene → set_color `action_mode`) is
+        dark/light, the matching variant is designated instead of the base."""
         from models.music_event import SCENE_GROUP_COLOR_REF, CURRENT_COLOR_GROUP_REF
         if ref_id == SCENE_GROUP_COLOR_REF:
             override = _FIRE_COLOR_GROUP.get()
@@ -4162,9 +4190,18 @@ class TriggerEngine:
                 logger.warning("color_group_override %s not a group card — ignored", override)
             gid = self._active_scene_group_id or state.active_scene_group_id
             grp = get_event(gid) if gid else None
-            designated = (grp.scene_group_color_ref_id
-                          if grp is not None and grp.event_type == "scene_group"
-                          else "")
+            designated = ""
+            if grp is not None and grp.event_type == "scene_group":
+                from services import display_mode as dm
+                _, scene_mode = dm.group_and_scene_modes()
+                mode = dm.resolve(state.display_mode, _FIRE_DISPLAY_MODE.get(),
+                                  grp.display_mode, scene_mode, action_mode)
+                if mode == "dark" and grp.scene_group_dark_color_ref_id:
+                    designated = grp.scene_group_dark_color_ref_id
+                elif mode == "light" and grp.scene_group_light_color_ref_id:
+                    designated = grp.scene_group_light_color_ref_id
+                else:
+                    designated = grp.scene_group_color_ref_id
             return designated or state.last_color_group_id
         if ref_id == CURRENT_COLOR_GROUP_REF:
             return state.last_color_group_id
@@ -4188,7 +4225,7 @@ class TriggerEngine:
         from services.morph_compiler import resolve_scope
         from services.effect_params import get_param_meta
 
-        ref_id = self._resolve_color_ref(action.ref_id)
+        ref_id = self._resolve_color_ref(action.ref_id, getattr(action, "display_mode", None))
         if not ref_id:
             logger.info("set_color: '%s' resolves to no Color Group yet — no-op",
                         action.ref_id)
@@ -4200,8 +4237,10 @@ class TriggerEngine:
             return
 
         overrides: list = []
+        group_card_mode = "default"   # level 6 — only a Group card can set it
         if card.kind == "group":
             state.last_color_group_id = card.id
+            group_card_mode = getattr(card, "display_mode", "default")
             overrides = list(card.entries or [])
             chosen_id = self._select_color_set_member(
                 card, action.pick_mode, action.advance, action.direction
@@ -4266,6 +4305,40 @@ class TriggerEngine:
         if not merged:
             logger.info("set_color '%s': no virtuals resolved from entry scopes — nothing to do", card.name)
             return
+
+        # ── Dark/Light display mode (services/display_mode) ──────────────────
+        # Full seven-level resolve, then rewrite the merged per-virtual entries
+        # for every non-shielded device: dark forces the background black,
+        # light backfills the default light background where the entry doesn't
+        # author one. Shielded devices keep their authored values. The LedFX
+        # dark locks are reconciled in the background so no other write path
+        # can relight a background while dark.
+        from services import display_mode as dm
+        _group_mode, _scene_mode = dm.group_and_scene_modes()
+        mode = dm.resolve(
+            state.display_mode, _FIRE_DISPLAY_MODE.get(), _group_mode, _scene_mode,
+            getattr(action, "display_mode", None), group_card_mode,
+            getattr(card, "display_mode", "default"),
+        )
+        dm.sync_dark_locks_bg(mode)
+        if mode != "default":
+            shields = dm.shielded_virtuals()
+            for vid, entry in merged.items():
+                if vid in shields:
+                    continue
+                if mode == "dark":
+                    entry.bg_color = "#000000"
+                    entry.background_brightness = 0.0
+                    entry.bg_mode = None   # pointless write for a black bg
+                else:  # light — make sure a VISIBLE background lands: fill the
+                    # default where the entry authors none, and treat explicit
+                    # black / zero brightness as "none" (a black background is
+                    # indistinguishable from no background).
+                    if (not entry.bg_color
+                            or entry.bg_color.strip().lower() in ("#000000", "#000", "black")):
+                        entry.bg_color = settings.display_light_bg_color
+                    if not entry.background_brightness:   # None or 0
+                        entry.background_brightness = float(settings.display_light_bg_brightness)
 
         # Address each device by its LIVE active effect (not a stale cached one)
         # so these color writes update config in place instead of switching the
@@ -4427,8 +4500,8 @@ class TriggerEngine:
         every color param (FG gradient/color, BG color, accent) around the hue
         wheel by `action.degrees` (backward = negative). Beat intensity can
         modulate the rotation via `intensity_scale` (same factor math as morph
-        nudges). BG on melt effects is skipped when `preserve_melt_bg` is set;
-        power effects always get their BG rotated. Rotated strings ramp via
+        nudges). The BG color is skipped on every effect when `morph_bg` is
+        off (FG/accent still rotate). Rotated strings ramp via
         gradient interpolation; effect-resetting params follow the same
         instant/server-tween rules as Set Color."""
         action = resolve_action_bindings(action, self._signal_now)
@@ -4496,9 +4569,8 @@ class TriggerEngine:
             if pc:
                 _rotate_param(pc)
 
-            # BG: melt keeps its background when preserve_melt_bg is set;
-            # power is exempt from that guard and always rotates.
-            if not (action.preserve_melt_bg and etype == "melt"):
+            # BG rotates only when the action includes it (default on).
+            if action.morph_bg:
                 pb = self._color_param_for(etype, "bg_color", "background_color", cfg)
                 if pb:
                     _rotate_param(pb)
@@ -4544,9 +4616,14 @@ class TriggerEngine:
             if updates:
                 morph_effect_state.save_many(updates)
 
-    async def fire_color_set_now(self, card_id: str) -> bool:
+    async def fire_color_set_now(self, card_id: str, advance: int = 1) -> bool:
         """Preview-fire a Color Set or Group immediately, bypassing the audio-
-        capture gate (mirrors fire_event_now's force_allow wrapper)."""
+        capture gate (mirrors fire_event_now's force_allow wrapper).
+
+        `advance` only matters for group cards: 1 (default) rotates to the next
+        member like a normal fire; 0 re-applies the CURRENT member without
+        moving the cursor — the display-mode toggle uses that to repaint the
+        room (group overrides included) under the new mode."""
         from models.music_event import SetColorAction
         from services import color_set_store
         card = color_set_store.get_by_id(card_id)
@@ -4558,7 +4635,8 @@ class TriggerEngine:
             # otherwise effect-resetting params (e.g. background_color) get
             # silently dropped and the background never fires.
             await self._execute_set_color(
-                SetColorAction(ref_id=card_id, pick_mode="default", preserve_effect=False),
+                SetColorAction(ref_id=card_id, pick_mode="default", advance=advance,
+                               preserve_effect=False),
                 await_ramps=True,
             )
             await ledfx_client.drain_bus()
@@ -4746,6 +4824,13 @@ class TriggerEngine:
         lane_index = 1 if repeat else 0
         self._last_scene_update_id = event.id
         state.last_scene_update_id = event.id  # mirror for the Now Playing indicator
+        # Becoming the current scene may change the resolved Dark/Light mode
+        # (level 4) — reconcile the LedFX dark locks even if no Set Color lane
+        # fires (a pure morph scene must still go dark / undark).
+        from services import display_mode as dm
+        _gm, _sm = dm.group_and_scene_modes()
+        dm.sync_dark_locks_bg(dm.resolve(
+            state.display_mode, _FIRE_DISPLAY_MODE.get(), _gm, _sm))
         picked = await self._run_one_lane(
             event, lane_index, labels, skip_event_ids,
             preselected=(preselected or {}).get(lane_index),
@@ -4995,8 +5080,8 @@ class TriggerEngine:
         """Current value of a ValueBinding's signal at the live song position.
         Same track/progress guards as _beat_intensity_now; sections and beats
         come from the runtime caches (lazy-loaded per URI as a fallback)."""
-        if binding.signal == "trigger_intensity":
-            # Needs no track/beat context — just the per-fire value.
+        if binding.signal in ("trigger_intensity", "random"):
+            # Need no track/beat context — per-fire value / fresh roll.
             return resolve_signal(binding, None, None, 0,
                                   trigger_intensity=_FIRE_INTENSITY.get())
         if not state.current_track or not state.current_track.spotify_uri:
@@ -5753,6 +5838,15 @@ class TriggerEngine:
             return
         _FIRE_INTENSITY.set(entry.trigger_intensity)  # per-task context — no cross-fire leak
         _FIRE_COLOR_GROUP.set(entry.trigger_color_group)
+        _FIRE_DISPLAY_MODE.set(entry.trigger_display_mode)
+        # A trigger that forces dark/light must flip the LedFX dark locks even
+        # when its event carries no Set Color / Scene Update (those paths
+        # re-sync on their own; syncing here only when the trigger overrides
+        # avoids redundant churn on ordinary fires).
+        if entry.trigger_display_mode in ("dark", "light"):
+            from services import display_mode as dm
+            dm.sync_dark_locks_bg(dm.resolve(
+                state.display_mode, entry.trigger_display_mode))
         evt = entry.event
         skip_ids = entry.planned_descendant_ids or None
 
@@ -6242,11 +6336,13 @@ class TriggerEngine:
                             )
                             _fi_tok = _FIRE_INTENSITY.set(_entry.trigger_intensity)
                             _cg_tok = _FIRE_COLOR_GROUP.set(_entry.trigger_color_group)
+                            _dm_tok = _FIRE_DISPLAY_MODE.set(_entry.trigger_display_mode)
                             try:
                                 payload = self._build_scene_payload(morph_actions)
                             finally:
                                 _FIRE_INTENSITY.reset(_fi_tok)
                                 _FIRE_COLOR_GROUP.reset(_cg_tok)
+                                _FIRE_DISPLAY_MODE.reset(_dm_tok)
                             if payload is None:
                                 _entry.scene_override_prepared = True  # nothing to do, skip lookahead retries
                                 continue

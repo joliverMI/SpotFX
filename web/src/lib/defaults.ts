@@ -36,13 +36,13 @@ export function newAction(type: ActionType): Action {
     case 'set_color':
       return {
         ...base, type, ref_id: SCENE_GROUP_COLOR_REF, pick_mode: 'default', advance: 1,
-        direction: 'forward', ramp_ms: null, preserve_effect: true,
+        direction: 'forward', ramp_ms: null, preserve_effect: true, display_mode: 'default',
       };
     case 'morph_color':
       return {
         ...base, type, scope: { virtual_ids: [], categories: [], roles: [] },
         degrees: 180, direction: 'forward', ramp_ms: null,
-        intensity_scale: 0, intensity_source: 'rms_total', preserve_melt_bg: false,
+        intensity_scale: 0, intensity_source: 'rms_total', morph_bg: true,
       };
     case 'scene_morph':
       return { ...base, type, advance: 1, direction: 'forward' };
@@ -123,7 +123,11 @@ export function newEvent(event_type: MusicEvent['event_type'] = 'single'): Music
     scene_group_mode: 'cycle',
     scene_group_cycle_behavior: 'wrap',
     scene_group_exclude_current: true,
+    scene_group_random_start: false,
     scene_group_color_ref_id: '',
+    scene_group_dark_color_ref_id: '',
+    scene_group_light_color_ref_id: '',
+    display_mode: 'default',
     event_offset_ms: 0,
   };
 }

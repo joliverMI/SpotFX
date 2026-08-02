@@ -6,7 +6,7 @@
 
 // ── Value bindings (signal-driven parameters) ───────────────────────────────
 
-export type SignalName = 'rms_total' | 'rms_bass' | 'onset_score' | 'section_energy' | 'trigger_intensity';
+export type SignalName = 'rms_total' | 'rms_bass' | 'onset_score' | 'section_energy' | 'trigger_intensity' | 'random';
 
 export interface BindingStep {
   threshold: number;              // applies when signal >= threshold
@@ -25,6 +25,8 @@ export interface ValueBinding {
   out_max: number;
   steps: BindingStep[];
   fallback: number | boolean | string | null;
+  /** Numeric results get their sign flipped 50% of the time (per fire). */
+  random_sign: boolean;
 }
 
 export type Bindable<T> = T | ValueBinding;
@@ -41,8 +43,11 @@ export interface MorphScope {
 }
 
 export interface NumericNudge {
-  amount: number;
+  /** Magnitude in abstract 0..1 space (negative ok); bindable (⚡/🎲). */
+  amount: number | ValueBinding;
   scale: number;
+  /** Flip the delta's sign 50% of the time — nudge randomly up or down. */
+  random_sign: boolean;
   wrap: boolean;
   lo: number | null;
   hi: number | null;
@@ -177,6 +182,18 @@ export interface MorphStepAction extends ActionBase {
 export const SCENE_GROUP_COLOR_REF = '__scene_group__';
 export const CURRENT_COLOR_GROUP_REF = '__current__';
 
+/** Dark/Light display mode — 'default' defers to the next level down the
+ *  cascade (TopBar → trigger → scene group → scene → set_color → color group
+ *  → color set); the first non-default level wins. Dark forces backgrounds
+ *  black on non-shielded devices; light backfills the default light bg. */
+export type DisplayMode = 'default' | 'dark' | 'light';
+
+export const DISPLAY_MODE_OPTIONS = [
+  { value: 'default', label: 'Default (defer)' },
+  { value: 'dark', label: '🌙 Dark' },
+  { value: 'light', label: '☀️ Light' },
+];
+
 export interface SetColorAction extends ActionBase {
   type: 'set_color';
   /** ColorSetCard id, or SCENE_GROUP_COLOR_REF / CURRENT_COLOR_GROUP_REF */
@@ -186,18 +203,20 @@ export interface SetColorAction extends ActionBase {
   direction: 'forward' | 'backward';
   ramp_ms: Bindable<number> | null;
   preserve_effect: boolean;
+  /** Level 5 of the display-mode cascade (above the color cards). */
+  display_mode: DisplayMode;
 }
 
 /** Rotate every showing color (FG/BG/accent) around the hue wheel. */
 export interface MorphColorAction extends ActionBase {
   type: 'morph_color';
   scope: MorphScope;              // empty = inherit nearest Target, else global
-  degrees: number;                // default 180 = complementary contrast
+  degrees: number | ValueBinding; // default 180 = complementary contrast; bindable (⚡/🎲, ± flips direction)
   direction: 'forward' | 'backward';
   ramp_ms: Bindable<number> | null;
   intensity_scale: number;        // 0 = ignore beat intensity
   intensity_source: IntensitySource;
-  preserve_melt_bg: boolean;      // true = keep melt BG; power BG always rotates
+  morph_bg: boolean;              // true (default) = BG rotates too; false = FG/accent only
 }
 
 /** Step the ACTIVE Scene Group ±advance members and fire the result.
@@ -420,9 +439,19 @@ export interface MusicEvent {
   scene_group_mode: 'cycle' | 'weighted';
   scene_group_cycle_behavior: 'wrap' | 'bounce';
   scene_group_exclude_current: boolean;
+  /** Cycle mode: a fresh call (group wasn't active) starts at a random member. */
+  scene_group_random_start: boolean;
   /** Color Group (ColorSetCard kind="group") this scene group designates —
    *  Set Color actions set to "Scene Group" pull from it. '' = none. */
   scene_group_color_ref_id: string;
+  /** Dark/Light variants of the designated Color Group: used instead of the
+   *  base ref while the resolved display mode is dark/light. '' = no variant. */
+  scene_group_dark_color_ref_id: string;
+  scene_group_light_color_ref_id: string;
+
+  /** Display-mode cascade level carried by this event: scene_group = level 3,
+   *  scene_update = level 4. 'default' defers downward. */
+  display_mode: DisplayMode;
 
   event_offset_ms: number;
 }

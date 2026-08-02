@@ -44,7 +44,7 @@ export default function SceneGroupTrack({ event }: { event: MusicEvent }) {
             onChange={(v) => mutate((d) => { d.scene_group_mode = v as MusicEvent['scene_group_mode']; })}
             options={[
               { value: 'cycle', label: 'Cycle (sequential)' },
-              { value: 'weighted', label: 'Weighted (random)' },
+              { value: 'weighted', label: 'Random (weighted)' },
             ]} />
         </label>
         {!weighted && (
@@ -57,6 +57,11 @@ export default function SceneGroupTrack({ event }: { event: MusicEvent }) {
                 { value: 'bounce', label: 'bounce' },
               ]} />
           </label>
+        )}
+        {!weighted && (
+          <Checkbox value={event.scene_group_random_start} label="random start"
+            title="When the group is freshly called (it wasn't the active scene group), start cycling from a random member instead of where it left off"
+            onChange={(v) => mutate((d) => { d.scene_group_random_start = v; })} />
         )}
         {weighted && (
           <Checkbox value={event.scene_group_exclude_current} label="exclude current from next"
@@ -72,6 +77,35 @@ export default function SceneGroupTrack({ event }: { event: MusicEvent }) {
             <Link to={`/color-sets?id=${encodeURIComponent(event.scene_group_color_ref_id)}`} target="_blank"
               title="Open this Color Group in a new tab" style={{ fontSize: 13, textDecoration: 'none' }}>↗</Link>
           )}
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+          title="This group's default Dark/Light mode. Default defers to the scene / color levels; the TopBar toggle and the firing trigger outrank it.">
+          <span style={{ color: 'var(--text-muted)' }}>mode 🌗</span>
+          <Select value={event.display_mode ?? 'default'} width={140}
+            onChange={(v) => mutate((d) => { d.display_mode = v as MusicEvent['display_mode']; })}
+            options={[
+              { value: 'default', label: 'Default (defer)' },
+              { value: 'dark', label: '🌙 Dark' },
+              { value: 'light', label: '☀️ Light' },
+            ]} />
+          <HelpLink topic="display-modes" title="Dark / Light mode" />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+          title="Color Group used instead of the one above while the resolved mode is Dark. Blank = keep the base group.">
+          <span style={{ color: 'var(--text-muted)' }}>🌙 group</span>
+          <SearchSelect value={event.scene_group_dark_color_ref_id ?? ''} width={180}
+            onChange={(v) => mutate((d) => { d.scene_group_dark_color_ref_id = v; })}
+            options={colorGroupOptions} placeholder="— same as base —" allowEmpty />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+          title="Color Group used instead of the one above while the resolved mode is Light. Blank = keep the base group.">
+          <span style={{ color: 'var(--text-muted)' }}>☀️ group</span>
+          <SearchSelect value={event.scene_group_light_color_ref_id ?? ''} width={180}
+            onChange={(v) => mutate((d) => { d.scene_group_light_color_ref_id = v; })}
+            options={colorGroupOptions} placeholder="— same as base —" allowEmpty />
         </label>
       </div>
 
@@ -122,7 +156,7 @@ export default function SceneGroupTrack({ event }: { event: MusicEvent }) {
         + Member
       </button>
       <p className="empty-note" style={{ marginTop: 8 }}>
-        Order matters for cycle mode; weights matter for weighted mode. Firing
+        Order matters for cycle mode; weights matter for random mode. Firing
         the group (or any scene pick while Force Scene holds it) advances one
         member and runs its normal First/Rest lanes.
       </p>

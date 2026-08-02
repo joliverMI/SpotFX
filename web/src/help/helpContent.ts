@@ -110,6 +110,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['▶ / ⏸', 'Activate — master switch for trigger firing. Green ⏸ = active (click to pause), ▶ = paused (click to resume).'],
           ['🍽️', 'Dinner Party — ignore song triggers; use automatic ambient lighting.'],
           ['💡', 'Ambient Mode — hold the Hue groups at a static full-brightness color. Short press: all groups on/off. Long-press: pick individual groups (see "Ambient Hue groups").'],
+          ['🌗', 'Display mode — cycles Default → 🌙 Dark → ☀️ Light. The icon flips immediately but the mode commits one second after the last click, so cycling past a mode never applies it. See "Dark / Light mode" under Settings.'],
         ],
         kbd: false,
       },
@@ -378,8 +379,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'event_ref ledfx scene ambient transition effect param morph color device settings',
         table: [
           ['event_ref', "Fire another event's action pool."],
-          ['morph_step', 'Multi-target aspect changes (brightness / reactivity / blur / color / bg color / effect / shape), absolute or nudge, with ramps. Shape sub-fields cover radial (star, twist, polygon) plus blackhole/orbits/fireworks (swirl, horizon size, field radius, blob size, offsets); "Edge / particle count" is one sub-field that lands on radial\'s polygon edges, orbits\' particle count, or fireworks\' burst size — whichever the running effect has. The Reactivity aspect has a Shape-style per-param menu: add any reactivity param (Spawn Rate, Beat Burst, Accel, Edge Speed, …), set it exactly, bind it to a signal (⚡), or give it its own nudge — per-param entries win over the single spread slider.'],
-          ['morph_color', 'Rotate the showing colors around the hue wheel (180° = complementary).'],
+          ['morph_step', 'Multi-target aspect changes (brightness / reactivity / blur / color / bg color / effect / shape), absolute or nudge, with ramps. Shape sub-fields cover radial (star, twist, polygon) plus blackhole/orbits/fireworks (swirl, horizon size, field radius, blob size, offsets); "Edge / particle count" is one sub-field that lands on radial\'s polygon edges, orbits\' particle count, or fireworks\' burst size — whichever the running effect has. On radial (no reverse param), Reverse reverses the full perceived motion — it flips the sign of Spin AND of Twist (the twist sign drives the apparent rotation of the scrolling spiral): On = reversed = negative, toggle = negate; magnitudes are preserved and an explicit Twist in the same step wins. Flip stays rotation-only (sign of Spin, On = positive). The Reactivity aspect has a Shape-style per-param menu: add any reactivity param (Spawn Rate, Beat Burst, Accel, Edge Speed, …), set it exactly, bind it to a signal (⚡), or give it its own nudge — per-param entries win over the single spread slider. Nudge amounts are bindable too: ⚡ maps the magnitude to a music signal, 🎲 rolls a fresh random magnitude every fire, and the +/− toggle flips the nudge direction 50/50 per fire (works alongside bounce — see "Value bindings").'],
+          ['morph_color', 'Rotate the showing colors around the hue wheel (180° = complementary). Degrees is bindable: ⚡ maps the rotation to a music signal, 🎲 rolls a fresh random rotation every fire, and the binding\'s +/− toggle randomizes direction (see "Value bindings"). "Morph background" (on by default) includes the BG color in the rotation; off leaves every effect\'s background untouched — FG and accent still rotate.'],
           ['scene_morph', 'Step the ACTIVE Scene Group forward/backward N scenes and fire the result (normal First/Rest). No-op when no group is active or Force Scene holds a single scene; advance 0 re-fires the current member (Rest lane).'],
           ['set_color', 'Apply a saved Color Set, or pick one from a Color Group. Instead of a specific card the picker also offers "Scene Group\'s Color Group" (default — pull from whatever Color Group the active Scene Group designates, falling back to the current group) and "Current Color Group" (re-use the last group any Set Color fired from).'],
           ['ledfx_scene / ledfx_ambient', 'Activate a LedFX scene / ambient behavior.'],
@@ -394,12 +395,14 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'events-scene-groups',
         title: 'Scene Groups',
-        keywords: 'scene group rotate cycle bounce wrap weighted random members force scene morph active color group designate palette',
+        keywords: 'scene group rotate cycle bounce wrap weighted random start members force scene morph active color group designate palette',
         body: [
           'A Scene Group is an event holding an ordered set of Scene Updates. Firing the group advances its cursor one member and fires that scene with normal First/Rest lanes — a newly rotated-to scene runs First, a repeat runs Rest. The picked member becomes the "last scene", so flares and Update/Reset Scene act on it as usual.',
-          'Modes mirror Color Groups: Cycle steps in order (wrap loops around, bounce reverses at the ends) and never re-lands on the scene already showing; Weighted picks randomly by member weight, optionally excluding the current one. The cursor lives in memory and keeps rotating across songs (unlike Color Group cursors, which reset per track).',
+          'Modes mirror Color Groups: Cycle steps in order (wrap loops around, bounce reverses at the ends) and never re-lands on the scene already showing; Random (weighted) picks every member randomly by weight — with "exclude current from next" on (the default) it never repeats the scene just shown. The cursor lives in memory and keeps rotating across songs (unlike Color Group cursors, which reset per track).',
+          'Cycle mode\'s "random start" checkbox randomizes where the cycle begins: whenever the group is freshly called (it wasn\'t the active scene group), the first pick is a random member and cycling continues from there, instead of resuming the persisted cursor.',
           'The group that fired last (or is held by Force Scene) is the ACTIVE group — Scene Morph actions step it. Picking a plain Scene Update directly clears the active group. Members that were deleted or are no longer Scene Updates are skipped automatically.',
           'A Scene Group can also designate a Color Group (the "color group" picker in its editor). Set Color actions left on "Scene Group\'s Color Group" (the default for new ones) pull from that group while this Scene Group is active — so switching Scene Groups re-themes the room\'s palette without editing any events. When no group is active, or the active one designates nothing, those actions fall back to the current (last-fired) Color Group.',
+          'Dark/Light: the "mode 🌗" select is the group\'s default display mode (see "Dark / Light mode" under Settings), and the 🌙/☀️ group pickers swap in a different Color Group while the resolved mode is Dark or Light — so a group can carry a dimmer palette for dark evenings and a fuller one for light.',
         ],
       },
       {
@@ -431,10 +434,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'events-bindings',
-        title: 'Value bindings (⚡)',
-        keywords: 'signal rms bass onset section energy trigger intensity threshold map',
+        title: 'Value bindings (⚡ / 🎲)',
+        keywords: 'signal rms bass onset section energy trigger intensity threshold map random dice sign plus minus flip',
         body: [
           'Any bindable field can swap its fixed value for a live music signal — rms_total, rms_bass, onset_score, section_energy, or trigger_intensity — with a beat averaging window, a mapped range or threshold steps, and a fallback for when the signal is missing.',
+          'The 🎲 button next to ⚡ binds the field to a random roll instead: every fire picks a fresh uniform value in the "random value" range (or, on toggle fields, rolls against the threshold steps — a single ≥ 0.5 step is a 50/50 coin flip). Each 🎲-bound field rolls independently, even within one morph step, and Random is also available in the signal dropdown of any existing binding.',
+          'The +/− toggle on numeric bindings randomly flips the sign of the result: half the fires come out negative — e.g. map intensity to twist 1–4 and get ±1–4, so direction varies while magnitude still tracks the music. The flip happens before the field\'s own clamping, so fields that only accept 0..1 just floor at 0.',
         ],
       },
     ],
@@ -1011,6 +1016,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Song info comes from the Spotify API (needs client credentials from the Spotify Developer Dashboard) or from LedFX events, in which case genres are sourced from Last.fm.',
           'Target Device Name(s) lists the Spotify Connect devices SpotFX reacts to — comma-separate multiple names (e.g. "Serenity, Living Room"). Playback on any listed device counts; anything else shows the Wrong Device badge on Now Playing and triggers stay quiet.',
           'Getting a Last.fm API key: sign in at last.fm/api/account/create, enter any application name and description, leave callback and homepage blank, submit, then copy the API key into the field here. The key is free and rate-limited to 5 requests/second — well within SpotFX\'s usage. Your username is optional; SpotFX only uses it for future scrobbling features.',
+        ],
+      },
+      {
+        id: 'display-modes',
+        title: 'Dark / Light mode',
+        keywords: 'dark mode light mode display background black force shield singles cascade override topbar moon sun ledfx lock',
+        body: [
+          'One room-wide mode — Dark, Light, or Default — decided by a cascade where the FIRST level that isn\'t "Default" wins: 1) the 🌗 TopBar toggle, 2) the firing trigger, 3) the active Scene Group, 4) the current Scene, 5) the Set Color step, 6) the Color Group card, 7) the Color Set card. "Default" at a level just defers to the next one down; if every level defers, backgrounds behave exactly as authored.',
+          'Dark forces every background black on affected devices. This is hard-locked inside LedFX itself (a per-virtual "dark_lock"), so no write path — ramps, scenes, morphs — can relight a background while dark. Light keeps authored backgrounds and fills in the default light background (color + brightness set here in Settings) on devices whose Color Set entry doesn\'t define one.',
+          'Shielded devices are exempt from both: they always keep their authored backgrounds. Shield whole categories with the checkboxes (default: Singles — single-color lamps should usually stay lit) or individual virtual ids in the text field.',
+          'Scene Groups can additionally designate a 🌙 Dark and ☀️ Light variant Color Group — see "Scene Groups" on the Events page help.',
         ],
       },
       {

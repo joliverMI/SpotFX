@@ -113,9 +113,9 @@ export function Select({
   );
 }
 
-export function Checkbox({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label?: string }) {
+export function Checkbox({ value, onChange, label, title }: { value: boolean; onChange: (v: boolean) => void; label?: string; title?: string }) {
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+    <label title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
       <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>

@@ -43,6 +43,10 @@ interface LiveState {
   ambient: boolean;
   /** LedFX Hue device ids currently held in Ambient Mode */
   ambientGroups: string[];
+  /** Global Dark/Light display mode (TopBar toggle, top of the cascade). */
+  displayMode: 'default' | 'dark' | 'light';
+  /** Mode the room actually resolved to on the last fire/toggle. */
+  displayModeResolved: 'default' | 'dark' | 'light';
   useAnalyzed: boolean;
   analyzedOverride: boolean;
   useAiTriggers: boolean;
@@ -69,6 +73,8 @@ export const useLiveStore = create<LiveState>(() => ({
   dinnerParty: false,
   ambient: false,
   ambientGroups: [],
+  displayMode: 'default',
+  displayModeResolved: 'default',
   useAnalyzed: true,
   analyzedOverride: false,
   useAiTriggers: false,
@@ -125,6 +131,9 @@ export function ensureLiveState(): void {
       dinnerParty: Boolean(msg.dinner_party_mode ?? false),
       ambient: Boolean(msg.ambient_mode_enabled ?? false),
       ambientGroups: (msg.ambient_groups as string[]) ?? [],
+      displayMode: (msg.display_mode as LiveState['displayMode']) ?? 'default',
+      displayModeResolved:
+        (msg.display_mode_resolved as LiveState['displayModeResolved']) ?? 'default',
       useAnalyzed: Boolean(msg.use_analyzed_triggerless ?? true),
       analyzedOverride: Boolean(msg.analyzed_trigger_override ?? false),
       useAiTriggers: Boolean(msg.use_unreviewed_ai_triggers ?? false),

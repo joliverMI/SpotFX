@@ -60,6 +60,20 @@ class Settings(BaseSettings):
     ambient_fade_brightness: int = 35        # brightness % the off-fade lands on before the entertainment stream takes over
     ambient_catchup_s: float = 8.0           # after the wake scene, tween the Hue virtual's effect back to the pre-wake (current music) look over this long (0 = jump at next trigger)
 
+    # ── Dark / Light display mode ─────────────────────────────────────────────
+    # The global on/off state lives on AppState.display_mode (TopBar toggle,
+    # persisted like dinner_party_mode); these configure what the modes DO.
+    # Light mode: background applied to affected devices whose Color Set entry
+    # doesn't set its own bg_color / background_brightness.
+    display_light_bg_color: str = "#201830"      # hex
+    display_light_bg_brightness: float = 0.3     # 0..1
+    # Shielded devices keep their authored backgrounds — never forced black by
+    # dark mode, never given the default light background. Categories are
+    # device-category NAMES (resolved to virtuals at fire time) plus explicit
+    # virtual ids. Default: Singles always keep a background.
+    display_shield_categories: list = ["Singles"]
+    display_shield_virtuals: list = []
+
     # ── App ───────────────────────────────────────────────────────────────────
     app_host: str = "0.0.0.0"
     app_port: int = 8000

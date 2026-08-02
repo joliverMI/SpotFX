@@ -81,6 +81,14 @@ class AppState:
     dinner_party_mode: bool = False            # True = ignore song triggers, use Dinner Party triggerless profile
     ambient_mode_enabled: bool = False         # True = at least one Hue group frozen (LedFX stream stopped) + held at static full-brightness via Hue REST
     ambient_groups: list = field(default_factory=list)  # LedFX Hue device ids currently held in ambient (subset of the target category)
+    # Global Dark/Light display mode (TopBar toggle — the TOP of the cascade).
+    # "default" = defer to trigger → scene group → scene → set_color → color
+    # cards. Persisted to settings.json, rehydrated at startup.
+    display_mode: str = "default"
+    # Last mode a fire (or the global toggle) actually resolved to — what the
+    # room is currently doing. Informational (WS/status); the source of truth
+    # for LedFX dark locks lives in services/display_mode.
+    display_mode_resolved: str = "default"
 
     # ── Genre Blending ────────────────────────────────────────────────────────
     # Snapshot of the outgoing track captured just before current_track is replaced.
