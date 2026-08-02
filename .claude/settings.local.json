@@ -216,7 +216,8 @@
       "Bash(curl -s http://localhost:8888/api/virtuals/hues)",
       "Bash(curl -s -X POST http://127.0.0.1:8888/api/virtuals/crystal-mapper/effects -H 'Content-Type: application/json' -d '{\"type\":\"radial\"}')",
       "Bash(python -)",
-      "Bash(/home/javi/ledfx/bin/python -)"
+      "Bash(/home/javi/ledfx/bin/python -)",
+      "Bash(/home/javi/ledfx/bin/python /tmp/claude-1000/-home-javi-SpotFX/a640fbdb-daa7-44ed-947e-4d4c81e9dfd7/scratchpad/maze_design.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\joliv\\.claude\\plans",
