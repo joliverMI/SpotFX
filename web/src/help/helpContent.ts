@@ -793,16 +793,6 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Use "Import from LedFX" to list live virtuals with pixel count, current effect, and any existing category assignment; the filter box matches the virtual id.',
         ],
       },
-      {
-        id: 'shape-maps',
-        title: 'Shape maps (shaped matrices)',
-        keywords: 'shape map hex lattice crystal resample kernel matrix geometry parity holes serpentine LLM thin lines',
-        body: [
-          'A shape map tells LedFX which cells of a matrix virtual\'s render grid are REAL LEDs and in what order the strip visits them — for devices like the crystal ball, where 976 LEDs sit on a hex-like lattice inside a 72×37 grid. With a map applied, LedFX kernel-resamples every rendered frame onto the real LEDs (each LED averages/maxes its catchment of render cells, blend set by the virtual\'s "shape_resample_blend", 0 = faithful average, 1 = punchy max). Thin features — radial\'s spokes, 1-px lines — land on the nearest real LEDs instead of falling between them. Pixel-exact lattice effects (Squiggles, Pacman) declare themselves LATTICE_EXACT and are passed through untouched.',
-          'Edit a map from Devices → the ⬡ button on a virtual chip. The text format is deliberately LLM-friendly: "shape v1", "grid W x H", "device"/"gap" ids, "parity odd|even|none", per-row extents with "holes", an optional "order:" block (serpentine row ranges + explicit r,c walks for irregular strip paths like the crystal\'s interleaved pole caps). Validate compiles on LedFX and reports every error with its line number, then previews the shape: dots = real LEDs, tinted patches = each LED\'s resample catchment. Apply regenerates the virtual\'s segment list from the map (idempotent) and turns resampling on.',
-          'The crystal\'s map was bootstrapped from its existing segment config with scripts/bootstrap_shape_map.py (--verify proves the round-trip is exact, --apply pushes). New shaped matrices: paste a description/photo of the fixture to an LLM with the authoring guide (collapsible in the dialog) and ask for "shape v1" text.',
-        ],
-      },
     ],
   },
 
@@ -1035,7 +1025,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'One room-wide mode — Dark, Light, or Default — decided by a cascade where the FIRST level that isn\'t "Default" wins: 1) the 🌗 TopBar toggle, 2) the firing trigger, 3) the active Scene Group, 4) the current Scene, 5) the Set Color step, 6) the Color Group card, 7) the Color Set card. "Default" at a level just defers to the next one down; if every level defers, backgrounds behave exactly as authored.',
           'Dark forces every background black on affected devices. This is hard-locked inside LedFX itself (a per-virtual "dark_lock"), so no write path — ramps, scenes, morphs — can relight a background while dark. Light keeps authored backgrounds and fills in the default light background (color + brightness set here in Settings) on devices whose Color Set entry doesn\'t define one.',
-          'Shielded devices are exempt from both — and the shield guarantees they always end up with a VISIBLE background, in every mode: a Color Set (or group override) that would land a black or zero-brightness background on a shielded device is rescued with the entry\'s own foreground color (fallback: the light default). Shield whole categories with the checkboxes (default: Singles — single-color lamps should usually stay lit) or individual virtual ids in the text field.',
+          'Shielded devices are exempt from both: they always keep their authored backgrounds. Shield whole categories with the checkboxes (default: Singles — single-color lamps should usually stay lit) or individual virtual ids in the text field.',
           'Scene Groups can additionally designate a 🌙 Dark and ☀️ Light variant Color Group — see "Scene Groups" on the Events page help.',
         ],
       },

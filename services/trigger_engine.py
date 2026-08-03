@@ -4321,34 +4321,24 @@ class TriggerEngine:
             getattr(card, "display_mode", "default"),
         )
         dm.sync_dark_locks_bg(mode)
-        shields = dm.shielded_virtuals()
-        for vid, entry in merged.items():
-            if vid in shields:
-                # Shielded devices must ALWAYS end up with a visible
-                # background — in EVERY mode, including default. Rescue
-                # authored blackouts (e.g. a group's global bg-black override
-                # meant for the strips/matrix canvas) with the entry's own FG
-                # color so the glow stays on-palette; explicit zero brightness
-                # lifts to the light default. None values stay None (no write
-                # → the device keeps its current, already-visible background).
-                if dm.is_black(entry.bg_color):
-                    entry.bg_color = dm.visible_bg_fallback(entry.color_value)
-                if entry.background_brightness == 0:
-                    entry.background_brightness = float(settings.display_light_bg_brightness)
-                continue
-            if mode == "dark":
-                entry.bg_color = "#000000"
-                entry.background_brightness = 0.0
-                entry.bg_mode = None   # pointless write for a black bg
-            elif mode == "light":
-                # Make sure a VISIBLE background lands: fill the default where
-                # the entry authors none, and treat explicit black / zero
-                # brightness as "none" (a black background is indistinguishable
-                # from no background).
-                if not entry.bg_color or dm.is_black(entry.bg_color):
-                    entry.bg_color = settings.display_light_bg_color
-                if not entry.background_brightness:   # None or 0
-                    entry.background_brightness = float(settings.display_light_bg_brightness)
+        if mode != "default":
+            shields = dm.shielded_virtuals()
+            for vid, entry in merged.items():
+                if vid in shields:
+                    continue
+                if mode == "dark":
+                    entry.bg_color = "#000000"
+                    entry.background_brightness = 0.0
+                    entry.bg_mode = None   # pointless write for a black bg
+                else:  # light — make sure a VISIBLE background lands: fill the
+                    # default where the entry authors none, and treat explicit
+                    # black / zero brightness as "none" (a black background is
+                    # indistinguishable from no background).
+                    if (not entry.bg_color
+                            or entry.bg_color.strip().lower() in ("#000000", "#000", "black")):
+                        entry.bg_color = settings.display_light_bg_color
+                    if not entry.background_brightness:   # None or 0
+                        entry.background_brightness = float(settings.display_light_bg_brightness)
 
         # Address each device by its LIVE active effect (not a stale cached one)
         # so these color writes update config in place instead of switching the
