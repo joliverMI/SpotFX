@@ -86,6 +86,35 @@ def shielded_virtuals() -> set[str]:
     return out
 
 
+_HEX_RE = None
+
+
+def visible_bg_fallback(color_value: Optional[str]) -> str:
+    """A background color guaranteed to be visible, for rescuing shielded
+    devices from authored black backgrounds: prefer the entry's own FG color
+    (solid hex, or the first parseable stop of a gradient) so the glow stays
+    palette-coherent; fall back to the configured light default."""
+    global _HEX_RE
+    import re
+    if _HEX_RE is None:
+        _HEX_RE = (re.compile(r"#[0-9a-fA-F]{6}\b"),
+                   re.compile(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)"))
+    cv = (color_value or "").strip()
+    m = _HEX_RE[0].search(cv)
+    if m and m.group(0).lower() != "#000000":
+        return m.group(0)
+    m = _HEX_RE[1].search(cv)
+    if m:
+        rgb = tuple(min(255, int(x)) for x in m.groups())
+        if any(rgb):
+            return "#%02x%02x%02x" % rgb
+    return settings.display_light_bg_color
+
+
+def is_black(color: Optional[str]) -> bool:
+    return (color or "").strip().lower() in ("#000000", "#000", "black")
+
+
 # ── LedFX dark-lock sync ─────────────────────────────────────────────────────
 # Last dark_lock value confirmed pushed per virtual. Empty after a SpotFX
 # restart → the first sync re-pushes everything (self-healing). LedFX persists
