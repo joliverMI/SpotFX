@@ -196,7 +196,7 @@ export default function BuilderPage() {
     librosa: librosa ?? null,
     mfccDistances,
     triggers: workingTriggers,
-    events: (events ?? []).map((e) => ({ id: e.id, name: e.name, color: e.color })),
+    events: (events ?? []).map((e) => ({ id: e.id, name: e.name, color: e.color, event_type: e.event_type })),
     calibrationTargetsMs,
     draggingIntensity,
     selectedIds,

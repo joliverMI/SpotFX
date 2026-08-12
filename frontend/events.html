@@ -2150,6 +2150,7 @@ function matchesTypeFilter(t) {
   if (typeFilter === 'scene') return [
     'scene_update', 'update_scene', 'reset_scene',
     'shape_flare', 'color_flare', 'combo_flare',
+    'charge', 'lull', 'drop',
   ].includes(t);
   if (typeFilter === 'morph') return t === 'morph_set';
   return t === typeFilter;
@@ -2247,9 +2248,10 @@ document.getElementById('filter-ai-ex').addEventListener('click', () => {
   renderList();
 });
 
-// Scene Update has exactly four fixed lanes: First / Rest / Shape / Color.
+// Scene Update has a fixed set of lanes: First / Rest / Shape / Color plus
+// Charge / Lull / Drop (extras fired alongside the LedFX phase choreography).
 // Upgrade-safe: preserves any existing lane alternatives and appends missing ones.
-const SCENE_LANE_NAMES = ['First', 'Rest', 'Shape', 'Color'];
+const SCENE_LANE_NAMES = ['First', 'Rest', 'Shape', 'Color', 'Charge', 'Lull', 'Drop'];
 function ensureSceneLanes(e) {
   if (e.event_type !== 'scene_update') return;
   const existing = Array.isArray(e.morph_lanes) ? e.morph_lanes : [];
@@ -2294,6 +2296,9 @@ function applyFixedReadonly(e) {
       shape_flare:  'Built-in: re-runs the Shape lane of the last Scene Update fired.',
       color_flare:  'Built-in: re-runs the Color lane of the last Scene Update fired.',
       combo_flare:  'Built-in: re-runs the Shape and Color lanes of the last Scene Update, in parallel.',
+      charge: 'Built-in: starts the charge build on phase-capable effects (blackhole/orbits/radial/fireworks) and runs the Charge lane of the last Scene Update.',
+      lull: 'Built-in: holds the coiled lull state on phase-capable effects and runs the Lull lane of the last Scene Update.',
+      drop: 'Built-in: snaps the drop payoff on phase-capable effects and runs the Drop lane of the last Scene Update.',
     };
     note.textContent = FLARE_NOTE[e.event_type] || 'Built-in event.';
     note.style.display = '';
@@ -2362,7 +2367,7 @@ document.getElementById('btn-add-device-target').addEventListener('click', () =>
 });
 
 function toggleSections(type) {
-  const isFixedScene = ['update_scene', 'reset_scene', 'shape_flare', 'color_flare', 'combo_flare'].includes(type);
+  const isFixedScene = ['update_scene', 'reset_scene', 'shape_flare', 'color_flare', 'combo_flare', 'charge', 'lull', 'drop'].includes(type);
   document.getElementById('actions-section').style.display = type === 'single' ? '' : 'none';
   document.getElementById('sequence-section').style.display = type === 'sequence' ? '' : 'none';
   document.getElementById('beat-sequence-section').style.display = type === 'beat_sequence' ? '' : 'none';

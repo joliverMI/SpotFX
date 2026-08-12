@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { Action, IntensityChooserAction, IntensityLane } from '../../types/events';
 import { newIntensityLane } from '../../lib/defaults';
 import { uuid } from '../../lib/uid';
@@ -6,10 +6,11 @@ import { useEditorStore } from '../../store/editorStore';
 import { cloneForPaste, useClipboard, writeClip } from '../../store/clipboard';
 import { LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import { ParentScopeToggle } from '../forms/ScopePicker';
+import RampOverride from '../forms/RampOverride';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import { groupPathOf } from './groupPath';
 import PreviewButton from '../PreviewButton';
-import { previewIntensityLane } from '../../lib/preview';
+import { previewActionAt, previewIntensityLane } from '../../lib/preview';
 import HelpLink from '../../help/HelpLink';
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -30,6 +31,8 @@ export default function IntensityChooserBody({ uid, action }: { uid: string; act
   const updateAction = useEditorStore((s) => s.updateAction);
   const clip = useClipboard();
   const stripRef = useRef<HTMLDivElement>(null);
+  // preview-at-intensity value (raw 0-1, not persisted)
+  const [testIntensity, setTestIntensity] = useState(0.5);
   if (!draft) return null;
   const groupPath = groupPathOf(draft, uid);
   if (!groupPath) return null;
@@ -123,6 +126,37 @@ export default function IntensityChooserBody({ uid, action }: { uid: string; act
             }}>{lane.threshold.toFixed(2)}</span>
           </div>
         ))}
+      </div>
+
+      {/* Preview the whole chooser as if the trigger fired at ⚡v — the
+          engine picks the matching lane exactly like a real fire. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 6px 12px', fontSize: 13 }}>
+        <span style={{ color: 'var(--text-muted)' }}>Test at ⚡</span>
+        <input type="range" min={0} max={1} step={0.01} value={testIntensity}
+          onChange={(e) => setTestIntensity(Number(e.target.value))}
+          style={{ flex: 1, maxWidth: 220 }} />
+        <input type="number" min={0} max={1} step={0.01} value={testIntensity}
+          onChange={(e) => setTestIntensity(clamp01(Number(e.target.value)))}
+          style={{ width: 64, background: 'var(--bg)', color: 'var(--text)',
+                   border: '1px solid var(--border)', borderRadius: 6, padding: '3px 6px' }} />
+        <PreviewButton
+          title={`Preview — fire the lane an intensity of ${testIntensity.toFixed(2)} would pick (raw value, no song scaling)`}
+          run={() => previewActionAt(action, testIntensity)} />
+        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+          → {(() => {
+            const idx = action.lanes.reduce(
+              (acc, l, j) => (j > 0 && l.threshold <= testIntensity ? j : acc), 0);
+            return action.lanes[idx]?.name || laneLabel(idx);
+          })()}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 6px 12px', fontSize: 13 }}>
+        <span style={{ color: 'var(--text-muted)' }}
+          title="Override forces this ramp on everything the chosen lane fires — through scene groups and scenes. ⚡ can map it to trigger intensity (e.g. 0→1500ms, 1→250ms), 🎲 rolls it per fire. Scene / scene-group overrides win over this one.">
+          Ramp
+        </span>
+        <RampOverride value={action.ramp_ms} onChange={(v) => set((g) => { g.ramp_ms = v; })} />
       </div>
 
       {action.lanes.map((lane, j) => (

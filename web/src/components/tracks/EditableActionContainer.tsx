@@ -1,20 +1,23 @@
 import { useState } from 'react';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
-import type { Action, ActionType } from '../../types/events';
+import type { Action } from '../../types/events';
+import type { AddableActionType } from '../../types/summaries';
 import { getUid } from '../../lib/uid';
 import { getAtPath } from '../../lib/paths';
-import { newAction } from '../../lib/defaults';
+import { newAction, newLightModeChooser } from '../../lib/defaults';
 import { useEditorStore } from '../../store/editorStore';
 import { cloneForPaste, useClipboard } from '../../store/clipboard';
 import EditActionCard from '../cards/EditActionCard';
 import AddActionDialog from '../dialogs/AddActionDialog';
 
-export const EDITABLE_ACTION_TYPES: ActionType[] = [
+export const EDITABLE_ACTION_TYPES: AddableActionType[] = [
   'event_ref', 'ledfx_scene', 'ledfx_ambient', 'ledfx_ambient_color',
   'ledfx_global_transition', 'ledfx_effect_param',
   'morph_step', 'set_color', 'morph_color', 'scene_morph', 'device_settings',
+  'brightness',
   'random_group', 'sequence_group', 'parallel_group', 'intensity_chooser',
+  'light_mode_chooser',
 ];
 
 /** A sortable, droppable Action[] list at `containerPath` with a "+ Add action" footer. */
@@ -72,7 +75,7 @@ export default function EditableActionContainer({
           onPick={(t) => {
             mutate((d) => {
               const arr = getAtPath(d, containerPath) as Action[];
-              arr.push(newAction(t));
+              arr.push(t === 'light_mode_chooser' ? newLightModeChooser() : newAction(t));
             });
             setAdding(false);
           }}

@@ -241,6 +241,27 @@ export interface DeviceSettingsAction extends ActionBase {
   targets: DeviceSettingTarget[];
 }
 
+/** Per-parameter mode of a BrightnessAction: leave the multiplier alone,
+ *  set it to a value ("change"), or add a nudge delta to it. */
+export type BrightnessMode = 'keep' | 'absolute' | 'nudge';
+
+/** Set/nudge the per-device brightness MULTIPLIERS (fg + bg, 0..1, default 1).
+ *  They multiply with whatever brightness the Color Set/Group pipeline writes
+ *  (final = entry value × multiplier) and re-apply immediately to the scoped
+ *  devices' current effects. Reset to 1.0 on track change. */
+export interface BrightnessAction extends ActionBase {
+  type: 'brightness';
+  scope: MorphScope;                 // empty = inherit nearest Target, else global
+  ramp_ms: Bindable<number> | null;  // null = settings default; 0 = instant
+  intensity_source: IntensitySource; // shared by both nudges' intensity scale
+  brightness_mode: BrightnessMode;
+  brightness_value: Bindable<number> | null; // 0..1 multiplier target (absolute)
+  brightness_nudge: NumericNudge | null;
+  bg_mode: BrightnessMode;
+  bg_value: Bindable<number> | null;         // 0..1 multiplier target (absolute)
+  bg_nudge: NumericNudge | null;
+}
+
 /** HA choose-style random container. */
 export interface RandomOption {
   id: string;
@@ -320,6 +341,9 @@ export interface IntensityLane {
   name: string;
   labels: string[];
   threshold: number; // lower bound on the 0-1 intensity scale; lanes[0] = default (ignored)
+  /** Light Mode Chooser lanes only (source 'display_mode'): the resolved
+   *  Dark/Light mode that selects this lane. */
+  mode?: 'dark' | 'light' | null;
   scope: MorphScope | null; // per-lane Target
   actions: Action[];
 }
@@ -327,7 +351,17 @@ export interface IntensityLane {
 export interface IntensityChooserAction extends ActionBase {
   type: 'intensity_chooser';
   id: string;
-  source: 'trigger_intensity';
+  /** Ramp override: forced on every descendant action of the chosen lane
+   *  (through event_refs / scene groups / scene lanes); ⚡/🎲-bindable.
+   *  null = parent (nearest ancestor override, else each action's own ramp).
+   *  Deeper overrides (scene group / scene ramp) win over this one. */
+  ramp_ms?: Bindable<number> | null;
+  /** 'display_mode' = the Light Mode Chooser face: the resolved Dark/Light
+   *  mode (TopBar → trigger → scene group → scene) picks the lane, re-resolved
+   *  at fire time. */
+  source: 'trigger_intensity' | 'display_mode';
+  /** display_mode source only: lane mode used when the cascade resolves "default". */
+  default_mode?: 'dark' | 'light';
   scope: MorphScope | null; // default Target for lanes
   lanes: IntensityLane[];
 }
@@ -344,6 +378,7 @@ export type Action =
   | MorphColorAction
   | SceneMorphAction
   | DeviceSettingsAction
+  | BrightnessAction
   | RandomGroupAction
   | SequenceGroupAction
   | ParallelGroupAction
@@ -396,6 +431,7 @@ export type EventType =
   | 'single' | 'sequence' | 'beat_sequence' | 'morph_set'
   | 'scene_update' | 'update_scene' | 'reset_scene'
   | 'shape_flare' | 'color_flare' | 'combo_flare'
+  | 'charge' | 'lull' | 'drop'
   | 'scene_group'
   | 'device_settings' | 'composite';
 
@@ -415,6 +451,12 @@ export interface MusicEvent {
   ai_exposed: boolean;
   fixed: boolean;
   scene_override: boolean;
+
+  /** scene_update / scene_group only: ramp override forced on every action
+   *  this scene fire runs; ⚡/🎲-bindable. null = parent (inherit the nearest
+   *  ancestor override, e.g. an Intensity Scene chooser's). The deepest
+   *  override wins: scene > scene group > chooser. */
+  ramp_ms?: Bindable<number> | null;
 
   actions: Action[];
 
@@ -461,6 +503,13 @@ export interface MusicEvent {
 export const SCENE_EVENT_TYPES: EventType[] = [
   'scene_update', 'update_scene', 'reset_scene',
   'shape_flare', 'color_flare', 'combo_flare',
+  'charge', 'lull', 'drop',
+];
+
+/** A scene_update's pinned lanes, by index. Charge/Lull/Drop carry the
+ *  per-scene extras fired alongside the LedFX phase choreography. */
+export const SCENE_LANE_NAMES = [
+  'First', 'Rest', 'Shape', 'Color', 'Charge', 'Lull', 'Drop',
 ];
 
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
@@ -474,6 +523,9 @@ export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   shape_flare: 'Shape Flare',
   color_flare: 'Color Flare',
   combo_flare: 'Combo Flare',
+  charge: 'Charge',
+  lull: 'Lull',
+  drop: 'Drop',
   scene_group: 'Scene Group',
   device_settings: 'Device Settings',
   composite: 'Composite',

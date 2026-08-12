@@ -37,7 +37,12 @@ class PhasedTransition:
 _PARTICLES = frozenset({"blackhole", "orbits", "fireworks"})
 # squiggles shares the full choreography set: pacman two-phase morph,
 # radial implode→segment-burst, and envoy-collision→radial-bloom.
-_PARTICLES_AND_SQUIGGLES = _PARTICLES | {"squiggles"}
+# dancer joins it too: radial→dancer holds the body formation until the
+# bloom; pacman→dancer rides the chomp wipe with a Neo drop-in.
+# eye joins as well: eye→radial gathers the gaze to the radial's center
+# for the bloom; radial→eye explodes the iris back out of the pinch;
+# pacman→eye holds the infall until the maze has faded.
+_PARTICLES_AND_SQUIGGLES = _PARTICLES | {"squiggles", "dancer", "eye"}
 
 # Keep anchor fractions in sync with ledfx/effects/particle_handoff.py:
 #   BLOOM_START = 0.45 (radial bloom / eruption burst)
@@ -54,6 +59,25 @@ TRANSITIONS: tuple[PhasedTransition, ...] = (
     PhasedTransition(
         "pacman→particles (maze fades, then entities morph)",
         frozenset({"pacman"}), _PARTICLES_AND_SQUIGGLES, 0.45,
+    ),
+    # dancer somersaults + fades over phase 1; the incoming particle
+    # effect holds adoption until PACMAN_MORPH_START (same 0.45 hold the
+    # siblings use for pacman) and the body-points burst lands on the beat
+    PhasedTransition(
+        "dancer→particles (somersault, then burst)",
+        frozenset({"dancer"}), _PARTICLES | {"squiggles", "eye"}, 0.45,
+    ),
+    # the eye closes its lids over phase 1; the lids reopen at the bloom
+    # revealing the dancer (who assembles from the iris at that moment)
+    PhasedTransition(
+        "eye→dancer (blink, then reveal)",
+        frozenset({"eye"}), frozenset({"dancer"}), 0.45,
+    ),
+    # dancers run from the approaching chomp wipe; the maze reveal (the
+    # wipe front crossing mid-panel) lands on the trigger
+    PhasedTransition(
+        "dancer→pacman (run away, then the wipe)",
+        frozenset({"dancer"}), frozenset({"pacman"}), 0.45,
     ),
 )
 

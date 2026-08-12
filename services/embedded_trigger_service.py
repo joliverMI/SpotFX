@@ -483,14 +483,26 @@ def _detect_charges_from_gaps(beats, gaps, tp) -> list[int | None]:
     """
     lookback  = getattr(tp, "charge_lookback_beats", 12)
     min_score = getattr(tp, "charge_min_score",      0.40)
+    # charge_lead_beats > 0 anchors the search around (gap - lead) instead
+    # of "loudest beat right before the gap": measured hand-authored EDM
+    # charges sit a median ~14 beats ahead of the lull (the buildup START),
+    # not at the pre-gap loudness peak. lookback then acts as the anchored
+    # window's total width. 0 = legacy behavior.
+    lead      = getattr(tp, "charge_lead_beats",     0)
 
     def _score(b):
         return (b.rms_total + b.rms_bass) / 2.0
 
     charges: list[int | None] = []
     for gs, ge, _ in gaps:
-        search_start = max(0, gs - lookback)
-        window = beats[search_start : gs]
+        if lead > 0:
+            center = gs - lead
+            search_start = max(0, center - lookback // 2)
+            search_end = max(search_start + 1, min(gs, center + lookback // 2 + 1))
+        else:
+            search_start = max(0, gs - lookback)
+            search_end = gs
+        window = beats[search_start:search_end]
         if not window:
             charges.append(None)
             continue
@@ -1167,6 +1179,14 @@ def suggest_triggers(
                      + w_uptick * uptick_comp + w_energy * energy_comp
                      + w_dip * dip_comp
                      + w_snare * snare_comp + w_burst * burst_comp)
+            # Normalize by the active weight sum: the score is a weighted
+            # MEAN, so the fixed tier thresholds (shape/flash/scene) keep
+            # their meaning for any weight combo the tuner explores. Without
+            # this, low weight sums made the flash tier mathematically
+            # unreachable and the tuner's optimum was "emit no flares".
+            total /= max(w_bass_hit + w_bass_onset + w_onset + w_harm
+                         + w_uptick + w_energy + w_dip + w_snare + w_burst,
+                         1e-6)
             # bass_comp for tier logic uses the combined bass signal
             bass_comp = bass_hit_comp + bass_onset_comp * 0.5
             scored.append((bi, total, bass_comp, harm_comp))

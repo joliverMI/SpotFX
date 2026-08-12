@@ -10,6 +10,7 @@ import { isBinding, SCENE_GROUP_COLOR_REF, CURRENT_COLOR_GROUP_REF, DISPLAY_MODE
 import EffectParamForm from './EffectParamForm';
 import MorphStepForm from './MorphStepForm';
 import DeviceSettingsForm from './DeviceSettingsForm';
+import BrightnessForm from './BrightnessForm';
 import JsonEditor from './JsonEditor';
 
 export type UpdateAction = (fn: (a: Action) => void) => void;
@@ -66,6 +67,8 @@ function TypedForm({ action, update }: { action: Action; update: UpdateAction })
       return <SceneMorphForm action={action} update={update} />;
     case 'device_settings':
       return <DeviceSettingsForm action={action} update={update as never} />;
+    case 'brightness':
+      return <BrightnessForm action={action} update={update} />;
     case 'random_group':
     case 'sequence_group':
     case 'parallel_group':

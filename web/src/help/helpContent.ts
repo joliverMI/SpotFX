@@ -243,9 +243,10 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'builder-trigger-dialog',
             title: 'Trigger edit dialog',
-            keywords: 'double click edit timestamp event labels intensity open new tab reference palette assign blend color group override',
+            keywords: 'double click edit timestamp event labels intensity open new tab reference palette assign blend color group override drop scene group',
             body: [
               'Double-click a trigger (or empty canvas) to open it: timestamp (m:ss.t), event (recently used float to the top), filter labels, intensity, the Colors picker (scene-group color override — see below), and the Override Blend toggle.',
+              'When the picked event is the fixed Drop, a Drop 🎯 picker appears: choose a Scene Group the drop falls back to for this trigger instead of the global drop group (see "Charge / Lull / Drop events").',
               'The ↗ next to the event picker opens the chosen event\'s editor in a new tab, so the trigger you\'re editing stays put.',
             ],
           },
@@ -350,7 +351,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Events page',
         keywords: 'chips fire test lock fixed ai exposed',
         body: [
-          'Search matches name or labels; type chips narrow by kind. Row icons: 🔒 built-in (read-only), 🌳 composite tree, ⚡ energy level, AI = exposed to AI trigger generation. ▶ test-fires the event immediately.',
+          'Search matches name or labels; type chips narrow by kind. Row icons: 🔒 built-in (body read-only — settings still editable), 🌳 composite tree, ⚡ energy level, AI = exposed to AI trigger generation. ▶ test-fires the event immediately.',
           'Create buttons: + Random / + Sequence / + Parallel / + Intensity start a new composite event with that root group; + Scene Group starts a group of Scene Updates (see "Scene Groups"). The Scenes chip includes Scene Groups.',
         ],
       },
@@ -374,6 +375,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         kbd: true,
       },
       {
+        id: 'events-builtin',
+        title: 'Built-in (🔒) events',
+        keywords: 'built-in fixed lock read-only settings color name label energy offset reset charge lull drop update reset scene flare no action',
+        body: [
+          'The 🔒 events — Update Scene, Reset Scene, the three Flares, Charge / Lull / Drop, and No Action — have a body the app defines, so their tracks are read-only and they can\'t be deleted. Their "Event settings" panel is yours, though: name, timeline color, labels, energy level, AI-exposed and fire offset all save like any other event, and the timeline color is what the Builder paints their triggers with.',
+          'Saved settings are stored as an override layer (storage/fixed_event_overrides.json) rather than a copy of the event, so app updates to the built-in behavior still reach you. "↺ Reset settings" in the editor header drops the overrides and restores the stock values; a field you set back to its stock value stops being stored at all.',
+        ],
+      },
+      {
         id: 'events-actions',
         title: 'Action types',
         keywords: 'event_ref ledfx scene ambient transition effect param morph color device settings',
@@ -387,6 +397,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['ledfx_ambient_color', 'Applies the complementary of the current ambient color.'],
           ['ledfx_global_transition / ledfx_effect_param', 'Set the global transition / a single effect parameter.'],
           ['device_settings', 'Apply raw device settings.'],
+          ['brightness', 'Set or nudge the per-device Brightness / BG Brightness multipliers that scale the Color Set values. See "Brightness action".'],
           ['sequence / parallel / random group', 'Containers — run children in order / at once / pick one by weight (random options can be energy-gated and tilted).'],
           ['intensity_chooser', 'Container — the firing trigger\'s intensity picks exactly one threshold lane; that lane\'s actions fire together. See "Intensity Chooser".'],
         ],
@@ -403,7 +414,25 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The group that fired last (or is held by Force Scene) is the ACTIVE group — Scene Morph actions step it. Picking a plain Scene Update directly clears the active group. Members that were deleted or are no longer Scene Updates are skipped automatically.',
           'A Scene Group can also designate a Color Group (the "color group" picker in its editor). Set Color actions left on "Scene Group\'s Color Group" (the default for new ones) pull from that group while this Scene Group is active — so switching Scene Groups re-themes the room\'s palette without editing any events. When no group is active, or the active one designates nothing, those actions fall back to the current (last-fired) Color Group.',
           'Dark/Light: the "mode 🌗" select is the group\'s default display mode (see "Dark / Light mode" under Settings), and the 🌙/☀️ group pickers swap in a different Color Group while the resolved mode is Dark or Light — so a group can carry a dimmer palette for dark evenings and a fuller one for light.',
+          'Ramp: the group\'s "Ramp" override (Event settings) forces one transition speed on every member scene fire; a member scene\'s own override still wins. Bindable ⚡/🎲 — see "Ramp overrides".',
         ],
+      },
+      {
+        id: 'charge-lull-drop',
+        title: 'Charge / Lull / Drop events',
+        keywords: 'charge lull drop phase buildup build payoff snap fixed built-in ramp rockets horizon implode explode spin-up',
+        body: [
+          'Three fixed built-in events (🔒 Charge, Lull, Drop) drive a build→hold→payoff choreography on the phase-capable effects — Blackhole, Orbits, Radial, Fireworks, Squiggles, Dancer and Eye. Fire Charge on a buildup, Lull at the peak hush, Drop at the impact: every SpotFX device currently running one of those effects plays its own version of the arc. Devices on other effects are untouched.',
+          'Per effect — Blackhole: charge forces inward infall while the event horizon swells until it swallows the whole panel black (the halo ring sweeps ahead of the dark, brightening and thickening as it grows); lull holds the black; drop pinches the horizon to a point, explodes a burst of blobs from the center and eases the horizon back. Orbits: charge grows the population to 10 blobs then sheds down to a single one; lull sends that blob slowly spiraling into the center, shrinking; drop is a big 3× explosion — triple the configured population erupts from the center, two thirds blast fully off the panel as ballistic ejecta while the boost decays (~2.4 s), and the remaining third settles into orbit. Radial: charge spins the pattern up in its set direction; lull implodes it to a held center point (same warp as the transition implode); drop blooms it back out. Fireworks: charge raises the launch rate while shrinking the bursts; lull goes near-dark except for 3 slow rockets crossing from the edges past the center, dimming with comet trails; drop explodes each rocket into a giant firework in its own color.',
+          'Squiggles: charge makes the silhouette walls solid — chains bounce back inward instead of exiting — while the population climbs; lull is an old-TV switch-off (the picture squashes vertically to a bright line, the line pinches to a held phosphor dot); drop erupts a fan of chains from the center and everything returns to normal. Dancer: the arc is part of the dancing — charge intensifies the moves themselves, lull sinks the dancers into a coiled deep-squat setup, and the drop is a spectacular payoff stunt per dancer: a huge star jump, a leap landing in the splits (ballet/tango/salsa/tai chi), or a low breakdance freeze-spin (hip hop/kpop/robot/floss), with impact flames on the landing. Eye: charge reverses the flames — they stream in from outside and are absorbed while the iris swells ~30% and the pupil shrinks to half; lull sends the gaze back to center and both eyelids close together from above and below (a little fast at first, slowing, pausing just as they overlap the iris, then shutting to a lash line); drop snaps the lids open with a huge flame explosion.',
+          'The 1D strips play the same arc: Blackhole Strip\'s growing horizon sweeps a brightening white halo flash through the sample ring then swallows the strip black (phosphor dot lull, sweep-back + blob eruption on the drop); Orbits Strip swells to 10 blobs, sheds to one that falls to the strip middle, then bursts back with each re-added blob\'s implosion fragments; Fireworks Strip ramps its launches, goes dark behind two slow rockets crossing from the strip ends, and explodes each into layered giant pairs. One Charge/Lull/Drop fire drives every phase-capable device — matrices and strips — together.',
+          'The build is ramp-driven: Charge maxes exactly at the end of its ramp (Settings → phase_charge_ramp_ms, default 4000; lull 2500, drop 400). Better: give the Charge/Lull trigger Override Blend — the phase ramp then stretches to exactly the gap to the NEXT trigger, so the charge peaks the instant the lull fires and the lull finishes coiling the instant the drop hits. All migrated Charge/Lull triggers (and triggerless-generated ones) have it on; Drop never blends — it stays a snap. A Drop resets the effect back to normal by itself, so repeated Drops always re-fire.',
+          'Nothing can stay stuck mid-arc: every effect carries an orphan watchdog — a charge or lull whose payoff never arrives (lost write, skipped track, no drop trigger) quietly releases itself ~12 s after its build completed (60 s absolute cap), each effect via its gentlest exit: the blackhole pinches out without the burst, orbits ease back to their ring, radial blooms back open, the rockets burn out, squiggle walls reopen, the dancers rise from the crouch, the eye\'s lid slides back open without the explosion. SpotFX also clears any un-dropped charge/lull on track change, and stale phase values can never ride along on ordinary color/param writes.',
+          'Drop also resolves a fallback Scene Group (settings → drop_scene_group_id; blank = the group named "Drop"). If the current scene — the one that charged and lulled — is already a member, the drop transitions cleanly: the group becomes the active one (cursor on that scene) and the room repaints from the group\'s designated Color Group, with no scene switch. If it isn\'t a member, a weighted-random member fires instead — the scene switch IS the payoff. Per-trigger override: the Drop 🎯 picker in the Builder trigger dialog swaps in a different scene group for that fire.',
+          'Scene Updates gained three matching pinned lanes — Charge, Lull and Drop (older scenes: "+ Add Charge / Lull / Drop lanes" in the editor). Each phase event also re-runs its lane of the last Scene Update, so a scene can layer its own extras on top of the hard-coded choreography: reactivity tweaks, color changes, spawn-rate or direction morphs. Empty lanes are skipped.',
+          'Testing: the "▶ Charge → Lull → Drop cycle" button (in a Scene Update\'s lane editor, and on the fixed events\' own pages) fires the whole arc automatically, spaced by the configured ramps — it acts on the ACTIVE scene\'s lanes, so fire the scene first if you want its extras included. For frame-by-frame tuning of one effect\'s look, open the effect in the LedFX UI: `phase` and `phase progress` are advanced params there — pick a phase and drag the progress slider by hand (the drop payoff still auto-completes ~½ s after it pinches).',
+        ],
+        kbd: false,
       },
       {
         id: 'random-energy',
@@ -430,6 +459,41 @@ export const HELP_SECTIONS: HelpSection[] = [
           'An Intensity Chooser is a container that fires exactly ONE of its lanes, chosen deterministically by the firing trigger\'s intensity (0–1, after the song\'s intensity scale is applied). Lanes are lower-bound thresholds on a slider: drag the numbered dots to move lane boundaries; everything left of the first dot is the Default lane. The highest dot at or below the intensity wins; two dots on the same value resolve to the higher lane.',
           'The Default lane also fires when the trigger has no intensity (manual ▶ test fires) and when no dots are defined. Deleting a lane merges its actions into the lane to its left. Lanes hold a full action list (all fire together), plus per-lane target scope and filter labels — same as Parallel lanes. Choosers nest anywhere an action is allowed (depth-capped like other groups).',
           'Versus Random energy gates: a Random group rolls weighted dice among energy-eligible options; a Chooser is a deterministic switch — same intensity, same lane, every time.',
+          'The Ramp row (parent/override) forces one ramp on everything the chosen lane fires — through event refs, scene groups and scene lanes. Bind it ⚡ to trigger intensity (0 → slow, 1 → fast) or 🎲 to randomize per fire; see "Ramp overrides".',
+          'Test at ⚡: the row under the threshold strip previews the whole chooser at any intensity you dial in — the engine fires the lane that value would pick (raw 0–1, no song scaling; the → label shows which lane before you fire). Each lane also keeps its own ▶ to fire it directly.',
+        ],
+      },
+      {
+        id: 'light-mode-chooser',
+        title: 'Light Mode Chooser',
+        keywords: 'dark light mode chooser lane 🌗 moon sun default branch scene group pick display',
+        body: [
+          'A Light Mode Chooser fires exactly ONE of its lanes, chosen by the room\'s resolved Dark/Light mode — the Now Playing 🌗 toggle, then the firing trigger, the active Scene Group, and the current Scene (see "Dark / Light mode" under Settings). Each lane is tagged 🌙 Dark or ☀️ Light; when nothing in the cascade forces a mode, the lane picked as the default (the "When mode is Default" select) runs.',
+          'Lanes hold a full action list plus per-lane target scope and filter labels, exactly like Intensity Chooser lanes — so an event can, say, fire one Scene Group by day and a dimmer one after dark. Add one from any "+ Add action" dialog, or create a whole event around one with "+ Light Mode" on the Events page.',
+          'The lane is re-checked at fire time (not locked at plan time), so flipping the TopBar 🌗 applies from the very next trigger. Note the color levels below Set Color (Color Group / Color Set cards) can\'t influence the pick — the chooser resolves before any colors are chosen.',
+          'Each lane\'s ▶ previews that lane directly, ignoring the current mode.',
+          'The Ramp row (parent/override) works exactly like the Intensity Chooser\'s — see "Ramp overrides".',
+        ],
+      },
+      {
+        id: 'brightness-action',
+        title: 'Brightness action',
+        keywords: 'brightness bg background multiplier dim keep change nudge scale random intensity color set group 🔆',
+        body: [
+          'The 🔆 Brightness action dims (or restores) devices without touching the authored look: each targeted device carries two multipliers — Brightness and BG Brightness — that scale whatever the Color Set / Color Group pipeline writes (final value = set value × multiplier). Both run 0–1 and default to 1 (= the set as authored). Firing applies the result immediately to the device\'s current effect AND to every later Set Color, until the multipliers reset to 1 on track change.',
+          'Each parameter independently keeps, changes, or nudges its multiplier. Keep leaves it alone; change sets it to a value — a fixed number, or ⚡/🎲 bound (e.g. trigger intensity → 0.3–1.0 so quiet triggers dim the room); nudge adds a delta per fire, with a bindable amount, an intensity scale (0 = ignore the beat, 1 = full), a ± random-sign flip, a bounce option that reflects off the range ends, and optional lo/hi limits inside 0–1.',
+          'Targeting works like Morph targets: pick devices/categories, or leave it on parent to inherit the nearest group/lane Target (empty = all devices). Ramp blank = the global smooth ramp; 0 = instant. A Color Set entry that doesn\'t define a brightness value keeps following the effect\'s own level — the multiplier only scales values the color pipeline actually writes (plus the immediate apply on fire). In a revert-enabled sequence, the revert restores both the visible params and the multipliers.',
+        ],
+      },
+      {
+        id: 'ramp-override',
+        title: 'Ramp overrides (scenes / groups / choosers)',
+        keywords: 'ramp override parent transition speed ms scene group chooser intensity trigger random cascade force',
+        body: [
+          'Scene Updates, Scene Groups, and both chooser types (Intensity / Light Mode) carry an optional Ramp with a parent/override toggle — the same idiom as Target. On parent (the default) the level adds nothing: every action keeps its own authored ramp, or inherits an override from further up. On override, the ramp you set is FORCED on everything that fire runs — through event references, scene group members, scene lanes, Set Color entry ramps and per-target morph ramps — so one number controls how fast the whole scene change lands.',
+          'The deepest override wins: a scene\'s own Ramp beats its Scene Group\'s, which beats the chooser\'s. So the Intensity Scene chooser can set a room-wide default while one group or scene opts into its own speed.',
+          'The value is bindable like any ramp: ⚡ maps it to a music signal — most usefully trigger intensity, e.g. 0 → 1500 ms and 1 → 250 ms so hard hits snap and quiet passages glide (the Intensity Scene event ships with exactly that) — and 🎲 rolls a fresh ramp every fire. Manual ▶ fires carry no intensity, so an intensity-bound ramp uses its fallback (or the mid value).',
+          'Two paths deliberately ignore an inherited override: beat-timed sequences (their ramps are compressed to fit the beat grid — that choreography stays authoritative) and the atomic scene-override fast path (bypassed while an override is active, so the ramp actually applies via normal dispatch).',
         ],
       },
       {
@@ -477,6 +541,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'native-dancer',
+        title: 'The Dancer effect & "Dancers" scene',
+        keywords:
+          'dancer effect native dance type tai chi ballet cowboy robot moonwalk floss worm hip hop salsa tango partner somersault stage angle burst threshold third color intensity bands',
+        body: [
+          'The native LedFX "dancer" effect (no GIFs) renders one or two procedural stick figures that dance to the beat engine: key poses land on beats, moves chain randomly from each dance\'s move set, and every change — dance type, partner, rotation, even effect switches — blends through choreography instead of cutting. Ten dances ship: tai chi (default — rebuilt as Avatar-style bending forms: big arm swirls, rooted fire strikes, low horizontal stretches), ballet (realistic vocabulary: port de bras, pirouettes, penchée, grand jeté, pas de deux), cowboy line dance, robot, moonwalk, flossing, the worm, hip hop, salsa, tango and k-pop (synchronized pop-and-lock formation). Big stretch poses that land inside a beat window HOLD as a synced flourish while an amplified flame burst fires from the stretched limb.',
+          'The skeleton has a two-segment spine, a neck, and 3D yaw — chest pops and worm waves bend through the spine, heads nod and snap, and spins (pirouettes, chaîné turns, spin-freezes, underarm turns) really rotate the figure with foreshortening. In "together" dances (ballet, salsa, tango) the pair genuinely holds hands: both held arms re-solve to a shared clasp point, releasing only for turns, leaps and swaps.',
+          'The dance runs on a surge clock: it progresses steadily at "Dance Speed" and lunges forward on every beat — harder on loud hits, so big flourishes accelerate straight into the flame bursts. A beat-locked groove layer (pendulum arm swing, shoulder and hip counter-sway, head bob, a lift into every beat) keeps the whole body moving BETWEEN key poses, scaled by each dance\'s energy and the music; fluid dances ease with follow-through so limbs overshoot and settle instead of parking. Colors: each dancer is one solid color — the foreground Gradient sampled 120° after its center (the partner sits 120° before it); "Third Color" shows in stunt flashes (near-black, the default, uses the gradient instead); BG Color stays a normal background layer.',
+          'Flames are THROWN by the dance: on beats louder than "Burst Threshold", the flourishing limb — whichever extremity is actually moving fastest — fires a plume mid-swing along its own motion, inheriting its momentum (a still body radiates from the chest instead). Plumes are buoyant with minor vortices, grab one random third of the gradient, grow in size/brightness/life with loudness, and a hot ember trickle follows the moving limb between beats. Mirrored dancers\' plumes collide at the midline and flare upward like meeting flame fronts.',
+          '"Partner" (the family\'s Reverse toggle: 2 dancers = reversed) adds the second dancer. Mirror dances (tai chi, robot, moonwalk, floss, worm, hip hop): the lead steps aside and the partner drops in Matrix-Neo style, and leaves with a superman takeoff + burst. Together dances (ballet, salsa, tango): the partner falls from the top into a catch, and leaves spun off screen. "Stage Angle" changes of 20°+ make the dancers somersault into the new orientation — in Shape morphs it rides the shared Twist sub-field (absolute or nudge, with lo/hi/wrap), so twist nudges literally flip the dancers; Dance Speed / Dance Intensity / Burst Threshold are per-param nudgeable under the Reactivity aspect. "Trail Length" is the shared particle-family trail.',
+          'Transitions are choreographed: to/from the particle effects the dancers somersault-tuck and dissolve into (or assemble from) particles; radial sucks them in / blooms them out; when Pacman comes in they run away from it. The phased-transition lead fires these switches early so the payoff lands on the trigger.',
+          'The seeded "Dancers" scene (member of Mid Group and Drop) picks the dance by trigger intensity — 0-4 calm (tai chi, ballet), 4-7 mid (cowboy, salsa, moonwalk, worm), 7-10 high (hip hop, robot, tango, floss, worm) — then randomly within the band; shape flares re-roll the dance, toggle the partner, or somersault the stage. Re-seed with scripts/seed_dancers_scene.py; author new dances via tools/dancesmith (see its README).',
+        ],
+      },
+      {
         id: 'matrix-blackhole',
         title: 'Blackhole effect',
         keywords: 'swirl vortex spiral blobs gradient infall reverse trail comet',
@@ -498,6 +577,27 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Particle handoff', 'Switching between Blackhole and Orbits (either direction, or recreating the same effect) hands the on-screen particles, trails AND the live gradient to the incoming effect — blobs become orbiting particles and vice versa instead of vanishing, and colors stay continuous until the next SpotFX color action repaints. The spin direction and blob size carry over too: the incoming effect flips its swirl/reverse sign to keep rotating the same way, and eases from the old blob size to its own. Coming from Orbits, EVERY particle is kept and starts swirling in (or erupting out) like a native blob; Handoff Ease sets how many seconds they take to wind up to full speed.'],
           ['Radial handoff', 'Switching to Radial: over the first half of the crossfade every blob breaks orbit and spirals into the radial\'s center, pinching bright; the ring pattern then STRETCHES outward from that point like an explosion (a real zoom of the pattern — the background color just fades in separately), with Twist sign flipped so the spiral keeps rotating the same way. Switching FROM Radial: the pattern converges onto the handover point — with an event horizon everything INSIDE the ring stretches outward to it while everything OUTSIDE collapses onto it, the whole pattern compressing into a narrow band at the ring that dissolves as blobs burst from it; without a horizon it collapses to a point and the burst fires from the center — native outflow in Reverse mode; in infall mode the burst arcs outward, stalls, and falls back in. Longer effect-switch ramps (≥1.2 s) give the two phases room to read.'],
           ['Morph Steps', 'The Shape aspect sub-fields Swirl, Horizon size, Blob size, X/Y offset (absolute or nudge, bindable) and Reverse (tri-state) morph the vortex from scene lanes and flares like any other shape. The Reactivity aspect\'s per-param menu reaches everything else: Spawn Rate, Beat Burst, Infall Speed, Accel, Edge Speed, Max Blobs, Horizon Hold, Impulse Decay….'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'matrix-eye',
+        title: 'Eye effect & "Eye" scene',
+        keywords:
+          'eye iris pupil gaze flames blink eyelid snap stare drift search spin flicker charge lull drop',
+        body: [
+          'A custom LedFX matrix effect: a big eye — black pupil inside a gradient-wheel iris — that watches the room. The gaze drifts among 9 positions (center + 8 on a ring at Gaze Radius), wandering curvy, orbit-like paths when the music is calm and darting straight and angular when it\'s hot; energetic music also searches faster and homes in closer (the "close enough" boundary breathes, so it sometimes locks right onto a spot and sometimes gives up early). Beats louder than Snap Threshold make the gaze dart — fluidly, just very fast — to a new ring position and hold the stare (Snap Hold, longer on bigger hits). The iris rotates at Spin (Spin Audio adds music boost; 0 = constant) and Flames turns on flickering flame tongues growing from the iris rim — an extension of the iris in the same gradient, with flame intensity, randomness AND flicker speed all growing with the music via Flame Audio.',
+        ],
+        table: [
+          ['Iris / Pupil Size', 'Radii as a fraction of the panel. The shared Field Radius shape sub-field lands on the iris, Blob Size on the pupil, so generic size morphs work.'],
+          ['Gaze Radius', 'The ring the 8 look-at positions sit on.'],
+          ['Gaze Depth', '3D eyeball illusion: as the eye looks away from center the iris foreshortens into an ellipse and the pupil leads into the gaze, so it reads as physically looking AT a spot. 0 = flat googly eye.'],
+          ['Drift Speed / Audio Speed', 'Base search speed and how hard the Audio Band boosts it.'],
+          ['Snap Threshold / Snap Hold', 'Impulse a beat needs to snap the gaze (0 = every beat), and the base stare length after a snap.'],
+          ['Spin / Spin Audio', 'Iris rotation (rev/s, sign = direction) and its independent music boost.'],
+          ['Flames / Flame Audio', 'Flame amount from the rim (0 = off) and how much music grows the tongues, their chaos and their flicker rate.'],
+          ['Charge / Lull / Drop', 'Charge streams the flames inward to be absorbed while the iris swells and the pupil shrinks; Lull looks back to center and closes both eyelids from above and below (fast start, pause just overlapping the iris, then shut to a lash line); Drop snaps the eye open with a huge flame explosion.'],
+          ['The "Eye" scene', 'Seeded member of Mid Group, Drop Group and Dark Hype: First fires the Eye Scene Setter (tuned matrix look with flames riding trigger intensity, Strips on Blackhole Strip, Singles power, scene-group color); Shape fires a temporary flame flare (LedFX restores it after a few seconds), a pupil dilation, a gaze widen or a spin flip; Color cycles the "Orbits" color group or an ambient flip. Re-seed with scripts/seed_eye_scene.py.'],
         ],
         kbd: false,
       },
@@ -765,6 +865,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'colorsets-mode-lanes',
+        title: 'Mode Lanes (groups)',
+        keywords: 'dark light mode lane variant 🌗 moon sun members overrides pool swap dim',
+        body: [
+          'A Group can carry a 🌙 Dark and/or ☀️ Light lane — what the group does while the room\'s resolved mode matches (see "Dark / Light mode" under Settings). Default mode always uses the base group exactly as authored.',
+          'Each lane has two optional parts. Members: when non-empty, they REPLACE the base member pool for the pick (with their own cycle position — the base cursor doesn\'t move); empty keeps the base members. Overrides: layered on top of the group\'s own overrides — a lane override only needs the fields that should differ (e.g. a lower BG brightness for dark evenings).',
+          'The mode is resolved from everything above the member set — TopBar, trigger, scene group, scene, the Set Color step, and this group card\'s own Mode — so the picked member set\'s card mode can\'t change which pool it was picked from.',
+        ],
+      },
+      {
         id: 'colorsets-palette-sync',
         title: 'Palette Sync (groups)',
         keywords: 'sync synced hue shared cursor position family disjointed devices categories together',
@@ -843,6 +953,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'drop lull charge quiet scene fill flare beat start scene update burst',
         body: [
           'Each slot maps a musical moment to an event; blank slots are skipped. Examples: Drop fires at the bass re-entry after a gap; Lull at the peak before an energy drop; Charge during buildups; Scene Fill at energy upticks/downbeats; Flare tiers at harmonic moments of low/mid/high energy. Flare Scene is a fourth tier above Flare High: assign a scene-update event and it fires on the most extreme flare moments (onset/snare bursts) with wide spacing — leave it blank to disable. Label filters support the same "-exclude" syntax as everywhere else.',
+          'The Charge / Lull / Drop slots now default to the fixed phase events (see "Charge / Lull / Drop events" under Events) — the effect choreography plus the active scene\'s phase lanes replace per-genre scene picking. All stock genre profiles were repointed 2026-08-07; cached analyzed triggers regenerate automatically on each song\'s next play (the training-profile hash changed).',
+        ],
+      },
+      {
+        id: 'triggerless-current-match',
+        title: 'Current-song highlight',
+        keywords: 'active match highlight current song profile genre default dinner party badge',
+        body: [
+          'The profile list highlights which profile the engine resolved for the CURRENT song, using the engine\'s own resolution order: Dinner Party mode → genre overlap → the default profile. A solid ACTIVE badge means the song is actually playing on synthetic triggerless triggers right now; a subtle MATCH badge means the song has its own triggers, but this is the profile that would take over if it didn\'t (or if Dinner Party is toggled on). Hover the badge for the match reason; the line above the list names the song it applies to. Refreshes every ~15 s.',
         ],
       },
       {
@@ -1026,7 +1145,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'One room-wide mode — Dark, Light, or Default — decided by a cascade where the FIRST level that isn\'t "Default" wins: 1) the 🌗 TopBar toggle, 2) the firing trigger, 3) the active Scene Group, 4) the current Scene, 5) the Set Color step, 6) the Color Group card, 7) the Color Set card. "Default" at a level just defers to the next one down; if every level defers, backgrounds behave exactly as authored.',
           'Dark forces every background black on affected devices. This is hard-locked inside LedFX itself (a per-virtual "dark_lock"), so no write path — ramps, scenes, morphs — can relight a background while dark. Light keeps authored backgrounds and fills in the default light background (color + brightness set here in Settings) on devices whose Color Set entry doesn\'t define one.',
           'Shielded devices are exempt from both: they always keep their authored backgrounds. Shield whole categories with the checkboxes (default: Singles — single-color lamps should usually stay lit) or individual virtual ids in the text field.',
-          'Scene Groups can additionally designate a 🌙 Dark and ☀️ Light variant Color Group — see "Scene Groups" on the Events page help.',
+          'Scene Groups can additionally designate a 🌙 Dark and ☀️ Light variant Color Group — see "Scene Groups" on the Events page help. To BRANCH on the mode, use a Light Mode Chooser action (Events help) — it fires a different lane per mode; Color Groups can also carry per-mode Mode Lanes (Color Sets help).',
         ],
       },
       {

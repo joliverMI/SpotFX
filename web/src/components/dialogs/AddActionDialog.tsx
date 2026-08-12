@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ActionType } from '../../types/events';
-import { ACTION_ICONS, ACTION_TYPE_LABELS } from '../../types/summaries';
+import { ACTION_ICONS, ACTION_TYPE_LABELS, type AddableActionType } from '../../types/summaries';
 
-const DESCRIPTIONS: Record<ActionType, string> = {
+const DESCRIPTIONS: Record<AddableActionType, string> = {
   event_ref: 'Fire another event’s action pool',
   ledfx_scene: 'Activate a named LedFX scene',
   ledfx_ambient: 'Patch the Single Color Effect (color, blur…)',
@@ -14,10 +13,12 @@ const DESCRIPTIONS: Record<ActionType, string> = {
   morph_color: 'Rotate the showing colors around the hue wheel',
   scene_morph: 'Step the active Scene Group ±N scenes and fire the result',
   device_settings: 'Virtual-config changes (max brightness, freq band)',
+  brightness: 'Set/nudge brightness & BG brightness multipliers over the Color Set values',
   random_group: 'Pick one weighted option; its actions fire together',
   sequence_group: 'Run children in order with ms or beat delays',
   parallel_group: 'Run children at once, each with its own offset',
   intensity_chooser: 'Trigger intensity picks one threshold lane; it fires alone',
+  light_mode_chooser: 'The Now Playing Dark/Light mode picks a lane; choose which is the default',
 };
 
 /** HA-style searchable "Add action" dialog. `types` limits what can be added here. */
@@ -26,8 +27,8 @@ export default function AddActionDialog({
   onPick,
   onClose,
 }: {
-  types: ActionType[];
-  onPick: (t: ActionType) => void;
+  types: AddableActionType[];
+  onPick: (t: AddableActionType) => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');

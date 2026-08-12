@@ -40,17 +40,25 @@ logger = logging.getLogger(__name__)
 
 # ── Parameter grids ───────────────────────────────────────────────────────────
 
+# 2026-08-11 rebalance: charge/lull became first-class scored roles (see
+# score_triggers) and the EDM baseline showed charge F1 0.22 / lull recall
+# 0.40 — the gap detector found too few gaps and the charge peak search
+# was pinned to a fixed 12-beat lookback. Widened gap_energy_thresh +
+# charge_min_score and made charge_lookback_beats tunable; trimmed the
+# scene-side dims (mfcc/smooth/delta) to keep the grid tractable.
 SCENE_GRID = {
-    "gap_energy_thresh":            [0.10, 0.20],
+    "gap_energy_thresh":            [0.10, 0.20, 0.30],
     "gap_after_thresh":             [0.3, 0.4],
     "gap_min_beats":                [2, 4],
-    "charge_min_score":             [0.3, 0.4],
+    "charge_min_score":             [0.2, 0.3, 0.4],
+    "charge_lookback_beats":        [12, 20],
+    "charge_lead_beats":            [0, 10, 14],
     "quiet_thresh":                 [0.4, 0.5],
     "quiet_min_beats":              [16, 24],
-    "scene_energy_delta":           [0.08, 0.12, 0.18],
-    "scene_smooth_window":          [4, 8, 12],
+    "scene_energy_delta":           [0.08, 0.14],
+    "scene_smooth_window":          [4, 8],
     "scene_min_spacing_beats":      [16, 24],
-    "scene_mfcc_weight":            [0.0, 0.2, 0.4, 0.6],
+    "scene_mfcc_weight":            [0.0, 0.4],
 }
 
 FLARE_GRID = {
@@ -63,8 +71,12 @@ FLARE_GRID = {
     "flare_dip_weight":             [0.0, 0.1, 0.2],
     "flare_snare_weight":           [0.0, 0.1, 0.2],
     "flare_burst_weight":           [0.0, 0.1, 0.2],
-    "flare_shape_thresh":           [0.10, 0.20, 0.30],
-    "flare_shape_min_spacing":      [3, 4, 6],
+    # 2026-08-11: EDM hand-authors flares densely (~47/song) but generation
+    # produced ~13 total (recall 0.07) — the threshold floor and spacing
+    # couldn't reach that density. Lowered both; the top values that never
+    # won dropped off.
+    "flare_shape_thresh":           [0.05, 0.10, 0.20],
+    "flare_shape_min_spacing":      [2, 3, 4],
 }
 
 # Tier 3: placement/intensity params, tuned with best scene+flare locked.

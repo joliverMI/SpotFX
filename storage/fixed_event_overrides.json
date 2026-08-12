@@ -1,0 +1,23 @@
+{
+  "fixed-update-scene": {
+    "ai_exposed": true
+  },
+  "fixed-shape-flare": {
+    "ai_exposed": true
+  },
+  "fixed-color-flare": {
+    "ai_exposed": true
+  },
+  "fixed-combo-flare": {
+    "ai_exposed": true
+  },
+  "fixed-charge": {
+    "ai_exposed": true
+  },
+  "fixed-lull": {
+    "ai_exposed": true
+  },
+  "fixed-drop": {
+    "ai_exposed": true
+  }
+}

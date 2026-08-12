@@ -48,6 +48,13 @@ export function newAction(type: ActionType): Action {
       return { ...base, type, advance: 1, direction: 'forward' };
     case 'device_settings':
       return { ...base, type, targets: [] };
+    case 'brightness':
+      return {
+        ...base, type, scope: { virtual_ids: [], categories: [], roles: [] },
+        ramp_ms: null, intensity_source: 'rms_total',
+        brightness_mode: 'absolute', brightness_value: 1, brightness_nudge: null,
+        bg_mode: 'keep', bg_value: null, bg_nudge: null,
+      };
     case 'random_group':
       return { ...base, type, id: uuid(), dedupe: true, scope: null, options: [] };
     case 'sequence_group':
@@ -61,7 +68,7 @@ export function newAction(type: ActionType): Action {
       // Starts with the default lane; threshold dots add more.
       return {
         ...base, type, id: uuid(), source: 'trigger_intensity', scope: null,
-        lanes: [newIntensityLane(0)],
+        ramp_ms: null, lanes: [newIntensityLane(0)],
       };
   }
 }
@@ -76,7 +83,20 @@ export const newParallelChild = (): ParallelChild => ({
 });
 
 export const newIntensityLane = (threshold = 0.5): IntensityLane => ({
-  id: uuid(), name: '', labels: [], threshold, scope: null, actions: [],
+  id: uuid(), name: '', labels: [], threshold, mode: null, scope: null, actions: [],
+});
+
+/** "Light Mode Chooser": the intensity_chooser machinery with source
+ * 'display_mode' — the resolved Dark/Light mode picks the lane. Starts with
+ * one lane per mode; `default_mode` names the lane used when the cascade
+ * resolves to "default". */
+export const newLightModeChooser = (): Action => ({
+  labels: [], weight: 1.0, type: 'intensity_chooser', id: uuid(),
+  source: 'display_mode', default_mode: 'light', scope: null, ramp_ms: null,
+  lanes: [
+    { ...newIntensityLane(0), mode: 'light' },
+    { ...newIntensityLane(0), mode: 'dark' },
+  ],
 });
 
 export const newSequenceStep = (): SequenceStep => ({
@@ -109,6 +129,7 @@ export function newEvent(event_type: MusicEvent['event_type'] = 'single'): Music
     ai_exposed: false,
     fixed: false,
     scene_override: false,
+    ramp_ms: null,
     actions: [],
     sequence_steps: [],
     revert: null,

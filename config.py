@@ -78,6 +78,21 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
+    # ── Guest source (Snapcast Guest / AirPlay streams) ──────────────────────
+    # When someone plays to the librespot "Serenity Guest" Connect device or
+    # the AirPlay target, their session is invisible to the Spotify Web API.
+    # services/guest_source polls snapserver's JSON-RPC instead and drives the
+    # engine in simple-triggerless mode for the duration (see that module).
+    guest_source_enabled: bool = True
+    snapcast_rpc_url: str = "http://127.0.0.1:1780/jsonrpc"
+    # Snapcast stream ids treated as guest sources, in priority order.
+    guest_streams: list = ["Guest", "AirPlay"]
+    guest_poll_interval_s: float = 5.0
+    # Assumed track length when snapserver has no duration metadata — only
+    # bounds how far ahead interval triggers are generated; a title change
+    # regenerates them anyway.
+    guest_default_duration_ms: int = 20 * 60 * 1000
+
     # ── Latency / timing ──────────────────────────────────────────────────────
     # Milliseconds between audio playback and Spotify timestamp
     audio_latency_ms: int = 1000
@@ -93,6 +108,17 @@ class Settings(BaseSettings):
     ledfx_trigger_buffer_ms: int = 250
     # Global default ramp duration for brightness/effect param changes; 0 = instant
     smooth_ramp_ms: int = 500
+    # Charge/Lull/Drop phase ramps: how long each phase's build takes on the
+    # phase-capable LedFX effects (phase_progress tweens 0→1 over this, so the
+    # charge maxes exactly at the ramp end). Drop stays short — it's the snap.
+    phase_charge_ramp_ms: int = 4000
+    phase_lull_ramp_ms: int = 2500
+    phase_drop_ramp_ms: int = 400
+    # Scene group the fixed Drop event falls back to: current scene already a
+    # member → clean transition (adopt the group + refresh its color set);
+    # otherwise fire a random member. "" = use the scene_group named "Drop".
+    # Per-trigger override: MusicTrigger.drop_scene_group_override.
+    drop_scene_group_id: str = ""
     # Prefer LedFX server-side param interpolation (one PUT + transition_ms) over
     # the client-side 40fps PUT loop, when the connected LedFX advertises support
     # (GET /api/info → features.param_transition). Kill-switch: set False to force

@@ -361,6 +361,35 @@ class DeviceSettingsAction(BaseModel):
     targets: list[DeviceSettingTarget] = Field(default_factory=list)
 
 
+class BrightnessAction(BaseModel):
+    """Set or nudge the per-virtual brightness MULTIPLIERS — one for effect
+    brightness, one for background brightness. Each is 0..1 and defaults to
+    1.0; they multiply with whatever the Color Set / Color Group pipeline
+    writes (final param = entry value × multiplier), so the authored "look"
+    stays intact and this action dims/undims it. Firing also re-applies the
+    result immediately to each scoped virtual's current effect (`brightness` /
+    `background_brightness` params, when present). Multipliers reset to 1.0
+    on track change.
+
+    Per parameter: mode "keep" leaves the multiplier alone; "absolute" sets it
+    (value may be a ⚡/🎲 ValueBinding); "nudge" adds a NumericNudge delta
+    (bindable amount, intensity `scale`, ± random_sign, bounce wrap) to the
+    current multiplier. See services/trigger_engine._execute_brightness."""
+    type:    Literal["brightness"] = "brightness"
+    labels:  list[str] = Field(default_factory=list)
+    weight:  float = 1.0
+    scope:   MorphScope = Field(default_factory=MorphScope)
+    ramp_ms: int | ValueBinding | None = None   # None = settings.smooth_ramp_ms; 0 = instant
+    # Shared by both nudges' intensity `scale` math, like MorphStepAction.
+    intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
+    brightness_mode:  Literal["keep", "absolute", "nudge"] = "keep"
+    brightness_value: float | ValueBinding | None = None    # 0..1 multiplier target
+    brightness_nudge: NumericNudge | None = None
+    bg_mode:  Literal["keep", "absolute", "nudge"] = "keep"
+    bg_value: float | ValueBinding | None = None            # 0..1 multiplier target
+    bg_nudge: NumericNudge | None = None
+
+
 class EffectParamChange(BaseModel):
     """One parameter change within a LedFxEffectParamAction."""
     param_label: str          # unified label e.g. "Reactivity", "Effect Brightness"
@@ -538,6 +567,9 @@ class IntensityLane(BaseModel):
     name:      str = ""
     labels:    list[str] = Field(default_factory=list)
     threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Light Mode Chooser lanes only (chooser source == "display_mode"): the
+    # resolved Dark/Light mode that selects this lane. None on intensity lanes.
+    mode:      Optional[Literal["dark", "light"]] = None
     # None = inherit the group's scope; set = override for this lane.
     scope:     Optional[MorphScope] = None
     actions:   list[Action] = Field(default_factory=list)
@@ -552,13 +584,28 @@ class IntensityChooserAction(BaseModel):
     threshold, when it is the only lane, or when the fire carries no intensity
     context (manual test fires).
 
-    `source` is pluggable for future signals; only the trigger's intensity is
-    implemented today."""
+    source == "display_mode" is the "Light Mode Chooser": the resolved
+    Dark/Light display mode (global TopBar → trigger → active scene group →
+    current scene — services/display_mode) selects the first lane whose `mode`
+    matches. A resolution of "default" uses `default_mode`; no matching lane →
+    lanes[0]. Unlike intensity picks, the lane is re-resolved at FIRE time
+    (plan-time picks are preview-only) so a TopBar flip between plan and fire
+    never runs a stale lane."""
     type:   Literal["intensity_chooser"] = "intensity_chooser"
     id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
     labels: list[str] = Field(default_factory=list)
     weight: float = 1.0        # weight of the group itself inside a parent pool
-    source: Literal["trigger_intensity"] = "trigger_intensity"
+    # Ramp override: when set, this ramp (ms) is forced on every descendant
+    # action of the chosen lane — through event_refs, scene groups and scene
+    # lanes — replacing their authored ramps. None = no override here (the
+    # nearest ancestor override applies, else each action's own ramp). May be
+    # a ValueBinding (⚡ trigger intensity / 🎲 random), resolved per fire.
+    # A deeper override (scene group / scene event ramp_ms) wins over this one.
+    ramp_ms: int | ValueBinding | None = None
+    source: Literal["trigger_intensity", "display_mode"] = "trigger_intensity"
+    # source == "display_mode" only: which lane mode runs when the cascade
+    # resolves to "default" (nothing forces dark or light).
+    default_mode: Literal["dark", "light"] = "light"
     # Default target for every lane (lanes inherit unless they override).
     scope:  Optional[MorphScope] = None
     lanes:  list[IntensityLane] = Field(default_factory=list)
@@ -577,6 +624,7 @@ Action = Annotated[
     | MorphColorAction
     | SceneMorphAction
     | DeviceSettingsAction
+    | BrightnessAction
     | RandomGroupAction
     | SequenceGroupAction
     | ParallelGroupAction
@@ -672,6 +720,13 @@ class MusicEvent(BaseModel):
         # shape_flare→Shape, color_flare→Color, combo_flare→Shape+Color.
         "scene_update", "update_scene", "reset_scene",
         "shape_flare", "color_flare", "combo_flare",
+        # Fixed charge/lull/drop events: drive the phase choreography of
+        # phase-capable LedFX effects (blackhole/orbits/radial/fireworks) —
+        # charge builds over the phase ramp, lull holds the coiled state,
+        # drop snaps the payoff. Each also re-runs the matching extra lane
+        # (Charge/Lull/Drop) of the last Scene Update for per-scene param
+        # tweaks. See trigger_engine._fire_phase.
+        "charge", "lull", "drop",
         # Ordered set of member Scene Updates picked one at a time, like a
         # Color Group: cycle (wrap/bounce) or weighted random. Firing the
         # group advances its cursor and fires the picked member (normal
@@ -698,6 +753,15 @@ class MusicEvent(BaseModel):
     # virtual changes atomically. Honored for event_type == "single" or
     # "morph_set"; ignored (with a warning log) for "sequence" / "beat_sequence".
     scene_override: bool = False
+
+    # Ramp override for scene_update / scene_group events: when set, this ramp
+    # (ms) is forced on every action the scene fire runs (lane picks, member
+    # scenes), replacing their authored ramps. None = no override (inherit the
+    # nearest ancestor override — e.g. an Intensity Scene chooser's ramp —
+    # else each action's own ramp). May be a ValueBinding (⚡ trigger
+    # intensity / 🎲 random), resolved per fire. The DEEPEST override wins:
+    # scene_update.ramp_ms > scene_group.ramp_ms > chooser.ramp_ms.
+    ramp_ms: int | ValueBinding | None = None
 
     # For event_type == "single": randomly picked from this list
     actions: list[Action] = Field(default_factory=list)

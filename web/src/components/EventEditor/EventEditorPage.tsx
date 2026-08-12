@@ -12,21 +12,22 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { useColorSets, useDeleteEvent, useEvents, useFireEvent, useSaveEvent } from '../../api/queries';
+import { useColorSets, useDeleteEvent, useEvents, useFireEvent, useResetEvent, useSaveEvent } from '../../api/queries';
 import { SCENE_EVENT_TYPES, type MusicEvent } from '../../types/events';
 import { ACTION_ICONS, summarizeAction, type SummaryContext } from '../../types/summaries';
 import { SummaryProvider } from '../SummaryCtx';
 import { useEditorStore, useIsDirty } from '../../store/editorStore';
 import { findByUid } from '../../lib/paths';
-import { newAction, newEvent } from '../../lib/defaults';
+import { newAction, newEvent, newLightModeChooser } from '../../lib/defaults';
 import { uuid } from '../../lib/uid';
 import EventMetaPanel from './EventMetaPanel';
+import HelpLink from '../../help/HelpLink';
 import RootSlot from './RootSlot';
 import PreviewButton from '../PreviewButton';
 import { previewEvent } from '../../lib/preview';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import EditableSequenceTrack from '../tracks/EditableSequenceTrack';
-import EditableParallelLanes from '../tracks/EditableParallelLanes';
+import EditableParallelLanes, { PhaseCycleButton } from '../tracks/EditableParallelLanes';
 import BeatSequenceTrack from '../tracks/BeatSequenceTrack';
 import ParallelLanes from '../tracks/ParallelLanes';
 import DeviceTargetsTrack from '../tracks/DeviceTargetsTrack';
@@ -44,11 +45,12 @@ export default function EventEditorPage() {
   const { id } = useParams<{ id: string }>();
   const [search] = useSearchParams();
   const navigate = useNavigate();
-  const { data: events, isLoading } = useEvents();
+  const { data: events, isLoading, refetch: refetchEvents } = useEvents();
   const { data: colorSets } = useColorSets();
   const fire = useFireEvent();
   const save = useSaveEvent();
   const del = useDeleteEvent();
+  const reset = useResetEvent();
 
   const draft = useEditorStore((s) => s.draft);
   const load = useEditorStore((s) => s.load);
@@ -72,7 +74,9 @@ export default function EventEditorPage() {
       const ev = newEvent(t);
       const rootKind = search.get('root');
       if (t === 'composite' && rootKind) {
-        ev.root = newAction(rootKind as Parameters<typeof newAction>[0]);
+        ev.root = rootKind === 'light_mode_chooser'
+          ? newLightModeChooser()
+          : newAction(rootKind as Parameters<typeof newAction>[0]);
       }
       load(ev);
       return;
@@ -113,10 +117,10 @@ export default function EventEditorPage() {
   if (isLoading && !isNew) return <p className="empty-note">Loading…</p>;
   if (!draft) return <p className="empty-note">Event not found. <Link to="/">Back to list</Link></p>;
 
-  // Meta edits are safe for every non-fixed event (payload round-trips untouched);
-  // track editing is gated per type until later phases.
-  const metaEditable = !draft.fixed;
-  const editable = metaEditable && EDITABLE_TYPES.includes(draft.event_type);
+  // Meta edits are safe for every event (payload round-trips untouched); on a
+  // built-in only the settings panel persists, as an override on the
+  // synthesized body. Track editing is gated per type until later phases.
+  const editable = !draft.fixed && EDITABLE_TYPES.includes(draft.event_type);
 
   const onDragStart = (e: DragStartEvent) => setDragUid(String(e.active.id));
   const onDragEnd = (e: DragEndEvent) => {
@@ -158,6 +162,16 @@ export default function EventEditorPage() {
     del.mutate(draft.id, { onSuccess: () => navigate('/') });
   };
 
+  const doReset = () => {
+    if (!confirm(`Restore the built-in settings for “${draft.name}”?`)) return;
+    reset.mutate(draft.id, {
+      onSuccess: async () => {
+        const fresh = (await refetchEvents()).data?.find((e) => e.id === draft.id);
+        if (fresh) load(fresh);
+      },
+    });
+  };
+
   const onFire = () => {
     setFired(true);
     fire.mutate(draft.id, { onSettled: () => setTimeout(() => setFired(false), 800) });
@@ -175,11 +189,10 @@ export default function EventEditorPage() {
           {draft.name}
           {dirty && <span title="Unsaved changes" style={{ color: 'var(--accent2)', marginLeft: 8 }}>●</span>}
         </h2>
-        {metaEditable && (
-          <button className="primary" onClick={doSave} disabled={!dirty && !isNew}>
-            {save.isPending ? 'Saving…' : 'Save'}
-          </button>
-        )}
+        <button className="primary" onClick={doSave} disabled={!dirty && !isNew}
+          title={draft.fixed ? 'Save the settings above (the built-in body is unchanged)' : undefined}>
+          {save.isPending ? 'Saving…' : 'Save'}
+        </button>
         <button onClick={onFire} disabled={isNew || dirty} title={dirty ? 'Save first — fire uses the stored event' : 'Test-fire'}>
           {fired ? '✔ Fired' : '▶ Fire'}
         </button>
@@ -187,6 +200,11 @@ export default function EventEditorPage() {
         <PreviewButton label="Preview" style={{ padding: '6px 12px', fontSize: 14 }}
           title="Fire the current draft as-is, without saving"
           run={() => previewEvent(serialize())} />
+        {draft.fixed && (
+          <button onClick={doReset} title="Restore the stock name, color, labels, energy, AI flag and fire offset">
+            {reset.isPending ? 'Resetting…' : '↺ Reset settings'}
+          </button>
+        )}
         {!isNew && !draft.fixed && <button className="danger" onClick={doDelete}>Delete</button>}
       </div>
 
@@ -231,10 +249,18 @@ export default function EventEditorPage() {
           {(draft.event_type === 'morph_set' || (SCENE_EVENT_TYPES as string[]).includes(draft.event_type)) && (
             <ParallelLanes lanes={draft.morph_lanes} />
           )}
+          {['charge', 'lull', 'drop'].includes(draft.event_type) && (
+            <div style={{ margin: '8px 0' }}><PhaseCycleButton /></div>
+          )}
           <p className="empty-note">
-            {draft.fixed
-              ? 'Built-in event — read-only.'
-              : `Settings above are editable; ${draft.event_type} track editing lands in a later phase — use the classic editor meanwhile.`}
+            {draft.fixed ? (
+              <>
+                Built-in event — what it does is fixed, but the settings above are yours to change
+                (↺ Reset settings restores the stock ones). <HelpLink topic="events-builtin" title="Built-in events" />
+              </>
+            ) : (
+              `Settings above are editable; ${draft.event_type} track editing lands in a later phase — use the classic editor meanwhile.`
+            )}
           </p>
         </>
       )}

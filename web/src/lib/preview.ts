@@ -11,12 +11,18 @@ import type {
   SequenceChild, SequenceGroupAction, SequenceStep,
 } from '../types/events';
 
-async function fire(body: { action?: Action; event?: MusicEvent }): Promise<void> {
+async function fire(body: { action?: Action; event?: MusicEvent; intensity?: number }): Promise<void> {
   await apiPost('/events/preview', stripUids(body));
 }
 
 /** Preview a single action card (any level, including a whole group card). */
 export const previewAction = (action: Action) => fire({ action });
+
+/** Preview an action as if the firing trigger's intensity were `intensity`
+ * (raw 0-1, no song/genre scaling) — intensity choosers pick the matching
+ * lane and ⚡ bindings resolve against it. */
+export const previewActionAt = (action: Action, intensity: number) =>
+  fire({ action, intensity });
 
 /** Preview a full (possibly unsaved / dirty) event draft. */
 export const previewEvent = (event: MusicEvent) => fire({ event });

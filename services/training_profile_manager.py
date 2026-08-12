@@ -42,9 +42,12 @@ class TrainingProfile(BaseModel):
     song_start_event_id: str = ""    # Stage 0 — always at ms=0 (empty = skip)
     beat_start_event_id: str = ""    # Stage 1 — first bass entry (empty = use scene_fill_event_id)
     song_end_event_id: str = ""      # Stage 2 — fade-out detection (empty = skip)
-    drop_event_id: str = ""          # Stage 3 — bass re-entry after gap (empty = skip)
-    lull_event_id: str = ""          # Stage 3 — quiet before drop / gap entry (empty = skip)
-    charge_event_id: str = ""        # Stage 4 — buildup peak before lull (empty = skip)
+    # Stage 3/4 phase moments default to the fixed Charge/Lull/Drop phase
+    # events (effect choreography + the active scene's phase lanes) — no
+    # per-genre scene picking needed. Empty = skip that moment entirely.
+    drop_event_id: str = "fixed-drop"      # Stage 3 — bass re-entry after gap
+    lull_event_id: str = "fixed-lull"      # Stage 3 — quiet before drop / gap entry
+    charge_event_id: str = "fixed-charge"  # Stage 4 — buildup peak before lull
     quiet_event_id: str = ""         # Stage 5 — extended quiet section entry (empty = skip)
     scene_fill_event_id: str = ""    # Stage 6 — standard fill / energy re-entry (empty = skip)
     flare_event_id: str = ""         # Stage 7 — flare triggers (legacy single tier; empty = skip)
@@ -93,6 +96,10 @@ class TrainingProfile(BaseModel):
     # Charge (Stage 4)
     charge_lookback_beats: int = 12
     charge_min_score: float = 0.40
+    # >0 anchors the charge search around (gap - lead) beats — the buildup
+    # START — instead of the loudest pre-gap beat; lookback becomes the
+    # anchored window width. 0 = legacy loudest-beat pick.
+    charge_lead_beats: int = 0
 
     # Quiet Section (Stage 5)
     quiet_thresh: float = 0.40       # rms_total below this = quiet beat

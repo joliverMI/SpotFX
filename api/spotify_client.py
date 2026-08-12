@@ -130,9 +130,20 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
         logger.error("Spotify poll failed: %s", exc)
         return None
 
+    _cur = state.current_track
+    _guest_owned = _cur is not None and _cur.spotify_uri.startswith("guest:")
+
     if not data or not data.get("item"):
-        state.current_track = None
-        state.on_target_device = False
+        if not _guest_owned:
+            # Guest sessions (services/guest_source) own playback state while
+            # Spotify reports nothing — don't clobber a guest-owned track.
+            state.current_track = None
+            state.on_target_device = False
+        return None
+
+    if _guest_owned and not data.get("is_playing"):
+        # A paused/idle Spotify answer must not steal state from an active
+        # guest session; only an actively playing real track takes over.
         return None
 
     device_name = (data.get("device") or {}).get("name", "")
@@ -255,9 +266,26 @@ def _refresh_queue(sp: spotipy.Spotify) -> None:
 def _safe_prewarm(spotify_uri: str) -> None:
     try:
         from services import analyzed_trigger_store
+        from services.audio_shape_service import _find_profile_for_genres
         from services.librosa_service import get_analysis_by_uri
+        from services.profile_manager import load_profile_by_uri
+        from services.training_profile_manager import TrainingProfile
         if not get_analysis_by_uri(spotify_uri):
             return  # no shape → nothing to pre-warm
+        # Skip when the cache is already valid — the queue poll calls this
+        # every few seconds, and the full pipeline re-scans every training
+        # song per run (observed: a pile-up of unconditional pre-warms
+        # pegged the process at 100% CPU for minutes, 2026-08-11).
+        track_id = spotify_uri.split(":")[-1]
+        cached = analyzed_trigger_store.load(track_id)
+        if cached is not None:
+            prof = load_profile_by_uri(spotify_uri)
+            genres = (prof.artist_genre if prof else None) or []
+            tp_data = _find_profile_for_genres(genres)
+            if tp_data and analyzed_trigger_store.is_valid(
+                cached, TrainingProfile(**tp_data)
+            ):
+                return
         analyzed_trigger_store.generate_for_uri(spotify_uri, save_cache=True)
         logger.info("Pre-warming analyzed-triggers cache for next: %s", spotify_uri)
     except Exception as exc:

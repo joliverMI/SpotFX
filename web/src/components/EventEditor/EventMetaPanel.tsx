@@ -2,6 +2,7 @@ import type { MusicEvent } from '../../types/events';
 import { DISPLAY_MODE_OPTIONS } from '../../types/events';
 import { useEditorStore } from '../../store/editorStore';
 import { Checkbox, ColorInput, LabelsInput, NumberInput, Row, Select, TextInput } from '../forms/inputs';
+import RampOverride from '../forms/RampOverride';
 import HelpLink from '../../help/HelpLink';
 
 export default function EventMetaPanel({ event }: { event: MusicEvent }) {
@@ -36,8 +37,12 @@ export default function EventMetaPanel({ event }: { event: MusicEvent }) {
             <span style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <Checkbox value={event.ai_exposed} label="AI exposed"
                 onChange={(v) => set((d) => { d.ai_exposed = v; })} />
-              <Checkbox value={event.scene_override} label="Scene override"
-                onChange={(v) => set((d) => { d.scene_override = v; })} />
+              {/* Scene override only applies to a stored single/morph_set body,
+                  so it's meaningless on a built-in. */}
+              {!event.fixed && (
+                <Checkbox value={event.scene_override} label="Scene override"
+                  onChange={(v) => set((d) => { d.scene_override = v; })} />
+              )}
             </span>
           </Row>
           {event.event_type === 'scene_update' && (
@@ -48,6 +53,15 @@ export default function EventMetaPanel({ event }: { event: MusicEvent }) {
                   onChange={(v) => set((d) => { d.display_mode = v as MusicEvent['display_mode']; })}
                   options={DISPLAY_MODE_OPTIONS} />
                 <HelpLink topic="display-modes" title="Dark / Light mode" />
+              </span>
+            </Row>
+          )}
+          {(event.event_type === 'scene_update' || event.event_type === 'scene_group') && (
+            <Row label="Ramp"
+              help="Override forces this ramp on every action this scene fire runs, replacing their authored ramps. ⚡ can map it to trigger intensity (e.g. 0→1500ms, 1→250ms), 🎲 rolls it per fire. Parent inherits the nearest ancestor override (scene group / Intensity Scene chooser); the deepest override wins.">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <RampOverride value={event.ramp_ms} onChange={(v) => set((d) => { d.ramp_ms = v; })} />
+                <HelpLink topic="ramp-override" title="Ramp overrides" />
               </span>
             </Row>
           )}

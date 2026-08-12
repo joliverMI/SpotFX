@@ -38,6 +38,11 @@ class MusicTrigger(BaseModel):
     # "light" force the mode for everything this trigger fires. The global
     # TopBar mode still outranks it. See services/display_mode.resolve().
     display_mode: Literal["default", "dark", "light"] = "default"
+    # Drop fallback override: a scene_group event id. When this trigger fires
+    # the fixed Drop event, its clean-transition / random-member fallback uses
+    # this group instead of the global drop group (settings.drop_scene_group_id,
+    # else the group named "Drop"). None = normal behavior.
+    drop_scene_group_override: Optional[str] = None
 
 
 class SongProfile(BaseModel):
