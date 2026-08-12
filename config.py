@@ -41,10 +41,6 @@ class Settings(BaseSettings):
             return self.ledfx_base_url.rstrip("/")
         return f"{self.ledfx_host}:{self.ledfx_port}"
 
-    # ── Home Assistant ────────────────────────────────────────────────────────
-    home_assistant_host: str = "http://homeassistant.local"
-    home_assistant_token: str = ""
-
     # ── Ambient Mode ──────────────────────────────────────────────────────────
     # Front-page / HA toggle: switch a device category to a static, full-brightness
     # color (via Hue REST) and drop those devices from music triggers. The on/off
