@@ -1,5 +1,12 @@
 # SpotFX — agent notes
 
+## Adding a new LedFX effect
+
+Follow `docs/ADDING_EFFECTS.md` — the full checklist (LedFX effect →
+smoke test → **tuning gate: Javi tunes defaults before any scene is
+seeded** → registry/phase wiring → scene seeder → scene groups → Help
+page). Don't improvise the order; the tuning gate is deliberate.
+
 ## In-app Help page (KEEP IT CURRENT)
 
 The React app has a searchable help page at `/help`, rendered from
