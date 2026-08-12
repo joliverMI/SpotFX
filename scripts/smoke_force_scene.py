@@ -54,7 +54,7 @@ async def main() -> int:
     te._scene_cursor_prev = {}
     te._active_scene_group_id = None
     te._scene_fire_seq = 0
-    te._scene_fire_cond = asyncio.Condition()
+    te._scene_fire_event = asyncio.Event()
 
     async def _fake_run_one_lane(event, lane_index, labels, skip_event_ids=None,
                                  preselected=None, resolved_picks=None):

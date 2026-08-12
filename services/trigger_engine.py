@@ -330,7 +330,14 @@ class TriggerEngine:
         # flares — including no-op flares — and Scene Morph). Waiters compare
         # against an absolute target so wakeups can't be lost.
         self._scene_fire_seq: int = 0
-        self._scene_fire_cond: asyncio.Condition = asyncio.Condition()
+        # Generation Event, NOT an asyncio.Condition: each fire sets and
+        # replaces the Event. Condition.wait inside asyncio.wait_for is a
+        # known cancellation hazard — a timeout cancelling the waiter while
+        # it re-acquires the condition lock can leave the lock held by a
+        # dead task, after which EVERY scene-family fire deadlocks in
+        # _notify_scene_fire (observed live 2026-08-08). Event.wait holds no
+        # lock, so cancellation can't wedge anything.
+        self._scene_fire_event: asyncio.Event = asyncio.Event()
         self._shape_offset_ms: int = 0       # cached from AudioShapeMeta.timestamp_offset_ms
         self._shape_offset_quality: float = 0.0  # cached quality score (r × difficulty)
         # Highest match-quality observed during the current play. Reset on URI
@@ -417,6 +424,13 @@ class TriggerEngine:
             self._preselected_steps.clear()
             self._plan.clear()
             self._plan_desc.clear()
+            # Previous song's synthetic triggerless triggers must not survive
+            # into this song's _should_use_triggerless() decision — via
+            # _get_active_triggers priority 1 they read as "enabled triggers
+            # exist", silently suppressing regeneration for THIS song (which
+            # then plays with zero triggers; symptom: triggerless only worked
+            # every other song).
+            self._triggerless_triggers = None
             self._last_preview_id = None
             self._last_uri = profile.spotify_uri
             # Scene cursors / active group intentionally NOT cleared (room
@@ -5032,17 +5046,21 @@ class TriggerEngine:
         """Bump the scene-family fire counter and wake sequence "updates"
         waiters. Called from _execute_scene_event (the single choke point for
         all scene-family fires) and _execute_scene_morph (the one path that
-        reaches _execute_scene_update without passing through it)."""
-        async with self._scene_fire_cond:
-            self._scene_fire_seq += 1
-            self._scene_fire_cond.notify_all()
+        reaches _execute_scene_update without passing through it).
+        Lock-free (single-threaded loop): set-and-replace the generation
+        Event so waiters re-check their predicates."""
+        self._scene_fire_seq += 1
+        old = self._scene_fire_event
+        self._scene_fire_event = asyncio.Event()
+        old.set()
 
     async def _wake_scene_waiters(self) -> None:
         """Wake "updates" waiters WITHOUT counting a fire — used on track
         change so updates-only waits (delay_ms=0) re-check their track-change
         predicate and release instead of leaking into the next song."""
-        async with self._scene_fire_cond:
-            self._scene_fire_cond.notify_all()
+        old = self._scene_fire_event
+        self._scene_fire_event = asyncio.Event()
+        old.set()
 
     async def _sleep_child_delay(self, delay_ms: int, delay_updates: Optional[int]) -> None:
         """ms-mode sequence-child gate. Without `delay_updates`: the classic
@@ -5058,17 +5076,28 @@ class TriggerEngine:
             return
         target = self._scene_fire_seq + upd
         uri0 = self._last_uri
-
-        async def _wait():
-            async with self._scene_fire_cond:
-                await self._scene_fire_cond.wait_for(
-                    lambda: self._scene_fire_seq >= target or self._last_uri != uri0)
-
-        try:
-            await asyncio.wait_for(
-                _wait(), (delay_ms / 1000) if delay_ms > 0 else None)
-        except asyncio.TimeoutError:
-            pass  # time delay wins — the child still fires, in the current scene
+        loop = asyncio.get_running_loop()
+        deadline = (loop.time() + delay_ms / 1000) if delay_ms > 0 else None
+        # Generation-event loop: grab the CURRENT event, re-check the
+        # predicate (a fire between the check and the wait replaced the
+        # event we hold, whose set() still wakes us), then wait on it with
+        # the remaining time. Event.wait is cancellation-safe — no
+        # condition lock to leak (see _scene_fire_event).
+        while (self._scene_fire_seq < target
+               and self._last_uri == uri0):
+            ev = self._scene_fire_event
+            if (self._scene_fire_seq >= target
+                    or self._last_uri != uri0):
+                break
+            timeout = None
+            if deadline is not None:
+                timeout = deadline - loop.time()
+                if timeout <= 0:
+                    break  # time delay wins — the child still fires
+            try:
+                await asyncio.wait_for(ev.wait(), timeout)
+            except asyncio.TimeoutError:
+                break  # time delay wins — the child still fires
 
     def _plan_ramp_ms(self, action) -> int:
         """Effective ramp for beat-timeline math — resolves a bound ramp_ms
