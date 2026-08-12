@@ -45,6 +45,7 @@ _probe_client: Optional[httpx.AsyncClient] = None
 
 # ── Command bus ────────────────────────────────────────────────────────────────
 _effect_bus: dict[tuple, dict] = {}   # (virtual_id, effect_type) → merged config patch
+_effect_bus_switch: set[tuple] = set()  # keys queued with switch intent
 _config_bus: dict = {}                # global config patch (global_brightness, etc.)
 _bus_task: Optional[asyncio.Task] = None
 BUS_WINDOW_MS = 8  # coalesce window; must be << ramp step_ms (25 ms)
@@ -311,12 +312,95 @@ def _breaker_is_open() -> bool:
     return _breaker_open_until > time.monotonic()
 
 
+# ── Post-outage state re-assert ───────────────────────────────────────────────
+# When LedFX comes back after being down (crash, watchdog restart), it boots
+# from its own lazily-saved config — often minutes stale. SpotFX's virtual
+# cache holds the pre-outage truth, so we push that back: every polled virtual
+# gets its cached effect re-POSTed, then the cache is refreshed and the source
+# watchdog runs once. Rate-limited; snapshot is taken synchronously at
+# schedule time so post-restart polls can't overwrite the pre-outage state
+# before we use it.
+
+_REASSERT_MIN_OUTAGE_S = 8.0
+_REASSERT_MIN_INTERVAL_S = 60.0
+_last_reassert = 0.0
+
+
+def _schedule_reassert(reason: str) -> None:
+    global _last_reassert
+    now = time.monotonic()
+    if now - _last_reassert < _REASSERT_MIN_INTERVAL_S:
+        return
+    _last_reassert = now
+    snapshot = {
+        vid: {
+            "type": eff.get("type"),
+            "config": dict(eff.get("config") or {}),
+        }
+        for vid, vstate in state.ledfx_virtual_cache.items()
+        if (eff := (vstate or {}).get("effect") or {}).get("type")
+    }
+    if not snapshot:
+        return
+    try:
+        asyncio.get_running_loop().create_task(
+            _reassert_effects(snapshot, reason)
+        )
+    except RuntimeError:
+        pass  # no running loop (offline tooling) — nothing to recover
+
+
+async def _reassert_effects(snapshot: dict, reason: str) -> None:
+    # Wait until the API actually answers (no-op if already up).
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        try:
+            resp = await _get_probe_client().get("/api/info")
+            if resp.status_code == 200:
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+    else:
+        logger.warning("LedFX recovery: API never came back — skipping re-assert")
+        return
+    logger.warning(
+        "LedFX recovery: re-asserting %d cached effects (%s)",
+        len(snapshot), reason,
+    )
+    # force_allow: a LedFX restart mid-song must be repaired even while the
+    # capture gate is muting ordinary writes — a dark room is worse than a
+    # few HTTP calls during capture.
+    with force_allow():
+        for vid, eff in snapshot.items():
+            await post_virtual_effect(vid, eff["type"], eff["config"])
+        # Refresh the cache from live LedFX, then let the watchdog tidy up.
+        for vid in snapshot:
+            data = await get_virtual(vid)
+            if data:
+                state.ledfx_virtual_cache[vid] = data.get(vid, data)
+        try:
+            from services import source_watchdog
+            await source_watchdog.check_and_repair()
+            await source_watchdog.check_and_repair()  # second pass clears strikes
+        except Exception as exc:
+            logger.debug("LedFX recovery watchdog pass failed: %r", exc)
+        await drain_bus()
+    logger.warning("LedFX recovery: re-assert complete")
+
+
 def _on_success() -> None:
     global _consecutive_failures, _breaker_open_until, _first_failure_at
     if _breaker_open_until:                 # was open or half-open → recovered
+        outage_s = time.monotonic() - _first_failure_at if _first_failure_at else 0.0
         _breaker_open_until = 0.0
         _record_event("recovered")
         logger.info("LedFX circuit recovered after %d consecutive failures", _consecutive_failures)
+        if outage_s >= _REASSERT_MIN_OUTAGE_S:
+            # LedFX was down long enough to have restarted — it boots from its
+            # lazily-saved config, which can be minutes stale (broken radial
+            # sources, wrong effects). Re-assert OUR pre-outage state.
+            _schedule_reassert(f"outage {outage_s:.0f}s")
     _consecutive_failures = 0
     _first_failure_at = 0.0
 
@@ -455,12 +539,38 @@ def _get_probe_client() -> httpx.AsyncClient:
 
 # ── Internal direct-fire helpers (bypass bus) ─────────────────────────────────
 
-async def _set_virtual_effect_direct(virtual_id: str, effect_type: str, config: dict) -> bool:
+def _round_int_params(effect_type: str, config: dict) -> dict:
+    """Return `config` with integer-typed params (per the effect_params
+    registry) rounded to real ints. Ramp math produces floats like 2.0/2.5,
+    and LedFX effects use these as numpy sizes/slice indices — a float there
+    kills the render thread. Every outgoing effect config passes through here."""
+    from services import effect_params as _ep
+    out = config
+    for k, v in config.items():
+        if isinstance(v, float):
+            meta = _ep.get_param_meta(effect_type, k)
+            if meta and meta.get("type") == "integer":
+                if out is config:
+                    out = dict(config)
+                out[k] = int(round(v))
+    return out
+
+
+async def _set_virtual_effect_direct(
+    virtual_id: str, effect_type: str, config: dict, patch_only: bool = False
+) -> bool:
     if _capture_in_progress():
         return True   # capture-in-progress mute (acts like success so callers don't error)
+    body = {"type": effect_type, "config": _round_int_params(effect_type, config)}
+    if patch_only:
+        # Tag non-switch writes: LedFX drops a patch-tagged PUT whose type no
+        # longer matches the active effect (a stale-addressed patch racing an
+        # effect switch must not switch the effect BACK). Older LedFX ignores
+        # the key.
+        body["patch"] = True
     resp = await _request(
         "PUT", f"/api/virtuals/{virtual_id}/effects",
-        json={"type": effect_type, "config": config},
+        json=body,
         label=f"effect:{virtual_id}",
     )
     return resp is not None
@@ -485,9 +595,14 @@ async def _set_virtual_effect_tween_direct(
         "PUT", f"/api/virtuals/{virtual_id}/effects",
         json={
             "type": effect_type,
-            "config": config,
+            "config": _round_int_params(effect_type, config),
             "transition_ms": int(transition_ms),
             "easing": easing,
+            # Colour/gradient travel: hue-wheel rotation vs straight RGB lerp.
+            # Older LedFX ignores unknown keys → falls back to RGB.
+            "transition_blend": (
+                "hue" if settings.hue_blend_transitions else "rgb"
+            ),
         },
         label=f"tween:{virtual_id}",
     )
@@ -521,12 +636,16 @@ async def _flush_bus() -> None:
     global _bus_task
     await asyncio.sleep(BUS_WINDOW_MS / 1000)
     effect_snap = dict(_effect_bus)
+    switch_snap = set(_effect_bus_switch)
     config_snap = dict(_config_bus)
     _effect_bus.clear()
+    _effect_bus_switch.clear()
     _config_bus.clear()
     _bus_task = None
     coros = [
-        _set_virtual_effect_direct(vid, etype, patch)
+        _set_virtual_effect_direct(
+            vid, etype, patch, patch_only=(vid, etype) not in switch_snap
+        )
         for (vid, etype), patch in effect_snap.items()
     ]
     if config_snap:
@@ -543,14 +662,21 @@ def _schedule_bus_flush() -> None:
 
 # ── Public write API (goes through bus) ───────────────────────────────────────
 
-async def set_virtual_effect(virtual_id: str, effect_type: str, config: dict) -> None:
+async def set_virtual_effect(
+    virtual_id: str, effect_type: str, config: dict, *, is_switch: bool = False
+) -> None:
     """
-    Queue a virtual effect patch into the coalesce bus.
-    Patches for the same (virtual_id, effect_type) within the bus window are merged;
-    later keys overwrite earlier ones.
+    Queue a virtual effect write into the coalesce bus.
+    Writes for the same (virtual_id, effect_type) within the bus window are
+    merged; later keys overwrite earlier ones. `is_switch=True` marks an
+    intentional effect switch — everything else flushes as a patch-tagged PUT
+    that LedFX drops when its type no longer matches the active effect (so a
+    stale-addressed patch can never switch the effect back).
     """
     key = (virtual_id, effect_type)
     _effect_bus[key] = {**_effect_bus.get(key, {}), **config}
+    if is_switch:
+        _effect_bus_switch.add(key)
     _schedule_bus_flush()
 
 
@@ -783,6 +909,90 @@ async def get_scenes() -> list[dict]:
     return [{"id": sid, **meta} for sid, meta in scenes_dict.items()]
 
 
+async def post_virtual_effect(virtual_id: str, effect_type: str, config: dict) -> bool:
+    """Set/replace a virtual's effect via POST — unlike the PUT patch path,
+    this works when NO effect is active (e.g. after a DELETE) and reactivates
+    the virtual. Used by the source watchdog's restore."""
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
+    resp = await _request(
+        "POST", f"/api/virtuals/{virtual_id}/effects",
+        json={"type": effect_type, "config": _round_int_params(effect_type, config)},
+        label=f"effect_post:{virtual_id}",
+    )
+    return resp is not None
+
+
+async def set_virtual_active(virtual_id: str, active: bool) -> bool:
+    """Activate/deactivate a virtual (PUT /api/virtuals/{id} {"active": ...}).
+    Used by the source watchdog to revive a consumer effect's source virtual."""
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
+    resp = await _request(
+        "PUT", f"/api/virtuals/{virtual_id}",
+        json={"active": active},
+        label=f"virtual_active:{virtual_id}",
+    )
+    return resp is not None
+
+
+async def set_virtual_effect_fallback(
+    virtual_id: str, effect_type: str, config: dict, fallback_s: float
+) -> bool:
+    """POST a full effect config with LedFX's server-side fallback: the prior
+    effect+config auto-restores after fallback_s seconds. Used for flare
+    bursts (e.g. dancer big moves) — zero revert bookkeeping on our side.
+    Bypasses the coalescing bus (flares are rare, and coalescing a fallback
+    POST with a PUT patch would drop the revert)."""
+    if _capture_in_progress():
+        return True   # capture-in-progress mute
+    resp = await _request(
+        "POST", f"/api/virtuals/{virtual_id}/effects",
+        json={"type": effect_type, "config": _round_int_params(effect_type, config), "fallback": fallback_s},
+        label=f"effect_fallback:{virtual_id}",
+    )
+    return resp is not None
+
+
+# ── Asset store (GIF assets for keybeat2d/gifplayer) ──────────────────────────
+# Not effect writes: they skip the capture-gate and use longer timeouts.
+
+async def upload_asset(dest_path: str, data: bytes, filename: str = "asset.gif") -> bool:
+    """Upload bytes into LedFX's asset store at a relative dest path
+    (e.g. 'spotfx/dancer/dancer_basic.gif'). Overwrites if present."""
+    resp = await _request(
+        "POST", "/api/assets",
+        files={"file": (filename, data, "image/gif")},
+        data={"path": dest_path},
+        timeout=httpx.Timeout(15.0),
+        label="asset_upload",
+    )
+    return resp is not None
+
+
+async def list_assets() -> list[dict]:
+    """List LedFX user assets (path/size/n_frames/... dicts). [] on failure."""
+    resp = await _request(
+        "GET", "/api/assets", timeout=httpx.Timeout(10.0), label="asset_list"
+    )
+    if resp is None:
+        return []
+    return (resp.json() or {}).get("assets", [])
+
+
+async def get_gif_frames(asset_path: str) -> int | None:
+    """Round-trip check: frame count of an asset as LedFX decodes it."""
+    resp = await _request(
+        "POST", "/api/get_gif_frames",
+        json={"path_url": asset_path},
+        timeout=httpx.Timeout(15.0),
+        label="gif_frames",
+    )
+    if resp is None:
+        return None
+    return (resp.json() or {}).get("frame_count")
+
+
 async def get_config() -> dict:
     """Fetch LedFX global config (GET /api/config). Returns {} on failure."""
     if _capture_in_progress():
@@ -902,6 +1112,20 @@ async def set_virtual_config(virtual_id: str, config: dict) -> bool:
     return False
 
 
+async def set_virtual_dark_lock(virtual_id: str, locked: bool) -> bool:
+    """Set/clear the per-virtual dark-mode background lock (SpotFX patch in
+    ledfx-src: Virtual.CONFIG_SCHEMA `dark_lock`). While locked LedFX clamps
+    background_color→#000000 / background_brightness→0 inside _apply_config,
+    so no write path can light a background. Deliberately NOT muted during
+    capture — lock flips are rare, tiny, and must not be silently dropped."""
+    resp = await _request(
+        "POST", "/api/virtuals",
+        json={"id": virtual_id, "config": {"dark_lock": bool(locked)}},
+        label=f"dark_lock:{virtual_id}",
+    )
+    return resp is not None
+
+
 def get_virtual_cache(virtual_id: str) -> dict:
     """Return the cached virtual state dict (from the last poll). Empty dict if not cached."""
     return state.ledfx_virtual_cache.get(virtual_id, {})
@@ -971,10 +1195,14 @@ async def ramp_gradient_params(
     from services.gradient_interpolation import interpolate_gradient
     cfg = state.ledfx_virtual_cache.get(virtual_id, {}).get("effect", {}).get("config", {})
     starts = {p: (cfg.get(p) or "") for p in patch}
+    hue = bool(settings.hue_blend_transitions)
     steps = max(1, ramp_ms // step_ms)
     for i in range(1, steps + 1):
         t = i / steps
-        frame = {p: interpolate_gradient(starts[p], patch[p], t) for p in patch}
+        frame = {
+            p: interpolate_gradient(starts[p], patch[p], t, hue_blend=hue)
+            for p in patch
+        }
         await set_virtual_effect(virtual_id, effect_type, frame)
         if i < steps:
             await asyncio.sleep(step_ms / 1000)
@@ -1037,10 +1265,43 @@ async def poll_virtual_states() -> None:
     while True:
         if _server_tween_supported is None:
             await refresh_capabilities()
+        if _capture_in_progress():
+            # Captures run song-to-song during playback, and the gate mutes
+            # normal polling + writes — but a broken radial source must still
+            # heal WHILE music plays (that's when effects switch and break).
+            # Light pass: refresh only the source-consumer chain (a couple of
+            # GETs) and let the watchdog repair inside force_allow().
+            chain: set[str] = set()
+            for vid, vstate in state.ledfx_virtual_cache.items():
+                cfg = ((vstate or {}).get("effect") or {}).get("config") or {}
+                if "source_virtual" in cfg:
+                    chain.add(vid)
+                    src = cfg.get("source_virtual")
+                    if src and src != "unknown":
+                        chain.add(src)
+            if chain:
+                try:
+                    with force_allow():
+                        for vid in chain:
+                            data = await get_virtual(vid)
+                            if data:
+                                state.ledfx_virtual_cache[vid] = data.get(vid, data)
+                        from services import source_watchdog
+                        await source_watchdog.check_and_repair()
+                        await drain_bus()  # coalesced repairs must land inside the gate
+                except Exception as exc:
+                    logger.debug("source watchdog capture-pass failed: %r", exc)
+            await asyncio.sleep(5)
+            continue
         for vid in _get_polled_virtuals():
             data = await get_virtual(vid)
             if data:
                 state.ledfx_virtual_cache[vid] = data.get(vid, data)
+        try:
+            from services import source_watchdog
+            await source_watchdog.check_and_repair()
+        except Exception as exc:
+            logger.debug("source watchdog pass failed: %r", exc)
         await asyncio.sleep(5)
 
 
@@ -1059,6 +1320,9 @@ async def _restart_ledfx_service() -> None:
         if proc.returncode == 0:
             logger.warning("LedFX watchdog: ledfx service restarted")
             _record_event("ledfx_restart", "watchdog: sustained high RTT")
+            # The cache still holds pre-restart truth (polls fail while LedFX
+            # is down, so nothing overwrote it) — push it back once LedFX is up.
+            _schedule_reassert("watchdog restart")
         else:
             logger.error("LedFX watchdog: ledfx restart failed (rc=%s): %s",
                          proc.returncode, (err or b"").decode()[:200])
@@ -1114,16 +1378,28 @@ async def _ledfx_watchdog_tick() -> None:
     await _restart_ledfx_service()
 
 
+# Consecutive dead-stream ticks per released Hue device (see the stream-health
+# watchdog at the end of _reconcile_ambient). 2 strikes → heal.
+_ambient_stream_strikes: dict[str, int] = {}
+
+
 async def _reconcile_ambient() -> None:
-    """Self-heal ambient drift, both directions. state.ambient_mode_enabled is the
-    single source of truth (set by the toggle, persisted, restored on startup,
-    broadcast to the UI). Device freeze is in-memory in LedFX and is LOST on a
-    LedFX restart, so a device can silently re-engage its stream while ambient is
-    meant to be on. Drive each target Hue device's freeze state toward the flag:
-    ON  → any device not frozen gets re-frozen + REST re-applied;
-    OFF → any device still frozen gets unfrozen."""
+    """Self-heal ambient drift, both directions. state.ambient_groups is the
+    single source of truth (set by the toggle / group picker / HA, persisted,
+    restored on startup, broadcast to the UI). Device freeze is in-memory in
+    LedFX and is LOST on a LedFX restart, so a device can silently re-engage
+    its stream while its group is meant to be held. Drive each target Hue
+    device's freeze state toward its group membership:
+    HELD     → not frozen gets re-frozen + REST re-applied;
+    NOT HELD → still frozen gets unfrozen + the wake scene kicked (else the
+               bulbs sit stuck on the ambient REST color until the next scene)."""
     from services import ambient_mode
-    want = bool(state.ambient_mode_enabled)
+    if ambient_mode.busy():
+        return  # enable/disable/fade mid-flight — don't unfreeze under a fade
+
+    want_ids = set(state.ambient_groups)
+    if state.ambient_mode_enabled and not want_ids:
+        want_ids = None  # legacy: flag on with no group detail = all targets
 
     all_v = await ambient_mode._all_virtuals()
     target_devices: set[str] = set()
@@ -1137,33 +1413,78 @@ async def _reconcile_ambient() -> None:
             hue_cfgs[did] = cfg
     if not hue_cfgs:
         return
+    if want_ids is None:
+        want_ids = set(hue_cfgs)
 
-    drift = []
+    refreeze, release = [], []
     for did in hue_cfgs:
         is_frozen = await get_hue_frozen(did)
         if is_frozen is None:
             continue                 # LedFX unreachable for this device — next tick
-        if is_frozen != want:
-            drift.append(did)
-    if not drift:
-        return
+        want = did in want_ids
+        if want and not is_frozen:
+            refreeze.append(did)
+        elif is_frozen and not want:
+            release.append(did)
 
-    if want:
+    if refreeze:
         logger.warning(
             "Ambient reconcile: %d Hue device(s) lost freeze (LedFX restart?) — re-asserting",
-            len(drift),
+            len(refreeze),
         )
-        for did in drift:
+        for did in refreeze:
             await freeze_hue_device(did, True)
-        for did in drift:            # re-write REST only AFTER re-freezing
+        for did in refreeze:         # re-write REST only AFTER re-freezing
             await ambient_mode._apply_hue(hue_cfgs[did])
-    else:
+    if release:
         logger.warning(
-            "Ambient reconcile: flag OFF but %d Hue device(s) still frozen — unfreezing",
-            len(drift),
+            "Ambient reconcile: %d Hue device(s) frozen outside held groups — unfreezing",
+            len(release),
         )
-        for did in drift:
+        for did in release:
             await freeze_hue_device(did, False)
+        try:
+            await ambient_mode._wake_kick()
+        except Exception as exc:
+            logger.error("Ambient reconcile: wake kick failed: %r", exc)
+
+    # Stream-health watchdog for RELEASED devices. A LedFX restart/death ends
+    # the entertainment session and the bridge reverts the bulbs to their
+    # pre-session state (typically the ambient white, zero reactivity); if the
+    # stream then fails to re-engage, the freeze flag still reads correct so
+    # the drift checks above never fire (bug seen live 2026-07-24). Two
+    # consecutive bad ticks (~60s) → freeze-cycle + wake + catch-up heal.
+    # Devices unfrozen this very tick are skipped — their stream needs a
+    # moment; strikes start next tick.
+    for did in list(_ambient_stream_strikes):
+        if did in want_ids or did not in hue_cfgs:
+            _ambient_stream_strikes.pop(did, None)
+    stuck = []
+    for did in hue_cfgs:
+        if did in want_ids or did in refreeze or did in release:
+            continue
+        if not ambient_mode._driven_and_should_stream(did, all_v):
+            _ambient_stream_strikes.pop(did, None)
+            continue
+        if await ambient_mode._stream_active(hue_cfgs[did]) is False:
+            n = _ambient_stream_strikes.get(did, 0) + 1
+            _ambient_stream_strikes[did] = n
+            if n >= 2:
+                stuck.append(did)
+        else:
+            _ambient_stream_strikes.pop(did, None)
+    if stuck:
+        for did in stuck:
+            _ambient_stream_strikes.pop(did, None)
+        logger.warning(
+            "Ambient reconcile: released device(s) %s have a dead entertainment "
+            "stream (bulbs stuck on pre-session state) — freeze-cycling + wake",
+            stuck,
+        )
+        try:
+            await ambient_mode._heal_stuck(stuck, hue_cfgs)
+        except Exception as exc:
+            logger.error("Ambient reconcile: stream heal failed: %r", exc)
 
 
 async def latency_loop() -> None:

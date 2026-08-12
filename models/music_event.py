@@ -13,7 +13,7 @@ Supported action types:
 """
 from __future__ import annotations
 from typing import Annotated, Literal, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import uuid
 
 from models.value_binding import ValueBinding
@@ -88,15 +88,20 @@ class MorphScope(BaseModel):
 
 class NumericNudge(BaseModel):
     """Per-element nudge spec used in Shape sub-fields when mode='nudge'.
-    amount: nudge magnitude in abstract 0..1 space (negative ok)
+    amount: nudge magnitude in abstract 0..1 space (negative ok). May be a
+            ValueBinding (⚡ intensity map / 🎲 random roll) — resolved to a
+            scalar at the executor seam like every other bound field.
     scale:  intensity_scale — 0 ignores intensity, 1 fully modulates.
+    random_sign: flip the delta's sign with 50% probability per fire — the
+            param randomly nudges up or down by the same magnitude.
     wrap:   when True, reflect off min/max and reverse direction on future
             fires so the value bounces instead of sticking at a boundary.
     lo/hi:  optional custom nudge range (None = the effect param's full range);
             clamping/bounce use these bounds. For x/y offset they are in the
             frontend −1..1 space."""
-    amount: float = 0.0
+    amount: float | ValueBinding = 0.0
     scale:  float = 0.0
+    random_sign: bool = False
     wrap:   bool = False
     lo:     float | None = None
     hi:     float | None = None
@@ -110,14 +115,23 @@ class AspectValue(BaseModel):
                                                 brightness / reactivity may also carry
                                                 scale_overrides (per-param weight overrides
                                                 — e.g. split fg vs bg brightness; see below)
+                                                reactivity additionally supports per-param
+                                                sub-fields (reactivity_values /
+                                                reactivity_nudges — see below) that override
+                                                the single-number distribution per param
       aspect=color                            → color_kind + color_value
       aspect=bg_color                         → bg_color
-      aspect=shape                            → any subset of {polygon, star, edges, twist, flip}
+      aspect=shape                            → any subset of {polygon, star, edges, twist, flip,
+                                                reverse, swirl, horizon_scale, radius_scale,
+                                                blob_size, x_offset, y_offset}.
+                                                `edges` doubles as the particle count on effects
+                                                with a `particle_count` param (orbits) — the UI
+                                                shows it as "Edge / Particle Count".
                                                 Booleans (polygon, flip) accept True, False,
                                                 or "toggle" (flip the current cached value).
                                                 When target.mode='nudge', the numeric sub-fields
-                                                (star, edges, twist) use their *_nudge specs
-                                                instead of their absolute value.
+                                                use their *_nudge specs instead of their
+                                                absolute value.
       aspect=effect                           → effect_type
     """
     number:       float | ValueBinding | None = None
@@ -141,6 +155,12 @@ class AspectValue(BaseModel):
     edges:        int | ValueBinding | None = None
     twist:        float | ValueBinding | None = None
     flip:         Optional[bool | Literal["toggle"] | ValueBinding] = None
+    # blackhole/orbits shape sub-fields (ignored by effects without the params)
+    swirl:          float | ValueBinding | None = None
+    horizon_scale:  float | ValueBinding | None = None
+    radius_scale:   float | ValueBinding | None = None
+    blob_size:      float | ValueBinding | None = None
+    reverse:        Optional[bool | Literal["toggle"] | ValueBinding] = None
     # x_offset / y_offset live in the FRONTEND −1..1 space. The compiler converts
     # to LedFX's 0..1 storage via the `scale_offset` flag in effect_params.json.
     x_offset:     float | ValueBinding | None = None
@@ -154,6 +174,22 @@ class AspectValue(BaseModel):
     twist_nudge:    NumericNudge | None = None
     x_offset_nudge: NumericNudge | None = None
     y_offset_nudge: NumericNudge | None = None
+    swirl_nudge:         NumericNudge | None = None
+    horizon_scale_nudge: NumericNudge | None = None
+    radius_scale_nudge:  NumericNudge | None = None
+    blob_size_nudge:     NumericNudge | None = None
+    # Per-param Reactivity sub-fields (aspect="reactivity"), mirroring the Shape
+    # sub-field semantics but keyed by raw LedFX param name so any effect's
+    # reactivity params (accel, edge_speed, beat_burst, spawn_rate, …) are
+    # addressable without a model field each. Values are in the param's OWN
+    # range (not abstract 0..1): set = write, absent = ignore, ValueBinding =
+    # variable (e.g. section energy). Toggle params (keybeat2d half_beat) take
+    # the usual tri-state True / False / "toggle". When target.mode="nudge",
+    # reactivity_nudges entries drive the per-param nudge math instead; the
+    # single-number distribution (nudge_amount × aspect_scale) still applies to
+    # params without an entry. Params the current effect lacks are ignored.
+    reactivity_values: dict[str, float | bool | Literal["toggle"] | ValueBinding] | None = None
+    reactivity_nudges: dict[str, NumericNudge] | None = None
 
 
 MorphAspect = Literal[
@@ -191,6 +227,7 @@ class MorphStepAction(BaseModel):
     beat-level signal feeds every per-target / per-sub-field nudge math.
     """
     type:             Literal["morph_step"] = "morph_step"
+    name:             str = ""  # optional editor display name, shown in summaries/previews
     labels:           list[str] = Field(default_factory=list)
     weight:           float = 1.0
     ramp_ms:          int | ValueBinding | None = None  # default for targets that don't override
@@ -198,15 +235,29 @@ class MorphStepAction(BaseModel):
     targets:          list[MorphTarget] = Field(default_factory=list)
 
 
+# SetColorAction.ref_id sentinels — resolved to a real ColorSetCard id at fire
+# time by trigger_engine._execute_set_color:
+#   SCENE_GROUP_COLOR_REF   → the Color Group designated by the ACTIVE scene
+#                             group (scene_group_color_ref_id); falls back to
+#                             the current group when none designates one.
+#   CURRENT_COLOR_GROUP_REF → the last Color Group any set_color fire used.
+SCENE_GROUP_COLOR_REF = "__scene_group__"
+CURRENT_COLOR_GROUP_REF = "__current__"
+
+
 class SetColorAction(BaseModel):
     """Apply a saved Color Set — or pick one from a Color Group — across many
     devices at once, setting FG color, BG color, and (optionally) background
-    mode. `ref_id` points at a ColorSetCard (kind="set" or "group"). For a
+    mode. `ref_id` points at a ColorSetCard (kind="set" or "group"), or one of
+    the sentinels above (follow the active Scene Group's designated Color
+    Group / re-use the current Color Group). For a
     group, `pick_mode` overrides the group's default selection; "default" uses
     the group's own `mode`. `ramp_ms` is the step default; each Color Set entry
     may override it. `advance`/`direction` apply only when the resolved mode is
     "cycle" (wrap or bounce): `advance` is how many members to move per fire (1 =
-    next, 3 = skip 2). For wrap, `direction` is the absolute index direction; for
+    next, 3 = skip 2, 0 = stay — re-apply the current member without moving,
+    which on a Palette Sync group means "repaint in the room's current color
+    family"). For wrap, `direction` is the absolute index direction; for
     bounce, "forward" continues the current travel direction and "backward"
     reverses it. See `services/trigger_engine._execute_set_color`."""
     type:      Literal["set_color"] = "set_color"
@@ -214,12 +265,23 @@ class SetColorAction(BaseModel):
     weight:    float = 1.0
     ref_id:    str = ""
     pick_mode: Literal["default", "cycle", "weighted"] = "default"
-    advance:   Union[Annotated[int, Field(ge=1)], ValueBinding] = 1
+    advance:   Union[Annotated[int, Field(ge=0)], ValueBinding] = 1
     direction: Literal["forward", "backward"] = "forward"
     ramp_ms:   int | ValueBinding | None = None
+    # Runtime multiplier for per-entry ramp overrides that live on the Color
+    # Set card (not on this action). Set by the Override Blend plan scaler on
+    # its deep copies; 1.0 (inert) on stored events.
+    ramp_scale: float = 1.0
+    # Dark/Light display mode for this step. "default" = defer to the color
+    # cards (group, then set); "dark" / "light" force it — but the global
+    # TopBar mode, trigger, scene group and scene all outrank this action.
+    # See services/display_mode.resolve().
+    display_mode: Literal["default", "dark", "light"] = "default"
     # When True (default), skip any color-set value that would reset the LedFX
-    # effect (e.g. background_color), preserving the running effect. When False,
-    # those values are still applied — but always instantly, never ramped.
+    # effect (params flagged `resets_effect`), preserving the running effect.
+    # When False, those values are still applied — but always instantly, never
+    # ramped. Since the 2026-07-10 ledfx-src background_* patch no stock param
+    # resets, so this flag is inert unless a param is flagged in effect_params.
     preserve_effect: bool = True
 
 
@@ -233,19 +295,49 @@ class MorphColorAction(BaseModel):
     (factor = 1 + (intensity − 0.5) · intensity_scale, same math as nudges).
 
     `direction`: "forward" rotates + degrees around the wheel, "backward" −.
-    `preserve_melt_bg`: when True, the BG color on melt effects is left
-    untouched; power effects ALWAYS get their BG rotated regardless.
+    `degrees` may be a ValueBinding (⚡ intensity map / 🎲 random roll per
+    fire; its ± flips rotation direction) — resolved at the executor seam.
+    `morph_bg`: when True (default) the BG color rotates along with FG and
+    accent; False leaves every effect's background untouched. Replaces the
+    old melt-only `preserve_melt_bg` (legacy True loads as morph_bg=False).
     See `services/trigger_engine._execute_morph_color`."""
     type:      Literal["morph_color"] = "morph_color"
     labels:    list[str] = Field(default_factory=list)
     weight:    float = 1.0
     scope:     MorphScope = Field(default_factory=MorphScope)
-    degrees:   float = 180.0
+    degrees:   float | ValueBinding = 180.0
     direction: Literal["forward", "backward"] = "forward"
     ramp_ms:   int | ValueBinding | None = None
     intensity_scale:  float = 0.0       # 0 = ignore beat intensity, 1 = full scaling
     intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
-    preserve_melt_bg: bool = False
+    morph_bg: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_preserve_melt_bg(cls, data):
+        # Old payloads carried melt-only `preserve_melt_bg`; map it onto the
+        # general toggle when the new field is absent.
+        if isinstance(data, dict) and "morph_bg" not in data:
+            if data.pop("preserve_melt_bg", False):
+                data["morph_bg"] = False
+        return data
+
+
+class SceneMorphAction(BaseModel):
+    """Step the ACTIVE Scene Group forward/backward `advance` members and fire
+    the resulting member scene (normal First/Rest lane behavior). Carries no
+    group reference — it acts on whichever scene_group event last fired or is
+    held by Force Scene; when none is active (or Force Scene holds a single
+    scene) it is a no-op. `advance` = members to move per fire (0 = re-fire
+    the current member, which runs its Rest lane). Stepping is always ordinal
+    ("cycle"), even on weighted-mode groups; bounce groups honor their bounce
+    travel, where "backward" reverses it — same semantics as SetColorAction.
+    See `services/trigger_engine._execute_scene_morph`."""
+    type:      Literal["scene_morph"] = "scene_morph"
+    labels:    list[str] = Field(default_factory=list)
+    weight:    float = 1.0
+    advance:   Annotated[int, Field(ge=0)] = 1
+    direction: Literal["forward", "backward"] = "forward"
 
 
 class DeviceSettingTarget(BaseModel):
@@ -302,6 +394,9 @@ class LedFxEffectParamAction(BaseModel):
     category: str | None = None     # e.g. "Matrix" | "Strips" | "Singles"
     params: list[EffectParamChange] = Field(default_factory=list)
     ramp_ms: int | ValueBinding | None = None  # None = use settings.smooth_ramp_ms; 0 = instant
+    fallback_s: float | None = None  # if set: POST full merged config with LedFX server-side
+                                     # fallback — prior effect auto-restores after this many
+                                     # seconds (flare bursts; ramp_ms is ignored)
 
 
 class RandomOption(BaseModel):
@@ -312,6 +407,15 @@ class RandomOption(BaseModel):
     name:    str = ""                     # optional editor display name
     labels:  list[str] = Field(default_factory=list)
     weight:  float = 1.0
+    # ── Energy gate/scale — evaluated against the firing trigger's intensity
+    # (0-1; machine triggers default it to section energy). Option is eligible
+    # only when floor <= energy <= ceiling (None = unbounded). energy_scale
+    # tilts the weight across that window: 0 = flat, +1 = 0x weight at the
+    # window's low edge up to 2x at the high edge, -1 = the inverse. Fires
+    # with no energy context (manual test fires) skip the gate entirely.
+    energy_floor:   Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    energy_ceiling: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    energy_scale:   float = Field(default=0.0, ge=-1.0, le=1.0)
     # None = inherit the group's scope; set = override for this option.
     scope:   Optional[MorphScope] = None
     actions: list[Action] = Field(default_factory=list)
@@ -364,6 +468,12 @@ class SequenceChild(BaseModel):
     labels:      list[str] = Field(default_factory=list)
     delay_ms:    int = 0
     delay_beats: int = 0
+    # ms mode only: also fire this child after this many scene-family fires
+    # (scene picks, Update/Reset Scene, flares, Scene Morph) — whichever of
+    # delay_ms / delay_updates completes first. delay_ms == 0 with updates set
+    # waits on updates alone (released early by a track change). Ignored in
+    # beats mode and by the legacy event-level sequence editor.
+    delay_updates: Optional[int] = None
     pre_ramp:    bool = True
     # None = inherit the parent group's scope ("parent" in the editor);
     # set = override for this step's subtree.
@@ -416,6 +526,44 @@ class ParallelGroupAction(BaseModel):
     children: list[ParallelChild] = Field(default_factory=list)
 
 
+class IntensityLane(BaseModel):
+    """One lane of an IntensityChooserAction. When selected, all `actions`
+    fire concurrently (same semantics as RandomOption.actions).
+
+    `threshold` is the lane's LOWER bound on the 0-1 intensity scale; a lane
+    covers [threshold, next lane's threshold). lanes[0] is the DEFAULT lane —
+    it covers everything below the first thresholded lane and its own
+    threshold is ignored."""
+    id:        str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name:      str = ""
+    labels:    list[str] = Field(default_factory=list)
+    threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    # None = inherit the group's scope; set = override for this lane.
+    scope:     Optional[MorphScope] = None
+    actions:   list[Action] = Field(default_factory=list)
+
+
+class IntensityChooserAction(BaseModel):
+    """Deterministic sibling of RandomGroupAction: the firing trigger's
+    intensity (0-1, after the song/genre intensity scaler) selects exactly ONE
+    lane, whose actions fire concurrently. Among lanes[1:], the highest lane
+    whose threshold <= intensity wins (equal thresholds -> the later lane).
+    lanes[0] is the default lane: it fires when intensity is below every
+    threshold, when it is the only lane, or when the fire carries no intensity
+    context (manual test fires).
+
+    `source` is pluggable for future signals; only the trigger's intensity is
+    implemented today."""
+    type:   Literal["intensity_chooser"] = "intensity_chooser"
+    id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
+    labels: list[str] = Field(default_factory=list)
+    weight: float = 1.0        # weight of the group itself inside a parent pool
+    source: Literal["trigger_intensity"] = "trigger_intensity"
+    # Default target for every lane (lanes inherit unless they override).
+    scope:  Optional[MorphScope] = None
+    lanes:  list[IntensityLane] = Field(default_factory=list)
+
+
 # Discriminated union of all action types
 Action = Annotated[
     EventRefAction
@@ -427,16 +575,19 @@ Action = Annotated[
     | MorphStepAction
     | SetColorAction
     | MorphColorAction
+    | SceneMorphAction
     | DeviceSettingsAction
     | RandomGroupAction
     | SequenceGroupAction
-    | ParallelGroupAction,
+    | ParallelGroupAction
+    | IntensityChooserAction,
     Field(discriminator="type"),
 ]
 
 # These models reference the Action union recursively.
 for _m in (RandomOption, RandomGroupAction, SequenceChild, SequenceGroupAction,
-           ParallelChild, ParallelGroupAction):
+           ParallelChild, ParallelGroupAction, IntensityLane,
+           IntensityChooserAction):
     _m.model_rebuild()
 
 
@@ -499,6 +650,13 @@ class BeatRevertConfig(BaseModel):
     pre_ramp: bool = True      # start revert ramp early so it completes on the target beat
 
 
+class SceneGroupMember(BaseModel):
+    """One reference to a scene_update event within a scene_group event.
+    `weight` matters only when the group's mode is "weighted"."""
+    event_id: str
+    weight:   float = 1.0
+
+
 class MusicEvent(BaseModel):
     """
     A named, reusable music event that defines what happens at a trigger point.
@@ -514,6 +672,12 @@ class MusicEvent(BaseModel):
         # shape_flare→Shape, color_flare→Color, combo_flare→Shape+Color.
         "scene_update", "update_scene", "reset_scene",
         "shape_flare", "color_flare", "combo_flare",
+        # Ordered set of member Scene Updates picked one at a time, like a
+        # Color Group: cycle (wrap/bounce) or weighted random. Firing the
+        # group advances its cursor and fires the picked member (normal
+        # First/Rest). Force Scene may hold a scene_group — every new-scene
+        # pick then rotates the group. See scene_group_* fields below.
+        "scene_group",
         # Sets LedFX virtual-config Device Settings (max_brightness / freq band).
         "device_settings",
         # Unified node-tree event: the entire body is `root` (an Action, usually
@@ -559,6 +723,34 @@ class MusicEvent(BaseModel):
     # For event_type == "composite" — the whole event body as one Action tree.
     # None = empty event (executors no-op).
     root: Optional[Action] = None
+
+    # For event_type == "scene_group" — member Scene Updates + selection
+    # behavior (mirrors ColorSetCard group semantics; cursor lives in the
+    # engine, keyed by this event's id, and persists across track changes).
+    scene_group_members: list[SceneGroupMember] = Field(default_factory=list)
+    scene_group_mode: Literal["cycle", "weighted"] = "cycle"
+    scene_group_cycle_behavior: Literal["wrap", "bounce"] = "wrap"
+    scene_group_exclude_current: bool = True
+    # Cycle mode only: when the group is freshly called (it wasn't the active
+    # scene group), start cycling from a random member instead of the
+    # persisted cursor. Weighted mode ignores it (every pick is random).
+    scene_group_random_start: bool = False
+    # Optional ColorSetCard (kind="group") id this scene group designates.
+    # Set Color actions with ref_id == SCENE_GROUP_COLOR_REF resolve to it
+    # while this group is active — the room's colors follow the scene group.
+    scene_group_color_ref_id: str = ""
+    # Dark/Light variants of the designated Color Group. When the resolved
+    # display mode (global → trigger → this group → scene → set_color) is
+    # dark/light and the matching ref is set, SCENE_GROUP_COLOR_REF resolves
+    # to it instead of scene_group_color_ref_id. "" = no variant, use the base.
+    scene_group_dark_color_ref_id: str = ""
+    scene_group_light_color_ref_id: str = ""
+
+    # Dark/Light display mode carried by this event. Meaningful on
+    # event_type == "scene_group" (the group's default mode, level 3) and
+    # "scene_update" (the scene's mode, level 4). "default" = defer downward.
+    # See services/display_mode.resolve() for the full precedence chain.
+    display_mode: Literal["default", "dark", "light"] = "default"
 
     # Timing offset: shift when this event fires (negative = earlier, positive = later)
     event_offset_ms: int = 0

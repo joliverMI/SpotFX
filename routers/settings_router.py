@@ -43,6 +43,8 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 class SettingsPatch(BaseModel):
     audio_latency_ms: Optional[int] = None
+    active_timing_device: Optional[str] = None
+    timing_device_offsets: Optional[dict[str, int]] = None
     ledfx_trigger_buffer_ms: Optional[int] = None
     builder_zoom_window_s: Optional[int] = None
     builder_future_buffer_s: Optional[int] = None
@@ -61,10 +63,13 @@ class SettingsPatch(BaseModel):
     quiet_min_duration_ms: Optional[int] = None
     audio_shape_min_capture_pct: Optional[float] = None
     smooth_ramp_ms: Optional[int] = None
+    hue_blend_transitions: Optional[bool] = None
     auto_generate_mode: Optional[str] = None   # "embedded" | "claude"
     show_ai_triggers: Optional[bool] = None
     show_advanced: Optional[bool] = None
     genre_blending_enabled: Optional[bool] = None
+    force_scene_enabled: Optional[bool] = None
+    force_scene_event_id: Optional[str] = None
     suppress_triggers_during_capture: Optional[bool] = None
     xcorr_monitor_enabled: Optional[bool] = None
     song_source: Optional[str] = None          # "spotify" | "ledfx"
@@ -79,12 +84,21 @@ class SettingsPatch(BaseModel):
     ambient_kelvin: Optional[int] = None
     ambient_brightness: Optional[int] = None
     ambient_wake_scene: Optional[str] = None
+    ambient_transition_s: Optional[float] = None
+    ambient_fade_brightness: Optional[int] = None
+    ambient_catchup_s: Optional[float] = None
+    display_light_bg_color: Optional[str] = None
+    display_light_bg_brightness: Optional[float] = None
+    display_shield_categories: Optional[list[str]] = None
+    display_shield_virtuals: Optional[list[str]] = None
 
 
 @router.get("")
 async def get_settings():
     return {
         "audio_latency_ms": settings.audio_latency_ms,
+        "active_timing_device": settings.active_timing_device,
+        "timing_device_offsets": settings.timing_device_offsets,
         "ledfx_trigger_buffer_ms": settings.ledfx_trigger_buffer_ms,
         "builder_zoom_window_s": settings.builder_zoom_window_s,
         "builder_future_buffer_s": settings.builder_future_buffer_s,
@@ -107,10 +121,13 @@ async def get_settings():
         "quiet_min_duration_ms": settings.quiet_min_duration_ms,
         "audio_shape_min_capture_pct": settings.audio_shape_min_capture_pct,
         "smooth_ramp_ms": settings.smooth_ramp_ms,
+        "hue_blend_transitions": settings.hue_blend_transitions,
         "auto_generate_mode": settings.auto_generate_mode,
         "show_ai_triggers": settings.show_ai_triggers,
         "show_advanced": settings.show_advanced,
         "genre_blending_enabled": settings.genre_blending_enabled,
+        "force_scene_enabled": settings.force_scene_enabled,
+        "force_scene_event_id": settings.force_scene_event_id,
         "suppress_triggers_during_capture": settings.suppress_triggers_during_capture,
         "xcorr_monitor_enabled": settings.xcorr_monitor_enabled,
         "song_source": settings.song_source,
@@ -125,6 +142,13 @@ async def get_settings():
         "ambient_kelvin": settings.ambient_kelvin,
         "ambient_brightness": settings.ambient_brightness,
         "ambient_wake_scene": settings.ambient_wake_scene,
+        "ambient_transition_s": settings.ambient_transition_s,
+        "ambient_fade_brightness": settings.ambient_fade_brightness,
+        "ambient_catchup_s": settings.ambient_catchup_s,
+        "display_light_bg_color": settings.display_light_bg_color,
+        "display_light_bg_brightness": settings.display_light_bg_brightness,
+        "display_shield_categories": settings.display_shield_categories,
+        "display_shield_virtuals": settings.display_shield_virtuals,
     }
 
 
@@ -155,6 +179,8 @@ async def restart_server():
 async def patch_settings(patch: SettingsPatch):
     """Apply non-None values from patch to the live settings object and persist to disk."""
     data = patch.model_dump(exclude_none=True)
+    prev_force_on = settings.force_scene_enabled
+    prev_force_eid = settings.force_scene_event_id
     for key, val in data.items():
         if hasattr(settings, key):
             object.__setattr__(settings, key, val)
@@ -166,7 +192,20 @@ async def patch_settings(patch: SettingsPatch):
     if any(k.startswith("ambient_") for k in data):
         from models.state import state
         if state.ambient_mode_enabled:
-            import asyncio
             from services import ambient_mode
             asyncio.create_task(ambient_mode.reapply())
+    # Dark/Light mode: shield-list or light-bg changes re-reconcile the LedFX
+    # dark locks from scratch (newly shielded virtuals unlock, and vice versa).
+    if any(k.startswith("display_") for k in data):
+        from services import display_mode as _dm
+        _dm.resync()
+    # Force Scene: turning it on or picking a different scene asserts the
+    # forced scene right away instead of waiting for the next scene pick.
+    # Fired in the background — lane ramps can take seconds.
+    if (settings.force_scene_enabled and settings.force_scene_event_id
+            and (not prev_force_on
+                 or settings.force_scene_event_id != prev_force_eid)):
+        from main import engine
+        asyncio.create_task(
+            engine.fire_event_now(settings.force_scene_event_id))
     return {"status": "updated"}

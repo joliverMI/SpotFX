@@ -107,15 +107,39 @@ class PCMRingBuffer:
             _, oldest = self._chunks.popleft()
             self._sample_count -= len(oldest)
 
-    def snapshot_since(self, monotonic_ts: float) -> np.ndarray:
-        """Return concatenated float32 mono PCM from `monotonic_ts` through now.
+    def ensure_alive(self) -> None:
+        """Watchdog: restart the input stream if it silently stopped filling
+        (device hiccup, PortAudio abort — sounddevice gives no error signal
+        when this happens; live symptom was 'no pre-roll PCM available' after
+        hours of uptime). Cheap; called from the Spotify poll loop so a dead
+        stream heals within one poll instead of at the next capture."""
+        if self._stream is None:
+            self.start()
+            return
+        newest = self._chunks[-1][0] if self._chunks else self._started_at
+        if time.monotonic() - newest > 5.0:
+            logger.warning(
+                "PCM ring buffer stalled (%.1fs since last chunk) — restarting stream",
+                time.monotonic() - newest,
+            )
+            self.stop()
+            self.start()
 
-        Returns an empty array when the requested window is older than the
-        buffer holds (i.e. the song-start was longer ago than the buffer
-        depth). Callers should treat that as "no pre-roll available".
+    def snapshot_since(self, monotonic_ts: float) -> np.ndarray:
+        """Return concatenated float32 mono PCM from `monotonic_ts` through now."""
+        return self.snapshot_since_with_start(monotonic_ts)[0]
+
+    def snapshot_since_with_start(self, monotonic_ts: float) -> tuple[np.ndarray, float]:
+        """Return (pcm, effective_start_monotonic) from `monotonic_ts` through now.
+
+        effective_start_monotonic is where the returned PCM actually begins:
+        equal to the request when the buffer covers it, or the oldest held
+        chunk's start when the request predates the buffer (pre-roll
+        truncated — callers must label the PCM from the EFFECTIVE start, not
+        the requested one, or every sample gets stamped too early).
         """
         if not self._chunks:
-            return np.zeros(0, dtype=np.float32)
+            return np.zeros(0, dtype=np.float32), monotonic_ts
         # Snapshot the deque to a list so concurrent appends/popleft don't
         # disturb iteration (chunks added mid-iteration would be missed —
         # acceptable, they're newer than `now` anyway).
@@ -148,8 +172,8 @@ class PCMRingBuffer:
                 if offset_samples < len(pcm):
                     out_chunks.append(pcm[offset_samples:])
         if not out_chunks:
-            return np.zeros(0, dtype=np.float32)
-        return np.concatenate(out_chunks)
+            return np.zeros(0, dtype=np.float32), monotonic_ts
+        return np.concatenate(out_chunks), monotonic_ts
 
     def latest_n_seconds(self, seconds: float) -> np.ndarray:
         """Convenience: return the last `seconds` of PCM (or what's available)."""

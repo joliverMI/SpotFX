@@ -1,11 +1,14 @@
 /** Trigger edit/create dialog: timestamp (m:ss.t), searchable event
  * (recents-first), filter labels, and the intensity slider + number. */
 import { useEffect, useMemo, useState } from 'react';
+import HelpLink from '../../help/HelpLink';
+import OpenRefLink from '../../components/OpenRefLink';
 import SearchSelect from '../../components/forms/SearchSelect';
 import { fmtMsTenths, parseMsTenths } from '../../lib/time';
 import { readSticky, writeSticky } from '../../lib/useSticky';
 import { uuid } from '../../lib/uid';
 import { useBuilderStore } from '../store';
+import { useColorSets } from '../../api/queries';
 import type { EventOption, MusicTrigger } from '../types';
 
 const LABELS_HELP =
@@ -28,6 +31,10 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
   const [eventId, setEventId] = useState('');
   const [labels, setLabels] = useState('');
   const [intensity, setIntensity] = useState(0.5);
+  const [overrideBlend, setOverrideBlend] = useState(false);
+  const [colorGroup, setColorGroup] = useState('');
+  const [displayMode, setDisplayMode] = useState<'default' | 'dark' | 'light'>('default');
+  const { data: colorSets } = useColorSets();
 
   useEffect(() => {
     if (!editingId) return;
@@ -36,11 +43,17 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       setEventId(readSticky<string>('lastEventId', ''));
       setLabels('');
       setIntensity(0.5);
+      setOverrideBlend(false);
+      setColorGroup('');
+      setDisplayMode('default');
     } else if (existing) {
       setTsText(fmtMsTenths(existing.timestamp_ms));
       setEventId(existing.event_id);
       setLabels(existing.labels.join(', '));
       setIntensity(existing.intensity ?? 0.5);
+      setOverrideBlend(existing.override_blend ?? false);
+      setColorGroup(existing.color_group_override ?? '');
+      setDisplayMode(existing.display_mode ?? 'default');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
@@ -84,7 +97,10 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
     mutateWorking((triggers) => {
       if (isNew) {
         triggers.push({ id: uuid(), timestamp_ms: ms, event_id: evId,
-                        labels: labelList, enabled: true, intensity });
+                        labels: labelList, enabled: true, intensity,
+                        override_blend: overrideBlend,
+                        color_group_override: colorGroup || null,
+                        display_mode: displayMode });
       } else {
         const t = triggers.find((tt) => tt.id === editingId);
         if (t) {
@@ -92,6 +108,9 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           t.event_id = evId;
           t.labels = labelList;
           t.intensity = intensity;
+          t.override_blend = overrideBlend;
+          t.color_group_override = colorGroup || null;
+          t.display_mode = displayMode;
         }
       }
     });
@@ -126,6 +145,12 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           <span style={{ width: 90, color: 'var(--text-muted)' }}>Event</span>
           <SearchSelect value={eventId} onChange={setEventId} options={options}
             placeholder="— pick an event —" width={260} allowEmpty={false} />
+          {eventId && (
+            <OpenRefLink
+              to={`/event/${eventId}`}
+              title={`Open event “${events.find((e) => e.id === eventId)?.name ?? eventId}” in a new tab`}
+            />
+          )}
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}
@@ -133,6 +158,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           <span style={{ width: 90, color: 'var(--text-muted)' }}>Labels</span>
           <input type="text" value={labels} onChange={(e) => setLabels(e.target.value)}
             placeholder="chorus, -quiet" style={{ flex: 1 }} />
+          <HelpLink topic="filter-labels" title="Label filter syntax" />
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
@@ -144,6 +170,41 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
             onChange={(e) => setIntensity(Math.max(0, Math.min(1, Number(e.target.value))))}
             style={{ width: 70, background: 'var(--bg)', color: 'var(--text)',
                      border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px' }} />
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+          title="When this trigger fires a Scene Group, use THIS Color Group instead of the group's designated one. Blank = group's normal colors. Missing/deleted groups fall back to normal.">
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>Colors 🖌️</span>
+          <SearchSelect value={colorGroup} width={220}
+            options={(colorSets ?? []).filter((c) => c.kind === 'group')
+              .map((c) => ({ value: c.id, label: c.name }))}
+            placeholder="— group's own colors —" allowEmpty
+            onChange={(v) => setColorGroup(v ?? '')} />
+          <HelpLink topic="trigger-color-override" title="Scene-group color override" />
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+          title="Force Dark or Light mode while this trigger fires. Default defers to the scene group / scene / color levels; the TopBar toggle still outranks this.">
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>Mode 🌗</span>
+          <select value={displayMode}
+            onChange={(e) => setDisplayMode(e.target.value as 'default' | 'dark' | 'light')}
+            style={{ width: 160 }}>
+            <option value="default">Default (defer)</option>
+            <option value="dark">🌙 Dark</option>
+            <option value="light">☀️ Light</option>
+          </select>
+          <HelpLink topic="display-modes" title="Dark / Light mode" />
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+          title="Stretch or compress this event's ramps and delays so it completes exactly at the next enabled trigger (or song end). Beat-timed spacing stays on the beat — only its ramps scale.">
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>Blend ⤳</span>
+          <input type="checkbox" checked={overrideBlend}
+            onChange={(e) => setOverrideBlend(e.target.checked)} />
+          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            Override blend — ramp until the next trigger
+          </span>
+          <HelpLink topic="override-blend" title="Override Blend" />
         </label>
 
         <div style={{ display: 'flex', gap: 8 }}>

@@ -37,12 +37,14 @@ logger = logging.getLogger(__name__)
 
 _STORE_FILE = Path(__file__).parent.parent / "storage" / "morph_effect_state.json"
 _STATE: dict[str, dict[str, dict]] = {}
+_LOADED = False  # guards against dumping an unloaded (empty) store over the file
 _LOCK = threading.Lock()  # protects in-memory dict + disk writes
 
 
 def load() -> None:
     """Load morph_effect_state.json into memory. Called once at startup."""
-    global _STATE
+    global _STATE, _LOADED
+    _LOADED = True
     if not _STORE_FILE.exists():
         _STATE = {}
         return
@@ -63,6 +65,16 @@ def get(virtual_id: str, effect_type: str) -> dict | None:
     return dict(entry) if isinstance(entry, dict) else None
 
 
+def all_for_virtual(virtual_id: str) -> dict[str, dict]:
+    """Return {effect_type: config} snapshots recorded for a virtual (copies)."""
+    entries = _STATE.get(virtual_id, {})
+    return {
+        etype: dict(cfg)
+        for etype, cfg in entries.items()
+        if isinstance(cfg, dict)
+    }
+
+
 def save(virtual_id: str, effect_type: str, config: dict) -> None:
     """Persist one (virtual_id, effect_type) → config snapshot."""
     save_many([(virtual_id, effect_type, config)])
@@ -73,6 +85,11 @@ def save_many(updates: list[tuple[str, str, dict]]) -> None:
     if not updates:
         return
     with _LOCK:
+        if not _LOADED:
+            # Out-of-process callers (smoke scripts, tools) that never called
+            # load() would otherwise dump a near-empty store over the real
+            # file, wiping every other virtual's snapshots. Merge over disk.
+            load()
         for vid, etype, cfg in updates:
             if not vid or not etype or not isinstance(cfg, dict):
                 continue

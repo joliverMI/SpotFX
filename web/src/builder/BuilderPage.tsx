@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CollapsibleCard from '../components/CollapsibleCard';
+import HelpLink from '../help/HelpLink';
 import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
@@ -135,12 +136,12 @@ export default function BuilderPage() {
   });
   useIntensityKeyboard({ onFollow: () => followWin.setFollowSnapped(true) });
 
-  // Opening the builder on a live song defaults to follow mode, zoomed in
-  // (once per page load — after that the user's choice rules).
-  const didInitFollow = useRef(false);
+  // In live mode, follow resumes (zoomed) on page open, on entering live
+  // mode, and whenever the live song changes — a past pan or Full Song view
+  // shouldn't leave the editor zoomed out. Within one song the user's choice
+  // rules. Search mode has no playhead, so the manual view sticks there.
   useEffect(() => {
-    if (didInitFollow.current || !liveMode || !track?.uri) return;
-    didInitFollow.current = true;
+    if (!liveMode || !track?.uri) return;
     followWin.setFollowSnapped(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveMode, track?.uri]);
@@ -170,6 +171,7 @@ export default function BuilderPage() {
 
   const canUndo = useBuilderStore((s) => s.undoStack.length > 0);
   const canRedo = useBuilderStore((s) => s.redoStack.length > 0);
+  const blendBrush = useBuilderStore((s) => s.blendBrush);
   const [beatTip, setBeatTip] = useState<{ ms: number; values: Record<string, number> } | null>(null);
   const [shiftOpen, setShiftOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -216,6 +218,18 @@ export default function BuilderPage() {
         title="Timeline"
         headerExtra={
           <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+            {blendBrush && (
+              <span
+                title="Override Blend brush armed — right-click triggers to apply; Esc or re-press to disarm"
+                style={{
+                  padding: '1px 8px', borderRadius: 10, fontSize: 11,
+                  background: blendBrush === 'set' ? 'rgba(29,185,84,0.25)' : 'rgba(231,76,60,0.25)',
+                  border: '1px solid var(--border)', color: 'var(--text)',
+                }}
+              >
+                ⤳ {blendBrush === 'set' ? 'paint blend [' : 'clear blend ]'}
+              </span>
+            )}
             <button disabled={!canUndo} title="Undo (Ctrl+Z)"
               onClick={() => useBuilderStore.getState().undo()}>
               ↶
@@ -226,13 +240,14 @@ export default function BuilderPage() {
             </button>
             <button onClick={() => followWin.setFollowSnapped(!followWin.follow)}
               className={followWin.follow ? 'primary' : ''}
-              title="Toggle follow/manual zoom (` key) — enabling snaps to the playhead">
+              title="Toggle follow/manual zoom (` key) — enabling snaps to the playhead, disabling freezes the current view">
               {followWin.follow ? 'Follow' : 'Manual'}
             </button>
             <button onClick={followWin.fullSong}>Full Song</button>
             <span style={{ color: 'var(--text-muted)' }}>
               {fmtMs(coarseMs)} / {fmtMs(durationMs)}
             </span>
+            <HelpLink topic="builder" title="Builder help — shortcuts & gestures" />
           </span>
         }
       >

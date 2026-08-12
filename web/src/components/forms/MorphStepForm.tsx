@@ -7,8 +7,9 @@ import type {
   MorphStepAction,
   MorphTarget,
   NumericNudge,
+  ValueBinding,
 } from '../../types/events';
-import { useMorphAspects } from '../../api/queries';
+import { useMorphAspects, type MorphAspectsInfo } from '../../api/queries';
 import { Checkbox, ColorInput, NumberInput, Row, Select, TextInput } from './inputs';
 import { ParentScopeToggle } from './ScopePicker';
 import SearchSelect from './SearchSelect';
@@ -25,7 +26,7 @@ const newTarget = (): MorphTarget => ({
   ramp_ms: null,
 });
 
-const newNudge = (): NumericNudge => ({ amount: 0, scale: 0, wrap: false, lo: null, hi: null });
+const newNudge = (): NumericNudge => ({ amount: 0, scale: 0, random_sign: false, wrap: false, lo: null, hi: null });
 
 const NUMERIC_ASPECTS: MorphAspect[] = ['brightness', 'reactivity', 'blur'];
 const OVERRIDE_ASPECTS: MorphAspect[] = ['brightness', 'reactivity'];
@@ -48,7 +49,7 @@ function TriState({ value, onChange }: {
   );
 }
 
-/** One NumericNudge spec: amount/scale/wrap/lo/hi. */
+/** One NumericNudge spec: amount (bindable ⚡/🎲) / ± / scale / wrap / lo / hi. */
 function NudgeInput({ label, nudge, onChange }: {
   label: string;
   nudge: NumericNudge | null | undefined;
@@ -63,10 +64,19 @@ function NudgeInput({ label, nudge, onChange }: {
       {n && (
         <>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: 'var(--text-muted)' }} title="magnitude in 0..1 space (negative ok)">amt</span>
-            <NumberInput value={n.amount} min={-1} max={1} step={0.05} width={72}
+            <span style={{ color: 'var(--text-muted)' }} title="magnitude in 0..1 space (negative ok); ⚡ maps it to a music signal, 🎲 rolls it fresh every fire">amt</span>
+            <BindableNumber value={n.amount} min={-1} max={1} step={0.05} width={72}
               onChange={(v) => onChange({ ...n, amount: v ?? 0 })} />
           </label>
+          <button title="Random sign — nudge up or down by the same magnitude, 50/50 per fire"
+            style={{
+              padding: '2px 6px', fontSize: 12, flex: 'none',
+              borderColor: n.random_sign ? 'var(--accent)' : 'var(--border)',
+              color: n.random_sign ? 'var(--accent)' : 'var(--text-muted)',
+            }}
+            onClick={() => onChange({ ...n, random_sign: !n.random_sign })}>
+            +/−
+          </button>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ color: 'var(--text-muted)' }} title="0 = ignore beat intensity, 1 = full">scale</span>
             <NumberInput value={n.scale} min={0} max={1} step={0.05} width={72}
@@ -86,6 +96,143 @@ function NudgeInput({ label, nudge, onChange }: {
           </label>
         </>
       )}
+    </div>
+  );
+}
+
+/** Union of reactivity-tagged params across all supported effects, for the
+ * per-param Reactivity menu. Color params are excluded (accent color has its
+ * own row); toggles (keybeat2d half_beat) render as tri-state. */
+type ReactMenuEntry = {
+  label: string;
+  type: string;
+  min: number | null;
+  max: number | null;
+  effects: string[];
+};
+
+function reactivityMenu(aspects?: MorphAspectsInfo): Map<string, ReactMenuEntry> {
+  const map = new Map<string, ReactMenuEntry>();
+  for (const [etype, params] of Object.entries(aspects?.param_meta ?? {})) {
+    for (const [pname, m] of Object.entries(params)) {
+      if (m.aspect !== 'reactivity' || m.type === 'color') continue;
+      const cur = map.get(pname);
+      if (cur) cur.effects.push(etype);
+      else map.set(pname, { label: m.label, type: m.type, min: m.min, max: m.max, effects: [etype] });
+    }
+  }
+  return map;
+}
+
+const stepFor = (m: ReactMenuEntry) =>
+  m.type === 'integer' ? 1 : ((m.max ?? 1) - (m.min ?? 0)) > 10 ? 0.5 : 0.05;
+
+const midVal = (m: ReactMenuEntry) => {
+  const mid = ((m.min ?? 0) + (m.max ?? 1)) / 2;
+  return m.type === 'integer' ? Math.round(mid) : Math.round(mid * 100) / 100;
+};
+
+/** Shape-style per-param editor for the Reactivity aspect: each added param can
+ * be set exactly (or bound to a signal), nudged (in nudge mode), or removed
+ * (= ignored). Params the target device's current effect lacks are ignored at
+ * fire time, mirroring the Shape sub-field semantics. */
+function ReactivityParams({ av, set, nudgeMode, menu }: {
+  av: AspectValue;
+  set: (fn: (v: AspectValue) => void) => void;
+  nudgeMode: boolean;
+  menu: Map<string, ReactMenuEntry>;
+}) {
+  const keys = [...new Set([
+    ...Object.keys(av.reactivity_values ?? {}),
+    ...Object.keys(av.reactivity_nudges ?? {}),
+  ])];
+  const addable = [...menu.entries()]
+    .filter(([k]) => !keys.includes(k))
+    .map(([k, m]) => ({ value: k, label: `${m.label} — ${m.effects.join(', ')}` }));
+
+  const removeKey = (k: string) => set((x) => {
+    const rv = { ...(x.reactivity_values ?? {}) };
+    delete rv[k];
+    const rn = { ...(x.reactivity_nudges ?? {}) };
+    delete rn[k];
+    x.reactivity_values = Object.keys(rv).length ? rv : null;
+    x.reactivity_nudges = Object.keys(rn).length ? rn : null;
+  });
+
+  const addKey = (k: string) => {
+    const m = menu.get(k);
+    if (!m) return;
+    if (m.type !== 'toggle' && nudgeMode) {
+      set((x) => { x.reactivity_nudges = { ...(x.reactivity_nudges ?? {}), [k]: newNudge() }; });
+    } else {
+      set((x) => {
+        x.reactivity_values = {
+          ...(x.reactivity_values ?? {}),
+          [k]: m.type === 'toggle' ? 'toggle' : midVal(m),
+        };
+      });
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div className="card-title" style={{ marginBottom: 4 }}>
+        Per-param reactivity
+        <span style={{ textTransform: 'none', letterSpacing: 0, marginLeft: 8 }}>
+          (exact values in the param's own range; wins over the spread slider)
+        </span>
+      </div>
+      {keys.map((k) => {
+        const m = menu.get(k);
+        const label = m?.label ?? k;
+        const effectsHint = m ? `${k} — ${m.effects.join(', ')}` : k;
+        const nudge = av.reactivity_nudges?.[k];
+        if (m?.type === 'toggle') {
+          return (
+            <div key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6, fontSize: 12 }}>
+              <span style={{ width: 110, color: 'var(--text-muted)', paddingTop: 4 }} title={effectsHint}>{label}</span>
+              <BindableTri
+                value={(av.reactivity_values?.[k] as boolean | 'toggle' | ValueBinding | undefined) ?? null}
+                onChange={(v) => (v === null ? removeKey(k) : set((x) => {
+                  x.reactivity_values = { ...(x.reactivity_values ?? {}), [k]: v };
+                }))}
+                renderScalar={(v, setV) => <TriState value={v} onChange={setV} />} />
+              <button className="danger" style={{ fontSize: 11, padding: '2px 7px' }} onClick={() => removeKey(k)}>✕</button>
+            </div>
+          );
+        }
+        if (nudge) {
+          return (
+            <div key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12 }}>
+              <div style={{ flex: 1 }}>
+                <NudgeInput label={label} nudge={nudge}
+                  onChange={(n) => (n === null ? removeKey(k) : set((x) => {
+                    x.reactivity_nudges = { ...(x.reactivity_nudges ?? {}), [k]: n };
+                  }))} />
+              </div>
+              <button className="danger" style={{ fontSize: 11, padding: '2px 7px' }} onClick={() => removeKey(k)}>✕</button>
+            </div>
+          );
+        }
+        return (
+          <div key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6, fontSize: 12 }}>
+            <span style={{ width: 110, color: 'var(--text-muted)', paddingTop: 4 }} title={effectsHint}>
+              {label}
+              {m && <span style={{ display: 'block', fontSize: 10 }}>{m.min}–{m.max}</span>}
+            </span>
+            <BindableNumber
+              value={(av.reactivity_values?.[k] as number | ValueBinding | undefined) ?? null}
+              nullable min={m?.min ?? undefined} max={m?.max ?? undefined} step={m ? stepFor(m) : 0.05} width={90}
+              onChange={(v) => (v === null ? removeKey(k) : set((x) => {
+                x.reactivity_values = { ...(x.reactivity_values ?? {}), [k]: v };
+              }))} />
+            <button className="danger" style={{ fontSize: 11, padding: '2px 7px' }} onClick={() => removeKey(k)}>✕</button>
+          </div>
+        );
+      })}
+      <SearchSelect value="" width={260} options={addable}
+        placeholder={nudgeMode ? '+ add param nudge' : '+ add param'}
+        onChange={(k) => { if (k) addKey(k); }} />
     </div>
   );
 }
@@ -144,9 +291,14 @@ export default function MorphStepForm({
     value: id,
     label: aspects?.aspect_labels[id] ?? id,
   }));
+  const reactMenu = reactivityMenu(aspects);
 
   return (
     <div>
+      <Row label="Name" help="Optional display name — shown in summaries and the Now Playing next-changes preview">
+        <TextInput value={action.name ?? ''} placeholder="e.g. Punch"
+          onChange={(v) => update((a) => { a.name = v; })} />
+      </Row>
       <Row label="Ramp (ms)" help="Default for targets without their own ramp">
         <BindableNumber value={action.ramp_ms} nullable onChange={(v) => update((a) => { a.ramp_ms = v; })} />
       </Row>
@@ -214,6 +366,9 @@ export default function MorphStepForm({
             {OVERRIDE_ASPECTS.includes(t.aspect) && (
               <ScaleOverrides av={av} set={setAV} />
             )}
+            {t.aspect === 'reactivity' && (
+              <ReactivityParams av={av} set={setAV} nudgeMode={nudgeMode} menu={reactMenu} />
+            )}
 
             {/* ── color / bg_color ── */}
             {t.aspect === 'color' && !nudgeMode && (
@@ -258,8 +413,12 @@ export default function MorphStepForm({
                   <BindableTri value={av.polygon ?? null} onChange={(v) => setAV((x) => { x.polygon = v; })}
                     renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
                 </Row>
-                <Row label="Flip">
+                <Row label="Flip" help="tri-state: on / off / toggle current. Melt reverses its motion direction (continuous, no restart); power mirrors the strip; radial flips spin; eq2d toggles ring">
                   <BindableTri value={av.flip ?? null} onChange={(v) => setAV((x) => { x.flip = v; })}
+                    renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
+                </Row>
+                <Row label="Reverse" help="Blackhole: flow direction; Orbits: spin direction — tri-state on / off / toggle current">
+                  <BindableTri value={av.reverse ?? null} onChange={(v) => setAV((x) => { x.reverse = v; })}
                     renderScalar={(v, set) => <TriState value={v} onChange={set} />} />
                 </Row>
                 {!nudgeMode && (
@@ -268,7 +427,7 @@ export default function MorphStepForm({
                       <BindableNumber value={av.star ?? null} nullable min={0} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.star = v; })} />
                     </Row>
-                    <Row label="Edges">
+                    <Row label="Edge / particle count" help="Radial: polygon edges (0–8); Orbits: particle count (1–16, count changes animate — removed particles fly off, new ones fly in; Orbits Strip: new ones explode in); Fireworks: burst size (3–30 particles per firework)">
                       <BindableNumber value={av.edges ?? null} nullable min={0} step={1}
                         onChange={(v) => setAV((x) => { x.edges = typeof v === 'number' ? Math.round(v) : v; })} />
                     </Row>
@@ -276,13 +435,29 @@ export default function MorphStepForm({
                       <BindableNumber value={av.twist ?? null} nullable step={0.05}
                         onChange={(v) => setAV((x) => { x.twist = v; })} />
                     </Row>
-                    <Row label="X offset (−1..1)">
+                    <Row label="X offset (−1..1)" help="Center point X — radial, blackhole and orbits; strip variants rotate the pattern around the strip">
                       <BindableNumber value={av.x_offset ?? null} nullable min={-1} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.x_offset = v; })} />
                     </Row>
-                    <Row label="Y offset (−1..1)">
+                    <Row label="Y offset (−1..1)" help="Center point Y — radial, blackhole and orbits">
                       <BindableNumber value={av.y_offset ?? null} nullable min={-1} max={1} step={0.05}
                         onChange={(v) => setAV((x) => { x.y_offset = v; })} />
+                    </Row>
+                    <Row label="Swirl (−6..6)" help="Blackhole (2D and Strip): swirl amount, sign = direction">
+                      <BindableNumber value={av.swirl ?? null} nullable min={-6} max={6} step={0.1}
+                        onChange={(v) => setAV((x) => { x.swirl = v; })} />
+                    </Row>
+                    <Row label="Horizon size" help="Blackhole: event-horizon radius (0 disables); Orbits: tether ring radius (2D only)">
+                      <BindableNumber value={av.horizon_scale ?? null} nullable min={0} max={0.8} step={0.05}
+                        onChange={(v) => setAV((x) => { x.horizon_scale = v; })} />
+                    </Row>
+                    <Row label="Field radius" help="Blackhole/orbits: overall field scale as a fraction of the panel edge (0.2–2); Blackhole Strip: sample-ring radius along the fall">
+                      <BindableNumber value={av.radius_scale ?? null} nullable min={0.2} max={2} step={0.05}
+                        onChange={(v) => setAV((x) => { x.radius_scale = v; })} />
+                    </Row>
+                    <Row label="Blob size" help="Blackhole: blob size; Orbits: particle size (0.5–6)">
+                      <BindableNumber value={av.blob_size ?? null} nullable min={0.5} max={6} step={0.1}
+                        onChange={(v) => setAV((x) => { x.blob_size = v; })} />
                     </Row>
                   </>
                 )}
@@ -291,7 +466,7 @@ export default function MorphStepForm({
                     <div className="card-title">Per-sub-field nudges</div>
                     <NudgeInput label="star" nudge={av.star_nudge}
                       onChange={(n) => setAV((x) => { x.star_nudge = n; })} />
-                    <NudgeInput label="edges" nudge={av.edges_nudge}
+                    <NudgeInput label="edge / particle count" nudge={av.edges_nudge}
                       onChange={(n) => setAV((x) => { x.edges_nudge = n; })} />
                     <NudgeInput label="twist" nudge={av.twist_nudge}
                       onChange={(n) => setAV((x) => { x.twist_nudge = n; })} />
@@ -299,6 +474,14 @@ export default function MorphStepForm({
                       onChange={(n) => setAV((x) => { x.x_offset_nudge = n; })} />
                     <NudgeInput label="y offset" nudge={av.y_offset_nudge}
                       onChange={(n) => setAV((x) => { x.y_offset_nudge = n; })} />
+                    <NudgeInput label="swirl" nudge={av.swirl_nudge}
+                      onChange={(n) => setAV((x) => { x.swirl_nudge = n; })} />
+                    <NudgeInput label="horizon size" nudge={av.horizon_scale_nudge}
+                      onChange={(n) => setAV((x) => { x.horizon_scale_nudge = n; })} />
+                    <NudgeInput label="field radius" nudge={av.radius_scale_nudge}
+                      onChange={(n) => setAV((x) => { x.radius_scale_nudge = n; })} />
+                    <NudgeInput label="blob size" nudge={av.blob_size_nudge}
+                      onChange={(n) => setAV((x) => { x.blob_size_nudge = n; })} />
                   </div>
                 )}
               </>

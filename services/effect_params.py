@@ -21,9 +21,31 @@ def load() -> None:
 
 
 def get_virtuals_for_category(category: str) -> list[str]:
-    from services.device_category_service import get_category_by_name
+    """Virtuals of the named category AND every descendant category, so
+    targeting a parent covers its whole subtree (dedup'd, parent-first)."""
+    from services.device_category_service import get_category_by_name, list_categories
     cat = get_category_by_name(category)
-    return cat.virtuals if cat else []
+    if not cat:
+        return []
+    cats = list_categories()
+    out: list[str] = []
+    seen_v: set[str] = set()
+    seen_c: set[str] = set()  # guards against parent_id cycles
+
+    def _walk(c) -> None:
+        if c.id in seen_c:
+            return
+        seen_c.add(c.id)
+        for v in c.virtuals:
+            if v not in seen_v:
+                seen_v.add(v)
+                out.append(v)
+        for child in cats:
+            if child.parent_id == c.id:
+                _walk(child)
+
+    _walk(cat)
+    return out
 
 
 def get_effects_for_category(category: str) -> list[str]:
@@ -58,6 +80,15 @@ def get_param_meta(effect_type: str, param_name: str) -> dict | None:
     return _CONFIG.get("effects", {}).get(effect_type, {}).get("params", {}).get(param_name)
 
 
+def bg_color_blocked(effect_type: str) -> bool:
+    """True when the effect opts out of background_color writes via the
+    registry's `no_background_color` flag (radial: it renders a source
+    virtual's frames, so a non-black background just washes the panel with
+    light — and no UI exposes it). LedFX still has the base-class param on
+    the live config, which is exactly why writes must be blocked here."""
+    return bool(_CONFIG.get("effects", {}).get(effect_type, {}).get("no_background_color"))
+
+
 def _collect_labels(effect_list: list[str]) -> list[dict]:
     """Return deduplicated label metadata for a list of effect type names."""
     seen: set[str] = set()
@@ -65,16 +96,17 @@ def _collect_labels(effect_list: list[str]) -> list[dict]:
     for eff in effect_list:
         for name, meta in _CONFIG.get("effects", {}).get(eff, {}).get("params", {}).items():
             lbl = meta["label"]
-            if lbl not in seen and meta["type"] in ("numeric", "integer", "toggle", "color", "gradient", "polar", "move_xy", "move_polar"):
+            if lbl not in seen and meta["type"] in ("numeric", "integer", "toggle", "color", "gradient", "polar", "move_xy", "move_polar", "string"):
                 seen.add(lbl)
                 out.append({
-                    "label":        lbl,
-                    "type":         meta["type"],
-                    "smooth":       meta.get("smooth", False),
-                    "min":          meta.get("min"),
-                    "max":          meta.get("max"),
-                    "flip_sign":    meta.get("flip_sign", False),
-                    "scale_offset": meta.get("scale_offset", False),
+                    "label":          lbl,
+                    "type":           meta["type"],
+                    "smooth":         meta.get("smooth", False),
+                    "min":            meta.get("min"),
+                    "max":            meta.get("max"),
+                    "flip_sign":      meta.get("flip_sign", False),
+                    "scale_offset":   meta.get("scale_offset", False),
+                    "options_source": meta.get("options_source"),
                 })
     return out
 

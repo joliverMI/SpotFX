@@ -6,7 +6,7 @@
 
 // ── Value bindings (signal-driven parameters) ───────────────────────────────
 
-export type SignalName = 'rms_total' | 'rms_bass' | 'onset_score' | 'section_energy' | 'trigger_intensity';
+export type SignalName = 'rms_total' | 'rms_bass' | 'onset_score' | 'section_energy' | 'trigger_intensity' | 'random';
 
 export interface BindingStep {
   threshold: number;              // applies when signal >= threshold
@@ -25,6 +25,8 @@ export interface ValueBinding {
   out_max: number;
   steps: BindingStep[];
   fallback: number | boolean | string | null;
+  /** Numeric results get their sign flipped 50% of the time (per fire). */
+  random_sign: boolean;
 }
 
 export type Bindable<T> = T | ValueBinding;
@@ -41,8 +43,11 @@ export interface MorphScope {
 }
 
 export interface NumericNudge {
-  amount: number;
+  /** Magnitude in abstract 0..1 space (negative ok); bindable (⚡/🎲). */
+  amount: number | ValueBinding;
   scale: number;
+  /** Flip the delta's sign 50% of the time — nudge randomly up or down. */
+  random_sign: boolean;
   wrap: boolean;
   lo: number | null;
   hi: number | null;
@@ -63,11 +68,27 @@ export interface AspectValue {
   x_offset?: Bindable<number> | null;
   y_offset?: Bindable<number> | null;
   effect_type?: string | null;
+  // blackhole/orbits shape sub-fields (ignored by effects without the params)
+  swirl?: Bindable<number> | null;
+  horizon_scale?: Bindable<number> | null;
+  radius_scale?: Bindable<number> | null;
+  blob_size?: Bindable<number> | null;
+  reverse?: Bindable<boolean | 'toggle'> | null;
   star_nudge?: NumericNudge | null;
   edges_nudge?: NumericNudge | null;
   twist_nudge?: NumericNudge | null;
   x_offset_nudge?: NumericNudge | null;
   y_offset_nudge?: NumericNudge | null;
+  swirl_nudge?: NumericNudge | null;
+  horizon_scale_nudge?: NumericNudge | null;
+  radius_scale_nudge?: NumericNudge | null;
+  blob_size_nudge?: NumericNudge | null;
+  // Per-param Reactivity sub-fields, keyed by raw LedFX param name. Values are
+  // in the param's OWN range (not 0..1); toggle params take the tri-state.
+  // Set = write, absent = ignore, binding = variable; *_nudges drive the
+  // per-param nudge math when the target's mode is "nudge".
+  reactivity_values?: Record<string, Bindable<number | boolean | 'toggle'>> | null;
+  reactivity_nudges?: Record<string, NumericNudge> | null;
 }
 
 export type MorphAspect =
@@ -143,35 +164,69 @@ export interface LedFxEffectParamAction extends ActionBase {
   category: string | null;
   params: EffectParamChange[];
   ramp_ms: Bindable<number> | null;
+  // If set: fire as a full-config POST with LedFX server-side fallback — the
+  // prior effect auto-restores after this many seconds (flare bursts).
+  fallback_s?: number | null;
 }
 
 export interface MorphStepAction extends ActionBase {
   type: 'morph_step';
+  name?: string; // optional editor display name, shown in summaries/previews
   ramp_ms: Bindable<number> | null;
   intensity_source: IntensitySource;
   targets: MorphTarget[];
 }
 
+/** SetColorAction.ref_id sentinels — resolved to a real Color Group at fire
+ *  time: the active Scene Group's designated group / the last group fired. */
+export const SCENE_GROUP_COLOR_REF = '__scene_group__';
+export const CURRENT_COLOR_GROUP_REF = '__current__';
+
+/** Dark/Light display mode — 'default' defers to the next level down the
+ *  cascade (TopBar → trigger → scene group → scene → set_color → color group
+ *  → color set); the first non-default level wins. Dark forces backgrounds
+ *  black on non-shielded devices; light backfills the default light bg. */
+export type DisplayMode = 'default' | 'dark' | 'light';
+
+export const DISPLAY_MODE_OPTIONS = [
+  { value: 'default', label: 'Default (defer)' },
+  { value: 'dark', label: '🌙 Dark' },
+  { value: 'light', label: '☀️ Light' },
+];
+
 export interface SetColorAction extends ActionBase {
   type: 'set_color';
+  /** ColorSetCard id, or SCENE_GROUP_COLOR_REF / CURRENT_COLOR_GROUP_REF */
   ref_id: string;
   pick_mode: 'default' | 'cycle' | 'weighted';
   advance: Bindable<number>;
   direction: 'forward' | 'backward';
   ramp_ms: Bindable<number> | null;
   preserve_effect: boolean;
+  /** Level 5 of the display-mode cascade (above the color cards). */
+  display_mode: DisplayMode;
 }
 
 /** Rotate every showing color (FG/BG/accent) around the hue wheel. */
 export interface MorphColorAction extends ActionBase {
   type: 'morph_color';
   scope: MorphScope;              // empty = inherit nearest Target, else global
-  degrees: number;                // default 180 = complementary contrast
+  degrees: number | ValueBinding; // default 180 = complementary contrast; bindable (⚡/🎲, ± flips direction)
   direction: 'forward' | 'backward';
   ramp_ms: Bindable<number> | null;
   intensity_scale: number;        // 0 = ignore beat intensity
   intensity_source: IntensitySource;
-  preserve_melt_bg: boolean;      // true = keep melt BG; power BG always rotates
+  morph_bg: boolean;              // true (default) = BG rotates too; false = FG/accent only
+}
+
+/** Step the ACTIVE Scene Group ±advance members and fire the result.
+ *  No group reference — acts on the last-fired / forced group; no-op when
+ *  none is active or Force Scene pins a single scene. advance 0 = re-fire
+ *  the current member (its Rest lane). */
+export interface SceneMorphAction extends ActionBase {
+  type: 'scene_morph';
+  advance: number;
+  direction: 'forward' | 'backward';
 }
 
 export interface DeviceSettingTarget {
@@ -192,6 +247,12 @@ export interface RandomOption {
   name: string;
   labels: string[];
   weight: number;
+  /** Eligible only when trigger energy >= floor (null = no floor). */
+  energy_floor?: number | null;
+  /** Eligible only when trigger energy <= ceiling (null = no ceiling). */
+  energy_ceiling?: number | null;
+  /** -1..1 weight tilt across the floor..ceiling window; 0 = flat. */
+  energy_scale?: number;
   scope: MorphScope | null; // null = inherit group Target
   actions: Action[];
 }
@@ -219,6 +280,10 @@ export interface SequenceChild {
   labels: string[];
   delay_ms: number;    // ms mode: slept before this child (honored on child 0)
   delay_beats: number; // beats mode: extra beats skipped (ignored on child 0)
+  /** ms mode only: also fire after this many scene-family fires (scene picks,
+   *  Update/Reset Scene, flares, Scene Morph) — whichever of delay_ms /
+   *  delay_updates comes first; delay_ms 0 waits on updates alone. */
+  delay_updates: number | null;
   pre_ramp: boolean;   // beats mode only
   scope: MorphScope | null; // null = inherit group Target
   actions: Action[];   // fire concurrently
@@ -250,6 +315,23 @@ export interface ParallelGroupAction extends ActionBase {
   children: ParallelChild[];
 }
 
+export interface IntensityLane {
+  id: string;
+  name: string;
+  labels: string[];
+  threshold: number; // lower bound on the 0-1 intensity scale; lanes[0] = default (ignored)
+  scope: MorphScope | null; // per-lane Target
+  actions: Action[];
+}
+
+export interface IntensityChooserAction extends ActionBase {
+  type: 'intensity_chooser';
+  id: string;
+  source: 'trigger_intensity';
+  scope: MorphScope | null; // default Target for lanes
+  lanes: IntensityLane[];
+}
+
 export type Action =
   | EventRefAction
   | LedFxSceneAction
@@ -260,10 +342,12 @@ export type Action =
   | MorphStepAction
   | SetColorAction
   | MorphColorAction
+  | SceneMorphAction
   | DeviceSettingsAction
   | RandomGroupAction
   | SequenceGroupAction
-  | ParallelGroupAction;
+  | ParallelGroupAction
+  | IntensityChooserAction;
 
 export type ActionType = Action['type'];
 
@@ -312,7 +396,14 @@ export type EventType =
   | 'single' | 'sequence' | 'beat_sequence' | 'morph_set'
   | 'scene_update' | 'update_scene' | 'reset_scene'
   | 'shape_flare' | 'color_flare' | 'combo_flare'
+  | 'scene_group'
   | 'device_settings' | 'composite';
+
+/** One member of a scene_group event (weight matters in weighted mode). */
+export interface SceneGroupMember {
+  event_id: string;
+  weight: number;
+}
 
 export interface MusicEvent {
   id: string;
@@ -342,10 +433,31 @@ export interface MusicEvent {
   /** event_type "composite": the whole body as one Action tree (null = empty). */
   root: Action | null;
 
+  /** event_type "scene_group": member Scene Updates + selection behavior
+   *  (cursor lives in the engine and persists across songs). */
+  scene_group_members: SceneGroupMember[];
+  scene_group_mode: 'cycle' | 'weighted';
+  scene_group_cycle_behavior: 'wrap' | 'bounce';
+  scene_group_exclude_current: boolean;
+  /** Cycle mode: a fresh call (group wasn't active) starts at a random member. */
+  scene_group_random_start: boolean;
+  /** Color Group (ColorSetCard kind="group") this scene group designates —
+   *  Set Color actions set to "Scene Group" pull from it. '' = none. */
+  scene_group_color_ref_id: string;
+  /** Dark/Light variants of the designated Color Group: used instead of the
+   *  base ref while the resolved display mode is dark/light. '' = no variant. */
+  scene_group_dark_color_ref_id: string;
+  scene_group_light_color_ref_id: string;
+
+  /** Display-mode cascade level carried by this event: scene_group = level 3,
+   *  scene_update = level 4. 'default' defers downward. */
+  display_mode: DisplayMode;
+
   event_offset_ms: number;
 }
 
-/** Scene-family event types that render as morph lanes. */
+/** Scene-family event types that render as morph lanes. scene_group is
+ *  deliberately NOT here — it renders a members editor, not lanes. */
 export const SCENE_EVENT_TYPES: EventType[] = [
   'scene_update', 'update_scene', 'reset_scene',
   'shape_flare', 'color_flare', 'combo_flare',
@@ -362,6 +474,7 @@ export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   shape_flare: 'Shape Flare',
   color_flare: 'Color Flare',
   combo_flare: 'Combo Flare',
+  scene_group: 'Scene Group',
   device_settings: 'Device Settings',
   composite: 'Composite',
 };

@@ -44,6 +44,28 @@ def _lerp_color(a: str, b: str, t: float) -> str:
     return _rgb_to_hex(ar + (br - ar) * t, ag + (bg - ag) * t, ab_ + (bb - ab_) * t)
 
 
+_ACHROMATIC = 0.05  # below this saturation/value a colour has no usable hue
+
+
+def _lerp_color_hue(a: str, b: str, t: float) -> str:
+    """Interpolate two #RRGGBB hex strings by rotating around the hue wheel
+    (HSV, shortest arc) instead of the straight RGB line — red→cyan sweeps
+    through neighbouring hues rather than desaturating through grey. When one
+    end is achromatic (grey/black/white, hue undefined) it adopts the other
+    end's hue so the blend fades saturation in place."""
+    import colorsys
+    h1, s1, v1 = colorsys.rgb_to_hsv(*_hex_to_rgb(a))
+    h2, s2, v2 = colorsys.rgb_to_hsv(*_hex_to_rgb(b))
+    if s1 < _ACHROMATIC or v1 < _ACHROMATIC:
+        h1 = h2
+    if s2 < _ACHROMATIC or v2 < _ACHROMATIC:
+        h2 = h1
+    dh = ((h2 - h1 + 0.5) % 1.0) - 0.5
+    return _rgb_to_hex(*colorsys.hsv_to_rgb(
+        (h1 + dh * t) % 1.0, s1 + (s2 - s1) * t, v1 + (v2 - v1) * t
+    ))
+
+
 def _normalize_stop_color(color_str: str) -> str | None:
     """Convert a stop color to #RRGGBB. Returns None if format not supported."""
     color_str = color_str.strip()
@@ -109,12 +131,74 @@ def rotate_color_string(value: str, degrees: float) -> str | None:
     return None
 
 
-def interpolate_gradient(start: str, end: str, t: float) -> str:
+def representative_hue(values: list[str | None]) -> float | None:
+    """Best-effort dominant hue (degrees 0..360) for a Color Set, used by
+    Palette Sync to line up member picks across Groups. Tries each candidate
+    string in order (card swatch first, then entry FG values) and returns the
+    hue of the first one that yields a usable answer:
+
+      - solid #RRGGBB / rgb(): its own hue, if saturated enough to have one
+      - linear-gradient: circular mean of its saturated stops — skipped when
+        the stops disagree too much (e.g. a rainbow has no dominant hue)
+
+    Near-greys/black/white contribute nothing. Returns None when no candidate
+    resolves — the caller falls back to non-synced behavior."""
+    import colorsys
+    import math
+
+    def _hues(hexes: list[str]) -> list[float]:
+        out = []
+        for h in hexes:
+            r, g, b = _hex_to_rgb(h)
+            hue, s, v = colorsys.rgb_to_hsv(r, g, b)
+            if s >= 0.25 and v >= 0.15:
+                out.append(hue * 360.0)
+        return out
+
+    def _circular_mean(hues: list[float]) -> tuple[float, float]:
+        """(mean_degrees, resultant_length 0..1 — 1 = full agreement)."""
+        x = sum(math.cos(math.radians(h)) for h in hues) / len(hues)
+        y = sum(math.sin(math.radians(h)) for h in hues) / len(hues)
+        return math.degrees(math.atan2(y, x)) % 360.0, math.hypot(x, y)
+
+    for value in values:
+        value = (value or "").strip()
+        if not value:
+            continue
+        norm = _normalize_stop_color(value)
+        if norm:
+            hues = _hues([norm])
+            if hues:
+                return hues[0]
+            continue
+        parsed = _parse_linear(value)
+        if parsed:
+            hues = _hues([c for c, _ in parsed[1]])
+            if not hues:
+                continue
+            mean, agreement = _circular_mean(hues)
+            if agreement >= 0.5:
+                return mean
+    return None
+
+
+def hue_distance(a: float, b: float) -> float:
+    """Shortest angular distance between two hues in degrees (0..180)."""
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+def interpolate_gradient(
+    start: str, end: str, t: float, hue_blend: bool = False
+) -> str:
     """
     Interpolate between two gradient or color strings.
 
     t=0.0 returns start exactly; t=1.0 returns end exactly.
     Intermediate values produce a blended result.
+
+    hue_blend: rotate colours around the hue wheel (HSV shortest arc) instead
+    of the straight RGB line — matches LedFX's transition_blend="hue".
 
     Fallback: if the format can't be parsed, returns start for t<0.5 and end for t>=0.5.
     """
@@ -123,12 +207,13 @@ def interpolate_gradient(start: str, end: str, t: float) -> str:
     if t >= 1.0:
         return end
 
+    lerp = _lerp_color_hue if hue_blend else _lerp_color
     start = start.strip()
     end   = end.strip()
 
     # Both solid hex colors
     if _HEX_FULL_RE.match(start) and _HEX_FULL_RE.match(end):
-        return _lerp_color(start, end, t)
+        return lerp(start, end, t)
 
     # Both linear gradients
     a = _parse_linear(start)
@@ -140,7 +225,7 @@ def interpolate_gradient(start: str, end: str, t: float) -> str:
         # Map end stops by index — if end has fewer stops, repeat the last one
         b_colors = [b_stops[min(i, len(b_stops) - 1)][0] for i in range(n)]
         new_stops = [
-            (_lerp_color(a_stops[i][0], b_colors[i], t), a_stops[i][1])
+            (lerp(a_stops[i][0], b_colors[i], t), a_stops[i][1])
             for i in range(n)
         ]
         return _encode_linear(a_angle, new_stops)

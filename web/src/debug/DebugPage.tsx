@@ -13,6 +13,7 @@ import { diamonds, playhead } from '../builder/canvas/layers';
 import type { LayerDataBag, ViewState } from '../builder/canvas/frame';
 import { useFollowWindow } from '../builder/hooks/useFollowWindow';
 import CollapsibleCard from '../components/CollapsibleCard';
+import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { ensureLiveState, getLiveProgressMs, useLiveStore } from '../live/liveStore';
 import { DIFF_MIN_SPAN_MS } from './diff';
@@ -94,6 +95,7 @@ export default function DebugPage() {
   const timing = useLiveStore((s) => s.timing);
   const ledfxRttMs = useLiveStore((s) => s.ledfxRttMs);
   const lastPollAt = useLiveStore((s) => s.lastPollAt);
+  const analyzedOverride = useLiveStore((s) => s.analyzedOverride);
   const uri = track?.spotify_uri ?? null;
   const shapeOffsetMs = Number(timing.shape_offset_ms ?? 0);
 
@@ -128,9 +130,10 @@ export default function DebugPage() {
     keyPrefix: 'dbg.',
   });
 
-  // Re-enable follow on song change (legacy behavior).
+  // Follow resumes (zoomed) on page open and song change; a past pan,
+  // Full Song view, or song-sized zoom window doesn't stick across songs.
   useEffect(() => {
-    if (uri) followWin.setFollow(true);
+    if (uri) followWin.setFollowSnapped(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uri]);
 
@@ -285,6 +288,23 @@ export default function DebugPage() {
     }
   };
 
+  const toggleAnalyzedOverride = async () => {
+    try {
+      const r = await apiPost<{ analyzed_trigger_override: boolean; has_analyzed: boolean; count: number }>(
+        `/control/analyzed-trigger-override?enabled=${!analyzedOverride}`, {});
+      if (r.analyzed_trigger_override) {
+        toast(r.has_analyzed
+          ? `Analyzed override ON — ${r.count} analyzed triggers active`
+          : 'Analyzed override ON — no analyzed triggers for this song (no librosa data or no matching training profile)',
+          r.has_analyzed ? 'success' : 'error');
+      } else {
+        toast('Analyzed override OFF — stored triggers active', 'success');
+      }
+    } catch (e) {
+      toast(`Failed: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  };
+
   const liveSpan = feeds.live?.timestamps_ms.length
     ? feeds.live.timestamps_ms[feeds.live.timestamps_ms.length - 1] - feeds.live.timestamps_ms[0]
     : 0;
@@ -310,7 +330,16 @@ export default function DebugPage() {
             <div style={{ fontSize: 14, fontWeight: 600 }}>{track?.title ?? '—'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{track?.artist ?? ''}</div>
           </div>
-          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          <label
+            title="Ignore the song's stored triggers and run the analyzed-triggerless pipeline instead — for testing tuned training profiles on songs that already have manual profiles. Now Playing shows the source as “Analyzed Override” while on."
+            style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+                     fontSize: 12, cursor: 'pointer',
+                     color: analyzedOverride ? '#4caf50' : 'var(--text-muted)' }}>
+            <input type="checkbox" checked={analyzedOverride}
+              onChange={() => void toggleAnalyzedOverride()} />
+            Analyzed override
+          </label>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
             {uri ?? ''}
           </span>
         </div>
@@ -398,10 +427,8 @@ export default function DebugPage() {
             {followWin.follow ? 'Follow' : 'Manual'}
           </button>
           <button style={{ fontSize: 11, padding: '2px 8px' }} onClick={followWin.fullSong}>Full Song</button>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-            Saved shape draws upward from the centerline; live capture (25 ms bins) draws downward.
-            Pan: middle-mouse drag. Zoom: drag the timeline handles. Magenta = confirmed mismatch spike.
-          </span>
+          <span style={{ flex: 1 }} />
+          <HelpLink topic="debug-shape-canvas" title="How to read this canvas" />
         </div>
       </div>
 
@@ -412,6 +439,7 @@ export default function DebugPage() {
         headerExtra={
           <span style={{ fontSize: 11, display: 'flex', gap: 10, alignItems: 'center' }}>
             <span style={{ color: 'var(--text-muted)' }}>{diffStatus}</span>
+            <HelpLink topic="debug-diff-canvas" title="How to read this canvas" />
           </span>
         }
       >
@@ -430,13 +458,6 @@ export default function DebugPage() {
             },
           }}
         />
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-          Matcher's view: both signals squared, binned to 25 ms, z-scored — what the xcorr Pearson
-          correlator compares, so gain/volume differences cancel. Scale pinned at ±1 (≡ ±2.5σ).
-          Blue above center = live louder than expected; orange below = saved louder. The colored line is
-          the monitor's rolling r (lock confidence): green ≥ 0.5, amber ≥ 0.2, red below — gaps mean the
-          span was too quiet to testify. Sustained diff excursions or time-skewed mirror pairs = misalignment.
-        </div>
       </CollapsibleCard>
 
       {/* ── Shape status + recapture ── */}

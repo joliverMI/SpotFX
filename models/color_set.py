@@ -6,7 +6,10 @@ A `ColorSetCard` is either:
                   device/category. Applied to many devices at once by a
                   Set Color step.
   - kind="group": an ordered list of references to Color Sets, picked one at a
-                  time (sequential cycle or weighted random) when fired.
+                  time (sequential cycle or weighted random) when fired. A
+                  group may also carry its own `entries` — a field-level
+                  override layer merged per virtual on top of the picked Set
+                  at fire time (see trigger_engine._execute_set_color).
 
 A Color Set entry is essentially a restricted Morph Step target (color +
 bg_color), so it reuses `MorphScope` from models.music_event and is compiled
@@ -50,8 +53,15 @@ class ColorSetCard(BaseModel):
     color: str = "#FFD700"     # swatch shown in the card list
     kind:  Literal["set", "group"] = "set"
     labels: list[str] = Field(default_factory=list)
+    # Dark/Light display mode carried by this card — the LAST two levels of the
+    # display-mode cascade (group card outranks the picked member set). Only
+    # consulted when every level above (TopBar, trigger, scene group, scene,
+    # set_color action) left the mode at "default".
+    display_mode: Literal["default", "dark", "light"] = "default"
 
-    # kind == "set"
+    # kind == "set": the palette itself.
+    # kind == "group": optional overrides — any field set here replaces the
+    # picked member Set's value for the virtuals the entry's scope resolves to.
     entries: list[ColorSetEntry] = Field(default_factory=list)
 
     # kind == "group"
@@ -59,3 +69,8 @@ class ColorSetCard(BaseModel):
     mode:           Literal["cycle", "weighted"] = "cycle"
     cycle_behavior: Literal["wrap", "bounce"] = "wrap"
     exclude_current: bool = True
+    # Palette Sync: synced groups share one room-wide "current palette hue".
+    # A synced group starts its pick from the member nearest that hue (instead
+    # of its own private cursor), then publishes the pick's hue back — so
+    # switching between synced groups keeps the room on one color family.
+    palette_sync:   bool = False

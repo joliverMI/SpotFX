@@ -6,7 +6,7 @@ import { stripUids, uuid } from '../lib/uid';
 
 const KEY = 'spotfx.clipboard.v1';
 
-export type ClipKind = 'action' | 'sequence_child' | 'parallel_child' | 'random_option';
+export type ClipKind = 'action' | 'sequence_child' | 'parallel_child' | 'random_option' | 'intensity_lane' | 'colorset_entries';
 
 export interface Clip {
   kind: ClipKind;

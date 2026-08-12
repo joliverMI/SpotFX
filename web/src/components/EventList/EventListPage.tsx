@@ -27,7 +27,7 @@ function effectiveType(ev: MusicEvent): EventType {
 
 function matchesFilter(ev: MusicEvent, f: Filter): boolean {
   if (f === 'all') return true;
-  if (f === 'scene') return SCENE_EVENT_TYPES.includes(ev.event_type);
+  if (f === 'scene') return SCENE_EVENT_TYPES.includes(ev.event_type) || ev.event_type === 'scene_group';
   return effectiveType(ev) === (f as EventType);
 }
 
@@ -35,8 +35,14 @@ export default function EventListPage() {
   const { data: events, isLoading, error } = useEvents();
   const fire = useFireEvent();
   const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  // Search + chip survive navigating into an event and back (per-tab).
+  const [search, setSearchState] = useState(() => sessionStorage.getItem('spotfx.events.search') ?? '');
+  const [filter, setFilterState] = useState<Filter>(() => {
+    const f = sessionStorage.getItem('spotfx.events.filter') as Filter | null;
+    return f && FILTERS.some((x) => x.key === f) ? f : 'all';
+  });
+  const setSearch = (v: string) => { setSearchState(v); sessionStorage.setItem('spotfx.events.search', v); };
+  const setFilter = (v: Filter) => { setFilterState(v); sessionStorage.setItem('spotfx.events.filter', v); };
   const [firedId, setFiredId] = useState<string | null>(null);
 
   const visible = useMemo(() => {
@@ -89,6 +95,8 @@ export default function EventListPage() {
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=random_group')}>+ Random</button>
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=sequence_group')}>+ Sequence</button>
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=parallel_group')}>+ Parallel</button>
+            <button className="primary" onClick={() => navigate('/event/new?type=composite&root=intensity_chooser')}>+ Intensity</button>
+            <button className="primary" onClick={() => navigate('/event/new?type=scene_group')}>+ Scene Group</button>
           </span>
         </div>
       </div>

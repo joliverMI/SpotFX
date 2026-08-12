@@ -106,6 +106,24 @@ def get_analysis_by_uri(spotify_uri: str) -> Optional[LibrosaAnalysis]:
 
 # ── WAV retention ─────────────────────────────────────────────────────────────
 
+def get_analysis_by_title_artist(artist: str, title: str) -> Optional[LibrosaAnalysis]:
+    """Multi-release URI aliasing rescue: the same song can play under
+    different Spotify URIs (single vs album vs remaster), so a capture made
+    under one release URI is invisible to `get_analysis_by_uri` with another.
+    Shape files are named by artist/title (audio_analyzer._npz_name — full
+    length, no truncation), so resolve through that convention, the same way
+    the profile layer's title/artist fallback does."""
+    safe = lambda s: "".join(c for c in s if c not in r'\/:*?"<>|')
+    p = AUDIO_SHAPES_DIR / f"{safe(artist)} - {safe(title)}.librosa.json"
+    if not p.exists():
+        return None
+    try:
+        return LibrosaAnalysis(**json.loads(p.read_text(encoding="utf-8")))
+    except Exception as exc:
+        logger.warning("Failed to load librosa JSON %s: %s", p.name, exc)
+        return None
+
+
 def _last_played_mtime(wav: Path) -> float:
     """
     Last-played proxy for a WAV: the audio-shape sidecar .json is rewritten

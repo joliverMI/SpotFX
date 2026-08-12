@@ -3,6 +3,7 @@
  * Press a key (or click one) to arm its event — right-click the timeline
  * places it. */
 import { useEffect, useState } from 'react';
+import HelpLink from '../../help/HelpLink';
 import SearchSelect from '../../components/forms/SearchSelect';
 import { useToast } from '../../components/Toast';
 import { useLongPress } from '../../lib/useLongPress';
@@ -125,12 +126,13 @@ export default function PaletteCard({ events }: { events: EventOption[] }) {
             {armedKey!.toUpperCase()} armed → {armedEvent.name}
           </span>
         )}
+        <HelpLink topic="builder-palettes" title="Palette help" />
       </div>
 
       {!editing && active && grid(active, false)}
       {!editing && !active && (
         <p className="empty-note" style={{ marginTop: 8 }}>
-          Activate a palette, press a key to arm its event, then right-click the timeline to place triggers.
+          Activate a palette to place triggers by keyboard.
         </p>
       )}
 

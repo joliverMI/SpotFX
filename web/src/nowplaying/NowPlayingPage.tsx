@@ -3,9 +3,9 @@
  * widgets (trim, nudge, sync panels) live on /debug. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from '../api/client';
+import { api, apiGet, apiPost } from '../api/client';
 import { onMessage } from '../api/ws';
-import { useEvents, useSettings } from '../api/queries';
+import { useEvents, usePatchSettings, useSettings } from '../api/queries';
 import {
   useAudioShapeData, useAudioShapeMeta, useLibrosa,
 } from '../builder/queries';
@@ -17,6 +17,8 @@ import { BEAT_STRIP_H, stripCountFor, type LayerDataBag, type ViewState } from '
 import { computeAverages, computeMfccDistances } from '../builder/canvas/data';
 import { useFollowWindow } from '../builder/hooks/useFollowWindow';
 import CollapsibleCard from '../components/CollapsibleCard';
+import SearchSelect from '../components/forms/SearchSelect';
+import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { fmtCountdown, fmtMs } from '../lib/time';
 import { ensureLiveState, getLiveProgressMs, useLiveStore, useLiveTick } from '../live/liveStore';
@@ -31,11 +33,27 @@ const ALL_MARKS: Record<MarkType, boolean> = {
 
 const NP_LAYERS = [rmsBands, avgLines, diamonds, librosaOverlays, musicMarks, triggersLayer, playhead, beatStrips];
 
+interface PreviewRow {
+  tag: string;      // lane / child-event name ("Shape", "Color", …)
+  scope: string;    // device categories / roles / virtual ids
+  text: string;     // capped change description ("twist → 4, blur +0.3")
+  full: string;     // uncapped description for the tooltip ('' = same as text)
+  colors: string[]; // hex swatches referenced by the change
+  at_ms: number;    // fire offset relative to the trigger point
+}
+
 interface NextPreview {
   trigger_id: string;
   event_name: string;
   event_color?: string;
   action_label?: string;
+  rows?: PreviewRow[];
+}
+
+const BOARD_ROWS = 3; // rows shown on the next-changes board (fixed height)
+
+function fmtAt(atMs: number): string {
+  return `${atMs > 0 ? '+' : '−'}${(Math.abs(atMs) / 1000).toFixed(1)}s`;
 }
 
 export default function NowPlayingPage() {
@@ -49,10 +67,8 @@ export default function NowPlayingPage() {
   const recordingActive = useLiveStore((s) => s.recordingActive);
   const lastCapture = useLiveStore((s) => s.lastCapture);
   const dinnerParty = useLiveStore((s) => s.dinnerParty);
-  const ambient = useLiveStore((s) => s.ambient);
   const useAnalyzed = useLiveStore((s) => s.useAnalyzed);
-  const lastScene = useLiveStore((s) => s.lastScene);
-  const lastColorSet = useLiveStore((s) => s.lastColorSet);
+  const activeSceneGroup = useLiveStore((s) => s.activeSceneGroup);
   const ledfxRttMs = useLiveStore((s) => s.ledfxRttMs);
   const timing = useLiveStore((s) => s.timing);
   const nextTrackUri = useLiveStore((s) => s.nextTrackUri);
@@ -67,8 +83,48 @@ export default function NowPlayingPage() {
   });
 
   const { triggers, source } = useNowProfile(uri);
+
+  // Per-song intensity scale (0-200%) — multiplies every trigger's intensity
+  // at fire time. Stored on the song profile; unset falls back to genre/auto.
+  const { data: iScale } = useQuery({
+    queryKey: ['intensity-scale', uri],
+    queryFn: () => apiGet<{
+      intensity_scale: number | null; source: string | null;
+      genre_default: number; effective: number;
+    }>(`/profiles/intensity-scale?uri=${encodeURIComponent(uri!)}`),
+    enabled: !!uri,
+  });
+  const [scaleDrag, setScaleDrag] = useState<number | null>(null);
+  const commitScale = useCallback(async (v: number | null) => {
+    if (!uri) return;
+    setScaleDrag(null);
+    await api('PATCH', `/profiles/by-uri?uri=${encodeURIComponent(uri)}`,
+      v == null ? { clear: true } : { intensity_scale: v / 100 });
+    void qc.invalidateQueries({ queryKey: ['intensity-scale', uri] });
+  }, [uri, qc]);
+
   const { data: settings } = useSettings();
   const { data: events } = useEvents();
+  const patchSettings = usePatchSettings();
+
+  // Force Scene — persisted in settings; while enabled, every new-scene pick
+  // reasserts the chosen Scene Update (normal First/Rest lanes) — or, when a
+  // Scene Group is chosen, rotates one member of the group per pick.
+  const forceScene = settings?.force_scene_enabled === true;
+  const forceSceneEventId = (settings?.force_scene_event_id as string | undefined) ?? '';
+  const sceneOptions = useMemo(
+    () => (events ?? [])
+      .filter((e) => e.event_type === 'scene_update' || e.event_type === 'scene_group')
+      .sort((a, b) =>
+        Number(a.event_type === 'scene_group') - Number(b.event_type === 'scene_group')
+        || a.name.localeCompare(b.name))
+      .map((e) => ({
+        value: e.id,
+        label: e.event_type === 'scene_group' ? `${e.name} (group)` : e.name,
+        keywords: (e.labels ?? []).join(' ') + (e.event_type === 'scene_group' ? ' group' : ''),
+      })),
+    [events],
+  );
   const { data: meta } = useAudioShapeMeta(uri);
   const { data: shape } = useAudioShapeData(uri, meta?.capture_complete ?? false);
   const { data: librosa } = useLibrosa(uri);
@@ -177,23 +233,44 @@ export default function NowPlayingPage() {
   // ── Canvas plumbing (reuses the builder stack) ─────────────────────────────
   const audioLatencyRef = useRef(0);
   audioLatencyRef.current = Number(settings?.audio_latency_ms ?? 0);
+  // Canvas x-axis is capture-data time; the drawn playhead lands at
+  // (progress − audio latency) + offsetMs (see the playhead layer). Everything
+  // that must agree with the playhead — the follow window pin, the upcoming
+  // trigger and its countdown — uses this same clock, so the line stays pinned
+  // when shape offsets update mid-song and the countdown hits 0 as the flash
+  // fires, instead of drifting by latency ± live offset.
+  const canvasOffsetMs = (shapeOffset ?? meta?.timestamp_offset_ms ?? 0) - (trim?.perception_trim_ms ?? 0);
+  const canvasOffsetRef = useRef(0);
+  canvasOffsetRef.current = canvasOffsetMs;
   const getCanvasNowMs = useCallback(() => {
     const now = getLiveProgressMs();
     return now === null ? null : now - audioLatencyRef.current;
   }, []);
+  const getPlayheadMs = useCallback(() => {
+    const now = getLiveProgressMs();
+    return now === null ? null : now - audioLatencyRef.current + canvasOffsetRef.current;
+  }, []);
   const durationMs = track?.duration_ms || meta?.duration_ms || 1;
   const followWin = useFollowWindow({
-    getNowMs: getLiveProgressMs,
+    getNowMs: getPlayheadMs,
     durationMs,
     seedWindowS: settings ? Number(settings.builder_zoom_window_s ?? 20) : undefined,
     seedFutureS: settings ? Number(settings.builder_future_buffer_s ?? 5) : undefined,
     keyPrefix: 'np.',
   });
+  // Live view: always resume following on page open and track change. Follow
+  // is sticky but manual bounds are not, so a persisted follow=false from a
+  // past pan would otherwise open the page zoomed out to the full song.
+  const { setFollow: setWinFollow, setManualWin: setWinManual } = followWin;
+  useEffect(() => {
+    setWinFollow(true);
+    setWinManual(null);
+  }, [uri, setWinFollow, setWinManual]);
 
   const canvasTriggers: MusicTrigger[] = useMemo(
     () => triggers.map((t) => ({
       id: t.id, timestamp_ms: t.timestamp_ms, event_id: t.event_id,
-      labels: t.labels, enabled: true, intensity: 0.5,
+      labels: t.labels, enabled: true, intensity: t.intensity,
     })),
     [triggers],
   );
@@ -216,7 +293,7 @@ export default function NowPlayingPage() {
     scaleOverall: Number(settings?.shape_scale_overall ?? 1),
     // The engine's xcorr baseline (median of saves, minus the perception trim)
     // shifts the playhead — legacy _engineXcorrOffsetMs().
-    offsetMs: (shapeOffset ?? meta?.timestamp_offset_ms ?? 0) - (trim?.perception_trim_ms ?? 0),
+    offsetMs: canvasOffsetMs,
     librosaOffsetMs: Number((librosa as { librosa_offset_ms?: number } | undefined)?.librosa_offset_ms ?? 0),
     triggerOffsetMs: 0,
     maxRms,
@@ -241,10 +318,16 @@ export default function NowPlayingPage() {
   const stripCount = stripCountFor(data, view.librosaFilters);
 
   // ── Derived UI bits ────────────────────────────────────────────────────────
+  // Trigger timestamps live on the canvas (capture-time) axis — compare them
+  // against the playhead clock, not raw Spotify progress, so "upcoming" and
+  // the countdown agree with the playhead line and the fired flash.
+  const playheadMs = progressMs == null
+    ? null
+    : progressMs - audioLatencyRef.current + canvasOffsetMs;
   const upcoming = useMemo(() => {
-    if (progressMs == null) return null;
-    return triggers.find((t) => t.timestamp_ms > progressMs) ?? null;
-  }, [triggers, progressMs]);
+    if (playheadMs == null) return null;
+    return triggers.find((t) => t.timestamp_ms > playheadMs) ?? null;
+  }, [triggers, playheadMs]);
 
   const service = paused
     ? { label: 'Paused', cls: 'badge-yellow' }
@@ -286,13 +369,9 @@ export default function NowPlayingPage() {
         </div>
       )}
 
-      {/* ── Now Playing ── */}
+      {/* ── Now Playing (track name/artist/time live in the shared top bar) ── */}
       <div className="card">
         <div className="card-title">Now Playing</div>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>{track?.title ?? '—'}</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {track ? (track.artist.length > 40 ? `${track.artist.slice(0, 40)}…` : track.artist) : ''}
-        </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
           {(track?.genres ?? []).join(' · ')}
         </div>
@@ -321,26 +400,24 @@ export default function NowPlayingPage() {
       {/* ── Controls ── */}
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <button className={`toggle-btn ${!paused ? 'active' : ''}`}
-            title="Activate / pause trigger firing"
-            onClick={() => void apiPost(paused ? '/control/resume' : '/control/pause')}>
-            Activate
-          </button>
-          <button className={`toggle-btn ${dinnerParty ? 'active' : ''}`}
-            title="Ignore song triggers, use automatic ambient lighting"
-            onClick={() => void apiPost(`/control/dinner-party?enabled=${!dinnerParty}`)}>
-            Dinner Party
-          </button>
-          <button className={`toggle-btn ${ambient ? 'active' : ''}`}
-            title="Hold the configured devices at a static full-brightness color (Hue REST) and skip them in triggers"
-            onClick={() => void apiPost(`/control/ambient-mode?enabled=${!ambient}`)}>
-            Ambient
-          </button>
           <button className={`toggle-btn ${useAnalyzed ? 'active' : ''}`}
             title="Use analyzed triggers for songs without user triggers"
             onClick={() => void apiPost(`/control/use-analyzed-triggerless?enabled=${!useAnalyzed}`)}>
             Analyzed
           </button>
+          <button className={`toggle-btn ${forceScene ? 'active' : ''}`}
+            title="Hold one scene: whenever a new scene would be picked, reassert the forced scene instead"
+            onClick={() => patchSettings.mutate({ force_scene_enabled: !forceScene })}>
+            Force Scene
+          </button>
+          {forceScene && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <SearchSelect value={forceSceneEventId} options={sceneOptions} width={200}
+                placeholder="— pick scene —" allowEmpty={false}
+                onChange={(v) => patchSettings.mutate({ force_scene_event_id: v })} />
+              <HelpLink topic="now-force-scene" />
+            </span>
+          )}
           {srcBadge && (
             <span style={{
               fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
@@ -371,50 +448,122 @@ export default function NowPlayingPage() {
               fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
               color: 'var(--accent2)', letterSpacing: '-0.02em', minWidth: 70, textAlign: 'right',
             }}>
-              {upcoming && progressMs != null ? fmtCountdown(upcoming.timestamp_ms - progressMs) : ''}
+              {upcoming && playheadMs != null ? fmtCountdown(upcoming.timestamp_ms - playheadMs) : ''}
             </span>
           </div>
         </div>
-        {(lastScene || lastColorSet) && (
-          <div style={{ display: 'flex', marginTop: 8, gap: 16, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-            {lastScene && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                Scene:
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: lastScene.color, display: 'inline-block' }} />
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{lastScene.name}</span>
-              </span>
+        {uri && iScale && (
+          <div style={{ display: 'flex', marginTop: 8, gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+            <span title="Multiplies every trigger's intensity for THIS song (0–200%) before gates, chooser lanes and bindings. Saved on the song profile.">
+              ⚡ Intensity scale
+            </span>
+            <input type="range" min={0} max={200} step={5}
+              key={`${uri}:${iScale.intensity_scale ?? 'unset'}`}
+              defaultValue={Math.round(iScale.effective * 100)}
+              onChange={(e) => setScaleDrag(parseInt(e.currentTarget.value, 10))}
+              onPointerUp={(e) => void commitScale(parseInt((e.target as HTMLInputElement).value, 10))}
+              onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') void commitScale(parseInt((e.target as HTMLInputElement).value, 10)); }}
+              style={{ width: 180, accentColor: 'var(--accent)' }}
+            />
+            <span style={{ minWidth: 42, fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+              {scaleDrag ?? Math.round(iScale.effective * 100)}%
+            </span>
+            <span className="chip" title="Where this value comes from: user = this slider, auto = ranked vs the library, genre = triggerless profile default">
+              {iScale.source ?? (iScale.genre_default !== 1 ? 'genre' : 'default')}
+            </span>
+            {iScale.intensity_scale != null && (
+              <button style={{ fontSize: 11, padding: '2px 6px' }}
+                title="Clear — fall back to the auto/genre starting value"
+                onClick={() => void commitScale(null)}>×</button>
             )}
-            {lastColorSet && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                Color:
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: lastColorSet.color, display: 'inline-block' }} />
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{lastColorSet.name}</span>
-              </span>
-            )}
+            <HelpLink topic="intensity-scale" />
           </div>
         )}
-        {/* Next-trigger preview — fixed height so the card never jumps. */}
-        <div style={{
-          visibility: nextPreview ? 'visible' : 'hidden', marginTop: 8,
-          height: 'calc(1.3em * 3 + 4px)', display: 'flex', alignItems: 'flex-start', gap: 8, overflow: 'hidden',
-        }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.3 }}>Next:</span>
-          <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, whiteSpace: 'nowrap', color: nextPreview?.event_color ?? 'var(--text)' }}>
-            {nextPreview?.event_name}
-          </span>
-          {nextPreview?.action_label && (
-            <>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.3 }}>▸</span>
-              <span title={nextPreview.action_label} style={{
-                fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', flex: '1 1 0', minWidth: 0,
-                display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
-                overflow: 'hidden', lineHeight: 1.3, wordBreak: 'break-word',
-              }}>
-                {nextPreview.action_label}
-              </span>
-            </>
-          )}
-        </div>
+        {activeSceneGroup && (
+          <div style={{ display: 'flex', marginTop: 8, gap: 16, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              title="Scene Group currently driving the scene — Scene Morph actions step this group">
+              Group:
+              <span style={{ fontWeight: 600, color: 'var(--text)' }}>{activeSceneGroup.name}</span>
+            </span>
+          </div>
+        )}
+        {/* Next-changes board — fixed height so the card never jumps. Shows
+            the locked-in plan for the next trigger: one row per lane/pick
+            (what parameters change and to what). */}
+        {(() => {
+          const rows = nextPreview?.rows ?? [];
+          const shown = rows.slice(0, BOARD_ROWS);
+          const extra = rows.length - shown.length;
+          return (
+            <div style={{
+              visibility: nextPreview ? 'visible' : 'hidden', marginTop: 8,
+              height: 'calc(1.4em * 4 + 10px)', overflow: 'hidden',
+              border: '1px solid var(--border)', borderRadius: 6, padding: '3px 8px',
+              background: 'var(--surface2)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, lineHeight: 1.4 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Next</span>
+                <span style={{
+                  fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden',
+                  textOverflow: 'ellipsis', color: nextPreview?.event_color ?? 'var(--text)',
+                }}>
+                  {nextPreview?.event_name}
+                </span>
+                {extra > 0 && (
+                  <span title={rows.map((r) => `${r.tag ? `${r.tag}: ` : ''}${r.full || r.text}`).join('\n')}
+                    style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                    +{extra} more
+                  </span>
+                )}
+              </div>
+              {shown.length > 0 ? shown.map((r, i) => (
+                <div key={i} title={`${r.tag ? `${r.tag} ` : ''}${r.scope ? `(${r.scope}) ` : ''}— ${r.full || r.text}`}
+                  style={{ display: 'flex', alignItems: 'baseline', gap: 8, lineHeight: 1.4, minWidth: 0 }}>
+                  {r.tag && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+                      color: 'var(--accent2)', whiteSpace: 'nowrap', flex: '0 1 auto', maxWidth: '35%',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {r.tag}{r.at_ms !== 0 && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> {fmtAt(r.at_ms)}</span>}
+                    </span>
+                  )}
+                  {r.scope && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {r.scope}
+                    </span>
+                  )}
+                  <span style={{
+                    fontSize: 12, color: 'var(--text)', fontFamily: 'monospace', flex: '1 1 0', minWidth: 0,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {r.text}
+                  </span>
+                  {r.colors.length > 0 && (
+                    <span style={{ display: 'inline-flex', gap: 3, flex: '0 0 auto', alignSelf: 'center' }}>
+                      {r.colors.map((c, j) => (
+                        <span key={j} style={{
+                          width: 9, height: 9, borderRadius: '50%', background: c,
+                          border: '1px solid var(--border)', display: 'inline-block',
+                        }} />
+                      ))}
+                    </span>
+                  )}
+                </div>
+              )) : nextPreview?.action_label && (
+                // Fallback for previews without structured rows.
+                <span title={nextPreview.action_label} style={{
+                  fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace',
+                  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden', lineHeight: 1.4, wordBreak: 'break-word',
+                }}>
+                  {nextPreview.action_label}
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Song Timeline ── */}
@@ -434,11 +583,6 @@ export default function NowPlayingPage() {
               background: t.color,
             }} />
           ))}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-          <span>{fmtMs(progressMs ?? 0)}</span>
-          <span>{track && progressMs != null ? `-${fmtMs(track.duration_ms - progressMs)}` : ''}</span>
-          <span>{fmtMs(track?.duration_ms ?? 0)}</span>
         </div>
       </div>
 

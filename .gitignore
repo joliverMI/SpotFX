@@ -41,3 +41,14 @@ storage/color_sets.json
 # Claude local settings
 .claude/settings.local.json
 storage/offset_bias.json
+
+# Runtime data from tune scheduler / lock history
+storage/lock_history.json
+storage/tune_history.json
+storage/tune_runs.log
+storage/tune_schedule.json
+build/
+
+# TypeScript incremental build
+web/tsconfig.tsbuildinfo
+storage/cache/

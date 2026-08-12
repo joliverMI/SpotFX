@@ -67,7 +67,7 @@ class AppState:
 
     # ── Service control ───────────────────────────────────────────────────────
     paused: bool = False          # True = triggers suppressed, polling continues
-    on_target_device: bool = False  # True = playing on settings.spotify_device_name
+    on_target_device: bool = False  # True = playing on one of settings.spotify_device_names
     audio_analysis_enabled: bool = False  # True = capture audio shapes for new songs
     # Force-recapture mode (was recapture_wavs — now force-recaptures every song
     # that plays while active, with a session-bound counter that auto-disables
@@ -79,7 +79,16 @@ class AppState:
     analyzed_trigger_override: bool = False    # True = override user triggers with analyzed (debug/testing)
     auto_generate_enabled: bool = False       # True = auto-generate triggers after shape capture
     dinner_party_mode: bool = False            # True = ignore song triggers, use Dinner Party triggerless profile
-    ambient_mode_enabled: bool = False         # True = target Hue devices frozen (LedFX stream stopped) + held at static full-brightness via Hue REST
+    ambient_mode_enabled: bool = False         # True = at least one Hue group frozen (LedFX stream stopped) + held at static full-brightness via Hue REST
+    ambient_groups: list = field(default_factory=list)  # LedFX Hue device ids currently held in ambient (subset of the target category)
+    # Global Dark/Light display mode (TopBar toggle — the TOP of the cascade).
+    # "default" = defer to trigger → scene group → scene → set_color → color
+    # cards. Persisted to settings.json, rehydrated at startup.
+    display_mode: str = "default"
+    # Last mode a fire (or the global toggle) actually resolved to — what the
+    # room is currently doing. Informational (WS/status); the source of truth
+    # for LedFX dark locks lives in services/display_mode.
+    display_mode_resolved: str = "default"
 
     # ── Genre Blending ────────────────────────────────────────────────────────
     # Snapshot of the outgoing track captured just before current_track is replaced.
@@ -99,10 +108,19 @@ class AppState:
     # scene the fixed Update/Reset Scene events act on. Mirrored from the engine
     # so broadcast_state can show a "last scene" indicator. Persists across songs.
     last_scene_update_id: str = ""
+    # Id of the scene_group event currently driving the scene ("" = none) —
+    # set when a group fires or Scene Morph steps it, cleared when a plain
+    # scene_update is picked directly. Mirrored from the engine. Persists
+    # across songs.
+    active_scene_group_id: str = ""
     # Id of the most recent Color Set the engine applied (the resolved member id
     # when a Group was fired). Mirrored from the engine for the Now Playing
     # indicator. Persists across songs.
     last_color_set_id: str = ""
+    # Id of the most recent Color GROUP a set_color fire drew from (the group
+    # card itself, not the picked member). Set Color actions with
+    # ref_id == CURRENT_COLOR_GROUP_REF re-use it. Persists across songs.
+    last_color_group_id: str = ""
 
     # ── Set List context ─────────────────────────────────────────────────────
     next_track_uri: str = ""           # spotify URI of queue[0] after the current track

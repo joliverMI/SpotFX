@@ -29,7 +29,7 @@ from services.websocket_manager import ws_manager
 from services.profile_manager import load_profile_by_uri, load_profile_by_title_artist, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
-from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router
+from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router
 from routers.settings_router import apply_settings_override
 from services import effect_params
 
@@ -116,6 +116,11 @@ async def lifespan(app: FastAPI):
         state.use_analyzed_triggerless = bool(_saved["use_analyzed_triggerless"])
     if "ambient_mode_enabled" in _saved:
         state.ambient_mode_enabled = bool(_saved["ambient_mode_enabled"])
+    if "ambient_groups" in _saved:
+        state.ambient_groups = [str(g) for g in (_saved["ambient_groups"] or [])]
+    if _saved.get("display_mode") in ("default", "dark", "light"):
+        state.display_mode = _saved["display_mode"]
+        state.display_mode_resolved = state.display_mode
 
     # Select song source based on settings
     if settings.song_source == "ledfx":
@@ -132,12 +137,17 @@ async def lifespan(app: FastAPI):
     from api.pcm_ring_buffer import pcm_ring_buffer
     pcm_ring_buffer.start()
 
+    # Tune scheduler: processes storage/tune_schedule.json (queued/timed
+    # training runs) — armed here so pending schedules survive restarts.
+    from services import tune_scheduler
+
     # Launch background tasks
     tasks = [
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
         asyncio.create_task(engine.run(), name="trigger-engine"),
+        asyncio.create_task(tune_scheduler.worker_loop(), name="tune-scheduler"),
     ]
     # Re-assert Ambient Mode if it was left on across restarts (freeze the Hue
     # devices + hold them at the static color). Deferred as a task so a slow Hue
@@ -145,7 +155,9 @@ async def lifespan(app: FastAPI):
     # longer deactivates virtuals.
     if state.ambient_mode_enabled:
         from services import ambient_mode
-        tasks.append(asyncio.create_task(ambient_mode.enable(), name="ambient-restore"))
+        # Restore the held group subset; legacy saves without group detail = all.
+        _want = set(state.ambient_groups) or None
+        tasks.append(asyncio.create_task(ambient_mode.set_groups(_want), name="ambient-restore"))
 
     logger.info("SpotFX started — http://%s:%d", settings.app_host, settings.app_port)
     yield
@@ -178,9 +190,11 @@ app.include_router(triggerless.router)
 app.include_router(device_manager.router)
 app.include_router(setlist_router.router)
 app.include_router(timing_viz_router.router)
+app.include_router(lock_history_router.router)
 app.include_router(debug_router.router)
 app.include_router(morph_router.router)
 app.include_router(color_sets_router.router)
+app.include_router(gif_assets_router.router)
 
 
 # ── Service status (health check for external callers) ────────────────────────

@@ -6,6 +6,7 @@ setAutoFreeze(false);
 import type { Action, MusicEvent } from '../types/events';
 import { attachUids, stripUids } from '../lib/uid';
 import { findByUid, getAtPath, ROOT_PATH } from '../lib/paths';
+import { diffChangedBlocks, FLASH_MS } from '../lib/flashDiff';
 
 interface EditorState {
   draft: MusicEvent | null;
@@ -13,10 +14,14 @@ interface EditorState {
   savedJson: string;
   undoStack: MusicEvent[];
   redoStack: MusicEvent[];
+  /** uid → Date.now() of its last create/update; cards flash-fade from it. */
+  flashes: Record<string, number>;
 
   load: (ev: MusicEvent) => void;
-  /** All edits funnel through here: snapshots undo, applies an immer recipe. */
-  mutate: (fn: (d: MusicEvent) => void) => void;
+  /** All edits funnel through here: snapshots undo, applies an immer recipe.
+   * Changed blocks are flash-highlighted — auto-detected unless `flash`
+   * names them (pass [] to suppress). */
+  mutate: (fn: (d: MusicEvent) => void, flash?: string[]) => void;
   updateAction: (uid: string, fn: (a: Action) => void) => void;
   removeByUid: (uid: string) => void;
   /** Move an action to (containerPath, index); steps reorder within their own list. */
@@ -32,18 +37,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   savedJson: '',
   undoStack: [],
   redoStack: [],
+  flashes: {},
 
   load: (ev) => {
     const draft = attachUids(JSON.parse(JSON.stringify(ev)) as MusicEvent);
-    set({ draft, savedJson: JSON.stringify(stripUids(draft)), undoStack: [], redoStack: [] });
+    set({
+      draft,
+      savedJson: JSON.stringify(stripUids(draft)),
+      undoStack: [],
+      redoStack: [],
+      flashes: {},
+    });
   },
 
-  mutate: (fn) => {
+  mutate: (fn, flash) => {
     const { draft, undoStack } = get();
     if (!draft) return;
     const next = produce(draft, fn);
     attachUids(next); // new objects created inside the recipe need uids too
-    set({ draft: next, undoStack: [...undoStack.slice(-49), draft], redoStack: [] });
+    const changed = flash ?? diffChangedBlocks(draft, next);
+    let flashes = get().flashes;
+    if (changed.length) {
+      const now = Date.now();
+      flashes = Object.fromEntries(
+        Object.entries(flashes).filter(([, t]) => now - t < FLASH_MS),
+      );
+      for (const uid of changed) flashes[uid] = now;
+    }
+    set({ draft: next, undoStack: [...undoStack.slice(-49), draft], redoStack: [], flashes });
   },
 
   updateAction: (uid, fn) =>
@@ -64,7 +85,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       arr.splice(loc.index, 1);
     }),
 
-  moveByUid: (uid, targetContainer, targetIndex) =>
+  moveByUid: (uid, targetContainer, targetIndex) => {
+    // Moves keep the item's reference, so auto-detection would flash the
+    // containers — flash the moved card itself instead (only on success).
+    const flash: string[] = [];
     get().mutate((d) => {
       const loc = findByUid(d, uid);
       if (!loc) return;
@@ -80,7 +104,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       let idx = targetIndex;
       if (src === dst && loc.index < targetIndex) idx -= 1;
       dst.splice(Math.max(0, Math.min(idx, dst.length)), 0, item);
-    }),
+      flash.push(uid);
+    }, flash);
+  },
 
   undo: () => {
     const { draft, undoStack, redoStack } = get();

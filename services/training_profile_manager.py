@@ -118,6 +118,51 @@ class TrainingProfile(BaseModel):
     song_end_fade_thresh: float = 0.20
     song_end_sustain_beats: int = 8
 
+    # Flare composite (Stage 7) — previously undeclared: pydantic silently
+    # dropped these on construction, so grid-search overrides never applied.
+    # Defaults match the generator's old getattr fallbacks.
+    flare_bass_hit_weight: float = 0.20
+    flare_bass_onset_weight: float = 0.10
+    flare_onset_weight: float = 0.15
+    flare_harmonic_weight: float = 0.15
+    flare_energy_uptick_weight: float = 0.15
+    flare_energy_weight: float = 0.10
+    flare_dip_weight: float = 0.15
+    flare_snare_weight: float = 0.0      # snare transient component (0 = off)
+    flare_burst_weight: float = 0.0      # clustered-onset burst component (0 = off)
+    flare_uptick_lookback: int = 3
+    flare_dip_lookback: int = 2
+    flare_shape_thresh: float = 0.30
+    flare_flash_thresh: float = 0.60
+    flare_combo_bass_thresh: float = 0.40
+    flare_combo_harm_thresh: float = 0.30
+    flare_shape_min_spacing: int = 4
+    flare_flash_min_spacing: int = 8
+    flare_combo_min_spacing: int = 6
+    beat_start_max_search_beats: int = 60
+
+    # Scene-tier flare (Stage 7, 4th tier above flare_high — fires a scene
+    # update event on the most extreme flare moments)
+    flare_scene_event_id: str = ""       # empty = tier disabled
+    flare_scene_labels: list[str] = Field(default_factory=list)
+    flare_scene_thresh: float = 0.85     # composite score >= this → scene tier
+    flare_scene_min_spacing: int = 24    # beats
+
+    # Onset snapping — snap drop/charge/scene/flare timestamps to the nearest
+    # bass onset (fallback: general onsets) within this radius. 0 = off.
+    onset_snap_radius_ms: int = 0
+
+    # Per-trigger intensity
+    flare_intensity_blend: float = 0.0   # 0 = pure section energy, 1 = pure composite score
+    intensity_drop_boost: float = 0.0    # added to section energy for drops, clamped to 1.0
+    intensity_quiet_cap: float = 0.35    # intensity ceiling for quiet/lull triggers
+
+    # Genre-level intensity scaler (0-2 = 0-200%): fire-time fallback for songs
+    # matching this profile's genres whose SongProfile.intensity_scale is unset.
+    # A future backfill may stamp it onto songs (source="genre"); user-set and
+    # auto-computed song values always win over this.
+    default_intensity_scale: float = Field(default=1.0, ge=0.0, le=2.0)
+
 
 def _load_raw() -> dict:
     if TRAINING_PROFILES_FILE.exists():

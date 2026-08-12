@@ -19,7 +19,13 @@ class Settings(BaseSettings):
     spotipy_client_id: str = ""
     spotipy_client_secret: str = ""
     spotipy_redirect_uri: str = "http://127.0.0.1:8000/api/spotify/callback"
+    # Comma-separated list of Spotify Connect device names SpotFX reacts to.
     spotify_device_name: str = "Serenity"
+
+    @property
+    def spotify_device_names(self) -> list[str]:
+        """spotify_device_name split on commas, trimmed, empties dropped."""
+        return [n.strip() for n in self.spotify_device_name.split(",") if n.strip()]
 
     # ── LedFX ────────────────────────────────────────────────────────────────
     # Accept either a full base URL (LEDFX_BASE_URL) or separate host/port.
@@ -50,6 +56,23 @@ class Settings(BaseSettings):
     ambient_kelvin: int = 2700               # used when ambient_color_mode == "white"
     ambient_brightness: int = 100            # 1..100 percent
     ambient_wake_scene: str = "wake-hues"    # LedFX scene fired on disable to restart the Hue stream ("" = off)
+    ambient_transition_s: float = 1.5        # ambient-off fade: Hue REST dynamics duration toward the wake color before unfreezing (0 = instant)
+    ambient_fade_brightness: int = 35        # brightness % the off-fade lands on before the entertainment stream takes over
+    ambient_catchup_s: float = 8.0           # after the wake scene, tween the Hue virtual's effect back to the pre-wake (current music) look over this long (0 = jump at next trigger)
+
+    # ── Dark / Light display mode ─────────────────────────────────────────────
+    # The global on/off state lives on AppState.display_mode (TopBar toggle,
+    # persisted like dinner_party_mode); these configure what the modes DO.
+    # Light mode: background applied to affected devices whose Color Set entry
+    # doesn't set its own bg_color / background_brightness.
+    display_light_bg_color: str = "#201830"      # hex
+    display_light_bg_brightness: float = 0.3     # 0..1
+    # Shielded devices keep their authored backgrounds — never forced black by
+    # dark mode, never given the default light background. Categories are
+    # device-category NAMES (resolved to virtuals at fire time) plus explicit
+    # virtual ids. Default: Singles always keep a background.
+    display_shield_categories: list = ["Singles"]
+    display_shield_virtuals: list = []
 
     # ── App ───────────────────────────────────────────────────────────────────
     app_host: str = "0.0.0.0"
@@ -58,6 +81,14 @@ class Settings(BaseSettings):
     # ── Latency / timing ──────────────────────────────────────────────────────
     # Milliseconds between audio playback and Spotify timestamp
     audio_latency_ms: int = 1000
+    # Multiple snapcast client devices can feed SpotFX; each has its own
+    # playback-chain latency, so offsets learned on one don't transfer 1:1.
+    # timing_device_offsets maps device name → extra offset (ms) layered onto
+    # the resolved shape offset while that device is active; lock-history and
+    # systemic-offset samples are tagged with the active device so learned
+    # data doesn't cross-contaminate between devices.
+    active_timing_device: str = "default"
+    timing_device_offsets: dict = {}
     # Positive = trigger earlier, negative = trigger later
     ledfx_trigger_buffer_ms: int = 250
     # Global default ramp duration for brightness/effect param changes; 0 = instant
@@ -67,6 +98,12 @@ class Settings(BaseSettings):
     # (GET /api/info → features.param_transition). Kill-switch: set False to force
     # the legacy client-side ramps. Effective only when LedFX actually supports it.
     server_side_tween: bool = True
+    # How colour/gradient transitions travel: True = rotate around the hue
+    # wheel (HSV shortest arc — red→cyan sweeps through magenta/blue or
+    # yellow/green instead of desaturating through grey), False = straight
+    # RGB lerp (legacy). Applies to both the server-side tween and the
+    # legacy client-side ramp loop.
+    hue_blend_transitions: bool = True
 
     # ── Write verification (non-ramping reconciliation) ────────────────────────
     # After a morph step's non-ramping writes (effect switch, colors incl. the
@@ -117,6 +154,19 @@ class Settings(BaseSettings):
     # URI-change handler realized a new song started. Memory cost at 44.1kHz
     # mono float32: ~5.3 MB for 30s.
     pcm_ring_buffer_seconds: int = 30
+
+    # ── Recapture self-correction (services/capture_alignment.py) ─────────────
+    # After a force-recapture commits, the timebase shift between the old and
+    # new capture is measured (multi-band NCC of the stored npz signals) and
+    # triggers + learned xcorr offsets migrate by that shift so they keep
+    # firing at the same musical moments.
+    realign_enabled: bool = True
+    realign_search_ms: int = 6000        # max |shift| searched between captures
+    realign_window_s: float = 20.0       # per-probe template width (seconds)
+    realign_min_r: float = 0.6           # min per-window correlation to trust
+    realign_single_window_min_r: float = 0.75  # stricter when only one window fits
+    realign_agree_ms: int = 120          # max spread between the probe windows' shifts
+    realign_apply_min_ms: int = 40       # |shift| below this: offsets migrate, triggers stay put
 
     # ── Audio shape display averages ──────────────────────────────────────────
     # Sliding-window average width for the smoothed overlay lines (ms)
@@ -549,6 +599,12 @@ class Settings(BaseSettings):
     # Genre Blending — when ON, suppress song-start triggers if the previous song
     # ended naturally and the new song shares any genre with it.
     genre_blending_enabled: bool = True
+    # Force Scene — when ON, every Scene Update fire (the moment SpotFX would
+    # pick a new scene) reasserts the chosen scene instead (normal First/Rest
+    # lanes), so the room stays on that scene. Flares still run against it.
+    # Toggled from Now Playing.
+    force_scene_enabled: bool = False
+    force_scene_event_id: str = ""   # id of the scene_update event to hold
     # Suppress Triggers During Capture — when ON, the LedFX gate mutes trigger
     # writes while audio_shape_service is recording so capture doesn't compete
     # with LedFX writes. Turn OFF to let triggers fire during capture.

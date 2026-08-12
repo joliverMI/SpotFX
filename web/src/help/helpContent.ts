@@ -94,6 +94,39 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
 
+  /* ── Shared top bar ──────────────────────────────────────────── */
+  {
+    id: 'topbar',
+    title: 'Top Bar (all pages)',
+    keywords: 'status bar header play pause activate dinner party ambient scene color lock track time intensity',
+    intro:
+      'The slim bar under the navigation is shared by every page: the master controls plus live status, so you never have to switch to Now Playing to check or pause things.',
+    entries: [
+      {
+        id: 'topbar-controls',
+        title: 'Controls',
+        keywords: 'play pause round button icon toggle dinner party ambient long press',
+        table: [
+          ['▶ / ⏸', 'Activate — master switch for trigger firing. Green ⏸ = active (click to pause), ▶ = paused (click to resume).'],
+          ['🍽️', 'Dinner Party — ignore song triggers; use automatic ambient lighting.'],
+          ['💡', 'Ambient Mode — hold the Hue groups at a static full-brightness color. Short press: all groups on/off. Long-press: pick individual groups (see "Ambient Hue groups").'],
+          ['🌗', 'Display mode — cycles Default → 🌙 Dark → ☀️ Light. The icon flips immediately but the mode commits one second after the last click, so cycling past a mode never applies it. See "Dark / Light mode" under Settings.'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'topbar-status',
+        title: 'Status readouts',
+        keywords: 'scene color set chip lock locked suspect recovering idle song artist truncated progress duration intensity score color coded',
+        body: [
+          'Chips show the active Scene and Color Set (dot = marker color; hover the scene chip for the active Scene Group). The lock indicator is the audio-sync monitor: green Locked, amber Suspect, red Recovering; gray "Lock idle" means an offset is held but the matcher is quiet, "No lock" means no live match data yet.',
+          'The right side shows the current track ("Title — Artist", truncated when long) and position / duration.',
+          'The ⚡ score is the intensity of the last fired trigger (0–100), color-coded cool blue (low) → hot red (high). It clears on track change.',
+        ],
+      },
+    ],
+  },
+
   /* ── Search & filters ────────────────────────────────────────── */
   {
     id: 'search-filters',
@@ -155,7 +188,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             ],
             table: [
               ['1–0, Q–P, A–L, Z–M', 'Arm that key\'s event from the active palette (36 keys); re-pressing keeps it armed.'],
-              ['Esc', 'Disarm the armed key (after clearing any selection).'],
+              ['Esc', 'Disarm the blend brush, then the armed key (after clearing any selection).'],
             ],
             kbd: true,
           },
@@ -183,7 +216,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             table: [
               ['Right-click empty canvas', 'Place the armed event — time snaps to the nearest bass onset, intensity starts at the section\'s energy.'],
               ['Hold right button', 'Keep holding after placing to slide the intensity live until you release.'],
-              ['Right-click a trigger', 'Reassign that trigger to the armed event.'],
+              ['Right-click a trigger', 'Reassign that trigger to the armed event — or, with the blend brush armed ([ / ]), paint/clear its Override Blend.'],
               ['Drag a circle ↕', 'Change intensity — snaps to the previous trigger\'s value and to 0.5. With a multi-selection, all selected circles shift together.'],
               ['Drag a triangle ↔', 'Move the trigger in time (20 ms grid, snaps to librosa markers by row).'],
               ['Drag off the canvas', 'Delete the trigger (pull it more than ~24 px out).'],
@@ -207,6 +240,40 @@ export const HELP_SECTIONS: HelpSection[] = [
             ],
             kbd: true,
           },
+          {
+            id: 'builder-trigger-dialog',
+            title: 'Trigger edit dialog',
+            keywords: 'double click edit timestamp event labels intensity open new tab reference palette assign blend color group override',
+            body: [
+              'Double-click a trigger (or empty canvas) to open it: timestamp (m:ss.t), event (recently used float to the top), filter labels, intensity, the Colors picker (scene-group color override — see below), and the Override Blend toggle.',
+              'The ↗ next to the event picker opens the chosen event\'s editor in a new tab, so the trigger you\'re editing stays put.',
+            ],
+          },
+          {
+            id: 'override-blend',
+            title: 'Override Blend',
+            keywords: 'blend ramp stretch scale slow fast transition next trigger no action paint brush bracket',
+            body: [
+              'A trigger with Override Blend on rescales its event\'s ramps and delays — proportionally — so the last ramp completes exactly at the next enabled trigger (or at song end when none follows). An event that would ramp 200 ms then 300 ms, fired 5 s before the next trigger, ramps 2 s then 3 s instead; if the next trigger comes sooner than the natural timing, ramps compress to fit.',
+              'Beat-timed steps stay on their beats — only their ramps scale — so completion is exact only for ms-timed events. The event\'s fire offset (latency trim) is never scaled.',
+              'Use the built-in "No Action" event on a trigger to end a blend span without changing the lights.',
+              'On both timelines the blended span is tinted in the event\'s color from the blend trigger to the trigger that ends it.',
+            ],
+            table: [
+              ['[', 'Arm the blend brush — right-click triggers to turn Override Blend ON. Re-press or Esc disarms.'],
+              [']', 'Arm the eraser — right-click triggers to turn Override Blend OFF.'],
+            ],
+            kbd: true,
+          },
+          {
+            id: 'trigger-color-override',
+            title: 'Scene-group color override',
+            keywords: 'color group override trigger scene group palette designate colors picker',
+            body: [
+              'The Colors picker in the trigger dialog overrides which Color Group a Scene Group pulls its colors from — for that one trigger. While the trigger\'s fire resolves "Scene Group\'s Color Group" (the default on Set Color actions), the picked group is used instead of the group\'s designated one.',
+              'Blank (the default) changes nothing — the group\'s normal colors apply. If the picked Color Group was deleted, the fire falls back to the normal choice instead of failing. The override lives on the trigger, so the same Scene Group can be blue at one trigger and gold at the next.',
+            ],
+          },
         ],
       },
       {
@@ -216,12 +283,15 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'builder-pan-zoom',
             title: 'Pan, zoom & follow',
-            keywords: 'middle drag scroll window playhead',
+            keywords: 'middle drag scroll window playhead resume auto',
+            body: [
+              'In Live mode, follow resumes automatically (zoomed to the sticky window size) when the page opens, when Live mode turns on, and when the song changes; within one song your pan/zoom choice sticks. In song-search mode there is no playhead, so the view stays where you leave it.',
+            ],
             table: [
               ['Middle-drag', 'Pan the zoom window (drag right → window moves right). Panning switches follow off.'],
-              ['` (backtick)', 'Toggle follow mode (auto-scroll with playback) vs. manual zoom.'],
+              ['` (backtick)', 'Toggle follow mode (auto-scroll with playback) vs. manual zoom. Turning follow off freezes the current view in place; use Full Song to zoom out.'],
               ['Ctrl+F', 'Also toggles follow mode.'],
-              ['Full-song bar', 'Drag the zoom region\'s center or edges to pan/resize; in follow mode this adjusts the look-ahead window.'],
+              ['Full-song bar', 'Drag the zoom region\'s center to pan — this switches follow off. Drag its edges to resize; in follow mode edge drags adjust the window size and look-ahead instead.'],
             ],
             kbd: false,
           },
@@ -233,7 +303,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               ['Drag a marker', 'Move that trigger in time; drag well above/below the bar to delete it.'],
               ['Click a marker', 'Edit the trigger.'],
               ['Double-click empty bar', 'Create a trigger there.'],
-              ['Right-click', 'Place the armed event (on a marker: reassign it).'],
+              ['Right-click', 'Place the armed event (on a marker: reassign it). With the blend brush armed ([ / ]), a marker right-click paints/clears Override Blend instead.'],
             ],
             kbd: false,
           },
@@ -281,16 +351,20 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'chips fire test lock fixed ai exposed',
         body: [
           'Search matches name or labels; type chips narrow by kind. Row icons: 🔒 built-in (read-only), 🌳 composite tree, ⚡ energy level, AI = exposed to AI trigger generation. ▶ test-fires the event immediately.',
-          'Create buttons: + Random / + Sequence / + Parallel start a new composite event with that root group.',
+          'Create buttons: + Random / + Sequence / + Parallel / + Intensity start a new composite event with that root group; + Scene Group starts a group of Scene Updates (see "Scene Groups"). The Scenes chip includes Scene Groups.',
         ],
       },
       {
         id: 'events-editor',
         title: 'Editing an event',
-        keywords: 'undo redo save fire duplicate drag reorder weight scope',
+        keywords: 'undo redo save fire duplicate preview drag reorder weight scope highlight flash glow green reference open link new tab',
         body: [
-          'Edits are drafts — Save writes to the server; ▶ Fire is disabled while dirty because firing uses the stored event. Drag cards to reorder; every action can be copied and pasted into any track of any event (cross-tab too).',
-          'Group types: Sequence (children in order, ms or beat delays), Parallel (all at once, per-child offset), Random (weighted pick of one option). Scopes cascade: a child with no target inherits the nearest group/lane target.',
+          'Edits are drafts — Save writes to the server; ▶ Fire is disabled while dirty because firing uses the stored event. ▶ Preview (between Duplicate and Delete) fires the CURRENT DRAFT as-is, without saving — it works on new and dirty events. Drag cards to reorder; every action can be copied and pasted into any track of any event (cross-tab too).',
+          'Every level of the tree has its own ▶ preview between its ⧉ and ✕ buttons: an action card fires just that action; a Parallel lane fires immediately (offset ignored); a Sequence step fires with its delay skipped and no group revert; a Random option is force-picked (energy gate ignored); an Intensity Chooser lane is force-picked (threshold ignored); a morph/scene lane rolls one of its alternatives; a Scene Group member fires that member scene. Nothing is saved — previews use the live draft.',
+          'The block you just added, edited, moved or pasted glows green and fades over 5 s, so you can spot where the change landed in a big tree.',
+          'Cards that reference something else — an event_ref or a set_color — show a ↗ button that opens the referenced event or color set/group in a new tab (a new tab so your unsaved draft stays put).',
+          'Group types: Sequence (children in order, ms or beat delays), Parallel (all at once, per-child offset), Random (weighted pick of one option), Intensity Chooser (the trigger\'s intensity picks one threshold lane — see "Intensity Chooser"). Scopes cascade: a child with no target inherits the nearest group/lane target.',
+          'Sequence steps in ms mode can also wait for scene "updates": set "or N updates" next to the delay and the step fires after N scene-family fires (scene picks, Update/Reset Scene, flares, Scene Morph) OR after the ms delay — whichever comes first. Delay 0 waits on updates alone (a track change releases it). Beats mode and the classic sequence editor don\'t have this. Typical use: Scene Morph +1 → wait "4000 ms or 2 updates" → Scene Morph −1 back.',
         ],
         table: [
           ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo draft edits.'],
@@ -305,23 +379,259 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'event_ref ledfx scene ambient transition effect param morph color device settings',
         table: [
           ['event_ref', "Fire another event's action pool."],
-          ['morph_step', 'Multi-target aspect changes (brightness / reactivity / blur / color / bg color / effect / shape), absolute or nudge, with ramps.'],
-          ['morph_color', 'Rotate the showing colors around the hue wheel (180° = complementary).'],
-          ['set_color', 'Sets gradient + background + sparks together.'],
+          ['morph_step', 'Multi-target aspect changes (brightness / reactivity / blur / color / bg color / effect / shape), absolute or nudge, with ramps. Shape sub-fields cover radial (star, twist, polygon) plus blackhole/orbits/fireworks (swirl, horizon size, field radius, blob size, offsets); "Edge / particle count" is one sub-field that lands on radial\'s polygon edges, orbits\' particle count, or fireworks\' burst size — whichever the running effect has. On radial (no reverse param), Reverse reverses the full perceived motion — it flips the sign of Spin AND of Twist (the twist sign drives the apparent rotation of the scrolling spiral): On = reversed = negative, toggle = negate; magnitudes are preserved and an explicit Twist in the same step wins. Flip stays rotation-only (sign of Spin, On = positive). The Reactivity aspect has a Shape-style per-param menu: add any reactivity param (Spawn Rate, Beat Burst, Accel, Edge Speed, …), set it exactly, bind it to a signal (⚡), or give it its own nudge — per-param entries win over the single spread slider. Nudge amounts are bindable too: ⚡ maps the magnitude to a music signal, 🎲 rolls a fresh random magnitude every fire, and the +/− toggle flips the nudge direction 50/50 per fire (works alongside bounce — see "Value bindings").'],
+          ['morph_color', 'Rotate the showing colors around the hue wheel (180° = complementary). Degrees is bindable: ⚡ maps the rotation to a music signal, 🎲 rolls a fresh random rotation every fire, and the binding\'s +/− toggle randomizes direction (see "Value bindings"). "Morph background" (on by default) includes the BG color in the rotation; off leaves every effect\'s background untouched — FG and accent still rotate.'],
+          ['scene_morph', 'Step the ACTIVE Scene Group forward/backward N scenes and fire the result (normal First/Rest). No-op when no group is active or Force Scene holds a single scene; advance 0 re-fires the current member (Rest lane).'],
+          ['set_color', 'Apply a saved Color Set, or pick one from a Color Group. Instead of a specific card the picker also offers "Scene Group\'s Color Group" (default — pull from whatever Color Group the active Scene Group designates, falling back to the current group) and "Current Color Group" (re-use the last group any Set Color fired from).'],
           ['ledfx_scene / ledfx_ambient', 'Activate a LedFX scene / ambient behavior.'],
           ['ledfx_ambient_color', 'Applies the complementary of the current ambient color.'],
           ['ledfx_global_transition / ledfx_effect_param', 'Set the global transition / a single effect parameter.'],
           ['device_settings', 'Apply raw device settings.'],
-          ['sequence / parallel / random group', 'Containers — run children in order / at once / pick one by weight.'],
+          ['sequence / parallel / random group', 'Containers — run children in order / at once / pick one by weight (random options can be energy-gated and tilted).'],
+          ['intensity_chooser', 'Container — the firing trigger\'s intensity picks exactly one threshold lane; that lane\'s actions fire together. See "Intensity Chooser".'],
         ],
         kbd: false,
       },
       {
+        id: 'events-scene-groups',
+        title: 'Scene Groups',
+        keywords: 'scene group rotate cycle bounce wrap weighted random start members force scene morph active color group designate palette',
+        body: [
+          'A Scene Group is an event holding an ordered set of Scene Updates. Firing the group advances its cursor one member and fires that scene with normal First/Rest lanes — a newly rotated-to scene runs First, a repeat runs Rest. The picked member becomes the "last scene", so flares and Update/Reset Scene act on it as usual.',
+          'Modes mirror Color Groups: Cycle steps in order (wrap loops around, bounce reverses at the ends) and never re-lands on the scene already showing; Random (weighted) picks every member randomly by weight — with "exclude current from next" on (the default) it never repeats the scene just shown. The cursor lives in memory and keeps rotating across songs (unlike Color Group cursors, which reset per track).',
+          'Cycle mode\'s "random start" checkbox randomizes where the cycle begins: whenever the group is freshly called (it wasn\'t the active scene group), the first pick is a random member and cycling continues from there, instead of resuming the persisted cursor.',
+          'The group that fired last (or is held by Force Scene) is the ACTIVE group — Scene Morph actions step it. Picking a plain Scene Update directly clears the active group. Members that were deleted or are no longer Scene Updates are skipped automatically.',
+          'A Scene Group can also designate a Color Group (the "color group" picker in its editor). Set Color actions left on "Scene Group\'s Color Group" (the default for new ones) pull from that group while this Scene Group is active — so switching Scene Groups re-themes the room\'s palette without editing any events. When no group is active, or the active one designates nothing, those actions fall back to the current (last-fired) Color Group.',
+          'Dark/Light: the "mode 🌗" select is the group\'s default display mode (see "Dark / Light mode" under Settings), and the 🌙/☀️ group pickers swap in a different Color Group while the resolved mode is Dark or Light — so a group can carry a dimmer palette for dark evenings and a fuller one for light.',
+        ],
+      },
+      {
+        id: 'random-energy',
+        title: 'Random options: energy gate & tilt',
+        keywords: 'random group weight energy floor ceiling scale tilt intensity eligible',
+        body: [
+          'Each option of a Random group can be gated and scaled by the firing trigger\'s energy (its intensity, 0–1; machine-generated triggers default to section energy). "energy ≥" sets a floor and "≤" a ceiling — outside that window the option is never picked. If every option is gated out, the group fires nothing.',
+          'Within the window, "tilt" bends the option\'s weight with energy: 0 is flat, +1 ramps from 0× weight at the floor to 2× at the ceiling (favors high energy), −1 is the inverse (favors low energy). An empty floor/ceiling counts as 0/1 for the tilt ramp.',
+          'Manual ▶ test fires carry no energy, so gates and tilt are skipped — every option stays pickable.',
+        ],
+        table: [
+          ['energy ≥ 0.6', 'Option only fires in sections with energy 0.6 or higher.'],
+          ['≤ 0.3', 'Option only fires in quiet sections (energy 0.3 or lower).'],
+          ['tilt +1', 'Weight grows with energy across the window (0× → 2×).'],
+          ['tilt −1', 'Weight shrinks as energy rises (2× → 0×).'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'intensity-chooser',
+        title: 'Intensity Chooser',
+        keywords: 'intensity chooser threshold lane dot slider default deterministic energy level pick scale',
+        body: [
+          'An Intensity Chooser is a container that fires exactly ONE of its lanes, chosen deterministically by the firing trigger\'s intensity (0–1, after the song\'s intensity scale is applied). Lanes are lower-bound thresholds on a slider: drag the numbered dots to move lane boundaries; everything left of the first dot is the Default lane. The highest dot at or below the intensity wins; two dots on the same value resolve to the higher lane.',
+          'The Default lane also fires when the trigger has no intensity (manual ▶ test fires) and when no dots are defined. Deleting a lane merges its actions into the lane to its left. Lanes hold a full action list (all fire together), plus per-lane target scope and filter labels — same as Parallel lanes. Choosers nest anywhere an action is allowed (depth-capped like other groups).',
+          'Versus Random energy gates: a Random group rolls weighted dice among energy-eligible options; a Chooser is a deterministic switch — same intensity, same lane, every time.',
+        ],
+      },
+      {
         id: 'events-bindings',
-        title: 'Value bindings (⚡)',
-        keywords: 'signal rms bass onset section energy trigger intensity threshold map',
+        title: 'Value bindings (⚡ / 🎲)',
+        keywords: 'signal rms bass onset section energy trigger intensity threshold map random dice sign plus minus flip',
         body: [
           'Any bindable field can swap its fixed value for a live music signal — rms_total, rms_bass, onset_score, section_energy, or trigger_intensity — with a beat averaging window, a mapped range or threshold steps, and a fallback for when the signal is missing.',
+          'The 🎲 button next to ⚡ binds the field to a random roll instead: every fire picks a fresh uniform value in the "random value" range (or, on toggle fields, rolls against the threshold steps — a single ≥ 0.5 step is a 50/50 coin flip). Each 🎲-bound field rolls independently, even within one morph step, and Random is also available in the signal dropdown of any existing binding.',
+          'The +/− toggle on numeric bindings randomly flips the sign of the result: half the fires come out negative — e.g. map intensity to twist 1–4 and get ±1–4, so direction varies while magnitude still tracks the music. The flip happens before the field\'s own clamping, so fields that only accept 0..1 just floor at 0.',
+        ],
+      },
+    ],
+  },
+
+  /* ── Matrix dancers / GIF effects ────────────────────────────── */
+  {
+    id: 'matrix-gifs',
+    title: 'Matrix Dancers, GIFs, Blackhole & Orbits',
+    keywords: 'dancing stick figure gif keybeat animation matrix crystal dancer asset blackhole orbits particles',
+    intro:
+      'Animated GIFs (like the dancing stick figure) run on matrix devices via LedFX\'s keybeat2d effect: frames tagged as "beat frames" land on musical beats and LedFX interpolates between them, so the figure dances to the music with no per-beat traffic from SpotFX. Silence freezes the dance.',
+    entries: [
+      {
+        id: 'gif-params',
+        title: 'Dancer parameters',
+        keywords: 'dance gif beat frames tint dancer color position stretch half beat',
+        table: [
+          ['Dance GIF', 'Which asset plays (dropdown lists the manifest; "(missing!)" = not uploaded to LedFX). Always change together with Beat Frames.'],
+          ['Beat Frames', 'Frame indices that land on beats — comes from the asset manifest; never hand-edit for stock dances.'],
+          ['Dancer Color', 'Runtime tint of the white master GIF (keybeat2d tint param). Ramps smoothly.'],
+          ['Dancer X / Y', 'Position offset on the matrix (% of width/height).'],
+          ['Dancer Width / Height', 'Stretch (100 = fit). Used by the flare stretch burst.'],
+          ['Half Beat', 'Dance at half speed — nice for mellow sections.'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'gif-dancer-event',
+        title: 'The "Dancer" scene',
+        keywords: 'scene update flare big move fallback burst style disco wave',
+        body: [
+          'The seeded "Dancer" Scene Update switches the Matrix to keybeat2d (First lane). Scene updates (Rest lane) randomly swap dance style (basic / disco / wave), shuffle position, toggle half-beat or flip, or recolor. Shape/Combo flares fire a BIG move — an exaggerated 4-beat GIF burst or a stretch burst — using a "Fallback (s)" burst: LedFX itself restores whatever was dancing before after the burst, so the normal dance always comes back. Color flares change the dancer tint.',
+          'Re-seed or update with scripts/seed_dancer_event.py.',
+        ],
+      },
+      {
+        id: 'matrix-blackhole',
+        title: 'Blackhole effect',
+        keywords: 'swirl vortex spiral blobs gradient infall reverse trail comet',
+        body: [
+          'A custom LedFX matrix effect: gradient-colored blobs spawn at the perimeter, spiral into the center, speed up and stretch into comet trails as they fall, and blend where they overlap. Fully audio-reactive without SpotFX traffic.',
+        ],
+        table: [
+          ['Swirl', 'Spiral amount; sign sets direction, 0 = straight infall.'],
+          ['Reverse Flow', 'Blobs erupt from the center outward instead.'],
+          ['Field Radius', 'Where blobs spawn, as a fraction of the panel edge.'],
+          ['Trail Length', '0 = crisp dots, 1 = long comet smear.'],
+          ['Spawn Rate / Beat Burst', 'Continuous blobs per second + extras on each beat.'],
+          ['Max Blobs / Edge Speed', 'Density controls: hard cap on live blobs, and rim speed as a fraction of center speed (low = blobs linger and crowd the rim).'],
+          ['Accel / Kill Radius / Horizon Hold', 'Speed-curve exponent (higher = slower rim, harder fall), the radius where blobs are consumed, and how long a blob orbits the horizon before fading.'],
+          ['Audio Spawn / Audio Speed', 'How much the chosen Audio Band boosts spawning / infall speed. Audio Speed goes to 5, multiplying speed by up to 1 + 2×value on a full-power hit (11× at max) — above ~2 the swirl saturates at its 3 rev/s cap, so extra value goes into radial motion.'],
+          ['Color Mode', 'wheel: gradient wraps the circle and rotates with Gradient Spin (direction follows the swirl); band: lows/mids/highs pick gradient positions; random: uniform (spin invisible).'],
+          ['Horizon Size / Horizon Audio', 'Event horizon: blobs fall into orbit at this radius (grows with sound when Horizon Audio is positive), turn the Accent Color while circling, then fade. The disc inside shows the BG color. 0 = classic fall-to-center.'],
+          ['X / Y Offset', 'Move the center point around the matrix — same sub-fields as radial and orbits, so one morph step can steer whichever of the three is running.'],
+          ['Particle handoff', 'Switching between Blackhole and Orbits (either direction, or recreating the same effect) hands the on-screen particles, trails AND the live gradient to the incoming effect — blobs become orbiting particles and vice versa instead of vanishing, and colors stay continuous until the next SpotFX color action repaints. The spin direction and blob size carry over too: the incoming effect flips its swirl/reverse sign to keep rotating the same way, and eases from the old blob size to its own. Coming from Orbits, EVERY particle is kept and starts swirling in (or erupting out) like a native blob; Handoff Ease sets how many seconds they take to wind up to full speed.'],
+          ['Radial handoff', 'Switching to Radial: over the first half of the crossfade every blob breaks orbit and spirals into the radial\'s center, pinching bright; the ring pattern then STRETCHES outward from that point like an explosion (a real zoom of the pattern — the background color just fades in separately), with Twist sign flipped so the spiral keeps rotating the same way. Switching FROM Radial: the pattern converges onto the handover point — with an event horizon everything INSIDE the ring stretches outward to it while everything OUTSIDE collapses onto it, the whole pattern compressing into a narrow band at the ring that dissolves as blobs burst from it; without a horizon it collapses to a point and the burst fires from the center — native outflow in Reverse mode; in infall mode the burst arcs outward, stalls, and falls back in. Longer effect-switch ramps (≥1.2 s) give the two phases room to read.'],
+          ['Morph Steps', 'The Shape aspect sub-fields Swirl, Horizon size, Blob size, X/Y offset (absolute or nudge, bindable) and Reverse (tri-state) morph the vortex from scene lanes and flares like any other shape. The Reactivity aspect\'s per-param menu reaches everything else: Spawn Rate, Beat Burst, Infall Speed, Accel, Edge Speed, Max Blobs, Horizon Hold, Impulse Decay….'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'matrix-orbits',
+        title: 'Orbits effect',
+        keywords: 'orbits particles tether ring jiggle trail spin color jump fly in off',
+        body: [
+          'A custom LedFX matrix effect, sibling of Blackhole: a fixed set of particles (default 6) stays on the matrix permanently. Each is tethered to a point on a ring around the center and orbits it with comet trails; the ring itself spins. Changing the particle count animates — a removed particle flies off in a random direction, a new one flies in and the rest re-space around the ring.',
+        ],
+        table: [
+          ['Particles', 'How many particles live on the matrix (1–16). Morphable via the Shape aspect\'s "Edge / particle count" sub-field (shared with radial\'s polygon edges).'],
+          ['X / Y Offset & Field Radius', 'Center point and overall scale — same params as radial/blackhole, so shape morphs steer all three.'],
+          ['Tether Radius', 'Ring the tether points sit on (the Horizon size shape sub-field). 0 = everything orbits the center.'],
+          ['Orbit Radius / Particle Size', 'Radius of each particle\'s path around its tether, and its drawn size in pixels.'],
+          ['Ring Spin / Orbit Speed / Reverse Spin', 'Ring rotation (fraction of base speed), base orbit revolutions per second, and direction flip (the Reverse shape sub-field).'],
+          ['Jiggle', '0 = clean synchronized orbits; 1 = each particle wanders smoothly and randomly within its orbit radius, and audio reactions fully decorrelate between particles.'],
+          ['Tether Scatter', '0 = tether points perfectly equidistant around the ring; 1 = each tether sits at its own random ring position (no equidistance bias).'],
+          ['Reactivity (master)', 'One knob, exposed to the Reactivity aspect spread: multiplies Speed Jump Max, Speed Jump Jog, Brightness Audio and Size Audio — balance those once, then scale the whole response with this.'],
+          ['Speed Jump Max / Speed Jump Jog', 'Cap on the music-driven speed boost, and how hard onsets/beats knock particles off course (a decaying bounce).'],
+          ['Brightness / Size Audio', 'Music pumps particle brightness and inflates particle size.'],
+          ['Colors', 'Particles sample the gradient at evenly spaced points; Gradient Spin rolls the colors over time; trails are each particle\'s own color fading out, exactly like Blackhole.'],
+          ['Particle handoff', 'Switching from Blackhole adopts its brightest blobs: they glide from where they are into tether orbits over Enter Time seconds, colors morphing from carried-over to slot colors, spin direction and blob size carrying over (Reverse flips to keep rotating the same way; size eases to its own). If Blackhole had fewer blobs than Particles, the deficit spawns in fast (~half a second) from the Blackhole\'s spawn zone — the center when it was erupting, the rim when infalling; the brightest surplus blobs (up to ~12) fly out along the Blackhole\'s flow (outward off-panel, or sucked into the center, fading exactly as they arrive), while horizon-captured blobs and the dim remainder simply fade out in place via the carried-over trails. Trails survive in both directions.'],
+          ['Radial handoff', 'Switching to Radial: the particles spiral into the radial\'s center over the first half of the crossfade, then the ring pattern stretches outward from that point like an explosion (Twist sign flipped to keep rotating the same way; the background color fades in separately). Switching FROM Radial: the pattern zooms down into the center, then the full particle set spawns bright AT the center and visibly shoots out to its orbits, with Reverse adopted so the spin continues the radial\'s apparent rotation.'],
+          ['Enter Time', 'Seconds a new or adopted particle takes to glide into its orbit — governs count-increase fly-ins and the Blackhole→Orbits handoff.'],
+          ['Color Jump', 'Integer slot rotation of the particle→color assignment. Nudge it +1 from a morph step (Reactivity per-param menu) to make colors jump A,B,C → C,A,B on cue.'],
+          ['Morph Steps', 'Shape aspect: X/Y offset, Horizon size (= tether radius), Field radius, Edge / particle count (= Particles), Blob size (= Particle Size) and Reverse apply directly. Reactivity per-param menu reaches Jiggle, Tether Scatter, Ring Spin, Orbit Speed, the jump/jog/brightness/size reactivities and Color Jump.'],
+          ['The "Orbits" scene', 'Seeded scene mirroring Black Hole: First fires the Orbits Scene Setter (tuned matrix look, Strips on Orbits Strip, Singles power, and an "Orbits" color-group pick); Shape randomly reverses spin or adds/removes a particle — matrix and strips together; Color randomly color-jumps (matrix + strips) or cycles the "Orbits" color group. Chill Orbits follows the same pattern with its "Calm" color group. scripts/seed_orbits_scene.py is the original seed (pre-strips — re-running it reverts Strips to melt).'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'matrix-fireworks',
+        title: 'Fireworks effect',
+        keywords: 'fireworks burst explode particles spawn center trail fade volume',
+        body: [
+          'A custom LedFX matrix effect, third sibling of Blackhole and Orbits: fireworks burst from random points (weighted toward the center), their particles flying apart, decelerating and fading with comet trails. All particles of one firework share a color; each firework picks its own at random from the gradient. Music volume drives brightness, burst size and launch speed; spawn pacing mirrors Blackhole (Spawn Rate + Beat Burst + Audio Spawn, capped by Max Particles).',
+        ],
+        table: [
+          ['Burst Size / Speed / Life / Drag', 'Particles per firework, base explosion speed, particle lifetime, and how hard they decelerate after the burst. Audio Burst Size sets how much volume grows each firework\'s particle count (0 pins it at Burst Size).'],
+          ['Reverse', 'Implode instead of explode: particles are born dim at their flight distance and BRIGHTEN as they converge onto the burst point — a near-perfect time reversal of the explosion. Same Reverse morph sub-field as Blackhole/Orbits, so shared shape morphs flip all siblings together. Works on the strip too — the pair races toward each other, brightening into the meet.'],
+          ['Spawn Rate / Beat Burst / Audio Spawn', 'Continuous fireworks per second + extras on each beat + band-driven boost — the same pacing model as Blackhole.'],
+          ['Audio Speed / Audio Brightness', 'How much volume boosts explosion speed and brightness.'],
+          ['X / Y Offset & Field Radius / Blob Size / Trail Length', 'Shared shape sub-fields — one morph step steers whichever sibling is running.'],
+          ['Particle handoff', 'Switching to Blackhole or Orbits hands the live firework particles over — they become infalling blobs / orbiting particles. Switching INTO Fireworks: from Blackhole the event horizon explodes (a safe number of captured blobs) and the stray blobs fly away too; from Orbits every particle explodes as its own firework in its own color; from Radial the pattern implodes and then goes up as one grand firework from the center. To Radial it shares the particle gather-then-bloom transition.'],
+          ['The "Fireworks" scene', 'Seeded scene mirroring Black Hole (scripts/seed_fireworks_scene.py, re-runnable): First fires the Fireworks Scene Setter — Matrix→Fireworks and Strips→Fireworks Strip with the looks captured from the LedFX "default" presets (stored as the SpotFX catalog defaults, so every switch starts from the full tuned config), Singles→power, plus the same starter color picks as Black Hole; the Matrix burst size and Beat Burst ride the trigger intensity. Rest = palette morph + Color Flare; Shape randomly reverses (implosion fireworks, matrix + strips together) or nudges burst size ±2; Color cycles the "Orbits" group or fires Ambient Flip and Back.'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'matrix-pacman',
+        title: 'Pacman effect',
+        keywords: 'pacman ms pac-man maze ghosts dots power pellet fright reverse chase wipe arcade game',
+        body: [
+          'A custom LedFX matrix effect: a mini Ms. Pac-Man game tuned for the crystal ball. She eats dots through a bold 18×18 single-lane maze with wrap-around tunnel openings; up to four classic-colored ghosts chase her. A lone ghost can never catch her — it stumbles (white blink) and scrambles away — but two ghosts cornering her at once DO catch her: she blinks out and respawns at the start while all ghosts return to the center house. Ghosts (re)spawn from the house doors with ~1s of can\'t-be-eaten invulnerability, so camping their spawn in fright mode doesn\'t pay. Eating one of the four power dots frightens the ghosts: they flash blue, flee, and she hunts them down. Clearing every dot flashes the maze white and refills it. Characters are soft glow blobs, not sprites — color and motion tell the story at LED resolution.',
+          'Audio: she jumps forward on every beat (Beat Jump cells), her speed rides the selected Audio Band (Pacman Speed + Speed Audio), and the maze walls are one uniform color from the gradient that rolls through it over time — faster when the music is loud (Wall Color Roll + Wall Roll Audio).',
+          'Switching effects on the matrix plays a transition gag: a big chomping Ms. Pac-Man sweeps across the panel, eating the old effect away (wipe out) or revealing the maze behind her (wipe in). It rides the LedFX crossfade, so the virtual\'s transition time sets the sweep duration.',
+        ],
+        table: [
+          ['Reverse', 'Forces permanent power-dot mode: ghosts stay blue and flee, she hunts and eats them, and eaten ghosts respawn already frightened. Same Reverse morph sub-field name as the particle siblings.'],
+          ['Fright Time', 'Seconds ghosts stay frightened after a power dot (blue/white flashing near the end). Ignored while Reverse is forced.'],
+          ['Ghosts / Ghost Speed', 'How many ghosts (1–4, classic red/pink/cyan/orange) and their speed as a fraction of hers — capped below 1, and only a two-ghost pincer can catch her. Changing the count live despawns/respawns via the center house.'],
+          ['Pacman Speed / Speed Audio / Beat Jump', 'Baseline speed in maze cells per second, how much music intensity boosts it, and how many cells she skips ahead on each beat (eating dots along the way).'],
+          ['Wall Gradient / Wall Color Roll / Wall Roll Audio / Wall Brightness', 'All walls share one color sampled from the gradient; the sample point bounces back and forth through the gradient (no snap at the ends) at the base rate plus a music-level boost.'],
+          ['Dot Brightness / Blob Size', 'Pellet brightness (power dots pulse on the beat) and the character glow radius in pixels. Blob Size shares the same shape morph sub-field as the particle effects\' blob size; Ghosts shares the Edge / Particle Count sub-field.'],
+          ['Trail Length', 'Comet trails behind her and the ghosts, exactly like Orbits: 0 = crisp blobs, 1 = long smears. Walls and dots stay crisp.'],
+          ['Smooth Motion', 'On (default): rendered positions ease toward the true game positions, so beat jumps and stumble recoils glide instead of teleporting. Purely cosmetic — collisions and eating use the real positions; tunnel wraps still snap across.'],
+          ['Audio Band / Impulse Decay', 'Which frequency band drives speed and wall roll, and its smoothing decay — same reactivity plumbing as Blackhole/Orbits.'],
+          ['Morph Steps', 'Shape aspect reaches Reverse, Ghosts, Blob Size, Wall Color Roll and Fright Time; the Reactivity per-param menu reaches Pacman Speed, Speed Audio, Beat Jump, Wall Roll Audio, Ghost Speed and Impulse Decay. Color morphs steer the wall gradient.'],
+          ['Transitions', 'Switching to Blackhole, Orbits, Fireworks or Squiggles skips the wipe and plays in two phases: first the maze walls and dots fade to black while the characters keep playing, then — at ~45% of the crossfade — each character becomes a particle, its own exploding firework, or a wriggling squiggle, keeping its color (she flies off yellow, frightened ghosts blue) and comet trails. Every other switch into or out of Pacman plays the big-pacman wipe (except Pacman→Pacman config recreations).'],
+          ['The "Pacman" scene', 'Seeded scene mirroring Fireworks (scripts/seed_pacman_scene.py, re-runnable): First fires the Pacman Scene Setter — Matrix→Pacman with the full Default-preset look asserted (ghost count rides trigger intensity 2–4, Beat Jump rides it 0.8–3.0), Strips→Orbits Strip, Singles→power, plus the same starter color picks as Fireworks. Rest = palette morph + Color Flare; Shape randomly toggles Fright! (reverse) or adds/removes a ghost; Color cycles the "Orbits" group or fires Ambient Flip and Back.'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'phased-transition-lead',
+        title: 'Phased transitions land on the beat',
+        keywords: 'transition lead phase bloom erupt morph handoff early fire anchor payoff radial particles pacman crossfade timing',
+        body: [
+          'Some effect switches are two-phase choreographies riding the crossfade: particles→Radial gathers first and BLOOMS at ~45%, Radial→particles implodes first and ERUPTS at ~45%, and Pacman→particles fades the maze first before the characters morph at ~45%. Left alone, the switch instant would land on the trigger and the visual payoff would arrive noticeably late.',
+          'The trigger engine compensates automatically: when a planned morph step switches between such a pair (registry: services/transition_phases.py), the whole fire is scheduled EARLY by that fraction of the crossfade — the bloom / eruption / character-morph lands on the trigger\'s timestamp instead of the switch. The crossfade length is the effect-switch ramp for scene-override fires, or the virtual\'s configured transition time otherwise; fire logs show the shift as "transition_lead=NNNms".',
+          'Scene Groups get this too: the planner peeks which member the rotation will pick (weighted rolls and random-start seeds are locked in at plan time — rotation cursors still only advance when the fire actually happens), rolls its First/Rest lane, follows the lane\'s event_ref into the scene setter, and shifts the fire by the setter\'s switch lead. The Now Playing preview names the peeked member; if anything moves the rotation between planning and firing (another group fire, a Scene Morph, Force Scene, an edit), the fire safely re-rolls fresh instead of honoring the stale pick.',
+          'Only switches firing at the event\'s anchor time shift the schedule — a switch buried in a delayed sequence step or a staggered lane never drags the rest of the event early. Editor previews fire immediately, so no lead applies there.',
+        ],
+        kbd: false,
+      },
+      {
+        id: 'matrix-squiggles',
+        title: 'Squiggles effect',
+        keywords: 'squiggles chains hex zigzag wriggle collide bounce explode firework straight',
+        body: [
+          'A custom LedFX matrix effect, fourth member of the particle family, fitted to the crystal ball\'s real LED lattice: chains walk the device\'s live-LED grid (diagonal neighbors + two-row verticals — six directions, none horizontal), so every lit pixel of a chain is a physical LED and nothing is lost to the ball\'s mask. A step may turn only one slot (never straight through a vertex, never reverse) while error-diffusion steering keeps each chain\'s center of mass on a straight line; headings stay a configurable buffer away from horizontal.',
+          'Spawn pacing mirrors Blackhole (Spawn Rate + Beat Burst + Audio Spawn, capped by Max Chains), but there is no attractor: chains are born ON the crystal\'s silhouette edge with a few segments already laid inward (visible immediately), aimed at the center ±30°; they fly straight through, leave the silhouette and delete. When two chains meet head-on (more than 90° between headings) both explode into a firework of sparks in their own colors; a shallower contact bounces them apart elastically.',
+        ],
+        table: [
+          ['Step Size / Step Count', 'Hex edge length in pixels (the minimum step, default 2) and chain length in steps. Audio Length grows chains with the music.'],
+          ['Blob Size', 'Chain thickness (0.5–6) — shares the family Blob Size morph sub-field, so one shape morph steers all the particle siblings.'],
+          ['Jiggle', 'Like Orbits: 0 = uniform chains, 1 = each chain wanders its own step size and thickness.'],
+          ['Horizontal Gap', 'Degrees the flight heading must stay away from horizontal (default 25) — the "distinctly not horizontal" rule.'],
+          ['Speed / Audio Speed / Brightness Audio', 'Center-of-mass speed in px/s, its music boost, and audio-pumped brightness.'],
+          ['Reverse', 'Every chain turns around and retraces its path back out; new chains keep entering from the edge.'],
+          ['Particle handoff', 'Switching between Squiggles and Blackhole/Orbits/Fireworks hands the live chains over: each chain head becomes a blob / orbiting particle / its own exploding firework, and adopted particles become new chains flying across. From Pacman it inherits the two-phase morph: the maze fades, then her and the ghosts sprout squiggle tails in their own colors. Radial handoffs are choreographed both ways: FROM Radial, the pattern implodes and then bursts into one chain per radial edge/segment flying out of its center; TO Radial, two envoy chains race in from opposite edges, collide at the radial\'s center in a spark explosion, and the radial blooms out of it — retimed every frame so the blast lands on the payoff point the transition planner anchors to the trigger.'],
+          ['The "Squiggles" scene', 'Seeded scene mirroring Black Hole (scripts/seed_squiggles_scene.py, re-runnable): First fires the Squiggles Scene Setter (full tuned look, beat bursts ride trigger intensity 1–5, Strips→Orbits Strip, Singles→power, same starter color picks); Rest = palette morph + Color Flare; Shape randomly reverses or flips chain length long/short; Color cycles the "Orbits" group. The scene is a member of every scene group that includes Black Hole (weight 1).'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'strip-blackhole-orbits',
+        title: 'Blackhole Strip & Orbits Strip (1D)',
+        keywords: 'strip 1d linear blackhole orbits particles ring overlap blend explode split hue midpoint',
+        body: [
+          'Both matrix effects have 1D siblings for LED strips — best on circular strips with connected ends, since positions wrap around. They share the 2D effects\' parameter names, so the same SpotFX shape/reactivity morphs, color actions and scene sets steer them.',
+          'Blackhole Strip is the 2D Blackhole seen through a 1-pixel ring stretched out to the strip: blobs keep their spiral physics, appear at their angle, brighten as they approach the sample ring, peak passing through and trail away (Approach Width tunes that envelope; Field Radius picks where along the fall the ring sits). Swirl slides blobs along the strip, Gradient Spin rotates the whole pattern at a baseline speed, and Reverse erupts blobs from the center outward. There is no event horizon in 1D.',
+          'Orbits Strip flattens the particle system onto the strip: a fixed set of particles tethered to evenly-spaced points on a spinning ring, oscillating around their tethers with the same Jiggle wander as 2D Orbits. Jiggle stacks onto every random decision: near 0 all particles roll the same outcome together, at 1 each rolls independently.',
+          'Fireworks Strip: each firework spawns TWO particles at a random strip position (no center weighting) that race away from each other, trailing and fading like a removed Orbits Strip particle. Both share one randomly-picked gradient color per firework; volume drives brightness and separation speed, and spawn pacing (Spawn Rate / Beat Burst / Audio Spawn / Max Particles) mirrors the 2D Fireworks.',
+          'The scenes use them: Black Hole runs Blackhole Strip on the Strips category (its global swirl/reverse morphs steer strips and matrix together), and Orbits / Chill Orbits run Orbits Strip — each Scene Setter applies the effect\'s Default-preset tuning and the strips take their gradients from the scene\'s color group (the "Orbits" group for Black Hole and Orbits, "Calm" for Chill Orbits).',
+        ],
+        table: [
+          ['Overlap Blend', 'What happens where blobs overlap: 1 = constructive interference (brightness fully adds), 0 = no brightness gain — colors meet at their hue midpoint instead. 0.5 adds half the extra brightness.'],
+          ['Jog Reverse Chance', 'On each music spike/beat, the chance a particle\'s speed jump runs BACKWARD until the next spike (replaces the 2D jog kick, which reads poorly in 1D).'],
+          ['Bounce Chance', 'On each spike/beat, the chance a particle bounces and travels backward along the strip — its tether drifts against the ring spin until a later bounce turns it forward again (default 0.2).'],
+          ['Implode Fade / Implode Reach', 'Adding a particle implodes it into existence: two half-brightness fragments, hue-rotated ±120° from its color, start Implode Reach of the strip away on either side and converge over Implode Fade seconds, brightening as the particle fades in.'],
+          ['X Offset', 'Rotates the whole pattern/ring around the strip (the same shape sub-field that moves the 2D center).'],
+          ['Not carried over from 2D', 'Y Offset, particle handoff, the event horizon and (on Orbits Strip) Tether Radius / Enter Time don\'t exist in 1D; everything else morphs identically.'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'gif-assets',
+        title: 'Creating new dance GIFs (agents)',
+        keywords: 'gifsmith toolkit render preview publish poses skill claude',
+        body: [
+          'Assets are authored procedurally with the gifsmith toolkit (tools/gifsmith; see .claude/skills/led-gif-assets/SKILL.md): compose poses → render → mask-aware preview → publish to LedFX\'s asset store + the manifest (storage/gif_assets.json). The hex matrix only lights ~1/3 of its grid cells, so the toolkit previews assets through the real-pixel mask — ask Claude to "add a new dance style" and it takes it from there.',
+          'Fallback burst editing: on a ledfx_effect_param action, setting "Fallback (s)" makes it fire as a burst that auto-reverts.',
         ],
       },
     ],
@@ -337,14 +647,55 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'now-controls',
         title: 'Control toggles',
-        keywords: 'activate pause dinner party ambient analyzed',
+        keywords: 'activate pause dinner party ambient analyzed force scene',
+        body: [
+          'Activate (play/pause), Dinner Party and Ambient moved to the shared top bar — see "Top Bar (all pages)". The remaining page toggles:',
+        ],
         table: [
-          ['Activate', 'Master switch — pause/resume trigger firing.'],
-          ['Dinner Party', 'Ignore song triggers; use automatic ambient lighting.'],
-          ['Ambient', 'Hold the configured devices at a static full-brightness color (Hue REST) and exclude them from triggers.'],
           ['Analyzed', 'Use analyzed (auto-generated) triggers for songs without user triggers.'],
+          ['Force Scene', 'Hold one scene: whenever a new scene would be picked, reassert the forced scene instead. See "Force Scene" below.'],
         ],
         kbd: false,
+      },
+      {
+        id: 'ambient-groups',
+        title: 'Ambient Hue groups',
+        keywords: 'long press hold hue group room dining living picker per-group transition fade home assistant',
+        body: [
+          'Long-press the Ambient button to pick which Hue groups (one per Hue entertainment room) are held in ambient. Each checkbox applies immediately; the button shows a count (e.g. "1/2") when only some groups are held. A short press still toggles all groups at once.',
+          'Turning a group off runs a two-stage handoff: a quick fade on the Hue bridge to the wake scene\'s look ("Fade to wake" in Settings → Ambient Mode), then a slow ease from that look back to the current music scene ("Catch-up to current scene") — no snap at the next trigger. Turning on ramps up over the fade time.',
+          'Home Assistant: POST /api/control/ambient-mode?enabled=true&groups=dining-hues&transition_s=2&catchup_s=10 — `groups` is a comma-separated list of group ids (GET /api/control/ambient-groups lists them); omit it to affect all groups. enabled=true adds the groups to the held set, enabled=false removes them. `transition_s` / `catchup_s` optionally override the configured fade / catch-up for that call.',
+        ],
+      },
+      {
+        id: 'now-force-scene',
+        title: 'Force Scene',
+        keywords: 'force scene hold pin lock reset first lane override picker search group rotate',
+        body: [
+          'When enabled, every Scene Update fire — the moment SpotFX would pick a new scene — reasserts the scene chosen in the picker instead: its First lane when it isn\'t the active scene yet, then its Rest lane on repeats, exactly like a natural fire of that scene. The room stays on it for as long as the toggle is on; flares (Shape/Color/Combo) and Update/Reset Scene keep running against it, so the lights still move with the music.',
+          'The picker lists Scene Update events AND Scene Groups ("(group)" suffix); type to filter by name or label. Holding a group rotates instead of pinning: every scene pick advances the group one member per its mode (cycle wrap/bounce or weighted), running that member\'s normal First/Rest lanes. Flares keep hitting the current member, and Scene Morph actions step the held group.',
+          'Turning the toggle on (with a scene chosen) or picking a different entry asserts it immediately — for a group that means one advance right away. Manual fires of other Scene Updates are redirected too while the toggle is on. The setting persists across restarts and is OFF by default; with no scene chosen it does nothing.',
+        ],
+      },
+      {
+        id: 'intensity-scale',
+        title: 'Intensity scale (per song)',
+        keywords: 'intensity scale slider percent 200 boost quiet loud song profile genre auto normalize library rank',
+        body: [
+          'The ⚡ Intensity scale slider (Controls card) multiplies EVERY trigger\'s intensity for the current song — 0–200%, applied before energy gates, Intensity Chooser lanes and trigger_intensity bindings (the result stays clamped to 0–1). It saves to the song\'s profile immediately and takes effect on the next fire, no track change needed. The ⚡ readout in the top bar shows the scaled value.',
+          'The chip shows where the value comes from: "user" = this slider (never overwritten automatically); "auto" = the computed starting value — the genre base nudged ±10% by how the song\'s bass (level, bass ratio, bass-onset density) ranks against the analyzed library; "genre" = the genre base alone (songs without captured audio). Automatic values never exceed 125% — only this slider can go higher. The × button clears a user value back to the automatic one.',
+          'The genre slider on a Triggerless training profile is a RELATIVE energy dial, not the final percentage: it maps to a song starting value as 0.6 × slider + 0.1 (so 185% → ~121%, 70% → ~52%, capped 30–125%). scripts/backfill_intensity_scale.py re-stamps every non-user song from the current sliders (backs up first; run it after retuning genres).',
+        ],
+      },
+      {
+        id: 'now-next-changes',
+        title: 'Next-changes board',
+        keywords: 'next trigger preview flare combo shape color lane steps board upcoming',
+        body: [
+          'Below the control toggles, the board previews the next trigger down to the LEAF changes: event-ref chains and random branches are followed all the way, so each row shows the actual morph — which parameters change, to what values, and the ramp time (e.g. "effect → radial, star → 0.3, edges → 6 (1.5s)"). Intermediate event names (the route) are dropped; the row tag is the deepest lane/child/branch name. Named Morph Steps show their name; color swatches appear for color changes; hover a row for the untruncated description.',
+          'Everything is locked in when the preview appears — lane picks AND every random branch inside referenced events — so the trigger fires exactly what the board shows. Flares (Shape/Color/Combo) resolve against the currently active Scene Update; if a different Scene Update fires in between, the engine re-rolls at fire time so stale picks never run.',
+          'Devices receiving the identical change are merged into one row with combined tags. Color Group cycles deliberately show only the step count ("+2 steps in “Party”") — the destination Set stays a surprise. Rows firing off the trigger point show their offset ("+0.5s"); more rows than fit are summarized as "+N more" (hover for the full list).',
+        ],
       },
       {
         id: 'now-source-badge',
@@ -357,9 +708,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'now-shape',
         title: 'Audio shape & recapture',
-        keywords: 'offset drift quality recapture badge',
+        keywords: 'offset drift quality recapture badge realign self-correction triggers shift zoom follow pan playhead',
         body: [
+          'The shape view follows the playhead. Drag to pan and inspect elsewhere in the song ("Follow playhead" snaps back); following always resumes when the song changes or the page reopens.',
           'The Audio Shape card shows the captured waveform with the live offset status ("start +Xms → now +Yms, Q=quality"). A "recapture suggested" badge appears when the stored offset keeps disagreeing with live audio; Recapture deletes the stored shape (audio + analysis) so the song re-records on its next play.',
+          'Recapture self-corrects: when a song is force-recaptured, the new recording is cross-correlated against the old one and any timing shift between the two is applied automatically to the song\'s triggers (including per-Set-List overrides), pending AI suggestions, and learned offsets — so existing triggers keep landing on the same musical moments. If the shift can\'t be measured confidently, triggers are left untouched and offsets relearn from scratch.',
         ],
       },
     ],
@@ -371,7 +724,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Color Sets',
     keywords: 'palette gradients colors groups',
     intro:
-      'Named color palettes for events to draw from. A Set holds per-device/category entries (FG gradient or solid, BG color and mode, brightness, accent color, ramp). A Group plays Sets in a cycle (wrap/bounce) or weighted-random order.',
+      'Named color palettes for events to draw from. A Set holds per-device/category entries (FG gradient or solid, BG color and mode, brightness, accent color, ramp). A Group plays Sets in a cycle (wrap/bounce) or weighted-random order, and can layer its own per-device overrides on top of whichever Set it picks.',
     entries: [
       {
         id: 'colorsets-workflow',
@@ -380,10 +733,47 @@ export const HELP_SECTIONS: HelpSection[] = [
         table: [
           ['⤓ Import', 'Read the current FG/BG colors off selected LedFX devices into a new Set.'],
           ['▶ Preview', 'Apply the selected Set to LedFX right now.'],
-          ['Labels', 'Comma-separated; label filters on triggers/actions pick which sets are eligible.'],
+          ['Labels', 'Comma-separated, applied when the field loses focus; label filters on triggers/actions pick which sets are eligible.'],
+          ['Members', "A Group's member picker is a searchable dropdown — type to filter Sets by name."],
           ['Gradients', 'Live in a shared library — edit stops and direction, then "Update current" or "Save as new".'],
         ],
         kbd: false,
+      },
+      {
+        id: 'colorsets-copy-entries',
+        title: 'Copying entries between sets',
+        keywords: 'copy paste clipboard multi-select shift click entries overrides',
+        body: [
+          'Entry boxes (and Group overrides) support multi-select: Shift+click a box to select it, Shift+click again to deselect, Esc to clear. Copied entries land on the same clipboard the event editor uses, so they survive reloads and work across tabs — open another Set or Group and paste to append them.',
+        ],
+        table: [
+          ['Shift+click', 'Toggle an entry box in/out of the selection.'],
+          ['Ctrl+C', 'Copy the selected entries to the clipboard.'],
+          ['Ctrl+V', 'Append the copied entries to the open Set (or Group overrides) — same as the 📋 Paste button.'],
+          ['Esc', 'Clear the selection.'],
+        ],
+        kbd: true,
+      },
+      {
+        id: 'colorsets-group-overrides',
+        title: 'Group overrides',
+        keywords: 'override layer bg brightness nested category subset clamp merge',
+        body: [
+          'A Group can carry its own entries (the "Overrides" list). When the Group fires, one member Set is picked as usual, then every field an override defines — color, BG color, BG mode, brightness, BG brightness, third color, ramp — replaces the Set\'s value on the devices the override\'s scope resolves to. Unset fields keep the Set\'s values.',
+          'Merging happens per device: an override scoped to a sub-category (or single device) inside a Set entry\'s scope only changes those nested devices, while the Set keeps applying to the rest. If the override\'s scope covers everything the Set touches, it simply wins everywhere. Devices in an override\'s scope that the picked Set doesn\'t cover still get the override\'s explicit fields — so a Group-level clamp (e.g. BG brightness on one category) behaves the same no matter which member is picked.',
+          'Third color: a Set clears the accent to black on devices where it leaves it undefined; an override only touches the accent when set explicitly (set it to black to force-clear).',
+        ],
+      },
+      {
+        id: 'colorsets-palette-sync',
+        title: 'Palette Sync (groups)',
+        keywords: 'sync synced hue shared cursor position family disjointed devices categories together',
+        body: [
+          'Normally each Group cycles from its own private position — so when different Groups drive different devices or scenes (e.g. one for strips, one for Hue lamps, one per scene family), each fires from wherever ITS cycle last sat and the room\'s palettes drift apart.',
+          'Palette Sync (Group Settings checkbox) makes a Group follow the room instead: every Set application publishes a room-wide "current palette" (the applied Set itself, plus a hue derived from its card swatch color, falling back to its FG colors). A synced Group starts its pick from the member matching that palette — the exact Set when it\'s a member, else the nearest member by hue — then advances from there as the fire requests. Enable it on all the Groups you want moving as one color family.',
+          'The hue comes from the card\'s swatch color first, so give parallel families matching swatches (e.g. "Mid - Ice" and "Power - Ice" the same cyan) for exact correspondences. Sets with no usable hue — brightness-only cards, white/grey swatches with rainbow gradients — neither move nor disturb the shared palette.',
+          'A Set Color step with Advance 0 stays put instead of moving: on a synced Group it repaints the scoped devices in the room\'s current family — handy in scene-set events so entering a scene re-themes without shifting the palette.',
+        ],
       },
     ],
   },
@@ -394,7 +784,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Devices',
     keywords: 'categories virtuals ledfx tree',
     intro:
-      'Organizes LedFX virtuals into a category tree that events and color sets target. A category has a name, optional parent, a role (e.g. ambient), its LedFX virtual IDs, and a list of supported effects.',
+      'Organizes LedFX virtuals into a category tree that events and color sets target. A category has a name, optional parent, a role (e.g. ambient), its LedFX virtual IDs, and a list of supported effects. Targeting a parent category includes every descendant category\'s devices.',
     entries: [
       {
         id: 'devices-import',
@@ -529,11 +919,36 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Advanced diagnostics. Timing (nav-gated by "Show advanced") is a read-only xcorr/anchor dump; Debug shows the live sync state.',
     entries: [
       {
+        id: 'timing-lock-history',
+        title: 'Lock history',
+        keywords: 'last 10 songs grade time to lock offset delta search recent plays',
+        body: [
+          'The panel at the top of the Timing page lists the last 10 distinct songs\' lock outcomes: how long into the song the hard lock landed ("time to lock"), the final offset, how far it had to move from the previous baseline (Δ needed), the lock quality Q, and a letter grade. Click any row to load that song\'s full timing dump below; type in the search box to switch to a full-history search (every stored play matching title, artist, uri, or device).',
+          'Grades: the base comes from the play\'s best Q (A ≥ 0.9, B ≥ 0.8, C ≥ 0.7, D ≥ 0.6, F below). A play that finished its windows without a hard lock drops one notch, and so does a hard lock that landed more than 30 s into the song (the song ran that long on the cold-start baseline).',
+        ],
+      },
+      {
+        id: 'timing-device-offsets',
+        title: 'Per-device timing offsets',
+        keywords: 'snapcast client multiple devices active device offset trim latency',
+        body: [
+          'Multiple snapcast client devices can play SpotFX audio, each with its own playback-chain latency. Settings → Latency & Timing → Timing devices lets you name each device, give it an offset (ms), and mark which one is active. The active device\'s offset is layered onto the resolved shape offset (visible as a "device" box in the fire-time pipeline), and lock history plus the systemic offset learner tag their samples with the active device so timing learned on one device never contaminates another.',
+        ],
+      },
+      {
         id: 'timing-pipeline',
         title: 'Trigger fire-time pipeline',
         keywords: 'shape offset buffer rtt effective audio latency',
         body: [
           'A trigger\'s actual fire time = Spotify song position + shape_offset (from xcorr) + LedFX trigger buffer + LedFX RTT; audio latency shifts where the playhead is drawn, not when triggers fire. The Timing page shows each measured term for the playing song — xcorr only controls the shape_offset term.',
+        ],
+      },
+      {
+        id: 'debug-analyzed-override',
+        title: 'Analyzed override',
+        keywords: 'force analyzed triggerless test training profile stored manual triggers',
+        body: [
+          'The "Analyzed override" toggle (track header) makes the current song ignore its stored triggers and run the analyzed-triggerless pipeline instead — useful for testing a tuned training profile against songs that already have hand-built profiles. Now Playing shows the source as "Analyzed Override" while it\'s on. The song needs librosa data and a genre-matching training profile; already-passed triggers re-evaluate from the current position when toggled.',
         ],
       },
       {
@@ -553,7 +968,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Reading the shape canvas',
         keywords: 'saved live capture mismatch magenta centerline legend',
         body: [
-          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches. Middle-drag pans; the timeline handles zoom.',
+          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches. Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
           'Perception trim is a per-track manual offset layered on top of the xcorr result — negative fires lighting earlier, positive later.',
         ],
       },
@@ -585,20 +1000,42 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'hue-blend-transitions',
+        title: 'Hue-rotation color blending',
+        keywords: 'color wheel rotate gradient transition gray desaturate rgb hsv blend tween ramp',
+        body: [
+          'Controls how color and gradient transitions travel between two colors. On (default), colors rotate around the hue wheel (HSV, shortest arc) — red→cyan sweeps through magenta/blue or yellow/green at full saturation. Off, colors take the straight RGB path, which desaturates through gray/muddy midpoints on distant hues (the classic washed-out mid-transition).',
+          'Applies everywhere SpotFX ramps a color: morph steps, Set Color actions, gradient params on any effect, both the LedFX server-side tween and the legacy client-side ramp loop. Grays, black, and white have no hue, so blends into or out of them fade saturation in place instead of picking an arbitrary rotation.',
+        ],
+      },
+      {
         id: 'settings-lastfm',
         title: 'Song source & Last.fm API key',
-        keywords: 'spotify api credentials ledfx event driven genres lastfm how to',
+        keywords: 'spotify api credentials ledfx event driven genres lastfm how to target device name multiple comma',
         body: [
           'Song info comes from the Spotify API (needs client credentials from the Spotify Developer Dashboard) or from LedFX events, in which case genres are sourced from Last.fm.',
+          'Target Device Name(s) lists the Spotify Connect devices SpotFX reacts to — comma-separate multiple names (e.g. "Serenity, Living Room"). Playback on any listed device counts; anything else shows the Wrong Device badge on Now Playing and triggers stay quiet.',
           'Getting a Last.fm API key: sign in at last.fm/api/account/create, enter any application name and description, leave callback and homepage blank, submit, then copy the API key into the field here. The key is free and rate-limited to 5 requests/second — well within SpotFX\'s usage. Your username is optional; SpotFX only uses it for future scrobbling features.',
+        ],
+      },
+      {
+        id: 'display-modes',
+        title: 'Dark / Light mode',
+        keywords: 'dark mode light mode display background black force shield singles cascade override topbar moon sun ledfx lock',
+        body: [
+          'One room-wide mode — Dark, Light, or Default — decided by a cascade where the FIRST level that isn\'t "Default" wins: 1) the 🌗 TopBar toggle, 2) the firing trigger, 3) the active Scene Group, 4) the current Scene, 5) the Set Color step, 6) the Color Group card, 7) the Color Set card. "Default" at a level just defers to the next one down; if every level defers, backgrounds behave exactly as authored.',
+          'Dark forces every background black on affected devices. This is hard-locked inside LedFX itself (a per-virtual "dark_lock"), so no write path — ramps, scenes, morphs — can relight a background while dark. Light keeps authored backgrounds and fills in the default light background (color + brightness set here in Settings) on devices whose Color Set entry doesn\'t define one.',
+          'Shielded devices are exempt from both: they always keep their authored backgrounds. Shield whole categories with the checkboxes (default: Singles — single-color lamps should usually stay lit) or individual virtual ids in the text field.',
+          'Scene Groups can additionally designate a 🌙 Dark and ☀️ Light variant Color Group — see "Scene Groups" on the Events page help.',
         ],
       },
       {
         id: 'settings-ambient',
         title: 'Ambient mode',
-        keywords: 'hue full brightness white temp category dinner',
+        keywords: 'hue full brightness white temp category dinner transition fade wake scene',
         body: [
-          'When the Now Playing (or Home Assistant) Ambient toggle is on, the chosen device category is held at the configured color at full brightness via the Hue REST API and excluded from music triggers.',
+          'When the Now Playing (or Home Assistant) Ambient toggle is on, the chosen device category\'s Hue groups are held at the configured color at full brightness via the Hue REST API while the music stream is muted for them. Long-press the Now Playing Ambient button to hold only some groups.',
+          'Turning off runs in two stages. "Fade to wake" quickly fades the bulbs toward the wake scene\'s color on the bridge before the music stream takes back over ("Fade-out brightness" is the level it lands on); then "Catch-up to current scene" slowly eases the bulbs from the wake look back to the music scene that\'s currently playing, instead of snapping at the next trigger. Set either to 0 for the old instant behavior.',
         ],
       },
     ],

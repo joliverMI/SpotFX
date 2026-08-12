@@ -1,11 +1,13 @@
 /** Triggerless Profiles — genre-keyed event mappings + embedded-pipeline
  * training (port of frontend/triggerless.html). Event pickers reuse the
- * events page's SearchSelect; Train/Cancel are 500ms long-presses. */
+ * events page's SearchSelect. Train opens a dialog (now / schedule at a
+ * time / queue right after); Cancel stays a 500ms long-press. */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import { useEvents } from '../api/queries';
 import SearchSelect from '../components/forms/SearchSelect';
+import { CsvInput } from '../components/forms/inputs';
 import { useToast } from '../components/Toast';
 import { useLongPress } from '../lib/useLongPress';
 import { uuid } from '../lib/uid';
@@ -27,6 +29,26 @@ interface TuneProgress {
   profile_name?: string;
   phase?: string;
   pct?: number;
+}
+
+interface ScheduleEntry {
+  id: string;
+  profile_id: string;
+  profile_name?: string;
+  at: string;              // "HH:MM" or "after"
+  due_at?: string | null;  // ISO timestamp for timed entries
+}
+
+interface HistoryRun {
+  profile_id?: string;
+  profile_name?: string;
+  trigger?: string;
+  finished_at?: string;
+  status?: string;         // completed | failed | cancelled
+  error?: string | null;
+  improved?: boolean;
+  baseline_f1?: number;
+  tuned_f1?: number;
 }
 
 interface TuneResult {
@@ -59,6 +81,7 @@ const EVENT_SECTIONS: [string, [string, string][]][] = [
   ['Flare Tiers (Analyzed)', [
     ['flare_low', 'Flare Low (subtle)'], ['flare_mid', 'Flare Mid (moderate)'],
     ['flare_high', 'Flare High (clear musical element)'],
+    ['flare_scene', 'Flare Scene (top-tier burst → scene update)'],
   ]],
 ];
 
@@ -70,6 +93,7 @@ const SCORE_DEFS: Record<string, string> = {
   flare_low: 'Subtle flare (FPs okay)',
   flare_mid: 'Moderate flare',
   flare_high: 'Clear musical element flare',
+  flare_scene: 'Scene-level flare burst (top tier)',
   song_start: 'Song beginning marker',
   song_end: 'Fade-out detection',
 };
@@ -173,9 +197,50 @@ export default function TriggerlessPage() {
     }
   };
 
+  // ── Schedule + history ─────────────────────────────────────────────────────
+  const [trainDialogOpen, setTrainDialogOpen] = useState(false);
+  const [scheduleTime, setScheduleTime] = useState('21:00');
+  const { data: schedule } = useQuery({
+    queryKey: ['tune-schedule'],
+    queryFn: () => apiGet<{ entries: ScheduleEntry[]; running: TuneProgress | null }>('/ai-triggers/tune/schedule'),
+    refetchInterval: 15000,
+  });
+  const { data: history } = useQuery({
+    queryKey: ['tune-history'],
+    queryFn: () => apiGet<{ runs: HistoryRun[] }>('/ai-triggers/tune/history?limit=5'),
+    refetchInterval: 30000,
+  });
+  const scheduleEntries = schedule?.entries ?? [];
+  const anyRunning = !!trainingId || !!schedule?.running?.running;
+  const lastRun = history?.runs?.[0];
+  const invalidateSchedule = () => qc.invalidateQueries({ queryKey: ['tune-schedule'] });
+
+  const scheduleTune = async (at: string) => {
+    if (!draft) return;
+    await save();
+    try {
+      await apiPost('/ai-triggers/tune/schedule', { profile_id: draft.id, at });
+      toast(at === 'after' ? 'Queued right after the pending run' : `Scheduled for ${at}`, 'success');
+      setTrainDialogOpen(false);
+      await invalidateSchedule();
+    } catch (e) {
+      toast(`Error: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  };
+
+  const removeScheduleEntry = async (entryId: string) => {
+    try {
+      await apiDel(`/ai-triggers/tune/schedule/${entryId}`);
+      await invalidateSchedule();
+    } catch (e) {
+      toast(`Error: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  };
+
   const train = async () => {
     if (!draft || trainingId) return;
     await save();
+    setTrainDialogOpen(false);
     const profileId = draft.id;
     setTrainStatus({ text: 'Training started...', color: '#ffb74d' });
     setTrainingId(profileId);
@@ -226,6 +291,7 @@ export default function TriggerlessPage() {
   const result = draft ? results[draft.id] : undefined;
   const phaseLabels: Record<string, string> = {
     loading: 'Loading songs...', scene: 'Tuning scenes...', flare: 'Tuning flares...',
+    placement: 'Tuning placement/intensity...',
   };
 
   return (
@@ -306,8 +372,8 @@ export default function TriggerlessPage() {
             <button
               disabled={!!trainingId}
               style={{ background: 'rgba(255,152,0,0.15)', color: '#ffb74d', borderColor: '#ffb74d' }}
-              title="Hold 500ms to start training"
-              {...longPress(() => void train())}
+              title="Train now, or schedule for later"
+              onClick={() => setTrainDialogOpen(true)}
             >
               Train
             </button>
@@ -327,6 +393,34 @@ export default function TriggerlessPage() {
             <div style={{ fontSize: 12, color: trainStatus.color, marginBottom: 8 }}>{trainStatus.text}</div>
           )}
 
+          {/* Scheduled queue */}
+          {scheduleEntries.length > 0 && (
+            <div style={{ fontSize: 12, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {scheduleEntries.map((e, i) => (
+                <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)' }}>
+                  <span>⏰</span>
+                  <span style={{ color: 'var(--text)' }}>{e.profile_name || e.profile_id}</span>
+                  <span>
+                    {e.at === 'after'
+                      ? (i === 0 && !anyRunning ? 'next up' : 'right after previous')
+                      : `at ${e.at}${e.due_at ? ` (${new Date(e.due_at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })})` : ''}`}
+                  </span>
+                  <button title="Remove from schedule"
+                    style={{ fontSize: 11, padding: '0 6px', marginLeft: 4 }}
+                    onClick={() => void removeScheduleEntry(e.id)}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Last run outcome (surfaces scheduled-run failures) */}
+          {lastRun?.status === 'failed' && (
+            <div style={{ fontSize: 12, color: '#e74c3c', marginBottom: 8 }}>
+              Last training run failed ({lastRun.profile_name}, {lastRun.finished_at}): {lastRun.error}
+              <span style={{ color: 'var(--text-muted)' }}> — full log in storage/tune_runs.log</span>
+            </div>
+          )}
+
           {/* Profile info */}
           <div className="field">
             <label>Name</label>
@@ -335,14 +429,23 @@ export default function TriggerlessPage() {
           </div>
           <div className="field">
             <label>Genres (comma-separated)</label>
-            <input type="text" placeholder="reggaeton, trap latino" value={(draft.genres ?? []).join(', ')} style={{ width: '100%' }}
-              onChange={(e) => set('genres', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+            <CsvInput key={`${draft.id}-genres`} placeholder="reggaeton, trap latino"
+              value={draft.genres ?? []} style={{ width: '100%' }}
+              onChange={(v) => set('genres', v)} />
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, marginBottom: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, marginBottom: 8 }}>
             <input type="checkbox" checked={!!draft.is_default}
               onChange={(e) => set('is_default', e.target.checked)} />
             Default profile (fallback when no genre match)
           </label>
+          <div className="field" style={{ marginBottom: 12 }}>
+            <label title="Starting intensity scale for songs matching these genres. Songs with their own (user/auto) value ignore this; a future backfill may stamp it onto un-set songs.">
+              Intensity scale (genre default) — {Math.round(((draft.default_intensity_scale as number) ?? 1) * 100)}%
+            </label>
+            <input type="range" min={0} max={200} step={5} style={{ width: 260, accentColor: 'var(--accent)' }}
+              value={Math.round(((draft.default_intensity_scale as number) ?? 1) * 100)}
+              onChange={(e) => set('default_intensity_scale', parseInt(e.target.value, 10) / 100)} />
+          </div>
 
           {/* Event sections */}
           {EVENT_SECTIONS.map(([title, slots], si) => (
@@ -357,10 +460,10 @@ export default function TriggerlessPage() {
                     placeholder="-- None --"
                     width="100%"
                   />
-                  <input type="text" placeholder="Filter labels (e.g. -rainbow)"
-                    value={((draft[`${key}_labels`] as string[]) ?? []).join(', ')}
+                  <CsvInput key={`${draft.id}-${key}`} placeholder="Filter labels (e.g. -rainbow)"
+                    value={(draft[`${key}_labels`] as string[]) ?? []}
                     style={{ width: '100%', fontSize: 11, padding: '3px 6px', marginTop: 3, color: 'var(--text-muted)' }}
-                    onChange={(e) => set(`${key}_labels`, e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+                    onChange={(v) => set(`${key}_labels`, v)} />
                 </div>
               ))}
               {title.startsWith('Analyzed') && (
@@ -495,6 +598,46 @@ export default function TriggerlessPage() {
         </div>
       ) : (
         <p className="empty-note" style={{ marginTop: 24 }}>Select a profile, or create one with + New.</p>
+      )}
+
+      {/* Train dialog: now / schedule at time / queue right after */}
+      {trainDialogOpen && draft && (
+        <div onClick={() => setTrainDialogOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100,
+                   display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '18vh' }}>
+          <div className="card" onClick={(e) => e.stopPropagation()}
+            style={{ width: 380, maxWidth: '92vw', margin: 0 }}>
+            <div className="card-title">Train “{draft.name}”</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button className="primary" disabled={anyRunning}
+                title={anyRunning ? 'Another training run is active — schedule or queue instead' : 'Start the full tuning run now'}
+                onClick={() => void train()}>
+                Train now{anyRunning ? ' (busy)' : ''}
+              </button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button style={{ flex: 1 }} onClick={() => void scheduleTune(scheduleTime)}>
+                  Schedule at
+                </button>
+                <input type="time" value={scheduleTime} style={{ width: 110 }}
+                  onChange={(e) => setScheduleTime(e.target.value)} />
+              </div>
+              {(anyRunning || scheduleEntries.length > 0) && (
+                <button onClick={() => void scheduleTune('after')}
+                  title="Queue this profile right after the running/scheduled tune finishes">
+                  Queue right after {scheduleEntries.length > 0
+                    ? `“${scheduleEntries[scheduleEntries.length - 1].profile_name}”`
+                    : 'the current run'}
+                </button>
+              )}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Scheduled times run at the next occurrence (today if still ahead, else tomorrow) and
+                survive restarts. Improved parameters apply automatically; failures are logged to
+                storage/tune_runs.log and shown here.
+              </div>
+              <button onClick={() => setTrainDialogOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Song picker */}

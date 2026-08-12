@@ -39,9 +39,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from services import effect_params
+from services import morph_effect_state
 
 # Load the param registry before any morph imports touch it
 effect_params.load()
+# Load the persisted (virtual, effect) snapshot store too: the fired morph
+# persists post-state via save_many, which dumps the WHOLE in-memory store —
+# starting from an unloaded (empty) store would clobber storage/
+# morph_effect_state.json down to just the virtuals this script touches.
+morph_effect_state.load()
 
 from api import ledfx_client                              # noqa: E402
 from models.state import state                            # noqa: E402

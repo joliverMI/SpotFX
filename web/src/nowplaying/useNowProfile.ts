@@ -15,11 +15,15 @@ export interface DisplayTrigger {
   name: string;
   color: string;
   labels: string[];
+  intensity: number; // 0-1 — drawn as the circle height on the shape graph
 }
 
 interface ActiveTriggers {
   source: string; // 'user' | 'none' | 'triggerless' | 'analyzed' | 'analyzed_override'
-  triggers: { id: string; timestamp_ms: number; event_id: string; labels?: string[] }[];
+  triggers: {
+    id: string; timestamp_ms: number; event_id: string;
+    labels?: string[]; intensity?: number;
+  }[];
 }
 
 export type TriggerSource =
@@ -58,6 +62,7 @@ export function useNowProfile(uri: string | null) {
           name: ev?.name ?? t.event_id,
           color: ev?.color ?? fallback,
           labels: t.labels ?? [],
+          intensity: t.intensity ?? 0.5,
         };
       });
     } else if (profile?.triggers?.length) {
@@ -71,6 +76,7 @@ export function useNowProfile(uri: string | null) {
           name: ev?.name ?? t.event_id,
           color: ev?.color ?? '#888',
           labels: t.labels ?? [],
+          intensity: (t as { intensity?: number }).intensity ?? 0.5,
         };
       });
     }

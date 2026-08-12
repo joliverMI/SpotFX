@@ -1,5 +1,32 @@
 /** Pure data helpers ported from frontend/js/shape_canvas.js. */
-import type { AudioShapeData, LibrosaAnalysis, MarkType } from '../types';
+import type { AudioShapeData, LibrosaAnalysis, MarkType, MusicTrigger } from '../types';
+
+/** One Override Blend region: from a blend trigger to the next enabled
+ * trigger (or song end). Mirrors trigger_engine._blend_factor_for. */
+export interface BlendSpan {
+  startMs: number;
+  endMs: number;
+  triggerId: string;
+  eventId: string;
+}
+
+export function computeBlendSpans(triggers: MusicTrigger[], durationMs: number): BlendSpan[] {
+  const enabled = triggers
+    .filter((t) => t.enabled !== false)
+    .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+  const spans: BlendSpan[] = [];
+  for (const t of enabled) {
+    if (!t.override_blend) continue;
+    const next = enabled.find((n) => n.timestamp_ms > t.timestamp_ms);
+    spans.push({
+      startMs: t.timestamp_ms,
+      endMs: next ? next.timestamp_ms : durationMs,
+      triggerId: t.id,
+      eventId: t.event_id,
+    });
+  }
+  return spans;
+}
 
 export const MARK_COLOR: Record<MarkType, string> = {
   bass_drop: '#e74c3c', bass_start: '#2ecc71', bass_end: '#e67e22',

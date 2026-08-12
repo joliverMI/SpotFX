@@ -6,7 +6,7 @@ import { LabelsInput, NumberInput, Row, Select, ColorInput, TextInput, Checkbox 
 import SearchSelect from './SearchSelect';
 import { ParentScopeToggle, emptyScope } from './ScopePicker';
 import { BindableNumber } from './BindingInput';
-import { isBinding } from '../../types/events';
+import { isBinding, SCENE_GROUP_COLOR_REF, CURRENT_COLOR_GROUP_REF, DISPLAY_MODE_OPTIONS } from '../../types/events';
 import EffectParamForm from './EffectParamForm';
 import MorphStepForm from './MorphStepForm';
 import DeviceSettingsForm from './DeviceSettingsForm';
@@ -62,12 +62,15 @@ function TypedForm({ action, update }: { action: Action; update: UpdateAction })
       return <SetColorForm action={action} update={update} />;
     case 'morph_color':
       return <MorphColorForm action={action} update={update} />;
+    case 'scene_morph':
+      return <SceneMorphForm action={action} update={update} />;
     case 'device_settings':
       return <DeviceSettingsForm action={action} update={update as never} />;
     case 'random_group':
     case 'sequence_group':
     case 'parallel_group':
-      return null; // container bodies render above (RandomGroup/SequenceGroup/ParallelGroupBody)
+    case 'intensity_chooser':
+      return null; // container bodies render above (RandomGroup/SequenceGroup/ParallelGroupBody/IntensityChooserBody)
   }
 }
 
@@ -119,10 +122,15 @@ function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set
   const { data: colorSets } = useColorSets();
   const set = (fn: (a: Extract<Action, { type: 'set_color' }>) => void) =>
     update((a) => { if (a.type === 'set_color') fn(a); });
-  const opts = (colorSets ?? []).map((c) => ({ value: c.id, label: `${c.name}${c.kind === 'group' ? ' (group)' : ''}` }));
+  const opts = [
+    { value: SCENE_GROUP_COLOR_REF, label: "🎬 Scene Group's Color Group", keywords: 'scene group follow' },
+    { value: CURRENT_COLOR_GROUP_REF, label: '↻ Current Color Group', keywords: 'current last group' },
+    ...(colorSets ?? []).map((c) => ({ value: c.id, label: `${c.name}${c.kind === 'group' ? ' (group)' : ''}` })),
+  ];
   return (
     <>
-      <Row label="Color set / group">
+      <Row label="Color set / group"
+        help="A specific Color Set/Group, or: Scene Group's = the Color Group designated by the active Scene Group (falls back to the current group); Current = whatever Color Group last fired">
         <SearchSelect value={action.ref_id} width={280} onChange={(v) => set((a) => { a.ref_id = v; })}
           options={opts} placeholder="— pick a color set —" />
       </Row>
@@ -134,11 +142,12 @@ function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set
       {(action.pick_mode === 'cycle' || action.pick_mode === 'default') && (
         <>
           <Row label="Advance"
-            help={action.pick_mode === 'default'
+            help={(action.pick_mode === 'default'
               ? "Members to move per fire — used when the group's own mode resolves to cycle/bounce; ignored for random"
-              : 'Members to move per fire'}>
-            <BindableNumber value={action.advance} min={1} step={1}
-              onChange={(v) => set((a) => { a.advance = isBinding(v) || v == null ? (v ?? 1) : Math.max(1, Math.round(v)); })} />
+              : 'Members to move per fire')
+              + '. 0 = stay: re-apply the current member (on a Palette Sync group, repaint in the room’s current color family)'}>
+            <BindableNumber value={action.advance} min={0} step={1}
+              onChange={(v) => set((a) => { a.advance = isBinding(v) || v == null ? (v ?? 1) : Math.max(0, Math.round(v)); })} />
           </Row>
           <Row label="Direction">
             <Select value={action.direction} width={140}
@@ -148,8 +157,36 @@ function SetColorForm({ action, update }: { action: Extract<Action, { type: 'set
         </>
       )}
       <Row label="Ramp (ms)"><BindableNumber value={action.ramp_ms} nullable onChange={(v) => set((a) => { a.ramp_ms = v; })} /></Row>
+      <Row label="Mode 🌗"
+        help="Force Dark/Light for this step. Default defers to the picked Color Group / Set's own mode; TopBar, trigger, scene group and scene all outrank this.">
+        <Select value={action.display_mode ?? 'default'} width={160}
+          onChange={(v) => set((a) => { a.display_mode = v as typeof a.display_mode; })}
+          options={DISPLAY_MODE_OPTIONS} />
+      </Row>
       <Row label="Preserve effect" help="Skip values that would reset the running LedFX effect">
         <Checkbox value={action.preserve_effect} onChange={(v) => set((a) => { a.preserve_effect = v; })} />
+      </Row>
+    </>
+  );
+}
+
+function SceneMorphForm({ action, update }: { action: Extract<Action, { type: 'scene_morph' }>; update: UpdateAction }) {
+  const set = (fn: (a: Extract<Action, { type: 'scene_morph' }>) => void) =>
+    update((a) => { if (a.type === 'scene_morph') fn(a); });
+  return (
+    <>
+      <p className="empty-note">
+        Operates on the currently active Scene Group — no-op when none is
+        active or Force Scene holds a single scene.
+      </p>
+      <Row label="Advance" help="Scenes to move per fire. 0 = re-fire the current member (its Rest lane)">
+        <NumberInput value={action.advance} min={0} step={1}
+          onChange={(v) => set((a) => { a.advance = Math.max(0, Math.round(v ?? 1)); })} />
+      </Row>
+      <Row label="Direction" help="For wrap groups: index direction. For bounce groups: forward keeps the current travel, backward reverses it">
+        <Select value={action.direction} width={140}
+          onChange={(v) => set((a) => { a.direction = v as typeof a.direction; })}
+          options={['forward', 'backward'].map((v) => ({ value: v, label: v }))} />
       </Row>
     </>
   );
@@ -164,8 +201,8 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
         <ParentScopeToggle scope={action.scope}
           onChange={(s) => set((a) => { a.scope = s ?? emptyScope(); })} />
       </Row>
-      <Row label="Degrees" help="Rotation around the hue wheel per fire — 180° = complementary contrast">
-        <NumberInput value={action.degrees} min={0} max={360} step={5}
+      <Row label="Degrees" help="Rotation around the hue wheel per fire — 180° = complementary contrast; ⚡ maps it to a music signal, 🎲 rolls it fresh every fire (the binding's +/− randomizes direction)">
+        <BindableNumber value={action.degrees} min={0} max={360} step={5}
           onChange={(v) => set((a) => { a.degrees = v ?? 180; })} />
       </Row>
       <Row label="Direction">
@@ -189,8 +226,8 @@ function MorphColorForm({ action, update }: { action: Extract<Action, { type: 'm
             ]} />
         </Row>
       )}
-      <Row label="Preserve melt BG" help="Keep the background color on melt effects; power BG always rotates">
-        <Checkbox value={action.preserve_melt_bg} onChange={(v) => set((a) => { a.preserve_melt_bg = v; })} />
+      <Row label="Morph background" help="On (default): the background color rotates along with FG and accent. Off: backgrounds stay put on every effect — only FG and accent rotate">
+        <Checkbox value={action.morph_bg} onChange={(v) => set((a) => { a.morph_bg = v; })} />
       </Row>
     </>
   );

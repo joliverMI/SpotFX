@@ -53,6 +53,60 @@ async def get_profile_by_uri(uri: str):
     return profile.model_dump()
 
 
+class IntensityScalePatch(BaseModel):
+    intensity_scale: float | None = None   # 0-2 (0-200%); ignored when clear=True
+    clear: bool = False                    # True → unset (fall back to genre/auto)
+
+
+@router.get("/intensity-scale")
+async def get_intensity_scale(uri: str):
+    """Resolved intensity scale for a song: stored value + source, the genre
+    fallback, and the effective multiplier the engine will use."""
+    profile = load_profile_by_uri(uri)
+    if profile is None:
+        raise HTTPException(404, "Profile not found")
+    from services.intensity_scale_service import resolve_genre_scale
+    genres = list(profile.artist_genre or [])
+    if not genres and state.current_track and state.current_track.spotify_uri == uri:
+        genres = list(state.current_track.genres or [])
+    # Song-space value (the genre slider is a relative dial — see
+    # intensity_scale_service.genre_to_song_scale).
+    genre_default = round(resolve_genre_scale(genres), 3)
+    effective = (profile.intensity_scale
+                 if profile.intensity_scale is not None else genre_default)
+    return {
+        "intensity_scale": profile.intensity_scale,
+        "source": profile.intensity_scale_source,
+        "genre_default": genre_default,
+        "effective": max(0.0, min(2.0, effective)),
+    }
+
+
+@router.patch("/by-uri")
+async def patch_profile_by_uri(uri: str, body: IntensityScalePatch):
+    """Set (source="user") or clear the song's intensity scaler. Pokes the
+    engine's in-memory profile so it's live without waiting for a poll."""
+    profile = load_profile_by_uri(uri)
+    if profile is None:
+        raise HTTPException(404, "Profile not found")
+    if body.clear:
+        profile.intensity_scale = None
+        profile.intensity_scale_source = None
+    elif body.intensity_scale is not None:
+        profile.intensity_scale = max(0.0, min(2.0, float(body.intensity_scale)))
+        profile.intensity_scale_source = "user"
+    else:
+        raise HTTPException(422, "intensity_scale or clear required")
+    save_profile(profile)
+    from main import engine
+    if engine._profile and engine._profile.spotify_uri == uri:
+        engine._profile.intensity_scale = profile.intensity_scale
+        engine._profile.intensity_scale_source = profile.intensity_scale_source
+        engine._genre_scale_uri = None  # re-resolve the genre fallback next fire
+    return {"status": "saved", "intensity_scale": profile.intensity_scale,
+            "source": profile.intensity_scale_source}
+
+
 @router.get("/{filename}")
 async def get_profile(filename: str):
     profile = load_profile_by_filename(filename)

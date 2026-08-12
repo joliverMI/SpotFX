@@ -221,6 +221,18 @@ export function useTriggerInteractions(opts: {
     },
 
     onContextMenu: (ms, hit, y, g) => {
+      // Override Blend brush beats the armed palette while active: right-click
+      // on a trigger paints/erases its blend flag; empty space does nothing.
+      const brush = useBuilderStore.getState().blendBrush;
+      if (brush) {
+        if (hit?.kind === 'trigger-triangle' || hit?.kind === 'trigger-intensity') {
+          mutateWorking((triggers) => {
+            const t = triggers.find((tt) => tt.id === hit.triggerId);
+            if (t) t.override_blend = brush === 'set';
+          });
+        }
+        return;
+      }
       const armed = opts.getArmedEventId();
       if (!armed) return;
       if (hit?.kind === 'trigger-triangle' || hit?.kind === 'trigger-intensity') {

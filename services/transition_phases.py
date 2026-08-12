@@ -1,0 +1,86 @@
+"""Phased effect transitions: fire the switch early so the payoff lands on the beat.
+
+Some LedFX effect switches choreograph a multi-phase transition that rides the
+crossfade (see ledfx/effects/particle_handoff.py). The visually loud moment —
+the radial blooming out of gathered particles, the eruption burst out of a
+collapsed radial, pacman's entities morphing into particles after the maze has
+faded — doesn't happen at the switch instant but at a fixed FRACTION of the
+crossfade. Because the whole choreography is deterministic (it advances on the
+virtual's transition frame counter), the trigger engine can fire the switch
+early by `anchor_frac × crossfade_ms` so that payoff phase, not the switch,
+lands on the trigger's timestamp. The planner calls `lead_ms()` at plan time
+(services/trigger_engine._plan_timeline) and shifts the plan entry's
+fire_at_ms by the result.
+
+Adding a new phased transition = appending one PhasedTransition below. The
+`anchor_frac` must match the constant in the LedFX effect code that starts the
+payoff phase (today they all key off particle_handoff.BLOOM_START /
+PACMAN_MORPH_START = 0.45). Nothing else needs to change: any morph-step
+effect switch whose (outgoing, incoming) types match an entry is scheduled
+early automatically, on both the bus and the scene-override dispatch paths.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class PhasedTransition:
+    name: str                   # for logs
+    from_types: frozenset[str]  # outgoing LedFX effect types
+    to_types: frozenset[str]    # incoming LedFX effect types
+    anchor_frac: float          # payoff phase starts at this crossfade fraction
+
+
+# 2D particle effects that share the particle_handoff choreography.
+_PARTICLES = frozenset({"blackhole", "orbits", "fireworks"})
+# squiggles shares the full choreography set: pacman two-phase morph,
+# radial implode→segment-burst, and envoy-collision→radial-bloom.
+_PARTICLES_AND_SQUIGGLES = _PARTICLES | {"squiggles"}
+
+# Keep anchor fractions in sync with ledfx/effects/particle_handoff.py:
+#   BLOOM_START = 0.45 (radial bloom / eruption burst)
+#   PACMAN_MORPH_START = 0.45 (entities morph once the maze has faded)
+TRANSITIONS: tuple[PhasedTransition, ...] = (
+    PhasedTransition(
+        "particles→radial (gather, then bloom)",
+        _PARTICLES_AND_SQUIGGLES, frozenset({"radial"}), 0.45,
+    ),
+    PhasedTransition(
+        "radial→particles (implode, then erupt)",
+        frozenset({"radial"}), _PARTICLES_AND_SQUIGGLES, 0.45,
+    ),
+    PhasedTransition(
+        "pacman→particles (maze fades, then entities morph)",
+        frozenset({"pacman"}), _PARTICLES_AND_SQUIGGLES, 0.45,
+    ),
+)
+
+# Hard cap so a huge configured transition_time can't drag a trigger absurdly
+# far ahead of its timestamp.
+MAX_LEAD_MS = 5000
+
+
+def find(from_type: str | None, to_type: str | None) -> PhasedTransition | None:
+    """The registered phased transition for this switch pair, or None."""
+    if not from_type or not to_type or from_type == to_type:
+        return None
+    for t in TRANSITIONS:
+        if from_type in t.from_types and to_type in t.to_types:
+            return t
+    return None
+
+
+def anchor_frac(from_type: str | None, to_type: str | None) -> float:
+    """Crossfade fraction where the payoff phase starts; 0.0 = not phased."""
+    t = find(from_type, to_type)
+    return t.anchor_frac if t else 0.0
+
+
+def lead_ms(from_type: str | None, to_type: str | None, crossfade_ms: int) -> int:
+    """How many ms EARLY to fire this switch so its payoff phase lands on the
+    planned time. 0 when the pair isn't phased or there is no crossfade."""
+    if crossfade_ms <= 0:
+        return 0
+    return min(round(anchor_frac(from_type, to_type) * crossfade_ms), MAX_LEAD_MS)

@@ -7,6 +7,8 @@ import { LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import { ParentScopeToggle } from '../forms/ScopePicker';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import { groupPathOf } from './groupPath';
+import PreviewButton from '../PreviewButton';
+import { previewParallelChild } from '../../lib/preview';
 
 /** Expanded body of a parallel_group card: lanes fire together, each with an
  * optional offset stagger and a nested droppable action list. */
@@ -52,6 +54,8 @@ export default function ParallelGroupBody({ uid, action }: { uid: string; action
                 clone.id = uuid();
                 g.children.splice(j + 1, 0, clone);
               })}>⧉</button>
+            <PreviewButton title="Preview — fire this lane now (offset ignored)"
+              run={() => previewParallelChild(child)} />
             <button className="danger" title="Delete lane" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => { g.children.splice(j, 1); })}>✕</button>
           </div>

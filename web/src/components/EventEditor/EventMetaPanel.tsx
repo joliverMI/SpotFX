@@ -1,6 +1,8 @@
 import type { MusicEvent } from '../../types/events';
+import { DISPLAY_MODE_OPTIONS } from '../../types/events';
 import { useEditorStore } from '../../store/editorStore';
-import { Checkbox, ColorInput, LabelsInput, NumberInput, Row, TextInput } from '../forms/inputs';
+import { Checkbox, ColorInput, LabelsInput, NumberInput, Row, Select, TextInput } from '../forms/inputs';
+import HelpLink from '../../help/HelpLink';
 
 export default function EventMetaPanel({ event }: { event: MusicEvent }) {
   const mutate = useEditorStore((s) => s.mutate);
@@ -38,6 +40,17 @@ export default function EventMetaPanel({ event }: { event: MusicEvent }) {
                 onChange={(v) => set((d) => { d.scene_override = v; })} />
             </span>
           </Row>
+          {event.event_type === 'scene_update' && (
+            <Row label="Mode 🌗"
+              help="Dark/Light mode while this scene is current. Default defers to the Set Color / color card levels; TopBar, trigger and scene group outrank it.">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Select value={event.display_mode ?? 'default'} width={160}
+                  onChange={(v) => set((d) => { d.display_mode = v as MusicEvent['display_mode']; })}
+                  options={DISPLAY_MODE_OPTIONS} />
+                <HelpLink topic="display-modes" title="Dark / Light mode" />
+              </span>
+            </Row>
+          )}
         </div>
       </div>
     </div>

@@ -7,6 +7,8 @@ import { Checkbox, LabelsInput, NumberInput, Select } from '../forms/inputs';
 import { ParentScopeToggle } from '../forms/ScopePicker';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import { groupPathOf } from './groupPath';
+import PreviewButton from '../PreviewButton';
+import { previewSequenceChild } from '../../lib/preview';
 
 const defaultRevert = (): GroupRevert => ({
   enabled: true, delay_ms: 0, delay_beats: 0, transition_ms: 500, pre_ramp: true,
@@ -74,6 +76,17 @@ export default function SequenceGroupBody({ uid, action }: { uid: string; action
               )}
               {!beats && <span style={{ color: 'var(--text-muted)' }}>ms</span>}
             </label>
+            {!beats && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+                title="Also fire after this many scene fires (scene picks, Update/Reset Scene, flares, Scene Morph) — whichever of delay/updates comes first. With delay 0 the step waits for updates alone. Blank = time delay only.">
+                <span style={{ color: 'var(--text-muted)' }}>or</span>
+                <NumberInput value={child.delay_updates ?? null} nullable min={1} step={1} width={64}
+                  onChange={(v) => set((g) => {
+                    g.children[j].delay_updates = v == null ? null : Math.max(1, Math.round(v));
+                  })} />
+                <span style={{ color: 'var(--text-muted)' }}>updates</span>
+              </label>
+            )}
             {beats && (
               <Checkbox value={child.pre_ramp} label="pre-ramp"
                 onChange={(v) => set((g) => { g.children[j].pre_ramp = v; })} />
@@ -92,6 +105,8 @@ export default function SequenceGroupBody({ uid, action }: { uid: string; action
                 clone.id = uuid();
                 g.children.splice(j + 1, 0, clone);
               })}>⧉</button>
+            <PreviewButton title="Preview — fire this step now (delay skipped, no revert)"
+              run={() => previewSequenceChild(action, child)} />
             <button className="danger" title="Delete step" style={{ padding: '2px 7px', fontSize: 12 }}
               onClick={() => set((g) => { g.children.splice(j, 1); })}>✕</button>
           </div>

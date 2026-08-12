@@ -1,5 +1,6 @@
 /** Small shared form inputs used by every action form. */
-import type { ReactNode } from 'react';
+import { useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 export function Row({ label, children, help }: { label: string; children: ReactNode; help?: string }) {
   return (
@@ -112,9 +113,9 @@ export function Select({
   );
 }
 
-export function Checkbox({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label?: string }) {
+export function Checkbox({ value, onChange, label, title }: { value: boolean; onChange: (v: boolean) => void; label?: string; title?: string }) {
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+    <label title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
       <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>
@@ -166,6 +167,36 @@ export function LabelsInput({ value, onChange, placeholder }: { value: string[];
             .filter(Boolean),
         )
       }
+    />
+  );
+}
+
+/** Comma-separated list ⇄ string[] that commits on every keystroke.
+ *
+ * Buffers the raw text while focused: parsing and re-joining on each change
+ * would drop a trailing "," (empty segment) and strip the space after it, so
+ * the caret jumped to the end and the separator could never be typed. */
+export function CsvInput({ value, onChange, placeholder, style }: {
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+  style?: CSSProperties;
+}) {
+  const joined = (value ?? []).join(', ');
+  const [text, setText] = useState(joined);
+  const [editing, setEditing] = useState(false);
+  return (
+    <input
+      type="text"
+      placeholder={placeholder}
+      style={style}
+      value={editing ? text : joined}
+      onFocus={() => { setText(joined); setEditing(true); }}
+      onBlur={() => setEditing(false)}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean));
+      }}
     />
   );
 }

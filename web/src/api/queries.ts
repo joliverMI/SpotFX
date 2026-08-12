@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiDel } from './client';
+import { api, apiGet, apiPost, apiDel } from './client';
 import type { MusicEvent } from '../types/events';
 
 export interface ColorSetCard {
@@ -39,9 +39,10 @@ export function useScenes() {
 
 export interface ParamLabel {
   label: string;
-  type: string; // numeric | color | toggle | gradient | polar | move_xy | move_polar
+  type: string; // numeric | color | toggle | gradient | polar | move_xy | move_polar | string
   min: number | null;
   max: number | null;
+  options_source?: string | null; // e.g. "gif_assets" → populate a dropdown
 }
 
 export function useParamLabels() {
@@ -52,10 +53,41 @@ export function useParamLabels() {
   });
 }
 
+export interface GifAsset {
+  id: string;
+  path: string;
+  style?: string;
+  energy?: string;
+  frames?: number;
+  beat_frames?: string;
+  big_variant?: string;
+  uploaded: boolean;
+}
+
+export function useGifAssets() {
+  return useQuery({
+    queryKey: ['gif-assets'],
+    queryFn: () => apiGet<{ assets: GifAsset[] }>('/gif-assets'),
+    staleTime: 60_000,
+  });
+}
+
+export interface AspectParamMeta {
+  label: string;
+  type: string;
+  min: number | null;
+  max: number | null;
+  aspect: string | null;
+  aspect_scale: number | null;
+  distribute: boolean;
+}
+
 export interface MorphAspectsInfo {
   aspect_ids: string[];
   aspect_labels: Record<string, string>;
   supported_effects: string[];
+  // {effect_type: {param_name: meta}} for every aspect-tagged param
+  param_meta?: Record<string, Record<string, AspectParamMeta>>;
 }
 
 export interface ParamConfig {
@@ -83,6 +115,28 @@ export function useSettings() {
     queryKey: ['settings'],
     queryFn: () => apiGet<Record<string, unknown>>('/settings'),
     staleTime: 60_000,
+  });
+}
+
+export interface AmbientGroup {
+  id: string;      // LedFX Hue device id
+  name: string;    // friendly name from the device config
+  ambient: boolean; // currently held in Ambient Mode
+}
+
+export function useAmbientGroups() {
+  return useQuery({
+    queryKey: ['ambient-groups'],
+    queryFn: () => apiGet<{ groups: AmbientGroup[]; transition_s: number }>('/control/ambient-groups'),
+    staleTime: 300_000, // topology is stable; live held-state comes from the WS store
+  });
+}
+
+export function usePatchSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Record<string, unknown>) => api('PATCH', '/settings', patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
   });
 }
 

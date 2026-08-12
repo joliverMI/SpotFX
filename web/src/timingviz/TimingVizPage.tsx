@@ -6,10 +6,11 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
 import { useToast } from '../components/Toast';
+import LockHistoryPanel from './LockHistoryPanel';
 
 interface Dump {
   uri?: string;
-  live_timing?: Record<string, number>;
+  live_timing?: Record<string, number | string>;
   spotify_track?: { interpolated_progress_ms?: number; polled_duration_ms?: number };
   audio_shape?: {
     title?: string; artist?: string;
@@ -101,7 +102,7 @@ function Pill({ warn, children }: { warn?: boolean; children: React.ReactNode })
 
 export default function TimingVizPage() {
   const toast = useToast();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const uriParam = params.get('uri') ?? '';
 
   const { data: d, refetch, isLoading } = useQuery({
@@ -145,19 +146,28 @@ export default function TimingVizPage() {
 
   const h3 = { margin: '0 0 8px 0', fontSize: 13, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: '0.5px' };
 
+  const historyPanel = (
+    <LockHistoryPanel activeUri={uri} onPick={(u) => setParams({ uri: u })} />
+  );
+
   if (!isLoading && d && !uri) {
     return (
-      <div className="card">
-        <div style={{ fontWeight: 600, fontSize: 15 }}>No track playing.</div>
-        <div style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'monospace' }}>
-          Open this page while a song is playing, or pass ?uri=spotify:track:... in the URL.
+      <>
+        {historyPanel}
+        <div className="card">
+          <div style={{ fontWeight: 600, fontSize: 15 }}>No track playing.</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'monospace' }}>
+            Open this page while a song is playing, pick a song from the lock history above,
+            or pass ?uri=spotify:track:... in the URL.
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
     <>
+      {historyPanel}
       <div className="card" style={{ padding: '12px 16px', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div>
@@ -196,6 +206,9 @@ export default function TimingVizPage() {
           <PipeBox label="effective" value={fmtMs(t.effective_offset_ms)} kind="output" />
           <span style={{ margin: '0 12px', color: 'var(--text-muted)' }}>|</span>
           <PipeBox label="audio latency" value={`−${t.audio_latency_ms ?? 0}ms`} kind="input" />
+          {(Number(t.device_offset_ms || 0) !== 0 || (t.active_timing_device && t.active_timing_device !== 'default')) && (
+            <PipeBox label={`device: ${t.active_timing_device || 'default'}`} value={fmtMs(t.device_offset_ms)} />
+          )}
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           Each box is a measured ms value at the time of dump. Any inaccuracy in the input boxes

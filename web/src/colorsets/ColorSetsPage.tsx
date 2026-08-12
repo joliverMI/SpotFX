@@ -2,16 +2,21 @@
  * Two-pane layout matching Devices; entries reuse the events page's
  * ScopeSelect; gradients share the /gradients library. Edits live in local
  * drafts until Save (legacy in-memory semantics). */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../api/client';
 import { useParamConfig } from '../api/queries';
 import { useToast } from '../components/Toast';
+import { LabelsInput } from '../components/forms/inputs';
+import SearchSelect from '../components/forms/SearchSelect';
+import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
+import { cloneForPaste, readClip, useClipboard, writeClip } from '../store/clipboard';
 import EntryRow from './EntryRow';
 import GradientModal from './GradientModal';
 import { useColorSetCards, useDeleteColorSet, useGradients, useSaveColorSet } from './queries';
-import { emptyEntry, newCard, type ColorSetCard } from './types';
+import { emptyEntry, newCard, type ColorSetCard, type ColorSetEntry } from './types';
 
 export default function ColorSetsPage() {
   const toast = useToast();
@@ -22,11 +27,17 @@ export default function ColorSetsPage() {
   const saveMut = useSaveColorSet();
   const delMut = useDeleteColorSet();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ?id=<card id> deep-links to a set/group (used by the event editor's ↗).
+  const [searchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('id'));
   const [search, setSearch] = useState('');
   const [drafts, setDrafts] = useState<Record<string, ColorSetCard>>({});
   const [gradEntryIdx, setGradEntryIdx] = useState<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  // Shift-click multi-select of entry boxes (indices into the open card's
+  // entries); Ctrl+C copies them to the shared clipboard, Ctrl+V pastes.
+  const [selEntries, setSelEntries] = useState<Set<number>>(new Set());
+  const clip = useClipboard();
 
   // Server cards overlaid with unsaved drafts (+ draft-only new cards).
   const cards = useMemo(() => {
@@ -38,6 +49,60 @@ export default function ColorSetsPage() {
 
   const card = cards.find((c) => c.id === selectedId) ?? null;
   const setCard = (next: ColorSetCard) => setDrafts((d) => ({ ...d, [next.id]: next }));
+
+  useEffect(() => setSelEntries(new Set()), [selectedId]);
+
+  const toggleEntrySel = (i: number) => setSelEntries((s) => {
+    const next = new Set(s);
+    if (next.has(i)) next.delete(i); else next.add(i);
+    return next;
+  });
+
+  const removeEntry = (i: number) => {
+    if (!card) return;
+    setCard({ ...card, entries: card.entries.filter((_, j) => j !== i) });
+    setSelEntries((s) => new Set([...s].filter((x) => x !== i).map((x) => (x > i ? x - 1 : x))));
+  };
+
+  const copySelected = (): boolean => {
+    if (!card || !selEntries.size) return false;
+    const entries = [...selEntries].sort((a, b) => a - b)
+      .map((i) => card.entries?.[i]).filter(Boolean);
+    if (!entries.length) return false;
+    writeClip('colorset_entries', entries,
+      `${entries.length} color ${entries.length === 1 ? 'entry' : 'entries'} from “${card.name}”`);
+    toast(`Copied ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`, 'success');
+    return true;
+  };
+
+  const pasteEntries = (): boolean => {
+    const c = readClip();
+    if (!card || c?.kind !== 'colorset_entries') return false;
+    const pasted = (c.data as ColorSetEntry[]).map((e) => cloneForPaste(e));
+    setCard({ ...card, entries: [...(card.entries ?? []), ...pasted] });
+    toast(`Pasted ${pasted.length} ${pasted.length === 1 ? 'entry' : 'entries'}`, 'success');
+    return true;
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        if (window.getSelection()?.toString()) return; // let native text copy win
+        if (copySelected()) e.preventDefault();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        if (pasteEntries()) e.preventDefault();
+      } else if (e.key === 'Escape' && selEntries.size) {
+        setSelEntries(new Set());
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const canPaste = clip?.kind === 'colorset_entries';
+  const pasteCount = canPaste ? (clip?.data as ColorSetEntry[]).length : 0;
 
   const visible = useMemo(() => {
     const q = search.toLowerCase();
@@ -106,6 +171,10 @@ export default function ColorSetsPage() {
   }, [paramConfig]);
 
   const sets = cards.filter((c) => c.kind === 'set');
+  const setOptions = useMemo(
+    () => cards.filter((c) => c.kind === 'set').map((s) => ({ value: s.id, label: s.name })),
+    [cards],
+  );
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
@@ -164,12 +233,12 @@ export default function ColorSetsPage() {
           <div className="card-title">{card.kind === 'group' ? 'Edit Group' : 'Edit Color Set'}</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
             <button className="primary" onClick={() => void save()}>Save</button>
-            <button className="danger" style={{ fontSize: 12 }} onClick={() => void del()}>Delete</button>
             <button style={{ fontSize: 12 }} onClick={duplicate}>Duplicate</button>
-            <button style={{ fontSize: 12, marginLeft: 'auto' }} title="Apply now to LedFX"
+            <button style={{ fontSize: 12 }} title="Apply now to LedFX"
               onClick={() => void preview()}>
               ▶ Preview
             </button>
+            <button className="danger" style={{ fontSize: 12 }} onClick={() => void del()}>Delete</button>
           </div>
 
           <div className="field">
@@ -185,22 +254,42 @@ export default function ColorSetsPage() {
             </div>
             <div style={{ flex: 1 }}>
               <label>Labels (comma separated)</label>
-              <input type="text" placeholder="e.g. warm, drop" value={(card.labels ?? []).join(', ')} style={{ width: '100%' }}
-                onChange={(e) => setCard({
-                  ...card,
-                  labels: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                })} />
+              <LabelsInput value={card.labels ?? []} placeholder="e.g. warm, drop"
+                onChange={(labels) => setCard({ ...card, labels })} />
+            </div>
+            <div title={card.kind === 'group'
+              ? 'Dark/Light mode this Group asserts when fired and nothing above (TopBar, trigger, scene group, scene, Set Color step) forces one. Outranks the picked member Set.'
+              : 'Dark/Light mode this Set asserts when fired and nothing above it forces one — the LAST word in the cascade.'}>
+              <label>Mode 🌗</label>
+              <select value={(card.display_mode as string) ?? 'default'} style={{ width: 130 }}
+                onChange={(e) => setCard({ ...card, display_mode: e.target.value as ColorSetCard['display_mode'] })}>
+                <option value="default">Default</option>
+                <option value="dark">🌙 Dark</option>
+                <option value="light">☀️ Light</option>
+              </select>
             </div>
           </div>
 
           {card.kind === 'set' ? (
             <>
-              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center' }}>
+              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
                 Entries
-                <span style={{ fontWeight: 400, marginLeft: 6, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>
+                <HelpLink topic="colorsets-copy-entries" />
+                <span style={{ fontWeight: 400, marginLeft: 2, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>
                   FG / BG color per device or category
                 </span>
-                <button style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
+                {selEntries.size > 0 && (
+                  <span style={{ fontWeight: 400, marginLeft: 8, fontSize: 11, textTransform: 'none', letterSpacing: 0, color: 'var(--accent)' }}>
+                    {selEntries.size} selected — Ctrl+C to copy
+                  </span>
+                )}
+                {canPaste && (
+                  <button style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
+                    title={`Paste ${clip?.summary ?? ''} (Ctrl+V)`} onClick={() => pasteEntries()}>
+                    📋 Paste {pasteCount}
+                  </button>
+                )}
+                <button style={{ marginLeft: canPaste ? 6 : 'auto', fontSize: 11, padding: '3px 10px' }}
                   onClick={() => setCard({ ...card, entries: [...(card.entries ?? []), emptyEntry()] })}>
                   + Entry
                 </button>
@@ -215,8 +304,10 @@ export default function ColorSetsPage() {
                   key={i}
                   entry={entry}
                   gradients={gradients}
+                  selected={selEntries.has(i)}
+                  onToggleSelect={() => toggleEntrySel(i)}
                   onChange={(e) => setCard({ ...card, entries: card.entries.map((x, j) => (j === i ? e : x)) })}
-                  onRemove={() => setCard({ ...card, entries: card.entries.filter((_, j) => j !== i) })}
+                  onRemove={() => removeEntry(i)}
                   onEditGradient={() => setGradEntryIdx(i)}
                 />
               ))}
@@ -246,6 +337,13 @@ export default function ColorSetsPage() {
                     onChange={(e) => setCard({ ...card, exclude_current: e.target.checked })} />
                   Exclude current from next
                 </label>
+                <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 0, cursor: 'pointer' }}
+                  title="Start picks from the member matching the room's current palette, instead of this group's own cycle position">
+                  <input type="checkbox" checked={card.palette_sync === true}
+                    onChange={(e) => setCard({ ...card, palette_sync: e.target.checked })} />
+                  Palette Sync
+                  <HelpLink topic="colorsets-palette-sync" />
+                </label>
               </div>
               <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center' }}>
                 Members
@@ -266,17 +364,23 @@ export default function ColorSetsPage() {
                 </div>
               )}
               {(card.members ?? []).map((m, i) => (
-                <div key={i} style={{
+                <div key={`m${i}`} style={{
                   background: 'var(--surface2)', padding: 8, borderRadius: 'var(--radius)', marginBottom: 8,
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
-                  <select value={m.color_set_id} style={{ flex: 1 }}
-                    onChange={(e) => setCard({
-                      ...card,
-                      members: card.members.map((x, j) => (j === i ? { ...x, color_set_id: e.target.value } : x)),
-                    })}>
-                    {sets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <SearchSelect
+                      value={m.color_set_id}
+                      options={setOptions}
+                      allowEmpty={false}
+                      width="100%"
+                      placeholder="Search sets…"
+                      onChange={(v) => setCard({
+                        ...card,
+                        members: card.members.map((x, j) => (j === i ? { ...x, color_set_id: v } : x)),
+                      })}
+                    />
+                  </div>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Wt</span>
                   <input type="number" min={0} step={0.1} value={m.weight ?? 1} style={{ width: 64 }}
                     onChange={(e) => setCard({
@@ -298,6 +402,45 @@ export default function ColorSetsPage() {
                   <button className="danger" style={{ fontSize: 12 }} title="Remove"
                     onClick={() => setCard({ ...card, members: card.members.filter((_, j) => j !== i) })}>✕</button>
                 </div>
+              ))}
+              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                Overrides
+                <HelpLink topic="colorsets-group-overrides" />
+                <span style={{ fontWeight: 400, marginLeft: 2, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>
+                  replace the picked Set's values per device/category
+                </span>
+                {selEntries.size > 0 && (
+                  <span style={{ fontWeight: 400, marginLeft: 8, fontSize: 11, textTransform: 'none', letterSpacing: 0, color: 'var(--accent)' }}>
+                    {selEntries.size} selected — Ctrl+C to copy
+                  </span>
+                )}
+                {canPaste && (
+                  <button style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
+                    title={`Paste ${clip?.summary ?? ''} (Ctrl+V)`} onClick={() => pasteEntries()}>
+                    📋 Paste {pasteCount}
+                  </button>
+                )}
+                <button style={{ marginLeft: canPaste ? 6 : 'auto', fontSize: 11, padding: '3px 10px' }}
+                  onClick={() => setCard({ ...card, entries: [...(card.entries ?? []), emptyEntry()] })}>
+                  + Override
+                </button>
+              </div>
+              {!(card.entries ?? []).length && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 6 }}>
+                  No overrides. Fields set here win over the picked Set for the scoped devices; unset fields keep the Set's values.
+                </div>
+              )}
+              {(card.entries ?? []).map((entry, i) => (
+                <EntryRow
+                  key={i}
+                  entry={entry}
+                  gradients={gradients}
+                  selected={selEntries.has(i)}
+                  onToggleSelect={() => toggleEntrySel(i)}
+                  onChange={(e) => setCard({ ...card, entries: card.entries.map((x, j) => (j === i ? e : x)) })}
+                  onRemove={() => removeEntry(i)}
+                  onEditGradient={() => setGradEntryIdx(i)}
+                />
               ))}
             </>
           )}

@@ -59,7 +59,7 @@ def rotate_action(old: dict, ramp_ms: int | None) -> dict:
         "ramp_ms": ramp_ms,
         "intensity_scale": 0.0,
         "intensity_source": "rms_total",
-        "preserve_melt_bg": False,
+        "morph_bg": True,
     }
 
 

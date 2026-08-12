@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import NavBar from './components/NavBar';
+import TopBar from './components/TopBar';
 import { ToastProvider } from './components/Toast';
 import BuilderPage from './builder/BuilderPage';
 import EventListPage from './components/EventList/EventListPage';
@@ -46,6 +47,7 @@ export default function App() {
     <>
       <ToastProvider>
       <NavBar />
+      <TopBar />
       <main>
         <Routes>
           <Route path="/" element={<EventListPage />} />

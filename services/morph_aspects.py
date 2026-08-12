@@ -76,6 +76,29 @@ def effect_defaults(effect_type: str) -> dict | None:
     return dict(_ep._CONFIG.get("effects", {}).get(effect_type, {}).get("defaults", {}))
 
 
+def aspect_param_meta() -> dict:
+    """UI-facing metadata for every aspect-tagged param on each supported
+    effect: {etype: {pname: {label, type, min, max, aspect, aspect_scale,
+    distribute}}}. Feeds the per-param editors (the Reactivity menu) so the
+    frontend gets ranges/labels without a second endpoint."""
+    out: dict = {}
+    for etype in supported_effects():
+        params = _ep._CONFIG.get("effects", {}).get(etype, {}).get("params", {})
+        out[etype] = {
+            name: {
+                "label":        meta.get("label", name),
+                "type":         meta.get("type"),
+                "min":          meta.get("min"),
+                "max":          meta.get("max"),
+                "aspect":       meta.get("aspect"),
+                "aspect_scale": meta.get("aspect_scale"),
+                "distribute":   meta.get("distribute", True),
+            }
+            for name, meta in params.items() if meta.get("aspect")
+        }
+    return out
+
+
 def aspect_catalog() -> dict:
     """Full snapshot for the UI: ids, labels, supported effects, and per-effect param mappings."""
     effects = supported_effects()
@@ -88,4 +111,5 @@ def aspect_catalog() -> dict:
             for etype in effects
         },
         "effect_defaults": {etype: effect_defaults(etype) for etype in effects},
+        "param_meta":      aspect_param_meta(),
     }

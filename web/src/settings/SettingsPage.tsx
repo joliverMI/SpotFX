@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiGet, apiPost } from '../api/client';
 import { useToast } from '../components/Toast';
+import HelpLink from '../help/HelpLink';
 import { useLongPress } from '../lib/useLongPress';
 import { buildGradientCss, parseCssGradient, type Stop } from '../colorsets/GradientModal';
 import { useGradientMutations, useGradients } from '../colorsets/queries';
@@ -51,8 +52,15 @@ export default function SettingsPage() {
 
   const advanced = bool('show_advanced');
   const songSource = str('song_source', 'spotify');
+  // Timing devices: name → offset ms, layered onto the shape offset while
+  // that device is active. Kept as one draft object so Save PATCHes it whole.
+  const devOffsets = useMemo(
+    () => ({ ...((draft?.timing_device_offsets as Record<string, number>) ?? {}) }),
+    [draft?.timing_device_offsets],
+  );
+  const activeDevice = str('active_timing_device', 'default');
+  const [newDevice, setNewDevice] = useState('');
   const sourceChanged = settings && songSource !== String(settings.song_source ?? 'spotify');
-  const [lastfmModal, setLastfmModal] = useState(false);
 
   // Ambient stored value may be a category id or (legacy) name — match either.
   const ambientCatId = useMemo(() => {
@@ -66,6 +74,8 @@ export default function SettingsPage() {
     try {
       await api('PATCH', '/settings', {
         audio_latency_ms: num('audio_latency_ms'),
+        active_timing_device: str('active_timing_device', 'default'),
+        timing_device_offsets: devOffsets,
         ledfx_trigger_buffer_ms: num('ledfx_trigger_buffer_ms'),
         builder_zoom_window_s: num('builder_zoom_window_s'),
         builder_future_buffer_s: num('builder_future_buffer_s'),
@@ -88,6 +98,7 @@ export default function SettingsPage() {
         audio_wav_max_songs: num('audio_wav_max_songs', 50),
         shape_average_window_ms: num('shape_average_window_ms', 500),
         smooth_ramp_ms: num('smooth_ramp_ms'),
+        hue_blend_transitions: bool('hue_blend_transitions', true),
         auto_generate_mode: str('auto_generate_mode', 'embedded'),
         show_ai_triggers: bool('show_ai_triggers'),
         show_advanced: bool('show_advanced'),
@@ -98,6 +109,13 @@ export default function SettingsPage() {
         ambient_kelvin: num('ambient_kelvin', 2700),
         ambient_color: str('ambient_color', '#ffffff'),
         ambient_brightness: num('ambient_brightness', 100),
+        ambient_transition_s: num('ambient_transition_s', 1.5),
+        ambient_fade_brightness: num('ambient_fade_brightness', 35),
+        ambient_catchup_s: num('ambient_catchup_s', 8),
+        display_light_bg_color: str('display_light_bg_color', '#201830'),
+        display_light_bg_brightness: num('display_light_bg_brightness', 0.3),
+        display_shield_categories: (draft.display_shield_categories as string[]) ?? ['Singles'],
+        display_shield_virtuals: (draft.display_shield_virtuals as string[]) ?? [],
       });
       void qc.invalidateQueries({ queryKey: ['settings'] });
       setSavedFlash(true);
@@ -141,6 +159,62 @@ export default function SettingsPage() {
           <input type="number" step={50} min={0} value={num('smooth_ramp_ms')}
             onChange={(e) => set('smooth_ramp_ms', parseInt(e.target.value) || 0)} />
         </Field>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, marginTop: 8 }}>
+          <input type="checkbox" checked={bool('hue_blend_transitions', true)}
+            onChange={(e) => set('hue_blend_transitions', e.target.checked)} />
+          Hue-rotation color blending — transitions travel around the color wheel instead of fading through gray
+          <HelpLink topic="hue-blend-transitions" title="Hue blending help" />
+        </label>
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+            Timing devices (snapcast clients)
+            <HelpLink topic="timing-device-offsets" title="Per-device offset help" />
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+            Each snapcast device SpotFX can play through gets its own offset (ms), layered
+            onto learned timing while it's the active device. Lock history and the systemic
+            offset learner are kept separate per device.
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+            <input type="radio" name="active-timing-device" checked={activeDevice === 'default'}
+              onChange={() => set('active_timing_device', 'default')} />
+            <span style={{ flex: 1 }}>default</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>no extra offset</span>
+          </label>
+          {Object.entries(devOffsets).map(([name, off]) => (
+            <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+              <input type="radio" name="active-timing-device" checked={activeDevice === name}
+                onChange={() => set('active_timing_device', name)} />
+              <span style={{ flex: 1 }}>{name}</span>
+              <input type="number" step={50} value={Number(off) || 0} style={{ width: 90 }}
+                title="Extra offset (ms) applied while this device is active"
+                onChange={(e) => set('timing_device_offsets', { ...devOffsets, [name]: parseInt(e.target.value) || 0 })} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>ms</span>
+              <button className="danger" style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  const next = { ...devOffsets };
+                  delete next[name];
+                  set('timing_device_offsets', next);
+                  if (activeDevice === name) set('active_timing_device', 'default');
+                }}>✕</button>
+            </label>
+          ))}
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <input type="text" placeholder="New device name (e.g. Living Room Pi)" value={newDevice}
+              style={{ flex: 1 }} onChange={(e) => setNewDevice(e.target.value)} />
+            <button style={{ fontSize: 12 }}
+              disabled={!newDevice.trim() || newDevice.trim() === 'default' || newDevice.trim() in devOffsets}
+              onClick={(e) => {
+                e.preventDefault();
+                const name = newDevice.trim();
+                set('timing_device_offsets', { ...devOffsets, [name]: 0 });
+                setNewDevice('');
+              }}>
+              + Add device
+            </button>
+          </div>
+        </div>
         {advanced && (
           <Field label="Auto-generate mode — method used when audio capture completes">
             <select value={str('auto_generate_mode', 'embedded')}
@@ -168,10 +242,9 @@ export default function SettingsPage() {
 
       {advanced && (
         <div className="card">
-          <div className="card-title">Audio Shape Display Scales</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-            Default scale factors for each graph layer. Can also be adjusted live in the builder
-            via long-press drag on the layer buttons.
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            Audio Shape Display Scales
+            <HelpLink topic="settings-timing" title="Graph scale help" />
           </div>
           {([['shape_scale_overall', 'Overall (applies to all layers)'], ['shape_scale_total', 'Total'],
              ['shape_scale_bass', 'Bass'], ['shape_scale_mid', 'Mids'], ['shape_scale_high', 'Highs']] as const)
@@ -214,10 +287,9 @@ export default function SettingsPage() {
 
       {advanced && (
         <div className="card">
-          <div className="card-title">Audio Shape Graph Averaging</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-            Sliding-window average width for the overlay lines on the audio shape graph.
-            Right-click a layer button in the builder to toggle its line.
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            Audio Shape Graph Averaging
+            <HelpLink topic="settings-timing" title="Graph averaging help" />
           </div>
           <Field label="Average Window (ms)">
             <input type="number" min={50} max={5000} step={50} value={num('shape_average_window_ms', 500)}
@@ -245,8 +317,10 @@ export default function SettingsPage() {
         )}
         {songSource === 'spotify' ? (
           <>
-            <Field label="Target Device Name">
+            <Field label="Target Device Name(s)">
               <input type="text" value={str('spotify_device_name')} style={{ width: '100%' }}
+                placeholder="Serenity, Living Room"
+                title="Comma-separate multiple device names — SpotFX reacts when playback is on any of them"
                 onChange={(e) => set('spotify_device_name', e.target.value)} />
             </Field>
             <Field label="Client ID">
@@ -270,10 +344,7 @@ export default function SettingsPage() {
             <Field label={
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 Last.fm API Key
-                <button type="button" style={{ padding: '2px 8px', fontSize: 11, borderRadius: 10 }}
-                  onClick={() => setLastfmModal(true)}>
-                  How to →
-                </button>
+                <HelpLink topic="settings-lastfm" title="How to get a key" />
               </span>
             }>
               <input type="text" placeholder="Paste your API key here" value={str('lastfm_api_key')} style={{ width: '100%' }}
@@ -339,6 +410,74 @@ export default function SettingsPage() {
             style={{ width: '100%', accentColor: 'var(--accent)' }}
             onChange={(e) => set('ambient_brightness', parseInt(e.target.value))} />
         </Field>
+        <Field label={`Fade to wake (s): ${num('ambient_transition_s', 1.5)}`}>
+          <input type="range" min={0} max={15} step={0.5} value={num('ambient_transition_s', 1.5)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            title="Turning ambient off first fades the bulbs to the wake scene's color on the Hue bridge over this many seconds, then the music stream takes back over (0 = instant). Also ramps the turn-on. Home Assistant can override per call with transition_s="
+            onChange={(e) => set('ambient_transition_s', parseFloat(e.target.value))} />
+        </Field>
+        <Field label={`Fade-out brightness (%): ${num('ambient_fade_brightness', 35)}`}>
+          <input type="range" min={1} max={100} step={1} value={num('ambient_fade_brightness', 35)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            title="Brightness the off-fade lands on just before the entertainment stream resumes — roughly match how bright the bulbs look while music-reactive"
+            onChange={(e) => set('ambient_fade_brightness', parseInt(e.target.value))} />
+        </Field>
+        <Field label={`Catch-up to current scene (s): ${num('ambient_catchup_s', 8)}`}>
+          <input type="range" min={0} max={30} step={0.5} value={num('ambient_catchup_s', 8)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            title="After the wake scene lands, the released Hue groups ease back to the current music scene's look over this many seconds instead of snapping at the next trigger (0 = old snap behavior). Home Assistant: catchup_s="
+            onChange={(e) => set('ambient_catchup_s', parseFloat(e.target.value))} />
+        </Field>
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          Dark / Light Mode
+          <HelpLink topic="display-modes" />
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+          The 🌗 TopBar toggle — or a trigger, scene group, scene, Set Color step or color
+          card — can force Dark (backgrounds black, hard-locked in LedFX) or Light
+          (backgrounds on). Shielded devices always keep their own backgrounds.
+        </div>
+        <Field label="Light mode default background"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input type="color" value={str('display_light_bg_color', '#201830')}
+              style={{ width: 48, height: 30, padding: 1 }}
+              onChange={(e) => set('display_light_bg_color', e.target.value)} />
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              applied when Light mode is on and the fired Color Set has no background of its own
+            </span>
+          </div>
+        </Field>
+        <Field label={`Default background brightness: ${Math.round(num('display_light_bg_brightness', 0.3) * 100)}%`}>
+          <input type="range" min={0} max={1} step={0.05} value={num('display_light_bg_brightness', 0.3)}
+            style={{ width: '100%', accentColor: 'var(--accent)' }}
+            onChange={(e) => set('display_light_bg_brightness', parseFloat(e.target.value))} />
+        </Field>
+        <Field label="Shielded device categories">
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}
+            title="Checked categories are never touched by Dark/Light forcing — they always keep their authored backgrounds (default: Singles)">
+            {categories.map((c) => {
+              const cats = (draft.display_shield_categories as string[]) ?? [];
+              return (
+                <label key={c.id} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13 }}>
+                  <input type="checkbox" checked={cats.includes(c.name)}
+                    onChange={(e) => set('display_shield_categories',
+                      e.target.checked ? [...cats, c.name] : cats.filter((n) => n !== c.name))} />
+                  {c.name}
+                </label>
+              );
+            })}
+          </div>
+        </Field>
+        <Field label="Extra shielded virtuals (comma-separated ids)">
+          <input type="text" style={{ width: '100%' }} placeholder="e.g. single-color-effect"
+            value={((draft.display_shield_virtuals as string[]) ?? []).join(', ')}
+            onChange={(e) => set('display_shield_virtuals',
+              e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+        </Field>
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
@@ -359,7 +498,6 @@ export default function SettingsPage() {
 
       <GradientProfiles />
 
-      {lastfmModal && <LastfmHowTo onClose={() => setLastfmModal(false)} />}
     </>
   );
 }
@@ -511,48 +649,6 @@ function GradientProfiles() {
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-function LastfmHowTo({ onClose }: { onClose: () => void }) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{
-        background: '#1a1a1a', border: '1px solid var(--border)', borderRadius: 10,
-        maxWidth: 520, width: '90%', padding: 28, position: 'relative', maxHeight: '85vh', overflowY: 'auto',
-      }}>
-        <button onClick={onClose} style={{
-          position: 'absolute', top: 14, right: 16, background: 'none', border: 'none',
-          color: 'var(--text-muted)', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1,
-        }}>✕</button>
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Getting a Last.fm API Key</div>
-        <ol style={{ paddingLeft: 18, margin: 0, lineHeight: 1.9, fontSize: 13 }}>
-          <li>Go to <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer">last.fm/api/account/create</a></li>
-          <li>Sign in or create a free Last.fm account if you don't have one</li>
-          <li>Fill in the form:
-            <ul style={{ marginTop: 4, marginBottom: 4 }}>
-              <li><strong>Application name</strong> — anything you like, e.g. <em>SpotFX</em></li>
-              <li><strong>Application description</strong> — e.g. <em>Genre lookup for music lighting</em></li>
-              <li><strong>Callback URL</strong> — leave blank</li>
-              <li><strong>Application homepage</strong> — leave blank</li>
-            </ul>
-          </li>
-          <li>Click <strong>Submit</strong></li>
-          <li>You'll see your new <strong>API key</strong> on the next page — copy it</li>
-          <li>Paste it into the <em>Last.fm API Key</em> field in SpotFX settings and save</li>
-        </ol>
-        <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-muted)' }}>
-          The API key is free and rate-limited to 5 req/s — well within SpotFX's usage.
-          Your username is optional; SpotFX only uses it for future scrobbling features.
-        </div>
-        <div style={{ marginTop: 18, textAlign: 'right' }}>
-          <button className="primary" style={{ padding: '7px 20px' }} onClick={onClose}>Done</button>
-        </div>
       </div>
     </div>
   );

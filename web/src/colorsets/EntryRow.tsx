@@ -19,12 +19,16 @@ export default function EntryRow({
   onChange,
   onRemove,
   onEditGradient,
+  selected = false,
+  onToggleSelect,
 }: {
   entry: ColorSetEntry;
   gradients: SavedGradient[];
   onChange: (e: ColorSetEntry) => void;
   onRemove: () => void;
   onEditGradient: () => void;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const fgEn = !!entry.color_value;
   const isSolid = (entry.color_kind ?? 'gradient') === 'solid';
@@ -32,7 +36,18 @@ export default function EntryRow({
   const set = (patch: Partial<ColorSetEntry>) => onChange({ ...entry, ...patch });
 
   return (
-    <div style={{ background: 'var(--surface2)', padding: 8, borderRadius: 'var(--radius)', marginBottom: 8 }}>
+    <div
+      title={onToggleSelect ? 'Shift+click to select for copy' : undefined}
+      onClick={(e) => {
+        if (!e.shiftKey || !onToggleSelect) return;
+        if ((e.target as HTMLElement).closest('input,select,button,textarea,label')) return;
+        e.preventDefault();
+        onToggleSelect();
+      }}
+      style={{
+        background: 'var(--surface2)', padding: 8, borderRadius: 'var(--radius)', marginBottom: 8,
+        boxShadow: selected ? 'inset 0 0 0 2px var(--accent)' : undefined,
+      }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <ScopeSelect
           scope={entry.scope}

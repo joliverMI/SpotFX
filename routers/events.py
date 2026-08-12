@@ -11,11 +11,19 @@ Endpoints:
 from __future__ import annotations
 import asyncio
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
-from models.music_event import MusicEvent
+from models.music_event import Action, MusicEvent
 from services.profile_manager import list_events, get_event, save_event, delete_event, FIXED_EVENT_IDS
 
 router = APIRouter(prefix="/api/events", tags=["events"])
+
+
+class PreviewBody(BaseModel):
+    """Either a full (possibly unsaved) event, or one action subtree to wrap."""
+    event: MusicEvent | None = None
+    action: Action | None = None
+    labels: list[str] = Field(default_factory=list)
 
 
 @router.get("")
@@ -54,6 +62,29 @@ async def remove_event(event_id: str):
     if not ok:
         raise HTTPException(404, "Event not found")
     return {"status": "deleted"}
+
+
+@router.post("/preview")
+async def preview_event(body: PreviewBody):
+    """Fire an unsaved event draft / action subtree immediately (editor Preview).
+
+    Nothing is persisted — the payload is wrapped in an in-memory composite
+    and dispatched through the same path as a manual test-fire.
+    """
+    from main import engine
+    if body.event is not None:
+        event = body.event
+    elif body.action is not None:
+        event = MusicEvent(
+            id="__preview__", name="Preview", event_type="composite",
+            root=body.action,
+        )
+    else:
+        raise HTTPException(422, "Provide either 'event' or 'action'")
+    ok = await engine.fire_event_object_now(event, body.labels)
+    if not ok:
+        raise HTTPException(400, "Nothing to fire (empty preview)")
+    return {"status": "fired"}
 
 
 @router.post("/{event_id}/fire")
