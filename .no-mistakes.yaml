@@ -1,0 +1,4 @@
+# no-mistakes repository configuration.
+# This repo has no CI on any branch; declare that so pipeline runs reach
+# the CI-ready point cleanly instead of waiting for checks that cannot exist.
+no_ci: true
