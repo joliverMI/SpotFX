@@ -41,6 +41,18 @@ class Settings(BaseSettings):
             return self.ledfx_base_url.rstrip("/")
         return f"{self.ledfx_host}:{self.ledfx_port}"
 
+    # ── fx (vendored render pipeline) — SPECTRA Stage 1 ─────────────────────
+    # OFF: every ledfx_client call goes over HTTP to the external LedFX
+    # service (production default). ON: api/ledfx_client._request() routes to
+    # the in-process facade (fx/facade.py) and no LedFX HTTP I/O happens.
+    # Stage 1 scope: the switch exists for the headless test bed only — do
+    # not enable against live hardware; coexistence with the running LedFX
+    # service (Hue DTLS + DDP single-sender exclusivity) is Stage 2+ work.
+    fx_in_process: bool = False
+    # Config dir for the in-process pipeline (fx config.json + assets/).
+    # Never point this at the live LedFX ~/.ledfx directory.
+    fx_config_dir: str = "storage/fx"
+
     # ── Ambient Mode ──────────────────────────────────────────────────────────
     # Front-page / HA toggle: switch a device category to a static, full-brightness
     # color (via Hue REST) and drop those devices from music triggers. The on/off

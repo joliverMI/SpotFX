@@ -39,6 +39,21 @@ declared name/type/range/default, driven by a future settings console); write
 code for agents — no ceremony comments, keep explicit names, typed contracts,
 and executable specs.
 
+## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
+
+`fx/` is the LedFX render pipeline vendored from the fork at commit
+`149f4470` — provenance, inventory, and the complete deviation list live in
+`fx/VENDOR.md` (keep vendored files verbatim; re-diff against that commit
+when updating). The in-process switch is `settings.fx_in_process` (default
+OFF; production runs HTTP) at the `api/ledfx_client._request()` choke point —
+the public client functions are the seam; don't fork per-transport logic in
+callers. Offline dummy-device harness: `fx/headless.py` +
+`tests/test_fx_headless.py` (deterministic frame-stepping under a fake
+clock; `silence_audio()` is mandatory in any fx test — fx must never open or
+enumerate audio devices). Do not enable the facade against live hardware
+until Stage 2+ resolves Hue-DTLS / DDP single-sender exclusivity with the
+running LedFX service.
+
 ## Run / deploy
 
 SpotFX runs as the **user systemd unit `spotfx.service`** (`.venv/bin/python

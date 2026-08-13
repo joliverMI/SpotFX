@@ -182,6 +182,38 @@ def server_tween_enabled() -> bool:
     return bool(settings.server_side_tween) and _server_tween_supported is True
 
 
+# ── In-process fx facade switch (SPECTRA Stage 1) ────────────────────────────
+# When settings.fx_in_process is on, _request() and measure_latency() route to
+# fx/facade.py — direct calls into the vendored render pipeline — instead of
+# HTTP. The flag is read per call so tests can flip it; production default is
+# OFF and nothing under fx/ is imported until the first routed call. The HTTP
+# survival machinery below (semaphore, breaker, pool recycling, watchdog) is
+# deliberately bypassed on the facade path: it exists to survive the network
+# boundary, and in-process calls either succeed or raise synchronously.
+
+
+def _facade_enabled() -> bool:
+    try:
+        return bool(settings.fx_in_process)
+    except Exception:
+        return False
+
+
+async def _facade_request(method: str, path: str, *, label: str, **kwargs):
+    global _last_completion
+    from fx import facade
+    try:
+        resp = await facade.handle(method, path, **kwargs)
+        resp.raise_for_status()
+    except Exception as exc:
+        _last_completion = time.monotonic()
+        _on_failure(exc, label)
+        return None
+    _last_completion = time.monotonic()
+    _on_success()
+    return resp
+
+
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
@@ -348,6 +380,8 @@ _last_reassert = 0.0
 
 def _schedule_reassert(reason: str) -> None:
     global _last_reassert
+    if _facade_enabled():
+        return  # HTTP-outage recovery; the in-process pipeline has no outages to heal
     now = time.monotonic()
     if now - _last_reassert < _REASSERT_MIN_INTERVAL_S:
         return
@@ -548,6 +582,8 @@ async def _request(method: str, path: str, *, label: str, **kwargs):
       - a deadline that expires while still WAITING for a slot means the gate
         itself is starved (leaked holders) — _reset_gate() rebuilds it."""
     global _last_completion
+    if _facade_enabled():
+        return await _facade_request(method, path, label=label, **kwargs)
     if _breaker_is_open():
         _record_event("shed", label)
         return None
@@ -917,6 +953,17 @@ async def measure_latency() -> float:
     global _probe_failed
     if _capture_in_progress():
         return state.ledfx_rtt_ms or 0.0   # mute during capture; keep last known RTT
+    if _facade_enabled():
+        from fx import facade
+        try:
+            rtt_ms = await facade.measure_rtt_ms()
+            state.ledfx_rtt_ms = rtt_ms
+            _probe_failed = False
+            return rtt_ms
+        except Exception as exc:
+            _probe_failed = True
+            logger.warning("fx facade latency probe failed: %r", exc)
+            return 0.0
     client = _get_probe_client()
     try:
         t0 = time.monotonic()
@@ -1497,6 +1544,8 @@ async def _ledfx_watchdog_tick() -> None:
     _LEDFX_WATCHDOG_TRIPS consecutive ticks. Skips while a capture mutes the
     probe (RTT is stale then), and rate-limits restarts via the cooldown."""
     global _watchdog_degraded_count
+    if _facade_enabled():
+        return  # no external ledfx service to restart in facade mode
     if _capture_in_progress():
         return
     degraded = _probe_failed or (state.ledfx_rtt_ms or 0.0) > _LEDFX_RTT_DEGRADED_MS
