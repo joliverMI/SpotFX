@@ -11,8 +11,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from api.home_assistant import pause_service, resume_service
-from api.ledfx_client import get_scenes, get_config
+from api.ledfx_client import get_scenes
 from models.state import state
 from services.websocket_manager import ws_manager
 
@@ -23,7 +22,8 @@ router = APIRouter(prefix="/api/control", tags=["control"])
 
 @router.post("/pause")
 async def pause():
-    pause_service()
+    state.paused = True
+    logger.info("SpotFX trigger service PAUSED.")
     if state.dinner_party_mode:
         state.dinner_party_mode = False
         from routers.settings_router import _load_settings_file, _save_settings_file
@@ -38,7 +38,8 @@ async def pause():
 
 @router.post("/resume")
 async def resume():
-    resume_service()
+    state.paused = False
+    logger.info("SpotFX trigger service RESUMED.")
     return {"paused": False}
 
 
@@ -60,14 +61,6 @@ async def ledfx_scenes():
     """Proxy: list available LedFX scenes for the UI."""
     return await get_scenes()
 
-
-
-@router.post("/use-ai-triggers")
-async def set_use_ai_triggers(enabled: bool):
-    """Enable or disable using unreviewed AI suggestion set triggers for the current song."""
-    state.use_unreviewed_ai_triggers = enabled
-    await ws_manager.broadcast_state(state)
-    return {"use_unreviewed_ai_triggers": enabled}
 
 
 @router.post("/use-analyzed-triggerless")
@@ -143,7 +136,7 @@ async def set_dinner_party(enabled: bool):
     """Enable or disable Dinner Party mode (triggerless play for all songs)."""
     state.dinner_party_mode = enabled
     if enabled:
-        resume_service()
+        state.paused = False
     from routers.settings_router import _load_settings_file, _save_settings_file
     saved = _load_settings_file()
     saved["dinner_party_mode"] = enabled
@@ -309,16 +302,3 @@ async def active_triggers():
     if state.use_analyzed_triggerless and engine._analyzed_triggers:
         return {"source": "analyzed", "triggers": [t.model_dump() for t in engine._analyzed_triggers]}
     return {"source": "none", "triggers": []}
-
-
-@router.get("/ledfx/probe")
-async def ledfx_probe():
-    """
-    Diagnostic endpoint: returns LedFX global config + cached virtual states.
-    Use this to verify API connectivity and confirm field names before relying
-    on them in action execution.
-    """
-    return {
-        "config":   await get_config(),
-        "virtuals": state.ledfx_virtual_cache,
-    }
