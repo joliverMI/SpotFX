@@ -14,3 +14,15 @@ python-multipart>=0.0.9   # form data support
 redis<7                   # spotipy dep; redis 7.x has Python 3.14 ABC metaclass bug
 librosa>=0.11.0           # musical feature extraction
 soundfile>=0.13.0         # WAV read/write
+
+# fx/ — vendored LedFX render pipeline (see fx/VENDOR.md)
+voluptuous>=0.14.1        # effect/virtual config schemas
+aubio-ledfx>=0.4.11       # onset/tempo detection (melbank pipeline)
+samplerate-ledfx>=0.2.3   # audio resampling for melbank input
+pillow>=10.1.0            # 2D effect rendering (Twod)
+sacn>=1.9.0               # E1.31 device driver (wled.py fallback path)
+pyserial>=3.5             # device registry imports (adalight-class drivers)
+netifaces2>=0.0.22        # fx.utils network helpers
+pyfastnoiselite>=0.0.7    # noise2d effect
+requests>=2.31.0          # fx.utils WLED helper + hue.py REST (already transitive via spotipy)
+python-mbedtls==2.9.2     # Hue entertainment DTLS (fx/devices/hue.py)

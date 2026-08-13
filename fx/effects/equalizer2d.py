@@ -1,0 +1,498 @@
+import logging
+
+import numpy as np
+import voluptuous as vol
+from PIL import Image, ImageDraw
+
+from fx.color import parse_color, validate_color
+from fx.effects.audio import AudioReactiveEffect
+from fx.effects.gradient import GradientEffect
+from fx.effects.twod import Twod
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def interpolate_point(p1, p2, t):
+    return (p1[0] + (p2[0] - p1[0]) * t, p1[1] + (p2[1] - p1[1]) * t)
+
+
+class Equalizer2d(Twod, GradientEffect):
+    NAME = "Equalizer2d"
+    CATEGORY = "Matrix"
+    HIDDEN_KEYS = Twod.HIDDEN_KEYS + []
+    ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
+        "peak_percent",
+        "peak_decay",
+        "max_vs_mean",
+        "frequency_range",
+        "spin_multiplier",
+        "spin_decay",
+        "peak_color",
+        "power_gradient",
+        "filtered",
+    ]
+
+    CONFIG_SCHEMA = vol.Schema(
+        {
+            vol.Optional(
+                "peak_percent",
+                description="Size of the tracer bar that follows a filtered value",
+                default=1.0,
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=5)),
+            vol.Optional(
+                "peak_decay",
+                description="Decay filter applied to the peak value",
+                default=0.03,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=0.1)),
+            vol.Optional(
+                "peak_marks",
+                description="Turn on white peak markers that follow a freq value filtered with decay",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "peak_color",
+                description="Peak mark color",
+                default="#FFFFFF",
+            ): validate_color,
+            vol.Optional(
+                "center",
+                description="Center the equalizer bar",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "max_vs_mean",
+                description="Use max or mean value for bar size",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "ring",
+                description="Why be so square?",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "spin",
+                description="Weeeeeeeeeee",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "bands",
+                description="Number of freq bands",
+                default=16,
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=64)),
+            vol.Optional(
+                "frequency_range",
+                description="Frequency range for spin impulse",
+                default="Lows (beat+bass)",
+            ): vol.In(list(AudioReactiveEffect.POWER_FUNCS_MAPPING.keys())),
+            vol.Optional(
+                "spin_multiplier",
+                description="Spin impulse multiplier",
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0, max=5)),
+            vol.Optional(
+                "spin_decay",
+                description="Decay filter applied to the spin impulse",
+                default=0.1,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=0.3)),
+            vol.Optional(
+                "power_gradient",
+                description="Color bars by power level: various algorithms",
+                default="Off",
+            ): vol.In(["Off", "Solid", "Progressive", "Stretch"]),
+            vol.Optional(
+                "filtered",
+                description="Enable default melbank pipeline filtering",
+                default=True,
+            ): bool,
+        }
+    )
+
+    def __init__(self, ledfx, config):
+        super().__init__(ledfx, config)
+
+    def on_activate(self, pixel_count):
+        self.r = np.zeros(pixel_count)
+        self.spin_value = 0.0
+
+    def config_updated(self, config):
+        super().config_updated(config)
+        self.bands = self._config["bands"]
+        self.center = self._config["center"]
+        self.grad_roll = self._config["gradient_roll"]
+        self.max = self._config["max_vs_mean"]
+        self.peak = self._config["peak_marks"]
+        self.peak_per = self._config["peak_percent"]
+        self.peak_decay = self._config["peak_decay"]
+        self.ring = self._config["ring"]
+        self.spin = self._config["spin"]
+        self.filtered = self._config["filtered"]
+        self.power_func = self.POWER_FUNCS_MAPPING[
+            self._config["frequency_range"]
+        ]
+        self.power_multiplier = self._config["spin_multiplier"]
+        self.impulse_filter = self.create_filter(
+            alpha_decay=self._config["spin_decay"], alpha_rise=0.99
+        )
+        self.peak_color = parse_color(self._config["peak_color"])
+        self.power_gradient = self._config["power_gradient"]
+
+    def calc_ring_segments(self, rotation):
+        # we want coordinates for self.bands around an oval defined by self.r_width and self.r_height
+        # do 1 more than bands to get closure of ring
+
+        # calculate start and end of bands on circle
+        self.bandsc = []
+        for i in range(self.bands + 1):
+            angle = 2.0 * np.pi * i / self.bands + np.radians(rotation)
+            x = (self.r_width) / 2.0 + (self.r_width - 1) / 2.0 * np.cos(angle)
+            y = (self.r_height) / 2.0 + (self.r_height - 1) / 2.0 * np.sin(
+                angle
+            )
+            self.bandsc.append((x, y))
+
+        # calc mid points of bands
+        self.bandscm = []
+        for i in range(self.bands):
+            self.bandscm.append(
+                interpolate_point(self.bandsc[i], self.bandsc[i + 1], 0.5)
+            )
+        # Add from beginnning to end for wrap around
+        self.bandscm.append(self.bandscm[0])
+        self.p_center = (self.r_width / 2.0, self.r_height / 2.0)
+
+    def do_once(self):
+        super().do_once()
+        # defer things that can't be done when pixel_count is not known
+        self.bands = min(self.bands, self.pixel_count)
+        self.bandsx = []
+        for i in range(self.bands):
+            start = int((self.r_width / float(self.bands)) * i)
+            end = max(
+                start, int(((self.r_width / float(self.bands)) * (i + 1)) - 1)
+            )
+            self.bandsx.append([start, end])
+        self.peaks_filter = self.create_filter(
+            alpha_decay=self.peak_decay, alpha_rise=0.99
+        )
+        self.peak_size = int(self.peak_per * self.r_height / 100)
+        self.half_height = self.r_height // 2
+
+        if self.ring:
+            self.calc_ring_segments(0)
+            self.impulse = 0.0
+            self._ring_dist = self._calc_ring_dist()
+
+    def audio_data_updated(self, data):
+        # Grab the filtered melbank
+        self.r = self.melbank(filtered=self.filtered, size=self.pixel_count)
+        np.clip(self.r, 0, 1, out=self.r)
+        self.impulse = self.impulse_filter.update(
+            getattr(data, self.power_func)() * self.power_multiplier
+        )
+
+    def prep_frame_vars(self):
+        # prepare volumes, peaks and colors for drawing
+        # these are per render frame or audio frame vars
+        # so cannot be done in do_once()
+        r_split = np.array_split(self.r, self.bands)
+        if self.max:
+            self.volumes = np.array([split.max() for split in r_split])
+        else:
+            self.volumes = np.array([split.mean() for split in r_split])
+        self.volumes = np.append(self.volumes, self.volumes[0])
+
+        if self.peak:
+            self.peaks = self.peaks_filter.update(self.volumes)
+
+        if self.power_gradient == "Solid":
+            colors = self.get_gradient_color_vectorized1d(
+                self.volumes[: self.bands]
+            ).astype(int)
+            self.bar_colors = [tuple(c) for c in colors]
+        elif self.power_gradient == "Off":
+            colors = self.get_gradient_color_vectorized1d(
+                np.arange(self.bands, dtype=np.float32) / self.bands
+            ).astype(int)
+            self.bar_colors = [tuple(c) for c in colors]
+
+        if self.ring and self.spin:
+            self.spin_value += self.impulse
+            self.spin_value %= 360
+            self.calc_ring_segments(self.spin_value)
+
+    def _draw_ring_peaks(self):
+        if not self.peak:
+            return
+        for i in range(self.bands):
+            if self.center:
+                self.m_draw.line(
+                    [
+                        interpolate_point(
+                            self.p_center, self.bandscm[i], self.peaks[i]
+                        ),
+                        interpolate_point(
+                            self.p_center,
+                            self.bandscm[i + 1],
+                            self.peaks[i + 1],
+                        ),
+                    ],
+                    fill=self.peak_color,
+                    width=self.peak_size,
+                )
+            else:
+                self.m_draw.line(
+                    [
+                        interpolate_point(
+                            self.bandscm[i], self.p_center, self.peaks[i]
+                        ),
+                        interpolate_point(
+                            self.bandscm[i + 1],
+                            self.p_center,
+                            self.peaks[i + 1],
+                        ),
+                    ],
+                    fill=self.peak_color,
+                    width=self.peak_size,
+                )
+
+    def draw_ring(self):
+        for i in range(self.bands):
+            if self.center:
+                self.m_draw.polygon(
+                    [
+                        interpolate_point(
+                            self.p_center, self.bandsc[i], self.volumes[i]
+                        ),
+                        interpolate_point(
+                            self.p_center, self.bandsc[i + 1], self.volumes[i]
+                        ),
+                        self.p_center,
+                    ],
+                    fill=self.bar_colors[i],
+                )
+            else:
+                self.m_draw.polygon(
+                    [
+                        self.bandsc[i],
+                        self.bandsc[i + 1],
+                        interpolate_point(
+                            self.bandscm[i], self.p_center, self.volumes[i]
+                        ),
+                    ],
+                    fill=self.bar_colors[i],
+                    outline=tuple(
+                        max(component - 1, 0)
+                        for component in self.bar_colors[i]
+                    ),
+                )
+        self._draw_ring_peaks()
+
+    def _calc_ring_dist(self):
+        """Pre-compute normalized elliptical distance from center."""
+        y_grid, x_grid = np.mgrid[0 : self.r_height, 0 : self.r_width]
+        cx = self.r_width / 2.0
+        cy = self.r_height / 2.0
+        rx = max(self.r_width / 2.0, 1)
+        ry = max(self.r_height / 2.0, 1)
+        dist = np.sqrt(((x_grid - cx) / rx) ** 2 + ((y_grid - cy) / ry) ** 2)
+        return np.clip(dist, 0, 1).astype(np.float32)
+
+    def draw_ring_progressive(self):
+        """Draw ring with gradient color progression based on distance from center."""
+        stretch = self.power_gradient == "Stretch"
+
+        if stretch:
+            positions = np.zeros(
+                (self.r_height, self.r_width), dtype=np.float32
+            )
+        elif self.center:
+            positions = self._ring_dist
+        else:
+            positions = 1.0 - self._ring_dist
+
+        mask_img = Image.new("L", (self.r_width, self.r_height), 0)
+        mask_draw = ImageDraw.Draw(mask_img)
+
+        for i in range(self.bands):
+            if self.center:
+                poly = [
+                    interpolate_point(
+                        self.p_center,
+                        self.bandsc[i],
+                        self.volumes[i],
+                    ),
+                    interpolate_point(
+                        self.p_center,
+                        self.bandsc[i + 1],
+                        self.volumes[i],
+                    ),
+                    self.p_center,
+                ]
+            else:
+                poly = [
+                    self.bandsc[i],
+                    self.bandsc[i + 1],
+                    interpolate_point(
+                        self.bandscm[i],
+                        self.p_center,
+                        self.volumes[i],
+                    ),
+                ]
+
+            mask_draw.polygon(poly, fill=255)
+
+            if stretch:
+                temp = Image.new("L", (self.r_width, self.r_height), 0)
+                temp_draw = ImageDraw.Draw(temp)
+                temp_draw.polygon(poly, fill=255)
+                band_pixels = np.array(temp) > 0
+                temp.close()
+                vol = max(self.volumes[i], 0.01)
+                if self.center:
+                    band_pos = np.clip(self._ring_dist / vol, 0, 1)
+                else:
+                    band_pos = np.clip((1.0 - self._ring_dist) / vol, 0, 1)
+                positions[band_pixels] = band_pos[band_pixels]
+
+        color_array = self.get_gradient_color_vectorized2d(positions).astype(
+            np.uint8
+        )
+
+        color_img = Image.fromarray(color_array, "RGB")
+        self.matrix.paste(color_img, mask=mask_img)
+        color_img.close()
+        mask_img.close()
+
+        self._draw_ring_peaks()
+
+    def _draw_normal_peaks(self):
+        if not self.peak:
+            return
+        for i in range(self.bands):
+            band_start, band_end = self.bandsx[i]
+            if self.center:
+                peak_scaled = int(self.half_height * self.peaks[i])
+                peak_end = int(peak_scaled + self.peak_size // 2)
+                self.m_draw.rectangle(
+                    (
+                        band_start,
+                        self.half_height + peak_scaled,
+                        band_end,
+                        self.half_height + peak_end,
+                    ),
+                    fill=self.peak_color,
+                )
+                self.m_draw.rectangle(
+                    (
+                        band_start,
+                        self.half_height - peak_end,
+                        band_end,
+                        self.half_height - peak_scaled,
+                    ),
+                    fill=self.peak_color,
+                )
+            else:
+                peak_scaled = int((self.r_height - 1) * self.peaks[i])
+                peak_start = (self.r_height - 1) - peak_scaled - self.peak_size
+                peak_end = (self.r_height - 1) - peak_scaled
+                self.m_draw.rectangle(
+                    (band_start, peak_start, band_end, peak_end),
+                    fill=self.peak_color,
+                )
+
+    def draw_normal(self):
+        for i in range(self.bands):
+            band_start, band_end = self.bandsx[i]
+            volume_scaled = int(self.r_height * self.volumes[i])
+            if self.center:
+                # Calculate dimensions for the centered rectangle
+                bottom = self.half_height - volume_scaled // 2
+                top = self.half_height + volume_scaled // 2
+            else:
+                # Dimensions for the bottom to top rectangle
+                bottom = (self.r_height - 1) - volume_scaled
+                top = self.r_height - 1
+
+            self.m_draw.rectangle(
+                (band_start, bottom, band_end, top),
+                fill=self.bar_colors[i],
+            )
+        self._draw_normal_peaks()
+
+    def draw_normal_progressive(self):
+        """Draw bars with gradient color progression based on power level."""
+        positions = np.zeros((self.r_height, self.r_width), dtype=np.float32)
+        mask = np.zeros((self.r_height, self.r_width), dtype=bool)
+
+        for i in range(self.bands):
+            band_start, band_end = self.bandsx[i]
+            volume_scaled = int(self.r_height * self.volumes[i])
+
+            if self.center:
+                half_vol = volume_scaled // 2
+                bottom = max(self.half_height - half_vol, 0)
+                top = min(self.half_height + half_vol, self.r_height - 1)
+            else:
+                bottom = max((self.r_height - 1) - volume_scaled, 0)
+                top = self.r_height - 1
+
+            if top < bottom:
+                continue
+
+            rows = np.arange(bottom, top + 1)
+
+            if self.center:
+                if self.power_gradient == "Stretch":
+                    norm = max(volume_scaled // 2, 1)
+                else:
+                    norm = max(self.half_height, 1)
+                grad_positions = (
+                    np.abs(rows - self.half_height).astype(np.float32) / norm
+                )
+            else:
+                if self.power_gradient == "Stretch":
+                    norm = max(volume_scaled, 1)
+                else:
+                    norm = max(self.r_height - 1, 1)
+                grad_positions = (self.r_height - 1 - rows).astype(
+                    np.float32
+                ) / norm
+            grad_positions = np.clip(grad_positions, 0, 1)
+
+            positions[rows, band_start : band_end + 1] = grad_positions[
+                :, np.newaxis
+            ]
+            mask[rows, band_start : band_end + 1] = True
+
+        color_array = self.get_gradient_color_vectorized2d(positions).astype(
+            np.uint8
+        )
+
+        color_img = Image.fromarray(color_array, "RGB")
+        mask_img = Image.fromarray((mask.astype(np.uint8) * 255), "L")
+        self.matrix.paste(color_img, mask=mask_img)
+        color_img.close()
+        mask_img.close()
+
+        self._draw_normal_peaks()
+
+    def draw(self):
+        # note we are leaving all math in float space until it gets clipped
+        # down to int by Image draw functions
+
+        if self.test:
+            self.draw_test(self.m_draw)
+
+        self.prep_frame_vars()
+
+        if self.ring:
+            if self.power_gradient in ("Progressive", "Stretch"):
+                self.draw_ring_progressive()
+            else:
+                self.draw_ring()
+        elif self.power_gradient in ("Progressive", "Stretch"):
+            self.draw_normal_progressive()
+        else:
+            self.draw_normal()
+
+        self.roll_gradient()

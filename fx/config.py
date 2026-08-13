@@ -1,0 +1,1114 @@
+import datetime
+import ipaddress
+import json
+import logging
+import os
+import shutil
+import sys
+import threading
+import uuid
+
+import voluptuous as vol
+from packaging.version import parse as parse_version
+
+from fx.consts import CONFIGURATION_VERSION
+
+CONFIG_DIRECTORY = ".ledfx"
+CONFIG_FILE_NAME = "config.json"
+PRESETS_FILE_NAME = "presets.json"
+
+PRIVATE_KEY_FILE = "privkey.pem"
+CHAIN_KEY_FILE = "fullchain.pem"
+
+_default_wled_settings = {
+    "wled_preferred_mode": "UDP",
+    "realtime_gamma_enabled": False,
+    "force_max_brightness": False,
+    "realtime_dmx_mode": "MultiRGB",
+    "start_universe_setting": 1,
+    "dmx_address_start": 1,
+    "inactivity_timeout": 1,
+}
+
+CONFIG_BACKUP_REASONS = {
+    "DECODE": "Error loading config. Backup created, default config used.",
+    "VERSION": "Old config version detected. Backup created.",
+    "OSERROR": "Unable to open config. Backup Created, default config used.",
+    "IMPORT": "Config imported. Backup Created.",
+    "DELETE": "Config deleted. Backup Created.",
+}
+
+# Some core config keys that don't need a restart to take effect - list them here to use elsewhere
+CORE_CONFIG_KEYS_NO_RESTART = [
+    "global_brightness",
+    "create_segments",
+    "scan_on_startup",
+    "user_presets",
+    "visualisation_maxlen",
+    "visualisation_fps",
+    "flush_on_deactivate",
+    "ui_brightness_boost",
+    "startup_scene_id",
+    "startup_playlist_id",
+    "lifx_broadcast_address",
+    "lifx_discovery_timeout",
+    "sendspin_always_on",
+    "now_playing",
+]
+# Collection of keys that are used for visualisation configuration - used to check if we need to restart the visualisation event listeners
+VISUALISATION_CONFIG_KEYS = [
+    "visualisation_fps",
+    "visualisation_maxlen",
+]
+
+UI_ONLY_KEYS_IGNORED_FOR_CONFIG_COMPARISON = [
+    "advanced",
+    "diag",
+    "gradient_name",  # UI field that gets expanded to gradient value
+]
+
+
+# Transmission types for pixel visualisation on frontend
+class Transmission:
+    BASE64_COMPRESSED = "compressed"
+    UNCOMPRESSED = "uncompressed"
+
+    @staticmethod
+    def get_list():
+        transmission_dict = vars(Transmission)
+        t_list = []
+        for attribute in transmission_dict.keys():
+            if attribute[:2] != "__" and attribute != "get_list":
+                t_list.append(getattr(Transmission, attribute))
+        return t_list
+
+
+# adds the {setting: ..., user: ...} thing to the defaults dict
+def parse_default_wled_setting(setting):
+    key, value = setting
+    return (key, {"setting": value, "user_enabled": False})
+
+
+# creates validators for the different wled preferences
+def wled_validator_generator(data_type):
+    return vol.Schema(
+        {
+            vol.Optional("setting"): data_type,
+            vol.Optional("user_enabled"): bool,
+        }
+    )
+
+
+# creates the vol.optionals using the above two functions
+def wled_optional_generator(setting):
+    key, default = setting
+    return (
+        vol.Optional(key, default=default),
+        wled_validator_generator(type(default["setting"])),
+    )
+
+
+# generate the default settings with the setting, user enabled dict thing
+_default_wled_settings = dict(
+    map(parse_default_wled_setting, _default_wled_settings.items())
+)
+
+# generate the config schema to validate changes
+WLED_CONFIG_SCHEMA = vol.Schema(
+    dict(map(wled_optional_generator, _default_wled_settings.items()))
+)
+
+
+def validate_ipv4_address(value):
+    """Validate that value is a valid IPv4 address (including broadcast).
+
+    Args:
+        value: The value to validate.
+
+    Returns:
+        str: The validated IPv4 address string.
+
+    Raises:
+        vol.Invalid: If the value is not a valid IPv4 address.
+    """
+    try:
+        addr = ipaddress.IPv4Address(value)
+        return str(addr)
+    except ipaddress.AddressValueError:
+        raise vol.Invalid(f"Invalid IPv4 address: {value}")
+
+
+CORE_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Optional("host", default="0.0.0.0"): str,
+        vol.Optional("hosts", default=[]): list,
+        vol.Optional("port", default=8888): int,
+        vol.Optional("port_s", default=8443): int,
+        vol.Optional("dev_mode", default=False): bool,
+        vol.Optional("devices", default=[]): list,
+        vol.Optional("virtuals", default=[]): list,
+        vol.Optional("audio", default={}): dict,
+        vol.Optional("melbank_collection", default=[]): list,
+        vol.Optional("melbanks", default={}): dict,
+        vol.Optional("ledfx_presets", default={}): dict,
+        vol.Optional("user_presets", default={}): dict,
+        vol.Optional("scenes", default={}): dict,
+        vol.Optional("playlists", default={}): dict,
+        vol.Optional("integrations", default=[]): list,
+        vol.Optional("transmission_mode", default="compressed"): vol.In(
+            Transmission.get_list()
+        ),
+        vol.Optional("visualisation_fps", default=30): vol.All(
+            int, vol.Range(1, 60)
+        ),
+        vol.Optional("visualisation_maxlen", default=81): vol.All(
+            int, vol.Range(5, 65536)
+        ),
+        vol.Optional(
+            "global_transitions",
+            description="Changes to any virtual's transitions apply to all other virtuals",
+            default=True,
+        ): bool,
+        vol.Optional("user_colors", default={}): dict,
+        vol.Optional("user_gradients", default={}): dict,
+        vol.Optional("scan_on_startup", default=False): bool,
+        vol.Optional("create_segments", default=False): bool,
+        vol.Optional("flush_on_deactivate", default=False): bool,
+        vol.Optional("wled_preferences", default={}): dict,
+        vol.Optional(
+            "configuration_version", default=CONFIGURATION_VERSION
+        ): str,
+        vol.Optional("global_brightness", default=1.0): vol.All(
+            vol.Coerce(float), vol.Range(0, 1.0)
+        ),
+        vol.Optional("ui_brightness_boost", default=0.0): vol.All(
+            vol.Coerce(float), vol.Range(0, 1.0)
+        ),
+        vol.Optional("startup_scene_id", default=""): str,
+        vol.Optional("startup_playlist_id", default=""): str,
+        vol.Optional(
+            "lifx_broadcast_address", default="255.255.255.255"
+        ): validate_ipv4_address,
+        vol.Optional("lifx_discovery_timeout", default=30): vol.All(
+            int, vol.Range(min=1, max=120)
+        ),
+        vol.Optional("instance_id", default=""): str,
+        vol.Optional("sendspin_servers", default={}): dict,
+        vol.Optional("sendspin_always_on", default=True): bool,
+        vol.Optional("now_playing", default={}): dict,
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+
+def ensure_instance_id(config):
+    """
+    Ensure the config has a persistent LedFx instance UUID.
+
+    Generates a random UUID if ``instance_id`` is missing or empty and
+    stores it back in *config* so it is saved on the next
+    :func:`save_config` call.  The value is stable across restarts and
+    uniquely identifies this LedFx installation.
+    """
+    if not config.get("instance_id"):
+        config["instance_id"] = str(uuid.uuid4())
+
+
+def load_logger():
+    """
+    Load the logger for the current module.
+
+    This function initializes the logger for the current module using the module's name as the logger name.
+
+    Returns:
+        None
+    """
+    global _LOGGER
+    _LOGGER = logging.getLogger(__name__)
+
+
+def get_default_config_directory() -> str:
+    """
+    Get the default configuration directory.
+
+    Returns:
+        str: The default configuration directory path.
+    """
+
+    base_dir = (
+        os.getenv("APPDATA") if os.name == "nt" else os.path.expanduser("~")
+    )
+    return os.path.join(base_dir, CONFIG_DIRECTORY)
+
+
+def get_default_config_path() -> str:
+    """
+    Get the default fully qualified configuration file path.
+
+    Returns:
+        str: The fully qualified configuration file path.
+    """
+    return os.path.join(get_default_config_directory(), CONFIG_FILE_NAME)
+
+
+def get_config_file(config_dir: str) -> str:
+    """
+    Finds a supported configuration file in the provided directory.
+
+    Args:
+        config_dir (str): The directory to search for the configuration file.
+
+    Returns:
+        str: The path of the configuration file if found, None otherwise.
+    """
+
+    json_path = os.path.join(config_dir, CONFIG_FILE_NAME)
+    if os.path.isfile(json_path) is False:  # Can't find a JSON file
+        return None  # No Valid Configs, return None to build another one
+    return json_path  # Return the JSON file if we find one.
+
+
+def get_preset_file(config_dir: str) -> str:
+    """
+    Finds a supported preset file in the provided directory
+    Currently this is a stub and is not used. It is here for potential future use.
+
+    Args:
+        config_dir (str): The directory to search for the preset file.
+
+    Returns:
+        str: The path of the found preset file, or None if no valid preset file is found.
+    """
+
+    json_path = os.path.join(config_dir, PRESETS_FILE_NAME)
+    if os.path.isfile(json_path) is False:  # Can't find a JSON file
+        return None  # No Valid Configs, return None to build another one
+    return json_path  # Return the JSON file if we find one.
+
+
+def get_profile_dump_location(config_dir: str) -> str:
+    """
+    Returns the location for dumping the profile.
+
+    Args:
+        config_dir (str): The directory where the profile dump will be stored.
+
+    Returns:
+        str: The complete path for dumping the profile.
+    """
+    date_time = datetime.datetime.now().strftime("%d-%m-%y_%H-%M-%S")
+    return os.path.join(config_dir, f"LedFx_{date_time}.profile")
+
+
+def get_log_file_location(config_dir: str) -> str:
+    """
+    Returns the absolute file path of the log file.
+
+    Args:
+        config_dir (str): The directory where the log file should be located.
+
+    Returns:
+        str: The absolute file path of the log file.
+    """
+    log_file_path = os.path.abspath(os.path.join(config_dir, "ledfx.log"))
+    return log_file_path
+
+
+def get_ssl_certs(config_dir) -> tuple:
+    """
+    Finds ssl certificate files in the specified config directory.
+
+    Args:
+        config_dir (str): The path to the config directory.
+
+    Returns:
+        tuple: A tuple containing the paths to the chain and key files if they exist, otherwise None.
+    """
+    ssl_dir = os.path.join(config_dir, "ssl")
+
+    if not os.path.exists(ssl_dir):
+        return None
+
+    key_path = os.path.join(ssl_dir, PRIVATE_KEY_FILE)
+    chain_path = os.path.join(ssl_dir, CHAIN_KEY_FILE)
+
+    if os.path.isfile(key_path) and os.path.isfile(chain_path):
+        return (chain_path, key_path)
+    return None
+
+
+def create_default_config(config_dir: str) -> str:
+    """
+    Creates a default configuration file in the provided directory.
+
+    Args:
+        config_dir (str): The directory where the configuration file will be created.
+
+    Returns:
+        str: The path of the created configuration file.
+
+    Raises:
+        OSError: If there is an error creating the configuration file.
+    """
+    config_path = os.path.join(config_dir, CONFIG_FILE_NAME)
+    try:
+        with open(config_path, "w", encoding="utf-8") as file:
+            json.dump(
+                CORE_CONFIG_SCHEMA({}),
+                file,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=4,
+            )
+        return config_path
+
+    except OSError:
+        _LOGGER.critical(
+            "Unable to create default configuration file %s.",
+            config_path,
+        )
+        return None
+
+
+def ensure_config_file(config_dir: str) -> str:
+    """
+    Checks if a config file exists, and otherwise creates one
+
+    Args:
+        config_dir (str): The directory where the config file should be located
+
+    Returns:
+        str: The path to the config file
+
+    """
+    ensure_config_directory(config_dir)
+    config_path = get_config_file(config_dir)
+    if config_path is None:
+        config_path = create_default_config(config_dir)
+
+    return config_path
+
+
+def check_preset_file(config_dir: str) -> str:
+    """
+    Checks if a preset file exists in the specified configuration directory.
+    Currently this is a stub and is not used. It is here for potential future use.
+
+    Args:
+        config_dir (str): The path to the configuration directory.
+
+    Returns:
+        str: The path to the preset file if it exists, otherwise None.
+    """
+    ensure_config_directory(config_dir)
+    presets_path = get_preset_file(config_dir)
+    if presets_path is None:
+        return None
+
+    return presets_path
+
+
+def ensure_config_directory(config_dir: str) -> None:
+    """
+    Validate that the config directory is valid.
+
+    Args:
+        config_dir (str): The path to the config directory.
+
+    Raises:
+        OSError: If unable to create the configuration directory.
+
+    """
+    # If an explicit path is provided simply check if it exist and failfast
+    # if it doesn't. Otherwise, if we have the default directory attempt to
+    # create the file
+    if not os.path.isdir(config_dir):
+        try:
+            os.mkdir(config_dir)
+        except OSError:
+            _LOGGER.critical(
+                "Unable to create configuration directory at %s. Shutting down.",
+                config_dir,
+            )
+            # Exit with code 1 to indicate that there was an error creating the configuration directory.
+            sys.exit(1)
+
+
+def load_config(config_dir: str) -> dict:
+    """
+    Validates and loads the configuration file in the provided directory.
+
+    Args:
+        config_dir (str): The directory where the configuration file is located.
+
+    Returns:
+        dict: The loaded and validated configuration as a dictionary.
+
+    Raises:
+        JSONDecodeError: If the configuration file cannot be decoded as JSON.
+        OSError: If there is an error while opening or reading the configuration file.
+    """
+
+    config_file = ensure_config_file(config_dir)
+    _LOGGER.info(
+        "Loading config file: %s",
+        os.path.join(os.path.abspath(config_dir), CONFIG_FILE_NAME),
+    )
+    try:
+        with open(config_file, encoding="utf-8") as file:
+            config_json = json.load(file)
+            try:
+                _LOGGER.info(
+                    "LedFx Configuration Version: %s",
+                    config_json["configuration_version"],
+                )
+                assert parse_version(
+                    config_json["configuration_version"]
+                ) == parse_version(CONFIGURATION_VERSION)
+                return CORE_CONFIG_SCHEMA(config_json)
+            except (KeyError, AssertionError):
+                create_backup(config_dir, "VERSION")
+                _LOGGER.warning(
+                    "LedFx config version: %s, your config version: %s",
+                    CONFIGURATION_VERSION,
+                    config_json.get(
+                        "configuration_version", "UNDEFINED (old!)"
+                    ),
+                )
+                try:
+                    config = migrate_config(config_json)
+                    save_config(config, config_dir)
+                except Exception as e:
+                    _LOGGER.exception(
+                        "Failed to migrate your config to the new standard :( Your old config is backed up safely. Please let a developer know what happened: %s",
+                        e,
+                    )
+                    config = {}
+                return CORE_CONFIG_SCHEMA(config)
+    except json.JSONDecodeError:
+        create_backup(config_dir, "DECODE")
+        return CORE_CONFIG_SCHEMA({})
+    except OSError:
+        create_backup(config_dir, "OSERROR")
+        return CORE_CONFIG_SCHEMA({})
+
+
+def migrate_config(old_config):
+    """
+    Attempts to update an old config to a working state
+
+    Args:
+        old_config (dict): The old configuration to be migrated.
+
+    Returns:
+        dict: The migrated configuration.
+    """
+    _LOGGER.warning("Attempting to migrate old config to new version...")
+
+    # most invalid keys were from invalid frequency ranges.
+    # this replacement dict should fix that
+    # oldkey: newkey
+    replacement_frequency_ranges = {
+        "Ultra Low (1-20Hz)": "Beat",
+        "Sub Bass (20-60Hz)": "Lows (beat+bass)",
+        "Bass (60-250Hz)": "Lows (beat+bass)",
+        "Low Midrange (250-500Hz)": "Lows (beat+bass)",
+        "Midrange (500Hz-2kHz)": "Mids",
+        "Upper Midrange (2Khz-4kHz)": "Mids",
+        "High Midrange (4kHz-6kHz)": "High",
+        "High Frequency (6kHz-24kHz)": "High",
+    }
+
+    # These keys were renamed in the schema, so we need to replace them
+    # oldkey: newkey
+    other_replacement_keys = {
+        "flip horizontal": "flip_horizontal",
+        "flip vertical": "flip_vertical",
+        "peak percent": "peak_percent",
+        "peak decay": "peak_decay",
+        "peak marks": "peak_marks",
+        "max vs mean": "max_vs_mean",
+        "spin multiplier": "spin_multiplier",
+        "spin decay": "spin_decay",
+        "GIF FPS": "gif_fps",
+        "Min Size": "min_size",
+        "pp skip": "ping_pong_skip",
+        "stretch hor": "stretch_horizontal",
+        "stretch ver": "stretch_vertical",
+        "v_stretch": "stretch_vertical",
+        "center hor": "center_horizontal",
+        "center ver": "center_vertical",
+        "gif_path": "image_location",
+        "gif at": "image_location",
+        "beat frames": "beat_frames",
+        "skip frames": "skip_frames",
+        "force aspect": "keep_aspect_ratio",
+        "force fit": "force_fit",
+        "ping pong": "ping_pong",
+        "half beat": "half_beat",
+        "v density": "density_vertical",
+        "size x": "size_multiplication",
+        "speed x": "speed_multiplication",
+        "Alpha": "alpha_options",
+        "Diagnostic": "diag",
+        "RGB Mix": "rgb_mix",
+        "diag2": "deep_diag",
+    }
+
+    class DummyLedfx:
+        def dev_enabled(_):
+            return False
+
+    import copy
+
+    import voluptuous as vol
+
+    from fx.effects import Effects
+
+    effects = Effects(DummyLedfx()).classes()
+
+    # initialise some things that will help us match up old effect info to new effect info
+    def get_matching_effect_id(dirty_effect_id):
+        """
+        Returns the effect ID that matches the given dirty_effect_id.
+
+        Args:
+            dirty_effect_id (str): The dirty effect ID to match.
+
+        Returns:
+            str or None: The matching effect ID, or None if no match is found.
+        """
+
+        def clean_effect_id(effect_id):
+            """
+            Cleans up the effect ID by converting it to lowercase and removing "(reactive)" and underscores.
+
+            Args:
+                effect_id (str): The effect ID to be cleaned.
+
+            Returns:
+                str: The cleaned effect ID.
+            """
+            return effect_id.lower().replace("(reactive)", "").replace("_", "")
+
+        candidate_effect_id = clean_effect_id(dirty_effect_id)
+        for effect_id in effects:
+            if clean_effect_id(effect_id) == candidate_effect_id:
+                return effect_id
+        else:
+            return None
+
+    def sanitise_effect_config(effect_type, old_config):
+        """
+        Sanitizes the effect configuration by attempting to find old keys or values and replace them
+
+        Args:
+            effect_type (str): The type of effect.
+            old_config (dict): The original effect configuration.
+
+        Returns:
+            dict: The sanitized effect configuration.
+        """
+        # checks each config key against the current schema, discarding any values that dont match
+        schema = effects[effect_type].schema().schema
+        new_config = {}
+        for old_key in old_config:
+            # Replace old key with new key if it exists in the other_replacement_keys dictionary
+            new_key = other_replacement_keys.get(old_key, old_key).replace(
+                "colour", "color"
+            )
+            if new_key in schema:
+                try:
+                    if (
+                        old_key == "frequency_range"
+                        and old_config.get(old_key)
+                        not in replacement_frequency_ranges.values()
+                    ):
+                        old_config[old_key] = replacement_frequency_ranges[
+                            old_config.get(old_key)
+                        ]
+                    schema[new_key](old_config[old_key])
+                    new_config[new_key] = old_config[old_key]
+                except (vol.MultipleInvalid, vol.InInvalid, Exception):
+                    _LOGGER.warning(
+                        "Preset for %s with config item %s : %s is invalid. Discarding.",
+                        effect_type,
+                        old_key,
+                        old_config[old_key],
+                    )
+                    continue
+            else:
+                _LOGGER.warning(
+                    "Preset for %s cannot match config item %s. Discarding item from preset.",
+                    effect_type,
+                    old_key,
+                )
+                continue
+        return new_config
+
+    new_config = copy.deepcopy(old_config)
+
+    # if not using new config "audio_device", delete audio config
+    if not old_config.get("audio", {}).get("audio_device", None):
+        new_config.pop("audio", None)
+
+    # remove old transition things
+    new_config.pop("crossfade", None)
+    new_config.pop("fade", None)
+
+    # update devices
+    new_config["devices"] = []
+    for device in old_config.get("devices", ()):
+        if device["type"].lower() == "fxmatrix":
+            _LOGGER.warning(
+                "FXMatrix devices are no longer supported. Add it as plain UDP or WLED."
+            )
+            continue
+        if (
+            device["type"].lower() == "artnet"
+            and "device_repeat" in device["config"]
+        ):
+            device["config"]["pixels_per_device"] = device["config"].pop(
+                "device_repeat"
+            )
+
+        # Migrate ArtNet output_mode → rgb_order + white_mode
+        if device["type"].lower() == "artnet":
+            cfg = device.get("config", {})
+            if "output_mode" in cfg:
+                old_mode = cfg.pop("output_mode")
+                mapping = {
+                    "RGB": ("RGB", "None"),
+                    "RGBW No White": ("RGB", "Zero"),
+                    "RGBW Accurate": ("RGB", "Accurate"),
+                    "RGBW Brighter": ("RGB", "Brighter"),
+                }
+                rgb_order, white_mode = mapping.get(old_mode, ("RGB", "None"))
+                cfg["rgb_order"] = rgb_order
+                cfg["white_mode"] = white_mode
+                _LOGGER.warning(
+                    "Migrated ArtNet device '%s' from output_mode=%s to rgb_order=%s, white_mode=%s",
+                    device.get("name", ""),
+                    old_mode,
+                    rgb_order,
+                    white_mode,
+                )
+
+        device.pop("effect", None)
+        new_config["devices"].append(device)
+
+    # if displays/virtuals are present, remove their effects and rename to virtuals
+    # else if no virtuals saved, create virtuals for all the devices
+    virtuals = new_config.pop("displays", None) or new_config.pop(
+        "virtuals", None
+    )
+    if virtuals:
+        for virtual in virtuals:
+            effect = virtual.get("effect", None)
+            if effect:
+                effect_id, effect_config = (
+                    effect.get("type", None),
+                    effect.get("config", None),
+                )
+                if effect_id:
+                    new_effect_id = get_matching_effect_id(effect_id)
+                    if not new_effect_id:
+                        _LOGGER.warning(
+                            "Could not match effect id %s to any current effects. Discarding this effect from virtual %s.",
+                            effect_id,
+                            virtual["id"],
+                        )
+                        continue
+                    new_effect_config = sanitise_effect_config(
+                        new_effect_id, effect_config
+                    )
+                virtual["effect"] = {
+                    "config": new_effect_config,
+                    "type": new_effect_id,
+                }
+            virtual["auto_generated"] = virtual.get("auto_generated", False)
+        new_config["virtuals"] = virtuals
+    else:  # time to make some virtuals
+        from fx.utils import generate_id
+
+        new_config["virtuals"] = []
+        for device in new_config["devices"]:
+            # Generate virtual configuration for the device
+            name = device["config"]["name"]
+            _LOGGER.info("Creating a virtual for device %s", name)
+
+            virtual_config = {
+                "name": name,
+                # "icon_name": device_config["icon_name"],
+            }
+            segments = [
+                [device["id"], 0, device["config"]["pixel_count"] - 1, False]
+            ]
+
+            new_config["virtuals"].append(
+                {
+                    "id": generate_id(name),
+                    "is_device": device["id"],
+                    "auto_generated": False,
+                    "config": virtual_config,
+                    "segments": segments,
+                }
+            )
+
+    # clean up user presets. effect names have changed, we'll try to clean them up here
+    user_presets = new_config.pop("custom_presets", ()) or new_config.pop(
+        "user_presets", ()
+    )
+    new_config["user_presets"] = {}
+    for effect_id in user_presets:
+        new_effect_id = get_matching_effect_id(effect_id)
+        if not new_effect_id:
+            _LOGGER.warning(
+                "Could not match effect id %s to any current effects. Discarding presets for this effect.",
+                effect_id,
+            )
+            continue
+        new_config["user_presets"][new_effect_id] = {}
+        for preset_id in user_presets[effect_id]:
+            new_config["user_presets"][new_effect_id][preset_id] = {
+                "name": user_presets[effect_id][preset_id]["name"],
+                "config": sanitise_effect_config(
+                    new_effect_id, user_presets[effect_id][preset_id]["config"]
+                ),
+            }
+
+    # clean up scenes. if you are reading this, sorry for the confusing variable naming. i've tried my best :D
+    scenes = new_config.pop("scenes", ())
+    new_config["scenes"] = {}
+    if scenes:
+        scenes_mode = next(
+            mode
+            for mode in scenes[next(iter(scenes))]
+            if mode in ("devices", "displays", "virtuals")
+        )
+    for scene_id in scenes:
+        virtuals_ish = scenes[scene_id].pop(scenes_mode, ())
+        new_virtuals = {}
+        for virtual_ish in virtuals_ish:
+            # if scenes are populated by devices, then we should by now have virtuals made for each device.
+            # we need to find the corresponding virtual for the device
+            if scenes_mode == "devices":
+                corresponding_virtual = next(
+                    (
+                        real_virtual["id"]
+                        for real_virtual in new_config["virtuals"]
+                        if real_virtual.get("is_device", None) == virtual_ish
+                    ),
+                    None,
+                )
+                if not corresponding_virtual:
+                    _LOGGER.warning(
+                        "Could not match device id %s to any virtuals. Discarding this device from scene %s.",
+                        virtual_ish,
+                        scene_id,
+                    )
+                    continue
+                actual_virtual = corresponding_virtual
+            else:
+                # if it's displays or virtuals, these should already exist in the user's config
+                actual_virtual = virtual_ish
+            # with the virtuals_ish now sanitised to an actual virtual, we need to clean up the effect type and config
+            effect_id, effect_config = (
+                virtuals_ish[virtual_ish].get("type", None),
+                virtuals_ish[virtual_ish].get("config", None),
+            )
+            if effect_id and effect_config:
+                new_effect_id = get_matching_effect_id(effect_id)
+                if not new_effect_id:
+                    _LOGGER.warning(
+                        "Could not match effect id %s to any current effects. Discarding this effect from scene %s.",
+                        effect_id,
+                        scene_id,
+                    )
+                    continue
+                new_effect_config = sanitise_effect_config(
+                    new_effect_id, effect_config
+                )
+                new_virtuals[actual_virtual] = {
+                    "config": new_effect_config,
+                    "type": new_effect_id,
+                }
+            else:
+                new_virtuals[actual_virtual] = {}
+
+        new_config["scenes"][scene_id] = {
+            "virtuals": new_virtuals,
+            "name": scenes[scene_id]["name"],
+        }
+
+    # if audio:min_volume is present and greater than 1 then set to a default of
+    # 0.2, old range was 0 to 10, but effective range is only 0 to 1, anything
+    # >= 1 will just squelch all audio, source of error for some users while
+    # trying to make audio work and blindly pushing sliders
+    if new_config.get("audio", {}).get("min_volume", 0) > 1:
+        new_config["audio"]["min_volume"] = 0.2
+
+    # Handle equalizer2d flip_vertical inversion for versions prior to 2.3.6
+    # In 2.3.6, we fixed the upside-down rendering when ring=False and center=False
+    # So we need to invert flip_vertical to maintain the same visual appearance
+    old_version = old_config.get("configuration_version", "0.0.0")
+    if parse_version(old_version) < parse_version("2.3.6"):
+        _LOGGER.warning(
+            "Migrating equalizer2d flip_vertical settings for config version < 2.3.6"
+        )
+
+        def invert_equalizer2d_flip_vertical(effect_config):
+            """Helper function to invert flip_vertical for equalizer2d effects"""
+            if not isinstance(effect_config, dict):
+                return effect_config
+            if (
+                effect_config.get("ring", True) is False
+                and effect_config.get("center", True) is False
+            ):
+                # Invert flip_vertical (default is False, so invert accordingly)
+                current_flip = effect_config.get("flip_vertical", False)
+                effect_config["flip_vertical"] = not current_flip
+                _LOGGER.info(
+                    "Inverted equalizer2d flip_vertical from %s to %s",
+                    current_flip,
+                    not current_flip,
+                )
+            return effect_config
+
+        # Update virtuals with equalizer2d effects
+        for virtual in new_config.get("virtuals", []):
+            # Handle currently active effect
+            effect = virtual.get("effect", {})
+            if effect.get("type") == "equalizer2d":
+                effect["config"] = invert_equalizer2d_flip_vertical(
+                    effect.get("config", {})
+                )
+
+            # Handle stored effects in the effects dictionary
+            effects_dict = virtual.get("effects", {})
+            if "equalizer2d" in effects_dict:
+                effects_dict["equalizer2d"]["config"] = (
+                    invert_equalizer2d_flip_vertical(
+                        effects_dict["equalizer2d"].get("config", {})
+                    )
+                )
+
+        # Update user presets for equalizer2d
+        equalizer2d_presets = new_config.get("user_presets", {}).get(
+            "equalizer2d", {}
+        )
+        for preset_name, preset_data in equalizer2d_presets.items():
+            preset_data["config"] = invert_equalizer2d_flip_vertical(
+                preset_data.get("config", {})
+            )
+
+        # Update scenes with equalizer2d effects
+        for scene_id, scene_data in new_config.get("scenes", {}).items():
+            for virtual_id, virtual_effect in scene_data.get(
+                "virtuals", {}
+            ).items():
+                if virtual_effect.get("type") == "equalizer2d":
+                    virtual_effect["config"] = (
+                        invert_equalizer2d_flip_vertical(
+                            virtual_effect.get("config", {})
+                        )
+                    )
+
+    _LOGGER.warning("Finished migrating config.")
+    return new_config
+
+
+def create_backup(config_dir: str, backup_reason: str) -> None:
+    """
+    This function creates a backup of the current configuration file - it uses the format dd-mm-yyyy_hh-mm-ss for the backup file.
+
+    Args:
+        config_dir (path): The path to the current configuration directory
+        backup_reason (string): The reason we are making the backup to allow for better logging
+    """
+
+    config_file = os.path.join(config_dir, CONFIG_FILE_NAME)
+    date = datetime.datetime.now().strftime("%d-%m-%y_%H-%M-%S")
+    backup_location = os.path.join(config_dir, f"config_backup_{date}.json")
+    if os.path.exists(config_file):
+        try:
+            os.rename(config_file, backup_location)
+        except OSError:
+            shutil.copy2(config_file, backup_location)
+
+        if backup_reason in CONFIG_BACKUP_REASONS:
+            _LOGGER.warning(CONFIG_BACKUP_REASONS[backup_reason])
+        else:
+            _LOGGER.error("Unknown Error. Backup Created.")
+
+
+_SAVE_CONFIG_LOCK = threading.Lock()
+
+
+def save_config(config: dict, config_dir: str) -> None:
+    """
+    Saves the configuration to the provided directory.
+
+    Args:
+        config (dict): The configuration to be saved.
+        config_dir (str): The directory where the configuration file will be saved.
+
+    Returns:
+        None
+    """
+    config_file = ensure_config_file(config_dir)
+    # Ensure logger is initialized (tests may call save_config without module init)
+    try:
+        _LOGGER
+    except NameError:
+        load_logger()
+
+    _LOGGER.info("Saving configuration file to %s", config_dir)
+    config["configuration_version"] = CONFIGURATION_VERSION
+    config_view = dict(config)
+    unneeded_keys = ["ledfx_presets"]
+    for key in [key for key in config_view if key in unneeded_keys]:
+        del config_view[key]
+
+    # Atomic write: serialize to a temp file in the same directory, fsync, then
+    # os.replace() into place. A process kill mid-write (e.g. systemctl restart
+    # or the SpotFX watchdog SIGTERM) then leaves the temp file truncated and
+    # config.json untouched, instead of zeroing the live config. open(...,"w")
+    # truncates immediately, so a direct write here was losing the whole config
+    # whenever a restart raced the dump.
+    # THREAD SAFETY: save_config is called from the event loop AND from
+    # virtual render threads (effect-fallback restores). The lock serializes
+    # writers; without it two savers share the one tmp path and the loser's
+    # os.replace() dies with FileNotFoundError, killing its virtual thread.
+    tmp_file = config_file + ".tmp"
+    with _SAVE_CONFIG_LOCK:
+        with open(tmp_file, "w", encoding="utf-8") as file:
+            json.dump(
+                config_view, file, ensure_ascii=False, sort_keys=True,
+                indent=4,
+            )
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp_file, config_file)
+
+
+def save_presets(config: dict, config_dir: str) -> None:
+    """
+    Saves the configuration to the provided directory.
+    Currently this is a stub and is not used. It is here for potential future use.
+
+    Args:
+        config (dict): The configuration dictionary.
+        config_dir (str): The directory to save the configuration to.
+
+    Returns:
+        None
+    """
+
+    presets_file = check_preset_file(config_dir)
+    _LOGGER.info("Saving user presets to %s", config_dir)
+
+    config_view = dict(config)
+    for key in [key for key in config_view if key != "user_presets"]:
+        del config_view[key]
+
+    with open(presets_file, "w", encoding="utf-8") as file:
+        json.dump(
+            config_view, file, ensure_ascii=False, sort_keys=True, indent=4
+        )
+
+
+def filter_config_for_comparison(config):
+    """Filter out UI-only keys from effect configuration for comparison.
+
+    Removes keys like 'advanced' and 'diag' that are UI-only and don't
+    affect the actual effect behavior.
+
+    Args:
+        config (dict): The configuration dictionary to filter.
+
+    Returns:
+        dict: A new dictionary with UI-only keys removed.
+    """
+    if not isinstance(config, dict):
+        return {}
+    return {
+        k: v
+        for k, v in config.items()
+        if k not in UI_ONLY_KEYS_IGNORED_FOR_CONFIG_COMPARISON
+    }
+
+
+def configs_match(config1, config2):
+    """Compare two effect configurations, ignoring UI-only keys.
+
+    Args:
+        config1 (dict): First configuration to compare.
+        config2 (dict): Second configuration to compare.
+
+    Returns:
+        bool: True if configurations match (ignoring UI-only keys), False otherwise.
+    """
+    return filter_config_for_comparison(
+        config1
+    ) == filter_config_for_comparison(config2)
+
+
+def find_matching_preset(
+    ledfx_presets, user_presets, ledfx_effects, effect_type, effect_config
+):
+    """Find a matching preset for the given effect configuration.
+
+    Searches through both system (ledfx) and user presets to find a preset
+    that matches the given effect configuration. Ignores UI-only keys like
+    'advanced' and 'diag' during comparison.
+
+    Args:
+        ledfx_presets (dict): The system presets configuration.
+        user_presets (dict): The user presets configuration.
+        ledfx_effects (dict): The effects registry.
+        effect_type (str): The type of effect to match.
+        effect_config (dict): The effect configuration to match against presets.
+
+    Returns:
+        tuple: (preset_id, category) if a match is found, otherwise (None, None).
+            category will be either 'ledfx_presets' or 'user_presets'.
+    """
+    from fx.utils import generate_defaults
+
+    if not isinstance(effect_config, dict):
+        return None, None
+
+    # Check ledfx_presets first
+    ledfx_defaults = generate_defaults(
+        ledfx_presets, ledfx_effects, effect_type
+    )
+    for preset_id, preset_data in ledfx_defaults.items():
+        preset_config = preset_data.get("config", {})
+        if configs_match(preset_config, effect_config):
+            return preset_id, "ledfx_presets"
+
+    # Check user_presets
+    if effect_type in user_presets:
+        for preset_id, preset_data in user_presets[effect_type].items():
+            preset_config = preset_data.get("config", {})
+            if configs_match(preset_config, effect_config):
+                return preset_id, "user_presets"
+
+    return None, None
+
+
+def remove_virtuals_active_effects(config: dict) -> None:
+    """
+    Removes active effects from virtuals
+    All effects configs will remain in the virtuals, but the active effect will be removed
+    This allows for recovery from scenarios where an effect configuration is poisened
+    The user retains all their other settings.
+    The poisoned effect config will still be present in the virtuals effects list and will crash the app if it is selected
+    This may be addreessed by future fixes in the application or manual removal
+    of the effect from virtuals effects list once it is identified
+    This can only be identified via selective activation of effects to the point of crash
+    """
+
+    for virtual in config["virtuals"]:
+        virtual.pop("effect", None)

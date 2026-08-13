@@ -1,0 +1,624 @@
+import logging
+import os
+
+import PIL.ImageEnhance as ImageEnhance
+import PIL.ImageSequence as ImageSequence
+import voluptuous as vol
+from PIL import Image, ImageChops
+
+from fx.color import parse_color
+from fx.consts import LEDFX_ASSETS_PATH
+from fx.effects.gifbase import GifBase
+from fx.effects.twod import Twod
+from fx.utils import (
+    clip_at_limit,
+    extract_positive_integers,
+    get_mono_font,
+    open_gif,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class Keybeat2d(Twod, GifBase):
+    NAME = "Keybeat2d"
+    CATEGORY = "Matrix"
+    # background colors make no sense with gifs, just hide them
+    HIDDEN_KEYS = Twod.HIDDEN_KEYS + [
+        "background_color",
+        "background_brightness",
+        "background_mode",
+    ]
+    ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
+        "deep_diag",
+        "fake_beat",
+        "pp_skip",
+        "resize_method",
+        "image_brightness",
+    ]
+
+    CONFIG_SCHEMA = vol.Schema(
+        {
+            vol.Optional(
+                "stretch_horizontal",
+                description="Percentage of original to matrix width",
+                default=100,
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=200)),
+            vol.Optional(
+                "stretch_vertical",
+                description="Percentage of original to matrix height",
+                default=100,
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=200)),
+            vol.Optional(
+                "center_horizontal",
+                description="Center offset in horizontal direction percent of matrix width",
+                default=0,
+            ): vol.All(vol.Coerce(int), vol.Range(min=-95, max=95)),
+            vol.Optional(
+                "center_vertical",
+                description="Center offset in vertical direction percent of matrix height",
+                default=0,
+            ): vol.All(vol.Coerce(int), vol.Range(min=-95, max=95)),
+            vol.Optional(
+                "image_location",
+                description="Load gif from url or path",
+                default="",
+            ): str,
+            vol.Optional(
+                "beat_frames",
+                description="Frame index to interpolate beats between",
+                default="",
+            ): str,
+            vol.Optional(
+                "skip_frames",
+                description="Frames to remove from gif animation",
+                default="",
+            ): str,
+            vol.Optional(
+                "deep_diag",
+                description="Diagnostic overlayed on matrix",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "fake_beat",
+                description="Trigger test code with 0.05 beat per frame",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "keep_aspect_ratio",
+                description="Preserve aspect ratio if force fit",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "force_fit",
+                description="Force fit to matrix",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "ping_pong_skip",
+                description="When ping pong, skip the first beat key frame on both ends, use when key beat frames are very close to start and ends only",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "ping_pong",
+                description="Play gif forward and reverse, not just loop",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "half_beat",
+                description="half the beat input impulse, slow things down",
+                default=False,
+            ): bool,
+            vol.Optional(
+                "image_brightness",
+                description="Image brightness",
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=3.0)),
+            vol.Optional(
+                "tint",
+                description="Tint color multiplied into the gif frames, empty to disable",
+                default="",
+            ): str,
+        }
+    )
+
+    last_gif = None
+
+    def __init__(self, ledfx, config):
+        super().__init__(ledfx, config)
+        self.min_vol = 0
+        self.min_vol_found_in_last_beat = False
+        self.above_min_vol = False
+
+    def deactivate(self):
+        """Clean up PIL Images when effect is deactivated"""
+        # Close orig_frames
+        if hasattr(self, "orig_frames") and self.orig_frames:
+            for frame in self.orig_frames:
+                try:
+                    frame.close()
+                except Exception:
+                    pass
+
+        # Close post_frames
+        if hasattr(self, "post_frames") and self.post_frames:
+            for frame in self.post_frames:
+                try:
+                    frame.close()
+                except Exception:
+                    pass
+
+        # Close frames
+        if hasattr(self, "frames") and self.frames:
+            for frame in self.frames:
+                try:
+                    frame.close()
+                except Exception:
+                    pass
+
+        # CRITICAL: Call parent deactivate to unsubscribe from audio callbacks and cleanup parent resources
+        super().deactivate()
+
+    def config_updated(self, config):
+        super().config_updated(config)
+        self.stretch_h = self._config["stretch_horizontal"] / 100.0
+        self.stretch_v = self._config["stretch_vertical"] / 100.0
+        self.center_h = self._config["center_horizontal"] / 100.0
+        self.center_v = self._config["center_vertical"] / 100.0
+
+        self.image_location = self._config["image_location"]
+
+        self.ping_pong = self._config["ping_pong"]
+        self.ping_pong_skip = self._config["ping_pong_skip"]
+        self.force_fit = self._config["force_fit"]
+        self.force_aspect = self._config["keep_aspect_ratio"]
+        self.fake_beat = self._config["fake_beat"]
+        self.deep_diag = self._config["deep_diag"]
+        self.half_beat = self._config["half_beat"]
+
+        # Explicitly close PIL Images before clearing lists to release C-level memory
+        if hasattr(self, "frames") and self.frames:
+            for frame in self.frames:
+                try:
+                    frame.close()
+                except Exception:
+                    pass
+        self.frames = []
+        self.reverse = False
+
+        self.gif = None
+        self.default = os.path.join(LEDFX_ASSETS_PATH, "gifs", "skull.gif")
+
+        # attempt to load gif, default on error or no url to test pattern
+        if self.last_gif != self.image_location:
+            # Close old orig_frames before loading new ones
+            if hasattr(self, "orig_frames") and self.orig_frames:
+                for frame in self.orig_frames:
+                    try:
+                        frame.close()
+                    except Exception:
+                        pass
+
+            if self.image_location:
+                self.gif = open_gif(
+                    self.image_location, config_dir=self._ledfx.config_dir
+                )
+
+            if self.gif is None:
+                self.gif = open_gif(
+                    self.default, config_dir=self._ledfx.config_dir
+                )
+                self.force_fit = True
+
+            iterator = ImageSequence.Iterator(self.gif)
+            self.orig_frames = []
+
+            for frame in iterator:
+                self.orig_frames.append(frame.convert("RGB"))
+            self.gif.close()
+
+        self.last_gif = self.image_location
+        self.beat = 0.0  # beat oscillator
+        self.frame_c = 0  # current frame index to render
+        self.frame_s = 0  # seq frame index for when wrapping around
+        self.f_beat = 0.0  # fake beat oscillator
+
+        self.framecount = len(self.orig_frames)
+        self.beat_frames = clip_at_limit(
+            sorted(extract_positive_integers(self._config["beat_frames"])),
+            len(self.orig_frames),
+        )
+        self.skip_frames = clip_at_limit(
+            sorted(extract_positive_integers(self._config["skip_frames"])),
+            len(self.orig_frames),
+        )
+
+        if self.logsec.diag:
+            _LOGGER.info(
+                "framecount %s beat frames %s",
+                self.framecount,
+                self.beat_frames,
+            )
+            _LOGGER.info(
+                "framecount %s skip frames %s",
+                self.framecount,
+                self.skip_frames,
+            )
+
+        # Close old post_frames before creating new ones
+        # Important: post_frames are enhanced copies, different objects from orig_frames
+        if hasattr(self, "post_frames") and self.post_frames:
+            for frame in self.post_frames:
+                try:
+                    frame.close()
+                except Exception:
+                    pass
+
+        # Create working list from orig_frames (shallow copy - just references)
+        self.post_frames = self.orig_frames.copy()
+        # remove any frames that are in skip_frames
+        for frame_index in self.skip_frames:
+            self.post_frames[frame_index] = None
+
+        # strip out None frames
+        self.post_frames = [img for img in self.post_frames if img is not None]
+
+        # Apply brightness enhancement - this creates NEW PIL Image objects
+        # The enhance() method returns a new image, leaving originals untouched
+        self.post_frames = [
+            ImageEnhance.Brightness(frame).enhance(
+                self._config["image_brightness"]
+            )
+            for frame in self.post_frames
+        ]
+
+        # Tint: multiply frames by a solid color. Designed for white-master
+        # gifs (e.g. SpotFX dancers) so one asset can render in any color.
+        # A tint-only config change skips the gif reload above (last_gif
+        # unchanged), so retinting is cheap.
+        tint = self._config.get("tint", "")
+        if tint:
+            try:
+                tint_rgb = tuple(parse_color(tint))
+                self.post_frames = [
+                    ImageChops.multiply(
+                        frame, Image.new("RGB", frame.size, tint_rgb)
+                    )
+                    for frame in self.post_frames
+                ]
+            except Exception:
+                _LOGGER.warning(
+                    "Keybeat2d: ignoring invalid tint %r", tint
+                )
+
+        if self.logsec.diag:
+            _LOGGER.info(
+                "************************* start beat frame debug *************************"
+            )
+        # adjust beat frames for removed frames
+        sl = len(self.skip_frames)
+        for s, skip_index in enumerate(reversed(self.skip_frames)):
+            si = sl - 1 - s
+            if self.logsec.diag:
+                _LOGGER.info(
+                    "si: %s skip_index: %s resolves %s from %s",
+                    si,
+                    skip_index,
+                    self.skip_frames[si],
+                    self.skip_frames,
+                )
+            bl = len(self.beat_frames)
+            for b, beat_index in enumerate(reversed(self.beat_frames)):
+                bi = bl - 1 - b
+                if self.logsec.diag:
+                    _LOGGER.info(
+                        "bi: %s beat_index: %s resolves %s from %s",
+                        bi,
+                        beat_index,
+                        self.beat_frames[bi],
+                        self.beat_frames,
+                    )
+                if beat_index > skip_index:
+                    self.beat_frames[bi] -= 1
+                    if self.logsec.diag:
+                        _LOGGER.info("reduce by 1 %s", self.beat_frames[bi])
+                if beat_index == skip_index:
+                    del self.beat_frames[bi]
+                    if self.logsec.diag:
+                        _LOGGER.info(
+                            "delete %s from %s", beat_index, self.beat_frames
+                        )
+
+        self.framecount = len(self.post_frames)
+
+        if self.logsec.diag:
+            _LOGGER.info(
+                "framecount %s beat frames %s",
+                self.framecount,
+                self.beat_frames,
+            )
+
+        # for ping pong, first lets copy all the frames in reverse order, without repeating the end frames
+        # then we need to add the beat frame indexs in reverse order, while accounting that they are now reversed and offset
+        if self.ping_pong:
+            # remove first and last frames from the copy, so we don't repeat them
+            self.post_frames.extend(reversed(self.post_frames[1:-1]))
+            # ensure we don't have beat indexes into the removed frames
+            self.mirror_beats = [
+                x
+                for x in reversed(self.beat_frames)
+                if x != 0 and x != self.framecount - 1
+            ]
+            beat_frames_ext = [
+                self.framecount + self.framecount - b - 2
+                for b in self.mirror_beats
+            ]
+
+            # its hard to decide if this makes sense as a feature
+            if self.ping_pong_skip and len(beat_frames_ext) >= 2:
+                beat_frames_ext = beat_frames_ext[:-1]
+                self.beat_frames = self.beat_frames[:-1]
+
+            self.beat_frames.extend(beat_frames_ext)
+            self.framecount = len(self.post_frames)
+
+            if self.logsec.diag:
+                _LOGGER.info(
+                    "************************* Ping Pong impacts *************************"
+                )
+                _LOGGER.info(
+                    "framecount %s beat frames %s",
+                    self.framecount,
+                    self.beat_frames,
+                )
+
+        # we have beat frames, that are now correctly indexed against image frames
+        # next we have to calculate for each beat end point, how much a frame represents in a beat continuum of 1
+        # then we can interpolate between frames based on beat progress
+        # we should always start animation from the first frame with a beat, never from frame 0
+
+        self.beat_incs = []
+        if len(self.beat_frames) == 0:
+            self.idx = 0
+            self.beat_idx = 0
+            self.beat_incs = [1.0]
+        else:
+            self.beat_idx = 0
+            self.idx = self.beat_frames[self.beat_idx]
+
+            for b, beat_index in enumerate(self.beat_frames):
+                if b == len(self.beat_frames) - 1:
+                    # last beat frame so loop to first for calculation
+                    frames = self.framecount - beat_index + self.beat_frames[0]
+                    self.beat_incs.append(1.0 / frames)
+                else:
+                    self.beat_incs.append(
+                        1.0 / (self.beat_frames[b + 1] - beat_index)
+                    )
+
+        if self.logsec.diag:
+            _LOGGER.info(
+                "************************* end beat frame debug *************************"
+            )
+            _LOGGER.info("beat_frames: %s", self.beat_frames)
+            _LOGGER.info("beat_incs  %s", self.beat_incs)
+            _LOGGER.info(
+                "************************* end beat frame debug *************************"
+            )
+
+        self.num_beat_frames = len(self.beat_frames)
+        self.last_beat = 0.0
+
+        self.suppress_beat = False
+        self.min_vol_found_in_last_beat = False
+        self.above_min_vol = False
+
+    def do_once(self):
+        super().do_once()
+        # defer things that can't be done when pixel_count is not known
+
+        if self.rotate == 1 or self.rotate == 3:
+            self.stretch_v, self.stretch_h = self.stretch_h, self.stretch_v
+            self.center_v, self.center_h = self.center_h, self.center_v
+
+        for frame in self.post_frames:
+            if not self.force_fit:
+                stretch_height = int(self.stretch_v * frame.height)
+                stretch_width = int(self.stretch_h * frame.width)
+            else:
+                self.center_h = 0
+                self.center_v = 0
+
+                if not self.force_aspect:
+                    stretch_height = self.r_height
+                    stretch_width = self.r_width
+                else:
+                    # preserve aspect ratio
+                    # find the larger scale factor
+                    scale = min(
+                        float(self.r_width) / frame.width,
+                        float(self.r_height) / frame.height,
+                    )
+                    stretch_height = int(scale * frame.height)
+                    stretch_width = int(scale * frame.width)
+
+            stretch_width = max(1, stretch_width)
+            stretch_height = max(1, stretch_height)
+
+            self.frames.append(
+                frame.resize(
+                    (stretch_width, stretch_height), self.resize_method
+                )
+            )
+
+        self.offset_x = int(
+            ((self.r_width - stretch_width) / 2)
+            + (self.center_h * self.r_width)
+        )
+        self.offset_y = int(
+            ((self.r_height - stretch_height) / 2)
+            + (self.center_v * self.r_height)
+        )
+
+        if self.deep_diag:
+            self.font = get_mono_font(10)
+
+            self.beat_times = []  # rolling window of beat timestamps
+            self.beat_f_times = []  # rolling windows of frame info
+            self.begin_time = self.now
+
+        self.last_beat_t = self.now
+        self.min_vol = self.audio._config["min_volume"]
+
+    def audio_data_updated(self, data):
+        if self.half_beat:
+            self.beat = (data.bar_oscillator() % 2) / 2
+        else:
+            self.beat = data.beat_oscillator()
+        vol = max(0, min(1, self.audio.volume(filtered=False)))
+        self.above_min_vol = vol >= self.min_vol
+
+        # Teleplot.send(f"beat:{self.beat}")
+        # Teleplot.send(f"vol:{vol}")
+        # Teleplot.send(f"min_vol:{self.min_vol}")
+        # Teleplot.send(f"beatnow:{1 if data.bpm_beat_now() else 0}")
+        # Teleplot.send(f"suppress:{1 if self.suppress_beat else 0}")
+        # Teleplot.send(f"above_min_vol:{1 if self.above_min_vol else 0}")
+        # Teleplot.send(f"min_found:{1 if self.min_vol_found_in_last_beat else 0}")
+
+    def overlay(self, beat_kick, skip_beat):
+        # add beat timestamps to the rolling window beat_list
+        # use len of beat_list as bpm
+        if beat_kick:
+            self.beat_times.append(self.now)
+            color = (255, 255, 255)
+        elif skip_beat:
+            color = (255, 0, 0)
+        else:
+            color = (255, 0, 255)
+
+        self.beat_f_times.append((self.now, self.beat, self.frame_c, color))
+        # cull any beats older than 60 seconds
+        self.beat_times = [
+            beat for beat in self.beat_times if self.now - beat < 60.0
+        ]
+        self.beat_f_times = [
+            f_beat
+            for f_beat in self.beat_f_times
+            if self.now - f_beat[0] < 60.0
+        ]
+
+        # lets graph directly into the draw space
+        # loop through beat_list and draw a dot for each beat
+        # start at the last entry and work backwards
+        graph_s = 9
+        graph_h = min(self.r_height - 9, 32)
+        x = 0
+        pixels = self.matrix.load()
+        for _, beat, f_frame, color in reversed(self.beat_f_times):
+            y_beat = graph_s + graph_h - beat * graph_h
+            if y_beat < self.matrix.height:
+                pixels[x, y_beat] = (255, 255, 0)
+            y_frame = graph_s + graph_h - (f_frame / self.framecount) * graph_h
+            if y_frame < self.matrix.height:
+                pixels[x, y_frame] = color
+            x += 1
+            if x >= self.matrix.width:
+                break
+
+        # if we have not reached a 60 second window yet, then gestimate bpm
+        passed = self.now - self.begin_time
+        self.bpm = len(self.beat_times)
+
+        if passed > 0 and passed < 60.0:
+            self.bpm *= 60 / passed
+            color = (255, 0, 255)
+        else:
+            color = (255, 255, 0)
+
+        if beat_kick:
+            diag_string = "\u25cf\u25cf\u25cf\u25cf"  # filled circle char
+            color = (255, 255, 255)
+        else:
+            diag_string = "\u25cb" * int(self.beat * 4) + " " * (
+                4 - int(self.beat * 4)
+            )
+
+        diag_string += f"{self.frame_c:03} {self.bpm:3.0f} {passed:.0f}"
+        self.m_draw.text((0, 0), diag_string, fill=color, font=self.font)
+
+    def draw(self):
+        beat_kick = False
+        skip_beat = False
+
+        # fake beat for testing at 200 frames per beat
+        if self.fake_beat:
+            self.f_beat = (self.f_beat + 0.005) % 1.0
+            self.beat = self.f_beat
+
+        # if we see beat go from a larger number to a smaller one, we hit a beat
+        if self.beat < self.last_beat:
+            # protect against false beats with less than 100ms ~= 600 bpm!
+            if self.now - self.last_beat_t < 0.1:
+                skip_beat = True
+                if self.deep_diag:
+                    _LOGGER.info(
+                        "skip beat threshold triggered: %s",
+                        self.now - self.last_beat_t,
+                    )
+            else:
+                beat_kick = True
+                # if there was no minimum volume for the duration since the last beat
+                # then suppress beat progression
+                if not self.min_vol_found_in_last_beat:
+                    self.suppress_beat = True
+                else:
+                    self.suppress_beat = False
+                    if self.num_beat_frames == 0:
+                        # let's just advance one frame per beat when there are no key frames
+                        self.frame_s = self.frame_c = (
+                            self.frame_c + 1
+                        ) % self.framecount
+                    else:
+                        self.beat_idx = (
+                            self.beat_idx + 1
+                        ) % self.num_beat_frames
+                self.min_vol_found_in_last_beat = False
+
+            self.last_beat_t = self.now
+
+        self.last_beat = self.beat
+
+        # latch if we find a min vol in the beat window
+        if self.above_min_vol:
+            self.min_vol_found_in_last_beat = True
+
+        if self.num_beat_frames > 0:
+            if not self.suppress_beat:
+                # Using the self.beat progress, we can interpolate between frames
+                frame_progress = self.beat / self.beat_incs[self.beat_idx]
+                self.frame_c = (
+                    int(frame_progress) + self.beat_frames[self.beat_idx]
+                )
+                self.frame_s = self.frame_c
+                self.frame_c %= self.framecount
+        else:
+            frame_progress = 0.0
+
+        if self.deep_diag:
+            _LOGGER.info(
+                "self.beat %s beat_inc: %s beat_idx: %s frame_progress: %s kick: %s seq: %s frame: %s",
+                self.beat,
+                self.beat_incs[self.beat_idx],
+                self.beat_idx,
+                frame_progress,
+                beat_kick,
+                self.frame_s,
+                self.frame_c,
+            )
+
+        current_frame = self.frames[self.frame_c]
+        self.matrix.paste(current_frame, (self.offset_x, self.offset_y))
+
+        if self.deep_diag:
+            self.overlay(beat_kick, skip_beat)
