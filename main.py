@@ -166,6 +166,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(engine.run(), name="trigger-engine"),
         asyncio.create_task(tune_scheduler.worker_loop(), name="tune-scheduler"),
     ]
+    # Write-plane wedge tripwire + systemd watchdog gating (its own task, not
+    # inside latency_loop — monitoring must not die with the monitored).
+    # Dark-compatible: without Type=notify/WatchdogSec in the unit
+    # (deploy/spotfx.service), its sd_notify calls are no-ops.
+    from services import write_plane_watchdog
+    tasks.append(asyncio.create_task(
+        write_plane_watchdog.run_supervised(), name="write-plane-watchdog"))
     # Guest source: watches the snapcast Guest/AirPlay streams and drives the
     # engine in simple-triggerless mode while a guest session owns the speakers.
     from services import guest_source

@@ -102,6 +102,13 @@ while the RTT probe is healthy is a wedged write plane, not a LedFX problem.
 Effects self-animate in LedFX, so a dead write plane still *looks* like a
 working light show.
 
+Tripwire behind the self-heal: `services/write_plane_watchdog.py` (own
+supervised task) evaluates `get_health()` every 30s and pings systemd's
+watchdog only while the write plane is alive — breaker-open (LedFX-side
+outage) counts as alive; predicate rationale is in its docstring. Inert until
+the live unit gains `Type=notify`/`WatchdogSec` (`deploy/spotfx.service` is
+the documented snippet; deploying it is an owner action).
+
 ## Editor Preview (per-level test fires)
 
 `POST /api/events/preview` fires an UNSAVED payload: `{event: MusicEvent}`
