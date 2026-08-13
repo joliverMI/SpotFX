@@ -22,9 +22,13 @@ data/spectra-sequencing-design/report.md Parts 2–4).
   - flare_entries: the flare selector's entries (decision 3) — curve × genre
     only; dwell_weight is carried by the shared entry shape but flares have
     no dwell and the selector never reads it.
-
-Colour sets are NOT here yet — they are wired last, in a separate change
-(decision 3; the wheel-travel factor already lives in selection_kernel).
+  - color_set_entries + wheel_travel_curve: the colour-set selector — the
+    kernel's third flavour, wired LAST (decision 3). score = curve(intensity)
+    × genre × wheel-travel, where wheel travel is itself a named curve
+    profile over angular distance (0–180° → x 0–1). No dwell: colours change
+    with scenes, not on their own clock, and the selector never reads
+    dwell_weight. Rainbow-tagged sets (services/color_wheel.py) take a
+    neutral ×1.0 wheel factor and never move the room's wheel position.
 
 Executable spec: scripts/check_sequencer.py
 """
@@ -124,6 +128,15 @@ class SequencerConfig(BaseModel):
     # Flare selector (decision 3): shares the kernel with curve × genre only —
     # no third factor, no dwell; its terminal ladder rung fires NOTHING.
     flare_entries: dict[str, SelectorEntry] = Field(default_factory=dict)
+    # Colour-set selector (decision 3, wired last): ColorSetCard id → entry.
+    # curve × genre × wheel-travel; no dwell (dwell_weight is never read);
+    # terminal ladder rung KEEPS the current colours — never forced to churn.
+    color_set_entries: dict[str, SelectorEntry] = Field(default_factory=dict)
+    # The wheel-travel likelihood curve: a named CurveProfile id evaluated
+    # over angular distance (x = travel/180°). None = neutral ×1.0 everywhere.
+    # Seeded downhill ("prefer small steps") by seed_sequencer_from_legacy so
+    # the migrated room approximates today's deterministic palette walk.
+    wheel_travel_curve: Optional[str] = None
 
     @model_validator(mode="after")
     def _no_duplicate_edges(self) -> "SequencerConfig":

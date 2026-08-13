@@ -29,7 +29,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from config import PROFILES_DIR
-from models.sequencer import CurveProfile, SequencerConfig
+from models.sequencer import CurvePoint, CurveProfile, SequencerConfig
 from services import selection_kernel as kernel
 from services import sequencer_store
 from services.scene_sequencer import scene_sequencer
@@ -73,14 +73,20 @@ async def get_config():
 @router.put("/config")
 async def put_config(config: SequencerConfig):
     known = set(sequencer_store.load_curves())
-    all_entries = list(config.entries.values()) + list(config.flare_entries.values())
+    all_entries = (list(config.entries.values())
+                   + list(config.flare_entries.values())
+                   + list(config.color_set_entries.values()))
     dangling = sorted({e.curve_ref for e in all_entries
                        if e.curve_ref is not None and e.curve_ref not in known})
+    if config.wheel_travel_curve is not None and \
+            config.wheel_travel_curve not in known:
+        dangling.append(config.wheel_travel_curve)
     if dangling:
         raise HTTPException(422, f"unknown curve profile id(s): {', '.join(dangling)}")
     sequencer_store.save_config(config)
     return {"status": "saved", "entries": len(config.entries),
             "flare_entries": len(config.flare_entries),
+            "color_set_entries": len(config.color_set_entries),
             "affinity_edges": len(config.affinity),
             "enabled": config.enabled}
 
@@ -98,8 +104,11 @@ async def put_curves(curves: dict[str, CurveProfile]):
     config = sequencer_store.load_config()
     referenced = {e.curve_ref
                   for e in (list(config.entries.values())
-                            + list(config.flare_entries.values()))
+                            + list(config.flare_entries.values())
+                            + list(config.color_set_entries.values()))
                   if e.curve_ref is not None}
+    if config.wheel_travel_curve is not None:
+        referenced.add(config.wheel_travel_curve)
     orphaned = sorted(referenced - set(curves))
     if orphaned:
         raise HTTPException(
@@ -116,12 +125,26 @@ async def get_status():
 class SimulateRequest(BaseModel):
     intensity: float = Field(ge=0.0, le=1.0)
     n: int = Field(default=1000, ge=1, le=100_000)
-    kind: Literal["scene", "flare"] = "scene"
-    # Scene rolls: the excluded current scene (None ≡ no active scene).
+    kind: Literal["scene", "flare", "color_set"] = "scene"
+    # Scene rolls: the excluded current scene; colour rolls: the excluded
+    # current colour set (None ≡ no active one).
     current_id: Optional[str] = None
     # Genre bucket (training-profile name); None = neutral ×1.0 everywhere.
     genre_bucket: Optional[str] = None
+    # Colour rolls: the room's wheel position to simulate from (None = no
+    # chromatic set has fired — wheel travel is neutral for everyone).
+    room_position_deg: Optional[float] = Field(default=None, ge=0.0, lt=360.0)
     seed: Optional[int] = None
+
+
+def _color_set_positions() -> dict[str, Optional[float]]:
+    """Wheel position per existing kind="set" card (None = rainbow/
+    achromatic). Simulation is kernel-only: the per-scene two-way filter is
+    the engine's concern and is not applied here."""
+    from services import color_set_store, color_wheel
+    return {sid: p.position_deg
+            for sid, p in color_wheel.wheel_positions(
+                color_set_store.list_all()).items()}
 
 
 @router.post("/simulate")
@@ -132,6 +155,15 @@ async def simulate(req: SimulateRequest):
     if req.kind == "flare":
         candidates = kernel.build_flare_candidates(
             config.flare_entries, curves, genre_bucket=req.genre_bucket)
+    elif req.kind == "color_set":
+        wheel_profile = (curves.get(config.wheel_travel_curve)
+                         if config.wheel_travel_curve else None)
+        candidates = kernel.build_color_set_candidates(
+            config.color_set_entries, curves,
+            genre_bucket=req.genre_bucket, room_deg=req.room_position_deg,
+            set_positions=_color_set_positions(),
+            wheel_points=(wheel_profile.points if wheel_profile
+                          else [CurvePoint(x=0.0, y=1.0)]))
     else:
         candidates = kernel.build_scene_candidates(
             config.entries, curves, config.affinity,
@@ -142,6 +174,9 @@ async def simulate(req: SimulateRequest):
     for _ in range(req.n):
         if req.kind == "flare":
             pick = kernel.select_flare(candidates, intensity=req.intensity, rng=rng)
+        elif req.kind == "color_set":
+            pick = kernel.select_color_set(candidates, intensity=req.intensity,
+                                           rng=rng, current_id=req.current_id)
         else:
             pick = kernel.select(candidates, intensity=req.intensity, rng=rng,
                                  current_id=req.current_id,

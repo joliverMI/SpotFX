@@ -50,7 +50,12 @@ accepted, don't "fix" it), seeder `scripts/seed_sequencer_from_legacy.py`
 Interface split: curves are edited graphically (Scenes page); genre/affinity/
 dwell/enabled only via `PUT /api/sequencer/config` (tell the agent — no
 forms). Spec: `.venv/bin/python scripts/check_sequencer.py`. Colour-set
-selector is deliberately not wired yet (wired last).
+selector (the kernel's third flavour, wired last): curve × genre ×
+wheel-travel (a named curve over 0–180° of wheel movement), no dwell —
+colours roll only when the sequencer fires a scene, scene + set land in one
+`scene_v2_compiler.fire_scene(color_set=...)` compile, and the ladder's
+terminal rung KEEPS the current colours (never forced churn). Rainbow sets:
+neutral ×1.0 wheel factor, never move the room's wheel position.
 
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 

@@ -21,9 +21,18 @@ rung when weighted drawing is impossible (all earlier rungs demand a
 positive, finite score; a pathological curve height like inf falls through
 to uniform rather than poisoning the draw).
 
-The wheel-travel factor below is the colour-set selector's third factor
-(decision 3) — colour sets are wired LAST, in a separate change; the
-geometry and the binding rainbow exemption already live here.
+The colour-set selector is the kernel's third flavour (decision 3, wired
+last): score = curve(intensity) × genre × WHEEL-TRAVEL, where wheel travel
+is a likelihood curve over the angular distance (0–180°) the pick would
+move the room's current wheel position. Its ladder is its own:
+
+    full → drop wheel-travel → drop genre → uniform among curve-eligible
+         → terminal KEEP the current colours (no change)
+
+Colours are never forced to churn: when nothing else is eligible the room
+keeps its palette. Rainbow-tagged sets (chromatic span > 180°,
+services/color_wheel.py) take a NEUTRAL ×1.0 wheel factor and are skipped
+by rotation mechanics — they stay eligible through their intensity curves.
 
 Executable spec: scripts/check_sequencer.py
 """
@@ -39,8 +48,9 @@ from models.sequencer import (AffinityEdge, CurvePoint, CurveProfile,
 WHEEL_HALF_TURN_DEG = 180.0
 
 # Terminal rung per selector kind (decision 2).
-TERMINAL_STAY = "stay"        # scenes: a room must always show something
-TERMINAL_NOTHING = "nothing"  # flares: the all-gated-out answer is silence
+TERMINAL_STAY = "stay"          # scenes: a room must always show something
+TERMINAL_NOTHING = "nothing"    # flares: the all-gated-out answer is silence
+TERMINAL_KEEP = "keep_colors"   # colour sets: never forced to churn
 
 # Ladder rung names, in order. "full" is the normal (non-fallback) draw.
 RUNG_FULL = "full"
@@ -48,6 +58,7 @@ RUNG_NO_AFFINITY = "no_affinity"
 RUNG_NO_GENRE = "no_genre"
 RUNG_READMIT_CURRENT = "readmit_current"
 RUNG_UNIFORM = "uniform"
+RUNG_NO_WHEEL = "no_wheel_travel"   # colour ladder only
 
 
 def curve_eval(points: list[CurvePoint], x: float) -> float:
@@ -94,11 +105,15 @@ def compose(curve_y: float, genre_mult: float, affinity_mult: float) -> float:
 
 @dataclass(frozen=True)
 class Candidate:
-    """One drawable thing, factors already resolved for this moment."""
+    """One drawable thing, factors already resolved for this moment.
+    affinity_mult is the scene selector's third factor; wheel_mult the
+    colour-set selector's — each flavour reads its own and leaves the
+    other at the neutral 1.0 default."""
     id: str
     points: list[CurvePoint]
     genre_mult: float = 1.0
     affinity_mult: float = 1.0
+    wheel_mult: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -174,6 +189,47 @@ def select_flare(candidates: list[Candidate], *, intensity: float,
                   current_id=None, terminal=TERMINAL_NOTHING)
 
 
+def select_color_set(candidates: list[Candidate], *, intensity: float,
+                     rng: Random, current_id: str | None = None) -> Pick:
+    """Colour-set selector (decision 3): curve × genre × wheel-travel over a
+    weighted draw, with the colour ladder — drop wheel-travel → drop genre →
+    uniform among curve-eligible → terminal KEEP the current colours.
+
+    The current set is excluded from every rung (all live colour groups run
+    exclude_current today); there is no re-admit rung because the terminal
+    already keeps the room's palette — picked_id None with rung
+    TERMINAL_KEEP means "change nothing", never "go dark"."""
+    curve_y = {c.id: curve_eval(c.points, intensity) for c in candidates}
+    factors = {
+        c.id: {
+            "curve": curve_y[c.id],
+            "genre": c.genre_mult,
+            "wheel": c.wheel_mult,
+            "score": compose(curve_y[c.id], c.genre_mult, c.wheel_mult),
+        }
+        for c in candidates
+    }
+    others = [c for c in candidates if c.id != current_id]
+
+    rungs: list[tuple[str, dict[str, float]]] = [
+        (RUNG_FULL,
+         {c.id: compose(curve_y[c.id], c.genre_mult, c.wheel_mult) for c in others}),
+        (RUNG_NO_WHEEL,
+         {c.id: compose(curve_y[c.id], c.genre_mult, 1.0) for c in others}),
+        (RUNG_NO_GENRE,
+         {c.id: curve_y[c.id] for c in others}),
+        (RUNG_UNIFORM,
+         {c.id: 1.0 for c in others if curve_y[c.id] > 0.0}),
+    ]
+    for rung, scores in rungs:
+        picked = _draw(scores, rng)
+        if picked is not None:
+            return Pick(picked_id=picked, rung=rung, intensity=intensity,
+                        scores=scores, factors=factors)
+    return Pick(picked_id=None, rung=TERMINAL_KEEP, intensity=intensity,
+                factors=factors)
+
+
 def genre_multiplier(entry: SelectorEntry, bucket: str | None) -> float:
     """Entry's multiplier for the song's genre bucket (training-profile name,
     matched case-insensitively). No bucket / no stated multiplier = neutral
@@ -236,6 +292,34 @@ def build_flare_candidates(entries: dict[str, SelectorEntry],
     ]
 
 
+def build_color_set_candidates(entries: dict[str, SelectorEntry],
+                               curves: dict[str, CurveProfile], *,
+                               genre_bucket: str | None,
+                               room_deg: float | None,
+                               set_positions: dict[str, float | None],
+                               wheel_points: list[CurvePoint]) -> list[Candidate]:
+    """Colour-set-selector candidates with all three factors resolved.
+
+    set_positions is the eligibility gate AND the geometry: only entries
+    keyed there become candidates (the caller has already applied the
+    two-way scene/set filter and dropped deleted sets), and each value is
+    the set's wheel position — None for rainbow/achromatic sets, which
+    makes wheel_travel_mult neutral ×1.0 (the binding rainbow exemption).
+    room_deg None (no chromatic set has fired yet) is neutral for everyone.
+    """
+    return [
+        Candidate(
+            id=eid,
+            points=resolve_curve(entry, curves),
+            genre_mult=genre_multiplier(entry, genre_bucket),
+            wheel_mult=wheel_travel_mult(wheel_points, room_deg,
+                                         set_positions[eid]),
+        )
+        for eid, entry in entries.items()
+        if eid in set_positions
+    ]
+
+
 def resolve_dwell_songs(dwell_weight: float, rng: Random) -> int:
     """Dwell target in SONGS for transition mode (decision 5): base is one
     song, so weight 2 holds ~2 songs. Fractional weights resolve
@@ -266,8 +350,8 @@ def wheel_travel_mult(points: list[CurvePoint], from_deg: float | None,
     """Wheel-travel likelihood factor; rainbow/achromatic sets are neutral ×1.0.
 
     The travel axis maps 0–180° onto the curve's 0–1 x-axis. This is the
-    colour-set selector's third factor (decision 3) — wired LAST, in a
-    separate change; the exemption is binding wherever sets appear.
+    colour-set selector's third factor (decision 3); the exemption is
+    binding wherever sets appear.
     """
     travel = wheel_travel_deg(from_deg, to_deg)
     if travel is None:

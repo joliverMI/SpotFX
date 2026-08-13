@@ -119,8 +119,37 @@ with tempfile.TemporaryDirectory() as td:
     ow = {w["virtual_id"]: w for w in scene_v2_compiler.compile_scene(ov)}
     check(ow["v-m2"]["effect_type"] == "pacman", "virtual entry overrides category")
 
+    # colour set riding a compile (the sequencer's colour-set selector):
+    # mode="set" entries take the picked palette; fixed entries stay pinned.
+    from models.music_event import MorphScope
+    palette = ColorSetCard(name="palette", entries=[
+        ColorSetEntry(color_kind="solid", color_value="#00ff00",
+                      bg_color="#000040", brightness=0.5),
+        ColorSetEntry(scope=MorphScope(virtual_ids=["v-m2"]),
+                      color_kind="solid", color_value="#0000ff"),
+    ])
+    cw = {w["virtual_id"]: w for w in scene_v2_compiler.compile_scene(scene, palette)}
+    check(cw["v-m1"]["config"]["gradient"] == "#00ff00"
+          and cw["v-m1"]["config"]["brightness"] == 0.5
+          and cw["v-m3"]["config"]["gradient"] == "#00ff00",
+          "set-mode entries take the colour set's palette (global scope)")
+    check("background_color" not in cw["v-m1"]["config"],
+          "set bg_color respects the effect's no_background_color block "
+          "(radial), same as the fixed path")
+    check(cw["v-m2"]["config"]["gradient"] == "#0000ff"
+          and "background_color" not in cw["v-m2"]["config"],
+          "a narrower set entry overrides the global one on its virtuals only")
+    check(cw["v-s1"]["config"]["gradient"] == "#ff0000",
+          "fixed-mode entries pin their own colours regardless of the set")
+    check("gradient" not in cw["v-solo"]["config"],
+          "un-imported virtuals get no set colours (scope resolution owns "
+          "nothing outside the category tree)")
+
     res = asyncio.run(scene_v2_compiler.fire_scene(scene, dry_run=True))
     check(res["dry_run"] is True and len(res["writes"]) == 5, "dry-run fire: writes only, no I/O")
+    res = asyncio.run(scene_v2_compiler.fire_scene(scene, color_set=palette, dry_run=True))
+    check(res["dry_run"] is True and len(res["writes"]) == 5,
+          "dry-run fire with a colour set: writes only, no I/O")
 
     # ── store CRUD + API router ──────────────────────────────────────────────
     from services import scene_v2_store
