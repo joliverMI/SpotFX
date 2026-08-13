@@ -50,7 +50,11 @@ the public client functions are the seam; don't fork per-transport logic in
 callers. Offline dummy-device harness: `fx/headless.py` +
 `tests/test_fx_headless.py` (deterministic frame-stepping under a fake
 clock; `silence_audio()` is mandatory in any fx test — fx must never open or
-enumerate audio devices). Do not enable the facade against live hardware
+enumerate audio devices). Stage 2 shared audio ingest: `fx/audio_ingest.py`
+(fan-out hub + hub-fed melbank source; design rationale in its docstring) +
+`api/audio_ingest_adapters.py` + `tests/test_audio_ingest.py` — DARK, nothing
+in main.py references it; production still runs its own capture streams until
+a later wiring stage. Do not enable the facade against live hardware
 until Stage 2+ resolves Hue-DTLS / DDP single-sender exclusivity with the
 running LedFX service.
 
