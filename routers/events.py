@@ -14,7 +14,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from models.music_event import Action, MusicEvent
-from services.profile_manager import list_events, get_event, save_event, delete_event, FIXED_EVENT_IDS
+from services.profile_manager import (
+    FIXED_EVENT_IDS, FIXED_OVERRIDE_FIELDS,
+    delete_event, get_event, list_events, reset_fixed_event, save_event,
+)
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -42,7 +45,11 @@ async def get_event_by_id(event_id: str):
 @router.post("")
 async def upsert_event(event: MusicEvent):
     if event.id in FIXED_EVENT_IDS:
-        raise HTTPException(403, "Built-in event cannot be edited")
+        # A built-in's body stays synthesized; its settings (name, timeline
+        # color, labels, energy, AI flag, fire offset) persist as overrides.
+        save_event(event)
+        return {"status": "saved", "id": event.id,
+                "saved_fields": list(FIXED_OVERRIDE_FIELDS)}
     # The frozen classic editor doesn't know the composite shape — reject a
     # legacy-shape payload that would silently flatten a migrated event.
     existing = get_event(event.id)
@@ -62,6 +69,16 @@ async def remove_event(event_id: str):
     if not ok:
         raise HTTPException(404, "Event not found")
     return {"status": "deleted"}
+
+
+@router.post("/{event_id}/reset")
+async def reset_event(event_id: str):
+    """Drop the saved meta overrides on a built-in event, restoring its
+    stock name / color / labels / energy / AI flag / fire offset."""
+    if event_id not in FIXED_EVENT_IDS:
+        raise HTTPException(400, "Only built-in events can be reset")
+    changed = reset_fixed_event(event_id)
+    return {"status": "reset" if changed else "already-default", "id": event_id}
 
 
 @router.post("/preview")

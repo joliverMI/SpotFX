@@ -169,7 +169,8 @@ def delete_profile(spotify_uri: str) -> bool:
 # ── Music Events ──────────────────────────────────────────────────────────────
 
 # Fixed / built-in events. Synthesized on read, never persisted to events.json,
-# and refused by save/delete. They drive the "active scene" — the last fired
+# and refused by delete (save keeps only their meta overrides — see
+# FIXED_OVERRIDE_FIELDS). They drive the "active scene" — the last fired
 # scene_update event — by re-running one of its lanes: Update→Rest, Reset→First,
 # Shape Flare→Shape, Color Flare→Color, Combo Flare→Shape+Color (parallel).
 # See trigger_engine._execute_scene_event.
@@ -180,8 +181,35 @@ FIXED_EVENT_IDS = {
     "fixed-no-action",
 }
 
+# Meta fields a user may override on a built-in event (stored in
+# FIXED_OVERRIDES_FILE and layered onto the synthesized defaults on read).
+# The BODY of a fixed event stays synthesized — only presentation and
+# scheduling metadata is editable, which is exactly what the editor's
+# "Event settings" panel exposes.
+FIXED_OVERRIDE_FIELDS = (
+    "name", "color", "labels", "energy_level", "ai_exposed", "event_offset_ms",
+)
 
-def _fixed_events() -> dict[str, MusicEvent]:
+FIXED_OVERRIDES_FILE = PROFILES_DIR.parent / "fixed_event_overrides.json"
+
+
+def _load_fixed_overrides() -> dict[str, dict]:
+    if FIXED_OVERRIDES_FILE.exists():
+        try:
+            data = json.loads(FIXED_OVERRIDES_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception as exc:
+            logger.warning("Could not parse %s: %s", FIXED_OVERRIDES_FILE.name, exc)
+    return {}
+
+
+def _save_fixed_overrides(data: dict[str, dict]) -> None:
+    FIXED_OVERRIDES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    FIXED_OVERRIDES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _fixed_event_defaults() -> dict[str, MusicEvent]:
     return {
         "fixed-update-scene": MusicEvent(
             id="fixed-update-scene", name="Update Scene", color="#FF00FF",
@@ -228,6 +256,50 @@ def _fixed_events() -> dict[str, MusicEvent]:
     }
 
 
+def _fixed_events() -> dict[str, MusicEvent]:
+    """Built-in events with the user's saved meta overrides layered on."""
+    events = _fixed_event_defaults()
+    for eid, over in _load_fixed_overrides().items():
+        ev = events.get(eid)
+        if ev is None or not isinstance(over, dict):
+            continue
+        for field in FIXED_OVERRIDE_FIELDS:
+            if field in over:
+                try:
+                    setattr(ev, field, over[field])
+                except Exception as exc:   # bad value in the file — keep the default
+                    logger.warning("Ignoring %s override %s=%r: %s",
+                                   eid, field, over[field], exc)
+    return events
+
+
+def save_fixed_event_meta(event: MusicEvent) -> None:
+    """Persist the overridable meta fields of a built-in event. Fields left at
+    their built-in default are dropped, so an event with nothing customized
+    keeps no entry at all."""
+    defaults = _fixed_event_defaults().get(event.id)
+    if defaults is None:
+        return
+    diff = {f: getattr(event, f) for f in FIXED_OVERRIDE_FIELDS
+            if getattr(event, f) != getattr(defaults, f)}
+    raw = _load_fixed_overrides()
+    if diff:
+        raw[event.id] = diff
+    else:
+        raw.pop(event.id, None)
+    _save_fixed_overrides(raw)
+
+
+def reset_fixed_event(event_id: str) -> bool:
+    """Drop every meta override for a built-in event. True if any were set."""
+    raw = _load_fixed_overrides()
+    if event_id not in raw:
+        return False
+    del raw[event_id]
+    _save_fixed_overrides(raw)
+    return True
+
+
 def _load_events_raw() -> dict:
     if EVENTS_FILE.exists():
         try:
@@ -258,7 +330,10 @@ def get_event(event_id: str) -> Optional[MusicEvent]:
 
 def save_event(event: MusicEvent) -> None:
     if event.id in FIXED_EVENT_IDS:
-        return  # built-in events are synthesized, never persisted
+        # Built-in bodies are synthesized and never persisted; only the
+        # editable meta fields are kept, as an override layer.
+        save_fixed_event_meta(event)
+        return
     raw = _load_events_raw()
     raw[event.id] = json.loads(event.model_dump_json())
     _save_events_raw(raw)

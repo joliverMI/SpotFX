@@ -36,8 +36,12 @@ export default function EventMetaPanel({ event }: { event: MusicEvent }) {
             <span style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <Checkbox value={event.ai_exposed} label="AI exposed"
                 onChange={(v) => set((d) => { d.ai_exposed = v; })} />
-              <Checkbox value={event.scene_override} label="Scene override"
-                onChange={(v) => set((d) => { d.scene_override = v; })} />
+              {/* Scene override only applies to a stored single/morph_set body,
+                  so it's meaningless on a built-in. */}
+              {!event.fixed && (
+                <Checkbox value={event.scene_override} label="Scene override"
+                  onChange={(v) => set((d) => { d.scene_override = v; })} />
+              )}
             </span>
           </Row>
           {event.event_type === 'scene_update' && (
