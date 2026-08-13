@@ -56,6 +56,12 @@ expect_invalid("missing effect_type", name="bad",
 expect_invalid("duplicate target", name="bad",
                devices=[SceneDeviceConfig(target="Matrix", effect_type="radial"),
                         SceneDeviceConfig(target="Matrix", effect_type="power")])
+expect_invalid("all-devices entry naming a target", name="bad",
+               devices=[SceneDeviceConfig(target_kind="all", target="Matrix",
+                                          effect_type="radial")])
+expect_invalid("duplicate all-devices entries", name="bad",
+               devices=[SceneDeviceConfig(target_kind="all", effect_type="radial"),
+                        SceneDeviceConfig(target_kind="all", effect_type="power")])
 
 # ── answer 2: wheel position + automatic rainbow tagging ─────────────────────
 def set_of(colors):
@@ -99,7 +105,7 @@ with tempfile.TemporaryDirectory() as td:
     device_category_service.CATEGORIES_FILE = Path(td) / "device_categories.json"
     device_category_service._save_raw({
         "c1": {"id": "c1", "name": "Matrix", "virtuals": ["v-m1", "v-m2"], "effects": ["radial"]},
-        "c2": {"id": "c2", "name": "MatrixChild", "parent_id": "c1", "virtuals": ["v-m3"], "effects": []},
+        "c2": {"id": "c2", "name": "MatrixChild", "parent_id": "c1", "virtuals": ["v-m3"], "effects": ["orbits", "blackhole"]},
         "c3": {"id": "c3", "name": "Strips", "virtuals": ["v-s1"], "effects": ["power"]},
     })
     effect_params.load()
@@ -118,6 +124,27 @@ with tempfile.TemporaryDirectory() as td:
         SceneDeviceConfig(target_kind="virtual", target="v-m2", effect_type="pacman")])
     ow = {w["virtual_id"]: w for w in scene_v2_compiler.compile_scene(ov)}
     check(ow["v-m2"]["effect_type"] == "pacman", "virtual entry overrides category")
+
+    # effect vocabulary parity: a category target fires the whole subtree of
+    # virtuals, so its effects union must cover descendants too (the effect
+    # picker sources from this resolution — child-category effects must not
+    # vanish when the parent is targeted).
+    check(effect_params.get_effects_for_category("Matrix") == ["radial", "orbits", "blackhole"],
+          "category effects cover the subtree, parent-first")
+
+    # all-devices target: every imported virtual, overridden by narrower entries
+    allscene = SceneV2(name="all", devices=[
+        SceneDeviceConfig(target_kind="all", effect_type="noise", brightness=0.3),
+        SceneDeviceConfig(target_kind="category", target="Strips", effect_type="power"),
+        SceneDeviceConfig(target_kind="virtual", target="v-m2", effect_type="pacman")])
+    aw = {w["virtual_id"]: w for w in scene_v2_compiler.compile_scene(allscene)}
+    check(set(aw) == {"v-m1", "v-m2", "v-m3", "v-s1"},
+          "all-devices entry expands to every imported virtual")
+    check(aw["v-m1"]["effect_type"] == "noise" and aw["v-s1"]["effect_type"] == "power"
+          and aw["v-m2"]["effect_type"] == "pacman",
+          "override layering: all < category < virtual")
+    check(aw["v-m1"]["config"] == {"brightness": 0.3},
+          "all-devices entry carries params/brightness like any other entry")
 
     # colour set riding a compile (the sequencer's colour-set selector):
     # mode="set" entries take the picked palette; fixed entries stay pinned.

@@ -68,16 +68,22 @@ def _apply_set_colors(config: dict[str, Any], effect_type: str,
 
 def compile_scene(scene: SceneV2,
                   color_set: Optional[ColorSetCard] = None) -> list[dict[str, Any]]:
-    """[{virtual_id, effect_type, config}] — pure; categories expand to member
-    virtuals, then virtual entries override. color_set colours land only on
-    mode="set" device entries; mode="fixed" pins its own colours regardless."""
+    """[{virtual_id, effect_type, config}] — pure; "all" expands to every
+    imported virtual, categories to member virtuals, and narrower entries
+    override wider ones (all < category < virtual). color_set colours land only
+    on mode="set" device entries; mode="fixed" pins its own colours regardless."""
     writes: dict[str, dict[str, Any]] = {}
     set_mode_vids: set[str] = set()
-    for kind in ("category", "virtual"):
+    for kind in ("all", "category", "virtual"):
         for dev in scene.devices:
             if dev.target_kind != kind:
                 continue
-            if kind == "category":
+            if kind == "all":
+                virtual_ids = list(dict.fromkeys(effect_params.get_all_virtual_ids()))
+                if not virtual_ids:
+                    logger.warning("SceneV2 %s: all-devices entry resolves to no "
+                                   "virtuals (no categories imported)", scene.name)
+            elif kind == "category":
                 virtual_ids = effect_params.get_virtuals_for_category(dev.target)
                 if not virtual_ids:
                     logger.warning("SceneV2 %s: category '%s' resolves to no virtuals",
