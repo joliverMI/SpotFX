@@ -942,6 +942,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           '▶ Test Fire saves the scene, compiles it to the per-virtual LedFX writes it would send, and shows them below the editor — nothing is sent to the devices. Use it to check which virtuals a scene resolves to and what config each would receive.',
         ],
       },
+      {
+        id: 'curve-editor',
+        title: 'Curve editor lab (dev preview)',
+        keywords: 'sequencer likelihood curve intensity draggable points histogram weight dwell',
+        body: [
+          'The collapsed "Curve editor lab" card at the bottom of the Scenes page previews the sequencer\'s likelihood-curve editor: a curve over intensity (0–1) whose height at the current intensity is how likely a thing is to be picked. A flat line at 0.7 is exactly a weight of 0.7; a region drawn at zero is a hard "never here".',
+          'Click empty space to add a point, drag a point to move it (a point can\'t cross its neighbors; two points at the same intensity make a step), double-click a point to remove it. Straight lines connect the points; outside the outermost points the curve continues flat.',
+          'The faint grey bars are the honesty underlay: a histogram of every trigger intensity in your profile library. Most of the library fires in the top half of the axis, so shape your curves where the bars are — a carefully drawn region where nothing ever fires does nothing.',
+          'This is a dev preview: edits stay on the page and attach to nothing. Attaching curves to scenes, colour sets, and flares lands with the sequencer once its open design decisions are made; relationships (genre fit, what-follows-what, dwell pace) will be adjusted by telling the agent, not by forms.',
+        ],
+      },
     ],
   },
 

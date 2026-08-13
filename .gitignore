@@ -35,6 +35,7 @@ storage/device_categories.json
 storage/morph_effect_state.json
 storage/color_sets.json
 storage/scenes_v2.json
+storage/sequencer.json
 storage/fixed_event_overrides.json
 !storage/profiles/.gitkeep
 !storage/audio_shapes/.gitkeep
