@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from fx import light_ownership
 from spectra.models.scene import SceneV2
 from spectra.services import scene_response
 from spectra.services.bridge import SpotEffectsBridge
@@ -89,8 +90,37 @@ def on_scene_fired(scene: SceneV2, writes: list[dict],
             {"type": "drift_rebaseline", **conductor._last_rebaseline}))
 
 
+def go_live(live_executor, grant: light_ownership.ActivationGrant) -> None:
+    """S3: swap the engine onto a real executor — the whole live delta the
+    S2 docstrings promised. Orchestrator-only: requires an ActivationGrant
+    valid against the ownership record RIGHT NOW, so no code path can point
+    the engine at lights SPECTRA doesn't hold."""
+    global executor
+    light_ownership.require_grant(grant, light_ownership.SPECTRA,
+                                  detail="engine go_live")
+    executor = live_executor
+    conductor.executor = live_executor
+    responses.executor = live_executor
+    logger.warning("SPECTRA engine LIVE (executor=%s)", live_executor.mode)
+
+
+def go_dark() -> None:
+    """Return the engine to the recording executor (always safe — this is
+    the shipped S2 state). The handover's quiesce/rollback path."""
+    global executor
+    dark = RecordingExecutor()
+    executor = dark
+    conductor.executor = dark
+    responses.executor = dark
+    logger.warning("SPECTRA engine dark (executor=recording)")
+
+
 async def start() -> None:
     global _conductor_task
+    # A handover orphaned by a crash leaves owner=handing-over — both worlds
+    # refusing to write (safe but dark). Land it back at its from-world.
+    # Age-gated so a live orchestrator in another process is never fought.
+    light_ownership.recover_stale_handover()
     bridge.start()
     if _conductor_task is None or _conductor_task.done():
         _conductor_task = asyncio.create_task(conductor.run(),
@@ -113,8 +143,9 @@ async def stop() -> None:
 
 def status() -> dict:
     return {
-        "increment": "S2",
+        "increment": "S3",
         "dark": executor.mode == "recording",
+        "light_ownership": light_ownership.load().owner,
         "executor": {"mode": executor.mode,
                      "recent_writes": list(executor.writes)[-20:]},
         "conductor": conductor.status(),

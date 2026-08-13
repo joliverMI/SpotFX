@@ -99,6 +99,26 @@ changes. Specs: `scripts/check_drift.py` (conductor), check_spectra.py
 (responses/bridge/Mid Group), `tests/test_spectra_engine.py`
 (frame-level proof on the dummy device).
 
+## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
+
+Exactly one process owns the lights. The durable record is
+`storage/spectra/ownership.json` via `fx/light_ownership.py` (shared library;
+missing file = spot-effects owns — the shipped default). Enforced in the
+write paths, not convention: `api/ledfx_client._request()` sheds every call
+when not owner and the LedFX-restart watchdog goes dormant (never resurrect a
+quiesced LedFX — merge-scout §4d trap); `spectra/services/fx_seam` routes
+HTTP↔facade by owner and refuses mid-handover; `fx/host.py` refuses non-dummy
+devices without a step-gated ActivationGrant. Two-step handover
+`spectra/services/handover.py` (quiesce → verify → activate → commit; every
+failure lands single-owner), live stack `spectra/services/live_host.py`
+(device layer + audio hub + frame-freshness tap). THE LIVENESS ENDPOINT
+CONTRACT: `GET /spectra/api/liveness` (`spectra/api/ownership.py`) — never
+delete or repoint without the Admiral's word. The handover API is inert until
+`SPECTRA_HANDOVER_ARMED=1`; arming and running it is the owner's word —
+procedure in `docs/SPECTRA_HANDOVER.md` (go-day seeder
+`scripts/seed_spectra_fx_live.py`). Spec:
+`.venv/bin/python scripts/check_ownership.py` + `tests/test_handover.py`.
+
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 
 `fx/` is the LedFX render pipeline vendored from the fork at commit
@@ -114,9 +134,9 @@ enumerate audio devices). Stage 2 shared audio ingest: `fx/audio_ingest.py`
 (fan-out hub + hub-fed melbank source; design rationale in its docstring) +
 `api/audio_ingest_adapters.py` + `tests/test_audio_ingest.py` — DARK, nothing
 in main.py references it; production still runs its own capture streams until
-a later wiring stage. Do not enable the facade against live hardware
-until Stage 2+ resolves Hue-DTLS / DDP single-sender exclusivity with the
-running LedFX service.
+a later wiring stage. The Hue-DTLS / DDP single-sender exclusivity with the
+running LedFX service is resolved by the S3 ownership gate: the facade
+reaches live hardware only through the handover (see the S3 section above).
 
 ## Run / deploy
 

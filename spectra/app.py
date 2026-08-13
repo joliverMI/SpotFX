@@ -9,10 +9,11 @@ lifespan calls spectra.services.engine.start()/stop() in the shared
 process, and _standalone() wires the identical pair — the S3 split changes
 which host calls them, nothing else.
 
-NOTE the /api/status handler is a PLACEHOLDER status surface, deliberately
-NOT the SPECTRA liveness endpoint contract — that named contract (per-
-virtual frame-flush freshness through the real render path) lands with S3
-ownership and must not be faked by an HTTP 200 that proves nothing.
+S3: light ownership + the SPECTRA LIVENESS ENDPOINT CONTRACT live in
+api/ownership.py — GET /spectra/api/liveness serves per-virtual frame-flush
+freshness through the real render path (never delete or repoint without the
+Admiral's word). /api/status stays the human status surface; the liveness
+contract is the checker's.
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from spectra import config
 from spectra.api import engine as engine_api
-from spectra.api import journey, registry, scenes, sequencer
+from spectra.api import journey, ownership, registry, scenes, sequencer
 
 
 class SPAStaticFiles(StaticFiles):
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(registry.router)
     app.include_router(journey.router)
     app.include_router(engine_api.router)
+    app.include_router(ownership.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):
@@ -61,18 +63,19 @@ def create_app() -> FastAPI:
 
     @app.get("/api/status")
     async def status():
+        from fx import light_ownership
         from spectra.services import (color_journey, engine, scene_store,
                                       sequencer_store)
         room = color_journey.load_room()
         seq = sequencer_store.load_config()
         return {
             "app": "SPECTRA",
-            "increment": "S2",
+            "increment": "S3",
             "scenes": len(scene_store.list_all()),
             "sequencer_enabled": seq.enabled,
             "bridge_connected": engine.bridge.connected,
             "engine_dark": engine.executor.mode == "recording",
-            "light_ownership": "spot-effects",   # S3 hands over, owner's word
+            "light_ownership": light_ownership.load().owner,
             "room_journey_degrees_per_min": room.journey.degrees_per_min,
             "room_wheel_position_deg": room.wheel_position_deg,
         }

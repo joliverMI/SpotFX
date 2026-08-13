@@ -43,10 +43,10 @@ export const HELP_SECTIONS: HelpSection[] = [
     entries: [
       {
         id: 'concept-increments',
-        title: 'What works today (increment S2)',
-        keywords: 'roadmap s1 s2 s3 engine bridge ownership dark',
+        title: 'What works today (increment S3)',
+        keywords: 'roadmap s1 s2 s3 engine bridge ownership dark handover',
         body: [
-          'S1 shipped the app and the full tabbed scene editor: bindings, dice, responses, drift declarations, colour journey, test-fire with dry-run compile. S2 (this build) adds the evolution engine: drift and responses now EXECUTE, fed read-only from spot-effects — but the engine runs DARK, computing and recording every move without touching the lights. S3 hands SPECTRA the lights (owner\'s call). Until then spot-effects owns the room; the real Fire button here writes through the same external LedFX service.',
+          'S1 shipped the app and the full tabbed scene editor: bindings, dice, responses, drift declarations, colour journey, test-fire with dry-run compile. S2 added the evolution engine: drift and responses EXECUTE, fed read-only from spot-effects — dark, recording every move. S3 (this build) adds light ownership and the safe handover: the machinery for SPECTRA to take the room is built, proven offline, and GATED OFF — spot-effects owns the lights until the owner\'s word arms and runs the switch. Until then the real Fire button here writes through the same external LedFX service.',
         ],
       },
       {
@@ -212,7 +212,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Dark — recording, not driving',
         keywords: 'recording executor s3 handover safe',
         body: [
-          'The "dark — recording" badge means the engine\'s executor records every glide and jump instead of sending them. The identical engine runs against the real render pipeline in the offline test bed; S3 swaps the executor when SPECTRA owns the lights — nothing else changes.',
+          'The "dark — recording" badge means the engine\'s executor records every glide and jump instead of sending them. The identical engine runs against the real render pipeline in the offline test bed; the S3 handover swaps the executor when the ownership record grants SPECTRA the lights — nothing else changes.',
         ],
       },
       {
@@ -247,6 +247,40 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Status page',
     keywords: 'health ownership bridge liveness engine',
     intro:
-      'App status (scene count, light ownership — spot-effects until the S3 handover, bridge state, sequencer state, room journey) plus the S2 evolution-engine card: journey custody, active scene and legs, bridge health, recorded writes. The real liveness endpoint — per-virtual frame-flush freshness — ships with S3.',
+      'App status (scene count, light ownership from the durable record, bridge state, sequencer state, room journey) plus the evolution-engine card: journey custody, active scene and legs, bridge health, recorded writes.',
+  },
+  {
+    id: 'ownership',
+    title: 'Light ownership & handover (S3)',
+    keywords:
+      'handover switchover owner spot-effects spectra liveness two writers quiesce armed',
+    intro:
+      'Exactly one process owns the lights — spot-effects (the external LedFX service) or SPECTRA — never both. The durable record (storage/spectra/ownership.json) is enforced in every write path: while spot-effects owns (the shipped default), SPECTRA touches no device and no audio input; during a handover NEITHER world writes. There is no UI switch by design: the room changes hands only on the owner\'s word, via the armed API (tell the agent; procedure in docs/SPECTRA_HANDOVER.md).',
+    entries: [
+      {
+        id: 'ownership-record',
+        title: 'Reading the state',
+        keywords: 'inspect status api record json',
+        body: [
+          'GET /spectra/api/ownership shows the owner, any in-flight handover step, and the history trail; the Status page and spot-effects\' Debug page (ledfx-health) surface the same record. States: spot-effects owns · spectra owns · handing-over.',
+        ],
+      },
+      {
+        id: 'ownership-liveness',
+        title: 'The liveness endpoint',
+        keywords: 'health checker frame flush freshness 503 contract',
+        body: [
+          'GET /spectra/api/liveness is the binding fleet contract: per-virtual frame-flush freshness straight from the render loop, HTTP 200 healthy / 503 not. While SPECTRA is dark it answers healthy only if provably dark (a live stack without ownership is the split-brain tripwire). Never remove or repoint it without the owner\'s word.',
+        ],
+      },
+      {
+        id: 'ownership-handover',
+        title: 'How the switch works (owner-run only)',
+        keywords: 'quiesce activate commit rollback failure single owner armed latch',
+        body: [
+          'Two steps, strictly ordered: quiesce the current writer and VERIFY it stopped (Hue DTLS session released, DDP sending stopped), only then activate the other (SPECTRA\'s in-process device layer + the shared audio hub — or, in reverse, restart LedFX). Any failure lands back at the old owner automatically — never two writers, never a split. The API refuses entirely until the process is armed (SPECTRA_HANDOVER_ARMED=1).',
+        ],
+      },
+    ],
   },
 ];

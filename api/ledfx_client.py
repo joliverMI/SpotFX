@@ -199,6 +199,21 @@ def _facade_enabled() -> bool:
         return False
 
 
+# ── Light ownership gate (SPECTRA S3) ────────────────────────────────────────
+# The never-two-writers rule enforced in THIS write path, not by convention:
+# unless the ownership record says spot-effects owns the lights, every call on
+# the main client is shed (both transports — HTTP and facade). During a
+# handover or SPECTRA ownership the external LedFX service is stopped or
+# surrendered; writing to it, polling it, or RESTARTING it (the watchdog —
+# merge-scout §4d's resurrect trap) would put a second writer on the room.
+# fx.light_ownership.load() never raises and a missing record means
+# spot-effects owns, so this gate is invisible until a handover exists.
+
+def _spot_effects_owns() -> bool:
+    from fx import light_ownership
+    return light_ownership.writes_allowed(light_ownership.SPOT_EFFECTS)
+
+
 async def _facade_request(method: str, path: str, *, label: str, **kwargs):
     global _last_completion
     from fx import facade
@@ -565,8 +580,9 @@ async def _request(method: str, path: str, *, label: str, **kwargs):
     the HTTP attempt.
 
     Returns the httpx.Response on success, or None when the call was shed
-    (circuit open), failed, or hit the deadline — never raises (CancelledError
-    passes through). Callers map None to their own empty/false fallback.
+    (light ownership not held, or circuit open), failed, or hit the deadline —
+    never raises (CancelledError passes through). Callers map None to their
+    own empty/false fallback.
     measure_latency() deliberately does NOT go through here: it uses the
     isolated probe client so its RTT reflects true server latency, not queue
     time.
@@ -582,6 +598,9 @@ async def _request(method: str, path: str, *, label: str, **kwargs):
       - a deadline that expires while still WAITING for a slot means the gate
         itself is starved (leaked holders) — _reset_gate() rebuilds it."""
     global _last_completion
+    if not _spot_effects_owns():
+        _record_event("ownership_shed", label)
+        return None
     if _facade_enabled():
         return await _facade_request(method, path, label=label, **kwargs)
     if _breaker_is_open():
@@ -635,10 +654,12 @@ def get_health() -> dict:
     here — breaker closed, zero failures — while no request had completed for
     7 hours. `last_completion_age_s` climbing while traffic exists (and the
     RTT probe stays healthy) is THE signature of a wedged write plane."""
+    from fx import light_ownership
     now_mono = time.monotonic()
     oldest = min((ts for _, ts in _inflight_started.values()), default=None)
     return {
         "now": time.time(),
+        "light_ownership": light_ownership.load().owner,
         "breaker_open": _breaker_is_open(),
         "consecutive_failures": _consecutive_failures,
         "max_inflight": _LEDFX_MAX_INFLIGHT,
@@ -1500,6 +1521,14 @@ async def _restart_ledfx_service() -> None:
     SpotFX's httpx clients: a LedFX restart severs our keepalive connections,
     leaving CLOSE-WAIT sockets that would wedge the pool — rebuild clean."""
     global _client, _probe_client, _last_ledfx_restart
+    if not _spot_effects_owns():
+        # Merge-scout §4d's trap: restarting LedFX while the room belongs to
+        # (or is handing to) SPECTRA starts a second writer fighting for the
+        # Hue session and interleaving DDP frames. Defense in depth — the
+        # watchdog tick already skips when not owner.
+        logger.critical("LedFX watchdog: REFUSING ledfx restart — light "
+                        "ownership is not spot-effects")
+        return
     _last_ledfx_restart = time.monotonic()
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -1546,6 +1575,11 @@ async def _ledfx_watchdog_tick() -> None:
     global _watchdog_degraded_count
     if _facade_enabled():
         return  # no external ledfx service to restart in facade mode
+    if not _spot_effects_owns():
+        # Ownership surrendered: LedFX is deliberately stopped (or being
+        # stopped). Degradation is the expected state, not a fault to heal.
+        _watchdog_degraded_count = 0
+        return
     if _capture_in_progress():
         return
     degraded = _probe_failed or (state.ledfx_rtt_ms or 0.0) > _LEDFX_RTT_DEGRADED_MS
