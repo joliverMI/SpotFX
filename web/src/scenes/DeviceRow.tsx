@@ -6,6 +6,10 @@ import type { EffectConfig } from './queries';
 import type { SceneDeviceConfig } from './types';
 import { emptyColor } from './types';
 
+/** Param types the pin editor can represent; other registry types (color,
+ * gradient, enum, string, …) are hidden until they get real editors. */
+const EDITABLE_PARAM_TYPES = new Set(['numeric', 'integer', 'toggle']);
+
 function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
   return (
     <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
@@ -43,7 +47,10 @@ export default function DeviceRow({
           : allEffects)
       : allEffects;
 
-  const paramMeta = config?.effects[dev.effect_type]?.params ?? {};
+  const paramMeta = Object.fromEntries(
+    Object.entries(config?.effects[dev.effect_type]?.params ?? {})
+      .filter(([, meta]) => EDITABLE_PARAM_TYPES.has(meta.type ?? '')),
+  );
   const isSolid = (dev.color.color_kind ?? 'solid') === 'solid';
   const inLib = gradients.some((g) => g.value === dev.color.color_value);
 
@@ -93,10 +100,13 @@ export default function DeviceRow({
                   <input type="checkbox" checked={!!val} onChange={(e) => setParam(name, e.target.checked)} />
                 )}
                 {on && meta.type !== 'toggle' && (
-                  <input type="number" value={Number(val)} step="any"
+                  <input type="number" value={Number(val)} step={meta.type === 'integer' ? 1 : 'any'}
                     min={meta.min} max={meta.max}
                     style={{ width: 64, fontSize: 12 }}
-                    onChange={(e) => setParam(name, Number(e.target.value))} />
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setParam(name, meta.type === 'integer' ? Math.round(n) : n);
+                    }} />
                 )}
               </span>
             );
