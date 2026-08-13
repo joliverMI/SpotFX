@@ -24,9 +24,21 @@ Translates:
   - Dwell weights all 1.0 (no legacy signal exists — today's model is one
     global timer). Genre multipliers and affinity are NOT seeded — they are
     authored by telling the agent.
+  - Colour sets (decision 3, wired last): every kind="set" member of a legacy
+    colour group (storage/color_sets.json) → a colour SelectorEntry keyed by
+    the SAME card id (no name mapping — both paths share the store). All live
+    weights are 1.0 → the default flat-1.0 curve; the room's palette walk is
+    carried by the wheel-travel factor instead: a default DOWNHILL profile
+    ("prefer small steps", (0,1)→(1,0)) is seeded and installed as
+    config.wheel_travel_curve, approximating today's deterministic
+    palette-sync hue-anchored stepping. Rainbow sets are seeded like any
+    other (they stay eligible via curves; the wheel exemption is the
+    kernel's). Dark/Light variant member pools are NOT seeded — variants are
+    a legacy display-mode mechanism.
 
---apply merges: seeded entries replace same-scene entries; unseeded entries,
-affinity, flare_entries, change_mode and the enabled flag are preserved.
+--apply merges: seeded entries replace same-scene/same-set entries; unseeded
+entries, affinity, flare_entries, change_mode and the enabled flag are
+preserved; wheel_travel_curve is only set when currently unset.
 The sequencer stays dark (enabled defaults False) after seeding.
 
 Usage:
@@ -48,6 +60,13 @@ from models.sequencer import CurvePoint, CurveProfile, SelectorEntry
 
 BAND_SKIRT = 0.1
 OUTLIER_WEIGHT = 10.0
+WHEEL_PROFILE_NAME = "Wheel travel — prefer small steps"
+
+
+def wheel_profile_points() -> list[CurvePoint]:
+    """The default downhill wheel-travel curve: most likely at no travel,
+    fading linearly to 0 at the opposite side of the wheel (x 1 ≡ 180°)."""
+    return [CurvePoint(x=0.0, y=1.0), CurvePoint(x=1.0, y=0.0)]
 
 
 # ── pure translation helpers (spec-covered: scripts/check_sequencer.py) ──────
@@ -129,12 +148,17 @@ class SeedPlan:
     """What an apply writes, plus the human diff table."""
     profiles: list[CurveProfile] = field(default_factory=list)   # identity = name
     entries: dict[str, SelectorEntry] = field(default_factory=dict)  # SceneV2 id → entry
+    color_entries: dict[str, SelectorEntry] = field(default_factory=dict)  # ColorSetCard id → entry
+    wheel_profile: CurveProfile | None = None   # also present in profiles
     rows: list[tuple[str, str, str]] = field(default_factory=list)   # (kind, name, detail)
 
 
-def build_seed(events: list[dict], v2_name_to_id: dict[str, str]) -> SeedPlan:
+def build_seed(events: list[dict], v2_name_to_id: dict[str, str],
+               color_cards: list | None = None) -> SeedPlan:
     """Translate legacy events into the seed plan. v2_name_to_id maps
-    lowercased SceneV2 names → ids (empty dict = every scene SKIPPED)."""
+    lowercased SceneV2 names → ids (empty dict = every scene SKIPPED).
+    color_cards (list[ColorSetCard]) enables the colour-set translation;
+    None skips it entirely — no colour entries, no wheel profile."""
     by_id = {e.get("id"): e for e in events}
     plan = SeedPlan()
 
@@ -216,15 +240,66 @@ def build_seed(events: list[dict], v2_name_to_id: dict[str, str]) -> SeedPlan:
                               f"{_fmt_points(gate_points(floor, ceiling, scale))} "
                               "(reference only — random-option gates attach to "
                               "nothing in the sequencer)"))
+
+    if color_cards is not None:
+        _seed_colors(plan, color_cards)
     return plan
 
 
-def apply_seed(plan: SeedPlan) -> tuple[int, int]:
+def _seed_colors(plan: SeedPlan, color_cards: list) -> None:
+    """Colour-set translation: the downhill wheel-travel profile plus one
+    flat-curve entry per set referenced by any legacy colour group. Card ids
+    are shared with the legacy path, so entries key directly on them."""
+    from services import color_wheel
+
+    plan.wheel_profile = CurveProfile(name=WHEEL_PROFILE_NAME,
+                                      points=wheel_profile_points())
+    plan.profiles.append(plan.wheel_profile)
+    plan.rows.append(("curve_profile", WHEEL_PROFILE_NAME,
+                      _fmt_points(plan.wheel_profile.points)
+                      + " — installed as wheel_travel_curve when unset"))
+
+    sets = {c.id: c for c in color_cards if c.kind == "set"}
+    for group in color_cards:
+        if group.kind != "group":
+            continue
+        for member in group.members:
+            card = sets.get(member.color_set_id)
+            if card is None:
+                plan.rows.append(("SKIPPED", f"{group.name} → {member.color_set_id}",
+                                  "member references no existing colour set"))
+                continue
+            if card.id in plan.color_entries:
+                continue   # a set in several groups still gets ONE entry
+            weight = member.weight
+            if weight >= OUTLIER_WEIGHT:
+                plan.rows.append(("FLAGGED", f"{group.name} → {card.name}",
+                                  f"weight {weight:g} outlier — translate by "
+                                  "hand, not seeded"))
+                continue
+            if weight == 1.0:
+                entry = SelectorEntry()
+                detail = "flat 1.0 curve"
+            else:
+                entry = SelectorEntry(
+                    inline_points=[CurvePoint(x=0.0, y=weight)])
+                detail = f"flat curve at {weight:g} (inline escape hatch)"
+            position = color_wheel.wheel_position(card)
+            wheel = ("rainbow — wheel-travel exempt" if position.rainbow
+                     else "achromatic — wheel-travel exempt"
+                     if position.position_deg is None
+                     else f"wheel {position.position_deg:g}°")
+            plan.color_entries[card.id] = entry
+            plan.rows.append(("color_entry", card.name, f"{detail}; {wheel}"))
+
+
+def apply_seed(plan: SeedPlan) -> tuple[int, int, int]:
     """Merge the plan into storage/sequencer.json. Profiles match existing
     ones BY NAME (id and unrelated profiles preserved); seeded entries
-    replace same-scene entries; everything else in config — enabled,
-    change_mode, affinity, flare_entries, unseeded entries — is preserved.
-    Returns (profiles_written, entries_written)."""
+    replace same-scene/same-set entries; everything else in config — enabled,
+    change_mode, affinity, flare_entries, unseeded entries, an already-set
+    wheel_travel_curve — is preserved.
+    Returns (profiles_written, entries_written, color_entries_written)."""
     from services import sequencer_store
 
     curves = sequencer_store.load_curves()
@@ -247,10 +322,14 @@ def apply_seed(plan: SeedPlan) -> tuple[int, int]:
                                   genre_mult=entry.genre_mult,
                                   dwell_weight=entry.dwell_weight)
         config.entries[scene_id] = entry
+    for set_id, entry in plan.color_entries.items():
+        config.color_set_entries[set_id] = entry
+    if plan.wheel_profile is not None and config.wheel_travel_curve is None:
+        config.wheel_travel_curve = remap[plan.wheel_profile.id]
 
     sequencer_store.save_curves(curves)
     sequencer_store.save_config(config)
-    return len(plan.profiles), len(plan.entries)
+    return len(plan.profiles), len(plan.entries), len(plan.color_entries)
 
 
 def main() -> int:
@@ -260,19 +339,22 @@ def main() -> int:
     args = parser.parse_args()
 
     from services.profile_manager import EVENTS_FILE
-    if not EVENTS_FILE.exists():
-        print(f"No legacy events file at {EVENTS_FILE} — nothing to translate.")
-        return 0
-    raw = json.loads(EVENTS_FILE.read_text(encoding="utf-8"))
-    events = list(raw.values()) if isinstance(raw, dict) else list(raw)
+    if EVENTS_FILE.exists():
+        raw = json.loads(EVENTS_FILE.read_text(encoding="utf-8"))
+        events = list(raw.values()) if isinstance(raw, dict) else list(raw)
+    else:
+        print(f"No legacy events file at {EVENTS_FILE} — no scene bands to "
+              "translate; colour translation still runs.")
+        events = []
 
-    from services import scene_v2_store
+    from services import color_set_store, scene_v2_store
     v2_name_to_id = {s.name.lower(): s.id for s in scene_v2_store.list_all()}
 
-    plan = build_seed(events, v2_name_to_id)
+    plan = build_seed(events, v2_name_to_id, color_set_store.list_all())
     mode = "APPLY" if args.apply else "DRY RUN"
     print(f"{mode} — {len(plan.rows)} row(s), {len(plan.profiles)} profile(s), "
-          f"{len(plan.entries)} entr(y/ies).\n")
+          f"{len(plan.entries)} scene entr(y/ies), "
+          f"{len(plan.color_entries)} colour entr(y/ies).\n")
     if plan.rows:
         kind_w = max(len(r[0]) for r in plan.rows)
         name_w = max(len(r[1]) for r in plan.rows)
@@ -284,11 +366,11 @@ def main() -> int:
               "storage/sequencer.json.")
         return 0
 
-    n_profiles, n_entries = apply_seed(plan)
+    n_profiles, n_entries, n_color = apply_seed(plan)
     from services.sequencer_store import SEQUENCER_FILE
     print(f"\nWrote {SEQUENCER_FILE}: {n_profiles} profile(s), "
-          f"{n_entries} entr(y/ies) merged. Sequencer remains dark "
-          "(config.enabled unchanged).")
+          f"{n_entries} scene entr(y/ies), {n_color} colour entr(y/ies) "
+          "merged. Sequencer remains dark (config.enabled unchanged).")
     return 0
 
 

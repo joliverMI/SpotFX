@@ -6,9 +6,9 @@ COMMITTED schema (decision 4 — named curve profiles + inline escape hatch):
       "config":         SequencerConfig }   # models/sequencer.py
 
 config carries the scene selector (entries/affinity/dwell), the flare
-selector (flare_entries), and the dark switch (enabled, default off). The
-colour-set selector joins config in a later change (decision 3 — wired
-last). Writes are atomic (tmp + os.replace in the same directory).
+selector (flare_entries), the colour-set selector (color_set_entries +
+wheel_travel_curve — decision 3, wired last), and the dark switch (enabled,
+default off). Writes are atomic (tmp + os.replace in the same directory).
 Consumers: services/scene_sequencer.py (at change moments only) and the
 agent-adjustment endpoints (routers/sequencer_router.py). Seeder:
 scripts/seed_sequencer_from_legacy.py.

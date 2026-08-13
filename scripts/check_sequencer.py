@@ -1,8 +1,9 @@
 """Executable spec for the SPECTRA sequencer — decision-complete per
 data/spectra-sequencing-design/decision-five-answers.md: models, curve
 evaluation, composition + fallback ladder, dwell-in-songs, the
-transition-only engine clock, flare selector, rainbow exemption, store,
-agent-adjustment API, seeder.
+transition-only engine clock, flare selector, colour-set selector
+(wheel-travel evaluation, rainbow neutrality, room position tracking,
+keep-current ladder termination), store, agent-adjustment API, seeder.
 Run from repo root: .venv/bin/python scripts/check_sequencer.py
 Isolated: temp files for the store and profile census; fakes injected into
 the engine; no live storage, no LedFX I/O, no audio."""
@@ -18,18 +19,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pydantic import ValidationError
 
-from models.color_set import ColorSetCard, ColorSetEntry
+from models.color_set import ColorSetCard, ColorSetEntry, GroupMember
 from models.sequencer import (AffinityEdge, CurvePoint, CurveProfile,
                               SelectorEntry, SequencerConfig)
 from services import color_wheel
-from services.selection_kernel import (Candidate, TERMINAL_NOTHING,
+from services.selection_kernel import (Candidate, RUNG_NO_WHEEL,
+                                       TERMINAL_KEEP, TERMINAL_NOTHING,
                                        TERMINAL_STAY, affinity_multiplier,
+                                       build_color_set_candidates,
                                        build_flare_candidates,
                                        build_scene_candidates, compose,
                                        curve_eval, genre_multiplier,
                                        resolve_curve, resolve_dwell_songs,
-                                       select, select_flare, wheel_travel_deg,
-                                       wheel_travel_mult)
+                                       select, select_color_set, select_flare,
+                                       wheel_travel_deg, wheel_travel_mult)
 
 
 def check(cond, label):
@@ -93,6 +96,15 @@ check(config.enabled is False, "sequencer's own dark switch defaults OFF")
 check(config.change_mode == "transition",
       "decision 5: shipped default change_mode is transition — no timer")
 check(config.flare_entries == {}, "flare selector entries default empty")
+check(config.color_set_entries == {} and config.wheel_travel_curve is None,
+      "colour selector defaults: no entries, no wheel curve (neutral)")
+color_cfg = SequencerConfig(
+    color_set_entries={"cs1": SelectorEntry(genre_mult={"edm": 2.0})},
+    wheel_travel_curve="w1")
+check(SequencerConfig(**json.loads(color_cfg.model_dump_json()))
+      .color_set_entries["cs1"].genre_mult == {"edm": 2.0}
+      and json.loads(color_cfg.model_dump_json())["wheel_travel_curve"] == "w1",
+      "colour selector round-trips (entries + wheel curve)")
 
 # ── curve_eval identities ────────────────────────────────────────────────────
 flat = pts((0.3, 0.7))
@@ -252,10 +264,82 @@ check(abs(wheel_travel_deg(10.0, 350.0) - 20.0) < 1e-9, "travel wraps the wheel 
 check(abs(wheel_travel_mult(prefer_near, 0.0, 90.0) - 0.5) < 1e-12,
       "chromatic sets read the travel curve (90° of 180° → 0.5)")
 
+# ── colour-set selector: curve × genre × wheel-travel, its own ladder ────────
+cs_entries = {"near": SelectorEntry(), "far": SelectorEntry(),
+              "rain": SelectorEntry()}
+cs_positions = {"near": 100.0, "far": 140.0, "rain": None}
+cs_cands = {c.id: c for c in build_color_set_candidates(
+    cs_entries, {}, genre_bucket=None, room_deg=90.0,
+    set_positions=cs_positions, wheel_points=prefer_near)}
+check(abs(cs_cands["near"].wheel_mult - (1 - 10 / 180)) < 1e-9
+      and abs(cs_cands["far"].wheel_mult - (1 - 50 / 180)) < 1e-9,
+      "wheel-travel evaluated through the curve (10° and 50° from room 90°)")
+check(cs_cands["rain"].wheel_mult == 1.0,
+      "rainbow candidate takes the NEUTRAL ×1.0 wheel factor")
+check(all(c.wheel_mult == 1.0 for c in build_color_set_candidates(
+          cs_entries, {}, genre_bucket=None, room_deg=None,
+          set_positions=cs_positions, wheel_points=prefer_near)),
+      "no chromatic set fired yet (room None) → wheel neutral for everyone")
+check([c.id for c in build_color_set_candidates(
+          {"near": SelectorEntry(), "gone": SelectorEntry()}, {},
+          genre_bucket=None, room_deg=None, set_positions={"near": 10.0},
+          wheel_points=prefer_near)] == ["near"],
+      "entries outside set_positions (deleted / scene-filtered) drop out")
+
+cw_rng = Random(13)
+cw = [Candidate(id="a", points=FLAT1, wheel_mult=0.9),
+      Candidate(id="b", points=FLAT1, wheel_mult=0.3)]
+cw_counts = {"a": 0, "b": 0}
+for _ in range(N):
+    p = select_color_set(cw, intensity=0.5, rng=cw_rng)
+    cw_counts[p.picked_id] += 1
+    if p.rung != "full":
+        raise SystemExit("FAIL: colour fallback rung on a drawable config")
+check(abs(cw_counts["a"] / N - 0.75) < 0.02,
+      f"colour draw proportional to curve×genre×wheel (3:1 → {cw_counts['a'] / N:.3f})")
+p = select_color_set([Candidate(id="a", points=ramp, genre_mult=2.0,
+                                wheel_mult=0.5)], intensity=0.5, rng=cw_rng)
+f = p.factors["a"]
+check(f["wheel"] == 0.5 and abs(f["score"] - 0.5 * 2.0 * 0.5) < 1e-9
+      and "affinity" not in f,
+      "colour pick.factors carries curve/genre/wheel/score")
+
+cs_seen = {select_color_set([Candidate(id="cur", points=FLAT1),
+                             Candidate(id="oth", points=FLAT1)],
+                            intensity=0.5, rng=cw_rng,
+                            current_id="cur").picked_id for _ in range(200)}
+check(cs_seen == {"oth"}, "current colour set excluded from the draw")
+
+# the colour ladder, rung by rung: drop wheel → drop genre → uniform → KEEP
+p = select_color_set([Candidate(id="a", points=FLAT1, wheel_mult=0.0),
+                      Candidate(id="b", points=FLAT1, wheel_mult=0.0)],
+                     intensity=0.5, rng=cw_rng)
+check(p.rung == RUNG_NO_WHEEL and p.picked_id in ("a", "b"),
+      "colour rung 1: all wheel-vetoed → wheel-travel dropped")
+p = select_color_set([Candidate(id="a", points=FLAT1, genre_mult=0.0,
+                                wheel_mult=0.0)], intensity=0.5, rng=cw_rng)
+check(p.rung == "no_genre" and p.picked_id == "a",
+      "colour rung 2: genre veto dropped after wheel-travel")
+cs_inf = [Candidate(id="a", points=[CurvePoint(x=0.0, y=float("inf"))]),
+          Candidate(id="z", points=pts((0, 0.0)))]
+cs_uni = {select_color_set(cs_inf, intensity=0.5, rng=cw_rng).picked_id
+          for _ in range(200)}
+check(cs_uni == {"a"},
+      "colour rung 3: uniform among curve-eligible (zero curve still out)")
+p = select_color_set([Candidate(id="cur", points=FLAT1),
+                      Candidate(id="oth", points=pts((0, 0.0)))],
+                     intensity=0.5, rng=cw_rng, current_id="cur")
+check(p.picked_id is None and p.rung == TERMINAL_KEEP,
+      "only the current set is curve-eligible → KEEP the current colours "
+      "(no re-admit rung — colours are never forced to churn)")
+check(select_color_set([], intensity=0.5, rng=cw_rng).rung == TERMINAL_KEEP,
+      "empty colour candidate set → keep the current colours")
+
 # ── seeder: translation + apply plan ─────────────────────────────────────────
-from scripts.seed_sequencer_from_legacy import (apply_seed, band_edges,
-                                                band_points, build_seed,
-                                                gate_points, scale_points)
+from scripts.seed_sequencer_from_legacy import (WHEEL_PROFILE_NAME, apply_seed,
+                                                band_edges, band_points,
+                                                build_seed, gate_points,
+                                                scale_points)
 
 bands = band_edges([0.3, 0.65, 0.85, 0.95])
 check(bands == [(0.0, 0.3), (0.3, 0.65), (0.65, 0.85), (0.85, 0.95), (0.95, 1.0)],
@@ -313,6 +397,35 @@ check(any(k == "SKIPPED" and n == "Orphan" for k, n, d in plan.rows)
       "scene with no SceneV2 counterpart is SKIPPED, not mis-keyed")
 check(kinds.count("gate_curve") == 2,
       "both Dancer energy gates printed (reference only — attach to nothing)")
+check(plan.wheel_profile is None and plan.color_entries == {},
+      "no colour cards passed → no colour translation, no wheel profile")
+
+# colour translation: legacy groups → flat-curve entries + downhill wheel curve
+CS_RED = ColorSetCard(name="Reds", entries=[
+    ColorSetEntry(color_kind="solid", color_value="#ff0000")])
+CS_HYPE = ColorSetCard(name="Hype", entries=[
+    ColorSetEntry(color_kind="solid", color_value=c)
+    for c in ("#ff0000", "#00ff00", "#0000ff")])
+CS_GROUP = ColorSetCard(name="Warm Group", kind="group", members=[
+    GroupMember(color_set_id=CS_RED.id),
+    GroupMember(color_set_id=CS_HYPE.id, weight=2.0),
+    GroupMember(color_set_id="ghost")])
+cplan = build_seed(legacy_events, V2_MAP, [CS_RED, CS_HYPE, CS_GROUP])
+check(cplan.wheel_profile is not None
+      and cplan.wheel_profile.name == WHEEL_PROFILE_NAME
+      and [(pt.x, pt.y) for pt in cplan.wheel_profile.points] == [(0.0, 1.0), (1.0, 0.0)]
+      and cplan.wheel_profile in cplan.profiles,
+      "downhill wheel-travel profile seeded — 'prefer small steps'")
+check(cplan.color_entries[CS_RED.id].curve_ref is None
+      and cplan.color_entries[CS_RED.id].inline_points is None,
+      "weight-1.0 colour member → default entry (flat 1.0 curve)")
+check(cplan.color_entries[CS_HYPE.id].inline_points[0].y == 2.0,
+      "off-1.0 colour weight → inline flat curve at that height")
+check(any(k == "color_entry" and n == "Hype" and "rainbow" in d
+          for k, n, d in cplan.rows),
+      "rainbow set seeded like any other, noted wheel-exempt")
+check(any(k == "SKIPPED" and "ghost" in n for k, n, d in cplan.rows),
+      "group member referencing no existing set is SKIPPED")
 
 # ── store + apply + agent-adjustment API + engine ────────────────────────────
 with tempfile.TemporaryDirectory() as td:
@@ -334,8 +447,9 @@ with tempfile.TemporaryDirectory() as td:
         enabled=False,
         entries={"keepme": SelectorEntry(dwell_weight=3.0)},
         affinity=[AffinityEdge(from_id="x", to_id="y", mult=2.0)]))
-    n_profiles, n_entries = apply_seed(plan)
-    check(n_profiles == 2 and n_entries == 1, "apply writes the plan")
+    n_profiles, n_entries, n_color = apply_seed(plan)
+    check(n_profiles == 2 and n_entries == 1 and n_color == 0,
+          "apply writes the plan")
     applied = sequencer_store.load_config()
     check("v2-nebula" in applied.entries and "keepme" in applied.entries
           and len(applied.affinity) == 1 and applied.enabled is False,
@@ -345,6 +459,32 @@ with tempfile.TemporaryDirectory() as td:
     apply_seed(build_seed(legacy_events, V2_MAP))
     check(set(sequencer_store.load_curves()) == curve_ids_before,
           "re-apply is idempotent — profiles matched by name, no duplicates")
+
+    # colour apply: wheel profile installed, entries merged, idempotent
+    n_profiles, n_entries, n_color = apply_seed(cplan)
+    check(n_color == 2, "colour apply writes both set entries")
+    applied = sequencer_store.load_config()
+    wheel_ids = [pid for pid, pr in sequencer_store.load_curves().items()
+                 if pr.name == WHEEL_PROFILE_NAME]
+    check(len(wheel_ids) == 1 and applied.wheel_travel_curve == wheel_ids[0],
+          "downhill wheel profile stored once and installed as "
+          "wheel_travel_curve")
+    check(CS_RED.id in applied.color_set_entries
+          and applied.color_set_entries[CS_HYPE.id].inline_points[0].y == 2.0
+          and "keepme" in applied.entries and applied.enabled is False,
+          "colour entries keyed by shared card id; scene entries / dark flag "
+          "untouched")
+    curve_ids_before = set(sequencer_store.load_curves())
+    apply_seed(build_seed(legacy_events, V2_MAP, [CS_RED, CS_HYPE, CS_GROUP]))
+    check(set(sequencer_store.load_curves()) == curve_ids_before
+          and sequencer_store.load_config().wheel_travel_curve == wheel_ids[0],
+          "colour re-apply idempotent — wheel profile matched by name")
+    owner_cfg = sequencer_store.load_config()
+    owner_cfg.wheel_travel_curve = "owner-custom-curve"
+    sequencer_store.save_config(owner_cfg)
+    apply_seed(build_seed(legacy_events, V2_MAP, [CS_RED, CS_HYPE, CS_GROUP]))
+    check(sequencer_store.load_config().wheel_travel_curve == "owner-custom-curve",
+          "an owner-set wheel_travel_curve is preserved by re-seeding")
 
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -390,8 +530,9 @@ with tempfile.TemporaryDirectory() as td:
         flare_entries={"f1": SelectorEntry(curve_ref="no-such-profile")}).model_dump_json())
     check(client.put("/api/sequencer/config", json=dangling_flare).status_code == 422,
           "flare entry referencing an unknown curve → 422")
+    quiet = CurveProfile(name="Quiet-only", points=pts((0, 1), (0.5, 0)))
     two_curves = {p.id: json.loads(p.model_dump_json())
-                  for p in (profile, CurveProfile(name="Quiet-only", points=pts((0, 1), (0.5, 0))))}
+                  for p in (profile, quiet)}
     check(client.put("/api/sequencer/curves", json=two_curves).json()["profiles"] == 2,
           "PUT curves accepts a valid library")
     agent_config = json.loads(SequencerConfig(
@@ -406,10 +547,34 @@ with tempfile.TemporaryDirectory() as td:
     check(client.get("/api/sequencer/config").json()["entries"]["s1"]["dwell_weight"] == 3.0,
           "agent adjustment persists")
 
+    # colour selector at the API boundary — same agent channel, same checks
+    dangling_color = json.loads(SequencerConfig(
+        color_set_entries={"c1": SelectorEntry(curve_ref="no-such-profile")}).model_dump_json())
+    check(client.put("/api/sequencer/config", json=dangling_color).status_code == 422,
+          "colour entry referencing an unknown curve → 422")
+    dangling_wheel = json.loads(SequencerConfig(
+        wheel_travel_curve="no-such-profile").model_dump_json())
+    check(client.put("/api/sequencer/config", json=dangling_wheel).status_code == 422,
+          "unknown wheel_travel_curve → 422")
+    color_put = json.loads(SequencerConfig(
+        color_set_entries={"cs1": SelectorEntry(genre_mult={"edm": 0.5})},
+        wheel_travel_curve=profile.id).model_dump_json())
+    check(client.put("/api/sequencer/config", json=color_put).json()["color_set_entries"] == 1,
+          "PUT config — the colour selector rides the agent channel")
+    check(client.get("/api/sequencer/config").json()["wheel_travel_curve"] == profile.id,
+          "wheel curve assignment persists")
+    check(client.put("/api/sequencer/curves",
+                     json={quiet.id: json.loads(quiet.model_dump_json())}).status_code == 422,
+          "deleting the installed wheel-travel profile → 422")
+
     status = client.get("/api/sequencer/status").json()
     check(status["enabled"] is False and status["next_change_source"] == "transition"
           and status["active_scene_id"] is None and status["dwell"] is None,
           "GET status: dark engine reports enabled=false, transition clock, no scene")
+    check(status["color"]["active_set_id"] is None
+          and status["color"]["wheel_position_deg"] is None
+          and status["color"]["last_pick"] is None,
+          "GET status: colour state starts empty — no set, no wheel position")
 
     sim_cfg = SequencerConfig(entries={
         "s1": SelectorEntry(inline_points=pts((0, 1.0))),
@@ -426,6 +591,36 @@ with tempfile.TemporaryDirectory() as td:
     check(sim_flare["shares"] == {"<nothing>": 1.0},
           "simulate kind=flare with no flare entries → terminal NOTHING")
 
+    # simulate kind=color_set: wheel geometry from the (redirected) card store
+    from services import color_set_store
+    color_set_store.COLOR_SETS_FILE = Path(td) / "color_sets.json"
+    cyan = ColorSetCard(name="Cyan", entries=[
+        ColorSetEntry(color_kind="solid", color_value="#00ffff")])
+    for card in (CS_RED, CS_HYPE, cyan):
+        color_set_store.save(card)
+    downhill = CurveProfile(name="downhill", points=pts((0, 1.0), (1, 0.0)))
+    sequencer_store.save_curves({downhill.id: downhill})
+    sequencer_store.save_config(SequencerConfig(
+        color_set_entries={CS_RED.id: SelectorEntry(),
+                           cyan.id: SelectorEntry(),
+                           CS_HYPE.id: SelectorEntry()},
+        wheel_travel_curve=downhill.id))
+    sim_color = client.post("/api/sequencer/simulate",
+                            json={"intensity": 0.5, "n": 400, "kind": "color_set",
+                                  "room_position_deg": 0.0,
+                                  "current_id": CS_RED.id, "seed": 2}).json()
+    check(sim_color["shares"] == {CS_HYPE.id: 1.0}
+          and sim_color["rungs"] == {"full": 400}
+          and sim_color["factors"][cyan.id]["wheel"] == 0.0
+          and sim_color["factors"][CS_HYPE.id]["wheel"] == 1.0,
+          "simulate colour: current set excluded, 180°-travel set wheel-vetoed, "
+          "rainbow set neutral ×1.0 → only the rainbow draws")
+    sim_color = client.post("/api/sequencer/simulate",
+                            json={"intensity": 0.5, "n": 4000, "kind": "color_set",
+                                  "current_id": CS_RED.id, "seed": 3}).json()
+    check(abs(sim_color["shares"][cyan.id] - 0.5) < 0.03,
+          "simulate colour with no room position: wheel neutral for everyone")
+
     # ── engine: transition-only clock, dwell in songs, deferrals, dark ──────
     from models.state import SpotifyTrackInfo, state
     from services.scene_sequencer import SceneSequencer
@@ -435,11 +630,12 @@ with tempfile.TemporaryDirectory() as td:
                                 duration_ms=200_000, progress_ms=0,
                                 is_playing=True, fetched_at=0.0)
 
-    def mk_engine(seed=5, intensity=0.5):
-        fires, casts = [], []
+    def mk_engine(seed=5, intensity=0.5, eligible=None):
+        fires, casts, color_fires = [], [], []
 
-        async def fake_fire(scene_id):
+        async def fake_fire(scene_id, color_set_id=None):
             fires.append(scene_id)
+            color_fires.append(color_set_id)
 
         async def fake_broadcast(payload):
             casts.append(payload)
@@ -448,8 +644,10 @@ with tempfile.TemporaryDirectory() as td:
             rng=Random(seed), fire=fake_fire,
             intensity=lambda: intensity, genre_bucket=lambda: None,
             list_scene_ids=lambda: {"s1", "s2", "s3"},
-            scene_name=lambda sid: sid.upper(), broadcast=fake_broadcast)
-        return eng, fires, casts
+            scene_name=lambda sid: sid.upper(), broadcast=fake_broadcast,
+            eligible_sets=lambda sid: dict(eligible or {}),
+            color_set_name=lambda cid: cid.upper())
+        return eng, fires, casts, color_fires
 
     saved_state = (state.paused, state.dinner_party_mode,
                    state.ambient_mode_enabled, state.last_scene_update_id)
@@ -462,7 +660,7 @@ with tempfile.TemporaryDirectory() as td:
         # DARK: enabled False → transitions change nothing, nothing fires.
         sequencer_store.save_config(SequencerConfig(
             entries={"s1": SelectorEntry()}))
-        eng, fires, _ = mk_engine()
+        eng, fires, _, _ = mk_engine()
         for uri in ("spotify:track:a", "spotify:track:b", "spotify:track:c"):
             await eng.on_track_state(track(uri))
         check(fires == [] and eng.status()["last_moment"] is None,
@@ -472,7 +670,7 @@ with tempfile.TemporaryDirectory() as td:
         sequencer_store.save_config(SequencerConfig(
             enabled=True,
             entries={"s1": SelectorEntry(), "s2": SelectorEntry()}))
-        eng, fires, casts = mk_engine()
+        eng, fires, casts, color_fires = mk_engine()
         await eng.on_track_state(track("spotify:track:a"))   # arms only
         for _ in range(5):
             await eng.on_track_state(track("spotify:track:a"))
@@ -492,11 +690,14 @@ with tempfile.TemporaryDirectory() as td:
         check(casts and casts[0]["type"] == "sequencer_pick"
               and "factors" in casts[0] and casts[0]["dwell_target_songs"] == 1,
               "sequencer_pick broadcast carries the factor breakdown")
+        check(color_fires == [None, None] and casts[0]["color"] is None,
+              "no colour entries configured → fires carry no set, colour "
+              "state untouched")
 
         # Dwell in songs: weight 2 holds two transitions (renewal, no re-fire).
         sequencer_store.save_config(SequencerConfig(
             enabled=True, entries={"s2": SelectorEntry(dwell_weight=2.0)}))
-        eng, fires, _ = mk_engine()
+        eng, fires, _, _ = mk_engine()
         results = []
         for i, uri in enumerate("abcdefg"):
             await eng.on_track_state(track(f"spotify:track:{uri}"))
@@ -516,7 +717,7 @@ with tempfile.TemporaryDirectory() as td:
         # Deferrals skip the moment entirely (no served count, no roll).
         sequencer_store.save_config(SequencerConfig(
             enabled=True, entries={"s1": SelectorEntry(), "s2": SelectorEntry()}))
-        eng, fires, _ = mk_engine()
+        eng, fires, _, _ = mk_engine()
         await eng.on_track_state(track("spotify:track:a"))
         await eng.on_track_state(track("spotify:track:b"))
         served_before = eng.status()["dwell"]["served_songs"]
@@ -540,7 +741,7 @@ with tempfile.TemporaryDirectory() as td:
         object.__setattr__(_settings, "force_scene_enabled", False)
 
         # A trigger-fired scene resets the dwell count (pure observation).
-        eng, fires, _ = mk_engine()
+        eng, fires, _, _ = mk_engine()
         await eng.on_track_state(track("spotify:track:a"))
         await eng.on_track_state(track("spotify:track:b"))   # picks, baselines
         state.last_scene_update_id = "legacy-ev-9"
@@ -560,7 +761,7 @@ with tempfile.TemporaryDirectory() as td:
         sequencer_store.save_config(SequencerConfig(
             enabled=True,
             entries={"s1": SelectorEntry(inline_points=pts((0, 0.0)))}))
-        eng, fires, _ = mk_engine(intensity=0.9)
+        eng, fires, _, _ = mk_engine(intensity=0.9)
         await eng.on_track_state(track("spotify:track:a"))
         await eng.on_track_state(track("spotify:track:b"))
         check(fires == [] and eng.status()["last_moment"]["result"] == "stay"
@@ -570,11 +771,78 @@ with tempfile.TemporaryDirectory() as td:
         # Stored non-transition mode still ticks transitions only (logged).
         sequencer_store.save_config(SequencerConfig(
             enabled=True, change_mode="both", entries={"s1": SelectorEntry()}))
-        eng, fires, _ = mk_engine()
+        eng, fires, _, _ = mk_engine()
         await eng.on_track_state(track("spotify:track:a"))
         await eng.on_track_state(track("spotify:track:b"))
         check(fires == ["s1"],
               "stored change_mode=both: no timer exists — transitions still tick")
+
+        # ── colour-set selector rides scene fires (decision 3, wired last) ──
+        wheelp = CurveProfile(name="downhill-engine", points=pts((0, 1.0), (1, 0.0)))
+        sequencer_store.save_curves({wheelp.id: wheelp})
+        sequencer_store.save_config(SequencerConfig(
+            enabled=True,
+            entries={"s1": SelectorEntry(), "s2": SelectorEntry()},
+            color_set_entries={"red": SelectorEntry()},
+            wheel_travel_curve=wheelp.id))
+        eligible = {"red": 0.0, "rainbow": None, "near": 20.0, "far": 180.0}
+        eng, fires, casts, color_fires = mk_engine(eligible=eligible)
+        await eng.on_track_state(track("spotify:track:a"))
+        await eng.on_track_state(track("spotify:track:b"))
+        st = eng.status()
+        check(color_fires == ["red"] and st["color"]["active_set_id"] == "red"
+              and st["color"]["active_set_name"] == "RED"
+              and st["color"]["wheel_position_deg"] == 0.0
+              and st["color"]["last_pick"]["rung"] == "full",
+              "a scene fire rolls the colour selector; the room's wheel "
+              "position tracks the fired set")
+        check(casts[-1]["color"]["picked_id"] == "red",
+              "sequencer_pick broadcast carries the colour pick")
+
+        # Terminal KEEP: the only candidate is the current set → fire keeps it.
+        await eng.on_track_state(track("spotify:track:c"))
+        st = eng.status()
+        check(color_fires == ["red", "red"]
+              and st["color"]["last_pick"]["rung"] == TERMINAL_KEEP
+              and st["color"]["last_pick"]["picked_id"] is None
+              and st["color"]["last_pick"]["kept_set_id"] == "red"
+              and st["color"]["wheel_position_deg"] == 0.0,
+              "ladder terminates at KEEP: the current set rides the fire — "
+              "colours are never forced to churn")
+
+        # Rainbow set: eligible via its curve, wheel position UNCHANGED.
+        sequencer_store.save_config(SequencerConfig(
+            enabled=True,
+            entries={"s1": SelectorEntry(), "s2": SelectorEntry()},
+            color_set_entries={"red": SelectorEntry(),
+                               "rainbow": SelectorEntry()},
+            wheel_travel_curve=wheelp.id))
+        await eng.on_track_state(track("spotify:track:d"))
+        st = eng.status()
+        check(color_fires[-1] == "rainbow"
+              and st["color"]["active_set_id"] == "rainbow"
+              and st["color"]["wheel_position_deg"] == 0.0,
+              "rainbow fire: set adopted, room wheel position unchanged "
+              "(binding exemption)")
+
+        # Downhill wheel curve steers the walk from the tracked position.
+        sequencer_store.save_config(SequencerConfig(
+            enabled=True,
+            entries={"s1": SelectorEntry(), "s2": SelectorEntry()},
+            color_set_entries={"near": SelectorEntry(),
+                               "far": SelectorEntry()},
+            wheel_travel_curve=wheelp.id))
+        await eng.on_track_state(track("spotify:track:e"))
+        st = eng.status()
+        check(color_fires[-1] == "near"
+              and st["color"]["wheel_position_deg"] == 20.0
+              and st["color"]["last_pick"]["factors"]["far"]["wheel"] == 0.0
+              and st["color"]["last_pick"]["factors"]["near"]["wheel"] > 0.8,
+              "downhill wheel curve: 180°-travel set vetoed, the small step "
+              "fires, the room position follows it")
+        check(len(color_fires) == len(fires),
+              "colours roll exactly when scenes fire — never on their own "
+              "clock (no dwell)")
 
     asyncio.run(engine_spec())
     (state.paused, state.dinner_party_mode,

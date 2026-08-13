@@ -949,9 +949,9 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: 'sequencer',
     title: 'Scene Sequencer',
-    keywords: 'spectra sequencing likelihood curve genre affinity dwell transition weighted random pick',
+    keywords: 'spectra sequencing likelihood curve genre affinity dwell transition weighted random pick color colour wheel',
     intro:
-      'The SPECTRA sequencer picks the next SceneV2 at song transitions from each scene\'s likelihood curve, genre fit, and what-just-played affinity. It ships DARK: nothing runs until it is enabled (by telling the agent), and the legacy chooser events keep working either way.',
+      'The SPECTRA sequencer picks the next SceneV2 — and the colour set it fires with — at song transitions from each candidate\'s likelihood curve, genre fit, and a third factor (scene affinity, or wheel travel for colours). It ships DARK: nothing runs until it is enabled (by telling the agent), and the legacy chooser events keep working either way.',
     entries: [
       {
         id: 'sequencer-model',
@@ -972,6 +972,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The Sequencing panel in the scene editor sets which likelihood curve the scene carries: "not sequenced" (the scene is invisible to the sequencer), "flat 1.0" (eligible everywhere, plain weight), a named curve profile from the shared library, or an inline one-off curve private to the scene.',
           'Editing a named profile\'s curve here retunes EVERY scene that references it — the panel says which scenes share it before you save. Use an inline one-off when the shape truly belongs to just this scene.',
           'The greyed relationships box (dwell weight, genre multipliers, affinity) is read-only on purpose: those are adjusted by telling the agent, never by a form.',
+        ],
+      },
+      {
+        id: 'sequencer-colors',
+        title: 'Colour sequencing (wheel travel)',
+        keywords: 'color set palette wheel travel rainbow keep churn hue rotation coherence',
+        body: [
+          'Colour sets ride the same machinery with one swap: instead of scene affinity, each candidate\'s score is its curve at the current intensity × its genre multiplier × a WHEEL-TRAVEL factor — a likelihood curve over how far around the colour wheel (0–180°) the pick would move the room. The seeded default is a downhill line ("prefer small steps"), which keeps the evening walking the wheel in small hops like today\'s palette sync did.',
+          'Colours have no dwell and no clock of their own: a colour set is rolled exactly when the sequencer fires a scene, among the sets that scene accepts (the two-way scene/set filter), and the pick fires WITH the scene. The room\'s wheel position then follows the fired set.',
+          'Rainbow sets (chromatic span over 180°) are everywhere and nowhere on the wheel: they take a neutral ×1.0 wheel factor, and firing one leaves the room\'s wheel position where the last chromatic set put it. They stay eligible through their intensity curves and the scene/set filter like any other set.',
+          'When nothing else is eligible the fallback ladder relaxes wheel travel, then genre, then goes uniform among curve-eligible sets — and if that still leaves nothing, the room KEEPS its current colours. Colours are never forced to churn.',
+          'Curves (including the wheel-travel curve) are drawn graphically; which sets are sequenced, their genre multipliers, and which profile is the wheel-travel curve are adjusted by telling the agent (PUT /api/sequencer/config). POST /api/sequencer/simulate with kind "color_set" answers what-ifs without touching the room.',
         ],
       },
       {

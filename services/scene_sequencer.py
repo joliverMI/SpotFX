@@ -28,6 +28,16 @@ Intensity at a moment (no trigger carries one): librosa section energy at
 the playback position, read RAW per the standing librosa_offset_ms rule;
 fallback = the song's auto intensity scale clamped to 0–1; last resort 0.5.
 
+Colour sets (decision 3, wired last): colours change with scenes, not on
+their own clock — whenever the sequencer fires a scene it also rolls the
+colour-set selector (curve × genre × wheel-travel over the sets the picked
+scene accepts, two-way filter) and fires scene + set in ONE compile
+(scene_v2_compiler.fire_scene(color_set=...)). The room's wheel position
+tracks the last fired set's position; rainbow/achromatic fires leave it
+unchanged (binding exemption). The ladder's terminal rung KEEPS the current
+colours — a scene change never forces a palette churn, and the kept set
+rides along on the fire so the new scene shows the old palette.
+
 Fires go through scene_v2_compiler.fire_scene(dry_run=False) → the
 api/ledfx_client._request() gate, honoring the write-plane contract.
 
@@ -41,7 +51,7 @@ import time
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
-from models.sequencer import SequencerConfig
+from models.sequencer import CurvePoint, SequencerConfig
 from models.state import state
 from services import selection_kernel as kernel
 from services import sequencer_store
@@ -100,6 +110,8 @@ class SceneSequencer:
         list_scene_ids: Callable[[], set[str]] | None = None,
         scene_name: Callable[[str], str] | None = None,
         broadcast: Callable[[dict], Awaitable[None]] | None = None,
+        eligible_sets: Callable[[str], dict[str, Optional[float]]] | None = None,
+        color_set_name: Callable[[str], str] | None = None,
     ) -> None:
         self._rng = rng or Random()
         self._fire = fire or self._default_fire
@@ -108,6 +120,11 @@ class SceneSequencer:
         self._list_scene_ids = list_scene_ids or self._default_list_scene_ids
         self._scene_name = scene_name or self._default_scene_name
         self._broadcast = broadcast or self._default_broadcast
+        # scene_id → {set_id: wheel position_deg | None} for every existing
+        # colour set the scene accepts (two-way filter applied; None =
+        # rainbow/achromatic — no position).
+        self._eligible_sets = eligible_sets or self._default_eligible_sets
+        self._color_set_name = color_set_name or self._default_color_set_name
 
         self.transition_source = TransitionSource()
         self.transition_source.bind(self._on_change_moment)
@@ -121,6 +138,11 @@ class SceneSequencer:
         self._last_pick: Optional[dict] = None
         self._last_moment: Optional[dict] = None
         self._warned_change_mode: Optional[str] = None
+        # Colour state: the room's current wheel position follows the last
+        # FIRED chromatic set; rainbow/achromatic fires leave it unchanged.
+        self._active_color_set_id: Optional[str] = None
+        self._wheel_position_deg: Optional[float] = None
+        self._last_color_pick: Optional[dict] = None
 
     # ── feed (wired from main._on_state_update; a no-op while dark) ─────────
 
@@ -193,11 +215,13 @@ class SceneSequencer:
         if missing:
             logger.warning("sequencer: %d entr(y/ies) reference no SceneV2 "
                            "and are skipped: %s", len(missing), sorted(missing))
+        intensity = self._intensity()
+        genre_bucket = self._genre_bucket()
         candidates = kernel.build_scene_candidates(
             config.entries, curves, config.affinity,
-            genre_bucket=self._genre_bucket(), prev_id=self._active_id,
+            genre_bucket=genre_bucket, prev_id=self._active_id,
             restrict_ids=existing)
-        pick = kernel.select(candidates, intensity=self._intensity(),
+        pick = kernel.select(candidates, intensity=intensity,
                              rng=self._rng, current_id=self._active_id,
                              terminal=kernel.TERMINAL_STAY)
         self._last_pick = {
@@ -224,13 +248,18 @@ class SceneSequencer:
                         "(dwell target %d songs)", pick.picked_id, pick.rung,
                         self._dwell_target)
             return
+        color = self._roll_color_set(config, curves, pick.picked_id,
+                                     intensity, genre_bucket)
         try:
-            await self._fire(pick.picked_id)
+            await self._fire(pick.picked_id,
+                             color["fire_set_id"] if color else None)
         except Exception:
             logger.exception("sequencer: firing scene %s failed", pick.picked_id)
             self._record_moment(source, "fire_failed")
             return
         self._adopt(pick.picked_id, config)
+        if color is not None:
+            self._adopt_colors(color)
         self._record_moment(source, "picked")
         logger.info("sequencer: picked %s via rung=%s at intensity %.2f "
                     "(dwell target %d songs, weight %g)", pick.picked_id,
@@ -241,7 +270,59 @@ class SceneSequencer:
             **self._last_pick,
             "dwell_target_songs": self._dwell_target,
             "dwell_weight": self._dwell_weight,
+            "color": self._last_color_pick if color is not None else None,
         })
+
+    # ── the colour-set selector (decision 3 — colours change with scenes) ───
+
+    def _roll_color_set(self, config: SequencerConfig, curves: dict,
+                        scene_id: str, intensity: float,
+                        genre_bucket: Optional[str]) -> Optional[dict]:
+        """Roll the colour-set selector for the scene about to fire. None =
+        selector unconfigured (no colour entries) — the fire carries no set
+        and colour state is untouched. A TERMINAL_KEEP pick fires the
+        CURRENT set (picked_id None) so the new scene keeps the room's
+        palette — colours are never forced to churn."""
+        if not config.color_set_entries:
+            return None
+        eligible = self._eligible_sets(scene_id)
+        wheel_profile = (curves.get(config.wheel_travel_curve)
+                         if config.wheel_travel_curve else None)
+        wheel_points = (wheel_profile.points if wheel_profile
+                        else [CurvePoint(x=0.0, y=1.0)])   # no curve ≡ neutral
+        candidates = kernel.build_color_set_candidates(
+            config.color_set_entries, curves,
+            genre_bucket=genre_bucket, room_deg=self._wheel_position_deg,
+            set_positions=eligible, wheel_points=wheel_points)
+        pick = kernel.select_color_set(candidates, intensity=intensity,
+                                       rng=self._rng,
+                                       current_id=self._active_color_set_id)
+        picked = pick.picked_id
+        fire_set_id = picked if picked is not None else self._active_color_set_id
+        return {
+            "picked_id": picked,
+            "fire_set_id": fire_set_id,
+            "position_deg": eligible.get(picked) if picked is not None else None,
+            "record": {
+                "picked_id": picked,
+                "picked_name": (self._color_set_name(picked)
+                                if picked is not None else None),
+                "kept_set_id": None if picked is not None else fire_set_id,
+                "rung": pick.rung,
+                "factors": pick.factors,
+            },
+        }
+
+    def _adopt_colors(self, color: dict) -> None:
+        """Commit colour state AFTER a successful fire. Rainbow/achromatic
+        picks (position None) move the active set but leave the room's wheel
+        position where the last chromatic set put it — the binding rule."""
+        self._last_color_pick = color["record"]
+        if color["picked_id"] is not None:
+            self._active_color_set_id = color["picked_id"]
+            if color["position_deg"] is not None:
+                self._wheel_position_deg = color["position_deg"]
+        self._last_color_pick["wheel_position_deg"] = self._wheel_position_deg
 
     def _record_moment(self, source: str, result: str) -> None:
         self._last_moment = {"source": source, "result": result, "at": time.time()}
@@ -277,16 +358,44 @@ class SceneSequencer:
             } if self._active_id else None,
             "last_pick": self._last_pick,
             "last_moment": self._last_moment,
+            "color": {
+                "active_set_id": self._active_color_set_id,
+                "active_set_name": (self._color_set_name(self._active_color_set_id)
+                                    if self._active_color_set_id else None),
+                "wheel_position_deg": self._wheel_position_deg,
+                "last_pick": self._last_color_pick,
+            },
         }
 
     # ── production defaults (lazy imports; the spec injects fakes) ──────────
 
-    async def _default_fire(self, scene_id: str) -> None:
-        from services import scene_v2_compiler, scene_v2_store
+    async def _default_fire(self, scene_id: str,
+                            color_set_id: Optional[str] = None) -> None:
+        from services import color_set_store, scene_v2_compiler, scene_v2_store
         scene = scene_v2_store.get_by_id(scene_id)
         if scene is None:
             raise ValueError(f"picked scene {scene_id} not found in scenes_v2")
-        await scene_v2_compiler.fire_scene(scene, dry_run=False)
+        color_set = (color_set_store.get_by_id(color_set_id)
+                     if color_set_id else None)
+        await scene_v2_compiler.fire_scene(scene, color_set=color_set,
+                                           dry_run=False)
+
+    def _default_eligible_sets(self, scene_id: str) -> dict[str, Optional[float]]:
+        from services import color_set_store, color_wheel, scene_v2_store
+        scene = scene_v2_store.get_by_id(scene_id)
+        out: dict[str, Optional[float]] = {}
+        for card in color_set_store.list_all():
+            if card.kind != "set":
+                continue
+            if scene is not None and not scene.accepts_color_set(card):
+                continue
+            out[card.id] = color_wheel.wheel_position(card).position_deg
+        return out
+
+    def _default_color_set_name(self, set_id: str) -> str:
+        from services import color_set_store
+        card = color_set_store.get_by_id(set_id)
+        return card.name if card else set_id
 
     def _default_intensity(self) -> float:
         track = state.current_track
