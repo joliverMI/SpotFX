@@ -1,0 +1,69 @@
+"""S2 evolution-engine observability + the dark event injector.
+
+  GET  /api/engine/status — the whole engine surface: executor mode (S2 is
+      "recording" — DARK against real lights until S3), conductor state
+      (journey custody/position, active mechanisms, last leg), recent
+      surges, bridge health. The Scenes-page status strip reads this.
+  POST /api/engine/event  — inject one response event at a chosen intensity
+      (the responses tabs' preview-of-record: in production it executes
+      against the RecordingExecutor, so the surge is computed, logged, and
+      visible — and no light moves).
+  POST /api/engine/baseline/{scene_id} — re-baseline the engine on a scene
+      WITHOUT firing anything: resolve at the given intensity, hand the
+      writes to the conductor. This is how the engine adopts a scene while
+      it stays dark (fires are S3's business).
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from spectra.models.scene import RESPONSE_CLASSES
+from spectra.services import engine, scene_compiler, scene_store
+from spectra.services.binding_resolver import FireContext
+
+router = APIRouter(prefix="/api/engine", tags=["spectra-engine"])
+
+
+class EventRequest(BaseModel):
+    event_class: str = Field(alias="class")
+    intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    model_config = {"populate_by_name": True}
+
+
+class BaselineRequest(BaseModel):
+    intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+    color_set_id: str | None = None
+
+
+@router.get("/status")
+async def get_status():
+    return engine.status()
+
+
+@router.post("/event")
+async def post_event(body: EventRequest):
+    if body.event_class not in RESPONSE_CLASSES:
+        raise HTTPException(422, f"class must be one of {RESPONSE_CLASSES}")
+    record = await engine.responses.on_event(body.event_class, body.intensity)
+    released = await engine.responses.flush_releases()
+    return {**record, "releases_flushed": released}
+
+
+@router.post("/baseline/{scene_id}")
+async def post_baseline(scene_id: str, body: BaselineRequest | None = None):
+    scene = scene_store.get_by_id(scene_id)
+    if scene is None:
+        raise HTTPException(404, "scene not found")
+    body = body or BaselineRequest()
+    from spectra.services import color_sets
+    color_set = (color_sets.get_by_id(body.color_set_id)
+                 if body.color_set_id else None)
+    ctx = FireContext(body.intensity)
+    resolved = scene_compiler.resolve_scene(scene, ctx)
+    writes = scene_compiler.compile_scene(resolved, color_set)
+    engine.on_scene_fired(scene, writes, body.color_set_id)
+    return {"status": "baselined", "scene_id": scene_id,
+            "mechanisms": len(engine.conductor.mechanisms),
+            "virtuals": len(writes)}

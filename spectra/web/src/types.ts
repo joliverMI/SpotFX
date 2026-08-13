@@ -243,3 +243,88 @@ export function sceneDiceLetters(scene: SceneV2): string[] {
   }
   return [...letters].sort();
 }
+
+/* ── S2 evolution-engine status (GET /api/engine/status) ── */
+
+export interface DriftMechanismStatus {
+  virtual_id: string;
+  param: string;
+  kind: 'creep' | 'follow';
+  position?: number;
+  lo?: number;
+  hi?: number;
+  rate_per_min?: number;
+  motion?: string;
+  slew_s?: number;
+}
+
+export interface DriftLegRecord {
+  virtual_id: string;
+  param: string;
+  kind: string;
+  target: number;
+  duration_ms: number;
+}
+
+export interface SurgeRecord {
+  at: number;
+  class: string;
+  intensity: number;
+  result: string;
+  band?: { intensity_min: number; intensity_max: number; curve: string; gain: number };
+  color_jump?: { result: string; picked_id?: string; rung?: string };
+}
+
+export interface EngineStatus {
+  increment: string;
+  dark: boolean;
+  executor: {
+    mode: string;
+    recent_writes: {
+      seq: number; at: number; kind: string; virtual_id: string;
+      effect_type: string; params: Record<string, unknown>; duration_ms: number;
+    }[];
+  };
+  conductor: {
+    executor_mode: string;
+    leg_s: number;
+    active_scene: { id: string; name: string } | null;
+    deferred_by: string | null;
+    journey: {
+      custody: string;
+      degrees_per_min: number;
+      room_degrees_per_min: number;
+      wheel_position_deg: number | null;
+      active_set_id: string | null;
+      rainbow_paused: boolean;
+    };
+    mechanisms: DriftMechanismStatus[];
+    last_leg: {
+      at: number; intensity: number;
+      journey: Record<string, unknown>;
+      legs: DriftLegRecord[];
+    } | null;
+    last_rebaseline: {
+      at: number; scene_id: string; scene_name: string; mechanisms: number;
+      journey_custody: string; journey_degrees_per_min: number;
+    } | null;
+  };
+  responses: { recent_surges: SurgeRecord[] };
+  bridge: {
+    connected: boolean;
+    ws_url: string;
+    last_message_age_s: number | null;
+    track: {
+      uri: string | null; title: string | null;
+      is_playing: boolean | null; position_ms: number | null;
+    } | null;
+    deferral: string | null;
+    intensity: number | null;
+    genre_bucket: string | null;
+    last_event: {
+      at: number; event_type: string; event_name: string;
+      class: string | null; intensity: number | null;
+    } | null;
+    counts: Record<string, number>;
+  };
+}

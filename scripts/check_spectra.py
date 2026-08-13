@@ -1,9 +1,16 @@
-"""Executable spec for the SPECTRA S1 model growth: value bindings in scene
+"""Executable spec for the SPECTRA model + engine: value bindings in scene
 params, dice-correlated randomness, the four-class responses block (legacy
 flare_bands shim), drift declarations, the colour-journey OVERRIDE
 semantics (into/out-of custody transfer), binding resolution + dry-run
 compile through the shared device model, store/API round-trips, the
-sequencer engine on SPECTRA stores, and the Mid Group seeder's S1 half.
+sequencer engine on SPECTRA stores, the Mid Group seeder, and the S2
+evolution engine: the response engine (band selection, patch broadcast
+targeting, gain envelopes, dice re-rolls, the flare colour jump with the
+keep-current rung and the journey resuming from the new point), the
+read-only bridge (event classification, feeds, deferral split, RAW section
+energy), and the seven Mid Group scenes' rebuild-table behaviors.
+
+The drift conductor has its own spec: scripts/check_drift.py.
 
 Run from repo root: .venv/bin/python scripts/check_spectra.py
 Isolated: temp files for every store; no LedFX I/O, no audio, no network.
@@ -50,6 +57,8 @@ scfg.DRIFT_PROFILES_FILE = scfg.SPECTRA_STORAGE / "drift_profiles.json"
 scfg.ROOM_COLOR_FILE = scfg.SPECTRA_STORAGE / "room_color.json"
 scfg.COLOR_SETS_FILE = td / "color_sets.json"
 scfg.PROFILES_DIR = td / "profiles"
+scfg.AUDIO_SHAPES_DIR = td / "audio_shapes"
+scfg.TRAINING_PROFILES_FILE = td / "training_profiles.json"
 
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (ColorJourneySpec, DriftRef, DriftSpec,
@@ -372,5 +381,365 @@ check(isinstance(spin, ValueBinding) and spin.fallback == 0.55
 res = scene_compiler.resolve_scene(ms, FireContext(None, rng=Random(2)))
 check(res.devices[0].params["spin"] == 0.55,
       "migrated scene with no signal resolves to its old static look")
+
+# ═══ S2 — the evolution engine ═══════════════════════════════════════════════
+
+from spectra.services.drift_conductor import DriftConductor
+from spectra.services.fx_executor import RecordingExecutor
+from spectra.services.scene_response import ResponseEngine, select_band
+from spectra.services import color_journey as cj
+
+# ── band selection: [min, max), top band inclusive at exactly 1.0 ────────────
+b_lo = FlareBand(intensity_min=0.0, intensity_max=0.5)
+b_hi = FlareBand(intensity_min=0.5, intensity_max=1.0)
+check(select_band([b_lo, b_hi], 0.0) is b_lo
+      and select_band([b_lo, b_hi], 0.5) is b_hi
+      and select_band([b_lo, b_hi], 1.0) is b_hi,
+      "band selection: [min, max) with the top band inclusive at 1.0")
+check(select_band([b_hi], 0.3) is None,
+      "no band containing the intensity → the class stays silent")
+
+# ── response-engine harness (fakes; the conductor spec is check_drift.py) ────
+room_box: list = [cj.RoomColorState(wheel_position_deg=220.0,
+                                    active_set_id="set-blue")]
+from spectra.services.color_sets import ColorSetCard, ColorSetEntry, SetScope
+set_cards = {
+    "set-red": ColorSetCard(id="set-red", name="Reds", entries=[
+        ColorSetEntry(scope=SetScope(categories=["Matrix"]),
+                      color_kind="solid", color_value="#ff0000",
+                      brightness=0.9)]),
+}
+seq_cfg_box = [SequencerConfig(color_set_entries={
+    "set-red": SelectorEntry()})]
+eligible_box: list = [{"set-red": 10.0}]
+surge_broadcasts: list[dict] = []
+
+
+async def surge_capture(payload):
+    surge_broadcasts.append(payload)
+
+exec2 = RecordingExecutor()
+conductor2 = DriftConductor(
+    executor=exec2,
+    intensity=lambda: 0.5,
+    room_load=lambda: room_box[0],
+    room_save=lambda st: room_box.__setitem__(0, st),
+    set_position=lambda sid: {"set-blue": 220.0, "set-red": 10.0}.get(sid),
+    drift_profiles=lambda: {},
+    curve_profiles=lambda: {},
+)
+responder = ResponseEngine(
+    conductor=conductor2, executor=exec2, rng=Random(11),
+    broadcast=surge_capture,
+    sequencer_config=lambda: seq_cfg_box[0],
+    curve_profiles=lambda: {},
+    eligible_sets=lambda sc: eligible_box[0],
+    set_card=lambda sid: set_cards.get(sid),
+    room_load=lambda: room_box[0],
+    room_save=lambda st: room_box.__setitem__(0, st),
+)
+
+resp_scene = scene.model_copy(deep=True)
+resp_scene.responses = {
+    "flare": ResponseSpec(bands=[
+        FlareBand(intensity_min=0.0, intensity_max=0.5, curve="pulse",
+                  gain=1.6, param_patch={"twist": 0.9}),
+        FlareBand(intensity_min=0.5, intensity_max=1.0, curve="pulse",
+                  gain=2.0)], color_set_jump=True),
+    "charge": ResponseSpec(bands=[
+        FlareBand(intensity_min=0.5, intensity_max=1.0, curve="ease_in",
+                  gain=1.3)], reroll_dice=False),
+    "lull": ResponseSpec(bands=[
+        FlareBand(intensity_min=0.0, intensity_max=1.0, curve="linear",
+                  gain=0.5)], reroll_dice=False),
+    "drop": ResponseSpec(bands=[
+        FlareBand(intensity_min=0.7, intensity_max=1.0,
+                  param_patch={"spin": 1.0, "ghost_param": 5.0})]),
+}
+resolved_fire = scene_compiler.resolve_scene(resp_scene,
+                                             FireContext(0.5, rng=Random(3)))
+fire_writes = scene_compiler.compile_scene(resolved_fire)
+conductor2.on_scene_fire(resp_scene, fire_writes, "set-blue")
+base_brightness = conductor2.virtuals["v-m1"].brightness_baseline
+check(abs(base_brightness - 0.65) < 1e-6,
+      "baseline brightness = the fire's resolved binding (⚡ 0.65 at 0.5)")
+
+# ── flare: re-roll (authored pairs), patch broadcast, pulse, colour jump ─────
+record = asyncio.run(responder.on_event("flare", 0.3))
+check(record["result"] == "applied"
+      and record["band"]["gain"] == 1.6,
+      "flare at 0.3 lands in its band and applies")
+pairs = {(0.3, 6), (-0.3, 3), (0.0, 5)}
+jumps = [w for w in exec2.writes if w["kind"] == "jump"]
+reroll_jump = next(w for w in jumps if "star" in w["params"])
+check((reroll_jump["params"]["star"], reroll_jump["params"]["edges"]) in pairs,
+      "re-roll: 🎲 star/edges jump as an AUTHORED pair (fresh dice)")
+check(all("spin" not in w["params"] for w in jumps),
+      "re-roll leaves ⚡ (non-random) bindings alone")
+patch_jumps = [w for w in jumps if "twist" in w["params"]]
+check({w["virtual_id"] for w in patch_jumps} == {"v-m1", "v-m2", "v-m3"}
+      and all(w["params"]["twist"] == 0.9 for w in patch_jumps),
+      "patch broadcast: 'twist' lands on every virtual whose effect has it")
+pulse_jumps = [w for w in jumps if set(w["params"]) == {"brightness"}]
+check(len(pulse_jumps) == 3 and all(w["params"]["brightness"] == 1.0
+                                    for w in pulse_jumps),
+      "pulse spike: brightness jumps to baseline×gain clamped (0.65×1.6→1.0)")
+check(record["gain_envelope"][0]["peak"] == 1.0,
+      "the surge record states the spike peak")
+check(record["color_jump"]["result"] == "jumped"
+      and record["color_jump"]["picked_id"] == "set-red",
+      "flare colour jump: the selector picked the eligible set")
+grad_jumps = [w for w in jumps if "gradient" in w["params"]]
+check(grad_jumps and all(w["params"]["gradient"] == "#ff0000"
+                         for w in grad_jumps),
+      "colour jump is a JUMP: the pick's colours land as instant writes")
+check(room_box[0].active_set_id == "set-red"
+      and room_box[0].wheel_position_deg == 10.0,
+      "a chromatic pick moves the room's wheel — the journey resumes there")
+check(conductor2.virtuals["v-m1"].gradient == "#ff0000"
+      and conductor2.virtuals["v-m1"].brightness_baseline == 0.9,
+      "colour jump CARRIES: palette + brightness baselines move with it")
+released = asyncio.run(responder.flush_releases())
+release_glides = [w for w in exec2.writes if w["kind"] == "glide"
+                  and "brightness" in w["params"]]
+check(released == 3 and all(
+    abs(w["params"]["brightness"] - 0.9) < 1e-6 for w in release_glides),
+      "pulse release returns to the baseline AS CARRIED (the jump moved it)")
+check(surge_broadcasts and surge_broadcasts[-1]["type"] == "surge",
+      "surge broadcast emitted with the applied record")
+
+# ── keep-current rung; pulse alone is MOMENTARY ──────────────────────────────
+eligible_box[0] = {}
+wheel_before = room_box[0].wheel_position_deg
+record = asyncio.run(responder.on_event("flare", 0.3))
+check(record["color_jump"]["result"] == "kept_current"
+      and room_box[0].wheel_position_deg == wheel_before
+      and room_box[0].active_set_id == "set-red",
+      "terminal rung KEEPS the current colours — never forced churn")
+check(abs(conductor2.virtuals["v-m1"].brightness_baseline - 0.9) < 1e-6,
+      "pulse without a carried change is MOMENTARY — the baseline holds")
+asyncio.run(responder.flush_releases())
+eligible_box[0] = {"set-red": 10.0}
+
+# ── charge/lull: land-and-hold gain CARRIES the baseline ─────────────────────
+record = asyncio.run(responder.on_event("charge", 0.8))
+held = max(0.0, min(1.0, 0.9 * 1.3))
+check(record["gain_envelope"][0]["held"] is True
+      and abs(conductor2.virtuals["v-m1"].brightness_baseline - held) < 1e-6,
+      "charge ease_in gain lands and HOLDS — the baseline carries (0.9→1.0)")
+record = asyncio.run(responder.on_event("lull", 0.2))
+check(abs(conductor2.virtuals["v-m1"].brightness_baseline - held * 0.5) < 1e-6,
+      "lull gain 0.5 ducks and holds — surges carry in both directions")
+
+# ── drop: patch, with unknown keys dropped by the registry gate ──────────────
+record = asyncio.run(responder.on_event("drop", 0.9))
+drop_jump = [w for w in exec2.writes if w["kind"] == "jump"
+             and "spin" in w["params"]][-1]
+check(drop_jump["params"]["spin"] == 1.0
+      and not any("ghost_param" in w["params"] for w in exec2.writes),
+      "drop patch lands 'spin'; a key no effect carries lands nowhere")
+check(asyncio.run(responder.on_event("drop", 0.3))["result"] == "no_band",
+      "drop below its band → silent (bands are the WHEN)")
+check(asyncio.run(responder.on_event("charge", 0.2))["result"] == "no_band"
+      and len([s for s in responder.surges if s["result"] == "applied"]) == 5,
+      "four classes executed; out-of-band moments recorded, not applied")
+
+# ── the bridge: classification, feeds, deferral split, RAW section energy ────
+from spectra.services import analysis_reader
+from spectra.services.bridge import SpotEffectsBridge, classify_event
+
+check(classify_event("charge") == "charge"
+      and classify_event("lull") == "lull"
+      and classify_event("drop") == "drop",
+      "bridge classifies the three phase classes")
+check(all(classify_event(t) is None for t in
+          ("scene_update", "update_scene", "reset_scene", "scene_group")),
+      "scene-family fires are scene CHANGES, never surges")
+check(all(classify_event(t) == "flare" for t in
+          ("single", "sequence", "beat_sequence", "morph_set", "composite",
+           "shape_flare", "color_flare", "combo_flare")),
+      "every other trigger fire is a flare (the musical accent)")
+
+scfg.AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
+(scfg.AUDIO_SHAPES_DIR / "song1.json").write_text(json.dumps(
+    {"spotify_uri": "spotify:track:x1"}))
+(scfg.AUDIO_SHAPES_DIR / "song1.librosa.json").write_text(json.dumps({
+    "spotify_uri": "spotify:track:x1",
+    "librosa_offset_ms": 75308324,   # the poisoned offset — must be IGNORED
+    "sections": [
+        {"start_ms": 0, "end_ms": 10000, "energy_rms": 0.25},
+        {"start_ms": 10000, "end_ms": 20000, "energy_rms": 0.9},
+    ]}))
+scfg.TRAINING_PROFILES_FILE.write_text(json.dumps({
+    "p1": {"name": "House", "genres": ["house"], "is_default": False},
+    "p2": {"name": "Default", "genres": [], "is_default": True}}))
+
+events: list[tuple] = []
+uris: list = []
+
+
+async def on_evt(cls_, inten):
+    events.append((cls_, inten))
+
+
+async def on_uri(uri):
+    uris.append(uri)
+
+clock_box = [50.0]
+br = SpotEffectsBridge(on_response_event=on_evt, on_track_uri=on_uri,
+                       clock=lambda: clock_box[0])
+state_msg = {"type": "state", "paused": False, "dinner_party_mode": False,
+             "ambient_mode_enabled": False, "last_scene_id": "legacy-9",
+             "track": {"spotify_uri": "spotify:track:x1", "title": "T",
+                       "progress_ms": 12000, "is_playing": True,
+                       "genres": ["deep house"]}}
+asyncio.run(br.handle_message(state_msg))
+check(uris == ["spotify:track:x1"] and br.trigger_scene_id() == "legacy-9",
+      "state broadcast feeds the sequencer's transition + trigger observation")
+clock_box[0] = 53.0   # 3 s later, playing → position interpolates to 15 000
+check(br.track_position_ms() == 15000,
+      "track position interpolates from the broadcast while playing")
+check(br.intensity() == 0.9,
+      "intensity = section energy at the RAW position (offset ignored)")
+check(br.genre_bucket() == "House",
+      "genre bucket matches training profiles by substring")
+asyncio.run(br.handle_message({"type": "trigger_fired", "event_type": "charge",
+                               "event_name": "Build", "intensity": 0.82}))
+asyncio.run(br.handle_message({"type": "trigger_fired",
+                               "event_type": "scene_update",
+                               "event_name": "Scene", "intensity": 0.5}))
+asyncio.run(br.handle_message({"type": "trigger_fired", "event_type": "single",
+                               "event_name": "Hit", "intensity": 0.4}))
+check(events == [("charge", 0.82), ("flare", 0.4)]
+      and br.counts["scene_changes"] == 1,
+      "trigger fires classify and feed the response engine with intensity")
+asyncio.run(br.handle_message({**state_msg, "dinner_party_mode": True}))
+check(br.conductor_deferral() == "dinner_party"
+      and br.sequencer_deferral() == "dinner_party",
+      "broadcast flags drive both deferral feeds")
+br.force_scene = True
+asyncio.run(br.handle_message(state_msg))
+check(br.conductor_deferral() is None
+      and br.sequencer_deferral() == "force_scene",
+      "Force Scene defers the sequencer only — drift keeps running")
+check(analysis_reader.section_energy_at("spotify:track:nope", 0) is None
+      and SpotEffectsBridge(clock=lambda: 0.0).intensity() is None,
+      "no analysis / no track → None (callers hold the stated 0.5 neutral)")
+
+# ── production sequencer defaults read the bridge singleton ──────────────────
+from spectra.services import engine as engine_mod
+from spectra.services.scene_sequencer import scene_sequencer as seq_singleton
+engine_mod.bridge.paused = True
+check(seq_singleton._default_deferral() == "paused",
+      "sequencer deferral default reads the engine bridge")
+engine_mod.bridge.paused = False
+check(seq_singleton._default_intensity() == 0.5,
+      "sequencer intensity default: bridge silent → 0.5 neutral (stated)")
+check(seq_singleton.status()["bridge_connected"] is False,
+      "sequencer status reports the real bridge connection state")
+
+# ── engine API: status + dark event injection + baseline adoption ────────────
+est = client.get("/api/engine/status").json()
+check(est["increment"] == "S2" and est["dark"] is True
+      and est["executor"]["mode"] == "recording"
+      and "conductor" in est and "bridge" in est,
+      "GET /api/engine/status serves the whole engine surface, dark")
+check(client.post("/api/engine/event",
+                  json={"class": "sparkle"}).status_code == 422,
+      "unknown response class → 422")
+rb = client.post(f"/api/engine/baseline/{scene.id}",
+                 json={"intensity": 0.9}).json()
+check(rb["status"] == "baselined" and rb["virtuals"] == 3,
+      "POST /api/engine/baseline adopts a scene without firing anything")
+ev = client.post("/api/engine/event",
+                 json={"class": "flare", "intensity": 0.4}).json()
+check(ev["result"] in ("applied", "no_band", "no_class"),
+      "POST /api/engine/event injects a dark response event")
+check(client.get("/api/status").json()["increment"] == "S2",
+      "app status reports increment S2")
+
+# ── Mid Group: the seven scenes behave per their rebuild-table intent ────────
+live_scenes_file = Path(__file__).parent.parent / "storage" / "spectra" / "scenes.json"
+check(live_scenes_file.exists(), "seeded SPECTRA scenes present (S1 output)")
+live = {v["name"]: SceneV2(**v)
+        for v in json.loads(live_scenes_file.read_text()).values()}
+SEVEN = ["Black Hole V2", "Orbits V2", "Mid Star V2", "Fireworks V2",
+         "Squiggles V2", "Dancers V2", "Eye V2"]
+check(all(name in live for name in SEVEN), "all seven Mid Group scenes seeded")
+check(all(live[n].responses["flare"].color_set_jump and
+          len(live[n].responses["flare"].bands) == 3 for n in SEVEN),
+      "each carries a 3-band flare class with the colour-set jump")
+
+def resolved_params(name: str, effect_type: str, intensity, seed: int = 1):
+    resolved = scene_compiler.resolve_scene(
+        live[name], FireContext(intensity, rng=Random(seed)))
+    return next(d.params for d in resolved.devices
+                if d.effect_type == effect_type)
+
+
+seen_pairs = set()
+for seed in range(200):
+    p = resolved_params("Mid Star V2", "radial", 0.5, seed)
+    seen_pairs.add((p["star"], p["edges"]))
+check(seen_pairs == {(0.3, 6), (-0.3, 3), (0.0, 5)},
+      "Mid Star: dice variants land ONLY as the three authored pairs")
+
+styles = {inten: resolved_params("Dancers V2", "dancer", inten)["dance_type"]
+          for inten in (0.2, 0.5, 0.8)}
+check(styles == {0.2: "ballet", 0.5: "cowboy", 0.8: "kpop"},
+      f"Dancers: intensity picks the dance style ({styles})")
+
+flips = sum(resolved_params("Orbits V2", "orbits", 0.5, s)["reverse"]
+            for s in range(200))
+check(40 < flips < 160, f"Orbits: reverse flips ~50/50 per fire ({flips}/200)")
+
+check(resolved_params("Black Hole V2", "blackhole", 1.0)["swirl"] == 6.0,
+      "Black Hole: swirl rides the ⚡ map to its ceiling at intensity 1.0")
+check(resolved_params("Fireworks V2", "fireworks", 1.0)["burst_size"] == 14,
+      "Fireworks: burst_size maps to 14 at full intensity (integer-coerced)")
+check(resolved_params("Squiggles V2", "squiggles", 0.0)["beat_burst"] == 1.0,
+      "Squiggles: beat_burst maps to its floor at intensity 0")
+
+# The responses ANIMATE: each scene's flare bands execute against the
+# engine — the top band's patch lands as jumps on the scene's virtuals
+# (one fake virtual per device entry; name-broadcast targeting decides
+# which entries each key reaches).
+for name in SEVEN:
+    sc = live[name]
+    resolved_sc = scene_compiler.resolve_scene(sc,
+                                               FireContext(0.5, rng=Random(4)))
+    fake_writes = [
+        {"virtual_id": f"v-{name}-{i}", "effect_type": dev.effect_type,
+         "config": dict(dev.params), "entry_id": dev.id,
+         "color_mode": dev.color.mode}
+        for i, dev in enumerate(resolved_sc.devices)]
+    exec3 = RecordingExecutor()
+    cond3 = DriftConductor(executor=exec3, drift_profiles=lambda: {},
+                           curve_profiles=lambda: {},
+                           room_load=lambda: cj.RoomColorState(),
+                           room_save=lambda st: None,
+                           set_position=lambda sid: None)
+    cond3.on_scene_fire(sc, fake_writes)
+    resp3 = ResponseEngine(conductor=cond3, executor=exec3, rng=Random(9),
+                           sequencer_config=lambda: SequencerConfig(),
+                           room_load=lambda: cj.RoomColorState(),
+                           room_save=lambda st: None)
+    top = max(sc.responses["flare"].bands, key=lambda b: b.intensity_max)
+    rec = asyncio.run(resp3.on_event("flare", 0.97))
+    expected = {k: v for k, v in top.param_patch.items()
+                if any(device_model.get_param_meta(d.effect_type, k)
+                       for d in sc.devices)}
+    landed = {}
+    for w in exec3.writes:
+        if w["kind"] == "jump":
+            landed.update(w["params"])
+    check(rec["result"] == "applied" and expected
+          and all(landed.get(k) == v for k, v in expected.items()),
+          f"{name}: top flare band executes its patch ({sorted(expected)})")
+
+eye_top = max(live["Eye V2"].responses["flare"].bands,
+              key=lambda b: b.intensity_max)
+check(eye_top.param_patch.get("flames") == 1.0,
+      "Eye: the top flare band is the FLAME flare (flames → 1.0)")
 
 print("\nALL CHECKS PASSED")

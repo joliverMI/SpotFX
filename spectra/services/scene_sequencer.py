@@ -6,11 +6,14 @@ SPECTRA's stores with two deliberate S1 differences:
      room_color.json via services/color_journey), no longer sequencer-private
      — creep, jumps, and the selector's travel factor all read one truth
      (a named change in the accepted design).
-  2. The music feed is the S2 read-only bridge's job. Until it lands the
-     production defaults are the STATED degradation: intensity 0.5 neutral,
-     no genre bucket, no deferral signals, no trigger-fire observation —
-     and nothing calls on_track_state(), so the engine ticks nothing.
-     enabled stays False by default regardless (its own dark switch).
+  2. The music feed IS the S2 read-only bridge (services/bridge): song
+     transitions tick on_track_state(), intensity is section energy at the
+     playback position (0.5 neutral when the bridge or analysis is absent —
+     stated degradation), genre buckets come from the training profiles,
+     deferrals from the broadcast flags + the settings poll, and
+     trigger-fired scenes are observed via last_scene_id. enabled stays
+     False by default regardless (its own dark switch) — feeding the engine
+     is not enabling it.
 
 Change moments: SONG TRANSITIONS ONLY (decision 5, binding) — the pluggable
 ChangeMomentSource seam ports verbatim; no timer, ever, without the owner's
@@ -99,7 +102,7 @@ class SceneSequencer:
         self._intensity = intensity or self._default_intensity
         self._genre_bucket = genre_bucket or self._default_genre_bucket
         self._deferral = deferral_fn or self._default_deferral
-        self._trigger_scene_id = trigger_scene_id or (lambda: None)
+        self._trigger_scene_id = trigger_scene_id or self._default_trigger_scene_id
         self._list_scene_ids = list_scene_ids or self._default_list_scene_ids
         self._scene_name = scene_name or self._default_scene_name
         self._broadcast = broadcast or self._default_broadcast
@@ -126,7 +129,7 @@ class SceneSequencer:
         self._active_color_set_id: Optional[str] = None
         self._last_color_pick: Optional[dict] = None
 
-    # ── feed (the S2 bridge calls this; nothing does in S1) ─────────────────
+    # ── feed (the S2 bridge calls this on every state broadcast) ────────────
 
     async def on_track_state(self, uri: Optional[str]) -> None:
         await self.transition_source.observe_uri(uri)
@@ -314,7 +317,7 @@ class SceneSequencer:
             "change_mode": config.change_mode,
             "next_change_source": TRANSITION_SOURCE,  # the only shipped clock
             "deferred_by": self._deferral(),
-            "bridge_connected": False,   # S2 flips this with the real feed
+            "bridge_connected": self._bridge_connected(),
             "active_scene_id": self._active_id,
             "active_scene_name": (self._scene_name(self._active_id)
                                   if self._active_id else None),
@@ -366,16 +369,28 @@ class SceneSequencer:
         return card.name if card else set_id
 
     def _default_intensity(self) -> float:
-        # Stated degradation until the S2 bridge: neutral 0.5.
-        return 0.5
+        # Bridge feed: section energy at position; 0.5 neutral when absent
+        # (stated degradation).
+        from spectra.services.engine import bridge
+        value = bridge.intensity()
+        return value if value is not None else 0.5
 
     def _default_genre_bucket(self) -> Optional[str]:
-        return None   # S2 bridge supplies the training-profile bucket
+        from spectra.services.engine import bridge
+        return bridge.genre_bucket()
 
     def _default_deferral(self) -> Optional[str]:
-        # Force Scene / pause / Dinner Party / Ambient arrive via the S2
-        # bridge; until then nothing defers (and nothing feeds moments).
-        return None
+        # Force Scene / pause / Dinner Party / Ambient, read off the bridge.
+        from spectra.services.engine import bridge
+        return bridge.sequencer_deferral()
+
+    def _default_trigger_scene_id(self) -> Optional[str]:
+        from spectra.services.engine import bridge
+        return bridge.trigger_scene_id()
+
+    def _bridge_connected(self) -> bool:
+        from spectra.services.engine import bridge
+        return bridge.connected
 
     def _default_list_scene_ids(self) -> set[str]:
         from spectra.services import scene_store
@@ -387,7 +402,8 @@ class SceneSequencer:
         return scene.name if scene else scene_id
 
     async def _default_broadcast(self, payload: dict) -> None:
-        pass   # SPECTRA's own WS lands with the S2 engine increment
+        from spectra.services.ws import ws_manager
+        await ws_manager.broadcast(payload)
 
     def _default_wheel_get(self) -> Optional[float]:
         from spectra.services import color_journey

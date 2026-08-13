@@ -20,6 +20,8 @@ ROOM_COLOR_FILE = SPECTRA_STORAGE / "room_color.json"
 # Read-only spot-effects storage (S2 formalizes this as the bridge).
 COLOR_SETS_FILE = REPO_ROOT / "storage" / "color_sets.json"
 PROFILES_DIR = REPO_ROOT / "storage" / "profiles"
+AUDIO_SHAPES_DIR = REPO_ROOT / "storage" / "audio_shapes"
+TRAINING_PROFILES_FILE = REPO_ROOT / "storage" / "training_profiles.json"
 
 WEB_DIST = Path(__file__).parent / "web" / "dist"
 

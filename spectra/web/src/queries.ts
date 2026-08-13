@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost, apiPut, spotfxGet, spotfxPost } from './api/client';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
-  ColorWheelPosition, DriftProfile, FireResult, Registry, RoomColorState,
-  SceneV2, SpotColorSetCard,
+  ColorWheelPosition, DriftProfile, EngineStatus, FireResult, Registry,
+  RoomColorState, SceneV2, SpotColorSetCard,
 } from './types';
 
 /* ── scenes ── */
@@ -238,6 +238,18 @@ export function useSaveDriftProfiles() {
   });
 }
 
+/* ── engine (S2) ── */
+
+/** The evolution engine's live surface — display only (the strip on the
+ * Scenes page and the Drift tab's live positions read this). */
+export function useEngineStatus() {
+  return useQuery({
+    queryKey: ['spectra-engine-status'],
+    queryFn: () => apiGet<EngineStatus>('/engine/status'),
+    refetchInterval: 3000,
+  });
+}
+
 /* ── status ── */
 
 export interface AppStatus {
@@ -246,6 +258,7 @@ export interface AppStatus {
   scenes: number;
   sequencer_enabled: boolean;
   bridge_connected: boolean;
+  engine_dark: boolean;
   light_ownership: string;
   room_journey_degrees_per_min: number;
   room_wheel_position_deg: number | null;
