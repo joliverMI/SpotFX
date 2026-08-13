@@ -1,0 +1,39 @@
+# SpotFX user unit — reference copy with the liveness-gated systemd watchdog
+# (detection Option B; see services/write_plane_watchdog.py).
+#
+# Deploy (owner action — the repo never edits the live unit):
+#   cp deploy/spotfx.service ~/.config/systemd/user/spotfx.service
+#   systemctl --user daemon-reload
+#   systemctl --user restart spotfx
+#
+# The three watchdog lines are Type=notify, WatchdogSec, and TimeoutStartSec.
+# Without them the backend runs exactly as before: $NOTIFY_SOCKET is unset and
+# every sd_notify call in write_plane_watchdog is a no-op. With them, SpotFX
+# pings WATCHDOG=1 every 30 s ONLY while the write-plane liveness predicate
+# holds; a wedged write plane, dead event loop, or dead alarm task stops the
+# pings and systemd restarts SpotFX (journal shows `watchdog timeout`).
+# WatchdogSec=90 tolerates 2 missed 30 s ticks. A LedFX-side outage never
+# stops the pings (breaker-open windows are treated as alive by the predicate).
+
+[Unit]
+Description=SpotFX
+After=snapclient.service ledfx.service
+Wants=snapclient.service ledfx.service
+
+[Service]
+# READY=1 is sent by the write-plane watchdog task shortly after the event
+# loop starts; TimeoutStartSec covers slow starts (model loads etc.) so
+# Type=notify cannot fail an otherwise-healthy boot.
+Type=notify
+WatchdogSec=90
+TimeoutStartSec=120
+WorkingDirectory=/home/javi/SpotFX
+ExecStart=/home/javi/SpotFX/.venv/bin/python main.py
+Restart=always
+RestartSec=3
+Environment=LOKY_MAX_CPU_COUNT=1
+Environment=OMP_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+
+[Install]
+WantedBy=default.target
