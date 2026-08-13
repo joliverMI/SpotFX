@@ -16,6 +16,10 @@ export interface MusicTrigger {
   color_group_override?: string | null;
   // Dark/Light override for this fire ('default' = defer down the cascade).
   display_mode?: 'default' | 'dark' | 'light';
+  // Drop fallback override: scene_group event id used by the fixed Drop
+  // event's clean-transition / random-member fallback instead of the global
+  // drop group. null/missing = normal behavior.
+  drop_scene_group_override?: string | null;
   // joined by GET /profiles/current only:
   event_name?: string;
   event_color?: string;
@@ -121,4 +125,5 @@ export interface EventOption {
   id: string;
   name: string;
   color: string;
+  event_type?: string;
 }

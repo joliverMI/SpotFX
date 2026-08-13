@@ -93,6 +93,17 @@ class Settings(BaseSettings):
     ledfx_trigger_buffer_ms: int = 250
     # Global default ramp duration for brightness/effect param changes; 0 = instant
     smooth_ramp_ms: int = 500
+    # Charge/Lull/Drop phase ramps: how long each phase's build takes on the
+    # phase-capable LedFX effects (phase_progress tweens 0→1 over this, so the
+    # charge maxes exactly at the ramp end). Drop stays short — it's the snap.
+    phase_charge_ramp_ms: int = 4000
+    phase_lull_ramp_ms: int = 2500
+    phase_drop_ramp_ms: int = 400
+    # Scene group the fixed Drop event falls back to: current scene already a
+    # member → clean transition (adopt the group + refresh its color set);
+    # otherwise fire a random member. "" = use the scene_group named "Drop".
+    # Per-trigger override: MusicTrigger.drop_scene_group_override.
+    drop_scene_group_id: str = ""
     # Prefer LedFX server-side param interpolation (one PUT + transition_ms) over
     # the client-side 40fps PUT loop, when the connected LedFX advertises support
     # (GET /api/info → features.param_transition). Kill-switch: set False to force

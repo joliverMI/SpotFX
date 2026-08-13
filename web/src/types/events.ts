@@ -396,6 +396,7 @@ export type EventType =
   | 'single' | 'sequence' | 'beat_sequence' | 'morph_set'
   | 'scene_update' | 'update_scene' | 'reset_scene'
   | 'shape_flare' | 'color_flare' | 'combo_flare'
+  | 'charge' | 'lull' | 'drop'
   | 'scene_group'
   | 'device_settings' | 'composite';
 
@@ -461,6 +462,13 @@ export interface MusicEvent {
 export const SCENE_EVENT_TYPES: EventType[] = [
   'scene_update', 'update_scene', 'reset_scene',
   'shape_flare', 'color_flare', 'combo_flare',
+  'charge', 'lull', 'drop',
+];
+
+/** A scene_update's pinned lanes, by index. Charge/Lull/Drop carry the
+ *  per-scene extras fired alongside the LedFX phase choreography. */
+export const SCENE_LANE_NAMES = [
+  'First', 'Rest', 'Shape', 'Color', 'Charge', 'Lull', 'Drop',
 ];
 
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
@@ -474,6 +482,9 @@ export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   shape_flare: 'Shape Flare',
   color_flare: 'Color Flare',
   combo_flare: 'Combo Flare',
+  charge: 'Charge',
+  lull: 'Lull',
+  drop: 'Drop',
   scene_group: 'Scene Group',
   device_settings: 'Device Settings',
   composite: 'Composite',

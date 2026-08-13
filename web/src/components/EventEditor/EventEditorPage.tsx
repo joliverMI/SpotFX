@@ -26,7 +26,7 @@ import PreviewButton from '../PreviewButton';
 import { previewEvent } from '../../lib/preview';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import EditableSequenceTrack from '../tracks/EditableSequenceTrack';
-import EditableParallelLanes from '../tracks/EditableParallelLanes';
+import EditableParallelLanes, { PhaseCycleButton } from '../tracks/EditableParallelLanes';
 import BeatSequenceTrack from '../tracks/BeatSequenceTrack';
 import ParallelLanes from '../tracks/ParallelLanes';
 import DeviceTargetsTrack from '../tracks/DeviceTargetsTrack';
@@ -230,6 +230,9 @@ export default function EventEditorPage() {
           {draft.event_type === 'device_settings' && <DeviceTargetsTrack targets={draft.device_targets} />}
           {(draft.event_type === 'morph_set' || (SCENE_EVENT_TYPES as string[]).includes(draft.event_type)) && (
             <ParallelLanes lanes={draft.morph_lanes} />
+          )}
+          {['charge', 'lull', 'drop'].includes(draft.event_type) && (
+            <div style={{ margin: '8px 0' }}><PhaseCycleButton /></div>
           )}
           <p className="empty-note">
             {draft.fixed

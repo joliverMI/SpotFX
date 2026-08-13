@@ -43,6 +43,13 @@ _FIRE_INTENSITY: ContextVar[float | None] = ContextVar("spotfx_fire_intensity", 
 # whenever this fire resolves the "__scene_group__" sentinel. Same task-scoped
 # lifetime as _FIRE_INTENSITY; unset/None = normal resolution.
 _FIRE_COLOR_GROUP: ContextVar[str | None] = ContextVar("spotfx_fire_color_group", default=None)
+# Per-fire drop-group override (MusicTrigger.drop_scene_group_override): the
+# scene_group the fixed Drop event's fallback uses for THIS fire.
+_FIRE_DROP_GROUP: ContextVar[str | None] = ContextVar("spotfx_fire_drop_group", default=None)
+# Per-fire phase-ramp override: an Override Blend charge/lull trigger
+# stretches its phase ramp to the gap to the next trigger, so the build
+# maxes exactly when the next moment fires. None = settings default.
+_FIRE_PHASE_RAMP: ContextVar[int | None] = ContextVar("spotfx_fire_phase_ramp", default=None)
 # Per-fire Dark/Light display-mode override (MusicTrigger.display_mode): level
 # 2 of the display-mode cascade (services/display_mode). Same task-scoped
 # lifetime as _FIRE_INTENSITY; unset/None/"default" = defer to lower levels.
@@ -58,13 +65,24 @@ STALE_FIRE_MS = 2000  # any trigger whose anchor is more than this far behind so
 
 # Scene events: the user-created scene_update (lanes below) plus the fixed
 # built-ins that re-run one or more of its lanes against the last fired
-# scene_update. Indices into a scene_update's morph_lanes.
-SCENE_LANE_NAMES = ["First", "Rest", "Shape", "Color"]
+# scene_update. Indices into a scene_update's morph_lanes. Charge/Lull/Drop
+# lanes carry per-scene extras (reactivity, color, spawn tweaks) fired
+# alongside the LedFX phase choreography (see _fire_phase).
+SCENE_LANE_NAMES = ["First", "Rest", "Shape", "Color", "Charge", "Lull", "Drop"]
 SCENE_EVENT_TYPES = (
     "scene_update", "update_scene", "reset_scene",
     "shape_flare", "color_flare", "combo_flare",
+    "charge", "lull", "drop",
     "scene_group",
 )
+# Fixed events that drive the LedFX phase choreography, and the effect types
+# that implement it (a `phase` + `phase_progress` config pair; see the
+# ledfx-src effects). Only virtuals live on one of these effects get writes.
+PHASE_EVENT_TYPES = ("charge", "lull", "drop")
+PHASE_EFFECTS = {
+    "blackhole", "orbits", "radial", "fireworks", "squiggles", "dancer",
+    "eye", "blackhole1d", "orbits1d", "fireworks1d",
+}
 # Params whose value change makes LedFX re-instantiate (reset) the effect.
 # These must be written instantly (ramping them flickers/restarts the effect),
 # and Set Color's "preserve effect" mode skips them entirely. The canonical
@@ -90,6 +108,9 @@ _FLARE_LANES = {
     "shape_flare":  [2],     # Shape
     "color_flare":  [3],     # Color
     "combo_flare":  [2, 3],  # Shape + Color in parallel
+    "charge":       [4],     # extra per-scene tweaks riding the phase
+    "lull":         [5],
+    "drop":         [6],
 }
 
 
@@ -125,6 +146,8 @@ class _PlanEntry:
     trigger_intensity: float = 0.5                # firing trigger's intensity (0-1, scaler applied at plan time)
     trigger_color_group: Optional[str] = None     # firing trigger's scene-group color override (card id)
     trigger_display_mode: Optional[str] = None    # firing trigger's dark/light override ("default"/None = defer)
+    trigger_drop_group: Optional[str] = None      # firing trigger's drop scene-group override (event id)
+    trigger_phase_ramp: Optional[int] = None      # blend-stretched charge/lull phase ramp (ms)
     is_root: bool = False                         # True only for the root entry of a trigger's plan
     planned_descendant_ids: set[str] = dc_field(default_factory=set)
     preselected_action: Optional[Action] = None   # for "single" events — action chosen at plan time
@@ -433,6 +456,15 @@ class TriggerEngine:
             self._triggerless_triggers = None
             self._last_preview_id = None
             self._last_uri = profile.spotify_uri
+            # A charge/lull from the previous song must not linger into this
+            # one — clear it if no drop resolved it (the LedFX-side orphan
+            # watchdog is the backstop when this write is lost too).
+            if getattr(self, "_phase_armed", False):
+                try:
+                    asyncio.get_running_loop().create_task(
+                        self._fire_phase("none"))
+                except RuntimeError:
+                    pass
             # Scene cursors / active group intentionally NOT cleared (room
             # continuity — see __init__). But wake any sequence "updates"
             # waiters so an updates-only wait (delay_ms=0) releases via its
@@ -796,6 +828,10 @@ class TriggerEngine:
                 id=t.id, timestamp_ms=t.timestamp_ms,
                 event_id=t.event_id, labels=list(t.labels or []),
                 intensity=iv if iv is not None else self._section_intensity(t.timestamp_ms),
+                # phase builds ride Override Blend: the charge/lull ramp
+                # stretches to the gap to the next analyzed trigger
+                # (see _phase_blend_ramp_ms); the drop stays a snap
+                override_blend=t.event_id in ("fixed-charge", "fixed-lull"),
             )
 
         track_id = spotify_uri.split(":")[-1]
@@ -1188,6 +1224,8 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_drop_group=getattr(trigger, "drop_scene_group_override", None),
+                    trigger_phase_ramp=self._phase_blend_ramp_ms(trigger, event),
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     preselected_action=action,
@@ -1215,6 +1253,8 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_drop_group=getattr(trigger, "drop_scene_group_override", None),
+                    trigger_phase_ramp=self._phase_blend_ramp_ms(trigger, event),
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
@@ -1246,6 +1286,8 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_drop_group=getattr(trigger, "drop_scene_group_override", None),
+                    trigger_phase_ramp=self._phase_blend_ramp_ms(trigger, event),
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
@@ -1269,6 +1311,8 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_drop_group=getattr(trigger, "drop_scene_group_override", None),
+                    trigger_phase_ramp=self._phase_blend_ramp_ms(trigger, event),
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     preselected_morph_picks=picks,
@@ -1354,6 +1398,8 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_drop_group=getattr(trigger, "drop_scene_group_override", None),
+                    trigger_phase_ramp=self._phase_blend_ramp_ms(trigger, event),
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     planned_descendant_ids=child_ids,
@@ -1414,6 +1460,8 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_drop_group=getattr(trigger, "drop_scene_group_override", None),
+                    trigger_phase_ramp=self._phase_blend_ramp_ms(trigger, event),
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     preselected_scene_picks=scene_picks or None,
@@ -1436,6 +1484,8 @@ class TriggerEngine:
                     trigger_id=trigger.id,
                     trigger_intensity=self._scaled_intensity(getattr(trigger, "intensity", 0.5)),
                     trigger_color_group=getattr(trigger, "color_group_override", None),
+                    trigger_drop_group=getattr(trigger, "drop_scene_group_override", None),
+                    trigger_phase_ramp=self._phase_blend_ramp_ms(trigger, event),
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                 ))
@@ -1791,17 +1841,51 @@ class TriggerEngine:
                     return max((self._blend_action_tail_ms(a, at_ms, depth, visited)
                                 for a in lanes[lane_index].alternatives), default=0.0)
                 return 0.0
+            # phase events: the natural tail is the phase ramp itself (plus
+            # any lane extras below), so generic blend math sees a sane
+            # duration for charge/lull/drop
+            end = 0.0
+            if et in PHASE_EVENT_TYPES:
+                end = float({
+                    "charge": settings.phase_charge_ramp_ms,
+                    "lull": settings.phase_lull_ramp_ms,
+                    "drop": settings.phase_drop_ramp_ms,
+                }.get(et, 0))
             last = get_event(self._last_scene_update_id) if self._last_scene_update_id else None
             if last is None or last.event_type != "scene_update":
-                return 0.0
+                return end
             lanes = last.morph_lanes or []
-            end = 0.0
             for i in self._scene_lane_indices(event):
                 if 0 <= i < len(lanes):
                     end = max(end, max((self._blend_action_tail_ms(a, at_ms, depth, visited)
                                         for a in lanes[i].alternatives), default=0.0))
             return end
         return 0.0  # device_settings and friends are instant
+
+    def _phase_blend_ramp_ms(
+        self, trigger: MusicTrigger, event: MusicEvent,
+    ) -> Optional[int]:
+        """Override Blend for the fixed Charge/Lull events: stretch the phase
+        ramp to the gap to the next enabled trigger, so the build maxes
+        exactly when the next moment (the lull / the drop) fires. Drop stays
+        a snap. Small margin so the tween lands just before the next fire's
+        progress reset. None = use the settings default."""
+        if getattr(event, "event_type", "") not in ("charge", "lull"):
+            return None
+        if not getattr(trigger, "override_blend", False):
+            return None
+        nxt = min(
+            (t.timestamp_ms for t in self._get_active_triggers()
+             if t.enabled and t.id != trigger.id
+             and t.timestamp_ms > trigger.timestamp_ms),
+            default=None,
+        )
+        if nxt is None:
+            return None
+        gap = int(nxt - trigger.timestamp_ms)
+        if gap <= 0:
+            return None
+        return max(200, gap - 120)
 
     def _blend_factor_for(self, trigger: MusicTrigger, event: MusicEvent) -> Optional[float]:
         """Override Blend scale factor for this trigger: gap to the next
@@ -2671,11 +2755,19 @@ class TriggerEngine:
                     group_like = (et == "scene_group"
                                   or (fs := self._forced_scene_event()) is not None
                                   and fs.event_type == "scene_group")
+                    if et in PHASE_EVENT_TYPES:
+                        # the payload is the LedFX choreography, not lanes —
+                        # "no active scene" here would be misleading
+                        text = ("effect phase choreography"
+                                + (" + drop scene fallback" if et == "drop" else "")
+                                + f" (no {et.title()} lane on the scene)")
+                    elif group_like:
+                        text = "next group scene picked at fire time"
+                    else:
+                        text = "resolved at fire time (no active scene yet)"
                     rows.append({
                         "tag": child_tag or evt.name, "scope": "",
-                        "text": ("next group scene picked at fire time"
-                                 if group_like else
-                                 "resolved at fire time (no active scene yet)"),
+                        "text": text,
                         "full": "", "colors": [],
                         "at_ms": int(entry.fire_at_ms - trigger_ms),
                     })
@@ -3069,6 +3161,7 @@ class TriggerEngine:
         _FIRE_INTENSITY.set(self._scaled_intensity(getattr(trigger, "intensity", 0.5)))
         _FIRE_COLOR_GROUP.set(getattr(trigger, "color_group_override", None))
         _FIRE_DISPLAY_MODE.set(getattr(trigger, "display_mode", None))
+        _FIRE_DROP_GROUP.set(getattr(trigger, "drop_scene_group_override", None))
         if getattr(trigger, "display_mode", None) in ("dark", "light"):
             from services import display_mode as dm
             dm.sync_dark_locks_bg(dm.resolve(state.display_mode, trigger.display_mode))
@@ -3077,6 +3170,7 @@ class TriggerEngine:
         if event is None:
             logger.warning("Trigger %s references unknown event %s.", trigger.id, trigger.event_id)
             return
+        _FIRE_PHASE_RAMP.set(self._phase_blend_ramp_ms(trigger, event))
 
         morph_summary = ""
         if event.event_type == "single":
@@ -4967,6 +5061,131 @@ class TriggerEngine:
                 parts.append(f"{nm}: {self._describe_action(p)}")
         return f"{last.name} → {' · '.join(parts)}" if parts else f"→ {last.name}"
 
+    def _drop_group(self) -> Optional[MusicEvent]:
+        """The scene_group the fixed Drop event falls back to: this fire's
+        trigger override, else settings.drop_scene_group_id, else the group
+        literally named "Drop". None when nothing resolves to a scene_group."""
+        for gid in (_FIRE_DROP_GROUP.get(), settings.drop_scene_group_id):
+            if gid:
+                ev = get_event(gid)
+                if ev is not None and ev.event_type == "scene_group":
+                    return ev
+        from services.profile_manager import list_events
+        for ev in list_events():
+            if (ev.event_type == "scene_group"
+                    and (ev.name or "").strip().lower() == "drop"):
+                return ev
+        return None
+
+    async def _execute_drop_scene(
+        self, labels: list[str], skip_event_ids: Optional[set] = None,
+    ) -> str:
+        """Drop's scene fallback. If the current scene (the one that charged
+        and lulled) is already a member of the drop group, the payoff keeps
+        it: adopt the group as active (cursor on that member) and refresh the
+        room's colors from the group's designated Color Group — no scene
+        switch. Otherwise fire a weighted-random member — the switch IS the
+        payoff."""
+        group = self._drop_group()
+        if group is None:
+            return ""
+        current = self._last_scene_update_id
+        valid: list[tuple[int, MusicEvent]] = []
+        for i, m in enumerate(group.scene_group_members or []):
+            ev = get_event(m.event_id)
+            if ev is not None and ev.event_type == "scene_update":
+                valid.append((i, ev))
+        if not valid:
+            logger.info("drop: group '%s' has no valid members — phase only",
+                        group.name)
+            return ""
+        member_ids = {ev.id for _, ev in valid}
+        self._active_scene_group_id = group.id
+        state.active_scene_group_id = group.id
+        if current in member_ids:
+            # clean transition: keep the charged scene, adopt the group +
+            # refresh the color set it designates
+            idx = next(i for i, ev in valid if ev.id == current)
+            self._commit_scene_group_cursor(
+                group.id, idx, 1, self._scene_cursor.get(group.id))
+            # adopting the group may change the level-3 display mode —
+            # reconcile the LedFX dark locks like a scene fire would
+            from services import display_mode as dm
+            _gm, _sm = dm.group_and_scene_modes()
+            dm.sync_dark_locks_bg(dm.resolve(
+                state.display_mode, _FIRE_DISPLAY_MODE.get(), _gm, _sm))
+            from models.music_event import SetColorAction, SCENE_GROUP_COLOR_REF
+            await self._execute_action(
+                SetColorAction(ref_id=SCENE_GROUP_COLOR_REF),
+                labels or [], skip_event_ids=skip_event_ids)
+            logger.info("drop: current scene is a '%s' member — clean adoption, "
+                        "color refreshed", group.name)
+            return f"{group.name} adopted (clean) · color refreshed"
+        # mismatch: a weighted-random member becomes the payoff switch
+        pool = [(i, ev) for i, ev in valid if ev.id != current] or valid
+        weights = [
+            max(float((group.scene_group_members[i].weight or 1.0)), 0.001)
+            for i, _ in pool
+        ]
+        idx, member = random.choices(pool, weights=weights, k=1)[0]
+        self._commit_scene_group_cursor(
+            group.id, idx, 1, self._scene_cursor.get(group.id))
+        logger.info("drop: current scene not in '%s' — switching to member "
+                    "'%s'", group.name, member.name)
+        tag = await self._execute_scene_update(
+            member, labels, skip_event_ids)
+        return f"{group.name} → {member.name} · {tag}"
+
+    async def _fire_phase(self, phase: str) -> str:
+        """Charge/Lull/Drop dispatch: for every SpotFX-imported virtual whose
+        LIVE effect is phase-capable, write `phase` + `phase_progress: 0`
+        instantly (the reset matters — the tween would otherwise ramp from a
+        stale 1.0 and skip the whole build), then tween `phase_progress` 0→1
+        over the phase's configured ramp. The LedFX effect edge-detects the
+        phase key and drives the actual choreography (horizon swallow, orbit
+        collapse, rockets, spin-up…) off the progress value, so the build
+        maxes exactly at the ramp end. Ramps are spawned, not awaited — a 4 s
+        charge must not stall the fire path."""
+        from services.morph_compiler import resolve_scope
+        from models.music_event import MorphScope
+        vids = resolve_scope(MorphScope())
+        await self._refresh_effect_types(vids)
+        # Override Blend charge/lull triggers stretch the ramp to the gap to
+        # the next trigger (threaded per-fire via _FIRE_PHASE_RAMP); manual
+        # fires and non-blend triggers use the settings defaults.
+        blend_ramp = _FIRE_PHASE_RAMP.get() if phase in ("charge", "lull") else None
+        ramp_ms = int(blend_ramp if blend_ramp else {
+            "charge": settings.phase_charge_ramp_ms,
+            "lull": settings.phase_lull_ramp_ms,
+            "drop": settings.phase_drop_ramp_ms,
+        }.get(phase, 0))
+        # armed = a charge/lull went out without a resolving drop yet; the
+        # track-change hook clears lingering phases via _fire_phase("none")
+        self._phase_armed = phase in ("charge", "lull")
+        targets: list[tuple[str, str]] = []
+        for vid in vids:
+            etype = ((state.ledfx_virtual_cache.get(vid) or {})
+                     .get("effect") or {}).get("type")
+            if etype in PHASE_EFFECTS:
+                targets.append((vid, etype))
+        if not targets:
+            logger.info("%s: no phase-capable effects live — no-op", phase)
+            return f"{phase.title()}: no phase-capable effect live"
+        for vid, etype in targets:
+            await ledfx_client.set_virtual_effect(
+                vid, etype, {"phase": phase, "phase_progress": 0.0})
+        # the arm patch must land before the tween PUT or the tween would be
+        # retargeted from the stale progress value
+        await ledfx_client.drain_bus()
+        if phase != "none":
+            for vid, etype in targets:
+                self._spawn_ramp(ledfx_client.ramp_effect_params(
+                    vid, etype, {"phase_progress": 1.0}, ramp_ms))
+        logger.info("%s fired on %d virtual(s), ramp %dms: %s",
+                    phase, len(targets), ramp_ms,
+                    ", ".join(v for v, _ in targets))
+        return f"{phase.title()} ({ramp_ms}ms) → {len(targets)} device(s)"
+
     def _scene_lane_is_empty(self, lane_index: int) -> bool:
         """True when the last fired Scene Update has no alternatives in
         `lane_index` (or there is no active Scene Update / lane)."""
@@ -5036,6 +5255,26 @@ class TriggerEngine:
                 target, labels, skip_event_ids, preselected, resolved_picks)
         if event.event_type not in _FLARE_LANES:
             return ""
+        if event.event_type in PHASE_EVENT_TYPES:
+            # Charge/Lull/Drop: the LedFX phase choreography fires always;
+            # the matching extra lane of the last Scene Update rides along
+            # when it has alternatives (per-scene reactivity/color tweaks).
+            # Drop additionally resolves its fallback scene group — clean
+            # adoption when the charged scene is a member, else a switch to
+            # a random member (see _execute_drop_scene).
+            indices = [
+                i for i in self._scene_lane_indices(event)
+                if not self._scene_lane_is_empty(i)
+            ]
+            jobs = [self._fire_phase(event.event_type)]
+            if event.event_type == "drop":
+                jobs.append(self._execute_drop_scene(labels, skip_event_ids))
+            if indices:
+                jobs.append(self._run_last_scene_lanes(
+                    indices, labels, skip_event_ids, preselected,
+                    resolved_picks))
+            parts = await asyncio.gather(*jobs)
+            return " · ".join(p for p in parts if p)
         # Shape Flare falls back to the Color lane when the Shape lane (2) is
         # empty, so an event with only color alternatives still flares.
         indices = self._scene_lane_indices(event)
@@ -5868,6 +6107,8 @@ class TriggerEngine:
         _FIRE_INTENSITY.set(entry.trigger_intensity)  # per-task context — no cross-fire leak
         _FIRE_COLOR_GROUP.set(entry.trigger_color_group)
         _FIRE_DISPLAY_MODE.set(entry.trigger_display_mode)
+        _FIRE_DROP_GROUP.set(entry.trigger_drop_group)
+        _FIRE_PHASE_RAMP.set(entry.trigger_phase_ramp)
         # A trigger that forces dark/light must flip the LedFX dark locks even
         # when its event carries no Set Color / Scene Update (those paths
         # re-sync on their own; syncing here only when the trigger overrides

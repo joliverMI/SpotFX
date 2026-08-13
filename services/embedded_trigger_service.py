@@ -483,14 +483,26 @@ def _detect_charges_from_gaps(beats, gaps, tp) -> list[int | None]:
     """
     lookback  = getattr(tp, "charge_lookback_beats", 12)
     min_score = getattr(tp, "charge_min_score",      0.40)
+    # charge_lead_beats > 0 anchors the search around (gap - lead) instead
+    # of "loudest beat right before the gap": measured hand-authored EDM
+    # charges sit a median ~14 beats ahead of the lull (the buildup START),
+    # not at the pre-gap loudness peak. lookback then acts as the anchored
+    # window's total width. 0 = legacy behavior.
+    lead      = getattr(tp, "charge_lead_beats",     0)
 
     def _score(b):
         return (b.rms_total + b.rms_bass) / 2.0
 
     charges: list[int | None] = []
     for gs, ge, _ in gaps:
-        search_start = max(0, gs - lookback)
-        window = beats[search_start : gs]
+        if lead > 0:
+            center = gs - lead
+            search_start = max(0, center - lookback // 2)
+            search_end = max(search_start + 1, min(gs, center + lookback // 2 + 1))
+        else:
+            search_start = max(0, gs - lookback)
+            search_end = gs
+        window = beats[search_start:search_end]
         if not window:
             charges.append(None)
             continue

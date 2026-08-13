@@ -176,6 +176,7 @@ def delete_profile(spotify_uri: str) -> bool:
 FIXED_EVENT_IDS = {
     "fixed-update-scene", "fixed-reset-scene",
     "fixed-shape-flare", "fixed-color-flare", "fixed-combo-flare",
+    "fixed-charge", "fixed-lull", "fixed-drop",
     "fixed-no-action",
 }
 
@@ -201,6 +202,22 @@ def _fixed_events() -> dict[str, MusicEvent]:
         "fixed-combo-flare": MusicEvent(
             id="fixed-combo-flare", name="Combo Flare", color="#FFFFFF",
             event_type="combo_flare", fixed=True,
+        ),
+        # Charge/Lull/Drop: phase choreography for phase-capable LedFX
+        # effects (blackhole/orbits/radial/fireworks) + the matching extra
+        # lane of the last Scene Update. Charge builds over its ramp, lull
+        # holds the coiled state, drop snaps the payoff.
+        "fixed-charge": MusicEvent(
+            id="fixed-charge", name="Charge", color="#FFB300",
+            event_type="charge", fixed=True,
+        ),
+        "fixed-lull": MusicEvent(
+            id="fixed-lull", name="Lull", color="#3D5AFE",
+            event_type="lull", fixed=True,
+        ),
+        "fixed-drop": MusicEvent(
+            id="fixed-drop", name="Drop", color="#FF1744",
+            event_type="drop", fixed=True,
         ),
         # Deliberate no-op (composite with no root). Place it on a trigger to
         # end an Override Blend span without changing the lights.
