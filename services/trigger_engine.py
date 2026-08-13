@@ -2934,11 +2934,16 @@ class TriggerEngine:
         return await self.fire_event_object_now(event, labels)
 
     async def fire_event_object_now(
-        self, event: MusicEvent, labels: list[str] | None = None
+        self, event: MusicEvent, labels: list[str] | None = None,
+        intensity: float | None = None,
     ) -> bool:
         """Fire an in-memory MusicEvent that need not be saved — the body of
         fire_event_now, used by the editor's per-level Preview (an ad-hoc
-        composite wrapping the previewed subtree)."""
+        composite wrapping the previewed subtree). `intensity` simulates the
+        firing trigger's intensity for this preview (RAW, no song/genre
+        scaling) so intensity choosers and ⚡ bindings resolve against it."""
+        if intensity is not None:
+            _FIRE_INTENSITY.set(max(0.0, min(1.0, float(intensity))))
         with ledfx_client.force_allow():
             # Composite: resolve random picks ONCE so the scene-override attempt
             # and the fallback bus dispatch fire the same branches.

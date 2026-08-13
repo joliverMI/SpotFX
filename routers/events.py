@@ -23,10 +23,14 @@ router = APIRouter(prefix="/api/events", tags=["events"])
 
 
 class PreviewBody(BaseModel):
-    """Either a full (possibly unsaved) event, or one action subtree to wrap."""
+    """Either a full (possibly unsaved) event, or one action subtree to wrap.
+    `intensity` simulates the firing trigger's intensity (raw 0-1, no
+    song/genre scaling) — intensity choosers and ⚡ bindings resolve against
+    it, so the editor can preview any lane."""
     event: MusicEvent | None = None
     action: Action | None = None
     labels: list[str] = Field(default_factory=list)
+    intensity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 @router.get("")
@@ -98,7 +102,8 @@ async def preview_event(body: PreviewBody):
         )
     else:
         raise HTTPException(422, "Provide either 'event' or 'action'")
-    ok = await engine.fire_event_object_now(event, body.labels)
+    ok = await engine.fire_event_object_now(
+        event, body.labels, intensity=body.intensity)
     if not ok:
         raise HTTPException(400, "Nothing to fire (empty preview)")
     return {"status": "fired"}
