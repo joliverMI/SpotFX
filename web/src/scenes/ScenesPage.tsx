@@ -4,6 +4,8 @@
  * colors, brightness) plus flare response bands and phase choreography; the
  * legacy scene_update events on the Events page are untouched by this page. */
 import { useMemo, useState } from 'react';
+import CollapsibleCard from '../components/CollapsibleCard';
+import CurveLab from '../components/CurveLab';
 import { useToast } from '../components/Toast';
 import { LabelsInput } from '../components/forms/inputs';
 import HelpLink from '../help/HelpLink';
@@ -355,6 +357,15 @@ export default function ScenesPage() {
           response and phase choreography. <HelpLink topic="scenes-v2" />
         </div>
       )}
+
+      {/* Dev affordance: sequencer curve-editor preview (SPECTRA sequencing
+        * core — attachment UI awaits the open design decisions). */}
+      <div style={{ gridColumn: '1 / -1' }}>
+        <CollapsibleCard id="scenes-curve-lab" defaultCollapsed
+          title={<>Curve editor lab <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>— dev preview</span></>}>
+          <CurveLab />
+        </CollapsibleCard>
+      </div>
     </div>
   );
 }
