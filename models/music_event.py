@@ -672,6 +672,13 @@ class MusicEvent(BaseModel):
         # shape_flare→Shape, color_flare→Color, combo_flare→Shape+Color.
         "scene_update", "update_scene", "reset_scene",
         "shape_flare", "color_flare", "combo_flare",
+        # Fixed charge/lull/drop events: drive the phase choreography of
+        # phase-capable LedFX effects (blackhole/orbits/radial/fireworks) —
+        # charge builds over the phase ramp, lull holds the coiled state,
+        # drop snaps the payoff. Each also re-runs the matching extra lane
+        # (Charge/Lull/Drop) of the last Scene Update for per-scene param
+        # tweaks. See trigger_engine._fire_phase.
+        "charge", "lull", "drop",
         # Ordered set of member Scene Updates picked one at a time, like a
         # Color Group: cycle (wrap/bounce) or weighted random. Firing the
         # group advances its cursor and fires the picked member (normal

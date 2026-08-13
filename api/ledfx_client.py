@@ -591,6 +591,9 @@ async def _set_virtual_effect_tween_direct(
     _set_virtual_effect_direct."""
     if _capture_in_progress():
         return True
+    config = _strip_stale_phase(config)
+    if not config:
+        return True
     resp = await _request(
         "PUT", f"/api/virtuals/{virtual_id}/effects",
         json={
@@ -662,6 +665,23 @@ def _schedule_bus_flush() -> None:
 
 # ── Public write API (goes through bus) ───────────────────────────────────────
 
+# Charge/lull/drop phase keys ride ONLY dedicated phase writes (payload =
+# phase keys alone, from trigger_engine._fire_phase). Any other write
+# carrying them is echoing a stale cached value — the effect edge-detects
+# `phase`, so re-sending a cached "charge" would spuriously re-fire the
+# choreography with no drop ever coming (a stuck charge/lull).
+_PHASE_KEYS = {"phase", "phase_progress"}
+
+
+def _strip_stale_phase(config: dict) -> dict:
+    """Drop phase keys from any payload that isn't a pure phase write.
+    Applied at queue time (before bus coalescing) so a real phase write
+    merging with a concurrent color/param write keeps its phase keys."""
+    if set(config) - _PHASE_KEYS:
+        return {k: v for k, v in config.items() if k not in _PHASE_KEYS}
+    return config
+
+
 async def set_virtual_effect(
     virtual_id: str, effect_type: str, config: dict, *, is_switch: bool = False
 ) -> None:
@@ -674,7 +694,7 @@ async def set_virtual_effect(
     stale-addressed patch can never switch the effect back).
     """
     key = (virtual_id, effect_type)
-    _effect_bus[key] = {**_effect_bus.get(key, {}), **config}
+    _effect_bus[key] = {**_effect_bus.get(key, {}), **_strip_stale_phase(config)}
     if is_switch:
         _effect_bus_switch.add(key)
     _schedule_bus_flush()
@@ -757,9 +777,12 @@ async def verify_and_correct(
             return
 
         # Right effect (or no type expected) → reconcile the discrete params.
+        # Phase keys are never reconciled: the effect self-resets them when
+        # its choreography completes — re-asserting a stale "charge" here
+        # would re-fire the build with no drop coming.
         fixes = {
             p: v for p, v in exp_cfg.items()
-            if not _values_match(v, live_cfg.get(p))
+            if p not in _PHASE_KEYS and not _values_match(v, live_cfg.get(p))
         }
         if not fixes:
             return

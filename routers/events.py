@@ -87,6 +87,37 @@ async def preview_event(body: PreviewBody):
     return {"status": "fired"}
 
 
+# NOTE: declared before /{event_id}/fire — route order matters or the
+# parametrized path would swallow "phase-cycle".
+@router.post("/phase-cycle/fire")
+async def fire_phase_cycle():
+    """Test the full Charge → Lull → Drop arc: fires the three fixed events
+    spaced by the configured phase ramps (charge builds fully, lull settles,
+    then the drop snaps). Returns immediately; the cycle runs in the
+    background. Acts on whatever phase-capable effects are live, and runs the
+    active scene's Charge/Lull/Drop lanes like any real fire."""
+    from main import engine
+    from config import settings
+    charge_ms = int(settings.phase_charge_ramp_ms)
+    lull_ms = int(settings.phase_lull_ramp_ms)
+
+    async def _cycle() -> None:
+        await engine.fire_event_now("fixed-charge")
+        # let the build max out, then a beat of held tension
+        await asyncio.sleep((charge_ms + 400) / 1000)
+        await engine.fire_event_now("fixed-lull")
+        await asyncio.sleep((lull_ms + 900) / 1000)
+        await engine.fire_event_now("fixed-drop")
+
+    asyncio.create_task(_cycle())
+    return {
+        "status": "started",
+        "charge_ramp_ms": charge_ms,
+        "lull_ramp_ms": lull_ms,
+        "drop_ramp_ms": int(settings.phase_drop_ramp_ms),
+    }
+
+
 @router.post("/{event_id}/fire")
 async def fire_event(event_id: str):
     from main import engine

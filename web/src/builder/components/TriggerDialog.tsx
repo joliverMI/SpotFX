@@ -34,6 +34,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
   const [overrideBlend, setOverrideBlend] = useState(false);
   const [colorGroup, setColorGroup] = useState('');
   const [displayMode, setDisplayMode] = useState<'default' | 'dark' | 'light'>('default');
+  const [dropGroup, setDropGroup] = useState('');
   const { data: colorSets } = useColorSets();
 
   useEffect(() => {
@@ -46,6 +47,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       setOverrideBlend(false);
       setColorGroup('');
       setDisplayMode('default');
+      setDropGroup('');
     } else if (existing) {
       setTsText(fmtMsTenths(existing.timestamp_ms));
       setEventId(existing.event_id);
@@ -54,6 +56,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
       setOverrideBlend(existing.override_blend ?? false);
       setColorGroup(existing.color_group_override ?? '');
       setDisplayMode(existing.display_mode ?? 'default');
+      setDropGroup(existing.drop_scene_group_override ?? '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
@@ -100,7 +103,8 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
                         labels: labelList, enabled: true, intensity,
                         override_blend: overrideBlend,
                         color_group_override: colorGroup || null,
-                        display_mode: displayMode });
+                        display_mode: displayMode,
+                        drop_scene_group_override: dropGroup || null });
       } else {
         const t = triggers.find((tt) => tt.id === editingId);
         if (t) {
@@ -111,6 +115,7 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           t.override_blend = overrideBlend;
           t.color_group_override = colorGroup || null;
           t.display_mode = displayMode;
+          t.drop_scene_group_override = dropGroup || null;
         }
       }
     });
@@ -182,6 +187,19 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
             onChange={(v) => setColorGroup(v ?? '')} />
           <HelpLink topic="trigger-color-override" title="Scene-group color override" />
         </label>
+
+        {events.find((e) => e.id === eventId)?.event_type === 'drop' && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+            title="Scene group the Drop falls back to for THIS trigger: current scene already a member → clean transition (adopt group + refresh colors); otherwise switch to a random member. Blank = the global drop group (the group named 'Drop').">
+            <span style={{ width: 90, color: 'var(--text-muted)' }}>Drop 🎯</span>
+            <SearchSelect value={dropGroup} width={220}
+              options={events.filter((e) => e.event_type === 'scene_group')
+                .map((e) => ({ value: e.id, label: e.name }))}
+              placeholder="— default drop group —" allowEmpty
+              onChange={(v) => setDropGroup(v ?? '')} />
+            <HelpLink topic="charge-lull-drop" title="Charge / Lull / Drop events" />
+          </label>
+        )}
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
           title="Force Dark or Light mode while this trigger fires. Default defers to the scene group / scene / color levels; the TopBar toggle still outranks this.">
