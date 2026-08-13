@@ -14,7 +14,12 @@ The proofs:
      from the new point on the next conductor leg,
   5. the seven Mid Group scenes animate: their seeded bindings resolve and
      land in the real effects, and each scene's top flare band executes
-     its patch on the rendering effect.
+     its patch on the rendering effect,
+  6. charge/lull/drop drive the REAL vendored phase machinery end to end:
+     the effect's own state machine enters the phase on the arm write, the
+     phase_progress ramp interpolates across render frames, the drop's
+     choreography SELF-RESETS to "none" (the vendored release grammar),
+     and a track-change release frees an armed lull.
 
 No LedFX service, no HTTP, no audio hardware (fx.headless.silence_audio).
 """
@@ -315,6 +320,72 @@ def test_flare_color_jump_and_journey_resume(tmp_path):
                             and "gradient" in w["params"]][-1]
                 assert rotation["params"]["gradient"] == \
                     color_rotate.rotate_color_value("#ff0000", delta)
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 6: charge/lull/drop drive the REAL vendored phase machinery ────────
+
+def test_charge_lull_drop_drive_the_real_phase_machinery(tmp_path):
+    """The build/suspend/release grammar is the vendored effects' own code
+    (docs/SPECTRA_RESPONSES.md); this proves the response engine's drive
+    reaches it frame-accurately on the headless harness: blackhole's state
+    machine enters the charge, the ramp interpolates, the drop bursts and
+    self-resets, and the lifecycle release frees an armed lull."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Phased", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="blackhole",
+        params={})])
+
+    async def main():
+        host, virtual = await _host(tmp_path, "phase")
+        try:
+            with headless.fake_clock() as clock:
+                config: dict = {}
+                effect = headless.attach_effect(host, virtual, "blackhole",
+                                                config)
+                executor, conductor, responder, room_box = _engine(clock)
+                _fire(conductor, scene, config)
+
+                # Charge: arm + 4000 ms build ramp. One frame consumes the
+                # edge — the REAL state machine enters the phase.
+                record = await responder.on_event("charge", 0.8)
+                assert record["phase"] == {"targets": [VID], "ramp_ms": 4000}
+                assert record["result"] == "phase_only"
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._phase == "charge"
+                # The ramp interpolates across render frames (the vendored
+                # tween engine), still mid-build after 1 s and 2 s.
+                headless.render_frames(virtual, 60, clock=clock, dt=1 / 60)
+                p1 = float(effect._config["phase_progress"])
+                headless.render_frames(virtual, 60, clock=clock, dt=1 / 60)
+                p2 = float(effect._config["phase_progress"])
+                assert 0.0 < p1 < p2 < 1.0
+                assert effect._phase == "charge"
+
+                # Drop: the 400 ms snap. The vendored choreography pinches,
+                # bursts, and SELF-RESETS phase to "none" — the release is
+                # the effect's own grammar, not the engine's.
+                record = await responder.on_event("drop", 0.9)
+                assert record["phase"]["ramp_ms"] == 400
+                headless.render_frames(virtual, 90, clock=clock, dt=1 / 60)
+                assert effect._phase == "none"
+                assert effect._config["phase"] == "none"
+                assert float(effect._config["phase_progress"]) == 0.0
+
+                # Lull arms; a track change releases it deliberately (the
+                # lifecycle guard) — no waiting on the orphan watchdog.
+                await responder.on_event("lull", 0.5)
+                headless.render_frames(virtual, 30, clock=clock, dt=1 / 60)
+                assert effect._phase == "lull"
+                assert await responder.release_phases() == 1
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._phase == "none"
+                assert await responder.release_phases() == 0
         finally:
             facade.set_host(None)
             await host.shutdown()
