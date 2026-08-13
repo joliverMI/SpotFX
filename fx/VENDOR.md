@@ -65,6 +65,10 @@ variables named `ledfx` (the core object handle) are untouched.
    (WEB_AUDIO_CLIENTS / WebAudioStream / ACTIVE_AUDIO_STREAM),
    `sendspin/{__init__,config,stream}.py` (SENDSPIN_AVAILABLE = False),
    `assets_builtin/`, `compat_sounddevice.py`.
+5. `device_model.py` — SpotFX-authored (not fork code): the shared device
+   model (categories/virtual topology, effect-param registry, scope
+   resolution) the architecture decision places in the shared library.
+   SPECTRA imports it; spot-effects keeps its own services until replaced.
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite. When updating vendored files, re-diff against that commit.

@@ -50,6 +50,7 @@ storage/lock_history.json
 storage/tune_history.json
 storage/tune_runs.log
 storage/tune_schedule.json
+storage/spectra/
 build/
 
 # TypeScript incremental build

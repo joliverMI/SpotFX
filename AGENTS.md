@@ -57,6 +57,28 @@ colours roll only when the sequencer fires a scene, scene + set land in one
 terminal rung KEEPS the current colours (never forced churn). Rainbow sets:
 neutral ×1.0 wheel factor, never move the room's wheel position.
 
+## SPECTRA app (S1 — separate app, shared process until S3)
+
+`spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`, own
+FastAPI sub-app mounted in main.py; `python -m spectra` is the future S3
+standalone entry). Import discipline is load-bearing: nothing under
+`spectra/` imports spot-effects runtime internals — only `fx/` (shared
+library, incl. `fx/device_model.py`) and stdlib/third-party; music/state
+inputs arrive via the S2 read-only bridge (until then intensity degrades to
+0.5, stated). Its scene model (`spectra/models/scene.py`) grows SceneV2
+with value bindings (+`dice` correlation), a four-class `responses` block
+(legacy `flare_bands` loads as the flare class), drift declarations, and
+the colour journey (room-level walk, per-scene OVERRIDE with custody
+semantics — `spectra/services/color_journey.py` docstring is the binding
+statement). Storage: `storage/spectra/` (own scenes/sequencer/drift/room
+files; seeder `scripts/seed_spectra_from_v2.py --apply`, idempotent, reads
+spot-effects storage READ-ONLY). Executable spec:
+`.venv/bin/python scripts/check_spectra.py`. Frontend: `spectra/web/`
+(own vite app — `cd spectra/web && npx vite build`), help content in
+`spectra/web/src/help/helpContent.ts` (same keep-it-current rule as the
+spot-effects help). The spot-effects Scenes page stays as-is until
+superseded; never point `fx/` at live hardware before the S3 handover.
+
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 
 `fx/` is the LedFX render pipeline vendored from the fork at commit

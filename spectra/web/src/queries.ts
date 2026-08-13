@@ -1,0 +1,260 @@
+/** Data hooks for the SPECTRA app (react-query). */
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiDel, apiGet, apiPost, apiPut, spotfxGet, spotfxPost } from './api/client';
+import type { CurvePoint } from './components/CurveEditor';
+import type {
+  ColorWheelPosition, DriftProfile, FireResult, Registry, RoomColorState,
+  SceneV2, SpotColorSetCard,
+} from './types';
+
+/* ── scenes ── */
+
+export function useScenes() {
+  return useQuery({
+    queryKey: ['spectra-scenes'],
+    queryFn: () => apiGet<SceneV2[]>('/scenes'),
+  });
+}
+
+export function useSaveScene() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (scene: SceneV2) => apiPost('/scenes', scene),
+    onSuccess: (_d, scene) => {
+      qc.setQueryData<SceneV2[]>(['spectra-scenes'], (old) => {
+        if (!old) return old;
+        return old.some((s) => s.id === scene.id)
+          ? old.map((s) => (s.id === scene.id ? scene : s))
+          : [...old, scene];
+      });
+      void qc.invalidateQueries({ queryKey: ['spectra-scenes'] });
+    },
+  });
+}
+
+export function useDeleteScene() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiDel(`/scenes/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['spectra-scenes'] }),
+  });
+}
+
+export const fireScene = (id: string, intensity: number, dryRun = true) =>
+  apiPost<FireResult>(`/scenes/${id}/fire`, { dry_run: dryRun, intensity });
+
+/* ── registry / colour sets ── */
+
+export function useRegistry() {
+  return useQuery({
+    queryKey: ['spectra-registry'],
+    queryFn: () => apiGet<Registry>('/registry'),
+    staleTime: 60_000,
+  });
+}
+
+export function useWheelPositions() {
+  return useQuery({
+    queryKey: ['spectra-wheel-positions'],
+    queryFn: () => apiGet<Record<string, ColorWheelPosition>>('/scenes/wheel-positions'),
+    staleTime: 60_000,
+  });
+}
+
+/** Full cards from the spot-effects surface (read + the one supported
+ * opt-out toggle) — the S2 bridge formalizes this feed. */
+export function useSpotColorSets() {
+  return useQuery({
+    queryKey: ['spot-color-sets'],
+    queryFn: () => spotfxGet<SpotColorSetCard[]>('/color-sets'),
+  });
+}
+
+export function useToggleSetOptOut() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (card: SpotColorSetCard) =>
+      spotfxPost('/color-sets', { ...card, scene_v2_opt_out: !card.scene_v2_opt_out }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spot-color-sets'] }),
+  });
+}
+
+/** Gradient library (read-only) for fixed-colour pickers. */
+export function useGradients() {
+  return useQuery({
+    queryKey: ['spot-gradients'],
+    queryFn: () => spotfxGet<{ id: string; name: string; value: string }[]>('/gradients'),
+    staleTime: 60_000,
+  });
+}
+
+/* ── sequencer ── */
+
+export interface CurveProfile { id: string; name: string; points: CurvePoint[]; }
+
+export interface SelectorEntry {
+  curve_ref: string | null;
+  inline_points: CurvePoint[] | null;
+  genre_mult: Record<string, number>;
+  dwell_weight: number;
+}
+
+export interface AffinityEdge { from_id: string; to_id: string; mult: number; }
+
+export interface SequencerConfig {
+  enabled: boolean;
+  change_mode: 'transition' | 'timed' | 'both';
+  base_dwell_s: number;
+  entries: Record<string, SelectorEntry>;
+  affinity: AffinityEdge[];
+  flare_entries: Record<string, SelectorEntry>;
+  color_set_entries: Record<string, SelectorEntry>;
+  wheel_travel_curve: string | null;
+}
+
+export interface SequencerStatus {
+  enabled: boolean;
+  change_mode: string;
+  next_change_source: string;
+  deferred_by: string | null;
+  bridge_connected: boolean;
+  active_scene_id: string | null;
+  active_scene_name: string | null;
+  dwell: { served_songs: number; target_songs: number; weight: number } | null;
+  last_pick: {
+    picked_id: string | null;
+    picked_name: string | null;
+    rung: string;
+    intensity: number;
+    factors: Record<string, { curve: number; genre: number; affinity: number; score: number }>;
+    source: string;
+    at: number;
+  } | null;
+  last_moment: { source: string; result: string; at: number } | null;
+  color: {
+    active_set_id: string | null;
+    active_set_name: string | null;
+    wheel_position_deg: number | null;
+    last_pick: Record<string, unknown> | null;
+  };
+}
+
+export function useSequencerCurves() {
+  return useQuery({
+    queryKey: ['spectra-seq-curves'],
+    queryFn: () => apiGet<Record<string, CurveProfile>>('/sequencer/curves'),
+  });
+}
+
+export function useSequencerConfig() {
+  return useQuery({
+    queryKey: ['spectra-seq-config'],
+    queryFn: () => apiGet<SequencerConfig>('/sequencer/config'),
+  });
+}
+
+export function useSequencerStatus() {
+  return useQuery({
+    queryKey: ['spectra-seq-status'],
+    queryFn: () => apiGet<SequencerStatus>('/sequencer/status'),
+    refetchInterval: 5000,
+  });
+}
+
+export function useIntensityHistogram() {
+  return useQuery({
+    queryKey: ['spectra-intensity-histogram'],
+    queryFn: () => apiGet<{ bins: number; counts: number[]; total: number }>('/sequencer/intensity-histogram'),
+    staleTime: 300_000,
+  });
+}
+
+export function useSaveCurves() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (curves: Record<string, CurveProfile>) => apiPut('/sequencer/curves', curves),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-seq-curves'] }),
+  });
+}
+
+/** Curve-attachment mutation: round-trips the STORED config and rewrites
+ * only entries[sceneId]'s curve fields — relationships stay agent-owned. */
+export function useAttachCurve() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      sceneId: string;
+      attachment:
+        | { kind: 'none' }
+        | { kind: 'flat' }
+        | { kind: 'profile'; profileId: string }
+        | { kind: 'inline'; points: CurvePoint[] };
+    }) => {
+      const config = await apiGet<SequencerConfig>('/sequencer/config');
+      const { [args.sceneId]: existing, ...rest } = config.entries;
+      if (args.attachment.kind === 'none') {
+        return apiPut('/sequencer/config', { ...config, entries: rest });
+      }
+      const entry: SelectorEntry = existing ?? {
+        curve_ref: null, inline_points: null, genre_mult: {}, dwell_weight: 1.0,
+      };
+      const curve =
+        args.attachment.kind === 'profile'
+          ? { curve_ref: args.attachment.profileId, inline_points: null }
+          : args.attachment.kind === 'inline'
+            ? { curve_ref: null, inline_points: args.attachment.points }
+            : { curve_ref: null, inline_points: null };
+      return apiPut('/sequencer/config', {
+        ...config,
+        entries: { ...rest, [args.sceneId]: { ...entry, ...curve } },
+      });
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-seq-config'] }),
+  });
+}
+
+/* ── journey / drift profiles ── */
+
+export function useRoomJourney() {
+  return useQuery({
+    queryKey: ['spectra-room-journey'],
+    queryFn: () => apiGet<RoomColorState>('/room-journey'),
+    staleTime: 30_000,
+  });
+}
+
+export function useDriftProfiles() {
+  return useQuery({
+    queryKey: ['spectra-drift-profiles'],
+    queryFn: () => apiGet<Record<string, DriftProfile>>('/drift-profiles'),
+  });
+}
+
+export function useSaveDriftProfiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (profiles: Record<string, DriftProfile>) => apiPut('/drift-profiles', profiles),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-drift-profiles'] }),
+  });
+}
+
+/* ── status ── */
+
+export interface AppStatus {
+  app: string;
+  increment: string;
+  scenes: number;
+  sequencer_enabled: boolean;
+  bridge_connected: boolean;
+  light_ownership: string;
+  room_journey_degrees_per_min: number;
+  room_wheel_position_deg: number | null;
+}
+
+export function useAppStatus() {
+  return useQuery({
+    queryKey: ['spectra-status'],
+    queryFn: () => apiGet<AppStatus>('/status'),
+    refetchInterval: 10_000,
+  });
+}
