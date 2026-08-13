@@ -61,7 +61,7 @@ export function newAction(type: ActionType): Action {
       // Starts with the default lane; threshold dots add more.
       return {
         ...base, type, id: uuid(), source: 'trigger_intensity', scope: null,
-        lanes: [newIntensityLane(0)],
+        ramp_ms: null, lanes: [newIntensityLane(0)],
       };
   }
 }
@@ -109,6 +109,7 @@ export function newEvent(event_type: MusicEvent['event_type'] = 'single'): Music
     ai_exposed: false,
     fixed: false,
     scene_override: false,
+    ramp_ms: null,
     actions: [],
     sequence_steps: [],
     revert: null,

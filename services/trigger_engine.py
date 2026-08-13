@@ -148,6 +148,12 @@ class _PlanEntry:
     trigger_display_mode: Optional[str] = None    # firing trigger's dark/light override ("default"/None = defer)
     trigger_drop_group: Optional[str] = None      # firing trigger's drop scene-group override (event id)
     trigger_phase_ramp: Optional[int] = None      # blend-stretched charge/lull phase ramp (ms)
+    # UNRESOLVED ramp override spec (int | ValueBinding | None) inherited from
+    # the referencing chain at plan time — e.g. the Intensity Scene chooser's
+    # ramp_ms when this entry is a pre-planned lane event_ref. Resolved at
+    # fire time (⚡ trigger intensity / 🎲 random) and passed down as
+    # inherited_ramp; the event's own ramp_ms still wins (deepest override).
+    trigger_ramp_override: Optional[object] = None
     is_root: bool = False                         # True only for the root entry of a trigger's plan
     planned_descendant_ids: set[str] = dc_field(default_factory=set)
     preselected_action: Optional[Action] = None   # for "single" events — action chosen at plan time
@@ -1199,6 +1205,7 @@ class TriggerEngine:
             lbls: list[str],
             depth: int = 0,
             visited: frozenset = frozenset(),
+            ramp_spec=None,  # unresolved inherited ramp override (int | ValueBinding)
         ) -> str:
             """Recurse; return a drill-down description string for this node."""
             if depth > 5:
@@ -1215,7 +1222,8 @@ class TriggerEngine:
                     child = get_event(action.event_id)
                     if child and child.id not in visited_next:
                         merged = lbls + list(action.labels or [])
-                        return walk(child, start_at, merged, depth + 1, visited_next)
+                        return walk(child, start_at, merged, depth + 1, visited_next,
+                                    ramp_spec=ramp_spec)
                     # cycle / missing → fall through to emit entry
                 # Leaf single: emit entry with the pre-selected action
                 entries.append(_PlanEntry(
@@ -1229,6 +1237,7 @@ class TriggerEngine:
                     trigger_display_mode=getattr(trigger, "display_mode", None),
                     is_root=(event.id == root_event.id),
                     preselected_action=action,
+                    trigger_ramp_override=ramp_spec,
                 ))
                 return self._describe_action(action) if action else event.name
 
@@ -1344,7 +1353,8 @@ class TriggerEngine:
                 # fallback in _execute_action stays for unresolved branches).
                 child_ids: set[str] = set()
 
-                def _plan_refs(action, base_ms: float, merged: list[str], d: int) -> None:
+                def _plan_refs(action, base_ms: float, merged: list[str], d: int,
+                               r_spec=None) -> None:
                     if action is None or d > 5:
                         return
                     t = getattr(action, "type", "")
@@ -1352,7 +1362,7 @@ class TriggerEngine:
                         child = get_event(action.event_id)
                         if child and child.id not in visited_next:
                             walk(child, int(base_ms), merged + list(action.labels or []),
-                                 depth + 1, visited_next)
+                                 depth + 1, visited_next, ramp_spec=r_spec)
                             child_ids.add(child.id)
                         return
                     if t == "random_group":
@@ -1360,14 +1370,21 @@ class TriggerEngine:
                         opt = next((o for o in action.options if o.id == opt_id), None)
                         if opt is not None:
                             for a in opt.actions:
-                                _plan_refs(a, base_ms, merged + list(opt.labels or []), d + 1)
+                                _plan_refs(a, base_ms, merged + list(opt.labels or []), d + 1,
+                                           r_spec)
                         return
                     if t == "intensity_chooser":
+                        # The chooser's ramp override rides down to pre-planned
+                        # lane event_refs (they fire as separate plan entries,
+                        # bypassing the fire-time chooser branch).
+                        own = getattr(action, "ramp_ms", None)
+                        r_spec = own if own is not None else r_spec
                         lane_id = resolved.get(action.id)
                         lane = next((l for l in action.lanes if l.id == lane_id), None)
                         if lane is not None:
                             for a in lane.actions:
-                                _plan_refs(a, base_ms, merged + list(lane.labels or []), d + 1)
+                                _plan_refs(a, base_ms, merged + list(lane.labels or []), d + 1,
+                                           r_spec)
                         return
                     if t == "sequence_group":
                         tmg = action.timing
@@ -1380,17 +1397,18 @@ class TriggerEngine:
                             else:
                                 tcur += c.delay_ms * time_scale
                             for a in c.actions:
-                                _plan_refs(a, tcur, merged + list(c.labels or []), d + 1)
+                                _plan_refs(a, tcur, merged + list(c.labels or []), d + 1,
+                                           r_spec)
                         return
                     if t == "parallel_group":
                         for c in action.children:
                             for a in c.actions:
                                 _plan_refs(a, base_ms + int(c.offset_ms or 0) * time_scale,
-                                           merged + list(c.labels or []), d + 1)
+                                           merged + list(c.labels or []), d + 1, r_spec)
                         return
 
                 if root is not None:
-                    _plan_refs(root, float(start_at), list(lbls), 0)
+                    _plan_refs(root, float(start_at), list(lbls), 0, ramp_spec)
 
                 entries.append(_PlanEntry(
                     fire_at_ms=int(fire_at), event=event, labels=list(lbls),
@@ -1405,6 +1423,7 @@ class TriggerEngine:
                     planned_descendant_ids=child_ids,
                     resolved_picks=resolved,
                     morph_anchor_offset_ms=anchor_off,
+                    trigger_ramp_override=ramp_spec,
                 ))
                 return (self._describe_action(root, resolved=resolved)
                         if root is not None else event.name)
@@ -1469,6 +1488,7 @@ class TriggerEngine:
                     scene_picks_event_id=picks_src,
                     resolved_picks=scene_resolved or None,
                     scene_group_pick=group_pick,
+                    trigger_ramp_override=ramp_spec,
                 ))
                 if group_pick is not None:
                     _m = get_event(group_pick["member_id"])
@@ -3300,13 +3320,15 @@ class TriggerEngine:
         self, action: Action, labels: list[str] | None = None,
         await_ramps: bool = False, skip_event_ids: set[str] | None = None,
         _depth: int = 0, resolved_picks: dict | None = None,
-        inherited_scope=None,
+        inherited_scope=None, inherited_ramp: Optional[int] = None,
     ) -> None:
         """Dispatch a single action. `resolved_picks` (random_group.id →
         RandomOption.id) pins random branches to the plan-time resolution so
         fires match previews; absent entries fall back to fresh picks.
         `inherited_scope` is the nearest group/lane Target — leaves with empty
-        scopes adopt it (see _apply_inherited_scope)."""
+        scopes adopt it (see _apply_inherited_scope). `inherited_ramp` is the
+        nearest resolved scene/group/chooser ramp override — when set it is
+        forced on every leaf's ramps (see _ramp_override)."""
         if action.type in self.CONTAINER_ACTION_TYPES and _depth > 5:
             logger.warning("%s depth cap (5) hit — skipping nested group", action.type)
             return
@@ -3329,6 +3351,7 @@ class TriggerEngine:
                         a, merged, await_ramps=await_ramps,
                         skip_event_ids=skip_event_ids, _depth=_depth + 1,
                         resolved_picks=resolved_picks, inherited_scope=opt_scope,
+                        inherited_ramp=inherited_ramp,
                     )
                     for a in opt.actions
                 ))
@@ -3337,7 +3360,7 @@ class TriggerEngine:
             await self._execute_sequence_group(
                 action, labels or [], skip_event_ids=skip_event_ids,
                 resolved_picks=resolved_picks, _depth=_depth,
-                inherited_scope=inherited_scope,
+                inherited_scope=inherited_scope, inherited_ramp=inherited_ramp,
             )
             return
         if action.type == "parallel_group":
@@ -3345,7 +3368,7 @@ class TriggerEngine:
                 action, labels or [], await_ramps=await_ramps,
                 skip_event_ids=skip_event_ids,
                 resolved_picks=resolved_picks, _depth=_depth,
-                inherited_scope=inherited_scope,
+                inherited_scope=inherited_scope, inherited_ramp=inherited_ramp,
             )
             return
         if action.type == "intensity_chooser":
@@ -3357,12 +3380,17 @@ class TriggerEngine:
             if lane and lane.actions:
                 eff_scope = self._effective_scope(action.scope, inherited_scope)
                 lane_scope = self._effective_scope(lane.scope, eff_scope)
+                # Chooser-level ramp override (⚡/🎲-bindable, resolved now)
+                # cascades to the chosen lane; deeper overrides still win.
+                eff_ramp = self._ramp_override(
+                    getattr(action, "ramp_ms", None), inherited_ramp)
                 merged = (labels or []) + [l for l in lane.labels if l not in (labels or [])]
                 await asyncio.gather(*(
                     self._execute_action(
                         a, merged, await_ramps=await_ramps,
                         skip_event_ids=skip_event_ids, _depth=_depth + 1,
                         resolved_picks=resolved_picks, inherited_scope=lane_scope,
+                        inherited_ramp=eff_ramp,
                     )
                     for a in lane.actions
                 ))
@@ -3404,7 +3432,10 @@ class TriggerEngine:
                 # a concurrent set_color can never address the pre-switch
                 # effect and flip a device back to it (radial→orbits→radial
                 # flicker). Bus dispatch remains the fallback.
-                if getattr(sub, "scene_override", False):
+                # An active ramp override must reach the actual writes, so the
+                # atomic scene-activate fast path (which carries no per-param
+                # ramps) is bypassed while one is inherited.
+                if getattr(sub, "scene_override", False) and inherited_ramp is None:
                     _rp = resolved_picks
                     if _rp is None and sub.root is not None:
                         _rp = self._resolve_random_picks(sub.root, list(labels or []))
@@ -3421,9 +3452,11 @@ class TriggerEngine:
                 # e.g. scene-lane picks — resolve into the same map). Groups
                 # not in the map still roll fresh.
                 await self._execute_composite(sub, labels or [], skip_event_ids=skip_event_ids,
-                                              resolved_picks=resolved_picks)
+                                              resolved_picks=resolved_picks,
+                                              inherited_ramp=inherited_ramp)
             elif sub.event_type in SCENE_EVENT_TYPES:
-                await self._execute_scene_event(sub, labels or [], skip_event_ids=skip_event_ids)
+                await self._execute_scene_event(sub, labels or [], skip_event_ids=skip_event_ids,
+                                                inherited_ramp=inherited_ramp)
             else:
                 sub_action = self._select_action(sub, labels or [])
                 if sub_action:
@@ -3431,6 +3464,7 @@ class TriggerEngine:
                         sub_action, labels, await_ramps=await_ramps,
                         skip_event_ids=skip_event_ids, _depth=_depth + 1,
                         resolved_picks=resolved_picks,
+                        inherited_ramp=inherited_ramp,
                     )
             return
 
@@ -3523,7 +3557,9 @@ class TriggerEngine:
                 virtuals = get_virtuals_for_category(action.category)
             else:
                 virtuals = get_all_virtual_ids()
-            ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+            ramp_ms = (inherited_ramp if inherited_ramp is not None
+                       else action.ramp_ms if action.ramp_ms is not None
+                       else settings.smooth_ramp_ms)
             instant_coros = []
             ramp_jobs: list = []
             polar_changes: dict = {}  # vid → (angle, radius, effect_type)
@@ -3700,17 +3736,21 @@ class TriggerEngine:
             await self._await_ramps_parallel(ramp_jobs)
 
         elif action.type == "morph_step":
-            await self._execute_morph_step(action, await_ramps=await_ramps)
+            await self._execute_morph_step(action, await_ramps=await_ramps,
+                                           ramp_override=inherited_ramp)
 
         elif action.type == "set_color":
-            await self._execute_set_color(action, await_ramps=await_ramps)
+            await self._execute_set_color(action, await_ramps=await_ramps,
+                                          ramp_override=inherited_ramp)
 
         elif action.type == "morph_color":
-            await self._execute_morph_color(action, await_ramps=await_ramps)
+            await self._execute_morph_color(action, await_ramps=await_ramps,
+                                            ramp_override=inherited_ramp)
 
         elif action.type == "scene_morph":
             await self._execute_scene_morph(action, labels or [],
-                                            skip_event_ids=skip_event_ids)
+                                            skip_event_ids=skip_event_ids,
+                                            ramp_override=inherited_ramp)
 
         elif action.type == "device_settings":
             await self._apply_device_targets(action.targets)
@@ -3741,7 +3781,8 @@ class TriggerEngine:
         if coros:
             await asyncio.gather(*coros, return_exceptions=True)
 
-    async def _execute_morph_step(self, action, await_ramps: bool = False) -> None:
+    async def _execute_morph_step(self, action, await_ramps: bool = False,
+                                  ramp_override: Optional[int] = None) -> None:
         """Dispatch a MorphStepAction in two compile passes so an in-step effect
         switch is visible to subsequent param targets on the same virtual.
 
@@ -3756,8 +3797,16 @@ class TriggerEngine:
 
         Finally, persist the post-action (effect, config) for every touched
         virtual so future switch-backs resume the right state.
+
+        `ramp_override` is the nearest resolved scene/group/chooser ramp
+        override — it replaces the step ramp AND every per-target ramp.
         """
         action = resolve_action_bindings(action, self._signal_now)
+        if ramp_override is not None:
+            action = action.model_copy(deep=True)
+            action.ramp_ms = ramp_override
+            for _t in action.targets:
+                _t.ramp_ms = None
         from services.morph_compiler import compile_target, resolve_scope
         from services.effect_params import get_param_meta
         from services import morph_effect_state
@@ -4315,7 +4364,8 @@ class TriggerEngine:
             return state.last_color_group_id
         return ref_id
 
-    async def _execute_set_color(self, action, await_ramps: bool = False) -> None:
+    async def _execute_set_color(self, action, await_ramps: bool = False,
+                                 ramp_override: Optional[int] = None) -> None:
         """Apply a Color Set (or a Group's currently-selected Color Set) across
         every scoped device. Writes FG color, BG color, and background mode
         directly per virtual — resolving each param against the device's CURRENT
@@ -4324,7 +4374,10 @@ class TriggerEngine:
         gradient interpolation; background mode is instant.
 
         A Group's own `entries` act as a field-level override layer on top of
-        whichever member Set gets picked — see the merge step below."""
+        whichever member Set gets picked — see the merge step below.
+
+        `ramp_override` is the nearest resolved scene/group/chooser ramp
+        override — it replaces the action ramp AND every per-entry card ramp."""
         action = resolve_action_bindings(action, self._signal_now)
         from models.color_set import ColorSetEntry
         from services import color_set_store
@@ -4453,7 +4506,9 @@ class TriggerEngine:
         # effect back to whatever was last polled.
         await self._refresh_effect_types(list(merged))
 
-        default_ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+        default_ramp_ms = (ramp_override if ramp_override is not None
+                           else action.ramp_ms if action.ramp_ms is not None
+                           else settings.smooth_ramp_ms)
         instant_coros: list = []
         ramp_jobs: list = []   # awaited ramps, gathered in parallel after the loop
         touched: set[str] = set()
@@ -4461,8 +4516,10 @@ class TriggerEngine:
         ramp_scale = float(getattr(action, "ramp_scale", 1.0) or 1.0)
         for vid, entry in merged.items():
             # Per-entry card ramps bypass action.ramp_ms, so Override Blend's
-            # scaled copies carry ramp_scale to stretch them here.
-            ramp_ms = (max(0, round(entry.ramp_ms * ramp_scale))
+            # scaled copies carry ramp_scale to stretch them here. An active
+            # scene/group/chooser ramp override beats the entry ramps too.
+            ramp_ms = (default_ramp_ms if ramp_override is not None
+                       else max(0, round(entry.ramp_ms * ramp_scale))
                        if entry.ramp_ms is not None else default_ramp_ms)
             # Remember this set's 3rd color for the vid so a later effect
             # switch can source the new effect's accent from it (None →
@@ -4603,7 +4660,8 @@ class TriggerEngine:
             if updates:
                 morph_effect_state.save_many(updates)
 
-    async def _execute_morph_color(self, action, await_ramps: bool = False) -> None:
+    async def _execute_morph_color(self, action, await_ramps: bool = False,
+                                   ramp_override: Optional[int] = None) -> None:
         """Morph the colors ALREADY showing on the scoped devices by rotating
         every color param (FG gradient/color, BG color, accent) around the hue
         wheel by `action.degrees` (backward = negative). Beat intensity can
@@ -4636,7 +4694,9 @@ class TriggerEngine:
         if not degrees:
             return
 
-        ramp_ms = action.ramp_ms if action.ramp_ms is not None else settings.smooth_ramp_ms
+        ramp_ms = (ramp_override if ramp_override is not None
+                   else action.ramp_ms if action.ramp_ms is not None
+                   else settings.smooth_ramp_ms)
         instant_coros: list = []
         ramp_jobs: list = []
         touched: set[str] = set()
@@ -4905,22 +4965,27 @@ class TriggerEngine:
         skip_event_ids: Optional[set] = None,
         preselected: Optional[Action] = None,
         resolved_picks: Optional[dict] = None,
+        inherited_ramp: Optional[int] = None,
     ) -> Optional[Action]:
         """Fire one alternative from `event.morph_lanes[lane_index]` — the
         plan-time `preselected` pick when given, else a fresh weighted pick.
         `resolved_picks` pins random branches inside the pick's subtree.
-        Returns the Action (for the Now-Playing summary) or None."""
+        `inherited_ramp` is the caller's resolved ramp override (the scene's
+        own, else an ancestor's). Returns the Action (for the Now-Playing
+        summary) or None."""
         picked = preselected or self._pick_lane_action(event, lane_index, labels)
         if picked is not None:
             await self._execute_action(picked, labels or [],
                                        skip_event_ids=skip_event_ids,
-                                       resolved_picks=resolved_picks)
+                                       resolved_picks=resolved_picks,
+                                       inherited_ramp=inherited_ramp)
         return picked
 
     async def _execute_scene_update(
         self, event: MusicEvent, labels: list[str], skip_event_ids: Optional[set] = None,
         preselected: Optional[dict] = None,
         resolved_picks: Optional[dict] = None,
+        inherited_ramp: Optional[int] = None,
     ) -> str:
         """Run First (lane 0) when this isn't the last Scene Update fired, else
         Rest (lane 1). Becomes the new 'last scene update' BEFORE the lane runs:
@@ -4943,6 +5008,10 @@ class TriggerEngine:
             event, lane_index, labels, skip_event_ids,
             preselected=(preselected or {}).get(lane_index),
             resolved_picks=resolved_picks,
+            # The scene's own ramp override (deepest level) wins over the
+            # inherited one (scene group / chooser).
+            inherited_ramp=self._ramp_override(
+                getattr(event, "ramp_ms", None), inherited_ramp),
         )
         tag = "Rest" if repeat else "First"
         return f"{tag}: {self._describe_action(picked)}" if picked else tag
@@ -4952,6 +5021,7 @@ class TriggerEngine:
         preselected: Optional[dict] = None,
         resolved_picks: Optional[dict] = None,
         pre_pick: Optional[dict] = None,
+        inherited_ramp: Optional[int] = None,
     ) -> str:
         """Advance the group's cursor one step and fire the picked member
         Scene Update (normal First/Rest — a newly rotated-to member runs
@@ -4968,6 +5038,10 @@ class TriggerEngine:
         (active group, this group's cursor, the member event) is unchanged, so
         anything that moved the rotation between plan and fire (another group
         fire, a Scene Morph, an edit) safely re-rolls fresh instead."""
+        # The group's own ramp override (resolved now) wins over the inherited
+        # one (e.g. an Intensity Scene chooser's); the member scene may still
+        # override deeper.
+        eff_ramp = self._ramp_override(getattr(event, "ramp_ms", None), inherited_ramp)
         member: Optional[MusicEvent] = None
         if (pre_pick
                 and pre_pick.get("group_id") == event.id
@@ -4983,7 +5057,8 @@ class TriggerEngine:
             self._commit_scene_group_cursor(
                 event.id, pre_pick["idx"], pre_pick["dir"], pre_pick["prev_cur"])
             tag = await self._execute_scene_update(
-                member, labels, skip_event_ids, preselected, resolved_picks)
+                member, labels, skip_event_ids, preselected, resolved_picks,
+                inherited_ramp=eff_ramp)
             return f"{event.name} → {member.name} · {tag}"
         if pre_pick:
             logger.info(
@@ -5000,11 +5075,13 @@ class TriggerEngine:
         if member is None:
             logger.info("scene_group '%s': no valid members — no-op", event.name)
             return "(empty scene group)"
-        tag = await self._execute_scene_update(member, labels, skip_event_ids)
+        tag = await self._execute_scene_update(member, labels, skip_event_ids,
+                                               inherited_ramp=eff_ramp)
         return f"{event.name} → {member.name} · {tag}"
 
     async def _execute_scene_morph(
         self, action, labels: list[str], skip_event_ids: Optional[set] = None,
+        ramp_override: Optional[int] = None,
     ) -> None:
         """Scene Morph leaf: step the ACTIVE scene group ±advance members and
         fire the result (normal First/Rest; advance=0 re-fires the current
@@ -5034,12 +5111,18 @@ class TriggerEngine:
         # The one scene fire that bypasses _execute_scene_event — count it
         # for sequence "updates" waiters too.
         await self._notify_scene_fire()
-        await self._execute_scene_update(member, labels, skip_event_ids)
+        await self._execute_scene_update(
+            member, labels, skip_event_ids,
+            # Group-level ramp override applies here too (bypasses
+            # _execute_scene_group, so resolve it ourselves).
+            inherited_ramp=self._ramp_override(
+                getattr(group, "ramp_ms", None), ramp_override))
 
     async def _run_last_scene_lanes(
         self, indices: list[int], labels: list[str], skip_event_ids: Optional[set] = None,
         preselected: Optional[dict] = None,
         resolved_picks: Optional[dict] = None,
+        inherited_ramp: Optional[int] = None,
     ) -> str:
         """Run one or more lanes of the last fired Scene Update — concurrently
         when more than one (e.g. Combo Flare = Shape + Color). No-op when no
@@ -5048,10 +5131,12 @@ class TriggerEngine:
         if last is None or last.event_type != "scene_update":
             logger.info("scene: no active Scene Update to run lanes %s", indices)
             return "(no active scene)"
+        eff_ramp = self._ramp_override(getattr(last, "ramp_ms", None), inherited_ramp)
         picks = await asyncio.gather(
             *(self._run_one_lane(last, i, labels, skip_event_ids,
                                  preselected=(preselected or {}).get(i),
-                                 resolved_picks=resolved_picks)
+                                 resolved_picks=resolved_picks,
+                                 inherited_ramp=eff_ramp)
               for i in indices)
         )
         parts: list[str] = []
@@ -5203,6 +5288,7 @@ class TriggerEngine:
         resolved_picks: Optional[dict] = None,
         picks_event_id: Optional[str] = None,
         scene_group_pick: Optional[dict] = None,
+        inherited_ramp: Optional[int] = None,
     ) -> str:
         """Dispatch any scene event type. Returns a short summary string for the
         Now-Playing broadcast. `preselected` (lane_index → Action) carries the
@@ -5226,13 +5312,16 @@ class TriggerEngine:
                 if forced.event_type == "scene_group":
                     return await self._execute_scene_group(
                         forced, labels, skip_event_ids,
-                        preselected, resolved_picks, pre_pick=scene_group_pick)
+                        preselected, resolved_picks, pre_pick=scene_group_pick,
+                        inherited_ramp=inherited_ramp)
                 self._active_scene_group_id = None
                 state.active_scene_group_id = ""
-                return await self._execute_scene_update(forced, labels, skip_event_ids)
+                return await self._execute_scene_update(
+                    forced, labels, skip_event_ids, inherited_ramp=inherited_ramp)
             return await self._execute_scene_group(
                 event, labels, skip_event_ids,
-                preselected, resolved_picks, pre_pick=scene_group_pick)
+                preselected, resolved_picks, pre_pick=scene_group_pick,
+                inherited_ramp=inherited_ramp)
         if event.event_type == "scene_update":
             forced = self._forced_scene_event()
             if forced is not None and forced.event_type == "scene_group":
@@ -5243,7 +5332,8 @@ class TriggerEngine:
                 # member ride along with scene_group_pick.
                 return await self._execute_scene_group(
                     forced, labels, skip_event_ids,
-                    preselected, resolved_picks, pre_pick=scene_group_pick)
+                    preselected, resolved_picks, pre_pick=scene_group_pick,
+                    inherited_ramp=inherited_ramp)
             target = forced if forced is not None else event
             if picks_event_id is not None and picks_event_id != target.id:
                 preselected, resolved_picks = None, None
@@ -5252,7 +5342,8 @@ class TriggerEngine:
             self._active_scene_group_id = None
             state.active_scene_group_id = ""
             return await self._execute_scene_update(
-                target, labels, skip_event_ids, preselected, resolved_picks)
+                target, labels, skip_event_ids, preselected, resolved_picks,
+                inherited_ramp=inherited_ramp)
         if event.event_type not in _FLARE_LANES:
             return ""
         if event.event_type in PHASE_EVENT_TYPES:
@@ -5272,14 +5363,15 @@ class TriggerEngine:
             if indices:
                 jobs.append(self._run_last_scene_lanes(
                     indices, labels, skip_event_ids, preselected,
-                    resolved_picks))
+                    resolved_picks, inherited_ramp=inherited_ramp))
             parts = await asyncio.gather(*jobs)
             return " · ".join(p for p in parts if p)
         # Shape Flare falls back to the Color lane when the Shape lane (2) is
         # empty, so an event with only color alternatives still flares.
         indices = self._scene_lane_indices(event)
         return await self._run_last_scene_lanes(
-            indices, labels, skip_event_ids, preselected, resolved_picks)
+            indices, labels, skip_event_ids, preselected, resolved_picks,
+            inherited_ramp=inherited_ramp)
 
     async def _notify_scene_fire(self) -> None:
         """Bump the scene-family fire counter and wake sequence "updates"
@@ -5343,6 +5435,18 @@ class TriggerEngine:
         so max() never sees a ValueBinding object."""
         r = static_ramp_ms(getattr(action, "ramp_ms", None), self._signal_now)
         return r if r is not None else settings.smooth_ramp_ms
+
+    def _ramp_override(self, own, inherited: Optional[int]) -> Optional[int]:
+        """Resolve a scene / scene-group / chooser-level ramp override. `own`
+        is that level's ramp_ms — an int, or a ValueBinding (⚡ trigger
+        intensity / 🎲 random) resolved NOW, at fire time. None = no override
+        at this level → the inherited one flows through (the nearest override
+        to the leaf wins). The resolved override is forced on every descendant
+        action's ramps by the leaf executors (ramp_override kwarg)."""
+        if own is None:
+            return inherited
+        r = static_ramp_ms(own, self._signal_now)
+        return r if r is not None else inherited
 
     def _signal_now(self, binding) -> Optional[float]:
         """Current value of a ValueBinding's signal at the live song position.
@@ -5824,6 +5928,7 @@ class TriggerEngine:
         resolved_picks: dict | None = None,
         _depth: int = 0,
         inherited_scope=None,
+        inherited_ramp: Optional[int] = None,
     ) -> None:
         """Fire every child concurrently, staggered by per-child offset_ms.
         Generalization of _fire_morph_picks: anchor = min(offset); each child
@@ -5846,7 +5951,7 @@ class TriggerEngine:
                 self._execute_action(
                     a, merged, await_ramps=await_ramps, skip_event_ids=skip_event_ids,
                     _depth=_depth + 1, resolved_picks=resolved_picks,
-                    inherited_scope=child_scope,
+                    inherited_scope=child_scope, inherited_ramp=inherited_ramp,
                 )
                 for a in child.actions
             ))
@@ -5863,6 +5968,7 @@ class TriggerEngine:
         step1_prefired: bool = False,
         precomputed_snapshot: Optional[dict] = None,
         inherited_scope=None,
+        inherited_ramp: Optional[int] = None,
     ) -> None:
         """Run children in order. timing="ms" ports _execute_sequence (per-child
         delay sleeps, revert with ambient-steal, revert-always-runs); timing=
@@ -5876,7 +5982,7 @@ class TriggerEngine:
                 group, labels, name=label, skip_event_ids=skip_event_ids,
                 resolved_picks=resolved_picks, _depth=_depth, anchor_ms=anchor_ms,
                 step1_prefired=step1_prefired, precomputed_snapshot=precomputed_snapshot,
-                inherited_scope=group_scope,
+                inherited_scope=group_scope, inherited_ramp=inherited_ramp,
             )
             return
 
@@ -5917,7 +6023,7 @@ class TriggerEngine:
                     self._execute_action(
                         a, merged, await_ramps=True, skip_event_ids=skip_event_ids,
                         _depth=_depth + 1, resolved_picks=resolved_picks,
-                        inherited_scope=child_scope,
+                        inherited_scope=child_scope, inherited_ramp=inherited_ramp,
                     )
                     for a in child.actions
                 ))
@@ -5957,8 +6063,15 @@ class TriggerEngine:
         step1_prefired: bool = False,
         precomputed_snapshot: Optional[dict] = None,
         inherited_scope=None,
+        inherited_ramp: Optional[int] = None,
     ) -> None:
-        """Beats-mode body of a sequence_group — port of _execute_beat_sequence."""
+        """Beats-mode body of a sequence_group — port of _execute_beat_sequence.
+
+        `inherited_ramp` is accepted but deliberately NOT forwarded to the
+        leaves: beat timing rewrites leaf ramps to fit the beat grid (pre_ramp
+        shift + compression below), and an outer override would fight that
+        choreography. Containers inside a step (choosers) still apply their
+        own overrides."""
         have_beats = bool(self._beats_cache)
         if not have_beats and group.beat_fallback == "skip":
             uri = state.current_track.spotify_uri if state.current_track else ""
@@ -6071,6 +6184,7 @@ class TriggerEngine:
         anchor_ms: int | None = None,
         step1_prefired: bool = False,
         precomputed_snapshot: Optional[dict] = None,
+        inherited_ramp: Optional[int] = None,
     ) -> None:
         """Top-level entry for a composite event: snapshot (if the root is a
         revert-enabled sequence group), then the root tree."""
@@ -6093,11 +6207,12 @@ class TriggerEngine:
                 root, labels, name=event.name, skip_event_ids=skip_event_ids,
                 resolved_picks=resolved_picks, anchor_ms=anchor_ms,
                 step1_prefired=step1_prefired, precomputed_snapshot=snap,
+                inherited_ramp=inherited_ramp,
             )
         else:
             await self._execute_action(
                 root, labels, await_ramps=True, skip_event_ids=skip_event_ids,
-                resolved_picks=resolved_picks,
+                resolved_picks=resolved_picks, inherited_ramp=inherited_ramp,
             )
 
     async def _execute_plan_entry(self, entry: _PlanEntry) -> None:
@@ -6119,11 +6234,17 @@ class TriggerEngine:
                 state.display_mode, entry.trigger_display_mode))
         evt = entry.event
         skip_ids = entry.planned_descendant_ids or None
+        # Resolve the inherited ramp override NOW — _FIRE_INTENSITY is set, so
+        # a ⚡ trigger-intensity binding reads this fire's intensity; 🎲 rolls
+        # fresh. The event's own ramp_ms (resolved downstream) still wins.
+        inherited_ramp = self._ramp_override(entry.trigger_ramp_override, None)
 
         # Scene-override fast path: planner pre-staged the temp scene + per-virtual
         # transition_time. Just activate it — then fire any Color Set lanes, which
-        # the step-only scene payload doesn't carry.
-        if entry.scene_override_prepared and entry.scene_override_payload:
+        # the step-only scene payload doesn't carry. Bypassed while a ramp
+        # override is inherited — the activate carries no per-param ramps.
+        if (entry.scene_override_prepared and entry.scene_override_payload
+                and inherited_ramp is None):
             await self._fire_scene_override(entry.scene_override_payload, evt)
             entry.scene_override_prepared = False  # consumed
             await self._fire_color_lanes_alongside(
@@ -6138,7 +6259,7 @@ class TriggerEngine:
         if evt.event_type == "composite":
             _so_picks = entry.preselected_morph_picks or self._composite_scene_picks(
                 evt, entry.resolved_picks)
-        if self._event_eligible_for_scene_override(evt, picks=_so_picks):
+        if inherited_ramp is None and self._event_eligible_for_scene_override(evt, picks=_so_picks):
             with ledfx_client.force_allow():
                 fired = await self._maybe_fire_scene_override(evt, labels=entry.labels, picks=_so_picks)
             if fired:
@@ -6158,7 +6279,8 @@ class TriggerEngine:
         if evt.event_type == "single":
             action = entry.preselected_action or self._select_action(evt, entry.labels)
             if action:
-                await self._execute_action(action, entry.labels, skip_event_ids=skip_ids)
+                await self._execute_action(action, entry.labels, skip_event_ids=skip_ids,
+                                           inherited_ramp=inherited_ramp)
         elif evt.event_type == "sequence":
             await self._execute_sequence(
                 evt, entry.labels,
@@ -6193,6 +6315,7 @@ class TriggerEngine:
                 resolved_picks=entry.resolved_picks,
                 anchor_ms=entry.fire_at_ms,
                 precomputed_snapshot=snap,
+                inherited_ramp=inherited_ramp,
             )
         elif evt.event_type in SCENE_EVENT_TYPES:
             # Use the plan-time lane picks (and their deep-resolved random
@@ -6213,7 +6336,8 @@ class TriggerEngine:
                 evt, entry.labels, skip_event_ids=skip_ids,
                 preselected=picks, resolved_picks=resolved,
                 picks_event_id=entry.scene_picks_event_id,
-                scene_group_pick=entry.scene_group_pick)
+                scene_group_pick=entry.scene_group_pick,
+                inherited_ramp=inherited_ramp)
 
     async def _execute_beat_sequence(
         self,

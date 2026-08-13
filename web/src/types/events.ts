@@ -327,6 +327,11 @@ export interface IntensityLane {
 export interface IntensityChooserAction extends ActionBase {
   type: 'intensity_chooser';
   id: string;
+  /** Ramp override: forced on every descendant action of the chosen lane
+   *  (through event_refs / scene groups / scene lanes); ⚡/🎲-bindable.
+   *  null = parent (nearest ancestor override, else each action's own ramp).
+   *  Deeper overrides (scene group / scene ramp) win over this one. */
+  ramp_ms?: Bindable<number> | null;
   source: 'trigger_intensity';
   scope: MorphScope | null; // default Target for lanes
   lanes: IntensityLane[];
@@ -416,6 +421,12 @@ export interface MusicEvent {
   ai_exposed: boolean;
   fixed: boolean;
   scene_override: boolean;
+
+  /** scene_update / scene_group only: ramp override forced on every action
+   *  this scene fire runs; ⚡/🎲-bindable. null = parent (inherit the nearest
+   *  ancestor override, e.g. an Intensity Scene chooser's). The deepest
+   *  override wins: scene > scene group > chooser. */
+  ramp_ms?: Bindable<number> | null;
 
   actions: Action[];
 
