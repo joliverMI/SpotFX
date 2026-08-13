@@ -258,6 +258,15 @@ export interface DriftMechanismStatus {
   slew_s?: number;
 }
 
+export interface JourneyDestination {
+  set_id: string;
+  set_name: string;
+  position_deg: number;
+  pace_deg_per_min: number;
+  progress: number;         // 0..1 of the walk completed
+  rung: string;             // selector rung that picked it
+}
+
 export interface DriftLegRecord {
   virtual_id: string;
   param: string;
@@ -297,6 +306,7 @@ export interface EngineStatus {
       wheel_position_deg: number | null;
       active_set_id: string | null;
       rainbow_paused: boolean;
+      destination: JourneyDestination | null;
     };
     mechanisms: DriftMechanismStatus[];
     last_leg: {

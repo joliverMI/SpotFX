@@ -207,8 +207,10 @@ except ValidationError:
 room = color_journey.RoomColorState(wheel_position_deg=200.0)
 inherit_scene = SceneV2(name="inh")
 check(color_journey.active_journey(room, inherit_scene).custody == "room"
-      and color_journey.active_journey(room, inherit_scene).degrees_per_min == 2.0,
-      "inherit scene rides the room journey (default pace)")
+      and color_journey.active_journey(room, inherit_scene).degrees_per_min
+      == 30.0,
+      "inherit scene rides the room journey (the owner's live 30°/min "
+      "reference pace as default)")
 slow = SceneV2(name="slow", color_journey=SceneColorJourney(
     mode="inherit", pace_factor=0.0))
 check(color_journey.active_journey(room, slow).degrees_per_min == 0.0,
@@ -223,23 +225,38 @@ except ValidationError:
 
 # INTO: custody transfers, the position does not move.
 entered = color_journey.on_scene_enter(room, override_scene)
-check(entered.custody == "scene" and entered.degrees_per_min == -30.0,
-      "INTO override: the scene steers, at its own pace/direction")
+check(entered.custody == "scene" and entered.degrees_per_min == 30.0,
+      "INTO override: the scene steers, at its own reference pace "
+      "(direction now comes from the destination, so the sign folds away)")
+# Destination model: pace is fixed at selection from distance.
+check(color_journey.destination_pace(30.0, 90.0) == 30.0
+      and color_journey.destination_pace(30.0, 30.0) == 15.0
+      and abs(color_journey.destination_pace(30.0, 179.0)
+              - 30.0 * (179.0 / 90.0)) < 1e-9
+      and color_journey.destination_pace(30.0, 300.0) == 60.0,
+      "the destination fixes its own pace: reference at 90°, ×0.5 floor "
+      "near, ×2 ceiling far")
 pos = room.wheel_position_deg
-pos2 = color_journey.step(entered, pos, dt_s=60.0)
-check(pos2 == (200.0 - 30.0) % 360.0,
-      "override walks FROM the room's current position — no snap in")
+pos2, arrived = color_journey.step_toward(pos, 140.0, 30.0, dt_s=60.0)
+check(pos2 == (200.0 - 30.0) % 360.0 and not arrived,
+      "travel walks FROM the room's current position toward the "
+      "destination along the shortest arc — no snap in")
+pos3, arrived = color_journey.step_toward(pos2, 140.0, 30.0, dt_s=60.0)
+check(pos3 == 140.0 and arrived,
+      "arrival lands EXACTLY on the destination position")
 # OUT: the room adopts the override's final position and resumes its pace.
 room2 = color_journey.on_scene_exit(room, pos2)
-check(room2.wheel_position_deg == pos2,
-      "OUT of override: room resumes from where the override left the wheel")
+check(room2.wheel_position_deg == pos2 and room2.destination is None,
+      "OUT of override: room resumes from where the override left the "
+      "wheel, with a fresh bearing to pick")
 resumed = color_journey.active_journey(room2, inherit_scene)
-check(resumed.custody == "room" and resumed.degrees_per_min == 2.0,
-      "OUT of override: the room's own pace/direction steer again")
-check(color_journey.step(resumed, room2.wheel_position_deg, 60.0,
-                         palette_rainbow=True) == room2.wheel_position_deg,
+check(resumed.custody == "room" and resumed.degrees_per_min == 30.0,
+      "OUT of override: the room's own reference pace steers again")
+check(color_journey.step_toward(room2.wheel_position_deg, 140.0, 30.0, 60.0,
+                                palette_rainbow=True)
+      == (room2.wheel_position_deg, False),
       "rainbow palette pauses the walk (binding exemption)")
-check(color_journey.step(resumed, None, 60.0) is None,
+check(color_journey.step_toward(None, 140.0, 30.0, 60.0) == (None, False),
       "no chromatic position yet → walk holds")
 
 # ── compiler: subtree expansion, override layering, binding-free contract ────
@@ -290,13 +307,18 @@ check(client.post("/api/scenes", json=bad).status_code == 200,
 check(client.put("/api/drift-profiles", json={}).status_code == 422,
       "deleting a profile still referenced by a scene → 422")
 rj = client.get("/api/room-journey").json()
-check(rj["journey"]["degrees_per_min"] == 2.0, "room journey served")
+check(rj["journey"]["degrees_per_min"] == 30.0,
+      "room journey served (30°/min effective default)")
 client.put("/api/room-journey", json={
-    "journey": {"degrees_per_min": -5.0}, "wheel_position_deg": 123.0})
+    "journey": {"degrees_per_min": 5.0}, "wheel_position_deg": 123.0,
+    "destination": {"set_id": "x", "position_deg": 1.0,
+                    "pace_deg_per_min": 9.0, "from_deg": 0.0}})
 rj = client.get("/api/room-journey").json()
-check(rj["journey"]["degrees_per_min"] == -5.0
-      and rj["wheel_position_deg"] != 123.0,
-      "journey PUT updates the declaration, never teleports the wheel")
+check(rj["journey"]["degrees_per_min"] == 5.0
+      and rj["wheel_position_deg"] != 123.0
+      and rj["destination"] is None,
+      "journey PUT updates the declaration, never teleports the wheel or "
+      "hand-steers the bearing")
 
 # ── sequencer engine on SPECTRA stores: fire carries intensity; wheel is
 #    shared room state ────────────────────────────────────────────────────────

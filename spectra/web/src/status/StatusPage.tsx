@@ -54,6 +54,9 @@ export default function StatusPage() {
             <div><div className="k">Journey custody</div>
               {eng.conductor.journey.custody === 'scene' ? 'scene OVERRIDE' : 'room'}
               {' '}· {eng.conductor.journey.degrees_per_min}°/min
+              {eng.conductor.journey.destination
+                && ` · → ${eng.conductor.journey.destination.set_name}`
+                + ` ${Math.round(eng.conductor.journey.destination.progress * 100)}%`}
               {eng.conductor.journey.rainbow_paused && ' · 🌈 paused'}
             </div>
             <div><div className="k">Active scene</div>

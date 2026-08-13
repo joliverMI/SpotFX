@@ -175,28 +175,37 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
   {
     id: 'color-journey',
-    title: 'Colour journey (room + override)',
-    keywords: 'wheel walk rotate palette drift creep hue override room',
+    title: 'Colour journey (destinations + override)',
+    keywords: 'wheel walk rotate palette drift destination hue override room pace travel arrival',
     intro:
-      'The room owns ONE continuous colour journey — a slow walk of the palette around the colour wheel (default: blue toward purple). Scenes ride it by default.',
+      'The room owns ONE continuous colour journey, and it is DESTINATION-DRIVEN: the room picks a destination colour set (via the selector: curve × genre × wheel-travel) and drifts toward its wheel position; on arrival it picks the next destination and sets off again. Never aimless — always a target, and each destination fixes its own travel pace. Scenes ride the room journey by default.',
     entries: [
+      {
+        id: 'journey-destination',
+        title: 'Destinations and per-destination pace',
+        keywords: 'target speed travel reference arrive reselect',
+        body: [
+          'The destination determines BOTH where the journey is heading and how fast: the room has a reference pace (°/min, agent-adjusted), and a destination 90° away travels at exactly that pace — nearer destinations stroll (down to ×0.5), farther ones hurry (up to ×2). Travel follows the shortest arc; the active palette\'s hues rotate with the wheel. On arrival the wheel lands exactly on the destination position and the next destination is picked (the arrived set excluded). The status strip shows the current destination and progress toward it.',
+          'The destination is a bearing, not an applied palette — sets are still applied by scene fires and flare jumps. When a jump teleports the wheel, the bearing clears and the journey re-orients from the new point. If no eligible chromatic set exists, the walk holds (never forced churn).',
+        ],
+      },
       {
         id: 'journey-inherit',
         title: 'Inherit (default) and pace',
-        body: ['An inheriting scene rides the room\'s walk, scaled by its pace factor — 0 holds the walk while that scene shows. Adjusted by telling the agent.'],
+        body: ['An inheriting scene rides the room\'s destination journey, its pace factor scaling the travel speed — 0 holds the walk while that scene shows (no destinations picked). Adjusted by telling the agent.'],
       },
       {
         id: 'journey-override',
         title: 'Override — a scene takes the pen',
-        keywords: 'custody transition into out of snap',
+        keywords: 'custody transition into out of snap palette bounds',
         body: [
-          'A scene may override the room journey outright: its own pace and direction while it holds. The override takes CUSTODY of the wheel, never a fork: entering, the scene\'s journey starts from wherever the room\'s walk had reached (no snap — the palette change itself rides the normal scene crossfade). Leaving, the room\'s own journey resumes from wherever the override left the wheel — it never snaps back. One continuous story; only who steers changes.',
+          'A scene may override the room journey outright: the same destination model, but destinations are picked WITHIN THE SCENE\'S OWN PALETTE BOUNDS (its accepted sets), at the scene\'s own reference pace. The override takes CUSTODY of the wheel, never a fork: entering, the scene\'s journey starts from wherever the room\'s walk had reached and picks its own destination (no snap — the palette change itself rides the normal scene crossfade). Leaving, the room\'s own journey resumes from wherever the override left the wheel with a fresh room destination — it never snaps back. One continuous story; only who steers changes.',
         ],
       },
       {
         id: 'journey-rainbow',
         title: 'Rainbow sets pause the walk',
-        body: ['Rainbow and achromatic palettes have no wheel position, so the walk pauses while one is live and resumes when a chromatic set returns.'],
+        body: ['Rainbow and achromatic palettes have no wheel position, so the walk pauses while one is live (the bearing is kept) and resumes when a chromatic set returns. A rainbow set is never a destination — it is everywhere and nowhere on the wheel.'],
       },
     ],
   },

@@ -173,11 +173,20 @@ class ResponseSpec(BaseModel):
 
 
 class ColorJourneySpec(BaseModel):
-    """A colour journey: the palette rotating around the wheel at a signed
-    pace. Positive degrees/min walks blue → purple → magenta (increasing
-    hue); negative walks the other way; 0 holds. Rainbow or achromatic
-    palettes pause the walk (no wheel position — the binding exemption)."""
-    degrees_per_min: float = 0.0
+    """A DESTINATION-DRIVEN colour journey: the walk always has a target — a
+    destination colour set picked by the shipped selector (curve × genre ×
+    wheel-travel) — and travels toward it along the shortest arc; on arrival
+    it selects the next destination and sets off again. Never aimless creep.
+
+    degrees_per_min is the REFERENCE pace, and the destination fixes its own
+    pace at selection: a destination 90° away travels at exactly this pace,
+    nearer ones stroll (down to ×0.5), farther ones hurry (up to ×2.0) —
+    services/color_journey.destination_pace. 0 holds the walk (no
+    destinations picked). The owner's live room value is 30°/min — that is
+    this default; a stored value always carries verbatim. Rainbow or
+    achromatic palettes pause the walk (no wheel position — the binding
+    exemption)."""
+    degrees_per_min: float = 30.0
 
 
 class SceneColorJourney(BaseModel):

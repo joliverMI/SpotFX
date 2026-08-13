@@ -317,6 +317,9 @@ class ResponseEngine:
         update: dict[str, Any] = {"active_set_id": pick.picked_id}
         if position is not None:   # rainbow/achromatic never move the wheel
             update["wheel_position_deg"] = position
+            # A teleport invalidates the journey's bearing — the conductor
+            # reselects a destination from the new point next leg.
+            update["destination"] = None
         self._room_save(room.model_copy(update=update))
         return {"result": "jumped", "picked_id": pick.picked_id,
                 "rung": pick.rung, "virtuals": landed,

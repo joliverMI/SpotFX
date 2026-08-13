@@ -61,12 +61,16 @@ def _engine(clock, *, intensity=1.0, room=None, set_positions=None):
     the whole S3 delta."""
     from spectra.models.sequencer import SequencerConfig, SelectorEntry
     from spectra.services import color_journey as cj
+    from spectra.services.color_sets import ColorSetCard
     from spectra.services.drift_conductor import DriftConductor
     from spectra.services.fx_executor import FacadeExecutor
     from spectra.services.scene_response import ResponseEngine
 
     room_box = [room or cj.RoomColorState()]
     positions = set_positions or {}
+    cards = [ColorSetCard(id=sid, name=sid, entries=[]) for sid in positions]
+    seq_config = SequencerConfig(color_set_entries={
+        sid: SelectorEntry() for sid in positions if sid != "current"})
     executor = FacadeExecutor(clock=lambda: clock.now)
     conductor = DriftConductor(
         executor=executor, clock=lambda: clock.now, leg_s=20.0,
@@ -74,9 +78,10 @@ def _engine(clock, *, intensity=1.0, room=None, set_positions=None):
         drift_profiles=lambda: {}, curve_profiles=lambda: {},
         room_load=lambda: room_box[0],
         room_save=lambda st: room_box.__setitem__(0, st),
-        set_position=lambda sid: positions.get(sid))
-    seq_config = SequencerConfig(color_set_entries={
-        sid: SelectorEntry() for sid in positions if sid != "current"})
+        set_position=lambda sid: positions.get(sid),
+        set_cards=lambda: cards,
+        sequencer_config=lambda: seq_config,
+        rng=Random(11))
     responder = ResponseEngine(
         conductor=conductor, executor=executor, rng=Random(7),
         clock=lambda: clock.now,
@@ -289,13 +294,22 @@ def test_flare_color_jump_and_journey_resume(tmp_path):
                 assert room_box[0].wheel_position_deg == pytest.approx(10.0)
                 assert room_box[0].active_set_id == "set-red"
 
+                # ...the teleport cleared the journey's bearing...
+                assert room_box[0].destination is None
                 # ...and the journey RESUMES from the new point: the next
-                # leg walks from 10° at the room's pace and rotates the
-                # jumped palette with it.
+                # leg picks a fresh destination (only Blues is eligible —
+                # Reds is now the active set), travels toward it at the
+                # pace that destination fixes from its distance, and
+                # rotates the jumped palette with the wheel.
                 await conductor.tick()
-                delta = 2.0 * (20.0 / 60.0)
+                dest = room_box[0].destination
+                assert dest is not None and dest.set_id == "set-blue"
+                travel = abs(cj.signed_travel(10.0, 220.0))          # 150°
+                pace = cj.destination_pace(30.0, travel)             # 50°/min
+                delta = -pace * (20.0 / 60.0)   # shortest arc goes down
+                assert dest.pace_deg_per_min == pytest.approx(pace)
                 assert room_box[0].wheel_position_deg == pytest.approx(
-                    10.0 + delta)
+                    (10.0 + delta) % 360.0)
                 rotation = [w for w in executor.writes
                             if w["kind"] == "glide"
                             and "gradient" in w["params"]][-1]

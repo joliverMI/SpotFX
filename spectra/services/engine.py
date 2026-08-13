@@ -46,6 +46,7 @@ conductor = DriftConductor(
     intensity=lambda: bridge.intensity(),
     deferral=lambda: bridge.conductor_deferral(),
     broadcast=ws_manager.broadcast,
+    genre_bucket=lambda: bridge.genre_bucket(),
 )
 
 responses = ResponseEngine(
