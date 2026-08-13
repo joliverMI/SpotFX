@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useSettings } from '../api/queries';
+import { confirmLeave } from '../lib/unsavedGuard';
 
 /** All pages live in the SPA; Timing follows the show_advanced setting. */
 export default function NavBar() {
@@ -7,7 +8,14 @@ export default function NavBar() {
   const { data: settings } = useSettings();
   const cls = (match: (p: string) => boolean) => (match(pathname) ? 'active' : '');
   return (
-    <nav>
+    // Capture-phase so the unsaved-changes guard runs before any Link handler.
+    <nav onClickCapture={(e) => {
+      const a = (e.target as HTMLElement).closest('a');
+      if (a && new URL(a.href).pathname !== window.location.pathname && !confirmLeave()) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }}>
       <span className="logo">SpotFX</span>
       <Link to="/now" className={cls((p) => p === '/now')}>Now Playing</Link>
       <Link to="/builder" className={cls((p) => p === '/builder')}>Profile Builder</Link>

@@ -3,12 +3,22 @@
 import { useMemo } from 'react';
 import { useGradients } from '../colorsets/queries';
 import type { EffectConfig } from './queries';
-import type { SceneDeviceConfig } from './types';
+import type { EffectParamMeta, SceneDeviceConfig } from './types';
 import { emptyColor } from './types';
 
 /** Param types the pin editor can represent; other registry types (color,
  * gradient, enum, string, …) are hidden until they get real editors. */
 const EDITABLE_PARAM_TYPES = new Set(['numeric', 'integer', 'toggle']);
+
+/** A newly enabled param starts at the effect's REAL default from the
+ * registry — never a silent 0 or always-on (Scenes UI decision 4). */
+function paramInitial(meta: EffectParamMeta): number | boolean {
+  if (meta.type === 'toggle') return typeof meta.default === 'boolean' ? meta.default : false;
+  if (typeof meta.default === 'number') {
+    return meta.type === 'integer' ? Math.round(meta.default) : meta.default;
+  }
+  return meta.min ?? 0;
+}
 
 function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -119,7 +129,7 @@ export default function DeviceRow({
             return (
               <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <Toggle label={meta.label ?? name} on={on}
-                  onChange={(en) => setParam(name, en ? (meta.type === 'toggle' ? true : (meta.min ?? 0)) : null)} />
+                  onChange={(en) => setParam(name, en ? paramInitial(meta) : null)} />
                 {on && meta.type === 'toggle' && (
                   <input type="checkbox" checked={!!val} onChange={(e) => setParam(name, e.target.checked)} />
                 )}

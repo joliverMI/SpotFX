@@ -76,6 +76,9 @@ export interface EffectParamMeta {
   type?: 'numeric' | 'toggle' | string;
   min?: number;
   max?: number;
+  /** The effect's real default, baked from the fx schemas
+   *  (scripts/backfill_param_defaults.py) — what an enabled param starts at. */
+  default?: number | boolean;
 }
 
 export const emptyColor = (): SceneColorAssignment => ({

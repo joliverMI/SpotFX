@@ -923,7 +923,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Device entries',
         keywords: 'all devices everything category virtual effect params override brightness',
         body: [
-          'Each entry targets All Devices (every imported virtual — no need to enumerate categories), a category (including its sub-categories), or a single virtual, and picks an effect plus number/toggle params to pin (other param types have no pin editor yet). Narrower entries override wider ones on shared virtuals: All Devices < category < virtual. Colors either come from the active Color Set at fire time ("Colors from active Color Set") or are fixed on the scene. Unset params/brightness leave the device\'s current values alone.',
+          'Each entry targets All Devices (every imported virtual — no need to enumerate categories), a category (including its sub-categories), or a single virtual, and picks an effect plus number/toggle params to pin (other param types have no pin editor yet). Enabling a param starts it at the effect\'s real default — not 0, not always-on — so you only type when you want something different. Narrower entries override wider ones on shared virtuals: All Devices < category < virtual. Colors either come from the active Color Set at fire time ("Colors from active Color Set") or are fixed on the scene. Unset params/brightness leave the device\'s current values alone.',
           'The effect list for a category entry covers the category AND its sub-categories (matching what the entry fires on); a category with no curated effects anywhere in its subtree — and any All Devices or virtual entry — offers every effect in the registry.',
         ],
       },
@@ -933,6 +933,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'intensity band curve gain anchor transition payoff',
         body: [
           'Flare bands shape how the scene answers flares by trigger intensity: each band covers an intensity range (bands may not overlap) with a curve and gain. Phase choreography sets the transition length/mode and the anchor fraction — where in the crossfade the visual payoff lands, so the engine can fire early and put the payoff on the beat. Both are stored now and take effect when the SceneV2 engine integration lands.',
+          'A band may also carry agent-authored parameter changes (a per-band param patch). Those are agent-managed — the editor shows a "⚙ includes N parameter changes" chip (hover it to see them) but has no form for them, and saving the scene here always preserves them untouched.',
         ],
       },
       {
@@ -940,7 +941,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Color Set filter',
         keywords: 'accept opt out narrow eligible wheel position rainbow',
         body: [
-          'Filtering works both ways: a Color Set can opt out of ALL scenes (the "opt out" button — global, affects every scene), and a scene can narrow which of the remaining sets it accepts by unticking "Accept every Color Set" and checking specific sets. A set\'s wheel dot shows its computed color-wheel position (the saturation- and value-weighted circular mean of its gradient hues); sets whose hues span more than 180° are 🌈 rainbow and have no single position.',
+          'Filtering works both ways: a Color Set can opt out of ALL scenes (the "opt out" button — global, affects every scene, so it asks for confirmation), and a scene can narrow which of the remaining sets it accepts by unticking "Accept every Color Set" and checking specific sets. A set\'s wheel dot shows its computed color-wheel position (the saturation- and value-weighted circular mean of its gradient hues); sets whose hues span more than 180° are 🌈 rainbow and have no single position.',
+          'The filter is per-set only: Color Set GROUPS never appear in it and cannot be accepted — to accept a group\'s palette, check its member sets. Older scenes whose filter referenced a group are migrated automatically on load to the group\'s member sets.',
         ],
       },
       {

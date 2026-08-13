@@ -3,12 +3,13 @@
  * A SceneV2 states outright what every targeted device shows (effect, params,
  * colors, brightness) plus flare response bands and phase choreography; the
  * legacy scene_update events on the Events page are untouched by this page. */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import CollapsibleCard from '../components/CollapsibleCard';
 import { useToast } from '../components/Toast';
 import { LabelsInput } from '../components/forms/inputs';
 import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
+import { setUnsavedGuard } from '../lib/unsavedGuard';
 import { useColorSetCards, useSaveColorSet } from '../colorsets/queries';
 import CurveProfilesCard from './CurveProfilesCard';
 import DeviceRow from './DeviceRow';
@@ -46,6 +47,16 @@ export default function ScenesPage() {
 
   const scene = scenes.find((s) => s.id === selectedId) ?? null;
   const setScene = (next: SceneV2) => setDrafts((d) => ({ ...d, [next.id]: next }));
+
+  // Unsaved-changes guard: drafts survive switching scenes within this page,
+  // but navigating away unmounts and discards them — make that explicit.
+  const draftCount = Object.keys(drafts).length;
+  useEffect(() => {
+    setUnsavedGuard(draftCount
+      ? `${draftCount} scene${draftCount === 1 ? ' has' : 's have'} unsaved changes — leave and discard them?`
+      : null);
+    return () => setUnsavedGuard(null);
+  }, [draftCount]);
 
   const visible = useMemo(() => {
     const q = search.toLowerCase();
@@ -132,6 +143,8 @@ export default function ScenesPage() {
   const toggleGlobalOptOut = async (setId: string) => {
     const card = setCards.find((c) => c.id === setId);
     if (!card) return;
+    if (!card.scene_v2_opt_out && !confirm(
+      `Opt "${card.name}" out of ALL scenes?\n\nThis is global — every scene stops accepting this set until it is re-enabled here.`)) return;
     try {
       await saveSetMut.mutateAsync({ ...card, scene_v2_opt_out: !card.scene_v2_opt_out });
       toast(card.scene_v2_opt_out ? 'Set re-enabled for scenes' : 'Set opted out of all scenes', 'success');
@@ -262,6 +275,12 @@ export default function ScenesPage() {
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>gain</span>
                 <input type="number" min={0} step={0.1} value={b.gain} style={{ width: 60, fontSize: 12 }}
                   onChange={(e) => setBand({ gain: Number(e.target.value) })} />
+                {Object.keys(b.param_patch ?? {}).length > 0 && (
+                  <span title={`Agent-authored parameter changes fired with this band — edit via the API/agent, not here. Saving this scene preserves them untouched.\n${Object.entries(b.param_patch).map(([k, v]) => `${k}: ${v}`).join('\n')}`}
+                    style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                    ⚙ includes {Object.keys(b.param_patch).length} parameter change{Object.keys(b.param_patch).length === 1 ? '' : 's'} (agent-managed)
+                  </span>
+                )}
                 <button className="danger" style={{ fontSize: 11, padding: '2px 8px', marginLeft: 'auto' }}
                   onClick={() => setScene({ ...scene, flare_bands: scene.flare_bands.filter((_, j) => j !== i) })}>✕</button>
               </div>

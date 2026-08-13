@@ -75,7 +75,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.3
         },
         "background_color": {
           "label": "BG Color",
@@ -106,7 +107,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.8
         },
         "blur": {
           "label": "Blur",
@@ -115,7 +117,8 @@
           "min": 0,
           "max": 10,
           "aspect": "blur",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "bass_decay_rate": {
           "label": "Reactivity",
@@ -124,7 +127,8 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.4
         },
         "sparks_decay_rate": {
           "label": "Sparks Decay Rate",
@@ -133,20 +137,23 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "aspect_scale": 0.6
+          "aspect_scale": 0.6,
+          "default": 0.4
         },
         "flip": {
           "label": "Flip",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "gradient_roll": {
           "label": "Gradient Roll",
           "type": "numeric",
           "smooth": false,
           "min": 1,
-          "max": 10
+          "max": 10,
+          "default": 1
         },
         "gradient": {
           "label": "Gradient",
@@ -192,20 +199,23 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.8
         },
         "gradient_roll": {
           "label": "Gradient Roll",
           "type": "numeric",
           "smooth": false,
           "min": 1,
-          "max": 10
+          "max": 10,
+          "default": 1
         },
         "flip": {
           "label": "Flip",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "blur": {
           "label": "Blur",
@@ -214,14 +224,16 @@
           "min": 0,
           "max": 10,
           "aspect": "blur",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "speed": {
           "label": "Speed",
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 1
+          "max": 1,
+          "default": 0.4
         },
         "reactivity": {
           "label": "Reactivity",
@@ -230,7 +242,8 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.5
         },
         "gradient": {
           "label": "Gradient",
@@ -262,28 +275,32 @@
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 1
+          "max": 1,
+          "default": 1.0
         },
         "multiplier": {
           "label": "Reactivity",
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 4
+          "max": 4,
+          "default": 2.0
         },
         "speed": {
           "label": "Speed",
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 5
+          "max": 5,
+          "default": 1
         },
         "zoom": {
           "label": "Zoom",
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 5
+          "max": 5,
+          "default": 2
         }
       }
     },
@@ -299,14 +316,16 @@
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 1
+          "max": 1,
+          "default": 1.0
         },
         "power_multiplier": {
           "label": "Reactivity",
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 1
+          "max": 1,
+          "default": 0.5
         },
         "speed": {
           "label": "Speed",
@@ -320,26 +339,30 @@
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 5
+          "max": 5,
+          "default": 1
         },
         "invert": {
           "label": "Flip",
           "type": "toggle",
-          "smooth": false
+          "smooth": false,
+          "default": false
         },
         "idle_speed": {
           "label": "Speed",
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 1
+          "max": 1,
+          "default": 1
         },
         "center_smoothing": {
           "label": "Blur",
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 5
+          "max": 5,
+          "default": 0.5
         }
       }
     },
@@ -367,7 +390,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.3
         },
         "brightness": {
           "label": "Effect Brightness",
@@ -376,7 +400,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.8
         },
         "peak_color": {
           "label": "Accent Color",
@@ -389,13 +414,15 @@
           "type": "numeric",
           "smooth": false,
           "min": 1,
-          "max": 10
+          "max": 10,
+          "default": 1
         },
         "ring": {
           "label": "Flip",
           "type": "toggle",
           "smooth": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "spin_multiplier": {
           "label": "Reactivity",
@@ -404,12 +431,14 @@
           "min": 0,
           "max": 5,
           "aspect": "reactivity",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "spin": {
           "label": "Spin",
           "type": "toggle",
-          "smooth": false
+          "smooth": false,
+          "default": false
         }
       },
       "defaults": {
@@ -430,7 +459,8 @@
           "label": "Polygon",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "spin": {
           "label": "Speed",
@@ -441,7 +471,8 @@
           "aspect": "reactivity",
           "aspect_scale": 1.0,
           "magnitude_only": true,
-          "note": "Reactivity drives the magnitude; spin_sign/Flip owns the sign (magnitude_only preserves it on write)"
+          "note": "Reactivity drives the magnitude; spin_sign/Flip owns the sign (magnitude_only preserves it on write)",
+          "default": 0.2
         },
         "spin_sign": {
           "label": "Flip",
@@ -450,7 +481,8 @@
           "maps_to": "spin",
           "sign_control": true,
           "aspect": "shape",
-          "note": "On=positive spin, Off=negative spin, Toggle=negate sign"
+          "note": "On=positive spin, Off=negative spin, Toggle=negate sign",
+          "default": true
         },
         "twist": {
           "label": "Twist",
@@ -459,7 +491,8 @@
           "min": 0,
           "max": 10,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0
         },
         "star": {
           "label": "Star",
@@ -468,7 +501,8 @@
           "min": -1,
           "max": 1,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.0
         },
         "edges": {
           "label": "Edges",
@@ -476,7 +510,8 @@
           "smooth": false,
           "min": 0,
           "max": 8,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 6
         },
         "x_offset": {
           "label": "X Offset",
@@ -486,7 +521,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.0
         },
         "y_offset": {
           "label": "Y Offset",
@@ -496,7 +532,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.0
         },
         "offset_polar": {
           "label": "Polar Offset",
@@ -560,7 +597,8 @@
           "min": 0.1,
           "max": 3.0,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "stretch_horizontal": {
           "label": "Dancer Width",
@@ -568,7 +606,8 @@
           "smooth": true,
           "min": 1,
           "max": 200,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 100
         },
         "stretch_vertical": {
           "label": "Dancer Height",
@@ -576,7 +615,8 @@
           "smooth": true,
           "min": 1,
           "max": 200,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 100
         },
         "center_horizontal": {
           "label": "Dancer X",
@@ -585,7 +625,8 @@
           "min": -95,
           "max": 95,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0
         },
         "center_vertical": {
           "label": "Dancer Y",
@@ -594,35 +635,41 @@
           "min": -95,
           "max": 95,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0
         },
         "half_beat": {
           "label": "Half Beat",
           "type": "toggle",
           "smooth": false,
-          "aspect": "reactivity"
+          "aspect": "reactivity",
+          "default": false
         },
         "ping_pong": {
           "label": "Ping Pong",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "flip_horizontal": {
           "label": "Flip",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "force_fit": {
           "label": "Force Fit",
           "type": "toggle",
-          "smooth": false
+          "smooth": false,
+          "default": true
         },
         "keep_aspect_ratio": {
           "label": "Keep Aspect",
           "type": "toggle",
-          "smooth": false
+          "smooth": false,
+          "default": false
         }
       },
       "defaults": {
@@ -647,13 +694,15 @@
           "min": -6,
           "max": 6,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 3.0
         },
         "reverse": {
           "label": "Reverse Flow",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": true
         },
         "radius_scale": {
           "label": "Field Radius",
@@ -661,7 +710,8 @@
           "smooth": true,
           "min": 0.2,
           "max": 2.0,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 1.0
         },
         "blob_size": {
           "label": "Blob Size",
@@ -669,7 +719,8 @@
           "smooth": true,
           "min": 0.5,
           "max": 6,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 1.0
         },
         "gradient_spin": {
           "label": "Gradient Spin",
@@ -678,7 +729,8 @@
           "min": -1,
           "max": 1,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.1
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -686,7 +738,8 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.4
         },
         "horizon_scale": {
           "label": "Horizon Size",
@@ -694,7 +747,8 @@
           "smooth": true,
           "min": 0,
           "max": 0.8,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.25
         },
         "x_offset": {
           "label": "X Offset",
@@ -704,7 +758,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "y_offset": {
           "label": "Y Offset",
@@ -714,7 +769,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "horizon_audio": {
           "label": "Horizon Audio",
@@ -723,7 +779,8 @@
           "min": -1,
           "max": 1,
           "aspect": "reactivity",
-          "aspect_scale": 0.4
+          "aspect_scale": 0.4,
+          "default": 0.3
         },
         "horizon_color": {
           "label": "Accent Color",
@@ -739,7 +796,8 @@
           "min": 0.05,
           "max": 2.0,
           "aspect": "reactivity",
-          "aspect_scale": 0.8
+          "aspect_scale": 0.8,
+          "default": 1.0
         },
         "accel": {
           "label": "Accel",
@@ -748,7 +806,8 @@
           "min": 0.5,
           "max": 5.0,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 2.5
         },
         "spawn_rate": {
           "label": "Spawn Rate",
@@ -757,7 +816,8 @@
           "min": 0,
           "max": 60,
           "aspect": "reactivity",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "beat_burst": {
           "label": "Beat Burst",
@@ -766,7 +826,8 @@
           "min": 0,
           "max": 12,
           "aspect": "reactivity",
-          "aspect_scale": 0.6
+          "aspect_scale": 0.6,
+          "default": 1
         },
         "spawn_audio": {
           "label": "Audio Spawn",
@@ -775,7 +836,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 1.0
         },
         "speed_audio": {
           "label": "Audio Speed",
@@ -784,7 +846,8 @@
           "min": 0,
           "max": 5,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 1.0
         },
         "impulse_decay": {
           "label": "Impulse Decay",
@@ -793,7 +856,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         },
         "max_blobs": {
           "label": "Max Blobs",
@@ -802,7 +866,8 @@
           "min": 20,
           "max": 1024,
           "aspect": "reactivity",
-          "aspect_scale": 0.4
+          "aspect_scale": 0.4,
+          "default": 50
         },
         "edge_speed": {
           "label": "Edge Speed",
@@ -811,14 +876,16 @@
           "min": 0.05,
           "max": 1.0,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.25
         },
         "kill_radius": {
           "label": "Kill Radius",
           "type": "numeric",
           "smooth": true,
           "min": 0.01,
-          "max": 0.2
+          "max": 0.2,
+          "default": 0.04
         },
         "horizon_hold": {
           "label": "Horizon Hold",
@@ -827,7 +894,8 @@
           "min": 0.5,
           "max": 10.0,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 2.5
         },
         "handoff_ease": {
           "label": "Handoff Ease",
@@ -837,7 +905,8 @@
           "max": 5,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Seconds adopted particles wind up to full speed after an orbits->blackhole switch"
+          "note": "Seconds adopted particles wind up to full speed after an orbits->blackhole switch",
+          "default": 1.5
         },
         "color_mode": {
           "label": "Color Mode",
@@ -880,7 +949,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "brightness": {
           "label": "Effect Brightness",
@@ -889,7 +959,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         }
       },
       "defaults": {
@@ -933,7 +1004,8 @@
           "min": 1,
           "max": 16,
           "aspect": "shape",
-          "note": "Count changes animate: removed particles fly off, new ones fly in"
+          "note": "Count changes animate: removed particles fly off, new ones fly in",
+          "default": 6
         },
         "x_offset": {
           "label": "X Offset",
@@ -943,7 +1015,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "y_offset": {
           "label": "Y Offset",
@@ -953,7 +1026,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "radius_scale": {
           "label": "Field Radius",
@@ -961,7 +1035,8 @@
           "smooth": true,
           "min": 0.2,
           "max": 2.0,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 1.8
         },
         "horizon_scale": {
           "label": "Tether Radius",
@@ -969,7 +1044,8 @@
           "smooth": true,
           "min": 0,
           "max": 0.8,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.19
         },
         "orbit_radius": {
           "label": "Orbit Radius",
@@ -977,7 +1053,8 @@
           "smooth": true,
           "min": 0.02,
           "max": 0.8,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.53
         },
         "blob_size": {
           "label": "Particle Size",
@@ -985,7 +1062,8 @@
           "smooth": true,
           "min": 0.5,
           "max": 6,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 1.0
         },
         "spin": {
           "label": "Ring Spin",
@@ -994,7 +1072,8 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.37
         },
         "base_speed": {
           "label": "Orbit Speed",
@@ -1003,13 +1082,15 @@
           "min": 0.05,
           "max": 2.0,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.3
         },
         "reverse": {
           "label": "Reverse Spin",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "jiggle": {
           "label": "Jiggle",
@@ -1019,7 +1100,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity"
+          "note": "0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity",
+          "default": 0.15
         },
         "tether_scatter": {
           "label": "Tether Scatter",
@@ -1029,7 +1111,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "0 = perfectly equidistant tethers, 1 = fully random ring placement"
+          "note": "0 = perfectly equidistant tethers, 1 = fully random ring placement",
+          "default": 0.0
         },
         "enter_time": {
           "label": "Enter Time",
@@ -1039,7 +1122,8 @@
           "max": 5,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Seconds a new or adopted particle glides into its orbit (fly-ins + blackhole->orbits handoff)"
+          "note": "Seconds a new or adopted particle glides into its orbit (fly-ins + blackhole->orbits handoff)",
+          "default": 2.0
         },
         "reactivity_scale": {
           "label": "Reactivity",
@@ -1049,7 +1133,8 @@
           "max": 2,
           "aspect": "reactivity",
           "aspect_scale": 1.0,
-          "note": "Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio"
+          "note": "Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio",
+          "default": 1.0
         },
         "speed_jump": {
           "label": "Speed Jump Max",
@@ -1058,7 +1143,8 @@
           "min": 0,
           "max": 3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 1.0
         },
         "speed_jog": {
           "label": "Speed Jump Jog",
@@ -1067,7 +1153,8 @@
           "min": 0,
           "max": 3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 1.0
         },
         "brightness_audio": {
           "label": "Brightness Audio",
@@ -1076,7 +1163,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.5
         },
         "size_audio": {
           "label": "Size Audio",
@@ -1085,7 +1173,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.5
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -1093,7 +1182,8 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.15
         },
         "gradient_spin": {
           "label": "Gradient Spin",
@@ -1102,7 +1192,8 @@
           "min": -1,
           "max": 1,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.0
         },
         "color_shift": {
           "label": "Color Jump",
@@ -1112,7 +1203,8 @@
           "max": 96,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Nudge +1 on a morph to make colors jump A,B,C -> C,A,B"
+          "note": "Nudge +1 on a morph to make colors jump A,B,C -> C,A,B",
+          "default": 1
         },
         "impulse_decay": {
           "label": "Impulse Decay",
@@ -1121,7 +1213,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -1154,7 +1247,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "brightness": {
           "label": "Effect Brightness",
@@ -1163,7 +1257,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         }
       },
       "defaults": {
@@ -1211,13 +1306,15 @@
           "smooth": true,
           "min": 1,
           "max": 60,
-          "aspect": "reactivity"
+          "aspect": "reactivity",
+          "default": 10
         },
         "bounce": {
           "label": "Ping Pong",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         }
       },
       "defaults": {
@@ -1234,13 +1331,15 @@
           "min": -6,
           "max": 6,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 3.1
         },
         "reverse": {
           "label": "Reverse Flow",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": true
         },
         "radius_scale": {
           "label": "Field Radius",
@@ -1249,7 +1348,8 @@
           "min": 0.2,
           "max": 2.0,
           "aspect": "shape",
-          "note": "Sample-ring radius: where along the fall blobs peak"
+          "note": "Sample-ring radius: where along the fall blobs peak",
+          "default": 1.0
         },
         "blob_size": {
           "label": "Blob Size",
@@ -1257,7 +1357,8 @@
           "smooth": true,
           "min": 0.5,
           "max": 6,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "gradient_spin": {
           "label": "Gradient Spin",
@@ -1266,7 +1367,8 @@
           "min": -1,
           "max": 1,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.1
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -1274,7 +1376,8 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.56
         },
         "x_offset": {
           "label": "X Offset",
@@ -1285,7 +1388,8 @@
           "flip_sign": true,
           "scale_offset": true,
           "aspect": "shape",
-          "note": "Rotates the whole pattern around the strip"
+          "note": "Rotates the whole pattern around the strip",
+          "default": 0.5
         },
         "base_speed": {
           "label": "Infall Speed",
@@ -1294,7 +1398,8 @@
           "min": 0.05,
           "max": 2.0,
           "aspect": "reactivity",
-          "aspect_scale": 0.8
+          "aspect_scale": 0.8,
+          "default": 1.0
         },
         "accel": {
           "label": "Accel",
@@ -1303,7 +1408,8 @@
           "min": 0.5,
           "max": 5.0,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 5.0
         },
         "spawn_rate": {
           "label": "Spawn Rate",
@@ -1312,7 +1418,8 @@
           "min": 0,
           "max": 60,
           "aspect": "reactivity",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.1
         },
         "beat_burst": {
           "label": "Beat Burst",
@@ -1321,7 +1428,8 @@
           "min": 0,
           "max": 12,
           "aspect": "reactivity",
-          "aspect_scale": 0.6
+          "aspect_scale": 0.6,
+          "default": 2
         },
         "spawn_audio": {
           "label": "Audio Spawn",
@@ -1330,7 +1438,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 1.0
         },
         "speed_audio": {
           "label": "Audio Speed",
@@ -1339,7 +1448,8 @@
           "min": 0,
           "max": 5,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 2.3
         },
         "impulse_decay": {
           "label": "Impulse Decay",
@@ -1348,7 +1458,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         },
         "max_blobs": {
           "label": "Max Blobs",
@@ -1357,7 +1468,8 @@
           "min": 20,
           "max": 1024,
           "aspect": "reactivity",
-          "aspect_scale": 0.4
+          "aspect_scale": 0.4,
+          "default": 50
         },
         "edge_speed": {
           "label": "Edge Speed",
@@ -1366,7 +1478,8 @@
           "min": 0.05,
           "max": 1.0,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 1.0
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -1399,7 +1512,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "brightness": {
           "label": "Effect Brightness",
@@ -1408,7 +1522,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "color_mode": {
           "label": "Color Mode",
@@ -1428,7 +1543,8 @@
           "max": 0.5,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Radial width of the approach/pass/trail brightness envelope"
+          "note": "Radial width of the approach/pass/trail brightness envelope",
+          "default": 0.16
         }
       },
       "defaults": {
@@ -1466,7 +1582,8 @@
           "min": 1,
           "max": 16,
           "aspect": "shape",
-          "note": "Count changes animate: removed particles fade out, new ones explode in"
+          "note": "Count changes animate: removed particles fade out, new ones explode in",
+          "default": 6
         },
         "x_offset": {
           "label": "X Offset",
@@ -1477,7 +1594,8 @@
           "flip_sign": true,
           "scale_offset": true,
           "aspect": "shape",
-          "note": "Rotates the whole tether ring around the strip"
+          "note": "Rotates the whole tether ring around the strip",
+          "default": 0.5
         },
         "orbit_radius": {
           "label": "Orbit Radius",
@@ -1486,7 +1604,8 @@
           "min": 0.02,
           "max": 0.8,
           "aspect": "shape",
-          "note": "Oscillation reach as a fraction of particle spacing"
+          "note": "Oscillation reach as a fraction of particle spacing",
+          "default": 0.25
         },
         "blob_size": {
           "label": "Particle Size",
@@ -1494,7 +1613,8 @@
           "smooth": true,
           "min": 0.5,
           "max": 6,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 1.5
         },
         "spin": {
           "label": "Ring Spin",
@@ -1503,7 +1623,8 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.15
         },
         "base_speed": {
           "label": "Orbit Speed",
@@ -1512,13 +1633,15 @@
           "min": 0.05,
           "max": 2.0,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.5
         },
         "reverse": {
           "label": "Reverse Spin",
           "type": "toggle",
           "smooth": false,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": false
         },
         "jiggle": {
           "label": "Jiggle",
@@ -1528,7 +1651,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity"
+          "note": "0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity",
+          "default": 0.2
         },
         "tether_scatter": {
           "label": "Tether Scatter",
@@ -1538,7 +1662,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "0 = perfectly equidistant tethers, 1 = fully random ring placement"
+          "note": "0 = perfectly equidistant tethers, 1 = fully random ring placement",
+          "default": 0.0
         },
         "reactivity_scale": {
           "label": "Reactivity",
@@ -1548,7 +1673,8 @@
           "max": 2,
           "aspect": "reactivity",
           "aspect_scale": 1.0,
-          "note": "Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio"
+          "note": "Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio",
+          "default": 1.0
         },
         "speed_jump": {
           "label": "Speed Jump Max",
@@ -1557,7 +1683,8 @@
           "min": 0,
           "max": 3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 1.0
         },
         "speed_jog": {
           "label": "Jog Reverse Chance",
@@ -1567,7 +1694,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Chance per spike/beat that the speed jump runs backward (jiggle correlates the rolls)"
+          "note": "Chance per spike/beat that the speed jump runs backward (jiggle correlates the rolls)",
+          "default": 0.3
         },
         "brightness_audio": {
           "label": "Brightness Audio",
@@ -1576,7 +1704,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.5
         },
         "size_audio": {
           "label": "Size Audio",
@@ -1585,7 +1714,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.5
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -1593,7 +1723,8 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.4
         },
         "gradient_spin": {
           "label": "Gradient Spin",
@@ -1602,7 +1733,8 @@
           "min": -1,
           "max": 1,
           "flip_sign": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.0
         },
         "color_shift": {
           "label": "Color Jump",
@@ -1612,7 +1744,8 @@
           "max": 96,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Nudge +1 on a morph to make colors jump A,B,C -> C,A,B"
+          "note": "Nudge +1 on a morph to make colors jump A,B,C -> C,A,B",
+          "default": 1
         },
         "impulse_decay": {
           "label": "Impulse Decay",
@@ -1621,7 +1754,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -1654,7 +1788,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "brightness": {
           "label": "Effect Brightness",
@@ -1663,7 +1798,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         },
         "overlap_blend": {
           "label": "Overlap Blend",
@@ -1673,7 +1809,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Overlapping blobs: 0 = no brightness gain (hue midpoint), 1 = fully additive"
+          "note": "Overlapping blobs: 0 = no brightness gain (hue midpoint), 1 = fully additive",
+          "default": 1.0
         },
         "bounce_chance": {
           "label": "Bounce Chance",
@@ -1683,7 +1820,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Chance per spike/beat that a particle bounces and travels backward along the strip"
+          "note": "Chance per spike/beat that a particle bounces and travels backward along the strip",
+          "default": 0.2
         },
         "implode_fade": {
           "label": "Implode Fade",
@@ -1693,7 +1831,8 @@
           "max": 3.0,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Seconds an add-implosion takes: fragments converge while the particle fades in"
+          "note": "Seconds an add-implosion takes: fragments converge while the particle fades in",
+          "default": 0.5
         },
         "implode_reach": {
           "label": "Implode Reach",
@@ -1703,7 +1842,8 @@
           "max": 1.0,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Fraction of the strip away the implosion fragments start"
+          "note": "Fraction of the strip away the implosion fragments start",
+          "default": 0.4
         }
       },
       "defaults": {
@@ -1746,7 +1886,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "y_offset": {
           "label": "Y Offset",
@@ -1756,7 +1897,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "radius_scale": {
           "label": "Field Radius",
@@ -1764,7 +1906,8 @@
           "smooth": true,
           "min": 0.2,
           "max": 2,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 1.0
         },
         "blob_size": {
           "label": "Blob Size",
@@ -1772,7 +1915,8 @@
           "smooth": true,
           "min": 0.5,
           "max": 6,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 2.0
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -1781,7 +1925,8 @@
           "min": 0,
           "max": 1,
           "aspect": "shape",
-          "note": "Forward: comet-trail length. Reverse: how faint and gradual the imploding burst STARTS (its end is always a fast wink-out)"
+          "note": "Forward: comet-trail length. Reverse: how faint and gradual the imploding burst STARTS (its end is always a fast wink-out)",
+          "default": 0.27
         },
         "spawn_rate": {
           "label": "Spawn Rate",
@@ -1791,7 +1936,8 @@
           "max": 60,
           "aspect": "reactivity",
           "aspect_scale": 1.0,
-          "note": "Fireworks launched per second; 0 = beat bursts only"
+          "note": "Fireworks launched per second; 0 = beat bursts only",
+          "default": 0.0
         },
         "beat_burst": {
           "label": "Beat Burst",
@@ -1800,7 +1946,8 @@
           "min": 0,
           "max": 12,
           "aspect": "reactivity",
-          "note": "Extra fireworks launched on each beat"
+          "note": "Extra fireworks launched on each beat",
+          "default": 4
         },
         "spawn_audio": {
           "label": "Audio Spawn",
@@ -1809,7 +1956,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "note": "How much the chosen band boosts the launch rate"
+          "note": "How much the chosen band boosts the launch rate",
+          "default": 2.0
         },
         "burst_size": {
           "label": "Burst Size",
@@ -1818,7 +1966,8 @@
           "min": 3,
           "max": 30,
           "aspect": "shape",
-          "note": "Particles per firework; the shared Edge / particle count shape sub-field lands here on fireworks"
+          "note": "Particles per firework; the shared Edge / particle count shape sub-field lands here on fireworks",
+          "default": 8
         },
         "burst_speed": {
           "label": "Burst Speed",
@@ -1827,7 +1976,8 @@
           "min": 0.1,
           "max": 3,
           "aspect": "reactivity",
-          "note": "Base explosion speed in radii per second"
+          "note": "Base explosion speed in radii per second",
+          "default": 1.8
         },
         "burst_life": {
           "label": "Burst Life",
@@ -1836,7 +1986,8 @@
           "min": 0.3,
           "max": 3,
           "aspect": "reactivity",
-          "note": "Seconds a particle lives after the explosion"
+          "note": "Seconds a particle lives after the explosion",
+          "default": 1.9
         },
         "speed_audio": {
           "label": "Audio Speed",
@@ -1845,7 +1996,8 @@
           "min": 0,
           "max": 5,
           "aspect": "reactivity",
-          "note": "How much the music boosts the explosion speed"
+          "note": "How much the music boosts the explosion speed",
+          "default": 3.2
         },
         "brightness_audio": {
           "label": "Audio Brightness",
@@ -1854,7 +2006,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "note": "How much the music pumps firework brightness"
+          "note": "How much the music pumps firework brightness",
+          "default": 2.0
         },
         "max_blobs": {
           "label": "Max Particles",
@@ -1862,7 +2015,8 @@
           "smooth": true,
           "min": 20,
           "max": 1024,
-          "aspect": "reactivity"
+          "aspect": "reactivity",
+          "default": 100
         },
         "drag": {
           "label": "Drag",
@@ -1872,7 +2026,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "How hard particles decelerate after the burst"
+          "note": "How hard particles decelerate after the burst",
+          "default": 0.69
         },
         "impulse_decay": {
           "label": "Impulse Decay",
@@ -1881,7 +2036,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -1907,7 +2063,8 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "brightness"
+          "aspect": "brightness",
+          "default": 1.0
         },
         "brightness": {
           "label": "Brightness",
@@ -1915,14 +2072,16 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "brightness"
+          "aspect": "brightness",
+          "default": 1.0
         },
         "reverse": {
           "label": "Reverse",
           "type": "toggle",
           "smooth": false,
           "aspect": "shape",
-          "note": "Implode: particles are born dim at their flight distance and brighten as they converge onto the burst point (same Reverse morph sub-field as Blackhole)"
+          "note": "Implode: particles are born dim at their flight distance and brighten as they converge onto the burst point (same Reverse morph sub-field as Blackhole)",
+          "default": false
         },
         "burst_audio": {
           "label": "Audio Burst Size",
@@ -1931,7 +2090,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "note": "How much volume grows each firework's particle count; 0 pins it at Burst Size"
+          "note": "How much volume grows each firework's particle count; 0 pins it at Burst Size",
+          "default": 1.0
         }
       },
       "defaults": {
@@ -1969,7 +2129,8 @@
           "smooth": true,
           "min": 0.5,
           "max": 6,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 1.7
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -1978,7 +2139,8 @@
           "min": 0,
           "max": 1,
           "aspect": "shape",
-          "note": "Forward: comet-trail length. Reverse: how faint and gradual the imploding burst STARTS (its end is always a fast wink-out)"
+          "note": "Forward: comet-trail length. Reverse: how faint and gradual the imploding burst STARTS (its end is always a fast wink-out)",
+          "default": 0.24
         },
         "spawn_rate": {
           "label": "Spawn Rate",
@@ -1988,7 +2150,8 @@
           "max": 60,
           "aspect": "reactivity",
           "aspect_scale": 1.0,
-          "note": "Fireworks (particle pairs) launched per second; 0 = beat bursts only"
+          "note": "Fireworks (particle pairs) launched per second; 0 = beat bursts only",
+          "default": 0.0
         },
         "beat_burst": {
           "label": "Beat Burst",
@@ -1997,7 +2160,8 @@
           "min": 0,
           "max": 12,
           "aspect": "reactivity",
-          "note": "Extra fireworks launched on each beat"
+          "note": "Extra fireworks launched on each beat",
+          "default": 2
         },
         "spawn_audio": {
           "label": "Audio Spawn",
@@ -2006,7 +2170,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "note": "How much the chosen band boosts the launch rate"
+          "note": "How much the chosen band boosts the launch rate",
+          "default": 0.0
         },
         "burst_speed": {
           "label": "Burst Speed",
@@ -2015,7 +2180,8 @@
           "min": 0.05,
           "max": 1.5,
           "aspect": "reactivity",
-          "note": "Base separation speed as a fraction of the strip per second"
+          "note": "Base separation speed as a fraction of the strip per second",
+          "default": 0.5
         },
         "burst_life": {
           "label": "Burst Life",
@@ -2024,7 +2190,8 @@
           "min": 0.3,
           "max": 3,
           "aspect": "reactivity",
-          "note": "Seconds a particle lives after the launch"
+          "note": "Seconds a particle lives after the launch",
+          "default": 1.2
         },
         "speed_audio": {
           "label": "Audio Speed",
@@ -2033,7 +2200,8 @@
           "min": 0,
           "max": 5,
           "aspect": "reactivity",
-          "note": "How much the music boosts the separation speed"
+          "note": "How much the music boosts the separation speed",
+          "default": 2.5
         },
         "brightness_audio": {
           "label": "Audio Brightness",
@@ -2042,7 +2210,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "note": "How much the music pumps firework brightness"
+          "note": "How much the music pumps firework brightness",
+          "default": 2.0
         },
         "max_blobs": {
           "label": "Max Particles",
@@ -2050,7 +2219,8 @@
           "smooth": true,
           "min": 4,
           "max": 96,
-          "aspect": "reactivity"
+          "aspect": "reactivity",
+          "default": 6
         },
         "drag": {
           "label": "Drag",
@@ -2060,7 +2230,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "How hard particles decelerate after the launch"
+          "note": "How hard particles decelerate after the launch",
+          "default": 0.5
         },
         "impulse_decay": {
           "label": "Impulse Decay",
@@ -2069,7 +2240,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -2095,7 +2267,8 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "brightness"
+          "aspect": "brightness",
+          "default": 1.0
         },
         "brightness": {
           "label": "Brightness",
@@ -2103,14 +2276,16 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "brightness"
+          "aspect": "brightness",
+          "default": 1.0
         },
         "reverse": {
           "label": "Reverse",
           "type": "toggle",
           "smooth": false,
           "aspect": "shape",
-          "note": "Implode: the pair races toward each other, brightening into the meeting point"
+          "note": "Implode: the pair races toward each other, brightening into the meeting point",
+          "default": false
         }
       },
       "defaults": {
@@ -2150,7 +2325,8 @@
           "smooth": true,
           "min": 0.05,
           "max": 1.0,
-          "aspect": "brightness"
+          "aspect": "brightness",
+          "default": 0.34
         },
         "dot_brightness": {
           "label": "Dot Brightness",
@@ -2159,7 +2335,8 @@
           "min": 0.0,
           "max": 1.0,
           "aspect": "brightness",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 0.78
         },
         "wall_cycle": {
           "label": "Wall Color Roll",
@@ -2167,7 +2344,8 @@
           "smooth": true,
           "min": 0.0,
           "max": 1.0,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.41
         },
         "wall_audio": {
           "label": "Wall Roll Audio",
@@ -2176,7 +2354,8 @@
           "min": 0.0,
           "max": 2.0,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 1.3
         },
         "base_speed": {
           "label": "Pacman Speed",
@@ -2185,7 +2364,8 @@
           "min": 1.0,
           "max": 12.0,
           "aspect": "reactivity",
-          "aspect_scale": 0.8
+          "aspect_scale": 0.8,
+          "default": 2.0
         },
         "speed_audio": {
           "label": "Speed Audio",
@@ -2194,7 +2374,8 @@
           "min": 0.0,
           "max": 5.0,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 3.3
         },
         "beat_jump": {
           "label": "Beat Jump",
@@ -2203,14 +2384,16 @@
           "min": 0.0,
           "max": 4.0,
           "aspect": "reactivity",
-          "aspect_scale": 0.6
+          "aspect_scale": 0.6,
+          "default": 1.5
         },
         "reverse": {
           "label": "Reverse",
           "type": "toggle",
           "smooth": false,
           "aspect": "shape",
-          "note": "Forces power-dot mode: ghosts stay blue, she hunts them"
+          "note": "Forces power-dot mode: ghosts stay blue, she hunts them",
+          "default": false
         },
         "fright_time": {
           "label": "Fright Time",
@@ -2219,7 +2402,8 @@
           "min": 2.0,
           "max": 15.0,
           "aspect": "shape",
-          "distribute": false
+          "distribute": false,
+          "default": 6.0
         },
         "ghost_count": {
           "label": "Ghosts",
@@ -2227,7 +2411,8 @@
           "smooth": true,
           "min": 1,
           "max": 4,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 4
         },
         "ghost_speed": {
           "label": "Ghost Speed",
@@ -2236,7 +2421,8 @@
           "min": 0.5,
           "max": 0.95,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.73
         },
         "entity_size": {
           "label": "Blob Size",
@@ -2244,7 +2430,8 @@
           "smooth": true,
           "min": 1.0,
           "max": 6.0,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 3.0
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -2265,7 +2452,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.09
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -2273,13 +2461,15 @@
           "smooth": true,
           "min": 0,
           "max": 1,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.35
         },
         "smooth_motion": {
           "label": "Smooth Motion",
           "type": "toggle",
           "smooth": false,
-          "note": "Entities glide between positions (beat jumps/recoils ease); game logic unchanged"
+          "note": "Entities glide between positions (beat jumps/recoils ease); game logic unchanged",
+          "default": true
         }
       },
       "defaults": {
@@ -2318,7 +2508,8 @@
           "min": 0,
           "max": 30,
           "aspect": "reactivity",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.0
         },
         "beat_burst": {
           "label": "Beat Burst",
@@ -2327,7 +2518,8 @@
           "min": 0,
           "max": 12,
           "aspect": "reactivity",
-          "aspect_scale": 0.6
+          "aspect_scale": 0.6,
+          "default": 2
         },
         "spawn_audio": {
           "label": "Audio Spawn",
@@ -2336,7 +2528,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 0.5
         },
         "max_blobs": {
           "label": "Max Chains",
@@ -2345,7 +2538,8 @@
           "min": 2,
           "max": 64,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 14
         },
         "base_speed": {
           "label": "Speed",
@@ -2354,7 +2548,8 @@
           "min": 2,
           "max": 60,
           "aspect": "reactivity",
-          "aspect_scale": 0.8
+          "aspect_scale": 0.8,
+          "default": 38.0
         },
         "speed_audio": {
           "label": "Audio Speed",
@@ -2363,7 +2558,8 @@
           "min": 0,
           "max": 5,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 2.7
         },
         "step_size": {
           "label": "Step Size",
@@ -2371,7 +2567,8 @@
           "smooth": true,
           "min": 1,
           "max": 10,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 3
         },
         "step_count": {
           "label": "Step Count",
@@ -2379,7 +2576,8 @@
           "smooth": true,
           "min": 2,
           "max": 24,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 4
         },
         "length_audio": {
           "label": "Audio Length",
@@ -2388,7 +2586,8 @@
           "min": 0,
           "max": 3,
           "aspect": "reactivity",
-          "aspect_scale": 0.5
+          "aspect_scale": 0.5,
+          "default": 1.0
         },
         "blob_size": {
           "label": "Blob Size",
@@ -2397,7 +2596,8 @@
           "min": 0.5,
           "max": 6,
           "aspect": "shape",
-          "note": "Chain thickness \u2014 shares the family Blob Size sub-field"
+          "note": "Chain thickness \u2014 shares the family Blob Size sub-field",
+          "default": 1.0
         },
         "jiggle": {
           "label": "Jiggle",
@@ -2407,7 +2607,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Per-chain step-size and thickness wander"
+          "note": "Per-chain step-size and thickness wander",
+          "default": 0.24
         },
         "horizontal_gap": {
           "label": "Horizontal Gap",
@@ -2417,7 +2618,8 @@
           "max": 80,
           "aspect": "shape",
           "distribute": false,
-          "note": "Degrees headings must stay away from horizontal"
+          "note": "Degrees headings must stay away from horizontal",
+          "default": 25.0
         },
         "brightness_audio": {
           "label": "Brightness Audio",
@@ -2426,14 +2628,16 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 1.0
         },
         "reverse": {
           "label": "Reverse",
           "type": "toggle",
           "smooth": false,
           "aspect": "shape",
-          "note": "Every chain turns around and retraces its path; new chains keep entering from the edge"
+          "note": "Every chain turns around and retraces its path; new chains keep entering from the edge",
+          "default": false
         },
         "x_offset": {
           "label": "X Offset",
@@ -2443,7 +2647,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "y_offset": {
           "label": "Y Offset",
@@ -2453,7 +2658,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -2474,7 +2680,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         }
       },
       "defaults": {
@@ -2530,7 +2737,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.0
         },
         "dance_type": {
           "label": "Dance Type",
@@ -2556,7 +2764,8 @@
           "type": "toggle",
           "smooth": false,
           "aspect": "shape",
-          "note": "Adds the second dancer (same Reverse morph sub-field as the particle family): Neo drop-in / catch entrances, superman / spin-off exits"
+          "note": "Adds the second dancer (same Reverse morph sub-field as the particle family): Neo drop-in / catch entrances, superman / spin-off exits",
+          "default": false
         },
         "rotation": {
           "label": "Stage Angle",
@@ -2566,7 +2775,8 @@
           "max": 360,
           "aspect": "shape",
           "distribute": false,
-          "note": "Degrees; 20\u00b0+ deltas somersault the dancers. Morphable via the shared Twist shape sub-field (absolute or nudge \u2014 nudge lo/hi/wrap supported)"
+          "note": "Degrees; 20\u00b0+ deltas somersault the dancers. Morphable via the shared Twist shape sub-field (absolute or nudge \u2014 nudge lo/hi/wrap supported)",
+          "default": 0.0
         },
         "x_offset": {
           "label": "X Offset",
@@ -2576,7 +2786,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "y_offset": {
           "label": "Y Offset",
@@ -2586,7 +2797,8 @@
           "max": 1,
           "scale_offset": true,
           "aspect": "shape",
-          "note": "0.5 = vertically centered"
+          "note": "0.5 = vertically centered",
+          "default": 0.32
         },
         "radius_scale": {
           "label": "Figure Size",
@@ -2594,7 +2806,8 @@
           "smooth": true,
           "min": 0.2,
           "max": 2.0,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.7
         },
         "blob_size": {
           "label": "Limb Thickness",
@@ -2603,7 +2816,8 @@
           "min": 0.5,
           "max": 6.0,
           "aspect": "shape",
-          "note": "Shared Blob Size shape sub-field"
+          "note": "Shared Blob Size shape sub-field",
+          "default": 1.9
         },
         "trail_decay": {
           "label": "Trail Length",
@@ -2612,7 +2826,8 @@
           "min": 0,
           "max": 1,
           "aspect": "shape",
-          "note": "How much trail the dancers leave and how slowly it fades (same lines as the particle effects)"
+          "note": "How much trail the dancers leave and how slowly it fades (same lines as the particle effects)",
+          "default": 0.0
         },
         "burst_threshold": {
           "label": "Burst Threshold",
@@ -2621,7 +2836,8 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "note": "Music level a beat needs to fire a flame burst; 0 = every beat"
+          "note": "Music level a beat needs to fire a flame burst; 0 = every beat",
+          "default": 0.63
         },
         "burst_size": {
           "label": "Burst Size",
@@ -2630,7 +2846,8 @@
           "min": 3,
           "max": 60,
           "aspect": "shape",
-          "note": "Flame particles per burst; the shared Edge / particle count shape sub-field lands here on dancer"
+          "note": "Flame particles per burst; the shared Edge / particle count shape sub-field lands here on dancer",
+          "default": 30
         },
         "burst_audio": {
           "label": "Burst Audio",
@@ -2639,7 +2856,8 @@
           "min": 0,
           "max": 2,
           "aspect": "reactivity",
-          "note": "How much loudness grows the bursts"
+          "note": "How much loudness grows the bursts",
+          "default": 1.8
         },
         "brightness_audio": {
           "label": "Audio Brightness",
@@ -2647,13 +2865,15 @@
           "smooth": true,
           "min": 0,
           "max": 2,
-          "aspect": "reactivity"
+          "aspect": "reactivity",
+          "default": 0.6
         },
         "half_beat": {
           "label": "Half Beat",
           "type": "toggle",
           "smooth": false,
-          "aspect": "reactivity"
+          "aspect": "reactivity",
+          "default": false
         },
         "jiggle": {
           "label": "Jiggle",
@@ -2662,7 +2882,8 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "note": "Humanize: random variation added to the moves"
+          "note": "Humanize: random variation added to the moves",
+          "default": 0.25
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -2682,7 +2903,8 @@
           "smooth": true,
           "min": 0.01,
           "max": 0.3,
-          "aspect": "reactivity"
+          "aspect": "reactivity",
+          "default": 0.06
         },
         "base_speed": {
           "label": "Dance Speed",
@@ -2691,7 +2913,8 @@
           "min": 0.2,
           "max": 2.5,
           "aspect": "reactivity",
-          "note": "Steady dance rate; beats surge the dance forward on top of it (louder hits = bigger flourish surges)"
+          "note": "Steady dance rate; beats surge the dance forward on top of it (louder hits = bigger flourish surges)",
+          "default": 2.0
         },
         "dance_intensity": {
           "label": "Dance Intensity",
@@ -2700,7 +2923,8 @@
           "min": 0.2,
           "max": 2.0,
           "aspect": "reactivity",
-          "note": "How hard they dance: scales beat surges + groove sway + pose exaggeration together"
+          "note": "How hard they dance: scales beat surges + groove sway + pose exaggeration together",
+          "default": 1.0
         }
       },
       "defaults": {
@@ -2738,7 +2962,8 @@
           "min": 0.1,
           "max": 0.8,
           "aspect": "shape",
-          "note": "Iris radius as a fraction of the panel; the shared Field Radius (radius_scale) shape sub-field lands here"
+          "note": "Iris radius as a fraction of the panel; the shared Field Radius (radius_scale) shape sub-field lands here",
+          "default": 0.54
         },
         "pupil_size": {
           "label": "Pupil Size",
@@ -2747,7 +2972,8 @@
           "min": 0.03,
           "max": 0.6,
           "aspect": "shape",
-          "note": "Shared Blob Size shape sub-field lands here"
+          "note": "Shared Blob Size shape sub-field lands here",
+          "default": 0.36
         },
         "gaze_radius": {
           "label": "Gaze Radius",
@@ -2756,7 +2982,8 @@
           "min": 0.05,
           "max": 0.6,
           "aspect": "shape",
-          "note": "Radius of the 8-position ring the eye looks around"
+          "note": "Radius of the 8-position ring the eye looks around",
+          "default": 0.5
         },
         "gaze_depth": {
           "label": "Gaze Depth",
@@ -2765,7 +2992,8 @@
           "min": 0,
           "max": 1,
           "aspect": "shape",
-          "note": "3D eyeball illusion: iris foreshortens + pupil leads toward the gaze; 0 = flat googly eye"
+          "note": "3D eyeball illusion: iris foreshortens + pupil leads toward the gaze; 0 = flat googly eye",
+          "default": 0.6
         },
         "spin": {
           "label": "Spin",
@@ -2775,7 +3003,8 @@
           "max": 1,
           "flip_sign": true,
           "aspect": "shape",
-          "note": "Iris rotation (rev/s); sign sets direction, music speeds it up"
+          "note": "Iris rotation (rev/s); sign sets direction, music speeds it up",
+          "default": 0.08
         },
         "flames": {
           "label": "Flames",
@@ -2784,7 +3013,8 @@
           "min": 0,
           "max": 1,
           "aspect": "shape",
-          "note": "Flame amount from the iris rim; shape-flare target \u2014 bump with fallback_s and it burns back down"
+          "note": "Flame amount from the iris rim; shape-flare target \u2014 bump with fallback_s and it burns back down",
+          "default": 0.0
         },
         "x_offset": {
           "label": "X Offset",
@@ -2794,7 +3024,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "y_offset": {
           "label": "Y Offset",
@@ -2804,7 +3035,8 @@
           "max": 1,
           "flip_sign": true,
           "scale_offset": true,
-          "aspect": "shape"
+          "aspect": "shape",
+          "default": 0.5
         },
         "flame_audio": {
           "label": "Flame Audio",
@@ -2814,7 +3046,8 @@
           "max": 2,
           "aspect": "reactivity",
           "aspect_scale": 0.6,
-          "note": "How much music boosts flame intensity and randomness"
+          "note": "How much music boosts flame intensity and randomness",
+          "default": 2.0
         },
         "drift_speed": {
           "label": "Drift Speed",
@@ -2824,7 +3057,8 @@
           "max": 2,
           "aspect": "reactivity",
           "aspect_scale": 0.6,
-          "note": "Base gaze search speed; music multiplies it"
+          "note": "Base gaze search speed; music multiplies it",
+          "default": 0.5
         },
         "speed_audio": {
           "label": "Audio Speed",
@@ -2834,7 +3068,8 @@
           "max": 5,
           "aspect": "reactivity",
           "aspect_scale": 0.5,
-          "note": "How much the band boosts the gaze search speed"
+          "note": "How much the band boosts the gaze search speed",
+          "default": 2.9
         },
         "spin_audio": {
           "label": "Spin Audio",
@@ -2844,7 +3079,8 @@
           "max": 5,
           "aspect": "reactivity",
           "aspect_scale": 0.4,
-          "note": "How much the band speeds up the iris spin; 0 = constant spin"
+          "note": "How much the band speeds up the iris spin; 0 = constant spin",
+          "default": 0.0
         },
         "snap_threshold": {
           "label": "Snap Threshold",
@@ -2854,7 +3090,8 @@
           "max": 1,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Impulse a beat needs to snap the gaze to a new ring position; 0 = every beat"
+          "note": "Impulse a beat needs to snap the gaze to a new ring position; 0 = every beat",
+          "default": 0.6
         },
         "snap_hold": {
           "label": "Snap Hold",
@@ -2864,7 +3101,8 @@
           "max": 3,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Base seconds the gaze holds after a snap (bigger hits hold longer)"
+          "note": "Base seconds the gaze holds after a snap (bigger hits hold longer)",
+          "default": 0.2
         },
         "impulse_decay": {
           "label": "Impulse Decay",
@@ -2873,7 +3111,8 @@
           "min": 0.01,
           "max": 0.3,
           "aspect": "reactivity",
-          "distribute": false
+          "distribute": false,
+          "default": 0.06
         },
         "frequency_range": {
           "label": "Audio Band",
@@ -2907,7 +3146,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 0.0
         },
         "brightness": {
           "label": "Effect Brightness",
@@ -2916,7 +3156,8 @@
           "min": 0,
           "max": 1,
           "aspect": "brightness",
-          "aspect_scale": 1.0
+          "aspect_scale": 1.0,
+          "default": 1.0
         }
       },
       "defaults": {
