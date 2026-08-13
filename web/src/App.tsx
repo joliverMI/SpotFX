@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import NavBar from './components/NavBar';
 import TopBar from './components/TopBar';
+import WorldStrip from './components/WorldStrip';
 import { ToastProvider } from './components/Toast';
 import BuilderPage from './builder/BuilderPage';
 import EventListPage from './components/EventList/EventListPage';
@@ -48,6 +49,7 @@ export default function App() {
       <ToastProvider>
       <NavBar />
       <TopBar />
+      <WorldStrip />
       <main>
         <Routes>
           <Route path="/" element={<EventListPage />} />

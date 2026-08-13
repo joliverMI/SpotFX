@@ -39,13 +39,29 @@ export default function DeviceRow({
     [config, categories],
   );
   const allEffects = Object.keys(config?.effects ?? {});
-  // Category entries offer the category's own effect list when it has one.
+  // A category target fires on its whole subtree of virtuals (compiler
+  // semantics), so its effect options are the subtree's union of curated
+  // effect lists — the category's own plus every descendant's.
+  const subtreeEffects = useMemo(() => {
+    if (dev.target_kind !== 'category') return [];
+    const cats = Object.values(config?.categories ?? {});
+    const root = config?.categories[dev.target];
+    if (!root) return [];
+    const ids = new Set([root.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const c of cats) {
+        if (c.parent_id && ids.has(c.parent_id) && !ids.has(c.id)) {
+          ids.add(c.id);
+          grew = true;
+        }
+      }
+    }
+    return [...new Set(cats.filter((c) => ids.has(c.id)).flatMap((c) => c.effects))];
+  }, [config, dev.target_kind, dev.target]);
   const effectOptions =
-    dev.target_kind === 'category'
-      ? (config?.categories[dev.target]?.effects?.length
-          ? config.categories[dev.target].effects
-          : allEffects)
-      : allEffects;
+    dev.target_kind === 'category' && subtreeEffects.length ? subtreeEffects : allEffects;
 
   const paramMeta = Object.fromEntries(
     Object.entries(config?.effects[dev.effect_type]?.params ?? {})
@@ -66,17 +82,25 @@ export default function DeviceRow({
       {/* Target + effect */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <select value={dev.target_kind} style={{ fontSize: 12 }}
-          onChange={(e) => set({ target_kind: e.target.value as 'category' | 'virtual', target: '' })}>
+          onChange={(e) => set({ target_kind: e.target.value as 'all' | 'category' | 'virtual', target: '' })}>
+          <option value="all">All Devices</option>
           <option value="category">Category</option>
           <option value="virtual">Virtual</option>
         </select>
-        <select value={dev.target} style={{ fontSize: 12, minWidth: 160 }}
-          onChange={(e) => set({ target: e.target.value })}>
-          <option value="">— pick {dev.target_kind} —</option>
-          {(dev.target_kind === 'category' ? categories : allVirtuals).map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
+        {dev.target_kind === 'all' ? (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}
+            title="Every imported virtual; category/virtual entries override it">
+            every imported virtual
+          </span>
+        ) : (
+          <select value={dev.target} style={{ fontSize: 12, minWidth: 160 }}
+            onChange={(e) => set({ target: e.target.value })}>
+            <option value="">— pick {dev.target_kind} —</option>
+            {(dev.target_kind === 'category' ? categories : allVirtuals).map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        )}
         <select value={dev.effect_type} style={{ fontSize: 12, minWidth: 130 }}
           onChange={(e) => set({ effect_type: e.target.value, params: {} })}>
           <option value="">— effect —</option>

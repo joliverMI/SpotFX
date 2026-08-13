@@ -52,6 +52,14 @@ export const HELP_SECTIONS: HelpSection[] = [
       'SpotFX turns Spotify playback into music-synced lighting. It analyzes each track (beats, onsets, sections, energy) and fires lighting events on LedFX/Hue devices at exactly the right moments.',
     entries: [
       {
+        id: 'concept-worlds',
+        title: 'Two worlds: SPECTRA vs legacy spot-effects',
+        keywords: 'spectra legacy v2 marker strip banner purple amber which world',
+        body: [
+          'SpotFX currently runs two lighting worlds side by side. The colored strip under the top bar tells you which one a page belongs to: a purple ◆ SPECTRA strip marks the SceneV2 world (Scenes page — device-aware scenes, the sequencer, curve profiles), an amber ■ LEGACY SPOT-EFFECTS strip marks the classic world (Events list/editor and the Profile Builder). Pages with no strip (Devices, Color Sets, Settings…) are shared infrastructure used by both.',
+        ],
+      },
+      {
         id: 'concept-events',
         title: 'Events',
         keywords: 'composite sequence parallel random scene morph',
@@ -913,9 +921,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'scenes-v2-devices',
         title: 'Device entries',
-        keywords: 'category virtual effect params override brightness',
+        keywords: 'all devices everything category virtual effect params override brightness',
         body: [
-          'Each entry targets a category (including its sub-categories) or a single virtual, and picks an effect plus number/toggle params to pin (other param types have no pin editor yet). An entry targeting a virtual overrides a category entry covering the same virtual. Colors either come from the active Color Set at fire time ("Colors from active Color Set") or are fixed on the scene. Unset params/brightness leave the device\'s current values alone.',
+          'Each entry targets All Devices (every imported virtual — no need to enumerate categories), a category (including its sub-categories), or a single virtual, and picks an effect plus number/toggle params to pin (other param types have no pin editor yet). Narrower entries override wider ones on shared virtuals: All Devices < category < virtual. Colors either come from the active Color Set at fire time ("Colors from active Color Set") or are fixed on the scene. Unset params/brightness leave the device\'s current values alone.',
+          'The effect list for a category entry covers the category AND its sub-categories (matching what the entry fires on); a category with no curated effects anywhere in its subtree — and any All Devices or virtual entry — offers every effect in the registry.',
         ],
       },
       {

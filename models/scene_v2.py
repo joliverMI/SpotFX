@@ -24,10 +24,11 @@ class SceneColorAssignment(BaseModel):
 
 
 class SceneDeviceConfig(BaseModel):
-    # Category targets expand to member virtuals at compile time; a virtual
-    # entry overrides its category's claim on that virtual.
+    # "all" targets every imported virtual (target stays empty); category
+    # targets expand to member virtuals at compile time. Narrower entries
+    # override wider ones: all < category < virtual.
     id:          str = Field(default_factory=lambda: str(uuid.uuid4()))
-    target_kind: Literal["category", "virtual"] = "category"
+    target_kind: Literal["all", "category", "virtual"] = "category"
     target:      str = ""
     effect_type: str = ""
     params:      dict[str, Any] = Field(default_factory=dict)
@@ -78,7 +79,11 @@ class SceneV2(BaseModel):
     def _validate(self) -> "SceneV2":
         seen: set[tuple[str, str]] = set()
         for dev in self.devices:
-            if not dev.target:
+            if dev.target_kind == "all":
+                if dev.target:
+                    raise ValueError(
+                        f"all-devices entry must not name a target (got '{dev.target}')")
+            elif not dev.target:
                 raise ValueError("device entry has an empty target")
             if not dev.effect_type:
                 raise ValueError(f"device entry for '{dev.target}' has no effect_type")

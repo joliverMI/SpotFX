@@ -12,7 +12,9 @@ export interface SceneColorAssignment {
 
 export interface SceneDeviceConfig {
   id: string;
-  target_kind: 'category' | 'virtual';
+  /** "all" targets every imported virtual (target stays empty);
+   *  overrides layer all < category < virtual. */
+  target_kind: 'all' | 'category' | 'virtual';
   target: string;
   effect_type: string;
   params: Record<string, number | boolean | string>;

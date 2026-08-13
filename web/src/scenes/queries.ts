@@ -51,7 +51,7 @@ export const fireSceneV2 = (id: string, dryRun = true) =>
 export interface EffectConfig {
   categories: Record<
     string,
-    { id: string; virtuals: string[]; effects: string[] }
+    { id: string; parent_id: string | null; virtuals: string[]; effects: string[] }
   >;
   effects: Record<string, { params?: Record<string, EffectParamMeta> }>;
 }

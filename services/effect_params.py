@@ -20,26 +20,21 @@ def load() -> None:
     _CONFIG = json.loads(path.read_text(encoding="utf-8"))
 
 
-def get_virtuals_for_category(category: str) -> list[str]:
-    """Virtuals of the named category AND every descendant category, so
-    targeting a parent covers its whole subtree (dedup'd, parent-first)."""
+def _category_subtree(category: str) -> list:
+    """The named category and every descendant, parent-first; [] if unknown."""
     from services.device_category_service import get_category_by_name, list_categories
     cat = get_category_by_name(category)
     if not cat:
         return []
     cats = list_categories()
-    out: list[str] = []
-    seen_v: set[str] = set()
-    seen_c: set[str] = set()  # guards against parent_id cycles
+    out: list = []
+    seen: set[str] = set()  # guards against parent_id cycles
 
     def _walk(c) -> None:
-        if c.id in seen_c:
+        if c.id in seen:
             return
-        seen_c.add(c.id)
-        for v in c.virtuals:
-            if v not in seen_v:
-                seen_v.add(v)
-                out.append(v)
+        seen.add(c.id)
+        out.append(c)
         for child in cats:
             if child.parent_id == c.id:
                 _walk(child)
@@ -48,10 +43,31 @@ def get_virtuals_for_category(category: str) -> list[str]:
     return out
 
 
+def get_virtuals_for_category(category: str) -> list[str]:
+    """Virtuals of the named category AND every descendant category, so
+    targeting a parent covers its whole subtree (dedup'd, parent-first)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for cat in _category_subtree(category):
+        for v in cat.virtuals:
+            if v not in seen:
+                seen.add(v)
+                out.append(v)
+    return out
+
+
 def get_effects_for_category(category: str) -> list[str]:
-    from services.device_category_service import get_category_by_name
-    cat = get_category_by_name(category)
-    return cat.effects if cat else []
+    """Effects of the named category AND every descendant category — a
+    category target fires on its whole subtree of virtuals, so its effect
+    vocabulary is the subtree's union (dedup'd, parent-first)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for cat in _category_subtree(category):
+        for e in cat.effects:
+            if e not in seen:
+                seen.add(e)
+                out.append(e)
+    return out
 
 
 def get_all_virtual_ids() -> list[str]:
