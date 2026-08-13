@@ -105,7 +105,7 @@ export default function EventListPage() {
         <div key={ev.id} className="event-row" onClick={() => navigate(`/event/${ev.id}`)}>
           <span className="color-dot" style={{ background: ev.color }} />
           <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {ev.fixed && <span title="Built-in (read-only)" style={{ marginRight: 6 }}>🔒</span>}
+            {ev.fixed && <span title="Built-in — body read-only, settings editable" style={{ marginRight: 6 }}>🔒</span>}
             {ev.name}
           </span>
           <span className="chip" title={ev.event_type === 'composite' ? 'Composite (node tree)' : undefined}>

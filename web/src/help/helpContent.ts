@@ -351,7 +351,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Events page',
         keywords: 'chips fire test lock fixed ai exposed',
         body: [
-          'Search matches name or labels; type chips narrow by kind. Row icons: 🔒 built-in (read-only), 🌳 composite tree, ⚡ energy level, AI = exposed to AI trigger generation. ▶ test-fires the event immediately.',
+          'Search matches name or labels; type chips narrow by kind. Row icons: 🔒 built-in (body read-only — settings still editable), 🌳 composite tree, ⚡ energy level, AI = exposed to AI trigger generation. ▶ test-fires the event immediately.',
           'Create buttons: + Random / + Sequence / + Parallel / + Intensity start a new composite event with that root group; + Scene Group starts a group of Scene Updates (see "Scene Groups"). The Scenes chip includes Scene Groups.',
         ],
       },
@@ -373,6 +373,15 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Enter', 'In the add-action dialog, picks the action when the search narrows to one.'],
         ],
         kbd: true,
+      },
+      {
+        id: 'events-builtin',
+        title: 'Built-in (🔒) events',
+        keywords: 'built-in fixed lock read-only settings color name label energy offset reset charge lull drop update reset scene flare no action',
+        body: [
+          'The 🔒 events — Update Scene, Reset Scene, the three Flares, Charge / Lull / Drop, and No Action — have a body the app defines, so their tracks are read-only and they can\'t be deleted. Their "Event settings" panel is yours, though: name, timeline color, labels, energy level, AI-exposed and fire offset all save like any other event, and the timeline color is what the Builder paints their triggers with.',
+          'Saved settings are stored as an override layer (storage/fixed_event_overrides.json) rather than a copy of the event, so app updates to the built-in behavior still reach you. "↺ Reset settings" in the editor header drops the overrides and restores the stock values; a field you set back to its stock value stops being stored at all.',
+        ],
       },
       {
         id: 'events-actions',

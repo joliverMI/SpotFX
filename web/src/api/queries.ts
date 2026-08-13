@@ -154,6 +154,15 @@ export function useSaveEvent() {
   });
 }
 
+/** Built-in events only: drop the saved settings overrides. */
+export function useResetEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiPost(`/events/${id}/reset`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['events'] }),
+  });
+}
+
 export function useDeleteEvent() {
   const qc = useQueryClient();
   return useMutation({
