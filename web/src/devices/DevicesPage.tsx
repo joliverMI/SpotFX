@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import { useToast } from '../components/Toast';
 import { uuid } from '../lib/uid';
+import ShapeMapDialog from './ShapeMapDialog';
 
 interface DeviceCategory {
   id: string;
@@ -46,6 +47,7 @@ export default function DevicesPage() {
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState<DeviceCategory | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [shapeVirtual, setShapeVirtual] = useState<string | null>(null);
 
   // Load the selected category into the editable draft (fresh server copy).
   const selected = categories.find((c) => c.id === selectedId) ?? null;
@@ -206,7 +208,8 @@ export default function DevicesPage() {
           <div className="field">
             <label>Virtuals (LedFX virtual IDs)</label>
             <ChipList items={draft.virtuals}
-              onRemove={(v) => setDraft({ ...draft, virtuals: draft.virtuals.filter((x) => x !== v) })} />
+              onRemove={(v) => setDraft({ ...draft, virtuals: draft.virtuals.filter((x) => x !== v) })}
+              onShape={(v) => setShapeVirtual(v)} />
             <AddVirtualRow
               onAdd={(v) => {
                 if (v && !draft.virtuals.includes(v)) setDraft({ ...draft, virtuals: [...draft.virtuals, v] });
@@ -243,16 +246,25 @@ export default function DevicesPage() {
       {!draft && (
         <p className="empty-note" style={{ marginTop: 24 }}>Select a category to edit, or create a new one.</p>
       )}
+      {shapeVirtual && (
+        <ShapeMapDialog virtualId={shapeVirtual} onClose={() => setShapeVirtual(null)} />
+      )}
     </div>
   );
 }
 
-function ChipList({ items, onRemove }: { items: string[]; onRemove: (v: string) => void }) {
+function ChipList({ items, onRemove, onShape }: {
+  items: string[]; onRemove: (v: string) => void; onShape?: (v: string) => void;
+}) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
       {items.map((v) => (
         <span key={v} className="chip" style={{ gap: 4 }}>
           {v}
+          {onShape && (
+            <span style={{ cursor: 'pointer', marginLeft: 4 }}
+              onClick={() => onShape(v)} title="Shape map (shaped-matrix geometry)">⬡</span>
+          )}
           <span style={{ cursor: 'pointer', fontWeight: 'bold', marginLeft: 4 }}
             onClick={() => onRemove(v)} title="Remove">×</span>
         </span>

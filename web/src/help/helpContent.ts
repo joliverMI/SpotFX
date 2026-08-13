@@ -911,6 +911,35 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Use "Import from LedFX" to list live virtuals with pixel count, current effect, and any existing category assignment; the filter box matches the virtual id.',
         ],
       },
+      {
+        id: 'shape-maps',
+        title: 'Shape maps (shaped matrices)',
+        keywords: 'geometry silhouette crystal hex resample kernel parity serpentine bootstrap',
+        body: [
+          'A shape map tells LedFX which cells of a matrix virtual\'s render grid are real LEDs (and in what strip order), so effects render across the full silhouette and get kernel-resampled onto just the physical LEDs. Without one, effects are point-sampled. Click the ⬡ on a virtual chip in the category editor to open the map for that virtual.',
+          'The map is plain text in the `shape v1` format. Validate runs a dry-run compile on LedFX — errors come back with line numbers; on success the canvas preview shows real LEDs as dots, each LED\'s resample catchment as a tinted patch, and orphan cells dark. Apply pushes the map: LedFX regenerates the virtual\'s segments from it and turns resampling on. The line above the editor shows the current state (LED count, grid, whether the map is in sync with the live segments).',
+        ],
+        table: [
+          ['shape v1', 'Required header line.'],
+          ['grid 72 x 37', 'Render grid size, width × height.'],
+          ['device crystal', 'Physical output device id.'],
+          ['gap gap-crystal-mapper', 'Dummy device id used for dead cells.'],
+          ['parity odd', 'Live iff (col+row)%2==1 (even: ==0; none: every cell).'],
+          ['row 0: 17-51 holes 21,23', 'Row 0: parity-matching cols in [17,51], minus the holes.'],
+          ['rows 5-7: 12-58', 'Same extent applied to a row range.'],
+          ['cell +10,3', 'Escape hatch: force one cell live (+) or dead (-).'],
+          ['order: … explicit 1,16 0,17', 'Strip-order block: exact row,col walk for irregular sections.'],
+          ['serpentine rows 2-34 first desc', 'Order complete rows, alternating direction. No order block = serpentine over all rows, row 0 ascending.'],
+        ],
+      },
+      {
+        id: 'shape-maps-bootstrap',
+        title: 'Bootstrapping a map from live segments',
+        keywords: 'decode round-trip verify apply crystal-mapper',
+        body: [
+          'scripts/bootstrap_shape_map.py decodes an already-hand-mapped virtual\'s live gap/LED segments back into shape v1 text — pole holes and interleaved strip order included — so you don\'t re-author an existing device. --verify recompiles the text and asserts the regenerated segments equal the live ones exactly, then dry-runs it through LedFX; --apply pushes the map (idempotent when in sync).',
+        ],
+      },
     ],
   },
 

@@ -1130,6 +1130,28 @@ async def get_virtual(virtual_id: str) -> dict:
     return resp.json() if resp is not None else {}
 
 
+async def get_virtual_shape(virtual_id: str) -> dict:
+    """Fetch a virtual's shape map (text + compiled summary). {} on failure."""
+    resp = await _request(
+        "GET", f"/api/virtuals/{virtual_id}/shape",
+        label=f"shape_get:{virtual_id}",
+    )
+    return resp.json() if resp is not None else {}
+
+
+async def put_virtual_shape(
+    virtual_id: str, shape_map: str, dry_run: bool = False
+) -> dict:
+    """Validate (dry_run) or apply a shape map on a virtual. Returns LedFX's
+    response verbatim ({status, errors|summary|coverage...}); {} on failure."""
+    resp = await _request(
+        "PUT", f"/api/virtuals/{virtual_id}/shape",
+        json={"shape_map": shape_map, "dry_run": dry_run},
+        label=f"shape_put:{virtual_id}",
+    )
+    return resp.json() if resp is not None else {}
+
+
 async def get_all_virtuals(force: bool = False) -> dict:
     """Fetch all LedFX virtuals. Returns {} on failure.
 
