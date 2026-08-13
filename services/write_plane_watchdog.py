@@ -84,6 +84,13 @@ def evaluate(health: dict, prev_counters: dict | None) -> tuple[bool, list[str]]
     First tick (prev_counters None) skips the counter deltas — no baseline yet.
     last_completion_age_s of None means no request has completed since boot;
     startup grace, not a wedge.
+
+    Light ownership (SPECTRA S3): when the snapshot says spot-effects does not
+    own the lights, the write plane is deliberately surrendered — every call
+    is shed at the ownership gate, so no completions and no deadlines is the
+    CORRECT state, excused like a breaker-open outage. The two hard signals
+    stay hard: they are internal to this process regardless of who owns the
+    room. The room's health signal is SPECTRA's liveness endpoint then.
     """
     counters = health.get("counters") or {}
     hard: list[str] = []       # write-plane-internal — count regardless of breaker
@@ -102,7 +109,9 @@ def evaluate(health: dict, prev_counters: dict | None) -> tuple[bool, list[str]]
     age = health.get("last_completion_age_s")
     if age is not None and age > COMPLETION_AGE_ALARM_S:
         excusable.append(f"last_completion_age {age:.0f}s")
-    reasons = hard + ([] if health.get("breaker_open") else excusable)
+    surrendered = health.get("light_ownership", "spot-effects") != "spot-effects"
+    reasons = hard + (
+        [] if (health.get("breaker_open") or surrendered) else excusable)
     return (not reasons, reasons)
 
 

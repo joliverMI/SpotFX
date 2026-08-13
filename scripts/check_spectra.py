@@ -49,6 +49,9 @@ device_model.CATEGORIES_FILE.write_text(json.dumps({
            "virtuals": ["v-s1"], "effects": ["power"], "role": "wash"},
 }))
 
+from fx import light_ownership
+light_ownership.OWNERSHIP_FILE = td / "ownership.json"
+
 from spectra import config as scfg
 scfg.SPECTRA_STORAGE = td / "spectra"
 scfg.SCENES_FILE = scfg.SPECTRA_STORAGE / "scenes.json"
@@ -640,10 +643,12 @@ check(seq_singleton.status()["bridge_connected"] is False,
 
 # ── engine API: status + dark event injection + baseline adoption ────────────
 est = client.get("/api/engine/status").json()
-check(est["increment"] == "S2" and est["dark"] is True
+check(est["increment"] == "S3" and est["dark"] is True
       and est["executor"]["mode"] == "recording"
+      and est["light_ownership"] == "spot-effects"
       and "conductor" in est and "bridge" in est,
-      "GET /api/engine/status serves the whole engine surface, dark")
+      "GET /api/engine/status serves the whole engine surface, dark, "
+      "ownership at the shipped default")
 check(client.post("/api/engine/event",
                   json={"class": "sparkle"}).status_code == 422,
       "unknown response class → 422")
@@ -655,8 +660,10 @@ ev = client.post("/api/engine/event",
                  json={"class": "flare", "intensity": 0.4}).json()
 check(ev["result"] in ("applied", "no_band", "no_class"),
       "POST /api/engine/event injects a dark response event")
-check(client.get("/api/status").json()["increment"] == "S2",
-      "app status reports increment S2")
+app_status = client.get("/api/status").json()
+check(app_status["increment"] == "S3"
+      and app_status["light_ownership"] == "spot-effects",
+      "app status reports increment S3, ownership at the shipped default")
 
 # ── Mid Group: the seven scenes behave per their rebuild-table intent ────────
 live_scenes_file = Path(__file__).parent.parent / "storage" / "spectra" / "scenes.json"

@@ -44,9 +44,16 @@ from fx.virtuals import Virtuals
 logger = logging.getLogger(__name__)
 
 
+# Device types whose activation touches no network or hardware. Everything
+# else (hue/ddp/wled/e131) streams to the room and falls under the light
+# ownership rule: never constructed without a live ActivationGrant.
+SAFE_DEVICE_TYPES = frozenset({"dummy"})
+
+
 class FxHost:
-    def __init__(self, config_dir: str):
+    def __init__(self, config_dir: str, live_grant=None):
         load_logger()  # fx/config.py's own init hook: binds its module logger
+        self._live_grant = live_grant
         self.config_dir = config_dir
         self.config = load_config(config_dir)
         self.loop = asyncio.get_running_loop()
@@ -73,7 +80,22 @@ class FxHost:
         self._started = False
 
     async def start(self) -> None:
-        """Instantiate devices and virtuals from the fx config file."""
+        """Instantiate devices and virtuals from the fx config file.
+
+        Light ownership gate (SPECTRA S3), enforced in the construction path:
+        a config with any non-dummy device is the live room, and starting it
+        requires an ActivationGrant that is valid against the ownership
+        record RIGHT NOW (fx/light_ownership.py). Headless/dummy configs are
+        untouched — no grant, no record read."""
+        live_types = sorted(
+            {d.get("type") for d in self.config["devices"]} - SAFE_DEVICE_TYPES
+        )
+        if live_types:
+            from fx import light_ownership
+            light_ownership.require_grant(
+                self._live_grant, light_ownership.SPECTRA,
+                detail=f"device types {live_types}",
+            )
         self.devices.create_from_config(self.config["devices"])
         await self.devices.async_initialize_devices()
         self.virtuals.create_from_config(self.config["virtuals"])
