@@ -831,7 +831,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Device entries',
         keywords: 'category virtual effect params override brightness',
         body: [
-          'Each entry targets a category (including its sub-categories) or a single virtual, and picks an effect plus any params to pin. An entry targeting a virtual overrides a category entry covering the same virtual. Colors either come from the active Color Set at fire time ("Colors from active Color Set") or are fixed on the scene. Unset params/brightness leave the device\'s current values alone.',
+          'Each entry targets a category (including its sub-categories) or a single virtual, and picks an effect plus number/toggle params to pin (other param types have no pin editor yet). An entry targeting a virtual overrides a category entry covering the same virtual. Colors either come from the active Color Set at fire time ("Colors from active Color Set") or are fixed on the scene. Unset params/brightness leave the device\'s current values alone.',
         ],
       },
       {
@@ -847,7 +847,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Color Set filter',
         keywords: 'accept opt out narrow eligible wheel position rainbow',
         body: [
-          'Filtering works both ways: a Color Set can opt out of ALL scenes (the "opt out" button — global, affects every scene), and a scene can narrow which of the remaining sets it accepts by unticking "Accept every Color Set" and checking specific sets. A set\'s wheel dot shows its computed color-wheel position (the saturation-weighted circular mean of its gradient hues); sets whose hues span more than 180° are 🌈 rainbow and have no single position.',
+          'Filtering works both ways: a Color Set can opt out of ALL scenes (the "opt out" button — global, affects every scene), and a scene can narrow which of the remaining sets it accepts by unticking "Accept every Color Set" and checking specific sets. A set\'s wheel dot shows its computed color-wheel position (the saturation- and value-weighted circular mean of its gradient hues); sets whose hues span more than 180° are 🌈 rainbow and have no single position.',
         ],
       },
       {
