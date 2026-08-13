@@ -84,10 +84,17 @@ superseded; never point `fx/` at live hardware before the S3 handover.
 The engine (`spectra/services/engine.py` wires it; the HOST lifespan in
 main.py owns start/stop — Starlette never runs a mounted sub-app's
 lifespan): drift conductor (`drift_conductor.py` — creep/follow legs +
-the room colour journey, ~20 s legs), response engine
+the DESTINATION-DRIVEN room colour journey, ~20 s legs: the room always
+heads for a destination set picked by the shipped selector, the
+destination fixes its own pace from distance, arrival reselects — the
+binding model is `spectra/services/color_journey.py`'s docstring; a room
+is never set-less: bootstrap + `POST /spectra/api/room-color/apply`, and
+fires with no explicit set wear the room's active set), response engine
 (`scene_response.py` — the four classes execute bands: patch jumps, gain
 envelopes, dice re-rolls, flare colour jump via the shipped selector;
-surges CARRY — baselines move permanently), read-only bridge
+surges CARRY — baselines move permanently; charge/lull/drop ALSO drive
+the vendored phase machinery band-or-no-band — per-family grammar in
+`docs/SPECTRA_RESPONSES.md`), read-only bridge
 (`bridge.py` — WS client on spot-effects' /ws + `analysis_reader.py`;
 classification: charge/lull/drop stay themselves, scene-family event
 types are observations, everything else is a flare). Every glide/jump
@@ -95,9 +102,17 @@ goes through the ONE executor seam (`fx_executor.py`): production =
 RecordingExecutor (DARK — records and models, never writes; the engine
 must never call fx_seam), headless tests = FacadeExecutor driving the
 fx/ tween engine. S3 goes live by swapping the executor — nothing else
-changes. Specs: `scripts/check_drift.py` (conductor), check_spectra.py
-(responses/bridge/Mid Group), `tests/test_spectra_engine.py`
-(frame-level proof on the dummy device).
+changes. Specs: `scripts/check_drift.py` (conductor + journey),
+check_spectra.py (responses/bridge/Mid Group),
+`tests/test_spectra_engine.py` (frame-level proof on the dummy device).
+
+SPECTRA frontend notes: `/spectra/timeline` is the SpotFX Profile
+Builder ported whole (`spectra/web/src/timeline/`, reads/writes the
+SpotFX `/api` + `/ws` same-origin via `api/spotfx.ts` + `api/ws.ts`);
+phone portrait (≤720px, `lib/useIsPhone.ts`) is a first-class layout —
+Scenes goes single-pane with a drawer picker. The Fire button asks no
+confirm BY OWNER ORDER (deliberate asymmetry: the global colour-set
+opt-out confirm stays) — don't "tidy" either side.
 
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
@@ -109,8 +124,11 @@ when not owner and the LedFX-restart watchdog goes dormant (never resurrect a
 quiesced LedFX — merge-scout §4d trap); `spectra/services/fx_seam` routes
 HTTP↔facade by owner and refuses mid-handover; `fx/host.py` refuses non-dummy
 devices without a step-gated ActivationGrant. Two-step handover
-`spectra/services/handover.py` (quiesce → verify → activate → commit; every
-failure lands single-owner), live stack `spectra/services/live_host.py`
+`spectra/services/handover.py` (READINESS GATE first — the order-8 fix: a
+missing/empty/unusable fx-live config, or a missing LedFX unit on the
+reverse path, REFUSES with HTTP 412 before the record moves or anything
+quiesces, naming the seeder; then quiesce → verify → activate → commit;
+every failure lands single-owner), live stack `spectra/services/live_host.py`
 (device layer + audio hub + frame-freshness tap). THE LIVENESS ENDPOINT
 CONTRACT: `GET /spectra/api/liveness` (`spectra/api/ownership.py`) — never
 delete or repoint without the Admiral's word. The handover API is inert until
