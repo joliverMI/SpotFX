@@ -18,6 +18,17 @@ export interface GroupMember {
   weight: number;
 }
 
+/** One Dark/Light "mode lane" of a Group card. Active while the resolved
+ * display mode matches; "default" always uses the base group as authored.
+ * entries = extra overrides layered ON TOP of the group's own (variant wins);
+ * members non-empty = replaces the member pool (own cursor). */
+export interface ModeVariant {
+  entries: ColorSetEntry[];
+  members: GroupMember[];
+}
+
+export const emptyVariant = (): ModeVariant => ({ entries: [], members: [] });
+
 export interface ColorSetCard {
   id: string;
   name: string;
@@ -38,6 +49,9 @@ export interface ColorSetCard {
    * the member nearest the room's current palette hue, not this group's own
    * private cursor. */
   palette_sync: boolean;
+  /** kind=group: optional Dark/Light mode lanes (see ModeVariant). */
+  dark_variant?: ModeVariant | null;
+  light_variant?: ModeVariant | null;
   [k: string]: unknown;
 }
 

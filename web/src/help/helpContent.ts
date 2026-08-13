@@ -400,6 +400,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['brightness', 'Set or nudge the per-device Brightness / BG Brightness multipliers that scale the Color Set values. See "Brightness action".'],
           ['sequence / parallel / random group', 'Containers — run children in order / at once / pick one by weight (random options can be energy-gated and tilted).'],
           ['intensity_chooser', 'Container — the firing trigger\'s intensity picks exactly one threshold lane; that lane\'s actions fire together. See "Intensity Chooser".'],
+          ['light_mode_chooser', 'Container — the room\'s resolved Dark/Light mode picks exactly one 🌙/☀️ lane, re-checked at fire time. See "Light Mode Chooser".'],
         ],
         kbd: false,
       },
@@ -461,6 +462,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Versus Random energy gates: a Random group rolls weighted dice among energy-eligible options; a Chooser is a deterministic switch — same intensity, same lane, every time.',
           'The Ramp row (parent/override) forces one ramp on everything the chosen lane fires — through event refs, scene groups and scene lanes. Bind it ⚡ to trigger intensity (0 → slow, 1 → fast) or 🎲 to randomize per fire; see "Ramp overrides".',
           'Test at ⚡: the row under the threshold strip previews the whole chooser at any intensity you dial in — the engine fires the lane that value would pick (raw 0–1, no song scaling; the → label shows which lane before you fire). Each lane also keeps its own ▶ to fire it directly.',
+        ],
+      },
+      {
+        id: 'light-mode-chooser',
+        title: 'Light Mode Chooser',
+        keywords: 'dark light mode chooser lane 🌗 moon sun default branch scene group pick display',
+        body: [
+          'A Light Mode Chooser fires exactly ONE of its lanes, chosen by the room\'s resolved Dark/Light mode — the Now Playing 🌗 toggle, then the firing trigger, the active Scene Group, and the current Scene (see "Dark / Light mode" under Settings). Each lane is tagged 🌙 Dark or ☀️ Light; when nothing in the cascade forces a mode, the lane picked as the default (the "When mode is Default" select) runs.',
+          'Lanes hold a full action list plus per-lane target scope and filter labels, exactly like Intensity Chooser lanes — so an event can, say, fire one Scene Group by day and a dimmer one after dark. Add one from any "+ Add action" dialog, or create a whole event around one with "+ Light Mode" on the Events page.',
+          'The lane is re-checked at fire time (not locked at plan time), so flipping the TopBar 🌗 applies from the very next trigger. Note the color levels below Set Color (Color Group / Color Set cards) can\'t influence the pick — the chooser resolves before any colors are chosen.',
+          'Each lane\'s ▶ previews that lane directly, ignoring the current mode.',
+          'The Ramp row (parent/override) works exactly like the Intensity Chooser\'s — see "Ramp overrides".',
         ],
       },
       {
@@ -817,6 +830,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'colorsets-mode-lanes',
+        title: 'Mode Lanes (groups)',
+        keywords: 'dark light mode lane variant 🌗 moon sun members overrides pool swap dim',
+        body: [
+          'A Group can carry a 🌙 Dark and/or ☀️ Light lane — what the group does while the room\'s resolved mode matches (see "Dark / Light mode" under Settings). Default mode always uses the base group exactly as authored.',
+          'Each lane has two optional parts. Members: when non-empty, they REPLACE the base member pool for the pick (with their own cycle position — the base cursor doesn\'t move); empty keeps the base members. Overrides: layered on top of the group\'s own overrides — a lane override only needs the fields that should differ (e.g. a lower BG brightness for dark evenings).',
+          'The mode is resolved from everything above the member set — TopBar, trigger, scene group, scene, the Set Color step, and this group card\'s own Mode — so the picked member set\'s card mode can\'t change which pool it was picked from.',
+        ],
+      },
+      {
         id: 'colorsets-palette-sync',
         title: 'Palette Sync (groups)',
         keywords: 'sync synced hue shared cursor position family disjointed devices categories together',
@@ -1087,7 +1110,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'One room-wide mode — Dark, Light, or Default — decided by a cascade where the FIRST level that isn\'t "Default" wins: 1) the 🌗 TopBar toggle, 2) the firing trigger, 3) the active Scene Group, 4) the current Scene, 5) the Set Color step, 6) the Color Group card, 7) the Color Set card. "Default" at a level just defers to the next one down; if every level defers, backgrounds behave exactly as authored.',
           'Dark forces every background black on affected devices. This is hard-locked inside LedFX itself (a per-virtual "dark_lock"), so no write path — ramps, scenes, morphs — can relight a background while dark. Light keeps authored backgrounds and fills in the default light background (color + brightness set here in Settings) on devices whose Color Set entry doesn\'t define one.',
           'Shielded devices are exempt from both: they always keep their authored backgrounds. Shield whole categories with the checkboxes (default: Singles — single-color lamps should usually stay lit) or individual virtual ids in the text field.',
-          'Scene Groups can additionally designate a 🌙 Dark and ☀️ Light variant Color Group — see "Scene Groups" on the Events page help.',
+          'Scene Groups can additionally designate a 🌙 Dark and ☀️ Light variant Color Group — see "Scene Groups" on the Events page help. To BRANCH on the mode, use a Light Mode Chooser action (Events help) — it fires a different lane per mode; Color Groups can also carry per-mode Mode Lanes (Color Sets help).',
         ],
       },
       {

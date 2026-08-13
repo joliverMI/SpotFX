@@ -567,6 +567,9 @@ class IntensityLane(BaseModel):
     name:      str = ""
     labels:    list[str] = Field(default_factory=list)
     threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Light Mode Chooser lanes only (chooser source == "display_mode"): the
+    # resolved Dark/Light mode that selects this lane. None on intensity lanes.
+    mode:      Optional[Literal["dark", "light"]] = None
     # None = inherit the group's scope; set = override for this lane.
     scope:     Optional[MorphScope] = None
     actions:   list[Action] = Field(default_factory=list)
@@ -581,8 +584,13 @@ class IntensityChooserAction(BaseModel):
     threshold, when it is the only lane, or when the fire carries no intensity
     context (manual test fires).
 
-    `source` is pluggable for future signals; only the trigger's intensity is
-    implemented today."""
+    source == "display_mode" is the "Light Mode Chooser": the resolved
+    Dark/Light display mode (global TopBar → trigger → active scene group →
+    current scene — services/display_mode) selects the first lane whose `mode`
+    matches. A resolution of "default" uses `default_mode`; no matching lane →
+    lanes[0]. Unlike intensity picks, the lane is re-resolved at FIRE time
+    (plan-time picks are preview-only) so a TopBar flip between plan and fire
+    never runs a stale lane."""
     type:   Literal["intensity_chooser"] = "intensity_chooser"
     id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
     labels: list[str] = Field(default_factory=list)
@@ -594,7 +602,10 @@ class IntensityChooserAction(BaseModel):
     # a ValueBinding (⚡ trigger intensity / 🎲 random), resolved per fire.
     # A deeper override (scene group / scene event ramp_ms) wins over this one.
     ramp_ms: int | ValueBinding | None = None
-    source: Literal["trigger_intensity"] = "trigger_intensity"
+    source: Literal["trigger_intensity", "display_mode"] = "trigger_intensity"
+    # source == "display_mode" only: which lane mode runs when the cascade
+    # resolves to "default" (nothing forces dark or light).
+    default_mode: Literal["dark", "light"] = "light"
     # Default target for every lane (lanes inherit unless they override).
     scope:  Optional[MorphScope] = None
     lanes:  list[IntensityLane] = Field(default_factory=list)

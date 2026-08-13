@@ -96,6 +96,8 @@ export default function EventListPage() {
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=sequence_group')}>+ Sequence</button>
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=parallel_group')}>+ Parallel</button>
             <button className="primary" onClick={() => navigate('/event/new?type=composite&root=intensity_chooser')}>+ Intensity</button>
+            <button className="primary" title="New event whose body is a Light Mode Chooser — the room's Dark/Light mode picks a lane"
+              onClick={() => navigate('/event/new?type=composite&root=light_mode_chooser')}>+ Light Mode</button>
             <button className="primary" onClick={() => navigate('/event/new?type=scene_group')}>+ Scene Group</button>
           </span>
         </div>

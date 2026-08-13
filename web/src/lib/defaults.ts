@@ -83,7 +83,20 @@ export const newParallelChild = (): ParallelChild => ({
 });
 
 export const newIntensityLane = (threshold = 0.5): IntensityLane => ({
-  id: uuid(), name: '', labels: [], threshold, scope: null, actions: [],
+  id: uuid(), name: '', labels: [], threshold, mode: null, scope: null, actions: [],
+});
+
+/** "Light Mode Chooser": the intensity_chooser machinery with source
+ * 'display_mode' — the resolved Dark/Light mode picks the lane. Starts with
+ * one lane per mode; `default_mode` names the lane used when the cascade
+ * resolves to "default". */
+export const newLightModeChooser = (): Action => ({
+  labels: [], weight: 1.0, type: 'intensity_chooser', id: uuid(),
+  source: 'display_mode', default_mode: 'light', scope: null, ramp_ms: null,
+  lanes: [
+    { ...newIntensityLane(0), mode: 'light' },
+    { ...newIntensityLane(0), mode: 'dark' },
+  ],
 });
 
 export const newSequenceStep = (): SequenceStep => ({
