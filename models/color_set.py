@@ -74,3 +74,8 @@ class ColorSetCard(BaseModel):
     # of its own private cursor), then publishes the pick's hue back — so
     # switching between synced groups keeps the room on one color family.
     palette_sync:   bool = False
+
+    # SceneV2 global opt-out (design answer 3): True removes this set from
+    # every SceneV2's pool, overriding any scene's own accept list. The legacy
+    # scene/set-color path ignores this flag.
+    scene_v2_opt_out: bool = False

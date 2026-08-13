@@ -830,6 +830,49 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
 
+  /* ── Scenes (SceneV2) ────────────────────────────────────────── */
+  {
+    id: 'scenes-v2',
+    title: 'Scenes',
+    keywords: 'spectra scene v2 device configuration flare choreography wheel rainbow',
+    intro:
+      'The Scenes page (SPECTRA SceneV2) authors full device-aware scenes: each scene states outright what every targeted device shows — effect, params, colors, brightness — per category or per virtual, plus flare response bands and phase choreography. One scene may combine different effects across devices. This is separate from the legacy scene events on the Events page; both exist side by side during the migration.',
+    entries: [
+      {
+        id: 'scenes-v2-devices',
+        title: 'Device entries',
+        keywords: 'category virtual effect params override brightness',
+        body: [
+          'Each entry targets a category (including its sub-categories) or a single virtual, and picks an effect plus number/toggle params to pin (other param types have no pin editor yet). An entry targeting a virtual overrides a category entry covering the same virtual. Colors either come from the active Color Set at fire time ("Colors from active Color Set") or are fixed on the scene. Unset params/brightness leave the device\'s current values alone.',
+        ],
+      },
+      {
+        id: 'scenes-v2-flare',
+        title: 'Flare response & choreography',
+        keywords: 'intensity band curve gain anchor transition payoff',
+        body: [
+          'Flare bands shape how the scene answers flares by trigger intensity: each band covers an intensity range (bands may not overlap) with a curve and gain. Phase choreography sets the transition length/mode and the anchor fraction — where in the crossfade the visual payoff lands, so the engine can fire early and put the payoff on the beat. Both are stored now and take effect when the SceneV2 engine integration lands.',
+        ],
+      },
+      {
+        id: 'scenes-v2-set-filter',
+        title: 'Color Set filter',
+        keywords: 'accept opt out narrow eligible wheel position rainbow',
+        body: [
+          'Filtering works both ways: a Color Set can opt out of ALL scenes (the "opt out" button — global, affects every scene), and a scene can narrow which of the remaining sets it accepts by unticking "Accept every Color Set" and checking specific sets. A set\'s wheel dot shows its computed color-wheel position (the saturation- and value-weighted circular mean of its gradient hues); sets whose hues span more than 180° are 🌈 rainbow and have no single position.',
+        ],
+      },
+      {
+        id: 'scenes-v2-test-fire',
+        title: 'Test Fire (dry run)',
+        keywords: 'compile preview writes simulate dry',
+        body: [
+          '▶ Test Fire saves the scene, compiles it to the per-virtual LedFX writes it would send, and shows them below the editor — nothing is sent to the devices. Use it to check which virtuals a scene resolves to and what config each would receive.',
+        ],
+      },
+    ],
+  },
+
   /* ── Devices ─────────────────────────────────────────────────── */
   {
     id: 'devices',

@@ -14,6 +14,7 @@ export default function NavBar() {
       <Link to="/builder" className={cls((p) => p === '/builder')}>Profile Builder</Link>
       <Link to="/" className={cls((p) => p === '/' || p.startsWith('/event'))}>Events</Link>
       <Link to="/color-sets" className={cls((p) => p === '/color-sets')}>Color Sets</Link>
+      <Link to="/scenes" className={cls((p) => p === '/scenes')}>Scenes</Link>
       <Link to="/devices" className={cls((p) => p === '/devices')}>Devices</Link>
       {!!settings?.show_ai_triggers && (
         <Link to="/ai-triggers" className={cls((p) => p === '/ai-triggers')}>AI Triggers</Link>
