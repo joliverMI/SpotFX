@@ -11,7 +11,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
-SPECTRA_STORAGE = REPO_ROOT / "storage" / "spectra"
+# SPECTRA_STORAGE_DIR: executable specs and rehearsals repoint the standalone
+# process (python -m spectra) at a temp dir. Production leaves it unset —
+# both worlds must see the same storage/spectra (the ownership record in
+# fx/light_ownership.py has its own path constant and is NOT moved by this).
+SPECTRA_STORAGE = Path(os.getenv("SPECTRA_STORAGE_DIR")
+                       or REPO_ROOT / "storage" / "spectra")
 SCENES_FILE = SPECTRA_STORAGE / "scenes.json"
 SEQUENCER_FILE = SPECTRA_STORAGE / "sequencer.json"
 DRIFT_PROFILES_FILE = SPECTRA_STORAGE / "drift_profiles.json"

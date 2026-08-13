@@ -1,6 +1,6 @@
-"""python -m spectra — the standalone entry the S3 process split will use.
-Until then production serves SPECTRA mounted at /spectra inside the
-spot-effects process (main.py)."""
+"""python -m spectra — SPECTRA's own process (the S3 process split, live).
+Production runs this under spectra.service; the spot-effects app reverse-
+proxies /spectra/* here so the port-8000 addresses survive verbatim."""
 from spectra.app import _standalone
 
 _standalone()

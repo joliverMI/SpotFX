@@ -1,10 +1,19 @@
 # SpotFX user unit — reference copy with the liveness-gated systemd watchdog
 # (detection Option B; see services/write_plane_watchdog.py).
 #
+# Deploy is a PAIR with deploy/spectra.service since the S3 process split,
+# applied in ONE pass (one room interruption) — see that unit's header and
+# docs/SPECTRA_PROCESS_SPLIT.md for the combined procedure. Watchdog
+# reconciliation: THIS unit's predicate stays gate-health (the write plane
+# this process still owns when spot-effects owns the lights; surrendered
+# ownership counts as alive); spectra.service carries its own watchdog gated
+# on frame-flush freshness, because the render plane lives there now.
+#
 # Deploy (owner action — the repo never edits the live unit):
-#   cp deploy/spotfx.service ~/.config/systemd/user/spotfx.service
+#   cp deploy/spotfx.service deploy/spectra.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
-#   systemctl --user restart spotfx
+#   systemctl --user enable spectra
+#   systemctl --user restart spotfx spectra
 #
 # The three watchdog lines are Type=notify, WatchdogSec, and TimeoutStartSec.
 # Without them the backend runs exactly as before: $NOTIFY_SOCKET is unset and

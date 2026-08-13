@@ -57,11 +57,21 @@ colours roll only when the sequencer fires a scene, scene + set land in one
 terminal rung KEEPS the current colours (never forced churn). Rainbow sets:
 neutral ×1.0 wheel factor, never move the room's wheel position.
 
-## SPECTRA app (S1+S2 — separate app, shared process until S3)
+## SPECTRA app (her OWN process since the S3 split)
 
-`spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`, own
-FastAPI sub-app mounted in main.py; `python -m spectra` is the future S3
-standalone entry). Import discipline is load-bearing: nothing under
+`spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`), running
+as its OWN process: `python -m spectra` under `spectra.service`, port
+`SPECTRA_PORT` (8010). The spot-effects app imports NOTHING under spectra/
+(spec-enforced) and serves `/spectra/*` through a transparent reverse
+proxy (`services/spectra_proxy.py`, target `settings.spectra_port`) so
+every port-8000 address survives. Why: one shared interpreter let
+spot-effects' 90 ms–5 s GIL bursts freeze the render threads (2026-08-13
+frame-rate diagnosis); the standalone entry also applies
+`sys.setswitchinterval(0.001)` (Stage-1 mitigation). Split spec:
+`.venv/bin/python scripts/check_process_split.py` +
+`tests/test_process_split.py` (frame-rate proof under a foreign GIL
+burst). Deploy pair + one-pass apply: `docs/SPECTRA_PROCESS_SPLIT.md`.
+Import discipline is load-bearing: nothing under
 `spectra/` imports spot-effects runtime internals — only `fx/` (shared
 library, incl. `fx/device_model.py`) and stdlib/third-party; music/state
 inputs arrive via the S2 read-only bridge (below), which degrades to 0.5
@@ -79,11 +89,12 @@ spot-effects storage READ-ONLY). Executable spec:
 spot-effects help). The spot-effects Scenes page stays as-is until
 superseded; never point `fx/` at live hardware before the S3 handover.
 
-## SPECTRA S2 evolution engine (runs DARK until S3)
+## SPECTRA S2 evolution engine
 
-The engine (`spectra/services/engine.py` wires it; the HOST lifespan in
-main.py owns start/stop — Starlette never runs a mounted sub-app's
-lifespan): drift conductor (`drift_conductor.py` — creep/follow legs +
+The engine (`spectra/services/engine.py` wires it; start/stop is owned by
+`spectra/app.py::_standalone_lifespan` — the SPECTRA process's own
+lifespan, which also runs the frame watchdog and the startup resume):
+drift conductor (`drift_conductor.py` — creep/follow legs +
 the DESTINATION-DRIVEN room colour journey, ~20 s legs: the room always
 heads for a destination set picked by the shipped selector, the
 destination fixes its own pace from distance, arrival reselects — the
@@ -158,9 +169,13 @@ reaches live hardware only through the handover (see the S3 section above).
 
 ## Run / deploy
 
-SpotFX runs as the **user systemd unit `spotfx.service`** (`.venv/bin/python
-main.py`, port 8000). Backend changes: `systemctl --user restart spotfx`.
-React UI (`/app/`) is served from `web/dist` — rebuild with
+Two user systemd units since the S3 process split: **`spotfx.service`**
+(`.venv/bin/python main.py`, port 8000) and **`spectra.service`**
+(`.venv/bin/python -m spectra`, port 8010; reference units + one-pass
+apply in `deploy/` and `docs/SPECTRA_PROCESS_SPLIT.md`). Backend changes:
+restart the unit that owns the changed code (`systemctl --user restart
+spotfx` / `spectra`; spectra restarts auto-resume the room if she owns
+it). React UI (`/app/`) is served from `web/dist` — rebuild with
 `cd web && npx vite build` (frontend-only changes need no restart; refresh
 the browser).
 

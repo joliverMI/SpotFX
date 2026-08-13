@@ -1,13 +1,19 @@
-"""The SPECTRA app — its own FastAPI application, mounted by spot-effects'
-main.py at /spectra for the shared-process S1/S2 stages and ready to run
-standalone the day S3 splits the processes (python -m spectra).
+"""The SPECTRA app — its own FastAPI application, its own PROCESS
+(python -m spectra, spectra.service). The S3 process split is DONE: the
+spot-effects process no longer mounts or starts anything under spectra/ —
+it serves /spectra/* through a thin reverse proxy (services/spectra_proxy)
+so the owner's port-8000 addresses survive verbatim. The split exists
+because one shared interpreter let spot-effects' 90 ms–5 s GIL bursts
+freeze every render thread (the 2026-08-13 frame-rate diagnosis, verdict +
+§c); process isolation is what made the old LedFX path smooth.
 
-S2 runtime: the evolution engine (services/engine — bridge + drift
-conductor + response engine, DARK against real lights). Starlette never
-runs a mounted sub-app's lifespan, so the HOST owns start/stop: main.py's
-lifespan calls spectra.services.engine.start()/stop() in the shared
-process, and _standalone() wires the identical pair — the S3 split changes
-which host calls them, nothing else.
+Runtime: the evolution engine (services/engine — bridge + drift conductor
++ response engine). The bridge reaches spot-effects over real sockets
+(ws://127.0.0.1:$SPOTFX_PORT/ws) — the same URLs it used in the shared
+process, which is why the split needed no bridge change. _standalone()
+owns the engine start/stop pair (Starlette never runs a mounted sub-app's
+lifespan, so the host has always owned it — the split changed which host,
+nothing else).
 
 S3: light ownership + the SPECTRA LIVENESS ENDPOINT CONTRACT live in
 api/ownership.py — GET /spectra/api/liveness serves per-virtual frame-flush
@@ -17,6 +23,7 @@ contract is the checker's.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -63,6 +70,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/status")
     async def status():
+        import sys as _sys
+
         from fx import light_ownership
         from spectra.services import (color_journey, engine, scene_store,
                                       sequencer_store)
@@ -71,6 +80,10 @@ def create_app() -> FastAPI:
         return {
             "app": "SPECTRA",
             "increment": "S3",
+            # 0.001 in the standalone process (_standalone sets it — the
+            # Stage-1 GIL mitigation); interpreter default elsewhere. The
+            # process-split spec asserts this on the real child process.
+            "switch_interval_s": _sys.getswitchinterval(),
             "scenes": len(scene_store.list_all()),
             "sequencer_enabled": seq.enabled,
             "bridge_connected": engine.bridge.connected,
@@ -91,31 +104,89 @@ def create_app() -> FastAPI:
     return app
 
 
+@asynccontextmanager
+async def _standalone_lifespan(app):
+    """The SPECTRA process's startup/shutdown pair. Module-level so the
+    lifecycle specs enter the REAL sequence, not a re-enactment."""
+    import asyncio
+    import logging
+    import os
+
+    logger = logging.getLogger("spectra")
+    from spectra.services import engine, frame_watchdog, handover
+    await engine.start()
+    # Restart mid-reign: if the ownership record says spectra owns, the
+    # live stack reactivates itself through the guarded activation path
+    # (grant + readiness gate). Failure stays dark-but-owned and keeps
+    # serving — liveness 503 is the alarm.
+    await handover.resume_own_room()
+    watchdog_task = asyncio.create_task(
+        frame_watchdog.run_supervised(), name="spectra-frame-watchdog")
+    logger.info("SPECTRA started — own process, pid %d", os.getpid())
+    yield
+    watchdog_task.cancel()
+    try:
+        await watchdog_task
+    except asyncio.CancelledError:
+        pass
+    await engine.stop()
+    # Release the room outputs cleanly on SIGTERM (deploy restarts): a
+    # torn-down Hue DTLS session / DDP sender re-handshakes instantly on
+    # the next activation, a killed one has to time out first (§4d).
+    # No-op while dark. The ownership record is NOT touched — the next
+    # start's resume_own_room() re-lights the room she still owns.
+    from spectra.services.live_host import live
+    if live.active:
+        engine.go_dark()
+        await live.deactivate()
+    logger.info("SPECTRA shutdown complete.")
+
+
 def _standalone() -> None:
-    """Serve the same /spectra URL space the shared process mounts, so the
-    frontend's absolute paths work identically after the S3 split. The
-    engine start/stop pair mirrors main.py's — the host owns the lifespan
-    because Starlette never runs a mounted sub-app's."""
-    from contextlib import asynccontextmanager
+    """The SPECTRA process entry. Serves the same /spectra URL space the
+    shared process used to mount, so the frontend's absolute paths and the
+    LIVENESS CONTRACT's path are identical whether a client arrives direct
+    (port $SPECTRA_PORT) or through the spot-effects proxy (port 8000)."""
+    import logging
+    import os
+    import sys
 
     import uvicorn
 
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        from spectra.services import engine
-        await engine.start()
-        yield
-        await engine.stop()
+    # Stage 1's promised GIL mitigation (PR #18: "to be applied when the
+    # facade ever goes live"; overdue per the 2026-08-13 diagnosis §D).
+    # 0.001 s is the benchmarked value: under saturated pure-Python load
+    # beside five 62 fps virtuals it restored ~57 fps for ~2 % extra compute.
+    # It bounds COOPERATIVE bytecode holds only — this process's own API must
+    # stay cheap (JSON reads), and C-level holds (large json parses) don't
+    # yield regardless, which is exactly why the heavy spot-effects loop now
+    # lives in another interpreter. The spot-effects process keeps the 5 ms
+    # default: it has no render threads, so tightening it would only tax its
+    # bursty pure-Python code.
+    sys.setswitchinterval(0.001)
 
-    root = FastAPI(title="SPECTRA host", lifespan=lifespan)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+    root = FastAPI(title="SPECTRA host", lifespan=_standalone_lifespan)
     root.mount("/spectra", create_app())
 
     @root.get("/")
     async def to_app():
         return RedirectResponse(url="/spectra/")
 
-    uvicorn.run(root, host="0.0.0.0", port=int(
-        __import__("os").getenv("SPECTRA_PORT", "8010")))
+    uvicorn.run(
+        root,
+        host=os.getenv("SPECTRA_HOST", "0.0.0.0"),
+        port=int(os.getenv("SPECTRA_PORT", "8010")),
+        # Same bound as main.py: SIGTERM must not wait forever on lingering
+        # WebSockets (the proxy holds one open per browser tab).
+        timeout_graceful_shutdown=3,
+    )
 
 
 if __name__ == "__main__":

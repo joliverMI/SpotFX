@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # ── App ───────────────────────────────────────────────────────────────────
     app_host: str = "0.0.0.0"
     app_port: int = 8000
+    # SPECTRA runs as its OWN process (spectra.service, python -m spectra) so
+    # this app's interpreter bursts can never stall her render threads (the
+    # 2026-08-13 frame-rate diagnosis). This is where services/spectra_proxy
+    # forwards /spectra/* — must match the SPECTRA_PORT env of spectra.service.
+    spectra_port: int = 8010
 
     # ── Guest source (Snapcast Guest / AirPlay streams) ──────────────────────
     # When someone plays to the librespot "Serenity Guest" Connect device or
