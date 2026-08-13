@@ -57,15 +57,15 @@ colours roll only when the sequencer fires a scene, scene + set land in one
 terminal rung KEEPS the current colours (never forced churn). Rainbow sets:
 neutral ×1.0 wheel factor, never move the room's wheel position.
 
-## SPECTRA app (S1 — separate app, shared process until S3)
+## SPECTRA app (S1+S2 — separate app, shared process until S3)
 
 `spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`, own
 FastAPI sub-app mounted in main.py; `python -m spectra` is the future S3
 standalone entry). Import discipline is load-bearing: nothing under
 `spectra/` imports spot-effects runtime internals — only `fx/` (shared
 library, incl. `fx/device_model.py`) and stdlib/third-party; music/state
-inputs arrive via the S2 read-only bridge (until then intensity degrades to
-0.5, stated). Its scene model (`spectra/models/scene.py`) grows SceneV2
+inputs arrive via the S2 read-only bridge (below), which degrades to 0.5
+neutral intensity when down (stated). Its scene model (`spectra/models/scene.py`) grows SceneV2
 with value bindings (+`dice` correlation), a four-class `responses` block
 (legacy `flare_bands` loads as the flare class), drift declarations, and
 the colour journey (room-level walk, per-scene OVERRIDE with custody
@@ -78,6 +78,26 @@ spot-effects storage READ-ONLY). Executable spec:
 `spectra/web/src/help/helpContent.ts` (same keep-it-current rule as the
 spot-effects help). The spot-effects Scenes page stays as-is until
 superseded; never point `fx/` at live hardware before the S3 handover.
+
+## SPECTRA S2 evolution engine (runs DARK until S3)
+
+The engine (`spectra/services/engine.py` wires it; the HOST lifespan in
+main.py owns start/stop — Starlette never runs a mounted sub-app's
+lifespan): drift conductor (`drift_conductor.py` — creep/follow legs +
+the room colour journey, ~20 s legs), response engine
+(`scene_response.py` — the four classes execute bands: patch jumps, gain
+envelopes, dice re-rolls, flare colour jump via the shipped selector;
+surges CARRY — baselines move permanently), read-only bridge
+(`bridge.py` — WS client on spot-effects' /ws + `analysis_reader.py`;
+classification: charge/lull/drop stay themselves, scene-family event
+types are observations, everything else is a flare). Every glide/jump
+goes through the ONE executor seam (`fx_executor.py`): production =
+RecordingExecutor (DARK — records and models, never writes; the engine
+must never call fx_seam), headless tests = FacadeExecutor driving the
+fx/ tween engine. S3 goes live by swapping the executor — nothing else
+changes. Specs: `scripts/check_drift.py` (conductor), check_spectra.py
+(responses/bridge/Mid Group), `tests/test_spectra_engine.py`
+(frame-level proof on the dummy device).
 
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 

@@ -2,11 +2,12 @@
  * by telling the agent. The one graphical piece is a follow map's curve (a
  * shape — the honest carve-out); creep cards are plain language. The colour
  * journey card lives here too: room-level walk by default, per-scene
- * OVERRIDE first-class, custody semantics stated on the card. */
+ * OVERRIDE first-class, custody semantics stated on the card. When the S2
+ * engine is running THIS scene, each card also shows its live legs. */
 import { useState } from 'react';
 import CurveEditor, { type CurvePoint } from '../../components/CurveEditor';
 import HelpLink from '../../help/HelpLink';
-import { useDriftProfiles, useRoomJourney, useSaveDriftProfiles } from '../../queries';
+import { useDriftProfiles, useEngineStatus, useRoomJourney, useSaveDriftProfiles } from '../../queries';
 import { useToast } from '../../components/Toast';
 import type { DriftRef, DriftSpec, SceneV2 } from '../../types';
 
@@ -22,8 +23,15 @@ export default function DriftTab({ scene, setScene }: {
   const toast = useToast();
   const { data: room } = useRoomJourney();
   const { data: profiles = {} } = useDriftProfiles();
+  const { data: engine } = useEngineStatus();
   const saveProfiles = useSaveDriftProfiles();
   const [draft, setDraft] = useState<{ key: string; points: CurvePoint[] } | null>(null);
+
+  const engineActive = engine?.conductor.active_scene?.id === scene.id;
+  const liveMechs = (param: string) =>
+    engineActive
+      ? (engine?.conductor.mechanisms ?? []).filter((m) => m.param === param)
+      : [];
 
   const cards: { devIdx: number; entry: string; param: string; ref: DriftRef }[] = [];
   scene.devices.forEach((dev, devIdx) => {
@@ -119,6 +127,13 @@ export default function DriftTab({ scene, setScene }: {
                 ? <span className="chip accent" title="A named profile — one edit retunes every scene using it">{profileName}</span>
                 : <span className="chip">inline one-off</span>}
               {spec && <span className="badge badge-gray">{spec.kind}</span>}
+              {liveMechs(param).map((m) => (
+                <span key={m.virtual_id} className="chip accent"
+                  title="The engine is running this leg now (recorded — dark against real lights until S3)">
+                  ● {m.virtual_id}{m.kind === 'creep' && m.position != null
+                    ? ` @ ${m.position.toFixed(3)}` : ''}
+                </span>
+              ))}
             </div>
             {spec?.kind === 'creep' && (
               <div style={{ color: 'var(--text-muted)', marginTop: 4 }}>{creepText(spec)}.</div>
@@ -154,9 +169,11 @@ export default function DriftTab({ scene, setScene }: {
         );
       })}
       <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-        Drift executes in the S2 engine increment; declarations made now carry over
-        unchanged. Cards are adjusted by telling the agent — the curve above is the
-        one graphical piece (a shape drawn, not a form filled).
+        The S2 engine executes these declarations — legs every {engine?.conductor.leg_s ?? 20}s,
+        surges re-baselining drift, the journey walking the room's wheel. It runs
+        DARK (computed and recorded, no light writes) until the S3 handover; the
+        Engine strip on this page shows it live. Cards are adjusted by telling the
+        agent — the curve above is the one graphical piece.
       </p>
     </div>
   );

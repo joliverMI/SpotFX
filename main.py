@@ -187,9 +187,16 @@ async def lifespan(app: FastAPI):
         _want = set(state.ambient_groups) or None
         tasks.append(asyncio.create_task(ambient_mode.set_groups(_want), name="ambient-restore"))
 
+    # SPECTRA S2 evolution engine (bridge + drift conductor + responses).
+    # The host owns this lifespan because Starlette never runs a mounted
+    # sub-app's. DARK: it records against real lights until S3.
+    from spectra.services import engine as spectra_engine
+    await spectra_engine.start()
+
     logger.info("SpotFX started — http://%s:%d", settings.app_host, settings.app_port)
     yield
     # Shutdown
+    await spectra_engine.stop()
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)

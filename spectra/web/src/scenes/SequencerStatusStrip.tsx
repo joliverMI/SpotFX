@@ -28,7 +28,8 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
 
       {!st.enabled ? (
         <span style={{ color: 'var(--text-muted)' }}>
-          dark — not enabled (ask the agent; its music feed arrives with the S2 bridge)
+          dark — not enabled (ask the agent; the bridge already feeds it song
+          transitions and intensity)
         </span>
       ) : (
         <>
@@ -47,8 +48,8 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
           </span>
           {!st.bridge_connected && (
             <span style={{ color: 'var(--warning)' }}
-              title="No music feed yet (S2) — nothing ticks moments; intensity would default to 0.5">
-              bridge not wired
+              title="The read-only spot-effects feed is down — nothing ticks moments; intensity holds at the 0.5 neutral (stated degradation)">
+              bridge down
             </span>
           )}
           {st.deferred_by && (

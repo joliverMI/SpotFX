@@ -2,8 +2,12 @@
 main.py at /spectra for the shared-process S1/S2 stages and ready to run
 standalone the day S3 splits the processes (python -m spectra).
 
-No lifespan work: stores are lazy and file-backed, the registry is
-mtime-cached, and no background task runs until the S2 engine increment.
+S2 runtime: the evolution engine (services/engine — bridge + drift
+conductor + response engine, DARK against real lights). Starlette never
+runs a mounted sub-app's lifespan, so the HOST owns start/stop: main.py's
+lifespan calls spectra.services.engine.start()/stop() in the shared
+process, and _standalone() wires the identical pair — the S3 split changes
+which host calls them, nothing else.
 
 NOTE the /api/status handler is a PLACEHOLDER status surface, deliberately
 NOT the SPECTRA liveness endpoint contract — that named contract (per-
@@ -14,11 +18,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from spectra import config
+from spectra.api import engine as engine_api
 from spectra.api import journey, registry, scenes, sequencer
 
 
@@ -42,18 +47,31 @@ def create_app() -> FastAPI:
     app.include_router(sequencer.router)
     app.include_router(registry.router)
     app.include_router(journey.router)
+    app.include_router(engine_api.router)
+
+    @app.websocket("/api/ws")
+    async def ws_endpoint(ws: WebSocket):
+        from spectra.services.ws import ws_manager
+        await ws_manager.connect(ws)
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            ws_manager.disconnect(ws)
 
     @app.get("/api/status")
     async def status():
-        from spectra.services import color_journey, scene_store, sequencer_store
+        from spectra.services import (color_journey, engine, scene_store,
+                                      sequencer_store)
         room = color_journey.load_room()
         seq = sequencer_store.load_config()
         return {
             "app": "SPECTRA",
-            "increment": "S1",
+            "increment": "S2",
             "scenes": len(scene_store.list_all()),
             "sequencer_enabled": seq.enabled,
-            "bridge_connected": False,   # S2 wires the read-only feed
+            "bridge_connected": engine.bridge.connected,
+            "engine_dark": engine.executor.mode == "recording",
             "light_ownership": "spot-effects",   # S3 hands over, owner's word
             "room_journey_degrees_per_min": room.journey.degrees_per_min,
             "room_wheel_position_deg": room.wheel_position_deg,
@@ -72,9 +90,21 @@ def create_app() -> FastAPI:
 
 def _standalone() -> None:
     """Serve the same /spectra URL space the shared process mounts, so the
-    frontend's absolute paths work identically after the S3 split."""
+    frontend's absolute paths work identically after the S3 split. The
+    engine start/stop pair mirrors main.py's — the host owns the lifespan
+    because Starlette never runs a mounted sub-app's."""
+    from contextlib import asynccontextmanager
+
     import uvicorn
-    root = FastAPI(title="SPECTRA host")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        from spectra.services import engine
+        await engine.start()
+        yield
+        await engine.stop()
+
+    root = FastAPI(title="SPECTRA host", lifespan=lifespan)
     root.mount("/spectra", create_app())
 
     @root.get("/")

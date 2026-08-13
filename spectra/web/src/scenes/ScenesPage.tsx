@@ -19,6 +19,7 @@ import ResponseTab from './tabs/ResponseTab';
 import PhaseTab from './tabs/PhaseTab';
 import SequencingTab from './tabs/SequencingTab';
 import ColorSetsTab from './tabs/ColorSetsTab';
+import EngineStatusStrip from './EngineStatusStrip';
 import SequencerStatusStrip from './SequencerStatusStrip';
 
 const TABS = [
@@ -156,6 +157,7 @@ export default function ScenesPage() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: 16, alignItems: 'start' }}>
       <SequencerStatusStrip scenes={scenes} />
+      <EngineStatusStrip />
 
       {/* ── Scene list ── */}
       <div className="card" style={{ minWidth: 0, maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>

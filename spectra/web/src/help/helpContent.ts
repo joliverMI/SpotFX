@@ -43,10 +43,10 @@ export const HELP_SECTIONS: HelpSection[] = [
     entries: [
       {
         id: 'concept-increments',
-        title: 'What works today (increment S1)',
-        keywords: 'roadmap s1 s2 s3 engine bridge ownership',
+        title: 'What works today (increment S2)',
+        keywords: 'roadmap s1 s2 s3 engine bridge ownership dark',
         body: [
-          'S1 (this build) ships the app and the full tabbed scene editor: bindings, dice, responses, drift declarations, colour journey, test-fire with dry-run compile. S2 adds the evolution engine that actually animates drift and responses, fed read-only from spot-effects. S3 hands SPECTRA the lights (owner\'s call). Until S3, spot-effects owns the room; the real Fire button here writes through the same external LedFX service.',
+          'S1 shipped the app and the full tabbed scene editor: bindings, dice, responses, drift declarations, colour journey, test-fire with dry-run compile. S2 (this build) adds the evolution engine: drift and responses now EXECUTE, fed read-only from spot-effects — but the engine runs DARK, computing and recording every move without touching the lights. S3 hands SPECTRA the lights (owner\'s call). Until then spot-effects owns the room; the real Fire button here writes through the same external LedFX service.',
         ],
       },
       {
@@ -95,10 +95,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'tab-drift',
-        title: 'Drift tab — declarations, adjusted via the agent',
-        keywords: 'creep follow wander slow evolution profile inline',
+        title: 'Drift tab — declarations the engine runs',
+        keywords: 'creep follow wander slow evolution profile inline live legs',
         body: [
           'Drift cards state what evolves on its own while the scene holds: creep (bounded wander between lo–hi, bouncing or wrapping) and follow (the value tracks the music\'s energy arc through a drawn intensity→value curve). Declarations use NAMED profiles — one edit retunes every scene using it — with inline one-offs as the escape hatch. Cards are adjusted by telling the agent; the one graphical piece is a follow curve\'s shape, drawn right on the card.',
+          'Since S2 the engine EXECUTES these declarations: when this scene is the engine\'s active scene, each card shows a live ● chip per virtual with the creep\'s current wander position. See the Evolution engine section for how legs run (dark until S3).',
           'The colour journey card also lives here — see the colour journey section.',
         ],
       },
@@ -108,6 +109,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'flare bands gain curve patch response intensity strip',
         body: [
           'Bands over the intensity axis decide the response when a flare fires. Drag a band\'s edges to move its window, drag the dot to set gain, double-click to remove, click an empty gap to add. The curve select picks the envelope (pulse spikes and returns; linear/ease land and hold). Param patches (⚙) are agent-authored — the strip shows they exist, the agent edits them. Re-roll dice and colour-set jump are per-class flags shown as chips; tell the agent to change them.',
+          'Since S2 these bands EXECUTE: any ordinary trigger fire from spot-effects is a flare at that fire\'s intensity, and the band containing it applies — see the Evolution engine section for the full pass (re-roll, patch, gain, colour jump, carry).',
         ],
       },
       {
@@ -121,7 +123,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Sequencing tab',
         keywords: 'sequencer curve likelihood dwell affinity genre',
         body: [
-          'As shipped in the sequencer increment: the scene\'s likelihood curve (named profile / inline / flat / not sequenced) is graphical; dwell weight, genre multipliers, and affinity render read-only — adjust them by telling the agent. The status strip shows the engine\'s state; the sequencer stays dark until enabled and its music feed arrives with S2.',
+          'As shipped in the sequencer increment: the scene\'s likelihood curve (named profile / inline / flat / not sequenced) is graphical; dwell weight, genre multipliers, and affinity render read-only — adjust them by telling the agent. The status strip shows the engine\'s state. The S2 bridge now feeds it song transitions, section-energy intensity, genre buckets, and deferrals — but the sequencer stays dark until its own enabled switch is flipped (ask the agent).',
         ],
       },
       {
@@ -136,7 +138,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         id: 'tab-responses',
         title: 'Charges / Lulls / Drops tab',
         keywords: 'charge lull drop event classes bands',
-        body: ['The other three event classes, same band-strip idiom as Flares. The classes fire from the music (via the S2 bridge); each class carries its own bands, re-roll flag, and (flares only, typically) colour-set jump.'],
+        body: ['The other three event classes, same band-strip idiom as Flares — and since S2 they EXECUTE: the bridge classifies spot-effects\' fixed charge/lull/drop events into these classes and the matching band applies (gain, patches, re-roll). Each class carries its own bands, re-roll flag, and (flares only, typically) colour-set jump.'],
       },
     ],
   },
@@ -199,10 +201,52 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'engine',
+    title: 'Evolution engine (S2)',
+    keywords: 'drift conductor response surge leg bridge dark recording carry',
+    intro:
+      'The S2 engine is a scene\'s declared life, running: a drift conductor (one leg every ~20s glides creeping and following values, and walks the room\'s colour journey) plus a response engine (flares/charges/lulls/drops execute their bands). It is fed READ-ONLY from spot-effects and runs DARK — every move is computed, recorded, and shown here, but no write reaches the lights until the S3 handover.',
+    entries: [
+      {
+        id: 'engine-dark',
+        title: 'Dark — recording, not driving',
+        keywords: 'recording executor s3 handover safe',
+        body: [
+          'The "dark — recording" badge means the engine\'s executor records every glide and jump instead of sending them. The identical engine runs against the real render pipeline in the offline test bed; S3 swaps the executor when SPECTRA owns the lights — nothing else changes.',
+        ],
+      },
+      {
+        id: 'engine-strip',
+        title: 'The Engine strip (Scenes page)',
+        keywords: 'status strip journey position legs live',
+        body: [
+          'Live display only: journey custody (room, or a scene OVERRIDE) with pace and wheel position, the engine-active scene with its drift legs (expand for per-virtual positions), holds (pause / Dinner Party / Ambient — Force Scene does NOT hold drift), the last surge, and bridge health with the current section-energy intensity.',
+        ],
+      },
+      {
+        id: 'engine-surges',
+        title: 'Surges — how a response executes',
+        keywords: 'flare band gain pulse patch reroll colour jump carry baseline',
+        body: [
+          'The bridge classifies every spot-effects trigger fire: charge/lull/drop stay themselves, scene changes are observations, everything else is a FLARE. The band containing the fire\'s intensity executes in one pass: the scene\'s 🎲 values re-roll (correlated dice stay correlated) and jump; the band\'s param patches jump (a key lands on every device whose effect has that param); gain shapes brightness (pulse spikes and returns; linear/ease lands and holds); flares with the colour-set jump roll the shipped selector and JUMP to the pick — the keep-current rung never forces churn, and the room journey resumes from the new wheel point.',
+          'Surges CARRY: patches, re-rolls, held gains, and colour jumps move the baseline drift resumes from. A surge on a followed value is an impulse the follow re-asserts from smoothly over its slew.',
+        ],
+      },
+      {
+        id: 'engine-bridge',
+        title: 'The read-only bridge',
+        keywords: 'spot-effects feed websocket intensity section energy genre deferral degradation',
+        body: [
+          'SPECTRA subscribes to spot-effects\' existing broadcasts (track state, trigger fires with intensity) and reads the analysis storage — one-directional; spot-effects is untouched. Intensity between fires is librosa section energy at the playback position. If the bridge is down, nothing breaks: no moments tick, no surges fire, intensity holds at the 0.5 neutral — a stated degradation, not a failure.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'status-page',
     title: 'Status page',
-    keywords: 'health ownership bridge liveness',
+    keywords: 'health ownership bridge liveness engine',
     intro:
-      'A placeholder status surface for S1: scene count, light ownership (spot-effects until the S3 handover), bridge state, sequencer state, and the room journey. The real liveness endpoint — per-virtual frame-flush freshness — ships with S3.',
+      'App status (scene count, light ownership — spot-effects until the S3 handover, bridge state, sequencer state, room journey) plus the S2 evolution-engine card: journey custody, active scene and legs, bridge health, recorded writes. The real liveness endpoint — per-virtual frame-flush freshness — ships with S3.',
   },
 ];

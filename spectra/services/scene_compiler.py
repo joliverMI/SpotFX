@@ -142,10 +142,15 @@ def compile_scene(scene: SceneV2,
                 virtual_ids = [dev.target]
             config = _entry_config(dev)
             for vid in virtual_ids:
+                # entry_id/color_mode ride along for the S2 engine (drift
+                # declarations and palette mechanics follow the WINNING entry
+                # per virtual); the write seams read only the first three keys.
                 writes[vid] = {
                     "virtual_id": vid,
                     "effect_type": dev.effect_type,
                     "config": config,
+                    "entry_id": dev.id,
+                    "color_mode": dev.color.mode,
                 }
                 if dev.color.mode == "set":
                     set_mode_vids.add(vid)
@@ -177,5 +182,11 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         logger.info("SPECTRA scene '%s' fired at intensity %.2f: %d virtual "
                     "writes%s", scene.name, intensity, len(writes),
                     f" (colour set '{color_set.name}')" if color_set else "")
+        # Re-baseline the evolution engine: drift's declared life restarts
+        # from these initial conditions. The ORIGINAL scene rides along —
+        # the response engine re-rolls its intact 🎲 bindings.
+        from spectra.services import engine
+        engine.on_scene_fired(scene, writes,
+                              color_set.id if color_set else None)
     return {"dry_run": dry_run, "intensity": intensity, "writes": writes,
             "resolved_bindings": ctx.resolved, "dice_rolls": ctx.dice_rolls()}

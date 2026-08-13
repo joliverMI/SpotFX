@@ -14,11 +14,15 @@ const CURVES = ['linear', 'ease_in', 'ease_out', 'pulse'] as const;
 const CLASS_TITLES: Record<ResponseClass, string> = {
   flare: 'Flares', charge: 'Charges', lull: 'Lulls', drop: 'Drops',
 };
+// The S2 engine executes these: the bridge classifies every spot-effects
+// trigger fire (charge/lull/drop stay themselves; scene changes are not
+// surges; everything else is a flare) and the band containing the fire's
+// intensity applies.
 const CLASS_HINTS: Record<ResponseClass, string> = {
-  flare: 'A flare fires: the band containing its intensity applies — gain as the momentary envelope, patches as a jump; drift resumes from the new baseline.',
-  charge: 'A charge (build-up) fires — the arc into a payoff.',
-  lull: 'A lull fires — the room settles.',
-  drop: 'A drop fires — the payoff lands.',
+  flare: 'Any ordinary trigger fire is a flare. The band containing its intensity EXECUTES: 🎲 re-roll + jump, patches as a jump, gain as the envelope (pulse returns; linear/ease holds), the colour-set jump — and drift resumes from the new baseline (surges carry).',
+  charge: 'A charge (build-up) fires from the music: its band executes — gain/patches coil the room into the payoff.',
+  lull: 'A lull fires: its band executes — typically gain < 1 ducks the room and holds (the ducked level carries).',
+  drop: 'A drop fires: its band executes — the payoff lands as jumps; drift resumes from the new point.',
 };
 
 export default function ResponseTab({ scene, setScene, classes, helpTopic }: {

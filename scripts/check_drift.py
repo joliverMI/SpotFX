@@ -1,0 +1,312 @@
+"""Executable spec for the S2 drift conductor (report §2.5, §2.8): leg
+targets through the executor seam, bounce/wrap identities, follow slew,
+colour-rotation accounting, journey custody through the conductor
+(into/out of an override — the binding transition semantics), re-baseline
+on scene fire, carry semantics, the deferral matrix (pause/Dinner
+Party/Ambient hold everything; Force Scene continues), and the production
+DARK discipline (the wired engine records, never executes).
+
+Run from repo root: .venv/bin/python scripts/check_drift.py
+Isolated: temp stores, fake clock, in-memory room — no LedFX I/O, no audio.
+"""
+from __future__ import annotations
+
+import asyncio
+import colorsys
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def check(cond, label):
+    if not cond:
+        raise SystemExit(f"FAIL: {label}")
+    print(f"ok: {label}")
+
+
+td = Path(tempfile.mkdtemp(prefix="spectra-drift-"))
+
+from fx import device_model
+device_model.CATEGORIES_FILE = td / "device_categories.json"
+device_model.CATEGORIES_FILE.write_text(json.dumps({
+    "c1": {"id": "c1", "name": "Matrix", "parent_id": None,
+           "virtuals": ["v-m1", "v-m2"], "effects": ["radial"], "role": None},
+}))
+
+from spectra import config as scfg
+scfg.SPECTRA_STORAGE = td / "spectra"
+scfg.SCENES_FILE = scfg.SPECTRA_STORAGE / "scenes.json"
+scfg.SEQUENCER_FILE = scfg.SPECTRA_STORAGE / "sequencer.json"
+scfg.DRIFT_PROFILES_FILE = scfg.SPECTRA_STORAGE / "drift_profiles.json"
+scfg.ROOM_COLOR_FILE = scfg.SPECTRA_STORAGE / "room_color.json"
+scfg.COLOR_SETS_FILE = td / "color_sets.json"
+
+from spectra.models.scene import (ColorJourneySpec, CurveMapPoint, DriftRef,
+                                  DriftSpec, SceneColorJourney,
+                                  SceneDeviceConfig, SceneV2)
+from spectra.services import color_journey, color_rotate, scene_compiler
+from spectra.services.binding_resolver import FireContext
+from spectra.services.drift_conductor import DriftConductor
+from spectra.services.fx_executor import RecordingExecutor
+
+run = asyncio.run
+
+# ── harness: fake clock, in-memory room, injectable feeds ────────────────────
+clock = [1000.0]
+room_box = [color_journey.RoomColorState(wheel_position_deg=100.0,
+                                         active_set_id="set-blue")]
+intensity_box: list = [None]
+deferral_box: list = [None]
+set_positions = {"set-blue": 220.0}   # chromatic; overwrite for rainbow cases
+broadcasts: list[dict] = []
+
+
+async def capture(payload):
+    broadcasts.append(payload)
+
+executor = RecordingExecutor(clock=lambda: clock[0])
+conductor = DriftConductor(
+    executor=executor,
+    clock=lambda: clock[0],
+    leg_s=20.0,
+    intensity=lambda: intensity_box[0],
+    deferral=lambda: deferral_box[0],
+    broadcast=capture,
+    drift_profiles=lambda: {},
+    curve_profiles=lambda: {},
+    room_load=lambda: room_box[0],
+    room_save=lambda st: room_box.__setitem__(0, st),
+    set_position=lambda sid: set_positions.get(sid),
+)
+
+GRADIENT = "linear-gradient(90deg, #0000ff 0%, #4000ff 100%)"
+scene = SceneV2(name="Drifting", devices=[SceneDeviceConfig(
+    target_kind="category", target="Matrix", effect_type="radial",
+    params={"spin": 0.5, "twist": 0.2},
+    drift={
+        "spin": DriftRef(inline=DriftSpec(kind="creep", rate_per_min=0.3,
+                                          lo=0.2, hi=0.8, motion="bounce")),
+        "twist": DriftRef(inline=DriftSpec(
+            kind="follow", slew_s=5.0,
+            inline_points=[CurveMapPoint(x=0.0, y=0.1),
+                           CurveMapPoint(x=1.0, y=0.9)])),
+    },
+    brightness=0.8)])
+
+
+def fire(sc, color_set=None, color_set_id=None):
+    resolved = scene_compiler.resolve_scene(sc, FireContext(0.5))
+    writes = scene_compiler.compile_scene(resolved, color_set)
+    conductor.on_scene_fire(sc, writes, color_set_id)
+    return writes
+
+
+# Colour set fixture so set-mode virtuals carry a gradient to rotate.
+from spectra.services.color_sets import ColorSetCard, ColorSetEntry, SetScope
+blue_set = ColorSetCard(id="set-blue", name="Blues", entries=[
+    ColorSetEntry(scope=SetScope(categories=["Matrix"]),
+                  color_kind="gradient", color_value=GRADIENT)])
+
+# ── re-baseline builds mechanisms per WINNING virtual ────────────────────────
+writes = fire(scene, blue_set, "set-blue")
+check(len(conductor.mechanisms) == 4
+      and {m.vid for m in conductor.mechanisms} == {"v-m1", "v-m2"}
+      and {m.kind for m in conductor.mechanisms} == {"creep", "follow"},
+      "re-baseline: drift declarations expand per virtual (2 params × 2 vids)")
+check(conductor.virtuals["v-m1"].gradient == GRADIENT
+      and conductor.virtuals["v-m1"].set_mode,
+      "re-baseline seeds palette + set-mode from the compiled writes")
+check(conductor._last_rebaseline["mechanisms"] == 4
+      and conductor._last_rebaseline["journey_custody"] == "room",
+      "re-baseline record carries mechanism count + journey custody")
+
+# ── leg targets: creep advances by rate·leg, follow glides over slew ─────────
+intensity_box[0] = 1.0
+leg = run(conductor.tick())
+glides = [w for w in executor.writes if w["kind"] == "glide"]
+spin_leg = next(w for w in glides if "spin" in w["params"])
+check(abs(spin_leg["params"]["spin"] - 0.6) < 1e-9
+      and spin_leg["duration_ms"] == 20000,
+      "creep leg: target = position + rate·leg (0.5 → 0.6) over the leg")
+twist_leg = next(w for w in glides if "twist" in w["params"])
+check(abs(twist_leg["params"]["twist"] - 0.9) < 1e-9
+      and twist_leg["duration_ms"] == 5000,
+      "follow leg: curve(intensity 1.0) = 0.9, glide over slew_s not leg_s")
+check(len({(w["virtual_id"], w["duration_ms"]) for w in glides})
+      == len(glides),
+      "one glide per virtual per duration — few small calls per leg")
+check(broadcasts and broadcasts[-1]["type"] == "drift_leg"
+      and broadcasts[-1]["legs"], "drift_leg broadcast carries the leg detail")
+
+# ── follow re-asserts the arc as intensity moves; neutral without a feed ─────
+intensity_box[0] = 0.0
+run(conductor.tick())
+twist_leg = [w for w in executor.writes if "twist" in w["params"]][-1]
+check(abs(twist_leg["params"]["twist"] - 0.1) < 1e-9,
+      "follow tracks the arc down (curve(0.0) = 0.1)")
+intensity_box[0] = None
+run(conductor.tick())
+twist_leg = [w for w in executor.writes if "twist" in w["params"]][-1]
+check(abs(twist_leg["params"]["twist"] - 0.5) < 1e-9,
+      "no music feed → follow holds the 0.5 neutral point (stated)")
+
+# ── bounce identity: reflect at the bounds, never outside ────────────────────
+spin_mech = next(m for m in conductor.mechanisms
+                 if m.vid == "v-m1" and m.param == "spin")
+seen = []
+for _ in range(12):
+    run(conductor.tick())
+    seen.append(round(spin_mech.position, 6))
+check(all(0.2 <= p <= 0.8 for p in seen), "creep bounce stays inside [lo, hi]")
+check(max(seen) == 0.8 and any(a > b for a, b in zip(seen, seen[1:])),
+      f"creep reflects at hi and walks back down ({seen[:8]}...)")
+
+# ── wrap identity ────────────────────────────────────────────────────────────
+wrap_scene = SceneV2(name="Wrap", devices=[SceneDeviceConfig(
+    target_kind="virtual", target="v-m1", effect_type="radial",
+    params={"spin": 0.75},
+    drift={"spin": DriftRef(inline=DriftSpec(
+        kind="creep", rate_per_min=0.3, lo=0.0, hi=0.8, motion="wrap"))})])
+fire(wrap_scene)
+wrap_mech = conductor.mechanisms[0]
+run(conductor.tick())
+check(abs(wrap_mech.position - 0.05) < 1e-9,
+      "creep wrap folds through hi back to lo (0.75 + 0.1 → 0.05)")
+
+# ── carry: a surge moves the wander position; bounds still clamp ─────────────
+conductor.on_surge({("v-m1", "spin"): 0.3})
+check(abs(wrap_mech.position - 0.3) < 1e-9,
+      "surge carries: creep resumes from the surged value")
+conductor.on_surge({("v-m1", "spin"): 7.0})
+check(wrap_mech.position == 0.8, "surge carry clamps into the creep bounds")
+conductor.on_surge({("v-m1", "brightness"): 0.4,
+                    ("v-m1", "gradient"): "#ff0000"})
+check(conductor.virtuals["v-m1"].brightness_baseline == 0.4
+      and conductor.virtuals["v-m1"].gradient == "#ff0000",
+      "surge carry updates brightness + palette baselines")
+
+# ── colour journey: the room walks, the palette rotates WITH the wheel ───────
+fire(scene, blue_set, "set-blue")
+room_box[0] = room_box[0].model_copy(update={"wheel_position_deg": 100.0})
+start_deg = 100.0
+n_legs = 6
+executor.writes.clear()
+for _ in range(n_legs):
+    run(conductor.tick())
+expected_delta = 2.0 * (20.0 / 60.0) * n_legs   # default room pace 2°/min
+check(abs(room_box[0].wheel_position_deg - (start_deg + expected_delta))
+      < 1e-6,
+      f"room walk: wheel advances pace·time ({start_deg} → "
+      f"{room_box[0].wheel_position_deg:.2f}°)")
+grad_writes = [w for w in executor.writes if "gradient" in w["params"]]
+check(len(grad_writes) == 2 * n_legs,
+      "palette rotation glides land on every set-mode virtual each leg")
+
+
+def first_stop_hue(gradient: str) -> float:
+    hex_color = gradient.split("#")[1][:6]
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return colorsys.rgb_to_hsv(r, g, b)[0] * 360.0
+
+
+rotated_hue = first_stop_hue(conductor.virtuals["v-m1"].gradient)
+check(abs(rotated_hue - (first_stop_hue(GRADIENT) + expected_delta))
+      % 360.0 < 3.0,
+      "rotation accounting: cumulative palette hue matches the wheel travel")
+
+# ── rainbow exemption: the walk pauses, nothing rotates ──────────────────────
+set_positions["set-blue"] = None   # the active set is now rainbow/achromatic
+held = room_box[0].wheel_position_deg
+executor.writes.clear()
+run(conductor.tick())
+check(room_box[0].wheel_position_deg == held
+      and not [w for w in executor.writes if "gradient" in w["params"]],
+      "rainbow palette pauses the walk — wheel and palette hold")
+set_positions["set-blue"] = 220.0
+
+# ── journey custody: INTO and OUT OF an override, no snap either way ─────────
+override_scene = SceneV2(
+    name="Override", color_journey=SceneColorJourney(
+        mode="override", journey=ColorJourneySpec(degrees_per_min=-30.0)),
+    devices=[SceneDeviceConfig(target_kind="virtual", target="v-m1",
+                               effect_type="radial", params={"spin": 0.5})])
+before = room_box[0].wheel_position_deg
+fire(override_scene, blue_set, "set-blue")
+check(room_box[0].wheel_position_deg == before,
+      "INTO override: custody transfers, the wheel does not move")
+run(conductor.tick())
+check(abs(room_box[0].wheel_position_deg - ((before - 10.0) % 360.0)) < 1e-6,
+      "override steers from the room's position at its own pace/direction")
+exit_deg = room_box[0].wheel_position_deg
+fire(scene, blue_set, "set-blue")   # back to an inherit scene
+check(room_box[0].wheel_position_deg == exit_deg,
+      "OUT of override: the room resumes from where the override left it")
+run(conductor.tick())
+check(abs(room_box[0].wheel_position_deg
+          - ((exit_deg + 2.0 * (20.0 / 60.0)) % 360.0)) < 1e-6,
+      "the room's own pace steers again — one story, custody handed back")
+
+# ── pace_factor 0 holds the walk while the scene shows ───────────────────────
+hold_scene = SceneV2(name="Hold", color_journey=SceneColorJourney(
+    mode="inherit", pace_factor=0.0),
+    devices=[SceneDeviceConfig(target_kind="virtual", target="v-m1",
+                               effect_type="radial", params={"spin": 0.5})])
+fire(hold_scene, blue_set, "set-blue")
+held = room_box[0].wheel_position_deg
+run(conductor.tick())
+check(room_box[0].wheel_position_deg == held,
+      "inherit pace_factor 0 holds the room walk")
+
+# ── deferral matrix: pause/dinner/ambient hold everything ────────────────────
+fire(scene, blue_set, "set-blue")
+for reason in ("paused", "dinner_party", "ambient"):
+    deferral_box[0] = reason
+    executor.writes.clear()
+    held = room_box[0].wheel_position_deg
+    result = run(conductor.tick())
+    check(result is None and not executor.writes
+          and room_box[0].wheel_position_deg == held
+          and conductor.status()["deferred_by"] == reason,
+          f"deferral '{reason}': no legs, no walk, stated in status")
+deferral_box[0] = None
+
+# ── Force Scene does NOT defer drift (bridge-level contract) ─────────────────
+from spectra.services.bridge import SpotEffectsBridge
+b = SpotEffectsBridge(clock=lambda: clock[0])
+b.force_scene = True
+check(b.conductor_deferral() is None
+      and b.sequencer_deferral() == "force_scene",
+      "Force Scene defers the sequencer but drift keeps running")
+b.paused = True
+check(b.conductor_deferral() == "paused",
+      "pause holds drift through the same bridge feed")
+
+# ── status surface ───────────────────────────────────────────────────────────
+st = conductor.status()
+check(st["executor_mode"] == "recording" and st["leg_s"] == 20.0
+      and st["active_scene"]["name"] == "Drifting"
+      and len(st["mechanisms"]) == 4
+      and st["journey"]["custody"] == "room"
+      and st["last_leg"] is not None,
+      "conductor status: executor mode, scene, mechanisms, journey, last leg")
+
+# ── the production wiring is DARK ────────────────────────────────────────────
+from spectra.services import engine
+check(engine.executor.mode == "recording"
+      and engine.conductor.executor is engine.executor
+      and engine.responses.executor is engine.executor
+      and engine.status()["dark"] is True,
+      "production engine records only — dark against real lights until S3")
+import spectra.services.drift_conductor as dc_mod
+import spectra.services.fx_executor as fxe_mod
+import spectra.services.scene_response as sr_mod
+for mod in (dc_mod, sr_mod, fxe_mod):
+    src = Path(mod.__file__).read_text()
+    check("fx_seam.apply_writes" not in src and "import fx_seam" not in src,
+          f"{mod.__name__.split('.')[-1]} never touches the live HTTP seam")
+
+print("\nALL CHECKS PASSED")
