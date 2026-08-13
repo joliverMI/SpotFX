@@ -1,0 +1,89 @@
+"""The SPECTRA app — its own FastAPI application, mounted by spot-effects'
+main.py at /spectra for the shared-process S1/S2 stages and ready to run
+standalone the day S3 splits the processes (python -m spectra).
+
+No lifespan work: stores are lazy and file-backed, the registry is
+mtime-cached, and no background task runs until the S2 engine increment.
+
+NOTE the /api/status handler is a PLACEHOLDER status surface, deliberately
+NOT the SPECTRA liveness endpoint contract — that named contract (per-
+virtual frame-flush freshness through the real render path) lands with S3
+ownership and must not be faked by an HTTP 200 that proves nothing.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+from spectra import config
+from spectra.api import journey, registry, scenes, sequencer
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve the SPECTRA SPA with index.html fallback for client routes."""
+
+    async def get_response(self, path: str, scope):
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="SPECTRA", version="0.1.0")
+
+    app.include_router(scenes.router)
+    app.include_router(sequencer.router)
+    app.include_router(registry.router)
+    app.include_router(journey.router)
+
+    @app.get("/api/status")
+    async def status():
+        from spectra.services import color_journey, scene_store, sequencer_store
+        room = color_journey.load_room()
+        seq = sequencer_store.load_config()
+        return {
+            "app": "SPECTRA",
+            "increment": "S1",
+            "scenes": len(scene_store.list_all()),
+            "sequencer_enabled": seq.enabled,
+            "bridge_connected": False,   # S2 wires the read-only feed
+            "light_ownership": "spot-effects",   # S3 hands over, owner's word
+            "room_journey_degrees_per_min": room.journey.degrees_per_min,
+            "room_wheel_position_deg": room.wheel_position_deg,
+        }
+
+    if config.WEB_DIST.exists():
+        app.mount("/", SPAStaticFiles(directory=str(config.WEB_DIST), html=True),
+                  name="spectra-app")
+    else:
+        @app.get("/")
+        async def no_ui():
+            return RedirectResponse(url="/spectra/api/status")
+
+    return app
+
+
+def _standalone() -> None:
+    """Serve the same /spectra URL space the shared process mounts, so the
+    frontend's absolute paths work identically after the S3 split."""
+    import uvicorn
+    root = FastAPI(title="SPECTRA host")
+    root.mount("/spectra", create_app())
+
+    @root.get("/")
+    async def to_app():
+        return RedirectResponse(url="/spectra/")
+
+    uvicorn.run(root, host="0.0.0.0", port=int(
+        __import__("os").getenv("SPECTRA_PORT", "8010")))
+
+
+if __name__ == "__main__":
+    _standalone()

@@ -226,6 +226,13 @@ app.include_router(scenes_v2_router.router)
 app.include_router(shape_map_router.router)
 app.include_router(sequencer_router.router)
 
+# ── SPECTRA (separate app, shared process until the S3 split) ─────────────────
+# Mounted as its own FastAPI application: /spectra/ serves the SPECTRA UI,
+# /spectra/api/* its backend. spectra/ imports nothing from this app —
+# unmounting here and running `python -m spectra` IS the S3 process split.
+from spectra.app import create_app as _create_spectra_app
+app.mount("/spectra", _create_spectra_app())
+
 
 # ── Service status (health check for external callers) ────────────────────────
 @app.get("/api/service/status")
