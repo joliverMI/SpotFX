@@ -5,7 +5,7 @@ import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
 import { useBuilderStore } from './store';
-import { useAudioShapeData, useAudioShapeMeta, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
+import { useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
 import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
@@ -56,6 +56,11 @@ export default function BuilderPage() {
   const { data: settings } = useSettings();
   const { data: profileData } = useProfileByUri(uri);
   const { data: meta } = useAudioShapeMeta(uri);
+  // Legacy-builder port: surface whether auto-calibration is targeting this
+  // song (only meaningful while its offset is still unverified).
+  const { data: calStatus } = useCalibrationStatus(
+    uri, (meta?.capture_complete ?? false) && meta?.offset_verification === 'unverified');
+  const calibrating = !!calStatus?.active;
   const { data: storedShape } = useAudioShapeData(uri, meta?.capture_complete ?? false);
   const { data: librosa } = useLibrosa(uri);
   const { data: events } = useEvents();
@@ -286,7 +291,13 @@ export default function BuilderPage() {
             {capturing && (
               <span style={{ fontSize: 11, color: 'var(--accent2)' }}>● capturing…</span>
             )}
-            <OffsetBadge meta={meta ?? null} />
+            {calibrating && (
+              <span style={{ fontSize: 11, color: 'var(--accent2)' }}
+                title="xcorr auto-calibration is currently targeting this song's offset">
+                🎯 auto-calibrating…
+              </span>
+            )}
+            <OffsetBadge meta={meta ?? null} uri={uri} />
             <button
               style={{ fontSize: 12 }}
               className={shiftOpen || triggerPreviewOffsetMs !== 0 ? 'primary' : ''}

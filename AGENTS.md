@@ -92,8 +92,8 @@ shows these controls/info.
 `LibrosaAnalysis.librosa_offset_ms` is meant to convert WAV-capture time to
 song-relative time, but the stored values can't be trusted: nonzero on ~74% of
 the 671 analyses, with outliers into the tens of thousands of seconds (one is
-75,308,324 ms). The codebase is split on it — `ai_trigger_service` and
-`embedded_trigger_service` add it, while `load_sections_for_uri()` and its
+75,308,324 ms). The codebase is split on it —
+`embedded_trigger_service` adds it, while `load_sections_for_uri()` and its
 consumers (`signal_resolver._section_energy`, the `section_energy` binding,
 `trigger_engine._section_intensity`) read section/beat ms **raw**.
 

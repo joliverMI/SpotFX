@@ -47,6 +47,18 @@ export function useLiveShape(uri: string | null, enabled: boolean) {
   });
 }
 
+/** Whether xcorr auto-calibration is currently targeting this song — ported
+ * from the legacy builder's on-load status readout. */
+export function useCalibrationStatus(uri: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['calibration-status', uri],
+    queryFn: () => apiGet<{ active: boolean }>(`/audio-shape/calibration-status?uri=${enc(uri!)}`),
+    enabled: !!uri && enabled,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+}
+
 export function useLibrosa(uri: string | null) {
   return useQuery({
     queryKey: ['librosa', uri],

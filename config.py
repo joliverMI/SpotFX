@@ -92,14 +92,6 @@ class Settings(BaseSettings):
     # ── Latency / timing ──────────────────────────────────────────────────────
     # Milliseconds between audio playback and Spotify timestamp
     audio_latency_ms: int = 1000
-    # Multiple snapcast client devices can feed SpotFX; each has its own
-    # playback-chain latency, so offsets learned on one don't transfer 1:1.
-    # timing_device_offsets maps device name → extra offset (ms) layered onto
-    # the resolved shape offset while that device is active; lock-history and
-    # systemic-offset samples are tagged with the active device so learned
-    # data doesn't cross-contaminate between devices.
-    active_timing_device: str = "default"
-    timing_device_offsets: dict = {}
     # Positive = trigger earlier, negative = trigger later
     ledfx_trigger_buffer_ms: int = 250
     # Global default ramp duration for brightness/effect param changes; 0 = instant
@@ -610,12 +602,6 @@ class Settings(BaseSettings):
     flare_rms_high: float = 0.8
     flare_rms_low:  float = 0.2
 
-    # ── AI trigger generation ─────────────────────────────────────────────────
-    anthropic_api_key: str = ""
-    # "embedded" = free local KNN (auto-applies); "claude" = paid Claude API (saves suggestion set)
-    auto_generate_mode: str = "embedded"
-    # Show the AI Triggers page in the nav bar
-    show_ai_triggers: bool = False
     # Show advanced controls across all pages
     show_advanced: bool = False
     # Genre Blending — when ON, suppress song-start triggers if the previous song

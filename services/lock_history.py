@@ -10,7 +10,6 @@ offset had to move.
 Each entry:
     at               ISO timestamp (UTC) when the play's xcorr concluded
     uri / title / artist
-    device           active timing device when the lock ran (settings.active_timing_device)
     setlist_id       active Set List at the time (or None)
     play_type        "first" | "repeat" | ... (auto_offset classification)
     locked           True when lock-and-stop fired (hard lock mid-song)
@@ -105,7 +104,6 @@ def record(
     uri: str,
     title: str = "",
     artist: str = "",
-    device: str = "default",
     setlist_id: Optional[str] = None,
     play_type: str = "",
     locked: bool = False,
@@ -122,7 +120,6 @@ def record(
             "uri": uri,
             "title": title or "",
             "artist": artist or "",
-            "device": device or "default",
             "setlist_id": setlist_id,
             "play_type": play_type,
             "locked": bool(locked),
@@ -169,7 +166,7 @@ def recent_songs(limit: int = 10) -> list[dict]:
 
 def search(q: str, limit: int = 100) -> list[dict]:
     """All entries matching `q` (case-insensitive substring on title, artist,
-    uri, or device), newest first — multiple plays of the same song included."""
+    or uri), newest first — multiple plays of the same song included."""
     needle = (q or "").strip().lower()
     with _lock:
         entries = list(_load())
@@ -178,7 +175,7 @@ def search(q: str, limit: int = 100) -> list[dict]:
     out = []
     for e in entries:
         hay = " ".join([e.get("title") or "", e.get("artist") or "",
-                        e.get("uri") or "", e.get("device") or ""]).lower()
+                        e.get("uri") or ""]).lower()
         if needle in hay:
             out.append(e)
             if len(out) >= limit:

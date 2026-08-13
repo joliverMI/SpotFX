@@ -206,9 +206,6 @@ export default function TimingVizPage() {
           <PipeBox label="effective" value={fmtMs(t.effective_offset_ms)} kind="output" />
           <span style={{ margin: '0 12px', color: 'var(--text-muted)' }}>|</span>
           <PipeBox label="audio latency" value={`−${t.audio_latency_ms ?? 0}ms`} kind="input" />
-          {(Number(t.device_offset_ms || 0) !== 0 || (t.active_timing_device && t.active_timing_device !== 'default')) && (
-            <PipeBox label={`device: ${t.active_timing_device || 'default'}`} value={fmtMs(t.device_offset_ms)} />
-          )}
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           Each box is a measured ms value at the time of dump. Any inaccuracy in the input boxes

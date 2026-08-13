@@ -49,7 +49,6 @@ interface LiveState {
   displayModeResolved: 'default' | 'dark' | 'light';
   useAnalyzed: boolean;
   analyzedOverride: boolean;
-  useAiTriggers: boolean;
   lastScene: { name: string; color: string } | null;
   /** Scene Group currently driving the scene (Scene Morph's target), if any. */
   activeSceneGroup: { name: string } | null;
@@ -77,7 +76,6 @@ export const useLiveStore = create<LiveState>(() => ({
   displayModeResolved: 'default',
   useAnalyzed: true,
   analyzedOverride: false,
-  useAiTriggers: false,
   lastScene: null,
   activeSceneGroup: null,
   lastColorSet: null,
@@ -136,7 +134,6 @@ export function ensureLiveState(): void {
         (msg.display_mode_resolved as LiveState['displayModeResolved']) ?? 'default',
       useAnalyzed: Boolean(msg.use_analyzed_triggerless ?? true),
       analyzedOverride: Boolean(msg.analyzed_trigger_override ?? false),
-      useAiTriggers: Boolean(msg.use_unreviewed_ai_triggers ?? false),
       lastScene: msg.last_scene_name
         ? { name: String(msg.last_scene_name), color: String(msg.last_scene_color ?? '#888') }
         : null,

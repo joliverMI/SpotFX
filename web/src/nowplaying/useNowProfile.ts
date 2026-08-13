@@ -33,13 +33,12 @@ export function useNowProfile(uri: string | null) {
   const useAnalyzed = useLiveStore((s) => s.useAnalyzed);
   const analyzedOverride = useLiveStore((s) => s.analyzedOverride);
   const dinnerParty = useLiveStore((s) => s.dinnerParty);
-  const useAiTriggers = useLiveStore((s) => s.useAiTriggers);
 
   const { data: profile } = useProfileByUri(uri);
   const { data: events } = useEvents();
   const { data: active } = useQuery({
     // Refetch whenever a mode toggle changes — the engine swaps trigger sources.
-    queryKey: ['active-triggers', uri, useAnalyzed, analyzedOverride, dinnerParty, useAiTriggers],
+    queryKey: ['active-triggers', uri, useAnalyzed, analyzedOverride, dinnerParty],
     queryFn: () => apiGet<ActiveTriggers>('/control/active-triggers'),
     enabled: !!uri,
     retry: false,

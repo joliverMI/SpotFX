@@ -866,13 +866,9 @@ def _find_profile_for_genres(genres: list[str]) -> dict | None:
 
 
 async def _auto_generate_for_uri(spotify_uri: str) -> None:
-    """Background task: generate trigger suggestions for a freshly captured shape.
-
-    Routes to the embedded KNN engine (auto-applies) or the Claude AI engine
-    (saves suggestion set for review) based on settings.auto_generate_mode.
-    """
+    """Background task: generate triggers for a freshly captured shape via the
+    embedded KNN engine (auto-applies to the song profile)."""
     from services.websocket_manager import ws_manager
-    from config import settings as _s
 
     meta = load_audio_shape_meta(spotify_uri)
     training_profile = _find_profile_for_genres(meta.genres if meta else [])
@@ -883,16 +879,9 @@ async def _auto_generate_for_uri(spotify_uri: str) -> None:
     title  = meta.title  if meta else ""
     artist = meta.artist if meta else ""
 
-    mode = _s.auto_generate_mode  # "embedded" | "claude"
-
-    if mode == "embedded":
-        await _auto_generate_embedded(
-            spotify_uri, title, artist, meta, training_profile, ws_manager
-        )
-    else:
-        await _auto_generate_claude(
-            spotify_uri, title, artist, meta, training_profile, ws_manager
-        )
+    await _auto_generate_embedded(
+        spotify_uri, title, artist, meta, training_profile, ws_manager
+    )
 
 
 async def _auto_generate_embedded(
@@ -965,75 +954,6 @@ async def _auto_generate_embedded(
         "track_id": track_id,
     })
     logger.info("Embedded auto-generated %d triggers for %s — %s", len(raw), artist, title)
-
-
-async def _auto_generate_claude(
-    spotify_uri: str, title: str, artist: str, meta, training_profile: dict, ws_manager
-) -> None:
-    """Claude AI path: generate suggestions and save for review (existing behaviour)."""
-    from services.ai_trigger_service import generate_suggestions
-    from services.suggestion_store import save_suggestion_set, load_suggestion_set
-    from models.ai_suggestion_set import AISuggestionSet, SavedSuggestion
-    from datetime import datetime, timezone
-
-    # Skip if suggestions already exist for this song
-    track_id = spotify_uri.split(":")[-1]
-    if load_suggestion_set(track_id) is not None:
-        logger.debug("Auto-generate (claude) skipped — suggestions already exist for %s", track_id)
-        return
-
-    await ws_manager.broadcast({"type": "auto_generate_started", "title": title, "artist": artist, "method": "claude"})
-    try:
-        suggestions, usage = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: generate_suggestions(
-                training_uris=training_profile["training_uris"],
-                target_uri=spotify_uri,
-                description=training_profile.get("description", ""),
-            ),
-        )
-    except Exception as exc:
-        logger.warning("Auto-generate (claude) failed for %s: %s", spotify_uri, exc)
-        await ws_manager.broadcast({
-            "type": "auto_generate_failed",
-            "title": title, "artist": artist, "error": str(exc),
-        })
-        return
-
-    saved_suggestions = [
-        SavedSuggestion(
-            timestamp_ms=s.timestamp_ms,
-            event_id=s.event_id,
-            event_name=s.event_name,
-            confidence=s.confidence,
-            reasoning=s.reasoning,
-            original_timestamp_ms=s.timestamp_ms,
-            original_event_id=s.event_id,
-        )
-        for s in suggestions
-    ]
-    suggestion_set = AISuggestionSet(
-        spotify_uri=spotify_uri,
-        title=title, artist=artist,
-        duration_ms=meta.duration_ms if meta else 0,
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        training_profile_id=training_profile["id"],
-        training_profile_name=training_profile.get("name", ""),
-        suggestions=saved_suggestions,
-        cost_usd=usage["cost_usd"],
-        input_tokens=usage["input_tokens"],
-        output_tokens=usage["output_tokens"],
-    )
-    save_suggestion_set(suggestion_set)
-
-    await ws_manager.broadcast({
-        "type": "auto_generate_complete",
-        "title": title, "artist": artist,
-        "count": len(suggestions),
-        "method": "claude",
-        "track_id": track_id,
-    })
-    logger.info("Claude auto-generated %d suggestions for %s — %s", len(suggestions), artist, title)
 
 
 async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> bool:

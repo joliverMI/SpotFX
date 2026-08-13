@@ -84,9 +84,6 @@ async def dump(uri: str = "") -> dict:
         "ledfx_rtt_ms": timing.get("ledfx_rtt_ms"),
         "ledfx_trigger_buffer_ms": settings.ledfx_trigger_buffer_ms,
         "audio_latency_ms": settings.audio_latency_ms,
-        "active_timing_device": getattr(settings, "active_timing_device", "default"),
-        "device_offset_ms": int((getattr(settings, "timing_device_offsets", {}) or {})
-                                .get(getattr(settings, "active_timing_device", "default"), 0) or 0),
         "shape_offset_ms": timing.get("shape_offset_ms"),
         "shape_offset_quality": timing.get("shape_offset_quality"),
         "shape_offset_source": timing.get("shape_offset_source"),

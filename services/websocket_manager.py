@@ -98,7 +98,6 @@ class WebSocketManager:
             "recapture_remaining": state.recapture_remaining,
             "recording_active": _recording_active(),
             "last_capture": _last_capture(),
-            "use_unreviewed_ai_triggers": state.use_unreviewed_ai_triggers,
             "use_analyzed_triggerless": state.use_analyzed_triggerless,
             "analyzed_trigger_override": state.analyzed_trigger_override,
             "auto_generate_enabled": state.auto_generate_enabled,

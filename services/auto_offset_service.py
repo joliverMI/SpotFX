@@ -1401,7 +1401,6 @@ class AutoOffsetService:
             uri=uri,
             title=meta.title or "",
             artist=meta.artist or "",
-            device=getattr(settings, "active_timing_device", "default"),
             setlist_id=app_state.active_setlist_id,
             play_type=play_type,
             locked=_locked_via_stop,

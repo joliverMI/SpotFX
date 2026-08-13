@@ -15,7 +15,6 @@ import SetlistsPage from './setlists/SetlistsPage';
 import SettingsPage from './settings/SettingsPage';
 import TriggerlessPage from './triggerless/TriggerlessPage';
 import TimingVizPage from './timingviz/TimingVizPage';
-import AITriggersPage from './aitriggers/AITriggersPage';
 import HelpPage from './help/HelpPage';
 
 const PAGE_TITLES: [string, string][] = [
@@ -30,7 +29,6 @@ const PAGE_TITLES: [string, string][] = [
   ['/settings', 'Settings'],
   ['/triggerless', 'Triggerless'],
   ['/timing', 'Timing'],
-  ['/ai-triggers', 'AI Triggers'],
   ['/help', 'Help'],
 ];
 
@@ -64,7 +62,6 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/triggerless" element={<TriggerlessPage />} />
           <Route path="/timing" element={<TimingVizPage />} />
-          <Route path="/ai-triggers" element={<AITriggersPage />} />
           <Route path="/help" element={<HelpPage />} />
         </Routes>
       </main>
