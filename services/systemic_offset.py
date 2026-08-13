@@ -137,9 +137,6 @@ def record(residual_ms: int, quality: float) -> None:
             "residual_ms": int(residual_ms),
             "quality": round(float(quality), 3),
             "at": _now().isoformat(),
-            # Tag with the active timing device so a bias learned on one
-            # snapcast client never leaks into predictions for another.
-            "device": str(getattr(settings, "active_timing_device", "default") or "default"),
         })
         cap = int(getattr(settings, "systemic_offset_sample_cap", 40))
         del samples[cap:]
@@ -169,13 +166,8 @@ def predict(now: Optional[datetime] = None) -> BiasPrediction:
     with _lock:
         samples = list(_load())
 
-    active_device = str(getattr(settings, "active_timing_device", "default") or "default")
     weighted: list[tuple[float, float]] = []   # (residual, weight)
     for s in samples:
-        # Per-device isolation: only samples from the active timing device
-        # feed its prediction (legacy samples without a tag count as "default").
-        if str(s.get("device", "default") or "default") != active_device:
-            continue
         at = _parse(s.get("at", ""))
         if at is None:
             continue

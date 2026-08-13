@@ -177,13 +177,12 @@ Configure the audio device in `.env` (`AUDIO_INPUT_DEVICE`) or in the Settings U
 For anyone looking to fork and modify:
 
 ```
-api/           External service clients (Spotify, LedFX, Home Assistant, audio capture)
+api/           External service clients (Spotify, LedFX, audio capture)
 services/      Core logic (trigger engine, audio analysis, profile management, librosa)
 routers/       FastAPI REST endpoints
 models/        Pydantic data models
-frontend/      Vanilla HTML/CSS/JS UI (no build step)
+web/           React SPA (Vite build → web/dist, served at /app)
 storage/       Runtime data (profiles, audio shapes, settings) — gitignored
-nn/            Experimental neural network (not used in production)
 ```
 
 **Key components:**

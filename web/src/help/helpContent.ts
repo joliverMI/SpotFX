@@ -85,10 +85,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'concept-triggerless',
-        title: 'Triggerless & AI triggers',
-        keywords: 'automatic machine learning generated suggestions',
+        title: 'Triggerless',
+        keywords: 'automatic machine learning generated analyzed',
         body: [
-          'Songs without a hand-built profile can still react: Triggerless mode maps analyzed features (bass, snare, sections) to event slots, and AI Triggers can generate suggested trigger placements for review before applying them to a profile.',
+          'Songs without a hand-built profile can still react: Triggerless mode maps analyzed features (bass, snare, sections) to event slots via the embedded pipeline and its training profiles.',
         ],
       },
     ],
@@ -158,8 +158,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Color Sets', 'Set name or any label.'],
           ['Set Lists', 'Name or Spotify context URI.'],
           ['Devices', 'Category name; the import dialog filters by virtual id.'],
-          ['Song pickers', 'Track title or artist (Builder, Triggerless, AI Triggers).'],
-          ['AI Triggers — saved runs', 'Title/artist, plus tabs: All / Not Applied / Unreviewed / Reviewed / Applied.'],
+          ['Song pickers', 'Track title or artist (Builder, Triggerless).'],
           ['Comma lists', 'Label and genre inputs are comma-separated; whitespace is trimmed.'],
         ],
         kbd: false,
@@ -325,9 +324,11 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'builder-misc',
             title: 'Other builder controls',
-            keywords: 'shift all offset resize canvas height live capture import setlist mode',
+            keywords: 'shift all offset resize canvas height live capture import setlist mode manual verify calibrating badge',
             table: [
               ['Shift all', 'Preview sliding every trigger by an offset, then apply. Double-click the slider to reset to 0.'],
+              ['Offset badge ✎ / ✕', 'Write the shape offset by hand (saved as user-verified) or clear it back to unverified so auto-calibration relearns.'],
+              ['🎯 auto-calibrating…', 'Shown in the Audio Shape header while xcorr auto-calibration is targeting this song\'s (still unverified) offset.'],
               ['⣀ handle below canvas', 'Drag to resize the canvas height.'],
               ['Modes', 'Song search picks any profile; Live mode follows Spotify playback; Auto Wait pauses placement until playback reaches the window.'],
             ],
@@ -353,6 +354,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Search matches name or labels; type chips narrow by kind. Row icons: 🔒 built-in (body read-only — settings still editable), 🌳 composite tree, ⚡ energy level, AI = exposed to AI trigger generation. ▶ test-fires the event immediately.',
           'Create buttons: + Random / + Sequence / + Parallel / + Intensity start a new composite event with that root group; + Scene Group starts a group of Scene Updates (see "Scene Groups"). The Scenes chip includes Scene Groups.',
+          '⤵ Import Scene converts a LedFX scene into a starter Morph Set event: pick the scene from the dropdown and the importer back-solves its live per-virtual state into editable morph lanes, then opens the new event.',
         ],
       },
       {
@@ -824,7 +826,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'The shape view follows the playhead. Drag to pan and inspect elsewhere in the song ("Follow playhead" snaps back); following always resumes when the song changes or the page reopens.',
           'The Audio Shape card shows the captured waveform with the live offset status ("start +Xms → now +Yms, Q=quality"). A "recapture suggested" badge appears when the stored offset keeps disagreeing with live audio; Recapture deletes the stored shape (audio + analysis) so the song re-records on its next play.',
-          'Recapture self-corrects: when a song is force-recaptured, the new recording is cross-correlated against the old one and any timing shift between the two is applied automatically to the song\'s triggers (including per-Set-List overrides), pending AI suggestions, and learned offsets — so existing triggers keep landing on the same musical moments. If the shift can\'t be measured confidently, triggers are left untouched and offsets relearn from scratch.',
+          'Recapture self-corrects: when a song is force-recaptured, the new recording is cross-correlated against the old one and any timing shift between the two is applied automatically to the song\'s triggers (including per-Set-List overrides) and learned offsets — so existing triggers keep landing on the same musical moments. If the shift can\'t be measured confidently, triggers are left untouched and offsets relearn from scratch.',
         ],
       },
     ],
@@ -1069,50 +1071,6 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
 
-  /* ── AI Triggers ─────────────────────────────────────────────── */
-  {
-    id: 'aitriggers',
-    title: 'AI Triggers',
-    keywords: 'claude generate suggestions review knn embedded haiku sonnet',
-    intro:
-      'Generate suggested trigger placements per song — via Claude (Haiku/Sonnet, costed) or the free local Embedded (KNN) model — then review, adjust, and apply them to the song\'s profile. Shown in the nav when "Show AI Triggers" is enabled in Settings.',
-    entries: [
-      {
-        id: 'aitriggers-workflow',
-        title: 'Workflow',
-        keywords: 'training songs target generate cost confirm',
-        body: [
-          'Pick or create a Training Profile (vibe description + genres), add training songs (AI + Embedded are sent to Claude and used for KNN; Embedded Only songs feed KNN alone), add Target Songs (they need a captured audio shape), then Generate. Model buttons in the cost-confirm dialog require a 500 ms hold; Embedded runs free and locally.',
-          'If a target song already has triggers you choose: keep them (AI suggests additions only, no duplicates) or hold the delete button for 2 seconds to wipe them first.',
-        ],
-      },
-      {
-        id: 'aitriggers-review',
-        title: 'Review panel',
-        keywords: 'approve reject apply markers confidence feedback',
-        body: [
-          'Suggestions appear as canvas markers: white = pending, green = approved, faded red = rejected, blue = manually added. Approve individually, or "✓ Approve ≥80%" by confidence, then Apply Approved to write them into the profile.',
-        ],
-        table: [
-          ['Drag a marker', 'Move the suggestion in time (snapped); a plain click highlights its row.'],
-          ['Double-click empty canvas', 'Add a manual suggestion there.'],
-          ['Right-click canvas', 'Quick-add a suggestion with the last-used event.'],
-          ['Middle-drag', 'Pan the view.'],
-          ['Band chips', 'Click toggles the band fill; right-click toggles its rolling-average line.'],
-        ],
-        kbd: false,
-      },
-      {
-        id: 'aitriggers-learning',
-        title: 'Analyze & feedback',
-        keywords: 'analyze learning refine profile description comments',
-        body: [
-          'Per-suggestion comments and the song feedback box are sent to Analyze Learning: "Analyze This Song" / "Analyze All" has Claude study what you approved and rejected and propose a refined profile description you can apply or discard.',
-        ],
-      },
-    ],
-  },
-
   /* ── Timing & Debug ──────────────────────────────────────────── */
   {
     id: 'timing-debug',
@@ -1126,16 +1084,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Lock history',
         keywords: 'last 10 songs grade time to lock offset delta search recent plays',
         body: [
-          'The panel at the top of the Timing page lists the last 10 distinct songs\' lock outcomes: how long into the song the hard lock landed ("time to lock"), the final offset, how far it had to move from the previous baseline (Δ needed), the lock quality Q, and a letter grade. Click any row to load that song\'s full timing dump below; type in the search box to switch to a full-history search (every stored play matching title, artist, uri, or device).',
+          'The panel at the top of the Timing page lists the last 10 distinct songs\' lock outcomes: how long into the song the hard lock landed ("time to lock"), the final offset, how far it had to move from the previous baseline (Δ needed), the lock quality Q, and a letter grade. Click any row to load that song\'s full timing dump below; type in the search box to switch to a full-history search (every stored play matching title, artist, or uri).',
           'Grades: the base comes from the play\'s best Q (A ≥ 0.9, B ≥ 0.8, C ≥ 0.7, D ≥ 0.6, F below). A play that finished its windows without a hard lock drops one notch, and so does a hard lock that landed more than 30 s into the song (the song ran that long on the cold-start baseline).',
-        ],
-      },
-      {
-        id: 'timing-device-offsets',
-        title: 'Per-device timing offsets',
-        keywords: 'snapcast client multiple devices active device offset trim latency',
-        body: [
-          'Multiple snapcast client devices can play SpotFX audio, each with its own playback-chain latency. Settings → Latency & Timing → Timing devices lets you name each device, give it an offset (ms), and mark which one is active. The active device\'s offset is layered onto the resolved shape offset (visible as a "device" box in the fire-time pipeline), and lock history plus the systemic offset learner tag their samples with the active device so timing learned on one device never contaminates another.',
         ],
       },
       {

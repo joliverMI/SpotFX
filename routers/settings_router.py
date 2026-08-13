@@ -43,8 +43,6 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 class SettingsPatch(BaseModel):
     audio_latency_ms: Optional[int] = None
-    active_timing_device: Optional[str] = None
-    timing_device_offsets: Optional[dict[str, int]] = None
     ledfx_trigger_buffer_ms: Optional[int] = None
     builder_zoom_window_s: Optional[int] = None
     builder_future_buffer_s: Optional[int] = None
@@ -64,8 +62,6 @@ class SettingsPatch(BaseModel):
     audio_shape_min_capture_pct: Optional[float] = None
     smooth_ramp_ms: Optional[int] = None
     hue_blend_transitions: Optional[bool] = None
-    auto_generate_mode: Optional[str] = None   # "embedded" | "claude"
-    show_ai_triggers: Optional[bool] = None
     show_advanced: Optional[bool] = None
     genre_blending_enabled: Optional[bool] = None
     force_scene_enabled: Optional[bool] = None
@@ -97,8 +93,6 @@ class SettingsPatch(BaseModel):
 async def get_settings():
     return {
         "audio_latency_ms": settings.audio_latency_ms,
-        "active_timing_device": settings.active_timing_device,
-        "timing_device_offsets": settings.timing_device_offsets,
         "ledfx_trigger_buffer_ms": settings.ledfx_trigger_buffer_ms,
         "builder_zoom_window_s": settings.builder_zoom_window_s,
         "builder_future_buffer_s": settings.builder_future_buffer_s,
@@ -122,8 +116,6 @@ async def get_settings():
         "audio_shape_min_capture_pct": settings.audio_shape_min_capture_pct,
         "smooth_ramp_ms": settings.smooth_ramp_ms,
         "hue_blend_transitions": settings.hue_blend_transitions,
-        "auto_generate_mode": settings.auto_generate_mode,
-        "show_ai_triggers": settings.show_ai_triggers,
         "show_advanced": settings.show_advanced,
         "genre_blending_enabled": settings.genre_blending_enabled,
         "force_scene_enabled": settings.force_scene_enabled,

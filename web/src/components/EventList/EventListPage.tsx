@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useEvents, useFireEvent } from '../../api/queries';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEvents, useFireEvent, useScenes } from '../../api/queries';
+import { apiPost } from '../../api/client';
+import { useToast } from '../Toast';
 import { EVENT_TYPE_LABELS, SCENE_EVENT_TYPES, type EventType, type MusicEvent } from '../../types/events';
 
 type Filter = 'all' | 'single' | 'sequence' | 'beat_sequence' | 'morph_set' | 'scene' | 'device_settings';
@@ -44,6 +47,29 @@ export default function EventListPage() {
   const setSearch = (v: string) => { setSearchState(v); sessionStorage.setItem('spotfx.events.search', v); };
   const setFilter = (v: Filter) => { setFilterState(v); sessionStorage.setItem('spotfx.events.filter', v); };
   const [firedId, setFiredId] = useState<string | null>(null);
+
+  // Import a LedFX scene as a starter Morph Set (POST /api/morph/import-scene).
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [showImport, setShowImport] = useState(false);
+  const [importSceneId, setImportSceneId] = useState('');
+  const [importing, setImporting] = useState(false);
+  const { data: scenes } = useScenes();
+  const runImport = async () => {
+    if (!importSceneId || importing) return;
+    setImporting(true);
+    try {
+      const r = await apiPost<{ event_id: string }>(
+        `/morph/import-scene/${encodeURIComponent(importSceneId)}`);
+      await qc.invalidateQueries({ queryKey: ['events'] });
+      setShowImport(false);
+      navigate(`/event/${r.event_id}`);
+    } catch (e) {
+      toast(`Import failed: ${e instanceof Error ? e.message : e}`, 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const visible = useMemo(() => {
     if (!events) return [];
@@ -99,8 +125,22 @@ export default function EventListPage() {
             <button className="primary" title="New event whose body is a Light Mode Chooser — the room's Dark/Light mode picks a lane"
               onClick={() => navigate('/event/new?type=composite&root=light_mode_chooser')}>+ Light Mode</button>
             <button className="primary" onClick={() => navigate('/event/new?type=scene_group')}>+ Scene Group</button>
+            <button title="Convert a LedFX scene into a starter Morph Set event"
+              onClick={() => setShowImport((v) => !v)}>⤵ Import Scene</button>
           </span>
         </div>
+        {showImport && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <select value={importSceneId} onChange={(e) => setImportSceneId(e.target.value)}
+              style={{ flex: 1, maxWidth: 340 }}>
+              <option value="">Pick a LedFX scene…</option>
+              {(scenes ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <button className="primary" disabled={!importSceneId || importing} onClick={runImport}>
+              {importing ? 'Importing…' : 'Import as Morph Set'}
+            </button>
+          </div>
+        )}
       </div>
 
       {visible.map((ev) => (

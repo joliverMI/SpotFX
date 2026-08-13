@@ -396,22 +396,6 @@ async def get_librosa_status(uri: str = Query(...)):
     return {"has_wav": has_wav, "has_analysis": has_analysis}
 
 
-@router.patch("/librosa-offset")
-async def update_librosa_offset(uri: str, librosa_offset_ms: int):
-    """Persist the librosa time offset for a URI to its .librosa.json sidecar."""
-    from services.librosa_service import get_analysis_by_uri, librosa_json_path
-    meta = load_audio_shape_meta(uri)
-    if meta is None:
-        raise HTTPException(404, "No audio shape found")
-    analysis = get_analysis_by_uri(uri)
-    if analysis is None:
-        raise HTTPException(404, "No librosa analysis found")
-    analysis.librosa_offset_ms = librosa_offset_ms
-    jpath = librosa_json_path(meta)
-    jpath.write_text(analysis.model_dump_json(indent=2), encoding="utf-8")
-    return {"status": "updated", "librosa_offset_ms": librosa_offset_ms}
-
-
 @router.post("/librosa-analyze")
 async def trigger_librosa_analyze(body: dict):
     """

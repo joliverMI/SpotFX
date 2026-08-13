@@ -74,7 +74,6 @@ class AppState:
     # the toggle at zero).
     recapture_active: bool = False        # True = force-recapture every song that plays
     recapture_remaining: int = 0          # 0 = inactive; >0 = N songs left to recapture
-    use_unreviewed_ai_triggers: bool = False  # True = use saved AI suggestion set instead of profile triggers
     use_analyzed_triggerless: bool = True      # True = use embedded pipeline triggers instead of synthetic triggerless
     analyzed_trigger_override: bool = False    # True = override user triggers with analyzed (debug/testing)
     auto_generate_enabled: bool = False       # True = auto-generate triggers after shape capture

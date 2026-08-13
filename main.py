@@ -2,7 +2,7 @@
 SpotFX — FastAPI application entry point.
 
 Startup sequence:
-  1. Mount static frontend files
+  1. Mount the React SPA (web/dist) at /app; / redirects there
   2. Register API routers
   3. Start background tasks:
        - Song source loop (Spotify polling or LedFX WebSocket, per settings)
@@ -19,7 +19,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from config import settings, PROFILES_DIR, AUDIO_SHAPES_DIR
 from models.state import state
@@ -29,7 +29,7 @@ from services.websocket_manager import ws_manager
 from services.profile_manager import load_profile_by_uri, load_profile_by_title_artist, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
-from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, ai_suggestions_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router
+from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router
 from routers.settings_router import apply_settings_override
 from services import effect_params
 
@@ -196,7 +196,6 @@ app.include_router(settings_router.router)
 app.include_router(audio_shape_router.router)
 app.include_router(auth.router)
 app.include_router(ai_triggers_router.router)
-app.include_router(ai_suggestions_router.router)
 app.include_router(effect_params_router.router)
 app.include_router(gradients_router.router)
 app.include_router(palettes_router.router)
@@ -263,11 +262,6 @@ async def websocket_endpoint(ws: WebSocket):
         ws_manager.disconnect(ws)
 
 
-# ── Static frontend ───────────────────────────────────────────────────────────
-FRONTEND_DIR = Path(__file__).parent / "frontend"
-app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
-
-
 # ── React SPA (web/dist) ──────────────────────────────────────────────────────
 class SPAStaticFiles(StaticFiles):
     """Serve web/dist with index.html fallback so client-side routes
@@ -290,19 +284,12 @@ if WEB_DIST.exists():
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse(str(FRONTEND_DIR / "favicon.svg"), media_type="image/svg+xml")
+    return FileResponse(str(WEB_DIST / "favicon.svg"), media_type="image/svg+xml")
 
 
 @app.get("/")
 async def root():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
-
-@app.get("/{page}.html")
-async def serve_page(page: str):
-    path = FRONTEND_DIR / f"{page}.html"
-    if path.exists():
-        return FileResponse(str(path))
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    return RedirectResponse(url="/app/")
 
 
 # ── Runner ──────────────────────────────────────────────────────────────────

@@ -223,27 +223,6 @@ def apply_shift_to_profile(spotify_uri: str, shift_ms: int, duration_ms: int) ->
     return n_main, n_setlist
 
 
-def apply_shift_to_suggestions(spotify_uri: str, shift_ms: int, duration_ms: int) -> int:
-    """Shift a pending (under-review) AI suggestion set, if one exists."""
-    from services.suggestion_store import load_suggestion_set, save_suggestion_set
-
-    track_id = spotify_uri.split(":")[-1]
-    ss = load_suggestion_set(track_id)
-    if ss is None or not ss.suggestions:
-        return 0
-    for s in ss.suggestions:
-        for attr in ("timestamp_ms", "original_timestamp_ms"):
-            ts = getattr(s, attr, None)
-            if ts is None:
-                continue
-            ts = ts + shift_ms
-            if duration_ms > 0:
-                ts = min(ts, duration_ms)
-            setattr(s, attr, max(0, ts))
-    save_suggestion_set(ss)
-    return len(ss.suggestions)
-
-
 def invalidate_analyzed_cache(spotify_uri: str) -> None:
     """Drop the cached analyzed triggers so they regenerate from the fresh
     librosa analysis (their timestamps came from the old capture's beats)."""
@@ -268,7 +247,7 @@ def realign_after_recapture(spotify_uri: str, stem: str, duration_ms: int) -> di
     sidecar = AUDIO_SHAPES_DIR / f"{stem}.json"
 
     summary: dict = {"status": "", "shift_ms": 0, "r": 0.0,
-                     "triggers": 0, "setlist_triggers": 0, "suggestions": 0,
+                     "triggers": 0, "setlist_triggers": 0,
                      "offsets_migrated": False}
 
     # The old capture's librosa beats no longer describe the new WAV — always
@@ -306,11 +285,6 @@ def realign_after_recapture(spotify_uri: str, stem: str, duration_ms: int) -> di
                     summary["triggers"], summary["setlist_triggers"] = n_main, n_sl
                 except Exception as exc:
                     logger.warning("Realign: trigger shift failed: %s", exc)
-                try:
-                    summary["suggestions"] = apply_shift_to_suggestions(
-                        spotify_uri, m.shift_ms, duration_ms)
-                except Exception as exc:
-                    logger.warning("Realign: suggestion shift failed: %s", exc)
             else:
                 summary["status"] = "no_shift"
 
@@ -332,8 +306,8 @@ def realign_after_recapture(spotify_uri: str, stem: str, duration_ms: int) -> di
         logger.warning("Realign: sidecar update failed: %s", exc)
 
     logger.info(
-        "Realign %s: %s (shift %+dms r=%.3f, %d+%d triggers, %d suggestions)",
+        "Realign %s: %s (shift %+dms r=%.3f, %d+%d triggers)",
         stem, summary["status"], summary["shift_ms"], summary["r"],
-        summary["triggers"], summary["setlist_triggers"], summary["suggestions"],
+        summary["triggers"], summary["setlist_triggers"],
     )
     return summary

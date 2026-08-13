@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from config import settings
 from services import lock_history
 
 router = APIRouter(prefix="/api/lock-history", tags=["lock-history"])
@@ -21,13 +20,12 @@ async def recent(limit: int = 10) -> dict:
     """Most recent lock per distinct song, newest first."""
     return {
         "entries": lock_history.recent_songs(limit=max(1, min(limit, 50))),
-        "active_device": getattr(settings, "active_timing_device", "default"),
     }
 
 
 @router.get("/search")
 async def search(q: str = "", limit: int = 100) -> dict:
-    """All stored entries matching `q` (title/artist/uri/device substring),
+    """All stored entries matching `q` (title/artist/uri substring),
     newest first — repeated plays of a song each get their own row."""
     return {"entries": lock_history.search(q, limit=max(1, min(limit, 500)))}
 

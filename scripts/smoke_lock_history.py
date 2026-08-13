@@ -1,14 +1,13 @@
 """
 Smoke test for the Timing-page lock history (services/lock_history.py,
-routers/lock_history_router.py) and the per-device offset layer.
+routers/lock_history_router.py) and the systemic offset learner.
 
   1. Grades      — quality notches, no-hard-lock penalty, slow-lock penalty.
   2. Record      — entries persist with delta_ms computed from prev offset.
   3. Recent      — recent_songs() dedupes to the latest entry per uri.
-  4. Search      — case-insensitive substring over title/artist/uri/device.
+  4. Search      — case-insensitive substring over title/artist/uri.
   5. API         — /api/lock-history endpoints serve the same data.
-  6. Device layer— trigger_engine adds the active device's offset; systemic
-                   learner isolates samples per device.
+  6. Systemic    — the learner records residuals and layers a bias.
 
 Run:  PYTHONPATH=. .venv/bin/python scripts/smoke_lock_history.py
 Exit code 0 = all assertions passed.
@@ -48,15 +47,15 @@ def main() -> int:
 
     print("2. Record + delta")
     lh.record(uri="spotify:track:aaa", title="Alpha", artist="Artist One",
-              device="default", play_type="first", locked=True,
+              play_type="first", locked=True,
               time_to_lock_ms=8400, offset_ms=1500, prev_offset_ms=1300,
               quality=0.91, n_windows=4)
     lh.record(uri="spotify:track:bbb", title="Beta", artist="Artist Two",
-              device="living-room", play_type="first", locked=False,
+              play_type="first", locked=False,
               time_to_lock_ms=None, offset_ms=-200, prev_offset_ms=None,
               quality=0.72, n_windows=2)
     lh.record(uri="spotify:track:aaa", title="Alpha", artist="Artist One",
-              device="default", play_type="repeat", locked=True,
+              play_type="repeat", locked=True,
               time_to_lock_ms=42000, offset_ms=1550, prev_offset_ms=1500,
               quality=0.88, n_windows=6)
     entries = lh.search("", limit=10)
@@ -79,7 +78,6 @@ def main() -> int:
     print("4. Search")
     check("by title", len(lh.search("alpha")) == 2)
     check("by artist", len(lh.search("artist two")) == 1)
-    check("by device", len(lh.search("living-room")) == 1)
     check("by uri fragment", len(lh.search("track:bbb")) == 1)
     check("no match", len(lh.search("zzz-nothing")) == 0)
     check("entries_for_uri", len(lh.entries_for_uri("spotify:track:aaa")) == 2)
@@ -92,7 +90,7 @@ def main() -> int:
     app.include_router(lock_history_router.router)
     client = TestClient(app)
     r = client.get("/api/lock-history/recent?limit=10").json()
-    check("recent endpoint", len(r["entries"]) == 2 and "active_device" in r)
+    check("recent endpoint", len(r["entries"]) == 2)
     r = client.get("/api/lock-history/search?q=beta").json()
     check("search endpoint", len(r["entries"]) == 1)
     # Beta is Q .72 (C base) with no hard lock → one notch down → D.
@@ -101,39 +99,25 @@ def main() -> int:
     r = client.get("/api/lock-history/song?uri=spotify:track:aaa").json()
     check("song endpoint", len(r["entries"]) == 2)
 
-    print("6. Per-device offset layer")
-    from services.trigger_engine import _device_offset, _layer_systemic
+    print("6. Systemic offset layer")
+    from services.trigger_engine import _layer_systemic
     settings.systemic_offset_enabled = False
-    settings.timing_device_offsets = {"living-room": 350, "patio": -120}
-    settings.active_timing_device = "living-room"
-    check("device offset resolves", _device_offset() == (350, "living-room"))
     off, _q, src = _layer_systemic(1000, 0.9, "default")
-    check("layered into offset", off == 1350, f"off={off}")
-    check("source labelled", "dev:living-room:+350" in src, src)
-    settings.active_timing_device = "default"
-    off, _q, src = _layer_systemic(1000, 0.9, "default")
-    check("default device = no-op", off == 1000 and "dev:" not in src)
+    check("disabled learner = no-op", off == 1000 and "systemic:" not in src)
 
     from services import systemic_offset as so
     so._STORE_PATH = Path(tempfile.mkstemp(suffix="_bias_smoke.json")[1])
     so.reset()
     settings.systemic_offset_enabled = True
     settings.systemic_offset_min_quality = 0.55
-    settings.active_timing_device = "living-room"
     so.record(800, 0.9)
     so.record(820, 0.9)
     so.record(810, 0.9)
     so.record(805, 0.9)
-    p_lr = so.predict()
-    settings.active_timing_device = "patio"
-    p_patio = so.predict()
-    check("systemic learns on its device", p_lr.n == 4 and p_lr.confidence > 0,
-          f"n={p_lr.n} conf={p_lr.confidence}")
-    check("other device sees none of it", p_patio.n == 0 and p_patio.bias_ms == 0,
-          f"n={p_patio.n}")
+    p = so.predict()
+    check("systemic learns", p.n == 4 and p.confidence > 0,
+          f"n={p.n} conf={p.confidence}")
     settings.systemic_offset_enabled = False
-    settings.active_timing_device = "default"
-    settings.timing_device_offsets = {}
 
     print()
     if _failures:
