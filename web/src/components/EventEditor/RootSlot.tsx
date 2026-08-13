@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { SortableContext } from '@dnd-kit/sortable';
 import type { MusicEvent } from '../../types/events';
 import { getUid } from '../../lib/uid';
-import { newAction } from '../../lib/defaults';
+import { newAction, newLightModeChooser } from '../../lib/defaults';
 import { useEditorStore } from '../../store/editorStore';
 import EditActionCard from '../cards/EditActionCard';
 import AddActionDialog from '../dialogs/AddActionDialog';
@@ -40,7 +40,7 @@ export default function RootSlot({ event }: { event: MusicEvent }) {
           types={EDITABLE_ACTION_TYPES}
           onClose={() => setAdding(false)}
           onPick={(t) => {
-            mutate((d) => { d.root = newAction(t); });
+            mutate((d) => { d.root = t === 'light_mode_chooser' ? newLightModeChooser() : newAction(t); });
             setAdding(false);
           }}
         />

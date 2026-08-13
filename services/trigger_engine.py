@@ -2481,15 +2481,23 @@ class TriggerEngine:
                     return f"🎲 {opt.name or inner or '—'}" if not opt.name else f"🎲 {opt.name}: {inner}"
             return f"🎲 1 of {len(action.options)}"
         elif action.type == "intensity_chooser":
+            is_mode = getattr(action, "source", "") == "display_mode"
+            icon = "🌗" if is_mode else "⚡"
             if resolved and action.id in resolved and _depth < 4:
                 lane = next((l for l in action.lanes if l.id == resolved[action.id]), None)
                 if lane is not None:
                     idx = action.lanes.index(lane)
-                    label = lane.name or ("default" if idx == 0 else f"lane {idx}")
+                    if is_mode:
+                        label = lane.name or {"dark": "🌙 dark", "light": "☀️ light"}.get(
+                            getattr(lane, "mode", None) or "", f"lane {idx}")
+                    else:
+                        label = lane.name or ("default" if idx == 0 else f"lane {idx}")
                     inner = ", ".join(
                         self._describe_action(a, _depth + 1, resolved) for a in lane.actions
                     )
-                    return f"⚡ {label}: {inner}" if inner else f"⚡ {label}"
+                    return f"{icon} {label}: {inner}" if inner else f"{icon} {label}"
+            if is_mode:
+                return f"🌗 dark/light · {len(action.lanes)} lanes"
             return f"⚡ 1 of {len(action.lanes)} lanes"
         elif action.type == "sequence_group":
             if _depth >= 3:
@@ -3354,10 +3362,24 @@ class TriggerEngine:
         """Pick the IntensityLane for `intensity`. lanes[0] is the default
         lane; among lanes[1:] the highest threshold <= intensity wins, with
         equal thresholds resolved to the later lane. No intensity context
-        (manual test fires) → default lane."""
+        (manual test fires) → default lane.
+
+        source == "display_mode" (Light Mode Chooser) ignores intensity: the
+        resolved Dark/Light mode (global → trigger ContextVar → scene group →
+        scene) picks the first lane whose `mode` matches; "default" resolves
+        to action.default_mode; no matching lane → lanes[0]. At plan time the
+        trigger ContextVar isn't set, so the plan pick can miss a trigger-level
+        override — fire time re-resolves (see _execute_action)."""
         lanes = action.lanes
         if not lanes:
             return None
+        if getattr(action, "source", "trigger_intensity") == "display_mode":
+            from services import display_mode as dm
+            _gm, _sm = dm.group_and_scene_modes()
+            mode = dm.resolve(state.display_mode, _FIRE_DISPLAY_MODE.get(), _gm, _sm)
+            if mode == "default":
+                mode = getattr(action, "default_mode", "light")
+            return next((l for l in lanes if getattr(l, "mode", None) == mode), lanes[0])
         if intensity is None:
             return lanes[0]
         best, best_thr = lanes[0], -1.0
@@ -3423,7 +3445,12 @@ class TriggerEngine:
             return
         if action.type == "intensity_chooser":
             lane = None
-            if resolved_picks and action.id in resolved_picks:
+            # Light Mode Chooser lanes are NEVER taken from plan-time picks:
+            # the mode can flip between plan and fire (TopBar toggle, trigger
+            # override the planner couldn't see), so re-resolve now — the
+            # plan pick only feeds previews/leads.
+            if (resolved_picks and action.id in resolved_picks
+                    and getattr(action, "source", "trigger_intensity") != "display_mode"):
                 lane = next((l for l in action.lanes if l.id == resolved_picks[action.id]), None)
             if lane is None:
                 lane = self._pick_intensity_lane(action, _FIRE_INTENSITY.get())
@@ -4457,8 +4484,35 @@ class TriggerEngine:
             state.last_color_group_id = card.id
             group_card_mode = getattr(card, "display_mode", "default")
             overrides = list(card.entries or [])
+            # Dark/Light "mode lane": resolved from every level ABOVE the
+            # member set (the picked set's own display_mode can't influence
+            # which pool it is picked from). "default" = base group as-is.
+            from services import display_mode as dm
+            _gm, _sm = dm.group_and_scene_modes()
+            pre_mode = dm.resolve(
+                state.display_mode, _FIRE_DISPLAY_MODE.get(), _gm, _sm,
+                getattr(action, "display_mode", None), group_card_mode,
+            )
+            variant = (card.dark_variant if pre_mode == "dark"
+                       else card.light_variant if pre_mode == "light" else None)
+            pick_card = card
+            if variant is not None:
+                if variant.entries:
+                    # Layered AFTER the base overrides so variant fields win.
+                    overrides += list(variant.entries)
+                if variant.members:
+                    # Replacement pool with an isolated cursor — the suffixed
+                    # id keys _color_cursor* so base cycling is untouched.
+                    pick_card = card.model_copy(update={
+                        "members": variant.members,
+                        "id": f"{card.id}::{pre_mode}",
+                    })
+                logger.info("set_color: group '%s' using %s mode lane (%s)",
+                            card.name, pre_mode,
+                            f"{len(variant.members)} members" if variant.members
+                            else "override entries only")
             chosen_id = self._select_color_set_member(
-                card, action.pick_mode, action.advance, action.direction
+                pick_card, action.pick_mode, action.advance, action.direction
             )
             if not chosen_id:
                 logger.info("set_color: group '%s' has no members", card.name)

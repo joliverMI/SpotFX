@@ -341,6 +341,9 @@ export interface IntensityLane {
   name: string;
   labels: string[];
   threshold: number; // lower bound on the 0-1 intensity scale; lanes[0] = default (ignored)
+  /** Light Mode Chooser lanes only (source 'display_mode'): the resolved
+   *  Dark/Light mode that selects this lane. */
+  mode?: 'dark' | 'light' | null;
   scope: MorphScope | null; // per-lane Target
   actions: Action[];
 }
@@ -353,7 +356,12 @@ export interface IntensityChooserAction extends ActionBase {
    *  null = parent (nearest ancestor override, else each action's own ramp).
    *  Deeper overrides (scene group / scene ramp) win over this one. */
   ramp_ms?: Bindable<number> | null;
-  source: 'trigger_intensity';
+  /** 'display_mode' = the Light Mode Chooser face: the resolved Dark/Light
+   *  mode (TopBar → trigger → scene group → scene) picks the lane, re-resolved
+   *  at fire time. */
+  source: 'trigger_intensity' | 'display_mode';
+  /** display_mode source only: lane mode used when the cascade resolves "default". */
+  default_mode?: 'dark' | 'light';
   scope: MorphScope | null; // default Target for lanes
   lanes: IntensityLane[];
 }

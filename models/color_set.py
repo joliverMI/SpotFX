@@ -46,6 +46,21 @@ class GroupMember(BaseModel):
     weight:       float = 1.0
 
 
+class ModeVariant(BaseModel):
+    """One Dark/Light "mode lane" of a Group card (dark_variant /
+    light_variant). Active while the display mode resolved from the levels
+    ABOVE the member set (global → trigger → scene group → scene → set_color
+    action → this group card) is the matching dark/light; a resolution of
+    "default" always uses the base group as authored.
+
+    `entries`: extra per-device overrides layered ON TOP of the group's own
+    override entries (variant fields win) — author only what differs.
+    `members`: non-empty = replaces the base member pool for the pick, with
+    its own selection cursor (base cycling position is untouched)."""
+    entries: list[ColorSetEntry] = Field(default_factory=list)
+    members: list[GroupMember] = Field(default_factory=list)
+
+
 class ColorSetCard(BaseModel):
     """A card on the Color Sets page — a Color Set or a Group of Color Sets."""
     id:    str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -69,6 +84,10 @@ class ColorSetCard(BaseModel):
     mode:           Literal["cycle", "weighted"] = "cycle"
     cycle_behavior: Literal["wrap", "bounce"] = "wrap"
     exclude_current: bool = True
+    # Dark/Light "mode lanes" (kind == "group"): optional per-mode variants —
+    # see ModeVariant. None = this group looks the same in every mode.
+    dark_variant:  Optional[ModeVariant] = None
+    light_variant: Optional[ModeVariant] = None
     # Palette Sync: synced groups share one room-wide "current palette hue".
     # A synced group starts its pick from the member nearest that hue (instead
     # of its own private cursor), then publishes the pick's hue back — so

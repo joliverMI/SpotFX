@@ -16,7 +16,7 @@ import { cloneForPaste, readClip, useClipboard, writeClip } from '../store/clipb
 import EntryRow from './EntryRow';
 import GradientModal from './GradientModal';
 import { useColorSetCards, useDeleteColorSet, useGradients, useSaveColorSet } from './queries';
-import { emptyEntry, newCard, type ColorSetCard, type ColorSetEntry } from './types';
+import { emptyEntry, emptyVariant, newCard, type ColorSetCard, type ColorSetEntry, type ModeVariant } from './types';
 
 export default function ColorSetsPage() {
   const toast = useToast();
@@ -33,6 +33,9 @@ export default function ColorSetsPage() {
   const [search, setSearch] = useState('');
   const [drafts, setDrafts] = useState<Record<string, ColorSetCard>>({});
   const [gradEntryIdx, setGradEntryIdx] = useState<number | null>(null);
+  // Gradient editing inside a mode-lane override (kept separate from the base
+  // entries' gradEntryIdx so the modal knows which list to write back to).
+  const [gradVar, setGradVar] = useState<{ mode: 'dark' | 'light'; idx: number } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   // Shift-click multi-select of entry boxes (indices into the open card's
   // entries); Ctrl+C copies them to the shared clipboard, Ctrl+V pastes.
@@ -442,6 +445,98 @@ export default function ColorSetsPage() {
                   onEditGradient={() => setGradEntryIdx(i)}
                 />
               ))}
+
+              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                Mode Lanes
+                <HelpLink topic="colorsets-mode-lanes" />
+                <span style={{ fontWeight: 400, marginLeft: 2, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>
+                  what this group does while the room is 🌙 Dark / ☀️ Light
+                </span>
+                {!card.dark_variant && (
+                  <button style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
+                    onClick={() => setCard({ ...card, dark_variant: emptyVariant() })}>+ 🌙 Dark lane</button>
+                )}
+                {!card.light_variant && (
+                  <button style={{ marginLeft: card.dark_variant ? 'auto' : 6, fontSize: 11, padding: '3px 10px' }}
+                    onClick={() => setCard({ ...card, light_variant: emptyVariant() })}>+ ☀️ Light lane</button>
+                )}
+              </div>
+              {!card.dark_variant && !card.light_variant && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 6 }}>
+                  No mode lanes — the group looks the same in every mode. A lane changes what this
+                  group applies while the resolved mode matches; Default mode always uses the base group.
+                </div>
+              )}
+              {(['dark', 'light'] as const).map((vm) => {
+                const key = vm === 'dark' ? 'dark_variant' : 'light_variant';
+                const variant = card[key] as ModeVariant | null | undefined;
+                if (!variant) return null;
+                const setVariant = (v: ModeVariant | null) => setCard({ ...card, [key]: v });
+                const tag = vm === 'dark' ? '🌙 Dark lane' : '☀️ Light lane';
+                return (
+                  <div key={vm} style={{
+                    border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                    padding: 8, marginBottom: 10,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <strong style={{ fontSize: 12 }}>{tag}</strong>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        members replace the pool (empty = keep base members); overrides layer on top of the group’s
+                      </span>
+                      <button className="danger" style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px' }}
+                        title="Remove this mode lane" onClick={() => setVariant(null)}>✕</button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Members</span>
+                      <button style={{ fontSize: 11, padding: '2px 8px' }}
+                        onClick={() => {
+                          if (!sets.length) { toast('Create a Color Set first', 'error'); return; }
+                          setVariant({ ...variant, members: [...variant.members, { color_set_id: sets[0].id, weight: 1 }] });
+                        }}>+ Member</button>
+                    </div>
+                    {variant.members.map((m, i) => (
+                      <div key={`vm${i}`} style={{
+                        background: 'var(--surface2)', padding: 6, borderRadius: 'var(--radius)', marginBottom: 6,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <SearchSelect value={m.color_set_id} options={setOptions} allowEmpty={false}
+                            width="100%" placeholder="Search sets…"
+                            onChange={(v) => setVariant({
+                              ...variant,
+                              members: variant.members.map((x, j) => (j === i ? { ...x, color_set_id: v } : x)),
+                            })} />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Wt</span>
+                        <input type="number" min={0} step={0.1} value={m.weight ?? 1} style={{ width: 64 }}
+                          onChange={(e) => setVariant({
+                            ...variant,
+                            members: variant.members.map((x, j) => (j === i ? { ...x, weight: parseFloat(e.target.value) || 1 } : x)),
+                          })} />
+                        <button className="danger" style={{ fontSize: 12 }} title="Remove"
+                          onClick={() => setVariant({ ...variant, members: variant.members.filter((_, j) => j !== i) })}>✕</button>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Overrides</span>
+                      <button style={{ fontSize: 11, padding: '2px 8px' }}
+                        onClick={() => setVariant({ ...variant, entries: [...variant.entries, emptyEntry()] })}>
+                        + Override
+                      </button>
+                    </div>
+                    {variant.entries.map((entry, i) => (
+                      <EntryRow
+                        key={`ve${i}`}
+                        entry={entry}
+                        gradients={gradients}
+                        onChange={(e) => setVariant({ ...variant, entries: variant.entries.map((x, j) => (j === i ? e : x)) })}
+                        onRemove={() => setVariant({ ...variant, entries: variant.entries.filter((_, j) => j !== i) })}
+                        onEditGradient={() => setGradVar({ mode: vm, idx: i })}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
             </>
           )}
         </div>
@@ -462,6 +557,29 @@ export default function ColorSetsPage() {
           onClose={() => setGradEntryIdx(null)}
         />
       )}
+
+      {/* ── Gradient editor modal (mode-lane override entries) ── */}
+      {card && gradVar !== null && (() => {
+        const key = gradVar.mode === 'dark' ? 'dark_variant' : 'light_variant';
+        const variant = card[key] as ModeVariant | null | undefined;
+        const entry = variant?.entries?.[gradVar.idx];
+        if (!variant || !entry) return null;
+        return (
+          <GradientModal
+            initialCss={entry.color_value ?? ''}
+            gradients={gradients}
+            onApply={(css) => setCard({
+              ...card,
+              [key]: {
+                ...variant,
+                entries: variant.entries.map((e, j) =>
+                  j === gradVar.idx ? { ...e, color_kind: 'gradient', color_value: css } : e),
+              },
+            })}
+            onClose={() => setGradVar(null)}
+          />
+        );
+      })()}
 
       {/* ── Import modal ── */}
       {importOpen && (

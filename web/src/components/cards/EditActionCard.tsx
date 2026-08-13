@@ -3,7 +3,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { FLASH_MS } from '../../lib/flashDiff';
 import type { Action } from '../../types/events';
-import { ACTION_ICONS, ACTION_TYPE_LABELS, summarizeAction } from '../../types/summaries';
+import { ACTION_ICONS, ACTION_TYPE_LABELS, addableKeyOf, summarizeAction } from '../../types/summaries';
 import { useSummaryCtx } from '../SummaryCtx';
 import { useEditorStore } from '../../store/editorStore';
 import { getAtPath, findByUid } from '../../lib/paths';
@@ -13,6 +13,7 @@ import RandomGroupBody from './RandomGroupBody';
 import SequenceGroupBody from './SequenceGroupBody';
 import ParallelGroupBody from './ParallelGroupBody';
 import IntensityChooserBody from './IntensityChooserBody';
+import LightModeChooserBody from './LightModeChooserBody';
 import { writeClip } from '../../store/clipboard';
 import OpenRefLink from '../OpenRefLink';
 import PreviewButton from '../PreviewButton';
@@ -102,13 +103,13 @@ export default function EditActionCard({ action }: { action: Action }) {
           ⠿
         </span>
         <span className={`caret ${open ? 'open' : ''}`}>▶</span>
-        <span className="action-card-icon">{ACTION_ICONS[action.type] ?? '❓'}</span>
+        <span className="action-card-icon">{ACTION_ICONS[addableKeyOf(action)] ?? '❓'}</span>
         <span className="action-card-summary">{summarizeAction(action, ctx)}</span>
         {action.weight !== 1 && <span className="chip" title="Weight">w {action.weight}</span>}
         {action.labels.slice(0, 3).map((l) => (
           <span key={l} className="chip">{l}</span>
         ))}
-        <span className="action-card-type">{ACTION_TYPE_LABELS[action.type] ?? action.type}</span>
+        <span className="action-card-type">{ACTION_TYPE_LABELS[addableKeyOf(action)] ?? action.type}</span>
         {ref && <OpenRefLink to={ref.to} title={ref.title} />}
         <button title="Copy (paste in any track, any event)" style={{ padding: '2px 7px', fontSize: 12 }}
           onClick={(e) => { e.stopPropagation(); writeClip('action', action, summarizeAction(action, ctx)); }}>📋</button>
@@ -123,7 +124,9 @@ export default function EditActionCard({ action }: { action: Action }) {
           {action.type === 'random_group' && <RandomGroupBody uid={uid} action={action} />}
           {action.type === 'sequence_group' && <SequenceGroupBody uid={uid} action={action} />}
           {action.type === 'parallel_group' && <ParallelGroupBody uid={uid} action={action} />}
-          {action.type === 'intensity_chooser' && <IntensityChooserBody uid={uid} action={action} />}
+          {action.type === 'intensity_chooser' && (action.source === 'display_mode'
+            ? <LightModeChooserBody uid={uid} action={action} />
+            : <IntensityChooserBody uid={uid} action={action} />)}
           <ActionForm action={action} update={(fn) => updateAction(uid, fn)} />
         </div>
       )}

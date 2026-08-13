@@ -18,7 +18,7 @@ import { ACTION_ICONS, summarizeAction, type SummaryContext } from '../../types/
 import { SummaryProvider } from '../SummaryCtx';
 import { useEditorStore, useIsDirty } from '../../store/editorStore';
 import { findByUid } from '../../lib/paths';
-import { newAction, newEvent } from '../../lib/defaults';
+import { newAction, newEvent, newLightModeChooser } from '../../lib/defaults';
 import { uuid } from '../../lib/uid';
 import EventMetaPanel from './EventMetaPanel';
 import HelpLink from '../../help/HelpLink';
@@ -74,7 +74,9 @@ export default function EventEditorPage() {
       const ev = newEvent(t);
       const rootKind = search.get('root');
       if (t === 'composite' && rootKind) {
-        ev.root = newAction(rootKind as Parameters<typeof newAction>[0]);
+        ev.root = rootKind === 'light_mode_chooser'
+          ? newLightModeChooser()
+          : newAction(rootKind as Parameters<typeof newAction>[0]);
       }
       load(ev);
       return;
