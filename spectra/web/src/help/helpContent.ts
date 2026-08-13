@@ -137,8 +137,26 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'tab-responses',
         title: 'Charges / Lulls / Drops tab',
-        keywords: 'charge lull drop event classes bands',
-        body: ['The other three event classes, same band-strip idiom as Flares — and since S2 they EXECUTE: the bridge classifies spot-effects\' fixed charge/lull/drop events into these classes and the matching band applies (gain, patches, re-roll). Each class carries its own bands, re-roll flag, and (flares only, typically) colour-set jump.'],
+        keywords: 'charge lull drop event classes bands phase build suspend release',
+        body: [
+          'Charges, lulls, and drops now drive the REAL phase choreography that lived in LedFX for the original program — the build/suspend/release grammar written into the particle effects, the dancers, and the eye. Every charge/lull/drop event arms the phase machinery on each device whose effect carries it and ramps the build (charge ~4s, lull ~2.5s, drop 0.4s — the snap), band or no band. See "Response families" below for what each effect family does.',
+          'The band strip here is the scene\'s COLOURING on top of that arc, same idiom as Flares: the band containing the fire\'s intensity adds gain, patches, and re-rolls. A track change releases a lingering charge/lull automatically.',
+        ],
+      },
+      {
+        id: 'response-families',
+        title: 'Response families — what charge/lull/drop look like',
+        keywords: 'blackhole orbits radial fireworks squiggles dancer eye grammar visual',
+        body: [
+          'Black Hole: charge — the horizon swallows the panel behind a glowing capture ring; lull — held full-screen black; drop — pinch to a point, a 24-blob centre explosion, ease back.',
+          'Orbits: charge — the population swells then sheds to a single blob; lull — its orbit collapses to a tiny centre swirl; drop — full population returns with a burst plus 2× ballistic ejecta, spin boosted and decaying.',
+          'Radial: charge — the spin accelerates, peaking at the ramp end; lull — the pattern implodes to a held centre point; drop — it blooms back out.',
+          'Fireworks: charge — launch rate climbs 6× while bursts shrink and slow; lull — launching stops, three dim rockets cross the dark panel; drop — every rocket explodes where it is, giant, in its own colour.',
+          'Squiggles: charge — walls turn solid and the figure fills with trapped scribble; lull — an old-TV switch-off to a held white dot; drop — a nine-chain fan erupts from centre.',
+          'Dancers: charge — the dance intensifies as the build climbs; lull — the crew sinks into a held squat; drop — every dancer fires a stunt (breaker freeze-spin, grand jeté splits, or a huge leap), staggered.',
+          'Eye: charge — the iris grows, the pupil constricts, flames stream inward; lull — the lids close with a suspense pause; drop — the eye explodes open with a flame burst.',
+          'Effects without phase machinery simply ride the band extras. Full engineering detail: docs/SPECTRA_RESPONSES.md.',
+        ],
       },
     ],
   },
@@ -187,6 +205,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'The destination determines BOTH where the journey is heading and how fast: the room has a reference pace (°/min, agent-adjusted), and a destination 90° away travels at exactly that pace — nearer destinations stroll (down to ×0.5), farther ones hurry (up to ×2). Travel follows the shortest arc; the active palette\'s hues rotate with the wheel. On arrival the wheel lands exactly on the destination position and the next destination is picked (the arrived set excluded). The status strip shows the current destination and progress toward it.',
           'The destination is a bearing, not an applied palette — sets are still applied by scene fires and flare jumps. When a jump teleports the wheel, the bearing clears and the journey re-orients from the new point. If no eligible chromatic set exists, the walk holds (never forced churn).',
+          'A room is NEVER set-less: with no active set the journey immediately selects a first set and applies it (engine start included), scene fires always wear the room\'s active set instead of effect defaults, and the owner or fleet can apply a specific set directly — tell the agent, which uses POST /spectra/api/room-color/apply.',
         ],
       },
       {

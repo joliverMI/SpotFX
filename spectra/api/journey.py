@@ -7,16 +7,37 @@ in the editor).
   PUT /api/room-journey      — replace the room's journey declaration
   GET /api/drift-profiles    — {profile_id: DriftProfile}
   PUT /api/drift-profiles    — replace the library (refs validated)
+  POST /api/room-color/apply — apply a colour set to the room directly
+                               ({"set_id": ...}): it becomes the active
+                               set, the wheel anchors at its position,
+                               colours land on live virtuals, the journey
+                               travels on from there. The supported manual
+                               surface for the owner/fleet (owner defect
+                               fix — a room must never be set-less).
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
-from spectra.services import color_journey, drift_profiles, scene_store
+from spectra.services import color_journey, color_sets, drift_profiles, scene_store
 from spectra.services.color_journey import RoomColorState
 from spectra.services.drift_profiles import DriftProfile
 
 router = APIRouter(prefix="/api", tags=["spectra-journey"])
+
+
+class ApplySetRequest(BaseModel):
+    set_id: str
+
+
+@router.post("/room-color/apply")
+async def apply_room_color(body: ApplySetRequest):
+    card = color_sets.get_by_id(body.set_id)
+    if card is None or card.kind != "set":
+        raise HTTPException(404, f"colour set '{body.set_id}' not found")
+    from spectra.services import engine
+    return await engine.conductor.apply_set_directly(card)
 
 
 @router.get("/room-journey")

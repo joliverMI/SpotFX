@@ -167,13 +167,29 @@ def compile_scene(scene: SceneV2,
     return list(writes.values())
 
 
+def room_active_set() -> Optional[ColorSetCard]:
+    """The colour set the room currently wears (shared room state). A fire
+    without an explicit set compiles with THIS — the owner's sets, never
+    effect-default LedFX wheel colours (owner defect fix, part c). None
+    only while the room is genuinely set-less, which the conductor's
+    bootstrap makes a transient state."""
+    from spectra.services import color_journey, color_sets
+    set_id = color_journey.load_room().active_set_id
+    if set_id is None:
+        return None
+    return color_sets.get_by_id(set_id)
+
+
 async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                      color_set: Optional[ColorSetCard] = None,
                      dry_run: bool = True,
                      rng: Random | None = None) -> dict[str, Any]:
     """Resolve at the given intensity, compile, and (live only) send through
     the seam. The returned resolution report + writes are the test-fire
-    display: dry and live runs share every step up to the seam."""
+    display: dry and live runs share every step up to the seam. With no
+    explicit color_set the scene wears the room's active set."""
+    if color_set is None:
+        color_set = room_active_set()
     ctx = FireContext(intensity, rng=rng)
     resolved = resolve_scene(scene, ctx)
     writes = compile_scene(resolved, color_set)

@@ -320,6 +320,29 @@ check(rj["journey"]["degrees_per_min"] == 5.0
       "journey PUT updates the declaration, never teleports the wheel or "
       "hand-steers the bearing")
 
+# ── the manual apply-this-set surface + fires wear the room's set ────────────
+GRAD_BLUE = "linear-gradient(90deg, #0000ff 0%, #4000ff 100%)"
+scfg.COLOR_SETS_FILE.write_text(json.dumps({
+    "set-blue": {"id": "set-blue", "name": "Blues", "kind": "set",
+                 "entries": [{"scope": {"categories": ["Matrix"]},
+                              "color_kind": "gradient",
+                              "color_value": GRAD_BLUE}]},
+}))
+r = client.post("/api/room-color/apply", json={"set_id": "missing"})
+check(r.status_code == 404, "apply-this-set refuses an unknown set")
+r = client.post("/api/room-color/apply", json={"set_id": "set-blue"})
+check(r.status_code == 200 and r.json()["applied"] == "set-blue"
+      and color_journey.load_room().active_set_id == "set-blue",
+      "apply-this-set (agent/fleet surface): the room's active set moves "
+      "on the owner's word")
+fired = asyncio.run(scene_compiler.fire_scene(scene, intensity=0.5))
+set_writes = [w for w in fired["writes"]
+              if w["config"].get("gradient") == GRAD_BLUE]
+check(len(set_writes) > 0,
+      "a fire with no explicit set WEARS THE ROOM'S ACTIVE SET — the "
+      "owner's colours, never effect defaults")
+scfg.COLOR_SETS_FILE.unlink()
+
 # ── sequencer engine on SPECTRA stores: fire carries intensity; wheel is
 #    shared room state ────────────────────────────────────────────────────────
 from spectra.models.sequencer import (CurvePoint, CurveProfile, SelectorEntry,
@@ -546,28 +569,70 @@ check(abs(conductor2.virtuals["v-m1"].brightness_baseline - 0.9) < 1e-6,
 asyncio.run(responder.flush_releases())
 eligible_box[0] = {"set-red": 10.0}
 
-# ── charge/lull: land-and-hold gain CARRIES the baseline ─────────────────────
+# ── charge/lull/drop DRIVE THE REAL PHASE MACHINERY (five-updates item 2) ────
+# The fixture's effect is radial — phase-capable — so every phase event
+# must arm ({"phase": cls, "phase_progress": 0.0} jump) then ramp
+# (phase_progress → 1.0 glide) with the original program's durations.
+from spectra.services.scene_response import PHASE_RAMP_MS
+
 record = asyncio.run(responder.on_event("charge", 0.8))
+check(sorted(record["phase"]["targets"]) == ["v-m1", "v-m2", "v-m3"]
+      and record["phase"]["ramp_ms"] == 4000,
+      "charge drives the vendored phase machinery on every phase-capable "
+      "virtual (arm + 4000 ms build ramp)")
+arm = [w for w in exec2.writes if w["kind"] == "jump"
+       and w["params"].get("phase") == "charge"]
+ramp = [w for w in exec2.writes if w["kind"] == "glide"
+        and w["params"] == {"phase_progress": 1.0}]
+check(len(arm) == 3 and all(w["params"]["phase_progress"] == 0.0
+                            for w in arm)
+      and len(ramp) == 3 and all(w["duration_ms"] == 4000 for w in ramp),
+      "the arm write resets phase_progress to 0.0 (re-arms the edge) and "
+      "lands before the ramp glide — the legacy _fire_phase order")
 held = max(0.0, min(1.0, 0.9 * 1.3))
 check(record["gain_envelope"][0]["held"] is True
       and abs(conductor2.virtuals["v-m1"].brightness_baseline - held) < 1e-6,
       "charge ease_in gain lands and HOLDS — the baseline carries (0.9→1.0)")
 record = asyncio.run(responder.on_event("lull", 0.2))
+check(record["phase"]["ramp_ms"] == 2500,
+      "lull suspends over the 2500 ms ramp")
 check(abs(conductor2.virtuals["v-m1"].brightness_baseline - held * 0.5) < 1e-6,
       "lull gain 0.5 ducks and holds — surges carry in both directions")
 
 # ── drop: patch, with unknown keys dropped by the registry gate ──────────────
 record = asyncio.run(responder.on_event("drop", 0.9))
+check(record["phase"]["ramp_ms"] == 400,
+      "drop stays short — it's the snap (400 ms ramp)")
 drop_jump = [w for w in exec2.writes if w["kind"] == "jump"
              and "spin" in w["params"]][-1]
 check(drop_jump["params"]["spin"] == 1.0
       and not any("ghost_param" in w["params"] for w in exec2.writes),
       "drop patch lands 'spin'; a key no effect carries lands nowhere")
-check(asyncio.run(responder.on_event("drop", 0.3))["result"] == "no_band",
-      "drop below its band → silent (bands are the WHEN)")
-check(asyncio.run(responder.on_event("charge", 0.2))["result"] == "no_band"
+record = asyncio.run(responder.on_event("drop", 0.3))
+check(record["result"] == "phase_only",
+      "drop below its band: the ARC still runs (the original fired the "
+      "phase for every phase event); only the band extras stay silent")
+check(asyncio.run(responder.on_event("charge", 0.2))["result"] == "phase_only"
       and len([s for s in responder.surges if s["result"] == "applied"]) == 5,
-      "four classes executed; out-of-band moments recorded, not applied")
+      "four classes executed; out-of-band moments run phase-only")
+
+# ── track change releases an armed charge/lull (lifecycle guard) ─────────────
+check(responder._phase_armed == "charge", "the last charge is still armed")
+released = asyncio.run(responder.release_phases())
+none_writes = [w for w in exec2.writes if w["kind"] == "jump"
+               and w["params"].get("phase") == "none"]
+check(released == 3 and len(none_writes) == 3
+      and asyncio.run(responder.release_phases()) == 0,
+      "track change releases the armed build with an instant phase 'none' "
+      "write per virtual — once; a drop already disarms it")
+
+# ── flares never touch the phase machinery ───────────────────────────────────
+before_phase_writes = len([w for w in exec2.writes
+                           if "phase" in w["params"]])
+asyncio.run(responder.on_event("flare", 0.3))
+check(len([w for w in exec2.writes if "phase" in w["params"]])
+      == before_phase_writes,
+      "a flare drives no phase write — charge/lull/drop own the arc")
 
 # ── the bridge: classification, feeds, deferral split, RAW section energy ────
 from spectra.services import analysis_reader

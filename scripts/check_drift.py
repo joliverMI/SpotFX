@@ -345,6 +345,36 @@ check(room_box[0].wheel_position_deg == held
       and room_box[0].destination is None,
       "inherit pace_factor 0 holds the room walk — no destinations picked")
 
+# ── a room is NEVER set-less: the journey bootstraps its first set ───────────
+# Wiped room state (no set, no wheel — the live defect): the first leg
+# selects a first set with the shipped selector and APPLIES it — active
+# set, wheel anchor, colours landed on live set-mode virtuals.
+cards_box[0] = [blue_set]
+fire(scene, blue_set, "set-blue")
+room_box[0] = color_journey.RoomColorState()
+executor.writes.clear()
+run(conductor.tick())
+check(room_box[0].active_set_id == "set-blue"
+      and room_box[0].wheel_position_deg == 220.0,
+      "set-less room: the first leg selects and APPLIES a first set — "
+      "active set + wheel anchor (a room is never set-less)")
+boot_jumps = [w for w in executor.writes
+              if w["kind"] == "jump" and "gradient" in w["params"]]
+check(len(boot_jumps) == 2
+      and all(w["params"]["gradient"] == GRADIENT for w in boot_jumps),
+      "bootstrap lands the set's colours on live set-mode virtuals as a "
+      "JUMP, not effect defaults")
+
+# ── manual apply-this-set (the supported owner/fleet surface) ────────────────
+result = run(conductor.apply_set_directly(green_set))
+check(result["applied"] == "set-green"
+      and room_box[0].active_set_id == "set-green"
+      and room_box[0].wheel_position_deg == 130.0
+      and room_box[0].destination is None,
+      "apply-this-set: active set + wheel anchor move, the bearing clears "
+      "so the journey travels on from the new point")
+cards_box[0] = [blue_set, green_set]
+
 # ── deferral matrix: pause/dinner/ambient hold everything ────────────────────
 fire(scene, blue_set, "set-blue")
 for reason in ("paused", "dinner_party", "ambient"):
