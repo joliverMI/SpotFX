@@ -46,6 +46,15 @@ async def get_scene(scene_id: str):
 
 @router.post("")
 async def upsert_scene(scene: SceneV2):
+    # Per-set-only filter (decision 1): group cards never enter a scene's
+    # set filter — callers list the group's member sets instead.
+    group_ids = scene_v2_store.group_ids_in_filter(scene)
+    if group_ids:
+        names = {c.id: c.name for c in color_set_store.list_all()}
+        offenders = ", ".join(f"'{names.get(i, i)}' ({i})" for i in group_ids)
+        raise HTTPException(422, (
+            f"accepted_set_ids may only reference kind='set' Color Sets; "
+            f"{offenders} is a group — list its member sets instead"))
     scene_v2_store.save(scene)
     return {"status": "saved", "id": scene.id}
 

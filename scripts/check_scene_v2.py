@@ -207,4 +207,79 @@ with tempfile.TemporaryDirectory() as td:
         {"target": "Matrix", "effect_type": "power"}]}).status_code == 422,
         "invalid scene → 422 at API boundary")
 
+    # ── decision 1: per-set-only filter — group ids rejected on save,
+    # legacy group refs expanded to member sets on load, and a UI-shaped
+    # save round-trip never drops filter contents it did not display ────────
+    from services import color_set_store
+    color_set_store.COLOR_SETS_FILE = Path(td) / "color_sets.json"
+    from models.color_set import GroupMember
+    m1, m2 = ColorSetCard(name="Orbit - A"), ColorSetCard(name="Orbit - B")
+    grp = ColorSetCard(name="Orbits", kind="group", members=[
+        GroupMember(color_set_id=m1.id), GroupMember(color_set_id=m2.id)])
+    nested = ColorSetCard(name="Nested", kind="group",
+                          members=[GroupMember(color_set_id=grp.id)])
+    for card in (m1, m2, grp, nested):
+        color_set_store.save(card)
+
+    resp = client.post("/api/scenes-v2", json=json.loads(SceneV2(
+        name="grp-filter", accept_all_sets=False,
+        accepted_set_ids=[grp.id]).model_dump_json()))
+    check(resp.status_code == 422 and "Orbits" in resp.text
+          and "member sets" in resp.text,
+          "decision 1: group id in accepted_set_ids → 422 naming the group")
+
+    legacy = SceneV2(name="legacy-grp", accept_all_sets=False,
+                     accepted_set_ids=["gone-set", nested.id, m1.id])
+    raw = json.loads(scene_v2_store.SCENES_V2_FILE.read_text())
+    raw[legacy.id] = json.loads(legacy.model_dump_json())
+    scene_v2_store.SCENES_V2_FILE.write_text(json.dumps(raw))
+    loaded = client.get(f"/api/scenes-v2/{legacy.id}").json()
+    check(loaded["accepted_set_ids"] == ["gone-set", m1.id, m2.id],
+          "decision 1: legacy group ref expands to member sets on load "
+          "(recursive, deduped, unknown ids kept)")
+    check(all(c is None or c.kind == "set"
+              for c in map(color_set_store.get_by_id, loaded["accepted_set_ids"])),
+          "decision 1: loaded filters never contain a group id")
+    # The UI mutates accepted_set_ids only by toggling displayed ids, so
+    # posting back exactly what GET returned models the worst-case UI save
+    # (accept-all off, nothing re-checked): nothing may be dropped.
+    check(client.post("/api/scenes-v2", json=loaded).status_code == 200,
+          "decision 1: UI-shaped save of a migrated filter accepted")
+    check(client.get(f"/api/scenes-v2/{legacy.id}").json()["accepted_set_ids"]
+          == ["gone-set", m1.id, m2.id],
+          "decision 1 HARD GUARANTEE: save round-trip drops no filter "
+          "contents (finding 11's silent-empty trap impossible)")
+
+    # ── decision 2: flare param patches survive a UI-shaped edit+save ───────
+    patched = SceneV2(name="patched", flare_bands=[
+        FlareBand(intensity_min=0.0, intensity_max=0.5,
+                  param_patch={"spawn_rate": 2.0, "beat_burst": 3}),
+        FlareBand(intensity_min=0.5, intensity_max=1.0)])
+    check(client.post("/api/scenes-v2",
+                      json=json.loads(patched.model_dump_json())).status_code == 200,
+          "decision 2: agent-authored param_patch accepted")
+    ui_copy = client.get(f"/api/scenes-v2/{patched.id}").json()
+    ui_copy["flare_bands"][0]["gain"] = 1.5   # the only fields the UI edits
+    client.post("/api/scenes-v2", json=ui_copy)
+    after = client.get(f"/api/scenes-v2/{patched.id}").json()
+    check(after["flare_bands"][0]["param_patch"] == {"spawn_rate": 2.0, "beat_burst": 3}
+          and after["flare_bands"][0]["gain"] == 1.5,
+          "decision 2 HARD GUARANTEE: UI band edit preserves param_patch untouched")
+
+# ── decision 4: registry defaults are the fx schemas' REAL defaults ─────────
+from scripts.backfill_param_defaults import BAKED_TYPES, bake
+registry = json.loads((Path(__file__).parent.parent
+                       / "config" / "effect_params.json").read_text())
+changed, skipped = bake(registry)
+check(changed == 0, "decision 4: baked param defaults match their sources "
+      f"(tuned registry blobs, then fx schemas — re-run "
+      f"scripts/backfill_param_defaults.py --apply; {changed} stale)")
+check(skipped == ["concentric.speed"],
+      f"decision 4: only known registry-virtual params lack a default ({skipped})")
+check(all("default" in m or f"{e}.{p}" in skipped
+          for e, eff in registry["effects"].items()
+          for p, m in (eff.get("params") or {}).items()
+          if m.get("type") in BAKED_TYPES),
+      "decision 4: every editable param the UI can enable carries a default")
+
 print("\nALL CHECKS PASSED")
