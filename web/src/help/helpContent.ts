@@ -942,15 +942,56 @@ export const HELP_SECTIONS: HelpSection[] = [
           '▶ Test Fire saves the scene, compiles it to the per-virtual LedFX writes it would send, and shows them below the editor — nothing is sent to the devices. Use it to check which virtuals a scene resolves to and what config each would receive.',
         ],
       },
+    ],
+  },
+
+  /* ── Scene Sequencer (SPECTRA) ───────────────────────────────── */
+  {
+    id: 'sequencer',
+    title: 'Scene Sequencer',
+    keywords: 'spectra sequencing likelihood curve genre affinity dwell transition weighted random pick',
+    intro:
+      'The SPECTRA sequencer picks the next SceneV2 at song transitions from each scene\'s likelihood curve, genre fit, and what-just-played affinity. It ships DARK: nothing runs until it is enabled (by telling the agent), and the legacy chooser events keep working either way.',
+    entries: [
+      {
+        id: 'sequencer-model',
+        title: 'How picks work',
+        keywords: 'score multiply veto ladder stay nothing weighted draw dwell songs transition timer',
+        body: [
+          'At each change moment every candidate scene gets a score: its curve\'s height at the current intensity × its genre multiplier for what\'s playing × its affinity multiplier for the scene it would follow. One winner is drawn at random in proportion to those scores — likelier scenes come up more often, and a zero anywhere (curve at zero, genre ×0, affinity ×0) is a hard veto. The current scene never competes; staying put is the dwell gate\'s job.',
+          'Change moments come ONLY from song transitions — no timer runs, so a scene never changes mid-song and a long DJ mix keeps one scene however hard it builds (that is by design, not a defect). Each scene\'s dwell weight is measured in songs: weight 2 holds about two songs, weight 1.5 holds one or two (resolved by chance so the average stays 1.5). A scene fired by a song trigger restarts its dwell count.',
+          'When everything scores zero, a fallback ladder relaxes one constraint at a time: drop affinity → drop genre → re-admit the current scene → uniform among curve-eligible scenes. If nothing is eligible at all, scenes STAY (the room always shows something) and flares fire NOTHING.',
+          'The sequencer holds while Force Scene, pause, Dinner Party, or Ambient Mode is active. Curves are drawn graphically; everything else — genre fit, affinity, dwell weights, enabling the sequencer — is adjusted by telling the agent.',
+        ],
+      },
+      {
+        id: 'sequencer-attachment',
+        title: 'Sequencing panel (per scene)',
+        keywords: 'attach curve profile picker inline one-off flat not sequenced shared retune',
+        body: [
+          'The Sequencing panel in the scene editor sets which likelihood curve the scene carries: "not sequenced" (the scene is invisible to the sequencer), "flat 1.0" (eligible everywhere, plain weight), a named curve profile from the shared library, or an inline one-off curve private to the scene.',
+          'Editing a named profile\'s curve here retunes EVERY scene that references it — the panel says which scenes share it before you save. Use an inline one-off when the shape truly belongs to just this scene.',
+          'The greyed relationships box (dwell weight, genre multipliers, affinity) is read-only on purpose: those are adjusted by telling the agent, never by a form.',
+        ],
+      },
       {
         id: 'curve-editor',
-        title: 'Curve editor lab (dev preview)',
-        keywords: 'sequencer likelihood curve intensity draggable points histogram weight dwell',
+        title: 'Curve editor & profile library',
+        keywords: 'sequencer likelihood curve intensity draggable points histogram weight profiles library shared',
         body: [
-          'The collapsed "Curve editor lab" card at the bottom of the Scenes page previews the sequencer\'s likelihood-curve editor: a curve over intensity (0–1) whose height at the current intensity is how likely a thing is to be picked. A flat line at 0.7 is exactly a weight of 0.7; a region drawn at zero is a hard "never here".',
+          'A likelihood curve is points on a line over intensity (0–1); its height at the current intensity IS how likely the thing is to be picked. A flat line at 0.7 is exactly a weight of 0.7; a region drawn at zero is a hard "never here".',
           'Click empty space to add a point, drag a point to move it (a point can\'t cross its neighbors; two points at the same intensity make a step), double-click a point to remove it. Straight lines connect the points; outside the outermost points the curve continues flat.',
           'The faint grey bars are the honesty underlay: a histogram of every trigger intensity in your profile library. Most of the library fires in the top half of the axis, so shape your curves where the bars are — a carefully drawn region where nothing ever fires does nothing.',
-          'This is a dev preview: edits stay on the page and attach to nothing. Attaching curves to scenes, colour sets, and flares lands with the sequencer once its open design decisions are made; relationships (genre fit, what-follows-what, dwell pace) will be adjusted by telling the agent, not by forms.',
+          'The collapsed "Curve profiles" card at the bottom of the Scenes page manages the shared library: create, edit, and delete named shapes ("High-energy ramp", "Quiet-only"). Deleting a profile a scene still references is refused. scripts/seed_sequencer_from_legacy.py seeds the five intensity-band profiles from the legacy chooser (dry-run by default, --apply to write).',
+        ],
+      },
+      {
+        id: 'sequencer-status',
+        title: 'Status strip',
+        keywords: 'active scene dwell progress songs last pick factor breakdown deferred dark next change',
+        body: [
+          'The strip at the top of the Scenes page shows what the sequencer is doing: dark (not enabled) or, when live, the active scene, dwell progress in songs (e.g. 1/2), the next change source (always "song transition" — the only clock that ships), and any hold (Force Scene, paused, Dinner Party, Ambient).',
+          '"Last pick" expands into the full factor breakdown — every candidate\'s curve height, genre multiplier, affinity multiplier, and final score at the moment of the roll, with the winner in bold and the ladder rung that produced it. The same numbers arrive live on the sequencer_pick WebSocket event and from POST /api/sequencer/simulate for dry what-if rolls.',
         ],
       },
     ],
