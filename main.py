@@ -81,6 +81,13 @@ async def _on_state_update(app_state) -> None:
             save_profile(profile)
         engine.load_profile(profile)
 
+    # SPECTRA scene sequencer: observes song transitions (its only shipped
+    # change-moment source). Dark unless sequencer.json config.enabled — the
+    # first thing a moment does is check that flag. Guest playback (early
+    # return above) is deliberately not fed.
+    from services.scene_sequencer import scene_sequencer
+    await scene_sequencer.on_track_state(track)
+
     await audio_shape_service.on_track_change(track)
     await ws_manager.broadcast_state(app_state)
 
