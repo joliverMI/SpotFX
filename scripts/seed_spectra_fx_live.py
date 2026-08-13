@@ -25,8 +25,6 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-VENDORED_DEVICE_TYPES = {"dummy", "ddp", "wled", "e131", "hue"}
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -37,6 +35,7 @@ def main() -> None:
     args = parser.parse_args()
 
     from fx.config import CORE_CONFIG_SCHEMA
+    from fx.host import VENDORED_DEVICE_TYPES
     from spectra import config as scfg
 
     source = Path(args.source).expanduser()

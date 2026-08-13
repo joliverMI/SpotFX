@@ -46,6 +46,7 @@ conductor = DriftConductor(
     intensity=lambda: bridge.intensity(),
     deferral=lambda: bridge.conductor_deferral(),
     broadcast=ws_manager.broadcast,
+    genre_bucket=lambda: bridge.genre_bucket(),
 )
 
 responses = ResponseEngine(
@@ -67,7 +68,18 @@ async def _release_after_hold() -> None:
     await responses.flush_releases()
 
 
+_last_track_uri: str | None = None
+
+
 async def _on_track_uri(uri) -> None:
+    # The bridge relays every state message; change detection lives here.
+    # A track change releases any armed charge/lull (the lifecycle guard
+    # the original program kept — a build must not linger into the next
+    # song) before the sequencer sees the transition.
+    global _last_track_uri
+    if uri != _last_track_uri:
+        _last_track_uri = uri
+        await responses.release_phases()
     from spectra.services.scene_sequencer import scene_sequencer
     await scene_sequencer.on_track_state(uri)
 

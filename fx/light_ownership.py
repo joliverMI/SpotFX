@@ -256,6 +256,20 @@ def require_grant(grant: Optional[ActivationGrant], world: str,
 
 # ── The handover state machine ───────────────────────────────────────────────
 
+def check_can_begin(to_world: str) -> None:
+    """Pure read-only preflight of begin_handover's refusal conditions, so
+    orchestrator gates that must run BEFORE the record moves (the readiness
+    gate) don't shadow an already-owner / in-flight refusal with their own.
+    begin_handover still re-validates atomically under its transition."""
+    if to_world not in WORLDS:
+        raise ValueError(f"unknown world {to_world!r}")
+    record = load()
+    if record.owner == HANDING_OVER:
+        raise OwnershipError("a handover is already in flight")
+    if record.owner == to_world:
+        raise OwnershipError(f"{to_world} already owns the lights")
+
+
 def begin_handover(to_world: str) -> Handover:
     """owner=<from> → handing-over(step=quiescing). Refuses if `to_world`
     already owns or a handover is in flight — the two-step always starts

@@ -410,10 +410,13 @@ class SceneSequencer:
         return color_journey.load_room().wheel_position_deg
 
     def _default_wheel_set(self, deg: Optional[float]) -> None:
+        # A sequencer colour roll teleports the wheel, invalidating the
+        # journey's bearing — clear it so the conductor reselects a
+        # destination from the new point next leg.
         from spectra.services import color_journey
         room = color_journey.load_room()
         color_journey.save_room(room.model_copy(
-            update={"wheel_position_deg": deg}))
+            update={"wheel_position_deg": deg, "destination": None}))
 
 
 scene_sequencer = SceneSequencer()

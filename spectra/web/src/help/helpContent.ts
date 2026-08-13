@@ -64,14 +64,23 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Scenes page & editor tabs',
     keywords: 'editor tabs scene list search save',
     intro:
-      'Left pane: scene list with search; right pane: the tabbed editor. Drafts live locally until Save — an unsaved dot marks edited scenes and leaving the page asks first.',
+      'Left pane: scene list with search; right pane: the tabbed editor. Drafts live locally until Save — an unsaved dot marks edited scenes and leaving the page asks first. On a phone in portrait the page is single-pane: the editor owns the width and the scene picker collapses into the ☰ bar (see "Phone layout").',
     entries: [
       {
         id: 'editor-toolbar',
         title: 'Toolbar: Save, Duplicate, Test Fire, Fire, Delete',
-        keywords: 'test fire dry run real fire intensity slider',
+        keywords: 'test fire dry run real fire intensity slider no confirm consent',
         body: [
           'The intensity slider picks the axis value a fire resolves against, so ⚡ scenes can be previewed anywhere on the axis. Test Fire compiles at that intensity WITHOUT touching devices and shows the resolved bindings, dice rolls, and per-virtual writes. Fire (live) sends the same writes to LedFX — it exists for the owner; use Test Fire for checking work.',
+          'Firing asks for NO confirmation — the press is the consent; it fires the single scene you chose and are looking at. This is a deliberate asymmetry: the global colour-set opt-out (Colour Sets tab) DOES confirm, because that one silently changes every scene in the house.',
+        ],
+      },
+      {
+        id: 'phone-layout',
+        title: 'Phone layout',
+        keywords: 'mobile portrait drawer picker narrow single pane responsive',
+        body: [
+          'On a phone-portrait screen the Scenes page is a first-class single-pane arrangement, not a squeezed desktop: with no scene open the list fills the width; once a scene is open the EDITOR owns the width and the picker collapses into the ☰ bar above it — tap it (or "scenes ▾") to open the full-screen scene drawer with search and + Scene. The editor tabs stay on one row and scroll sideways. The Timeline and Status pages stack their cards full-width.',
         ],
       },
       {
@@ -137,8 +146,26 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'tab-responses',
         title: 'Charges / Lulls / Drops tab',
-        keywords: 'charge lull drop event classes bands',
-        body: ['The other three event classes, same band-strip idiom as Flares — and since S2 they EXECUTE: the bridge classifies spot-effects\' fixed charge/lull/drop events into these classes and the matching band applies (gain, patches, re-roll). Each class carries its own bands, re-roll flag, and (flares only, typically) colour-set jump.'],
+        keywords: 'charge lull drop event classes bands phase build suspend release',
+        body: [
+          'Charges, lulls, and drops now drive the REAL phase choreography that lived in LedFX for the original program — the build/suspend/release grammar written into the particle effects, the dancers, and the eye. Every charge/lull/drop event arms the phase machinery on each device whose effect carries it and ramps the build (charge ~4s, lull ~2.5s, drop 0.4s — the snap), band or no band. See "Response families" below for what each effect family does.',
+          'The band strip here is the scene\'s COLOURING on top of that arc, same idiom as Flares: the band containing the fire\'s intensity adds gain, patches, and re-rolls. A track change releases a lingering charge/lull automatically.',
+        ],
+      },
+      {
+        id: 'response-families',
+        title: 'Response families — what charge/lull/drop look like',
+        keywords: 'blackhole orbits radial fireworks squiggles dancer eye grammar visual',
+        body: [
+          'Black Hole: charge — the horizon swallows the panel behind a glowing capture ring; lull — held full-screen black; drop — pinch to a point, a 24-blob centre explosion, ease back.',
+          'Orbits: charge — the population swells then sheds to a single blob; lull — its orbit collapses to a tiny centre swirl; drop — full population returns with a burst plus 2× ballistic ejecta, spin boosted and decaying.',
+          'Radial: charge — the spin accelerates, peaking at the ramp end; lull — the pattern implodes to a held centre point; drop — it blooms back out.',
+          'Fireworks: charge — launch rate climbs 6× while bursts shrink and slow; lull — launching stops, three dim rockets cross the dark panel; drop — every rocket explodes where it is, giant, in its own colour.',
+          'Squiggles: charge — walls turn solid and the figure fills with trapped scribble; lull — an old-TV switch-off to a held white dot; drop — a nine-chain fan erupts from centre.',
+          'Dancers: charge — the dance intensifies as the build climbs; lull — the crew sinks into a held squat; drop — every dancer fires a stunt (breaker freeze-spin, grand jeté splits, or a huge leap), staggered.',
+          'Eye: charge — the iris grows, the pupil constricts, flames stream inward; lull — the lids close with a suspense pause; drop — the eye explodes open with a flame burst.',
+          'Effects without phase machinery simply ride the band extras. Full engineering detail: docs/SPECTRA_RESPONSES.md.',
+        ],
       },
     ],
   },
@@ -175,28 +202,38 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
   {
     id: 'color-journey',
-    title: 'Colour journey (room + override)',
-    keywords: 'wheel walk rotate palette drift creep hue override room',
+    title: 'Colour journey (destinations + override)',
+    keywords: 'wheel walk rotate palette drift destination hue override room pace travel arrival',
     intro:
-      'The room owns ONE continuous colour journey — a slow walk of the palette around the colour wheel (default: blue toward purple). Scenes ride it by default.',
+      'The room owns ONE continuous colour journey, and it is DESTINATION-DRIVEN: the room picks a destination colour set (via the selector: curve × genre × wheel-travel) and drifts toward its wheel position; on arrival it picks the next destination and sets off again. Never aimless — always a target, and each destination fixes its own travel pace. Scenes ride the room journey by default.',
     entries: [
+      {
+        id: 'journey-destination',
+        title: 'Destinations and per-destination pace',
+        keywords: 'target speed travel reference arrive reselect',
+        body: [
+          'The destination determines BOTH where the journey is heading and how fast: the room has a reference pace (°/min, agent-adjusted), and a destination 90° away travels at exactly that pace — nearer destinations stroll (down to ×0.5), farther ones hurry (up to ×2). Travel follows the shortest arc; the active palette\'s hues rotate with the wheel. On arrival the wheel lands exactly on the destination position and the next destination is picked (the arrived set excluded). The status strip shows the current destination and progress toward it.',
+          'The destination is a bearing, not an applied palette — sets are still applied by scene fires and flare jumps. When a jump teleports the wheel, the bearing clears and the journey re-orients from the new point. If no eligible chromatic set exists, the walk holds (never forced churn).',
+          'A room is NEVER set-less: with no active set the journey immediately selects a first set and applies it (engine start included), scene fires always wear the room\'s active set instead of effect defaults, and the owner or fleet can apply a specific set directly — tell the agent, which uses POST /spectra/api/room-color/apply.',
+        ],
+      },
       {
         id: 'journey-inherit',
         title: 'Inherit (default) and pace',
-        body: ['An inheriting scene rides the room\'s walk, scaled by its pace factor — 0 holds the walk while that scene shows. Adjusted by telling the agent.'],
+        body: ['An inheriting scene rides the room\'s destination journey, its pace factor scaling the travel speed — 0 holds the walk while that scene shows (no destinations picked). Adjusted by telling the agent.'],
       },
       {
         id: 'journey-override',
         title: 'Override — a scene takes the pen',
-        keywords: 'custody transition into out of snap',
+        keywords: 'custody transition into out of snap palette bounds',
         body: [
-          'A scene may override the room journey outright: its own pace and direction while it holds. The override takes CUSTODY of the wheel, never a fork: entering, the scene\'s journey starts from wherever the room\'s walk had reached (no snap — the palette change itself rides the normal scene crossfade). Leaving, the room\'s own journey resumes from wherever the override left the wheel — it never snaps back. One continuous story; only who steers changes.',
+          'A scene may override the room journey outright: the same destination model, but destinations are picked WITHIN THE SCENE\'S OWN PALETTE BOUNDS (its accepted sets), at the scene\'s own reference pace. The override takes CUSTODY of the wheel, never a fork: entering, the scene\'s journey starts from wherever the room\'s walk had reached and picks its own destination (no snap — the palette change itself rides the normal scene crossfade). Leaving, the room\'s own journey resumes from wherever the override left the wheel with a fresh room destination — it never snaps back. One continuous story; only who steers changes.',
         ],
       },
       {
         id: 'journey-rainbow',
         title: 'Rainbow sets pause the walk',
-        body: ['Rainbow and achromatic palettes have no wheel position, so the walk pauses while one is live and resumes when a chromatic set returns.'],
+        body: ['Rainbow and achromatic palettes have no wheel position, so the walk pauses while one is live (the bearing is kept) and resumes when a chromatic set returns. A rainbow set is never a destination — it is everywhere and nowhere on the wheel.'],
       },
     ],
   },
@@ -276,9 +313,208 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'ownership-handover',
         title: 'How the switch works (owner-run only)',
-        keywords: 'quiesce activate commit rollback failure single owner armed latch',
+        keywords: 'quiesce activate commit rollback failure single owner armed latch readiness precondition refuse seeder',
         body: [
-          'Two steps, strictly ordered: quiesce the current writer and VERIFY it stopped (Hue DTLS session released, DDP sending stopped), only then activate the other (SPECTRA\'s in-process device layer + the shared audio hub — or, in reverse, restart LedFX). Any failure lands back at the old owner automatically — never two writers, never a split. The API refuses entirely until the process is armed (SPECTRA_HANDOVER_ARMED=1).',
+          'Before anything moves, the READINESS GATE: the switch checks the go-day preparations itself and REFUSES — room untouched, current owner still writing — when SPECTRA\'s fx-live device config is missing, empty, or has no usable virtuals (the refusal names the seeder command), or in reverse when the LedFX service unit is missing. Skipped preparation can no longer dark the room.',
+          'Then two steps, strictly ordered: quiesce the current writer and VERIFY it stopped (Hue DTLS session released, DDP sending stopped), only then activate the other (SPECTRA\'s in-process device layer + the shared audio hub — or, in reverse, restart LedFX). Any failure lands back at the old owner automatically — never two writers, never a split. The API refuses entirely until the process is armed (SPECTRA_HANDOVER_ARMED=1).',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'builder',
+    title: 'Timeline (song profiles)',
+    keywords: 'timeline canvas triggers place edit profile builder song',
+    intro:
+      'The song timeline from the SpotFX Profile Builder, carried into SPECTRA whole: build a song\'s lighting profile on a zoomable timeline. Arm an event on a palette key, then place triggers with the mouse; circles show intensity, triangles show timing. Reads and edits go straight to the SpotFX app\'s own APIs (same process) — profiles, waveform, librosa analysis, palettes, setlists, and the live playhead over its WebSocket.',
+    subsections: [
+      {
+        id: 'builder-palettes',
+        title: 'Palettes & arming',
+        entries: [
+          {
+            id: 'builder-palette-keys',
+            title: 'Keyboard palettes',
+            keywords: 'arm hotkey bank assign keys',
+            body: [
+              'A palette maps keyboard keys to events. Activate a palette, press a key to arm its event (Escape or clicking the key tile disarms; re-pressing the key keeps it armed), then right-click the timeline to place it. With the trigger dialog open, pressing a palette key assigns that event directly.',
+            ],
+            table: [
+              ['1–0, Q–P, A–L, Z–M', 'Arm that key\'s event from the active palette (36 keys); re-pressing keeps it armed.'],
+              ['Esc', 'Disarm the blend brush, then the armed key (after clearing any selection).'],
+            ],
+            kbd: true,
+          },
+          {
+            id: 'builder-palette-card',
+            title: 'Palette card gestures',
+            keywords: 'edit long press double click activate',
+            table: [
+              ['Click palette', 'Activate / deactivate the palette.'],
+              ['Long-press / double-click palette', 'Open the palette editor.'],
+              ['Click a key tile', 'Arm/disarm that key (or select it in edit mode).'],
+            ],
+            kbd: false,
+          },
+        ],
+      },
+      {
+        id: 'builder-placing',
+        title: 'Placing & editing triggers',
+        entries: [
+          {
+            id: 'builder-mouse',
+            title: 'Canvas mouse actions',
+            keywords: 'right click place drag move delete create circle triangle',
+            table: [
+              ['Right-click empty canvas', 'Place the armed event — time snaps to the nearest bass onset, intensity starts at the section\'s energy.'],
+              ['Hold right button', 'Keep holding after placing to slide the intensity live until you release.'],
+              ['Right-click a trigger', 'Reassign that trigger to the armed event — or, with the blend brush armed ([ / ]), paint/clear its Override Blend.'],
+              ['Drag a circle ↕', 'Change intensity — snaps to the previous trigger\'s value and to 0.5. With a multi-selection, all selected circles shift together.'],
+              ['Drag a triangle ↔', 'Move the trigger in time (20 ms grid, snaps to librosa markers by row).'],
+              ['Drag off the canvas', 'Delete the trigger (pull it more than ~24 px out).'],
+              ['Double-click', 'Edit the trigger under the cursor, or create a new one on empty canvas.'],
+              ['Click circle / empty canvas', 'Select a trigger / clear the selection.'],
+            ],
+            kbd: false,
+          },
+          {
+            id: 'builder-selection-keys',
+            title: 'Selection & intensity keys',
+            keywords: 'arrow nudge undo redo select all ripple enter numeric',
+            table: [
+              ['Ctrl+A', 'Select all triggers.'],
+              ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo.'],
+              ['Left / Right', 'Select the previous / next trigger (Shift extends the selection).'],
+              ['Up / Down', 'Nudge selected intensity ±0.01 (Shift = ±0.1).'],
+              ['. then digits', 'Type an exact intensity: ".9" → 0.90, ".09" → 0.09.'],
+              ['Enter', 'Copy the previous trigger\'s intensity, then advance — fast ripple editing.'],
+              ['Esc', 'Clear the selection.'],
+            ],
+            kbd: true,
+          },
+          {
+            id: 'builder-trigger-dialog',
+            title: 'Trigger edit dialog',
+            keywords: 'double click edit timestamp event labels intensity open new tab reference palette assign blend color group override drop scene group',
+            body: [
+              'Double-click a trigger (or empty canvas) to open it: timestamp (m:ss.t), event (recently used float to the top), filter labels, intensity, the Colors picker (scene-group color override — see below), and the Override Blend toggle.',
+              'When the picked event is the fixed Drop, a Drop 🎯 picker appears: choose a Scene Group the drop falls back to for this trigger instead of the global drop group.',
+              'The ↗ next to the event picker opens the chosen event\'s editor in the SpotFX app in a new tab, so the trigger you\'re editing stays put.',
+            ],
+          },
+          {
+            id: 'filter-labels',
+            title: 'Label filter syntax',
+            keywords: 'exclude not minus comma separator negative',
+            body: [
+              'Used wherever you filter by labels — e.g. the trigger dialog\'s color-set filter.',
+            ],
+            table: [
+              ['chorus, big', 'Comma-separated labels: ALL listed labels must match.'],
+              ['-quiet', 'Minus prefix excludes: matches anything NOT labeled "quiet".'],
+              ['(blank)', 'No filtering — everything is eligible.'],
+            ],
+            kbd: false,
+          },
+          {
+            id: 'override-blend',
+            title: 'Override Blend',
+            keywords: 'blend ramp stretch scale slow fast transition next trigger no action paint brush bracket',
+            body: [
+              'A trigger with Override Blend on rescales its event\'s ramps and delays — proportionally — so the last ramp completes exactly at the next enabled trigger (or at song end when none follows). Beat-timed steps stay on their beats — only their ramps scale. On both timelines the blended span is tinted in the event\'s color from the blend trigger to the trigger that ends it.',
+              'On Charge and Lull triggers this stretches the phase build to exactly the gap to the NEXT trigger — the charge peaks the instant the lull fires, the lull finishes coiling the instant the drop hits. Drop never blends: it stays a snap.',
+            ],
+            table: [
+              ['[', 'Arm the blend brush — right-click triggers to turn Override Blend ON. Re-press or Esc disarms.'],
+              [']', 'Arm the eraser — right-click triggers to turn Override Blend OFF.'],
+            ],
+            kbd: true,
+          },
+          {
+            id: 'trigger-color-override',
+            title: 'Scene-group color override',
+            keywords: 'color group override trigger scene group palette designate colors picker',
+            body: [
+              'The Colors picker in the trigger dialog overrides which Color Group the SpotFX scene machinery pulls its colors from — for that one trigger. Blank (the default) changes nothing; a deleted pick falls back to the normal choice instead of failing. The override lives on the trigger, so the same Scene Group can be blue at one trigger and gold at the next.',
+            ],
+          },
+          {
+            id: 'charge-lull-drop',
+            title: 'Charge / Lull / Drop triggers',
+            keywords: 'charge lull drop phase buildup build payoff snap fixed built-in',
+            body: [
+              'The three fixed events drive the build→hold→payoff arc on every phase-capable effect: fire Charge on a buildup, Lull at the peak hush, Drop at the impact. In SPECTRA these same fires reach the response engine as the charge/lull/drop classes and drive the identical vendored choreography — see "Response families" under the editor help for what each effect family does. Give Charge/Lull triggers Override Blend so the build stretches to the next trigger; Drop stays a snap and re-fires cleanly every time.',
+            ],
+          },
+          {
+            id: 'display-modes',
+            title: 'Dark / Light mode (per trigger)',
+            keywords: 'dark mode light mode display background moon sun',
+            body: [
+              'The Mode 🌗 select on a trigger feeds the SpotFX room-wide dark/light cascade: Dark forces backgrounds black on affected devices (hard-locked in the render pipeline), Light fills default light backgrounds, Default defers down the cascade. The full cascade and shielding live in the SpotFX app\'s Settings help.',
+            ],
+          },
+        ],
+      },
+      {
+        id: 'builder-navigation',
+        title: 'Navigation & view',
+        entries: [
+          {
+            id: 'builder-pan-zoom',
+            title: 'Pan, zoom & follow',
+            keywords: 'middle drag scroll window playhead resume auto',
+            body: [
+              'In Live mode, follow resumes automatically (zoomed to the sticky window size) when the page opens, when Live mode turns on, and when the song changes; within one song your pan/zoom choice sticks. In song-search mode there is no playhead, so the view stays where you leave it.',
+            ],
+            table: [
+              ['Middle-drag', 'Pan the zoom window (drag right → window moves right). Panning switches follow off.'],
+              ['` (backtick)', 'Toggle follow mode (auto-scroll with playback) vs. manual zoom.'],
+              ['Ctrl+F', 'Also toggles follow mode.'],
+              ['Full-song bar', 'Drag the zoom region\'s center to pan (switches follow off); drag its edges to resize — in follow mode edge drags adjust window size and look-ahead.'],
+            ],
+            kbd: false,
+          },
+          {
+            id: 'builder-timeline-bar',
+            title: 'Full-song timeline bar',
+            keywords: 'overview marker minimap',
+            table: [
+              ['Drag a marker', 'Move that trigger in time; drag well above/below the bar to delete it.'],
+              ['Click a marker', 'Edit the trigger.'],
+              ['Double-click empty bar', 'Create a trigger there.'],
+              ['Right-click', 'Place the armed event (on a marker: reassign it). With the blend brush armed, paint/clear Override Blend instead.'],
+            ],
+            kbd: false,
+          },
+          {
+            id: 'builder-shape-controls',
+            title: 'Waveform & layer controls',
+            keywords: 'bands bass mid high total scale lightning intensity background source',
+            table: [
+              ['Click a band button', 'Toggle that frequency band\'s fill (Total / Bass / Mid / High).'],
+              ['Right-click a band button', 'Toggle its rolling-average line.'],
+              ['Long-press + drag ↕ a band button', 'Adjust that band\'s vertical scale (snaps back to 1.0).'],
+              ['⚡ click', 'Toggle the intensity background layer.'],
+              ['⚡ scroll wheel', 'Cycle intensity-background sources.'],
+              ['⚡ hold', 'Open the source chooser.'],
+            ],
+            kbd: false,
+          },
+          {
+            id: 'builder-misc',
+            title: 'Other timeline controls',
+            keywords: 'shift all offset resize canvas height live capture import setlist mode manual verify calibrating badge',
+            table: [
+              ['Shift all', 'Preview sliding every trigger by an offset, then apply. Double-click the slider to reset to 0.'],
+              ['Offset badge ✎ / ✕', 'Write the shape offset by hand (saved as user-verified) or clear it back to unverified so auto-calibration relearns.'],
+              ['🎯 auto-calibrating…', 'Shown in the Audio Shape header while xcorr auto-calibration is targeting this song\'s (still unverified) offset.'],
+              ['⣀ handle below canvas', 'Drag to resize the canvas height.'],
+              ['Modes', 'Song search picks any profile; Live mode follows Spotify playback; Auto Wait pauses placement until playback reaches the window.'],
+            ],
+            kbd: false,
+          },
         ],
       },
     ],

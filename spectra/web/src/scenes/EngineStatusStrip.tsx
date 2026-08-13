@@ -35,12 +35,26 @@ export default function EngineStatusStrip() {
         </span>
       )}
 
-      <span title={`Who steers the room's colour wheel and how fast. Room pace ${j.room_degrees_per_min}°/min.`}>
+      <span title={`Who steers the room's colour wheel. The journey always heads for a DESTINATION set picked by the selector — the destination fixes its own travel pace from its distance (reference ${j.room_degrees_per_min}°/min).`}>
         journey: {j.custody === 'scene' ? 'scene OVERRIDE' : 'room'}
-        {' '}{j.degrees_per_min}°/min
         {j.wheel_position_deg != null && ` @ ${j.wheel_position_deg.toFixed(0)}°`}
         {j.rainbow_paused && ' · 🌈 paused'}
       </span>
+      {j.destination ? (
+        <span
+          title={`Current destination: ${j.destination.set_name} at ${j.destination.position_deg.toFixed(0)}° — travelling at ${j.destination.pace_deg_per_min.toFixed(1)}°/min (picked via ${j.destination.rung}). On arrival the next destination is selected.`}>
+          → {j.destination.set_name}
+          {' '}{Math.round(j.destination.progress * 100)}%
+          {' '}@ {j.destination.pace_deg_per_min.toFixed(1)}°/min
+        </span>
+      ) : (
+        j.wheel_position_deg != null && !j.rainbow_paused && (
+          <span style={{ color: 'var(--text-muted)' }}
+            title="No destination right now — either the walk is held (pace 0) or no eligible colour set exists to head for; the journey never creeps aimlessly">
+            no destination
+          </span>
+        )
+      )}
 
       {st.conductor.active_scene ? (
         <details style={{ display: 'inline' }}>

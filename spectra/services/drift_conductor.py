@@ -11,13 +11,21 @@ Mechanisms per leg:
            evaluate the declared curve, glide toward it over slew_s.
            Deliberately the slow layer; beat-rate response stays inside the
            effects' own audio params.
-  colour journey — the room's walk (services/color_journey holds the binding
-           custody semantics): the wheel advances Δ° per leg under whoever
-           steers (room by default, an overriding scene outright), and the
-           active palette rotates WITH it — gradient + background together,
-           hue-blend glides on set-mode virtuals. Rainbow/achromatic
-           palettes pause the walk; the wheel position persists to shared
-           room state every leg, so custody transfers never move it.
+  colour journey — DESTINATION-DRIVEN (services/color_journey holds the
+           binding model + custody semantics): the room holds a destination
+           colour set picked by the shipped selector (curve × genre ×
+           wheel-travel) — the destination determines both the target and
+           the pace (fixed at selection from distance) — and each leg the
+           wheel travels toward it along the shortest arc, the active
+           palette rotating WITH it (gradient + background together,
+           hue-blend glides on set-mode virtuals). ON ARRIVAL the next
+           destination is selected (arrived set excluded) and the walk sets
+           off again. No destination in state → one is selected; no
+           eligible set → the walk holds (never aimless creep, never forced
+           churn). Rainbow/achromatic palettes pause the walk; a scene fire
+           or wheel teleport clears the bearing so the new custody/position
+           reselects; the wheel + bearing persist to shared room state
+           every leg, so custody transfers never move the position.
 
 Re-baseline: any scene fire drops every leg and restarts mechanisms from
 the new resolved initial conditions (on_scene_fire, hooked into
@@ -42,10 +50,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.scene import DriftSpec, SceneV2
+from spectra.models.sequencer import CurvePoint, SelectorEntry
 from spectra.services import color_journey, color_rotate
+from spectra.services import selection_kernel as kernel
 from spectra.services.selection_kernel import curve_eval
 
 logger = logging.getLogger(__name__)
@@ -131,6 +142,10 @@ class DriftConductor:
         room_load: Callable[[], color_journey.RoomColorState] | None = None,
         room_save: Callable[[color_journey.RoomColorState], None] | None = None,
         set_position: Callable[[str], Optional[float]] | None = None,
+        set_cards: Callable[[], list] | None = None,
+        sequencer_config: Callable[[], Any] | None = None,
+        genre_bucket: Callable[[], Optional[str]] | None = None,
+        rng: Random | None = None,
     ) -> None:
         self.executor = executor
         self._clock = clock
@@ -143,6 +158,11 @@ class DriftConductor:
         self._room_load = room_load or color_journey.load_room
         self._room_save = room_save or color_journey.save_room
         self._set_position = set_position or self._default_set_position
+        self._set_cards = set_cards or self._default_set_cards
+        self._sequencer_config = sequencer_config \
+            or self._default_sequencer_config
+        self._genre_bucket = genre_bucket or (lambda: None)
+        self._rng = rng or Random()
 
         self.scene: SceneV2 | None = None
         self.virtuals: dict[str, VirtualState] = {}
@@ -167,7 +187,10 @@ class DriftConductor:
                       color_set_id: str | None = None) -> None:
         """Drop all legs; restart every mechanism from the fire's resolved
         initial conditions. The wheel position does not move — custody may
-        transfer (color_journey semantics), the story never snaps."""
+        transfer (color_journey semantics), the story never snaps — but the
+        journey's DESTINATION clears: the fire changed the palette (and
+        possibly custody/pace), so the new steering picks a fresh bearing
+        on the next leg."""
         entries = {dev.id: dev for dev in scene.devices}
         self.scene = scene
         self.virtuals = {}
@@ -192,10 +215,11 @@ class DriftConductor:
                 else:
                     baseline = float(w["config"].get(param, 0.0) or 0.0)
                 self.mechanisms.append(Mechanism(vid, param, spec, baseline))
+        room = self._room_load()
+        update: dict[str, Any] = {"destination": None}
         if color_set_id is not None:
-            room = self._room_load()
-            self._room_save(room.model_copy(
-                update={"active_set_id": color_set_id}))
+            update["active_set_id"] = color_set_id
+        self._room_save(room.model_copy(update=update))
         journey = color_journey.active_journey(self._room_load(), scene)
         self._last_rebaseline = {
             "at": self._clock(), "scene_id": scene.id, "scene_name": scene.name,
@@ -244,7 +268,16 @@ class DriftConductor:
         batches: dict[tuple[str, int], dict[str, Any]] = {}
         legs: list[dict] = []
 
+        # A room is never set-less: bootstrap the first set before the leg
+        # (owner defect fix — see _bootstrap_room_color).
+        bootstrap = None
+        if self._room_load().active_set_id is None:
+            bootstrap = await self._bootstrap_room_color(
+                color_journey.active_journey(self._room_load(), self.scene))
+
         journey_rec = self._journey_leg(batches, leg_ms, legs)
+        if bootstrap is not None:
+            journey_rec["bootstrap"] = bootstrap
 
         intensity = self._intensity()
         if intensity is None:
@@ -286,55 +319,275 @@ class DriftConductor:
         from spectra.models.scene import CurveMapPoint
         return [CurveMapPoint(x=0.0, y=0.0), CurveMapPoint(x=1.0, y=1.0)]
 
+    def _destination_pool(self) -> dict[str, tuple[Any, float]]:
+        """Eligible chromatic destinations under current custody, as
+        {set_id: (card, wheel_position)}: an OVERRIDE picks within its own
+        palette bounds (the scene's accepted sets); room custody picks from
+        every set not globally opted out. Rainbow/achromatic sets are never
+        destinations — they have no wheel position to travel toward."""
+        scene = self.scene
+        override = (scene is not None
+                    and scene.color_journey.mode == "override")
+        pool: dict[str, tuple[Any, float]] = {}
+        for card in self._set_cards():
+            if getattr(card, "kind", "set") != "set":
+                continue
+            if override:
+                if not scene.accepts_color_set(card):
+                    continue
+            elif getattr(card, "scene_v2_opt_out", False):
+                continue
+            position = self._set_position(card.id)
+            if position is None:
+                continue
+            pool[card.id] = (card, position)
+        return pool
+
+    def _select_destination(
+        self, journey: color_journey.EffectiveJourney, from_deg: float,
+        exclude_id: Optional[str],
+    ) -> Optional[color_journey.JourneyDestination]:
+        """Pick the next destination with the SHIPPED selector (curve ×
+        genre × wheel-travel, decision-3 ladder). Selector entries narrow
+        and weight the pool when configured; an unconfigured selector falls
+        back to neutral entries over every eligible set, so the journey
+        keeps moving (uniform-among-eligible is the ladder's own rung, not
+        an invention). Terminal keep → None → the walk holds (never forced
+        churn). The pick fixes its own pace from its distance."""
+        pool = self._destination_pool()
+        if not pool:
+            return None
+        config = self._sequencer_config()
+        curves = self._curve_profiles()
+        positions = {sid: pos for sid, (_name, pos) in pool.items()}
+        entries = {sid: entry
+                   for sid, entry in config.color_set_entries.items()
+                   if sid in positions}
+        if not entries:
+            entries = {sid: SelectorEntry() for sid in positions}
+        wheel_profile = (curves.get(config.wheel_travel_curve)
+                         if config.wheel_travel_curve else None)
+        candidates = kernel.build_color_set_candidates(
+            entries, curves,
+            genre_bucket=self._genre_bucket(),
+            room_deg=from_deg,
+            set_positions=positions,
+            wheel_points=(wheel_profile.points if wheel_profile
+                          else [CurvePoint(x=0.0, y=1.0)]))
+        intensity = self._intensity()
+        if intensity is None:
+            intensity = NEUTRAL_INTENSITY
+        pick = kernel.select_color_set(candidates, intensity=intensity,
+                                       rng=self._rng, current_id=exclude_id)
+        if pick.picked_id is None:
+            return None
+        position = positions[pick.picked_id]
+        travel = abs(color_journey.signed_travel(from_deg, position))
+        return color_journey.JourneyDestination(
+            set_id=pick.picked_id,
+            set_name=getattr(pool[pick.picked_id][0], "name",
+                             pick.picked_id),
+            position_deg=position,
+            pace_deg_per_min=color_journey.destination_pace(
+                journey.degrees_per_min, travel),
+            from_deg=from_deg,
+            rung=pick.rung)
+
+    async def apply_color_set(self, card) -> int:
+        """Land a colour-set card on the live scene's set-mode virtuals as
+        a JUMP and move the palette/brightness baselines with it (the
+        conductor owns the baselines drift resumes from). Returns virtuals
+        landed — 0 with no live scene, which still leaves the set active
+        for the next fire to wear (scene_compiler.fire_scene)."""
+        from spectra.services import scene_compiler
+        from fx import device_model
+        by_vid = scene_compiler._set_entry_by_virtual(card)
+        landed = 0
+        for vid, state in self.virtuals.items():
+            if not state.set_mode:
+                continue
+            entry = by_vid.get(vid)
+            if entry is None:
+                continue
+            params: dict[str, Any] = {}
+            if entry.color_value:
+                params["gradient"] = entry.color_value
+                state.gradient = entry.color_value
+            if entry.bg_color and not device_model.bg_color_blocked(
+                    state.effect_type):
+                params["background_color"] = entry.bg_color
+                state.background_color = entry.bg_color
+            if entry.bg_mode:
+                params["background_mode"] = entry.bg_mode
+            if entry.brightness is not None:
+                params["brightness"] = entry.brightness
+                state.brightness_baseline = float(entry.brightness)
+            if entry.background_brightness is not None:
+                params["background_brightness"] = entry.background_brightness
+            if params:
+                await self.executor.jump(vid, state.effect_type, params)
+                landed += 1
+        return landed
+
+    async def apply_set_directly(self, card) -> dict:
+        """The supported manual apply-this-set surface (owner defect fix,
+        part b — reached via POST /api/room-color/apply): the card becomes
+        the room's active set, the wheel anchors at its position (rainbow:
+        colours land but the wheel stays where it was), its colours land on
+        any live set-mode virtuals, and the journey clears its bearing to
+        travel on from the new anchor."""
+        position = self._set_position(card.id)
+        landed = await self.apply_color_set(card)
+        room = self._room_load()
+        update: dict[str, Any] = {"active_set_id": card.id,
+                                  "destination": None}
+        if position is not None:
+            update["wheel_position_deg"] = position
+        self._room_save(room.model_copy(update=update))
+        logger.info("room colour set applied directly: '%s' (%d virtuals)",
+                    getattr(card, "name", card.id), landed)
+        return {"applied": card.id,
+                "set_name": getattr(card, "name", card.id),
+                "position_deg": position, "virtuals": landed}
+
+    async def _bootstrap_room_color(
+            self, journey: color_journey.EffectiveJourney) -> Optional[dict]:
+        """(owner defect fix, part a) A ROOM IS NEVER SET-LESS: with no
+        active set — first boot, wiped state — the journey immediately
+        selects its first set with the shipped selector (an unanchored
+        wheel is neutral for every candidate) and APPLIES it as the room's
+        anchor. Destination travel then proceeds from there. Without this,
+        nothing ever applies a first set (the sequencer is off, the flare
+        jump can't pick from an unanchored journey) and scenes render
+        effect-default LedFX wheel colours instead of the owner's sets."""
+        pool = self._destination_pool()
+        if not pool:
+            return None
+        config = self._sequencer_config()
+        curves = self._curve_profiles()
+        positions = {sid: pos for sid, (_card, pos) in pool.items()}
+        entries = {sid: entry
+                   for sid, entry in config.color_set_entries.items()
+                   if sid in positions}
+        if not entries:
+            entries = {sid: SelectorEntry() for sid in positions}
+        wheel_profile = (curves.get(config.wheel_travel_curve)
+                         if config.wheel_travel_curve else None)
+        candidates = kernel.build_color_set_candidates(
+            entries, curves,
+            genre_bucket=self._genre_bucket(),
+            room_deg=None,
+            set_positions=positions,
+            wheel_points=(wheel_profile.points if wheel_profile
+                          else [CurvePoint(x=0.0, y=1.0)]))
+        intensity = self._intensity()
+        if intensity is None:
+            intensity = NEUTRAL_INTENSITY
+        pick = kernel.select_color_set(candidates, intensity=intensity,
+                                       rng=self._rng, current_id=None)
+        if pick.picked_id is None:
+            return None
+        result = await self.apply_set_directly(pool[pick.picked_id][0])
+        result["rung"] = pick.rung
+        logger.info("room colour bootstrap: first set '%s' selected and "
+                    "applied", result["set_name"])
+        return result
+
+    def _destination_rec(self, dest: Optional[color_journey.JourneyDestination],
+                         wheel_deg: Optional[float]) -> Optional[dict]:
+        if dest is None:
+            return None
+        return {"set_id": dest.set_id, "set_name": dest.set_name,
+                "position_deg": round(dest.position_deg, 2),
+                "pace_deg_per_min": round(dest.pace_deg_per_min, 3),
+                "progress": round(color_journey.progress(dest, wheel_deg), 3),
+                "rung": dest.rung}
+
     def _journey_leg(self, batches: dict, leg_ms: int,
                      legs: list[dict]) -> dict:
-        """Advance the wheel one leg under whoever steers; rotate the active
-        palette with it on set-mode virtuals. Persists room state so the
-        wheel survives restarts and custody transfers read one truth."""
+        """One destination-journey leg under whoever steers: ensure a
+        bearing exists (select one if not), travel toward it along the
+        shortest arc at ITS pace, rotate the active palette with the wheel
+        on set-mode virtuals, land exactly on arrival and reselect. Persists
+        wheel + bearing to room state so restarts and custody transfers
+        read one truth."""
         room = self._room_load()
         journey = color_journey.active_journey(room, self.scene)
         rainbow = False
         if room.active_set_id is not None:
             rainbow = self._set_position(room.active_set_id) is None
-        new_deg = color_journey.step(journey, room.wheel_position_deg,
-                                     self.leg_s, palette_rainbow=rainbow)
-        rec = {"custody": journey.custody,
-               "degrees_per_min": journey.degrees_per_min,
-               "wheel_position_deg": round(new_deg, 2) if new_deg is not None
-               else None,
-               "paused": rainbow or new_deg is None}
-        if new_deg is None or new_deg == room.wheel_position_deg:
+        rec: dict[str, Any] = {
+            "custody": journey.custody,
+            "degrees_per_min": journey.degrees_per_min,
+            "wheel_position_deg": (round(room.wheel_position_deg, 2)
+                                   if room.wheel_position_deg is not None
+                                   else None),
+            "paused": True, "arrived": False,
+            "destination": self._destination_rec(room.destination,
+                                                 room.wheel_position_deg),
+        }
+        # Held: no chromatic story yet, rainbow palette live, or pace 0
+        # (pace_factor 0 / a zero spec). Bearing kept, nothing travels.
+        if (room.wheel_position_deg is None or rainbow
+                or journey.degrees_per_min <= 0.0):
             return rec
-        delta = journey.degrees_per_min * (self.leg_s / 60.0)
-        for vid, state in self.virtuals.items():
-            if not state.set_mode:
-                continue
-            params: dict[str, Any] = {}
-            if state.gradient:
-                state.gradient = color_rotate.rotate_color_value(
-                    state.gradient, delta)
-                params["gradient"] = state.gradient
-            if state.background_color:
-                state.background_color = color_rotate.rotate_color_value(
-                    state.background_color, delta)
-                params["background_color"] = state.background_color
-            if params:
-                batches.setdefault((vid, leg_ms), {}).update(params)
-                legs.append({"virtual_id": vid, "param": "palette",
-                             "kind": "journey", "target": round(delta, 3),
-                             "duration_ms": leg_ms})
-        self._room_save(room.model_copy(update={"wheel_position_deg": new_deg}))
+
+        dest = room.destination
+        if dest is None:
+            dest = self._select_destination(journey, room.wheel_position_deg,
+                                            room.active_set_id)
+            if dest is None:
+                return rec   # no eligible destination — the walk holds
+            rec["destination"] = self._destination_rec(
+                dest, room.wheel_position_deg)
+
+        new_deg, arrived = color_journey.step_toward(
+            room.wheel_position_deg, dest.position_deg,
+            dest.pace_deg_per_min, self.leg_s)
+        delta = color_journey.signed_travel(room.wheel_position_deg, new_deg)
+        rec.update(paused=False, arrived=arrived,
+                   wheel_position_deg=round(new_deg, 2))
+        if delta != 0.0:
+            for vid, state in self.virtuals.items():
+                if not state.set_mode:
+                    continue
+                params: dict[str, Any] = {}
+                if state.gradient:
+                    state.gradient = color_rotate.rotate_color_value(
+                        state.gradient, delta)
+                    params["gradient"] = state.gradient
+                if state.background_color:
+                    state.background_color = color_rotate.rotate_color_value(
+                        state.background_color, delta)
+                    params["background_color"] = state.background_color
+                if params:
+                    batches.setdefault((vid, leg_ms), {}).update(params)
+                    legs.append({"virtual_id": vid, "param": "palette",
+                                 "kind": "journey",
+                                 "target": round(delta, 3),
+                                 "duration_ms": leg_ms})
+        if arrived:
+            # ON ARRIVAL: select the next destination (arrived set
+            # excluded) and set off again next leg.
+            dest = self._select_destination(journey, new_deg, dest.set_id)
+            rec["destination"] = self._destination_rec(dest, new_deg)
+        else:
+            rec["destination"] = self._destination_rec(dest, new_deg)
+        self._room_save(room.model_copy(
+            update={"wheel_position_deg": new_deg, "destination": dest}))
         return rec
 
     # ── supervised production loop ───────────────────────────────────────────
 
     async def run(self) -> None:
+        # First tick immediately: a set-less room bootstraps its first
+        # colour set at engine start, not one leg-interval later.
         while True:
-            await asyncio.sleep(self.leg_s)
             try:
                 await self.tick()
             except Exception:
                 logger.exception("drift conductor: leg failed")
+            await asyncio.sleep(self.leg_s)
 
     # ── observability ────────────────────────────────────────────────────────
 
@@ -356,6 +609,8 @@ class DriftConductor:
                 "wheel_position_deg": room.wheel_position_deg,
                 "active_set_id": room.active_set_id,
                 "rainbow_paused": rainbow,
+                "destination": self._destination_rec(
+                    room.destination, room.wheel_position_deg),
             },
             "mechanisms": [m.as_status() for m in self.mechanisms],
             "last_leg": self._last_leg,
@@ -381,6 +636,16 @@ class DriftConductor:
         if card is None:
             return None
         return color_wheel.wheel_position(card).position_deg
+
+    @staticmethod
+    def _default_set_cards() -> list:
+        from spectra.services import color_sets
+        return color_sets.list_all()
+
+    @staticmethod
+    def _default_sequencer_config():
+        from spectra.services import sequencer_store
+        return sequencer_store.load_config()
 
     @staticmethod
     async def _no_broadcast(payload: dict) -> None:

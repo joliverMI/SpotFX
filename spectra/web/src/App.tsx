@@ -5,9 +5,11 @@ import { confirmLeave } from './lib/unsavedGuard';
 import HelpPage from './help/HelpPage';
 import ScenesPage from './scenes/ScenesPage';
 import StatusPage from './status/StatusPage';
+import BuilderPage from './timeline/BuilderPage';
 
 const PAGE_TITLES: [string, string][] = [
   ['/scenes', 'Scenes'],
+  ['/timeline', 'Timeline'],
   ['/status', 'Status'],
   ['/help', 'Help'],
 ];
@@ -34,6 +36,7 @@ function NavBar() {
     }}>
       <span className="logo">◆ SPECTRA</span>
       <Link to="/scenes" className={cls((p) => p === '/' || p.startsWith('/scenes'))}>Scenes</Link>
+      <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
       <Link to="/status" className={cls((p) => p === '/status')}>Status</Link>
       <Link to="/help" className="help-link" title="Help" aria-label="Help">?</Link>
     </nav>
@@ -50,6 +53,7 @@ export default function App() {
           <Route path="/" element={<ScenesPage />} />
           <Route path="/scenes" element={<ScenesPage />} />
           <Route path="/scenes/:id" element={<ScenesPage />} />
+          <Route path="/timeline" element={<BuilderPage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/help" element={<HelpPage />} />
         </Routes>

@@ -6,8 +6,11 @@
   POST /api/ownership/handover — the owner's switch: {"to": "spectra" |
       "spot-effects"}. REFUSED (403) unless the SPECTRA_HANDOVER_ARMED
       latch is set on the process; 409 when the record refuses (already
-      owner / already in flight); on a step failure returns 502 with the
-      landing — always a settled single owner, never split.
+      owner / already in flight); 412 when the to-side's go-day preparation
+      is missing (the readiness gate — refused BEFORE quiesce, room
+      untouched, the error names the preparation and its command); on a
+      step failure returns 502 with the landing — always a settled single
+      owner, never split.
   POST /api/ownership/recover  — land a crash-orphaned handover (age-gated;
       also runs automatically at engine start).
 
@@ -88,6 +91,10 @@ async def post_handover(body: HandoverRequest):
             body.to, handover_svc.production_sides())
     except light_ownership.OwnershipError as exc:
         raise HTTPException(409, str(exc))
+    except handover_svc.HandoverRefused as exc:
+        return JSONResponse(
+            {"result": "refused-preparation-missing", "error": str(exc),
+             "record": _record_json()}, status_code=412)
     except handover_svc.HandoverFailed as exc:
         return JSONResponse(
             {"result": "failed-landed-single-owner", "error": str(exc),

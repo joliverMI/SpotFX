@@ -83,22 +83,26 @@ export default function DriftTab({ scene, setScene }: {
         {journey.mode === 'inherit' ? (
           <>
             <span className="badge badge-gray" style={{ marginRight: 8 }}>inherits the room</span>
-            The room's palette walks the colour wheel at <b>{roomPace}°/min</b>
+            The room's palette always heads for a <b>destination</b> colour set (picked by the
+            selector: curve × genre × wheel-travel) at a reference pace of <b>{roomPace}°/min</b>
+            — the destination fixes its own travel speed from how far away it is, and on
+            arrival the next destination is picked
             {journey.pace_factor !== 1 && (
-              <> — this scene scales it <b>×{journey.pace_factor}</b>
+              <> — this scene scales the pace <b>×{journey.pace_factor}</b>
                 {journey.pace_factor === 0 && ' (holds the walk while it shows)'}</>
             )}.
           </>
         ) : (
           <>
             <span className="badge badge-purple" style={{ marginRight: 8 }}>OVERRIDE</span>
-            While this scene shows, it steers the wheel itself:{' '}
-            <b>{journey.journey?.degrees_per_min}°/min</b>{' '}
-            ({(journey.journey?.degrees_per_min ?? 0) >= 0 ? 'blue → purple' : 'purple → blue'} direction).
+            While this scene shows, it steers the wheel itself — same destination model,
+            but destinations are picked <b>within this scene's own palette bounds</b> (its
+            accepted sets), at its own reference pace of{' '}
+            <b>{Math.abs(journey.journey?.degrees_per_min ?? 0)}°/min</b>.
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
               Custody, not a fork: entering, this journey continues from wherever the room's
-              walk had reached; leaving, the room's own walk resumes from wherever this scene
-              left the wheel. No snap in either direction.
+              walk had reached and picks its own destination; leaving, the room's own walk
+              resumes from wherever this scene left the wheel. No snap in either direction.
             </div>
           </>
         )}

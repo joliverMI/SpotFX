@@ -160,6 +160,19 @@ def resolve_scope(virtual_ids: list[str] = (), categories: list[str] = (),
     return out
 
 
+# The vendored effects carrying the charge/lull/drop phase machinery: the
+# `phase` ("none"|"charge"|"lull"|"drop") + `phase_progress` (0→1) config
+# pair, edge-detected in config_updated and consumed per draw, with the
+# shared orphan watchdog (fx/effects/particle_handoff.phase_release_due).
+# Matches the original SpotFX program's PHASE_EFFECTS set; deliberately NOT
+# part of the effect-parameter registry below — phase keys ride ONLY
+# dedicated phase writes, never editor surfaces or band patches.
+PHASE_EFFECTS = frozenset({
+    "blackhole", "blackhole1d", "orbits", "orbits1d", "radial",
+    "fireworks", "fireworks1d", "squiggles", "dancer", "eye",
+})
+
+
 # ── effect-parameter registry ────────────────────────────────────────────────
 
 def effect_types() -> list[str]:

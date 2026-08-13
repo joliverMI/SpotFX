@@ -21,6 +21,10 @@ The proofs:
   5. a lying quiesce (stop claimed, outputs still running) never lets the
      new writer start — verification is independent of the claim;
   6. the armed latch: the handover API refuses unarmed.
+  7. the READINESS GATE (order-8): a missing/empty/unusable fx-live config
+     REFUSES the handover before the old owner is quiesced — the room stays
+     untouched, the refusal names the seeder command; the reverse direction
+     equally refuses when the LedFX service unit is missing.
 """
 from __future__ import annotations
 
@@ -78,6 +82,10 @@ class RecordedSide:
         self.name = name
         self.calls = []
         self.running = True
+
+    async def readiness_problems(self):
+        self.calls.append("readiness_problems")
+        return []
 
     async def quiesce(self):
         self.calls.append("quiesce")
@@ -255,6 +263,9 @@ class BusSide:
             for r in self.RESOURCES:
                 bus.acquire(r, name)
 
+    async def readiness_problems(self):
+        return []
+
     async def quiesce(self):
         if self.lie_on_quiesce:
             return  # claims success; releases nothing
@@ -417,6 +428,134 @@ def test_handover_api_armed_but_already_owner_is_409(tmp_path, monkeypatch):
         assert exc.value.status_code == 409
 
     _run(main())
+
+
+# ── proof 7: the readiness gate (order-8 — refuse BEFORE quiesce) ────────────
+
+def _refusal_sides(tmp_path, config_dir):
+    from spectra.services.handover import SpectraSide
+
+    spot = RecordedSide(lo.SPOT_EFFECTS)
+    return spot, {lo.SPOT_EFFECTS: spot,
+                  lo.SPECTRA: SpectraSide(config_dir=str(config_dir),
+                                          open_audio=False)}
+
+
+def _assert_refused_room_untouched(tmp_path, spot, exc):
+    # The old owner was never quiesced — not one call reached its side —
+    # and the ownership record never moved (the file was never written).
+    assert spot.calls == []
+    assert lo.load().owner == lo.SPOT_EFFECTS
+    assert not lo.OWNERSHIP_FILE.exists()
+    # The refusal names the missing preparation and the seeder command.
+    from spectra.services.handover import FX_LIVE_SEED_COMMAND
+    assert FX_LIVE_SEED_COMMAND in str(exc.value)
+
+
+def test_missing_fx_live_config_refuses_before_quiesce(tmp_path):
+    from spectra.services.handover import HandoverRefused, run_handover
+
+    _own_file(tmp_path)
+    spot, sides = _refusal_sides(tmp_path, tmp_path / "never-seeded")
+
+    async def main():
+        with pytest.raises(HandoverRefused) as exc:
+            await run_handover(lo.SPECTRA, sides, grace_s=0)
+        _assert_refused_room_untouched(tmp_path, spot, exc)
+
+    _run(main())
+
+
+def test_empty_fx_live_config_refuses_before_quiesce(tmp_path):
+    from spectra.services.handover import HandoverRefused, run_handover
+
+    _own_file(tmp_path)
+    config_dir = tmp_path / "fx-live"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"devices": [], "virtuals": []}))
+    spot, sides = _refusal_sides(tmp_path, config_dir)
+
+    async def main():
+        with pytest.raises(HandoverRefused) as exc:
+            await run_handover(lo.SPECTRA, sides, grace_s=0)
+        _assert_refused_room_untouched(tmp_path, spot, exc)
+
+    _run(main())
+
+
+def test_zero_usable_virtuals_refuses_before_quiesce(tmp_path):
+    """Devices exist but none of a vendored driver type backs any virtual —
+    the host would skip them all and activate empty-handed."""
+    from spectra.services.handover import HandoverRefused, run_handover
+
+    _own_file(tmp_path)
+    config_dir = tmp_path / "fx-live"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(json.dumps({
+        "devices": [{"id": "strip", "type": "not-a-vendored-driver",
+                     "config": {"name": "strip", "pixel_count": 64}}],
+        "virtuals": [{"id": "strip", "config": {"name": "strip"},
+                      "segments": [["strip", 0, 63, False]]}],
+    }))
+    spot, sides = _refusal_sides(tmp_path, config_dir)
+
+    async def main():
+        with pytest.raises(HandoverRefused) as exc:
+            await run_handover(lo.SPECTRA, sides, grace_s=0)
+        _assert_refused_room_untouched(tmp_path, spot, exc)
+
+    _run(main())
+
+
+def test_seeded_config_passes_readiness(tmp_path):
+    from spectra.services.handover import SpectraSide
+
+    config_dir = tmp_path / "fx-live"
+    headless.write_headless_config(str(config_dir))
+    side = SpectraSide(config_dir=str(config_dir), open_audio=False)
+    assert _run(side.readiness_problems()) == []
+
+
+def test_handover_api_armed_but_unseeded_is_412(tmp_path, monkeypatch):
+    from spectra import config as spectra_config
+    from spectra.api.ownership import HandoverRequest, post_handover
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+    monkeypatch.setattr(spectra_config, "FX_LIVE_CONFIG_DIR",
+                        tmp_path / "never-seeded")
+
+    async def main():
+        resp = await post_handover(HandoverRequest(to=lo.SPECTRA))
+        body = json.loads(bytes(resp.body))
+        assert resp.status_code == 412
+        assert body["result"] == "refused-preparation-missing"
+        assert "seed_spectra_fx_live" in body["error"]
+        # Room untouched: record never moved, never even written.
+        assert lo.load().owner == lo.SPOT_EFFECTS
+        assert not lo.OWNERSHIP_FILE.exists()
+
+    _run(main())
+
+
+def test_reverse_handover_refuses_on_missing_ledfx_unit(monkeypatch):
+    from spectra.services import handover as handover_svc
+
+    async def fake_systemctl(*args):
+        assert args == ("cat", "ledfx")
+        return 1, "No files found for ledfx.service."
+
+    monkeypatch.setattr(handover_svc, "_systemctl", fake_systemctl)
+    side = handover_svc.SpotEffectsSide()
+    problems = _run(side.readiness_problems())
+    assert problems and "ledfx" in problems[0]
+
+    async def ok_systemctl(*args):
+        return 0, "# ledfx.service"
+
+    monkeypatch.setattr(handover_svc, "_systemctl", ok_systemctl)
+    assert _run(side.readiness_problems()) == []
 
 
 # ── offline guarantee ────────────────────────────────────────────────────────

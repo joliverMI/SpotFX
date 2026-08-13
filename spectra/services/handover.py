@@ -3,6 +3,14 @@ stopped, only then activate the other; commit only after the new writer is
 verified up. Every failure lands the record at a settled single owner —
 never split, never two writers (the Admiral's architecture decision).
 
+Before either step, the READINESS GATE (order-8 correction): the to-side's
+rememberable go-day preparations are checked and a missing one REFUSES the
+handover before the record moves and before any quiesce — the room stays
+untouched under its current owner. Rememberable preparation is a defect
+class, not a procedure note: verification cannot catch an empty world
+(freshness is vacuously true with zero virtuals), so the world that is
+about to take the room proves its preparation first.
+
 The ordering exists because of the merge-scout §4d failure modes:
   - Hue entertainment is a hard exclusivity: one DTLS session per bridge
     group. The new writer's multi-second handshake FAILS while the old
@@ -33,13 +41,16 @@ the operator procedure).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+from pathlib import Path
 from typing import Optional, Protocol
 
 import httpx
 
 from fx import light_ownership
+from fx.host import VENDORED_DEVICE_TYPES
 from spectra import config
 
 logger = logging.getLogger(__name__)
@@ -50,19 +61,39 @@ HUE_RELEASE_GRACE_S = 5.0
 SERVICE_VERIFY_TIMEOUT_S = 30.0
 FRESH_VERIFY_TIMEOUT_S = 15.0
 
+# The go-day preparation the readiness gate names in its refusal (the order-8
+# correction: this step was once skipped and the room went dark for minutes).
+FX_LIVE_SEED_COMMAND = ".venv/bin/python scripts/seed_spectra_fx_live.py --apply"
+
 
 class HandoverFailed(RuntimeError):
     """The handover did not land on the target. The record has already been
     landed on a single owner (the from-world) before this raises."""
 
 
+class HandoverRefused(RuntimeError):
+    """The handover did not BEGIN: a rememberable preparation is missing on
+    the to-side. Raised before the ownership record moves and before any
+    quiesce — the room is untouched and the current owner keeps writing.
+
+    This exists because activation verification cannot catch an empty world:
+    live.fresh() is vacuously true with zero active virtuals, so an unseeded
+    fx-live config once sailed through the whole handover and left the room
+    dark for minutes (the owner's order-8 defect). Preparation is checked
+    BEFORE quiescing, not remembered."""
+
+
 class WriterSide(Protocol):
     """One world's stop/start surface. quiesce/deactivate must release every
     room output (Hue DTLS session, DDP sending); activate must bring them
-    back. verify_* consult real state, never the last call's return value."""
+    back. verify_* consult real state, never the last call's return value.
+    readiness_problems runs BEFORE the record moves: it reports every missing
+    preparation that would leave this side unable to take the room, so the
+    orchestrator can refuse with the current owner still writing."""
 
     name: str
 
+    async def readiness_problems(self) -> list[str]: ...
     async def quiesce(self) -> None: ...
     async def verify_quiesced(self) -> bool: ...
     async def activate(self) -> None: ...
@@ -83,10 +114,20 @@ async def run_handover(
     *,
     grace_s: float = HUE_RELEASE_GRACE_S,
 ) -> light_ownership.OwnershipRecord:
-    """The two-step switch. Raises OwnershipError if the record refuses to
-    begin (already owner / already in flight) and HandoverFailed when a step
-    fails — in which case the record has landed back at the from-world and
-    the from-side was restored best-effort. Returns the committed record."""
+    """The two-step switch. Raises HandoverRefused when the to-side's go-day
+    preparation is missing — BEFORE the record moves and before any quiesce,
+    so the room stays untouched under its current owner. Raises
+    OwnershipError if the record refuses to begin (already owner / already in
+    flight) and HandoverFailed when a step fails — in which case the record
+    has landed back at the from-world and the from-side was restored
+    best-effort. Returns the committed record."""
+    light_ownership.check_can_begin(to_world)
+    problems = await sides[to_world].readiness_problems()
+    if problems:
+        raise HandoverRefused(
+            f"handover to {to_world} refused before quiesce — the room is "
+            f"untouched and the current owner keeps writing. Missing "
+            f"preparation: " + "; ".join(problems))
     handover = light_ownership.begin_handover(to_world)
     from_side = sides[handover.from_world]
     to_side = sides[handover.to_world]
@@ -153,6 +194,22 @@ class SpotEffectsSide:
 
     name = light_ownership.SPOT_EFFECTS
 
+    async def readiness_problems(self) -> list[str]:
+        """Giving the room back requires a startable LedFX unit. A missing
+        unit would only surface AFTER SPECTRA quiesced — minutes of dark
+        room — so it is checked here, before anything stops."""
+        try:
+            rc, out = await _systemctl("cat", _ledfx_unit())
+        except FileNotFoundError:
+            return ["systemctl not available — cannot start the LedFX "
+                    f"service unit '{_ledfx_unit()}' to restore spot-effects"]
+        if rc != 0:
+            return [f"LedFX service unit '{_ledfx_unit()}' not found "
+                    f"(systemctl --user cat rc={rc}) — restoring spot-effects "
+                    "would leave the room dark; install the unit or set "
+                    "SPECTRA_LEDFX_UNIT"]
+        return []
+
     async def quiesce(self) -> None:
         rc, out = await _systemctl("stop", _ledfx_unit())
         if rc != 0:
@@ -201,6 +258,36 @@ class SpectraSide:
         self.config_dir = config_dir or str(config.FX_LIVE_CONFIG_DIR)
         self.open_audio = open_audio
         self.audio_source_factory = audio_source_factory
+
+    async def readiness_problems(self) -> list[str]:
+        """The order-8 gate: SPECTRA cannot take the room on a missing,
+        unreadable, or empty fx-live config — that world activates
+        'successfully' with zero virtuals (freshness is vacuously true) and
+        the room goes dark. Named preparation, checked, refused pre-quiesce."""
+        path = Path(self.config_dir) / "config.json"
+        remedy = f"run: {FX_LIVE_SEED_COMMAND}"
+        if not path.exists():
+            return [f"SPECTRA fx-live config missing ({path}) — the go-day "
+                    f"seeding step has not been run; {remedy}"]
+        try:
+            raw = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            return [f"SPECTRA fx-live config unreadable ({path}: {exc}) — "
+                    f"re-seed it; {remedy}"]
+        devices = raw.get("devices") or []
+        virtuals = raw.get("virtuals") or []
+        vendored_ids = {d.get("id") for d in devices
+                        if d.get("type") in VENDORED_DEVICE_TYPES}
+        usable = [v for v in virtuals
+                  if any(seg and seg[0] in vendored_ids
+                         for seg in (v.get("segments") or []))]
+        if not usable:
+            return [f"SPECTRA fx-live config has no usable virtuals "
+                    f"({len(devices)} devices, {len(virtuals)} virtuals, 0 "
+                    f"backed by a vendored driver type "
+                    f"{sorted(VENDORED_DEVICE_TYPES)}) — the room would come "
+                    f"up empty-handed; {remedy}"]
+        return []
 
     async def activate(self) -> None:
         from fx import facade

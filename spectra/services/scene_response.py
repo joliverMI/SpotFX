@@ -4,10 +4,28 @@ lull / drop) now EXECUTE against the active scene's responses block.
 
 Per event, fed by the bridge with the fire's intensity:
 
+  0. CHARGE/LULL/DROP DRIVE THE REAL PHASE MACHINERY FIRST (the owner's
+     five-updates item 2). The build/suspend/release grammar lives IN the
+     vendored effects (fx/effects — the fork's charge/lull/drop handling:
+     phase + phase_progress config keys, edge-detected, per-family
+     choreography, shared orphan watchdog); this engine drives it exactly
+     the way the original SpotFX program did (trigger_engine._fire_phase):
+     an instant {"phase": <class>, "phase_progress": 0.0} arm per
+     phase-capable virtual (the 0.0 reset re-arms the edge), then a glide
+     of phase_progress → 1.0 over the class's ramp (charge 4000 ms builds,
+     lull 2500 ms suspends, drop 400 ms — the snap). The drive fires for
+     EVERY charge/lull/drop event, band or no band — exactly as the
+     original fired the phase for every phase event, with the per-scene
+     band riding on top as the scene's colouring. Per-family grammar:
+     docs/SPECTRA_RESPONSES.md. Phase keys ride ONLY these dedicated
+     writes (the registry gate keeps them out of band patches; the
+     editor/compiler never carries them) — a re-sent stale "charge" would
+     spuriously re-fire the choreography with no drop coming.
   1. Select the band containing the intensity ([min, max); the top band is
      inclusive at exactly 1.0 so a full-scale fire always matches). No band
-     → the class stays silent at that intensity — bands are the response's
-     WHEN along the axis.
+     → the class's BAND extras stay silent at that intensity — bands are
+     the response's WHEN along the axis (the phase drive above is not
+     band-gated).
   2. One batched pass:
        re-roll  — the scene's 🎲 (signal="random") bindings re-resolve with
                   fresh dice and JUMP to the new values (reroll_dice flag).
@@ -64,6 +82,10 @@ PULSE_RELEASE_S = 1.5    # glide back to baseline
 GAIN_GLIDE_S = 0.8       # linear/ease_* land over this, then hold (carried)
 SURGE_LOG_LIMIT = 50
 
+# phase_progress ramp per class — the original program's tuned durations
+# (config.py phase_*_ramp_ms defaults): "Drop stays short — it's the snap."
+PHASE_RAMP_MS = {"charge": 4000, "lull": 2500, "drop": 400}
+
 
 def select_band(bands: list[FlareBand], intensity: float) -> Optional[FlareBand]:
     for band in bands:
@@ -105,6 +127,7 @@ class ResponseEngine:
 
         self.surges: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
         self._pending_releases: list[str] = []   # virtual ids awaiting release
+        self._phase_armed: Optional[str] = None  # "charge"|"lull" awaiting payoff
 
     # ── the event ────────────────────────────────────────────────────────────
 
@@ -115,15 +138,23 @@ class ResponseEngine:
             "at": self._clock(), "class": event_class,
             "intensity": round(intensity, 4),
         }
-        spec = scene.responses.get(event_class) if scene else None
-        if scene is None or spec is None:
-            record["result"] = "no_active_scene" if scene is None else "no_class"
+        if scene is None:
+            record["result"] = "no_active_scene"
             self.surges.append(record)
             return record
-        band = select_band(spec.bands, intensity)
-        if band is None:
-            record["result"] = "no_band"
+        phase_driven = False
+        if event_class in PHASE_RAMP_MS:
+            record["phase"] = await self._drive_phase(event_class)
+            phase_driven = bool(record["phase"]["targets"])
+        spec = scene.responses.get(event_class)
+        band = select_band(spec.bands, intensity) if spec else None
+        if spec is None or band is None:
+            record["result"] = ("phase_only" if phase_driven
+                                else "no_class" if spec is None
+                                else "no_band")
             self.surges.append(record)
+            if phase_driven:
+                await self._broadcast({"type": "surge", **record})
             return record
         record["band"] = {"intensity_min": band.intensity_min,
                           "intensity_max": band.intensity_max,
@@ -257,6 +288,52 @@ class ResponseEngine:
             count += 1
         return count
 
+    async def _drive_phase(self, event_class: str) -> dict:
+        """Arm + ramp the vendored phase machinery on every phase-capable
+        virtual — the exact drive the original program used: the instant
+        arm write must land before the ramp (jump, then glide — in-process
+        the calls are ordered by construction; the legacy path needed an
+        explicit bus drain). The choreography itself — blackhole's swallow,
+        orbits' collapse, fireworks' rockets, the eye's lids — is the
+        effects' own vendored code, not re-invented here."""
+        ramp_ms = PHASE_RAMP_MS[event_class]
+        targets: list[str] = []
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.PHASE_EFFECTS:
+                continue
+            await self.executor.jump(
+                vid, state.effect_type,
+                {"phase": event_class, "phase_progress": 0.0})
+            await self.executor.glide(
+                vid, state.effect_type, {"phase_progress": 1.0}, ramp_ms)
+            targets.append(vid)
+        if targets:
+            self._phase_armed = (event_class
+                                 if event_class in ("charge", "lull")
+                                 else None)
+        return {"targets": targets, "ramp_ms": ramp_ms}
+
+    async def release_phases(self) -> int:
+        """The lifecycle guard carried from the original program
+        (trigger_engine cleared _phase_armed on track change): a charge or
+        lull armed mid-song must not linger into the next track — release
+        every phase-capable virtual with an instant phase "none" write.
+        The effects would eventually free themselves anyway (the shared
+        orphan watchdog: 12 s grace / 60 s cap) — this is the deliberate
+        release, not the safety net."""
+        if self._phase_armed is None:
+            return 0
+        self._phase_armed = None
+        count = 0
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.PHASE_EFFECTS:
+                continue
+            await self.executor.jump(
+                vid, state.effect_type,
+                {"phase": "none", "phase_progress": 0.0})
+            count += 1
+        return count
+
     async def _color_jump(self, scene: SceneV2, intensity: float,
                           carry: dict) -> dict:
         """The flare colour jump: the shipped selector picks (curve × genre
@@ -317,6 +394,9 @@ class ResponseEngine:
         update: dict[str, Any] = {"active_set_id": pick.picked_id}
         if position is not None:   # rainbow/achromatic never move the wheel
             update["wheel_position_deg"] = position
+            # A teleport invalidates the journey's bearing — the conductor
+            # reselects a destination from the new point next leg.
+            update["destination"] = None
         self._room_save(room.model_copy(update=update))
         return {"result": "jumped", "picked_id": pick.picked_id,
                 "rung": pick.rung, "virtuals": landed,

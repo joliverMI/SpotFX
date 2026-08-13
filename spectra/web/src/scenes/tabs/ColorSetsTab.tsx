@@ -46,6 +46,9 @@ export default function ColorSetsTab({ scene, setScene }: {
   const toggleGlobalOptOut = async (setId: string) => {
     const card = cards.find((c) => c.id === setId);
     if (!card) return;
+    // This confirm STAYS — deliberate asymmetry with the confirm-free Fire
+    // button (owner's order, 2026-08-13): opting out silently changes every
+    // scene in the house; a fire touches only the scene he is looking at.
     if (!card.scene_v2_opt_out && !confirm(
       `Opt "${card.name}" out of ALL scenes?\n\nThis is global — every scene (SPECTRA and legacy) stops accepting this set until it is re-enabled.`)) return;
     try {

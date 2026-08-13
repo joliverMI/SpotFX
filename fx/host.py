@@ -49,6 +49,13 @@ logger = logging.getLogger(__name__)
 # ownership rule: never constructed without a live ActivationGrant.
 SAFE_DEVICE_TYPES = frozenset({"dummy"})
 
+# The driver modules vendored under fx/devices/. A config device of any other
+# type is skipped by the registry at host start (warning, not error) — so for
+# readiness checks a virtual is only usable if a device of one of THESE types
+# backs it. Kept in lockstep with the fx/devices/ package contents; the
+# fx-live seeder and the handover readiness gate both read this set.
+VENDORED_DEVICE_TYPES = frozenset({"dummy", "ddp", "wled", "e131", "hue"})
+
 
 class FxHost:
     def __init__(self, config_dir: str, live_grant=None):

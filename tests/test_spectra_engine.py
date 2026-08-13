@@ -14,7 +14,12 @@ The proofs:
      from the new point on the next conductor leg,
   5. the seven Mid Group scenes animate: their seeded bindings resolve and
      land in the real effects, and each scene's top flare band executes
-     its patch on the rendering effect.
+     its patch on the rendering effect,
+  6. charge/lull/drop drive the REAL vendored phase machinery end to end:
+     the effect's own state machine enters the phase on the arm write, the
+     phase_progress ramp interpolates across render frames, the drop's
+     choreography SELF-RESETS to "none" (the vendored release grammar),
+     and a track-change release frees an armed lull.
 
 No LedFX service, no HTTP, no audio hardware (fx.headless.silence_audio).
 """
@@ -61,12 +66,16 @@ def _engine(clock, *, intensity=1.0, room=None, set_positions=None):
     the whole S3 delta."""
     from spectra.models.sequencer import SequencerConfig, SelectorEntry
     from spectra.services import color_journey as cj
+    from spectra.services.color_sets import ColorSetCard
     from spectra.services.drift_conductor import DriftConductor
     from spectra.services.fx_executor import FacadeExecutor
     from spectra.services.scene_response import ResponseEngine
 
     room_box = [room or cj.RoomColorState()]
     positions = set_positions or {}
+    cards = [ColorSetCard(id=sid, name=sid, entries=[]) for sid in positions]
+    seq_config = SequencerConfig(color_set_entries={
+        sid: SelectorEntry() for sid in positions if sid != "current"})
     executor = FacadeExecutor(clock=lambda: clock.now)
     conductor = DriftConductor(
         executor=executor, clock=lambda: clock.now, leg_s=20.0,
@@ -74,9 +83,10 @@ def _engine(clock, *, intensity=1.0, room=None, set_positions=None):
         drift_profiles=lambda: {}, curve_profiles=lambda: {},
         room_load=lambda: room_box[0],
         room_save=lambda st: room_box.__setitem__(0, st),
-        set_position=lambda sid: positions.get(sid))
-    seq_config = SequencerConfig(color_set_entries={
-        sid: SelectorEntry() for sid in positions if sid != "current"})
+        set_position=lambda sid: positions.get(sid),
+        set_cards=lambda: cards,
+        sequencer_config=lambda: seq_config,
+        rng=Random(11))
     responder = ResponseEngine(
         conductor=conductor, executor=executor, rng=Random(7),
         clock=lambda: clock.now,
@@ -289,18 +299,93 @@ def test_flare_color_jump_and_journey_resume(tmp_path):
                 assert room_box[0].wheel_position_deg == pytest.approx(10.0)
                 assert room_box[0].active_set_id == "set-red"
 
+                # ...the teleport cleared the journey's bearing...
+                assert room_box[0].destination is None
                 # ...and the journey RESUMES from the new point: the next
-                # leg walks from 10° at the room's pace and rotates the
-                # jumped palette with it.
+                # leg picks a fresh destination (only Blues is eligible —
+                # Reds is now the active set), travels toward it at the
+                # pace that destination fixes from its distance, and
+                # rotates the jumped palette with the wheel.
                 await conductor.tick()
-                delta = 2.0 * (20.0 / 60.0)
+                dest = room_box[0].destination
+                assert dest is not None and dest.set_id == "set-blue"
+                travel = abs(cj.signed_travel(10.0, 220.0))          # 150°
+                pace = cj.destination_pace(30.0, travel)             # 50°/min
+                delta = -pace * (20.0 / 60.0)   # shortest arc goes down
+                assert dest.pace_deg_per_min == pytest.approx(pace)
                 assert room_box[0].wheel_position_deg == pytest.approx(
-                    10.0 + delta)
+                    (10.0 + delta) % 360.0)
                 rotation = [w for w in executor.writes
                             if w["kind"] == "glide"
                             and "gradient" in w["params"]][-1]
                 assert rotation["params"]["gradient"] == \
                     color_rotate.rotate_color_value("#ff0000", delta)
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 6: charge/lull/drop drive the REAL vendored phase machinery ────────
+
+def test_charge_lull_drop_drive_the_real_phase_machinery(tmp_path):
+    """The build/suspend/release grammar is the vendored effects' own code
+    (docs/SPECTRA_RESPONSES.md); this proves the response engine's drive
+    reaches it frame-accurately on the headless harness: blackhole's state
+    machine enters the charge, the ramp interpolates, the drop bursts and
+    self-resets, and the lifecycle release frees an armed lull."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Phased", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="blackhole",
+        params={})])
+
+    async def main():
+        host, virtual = await _host(tmp_path, "phase")
+        try:
+            with headless.fake_clock() as clock:
+                config: dict = {}
+                effect = headless.attach_effect(host, virtual, "blackhole",
+                                                config)
+                executor, conductor, responder, room_box = _engine(clock)
+                _fire(conductor, scene, config)
+
+                # Charge: arm + 4000 ms build ramp. One frame consumes the
+                # edge — the REAL state machine enters the phase.
+                record = await responder.on_event("charge", 0.8)
+                assert record["phase"] == {"targets": [VID], "ramp_ms": 4000}
+                assert record["result"] == "phase_only"
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._phase == "charge"
+                # The ramp interpolates across render frames (the vendored
+                # tween engine), still mid-build after 1 s and 2 s.
+                headless.render_frames(virtual, 60, clock=clock, dt=1 / 60)
+                p1 = float(effect._config["phase_progress"])
+                headless.render_frames(virtual, 60, clock=clock, dt=1 / 60)
+                p2 = float(effect._config["phase_progress"])
+                assert 0.0 < p1 < p2 < 1.0
+                assert effect._phase == "charge"
+
+                # Drop: the 400 ms snap. The vendored choreography pinches,
+                # bursts, and SELF-RESETS phase to "none" — the release is
+                # the effect's own grammar, not the engine's.
+                record = await responder.on_event("drop", 0.9)
+                assert record["phase"]["ramp_ms"] == 400
+                headless.render_frames(virtual, 90, clock=clock, dt=1 / 60)
+                assert effect._phase == "none"
+                assert effect._config["phase"] == "none"
+                assert float(effect._config["phase_progress"]) == 0.0
+
+                # Lull arms; a track change releases it deliberately (the
+                # lifecycle guard) — no waiting on the orphan watchdog.
+                await responder.on_event("lull", 0.5)
+                headless.render_frames(virtual, 30, clock=clock, dt=1 / 60)
+                assert effect._phase == "lull"
+                assert await responder.release_phases() == 1
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._phase == "none"
+                assert await responder.release_phases() == 0
         finally:
             facade.set_host(None)
             await host.shutdown()

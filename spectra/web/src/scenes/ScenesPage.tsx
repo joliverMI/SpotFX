@@ -1,13 +1,18 @@
-/** Scenes — SPECTRA's tabbed scene editor. Two panes: scene list (search,
- * create) and the editor. Horizontal tabs replace the legacy long scroll:
- * Summary · Initial Set · Drift · Flares · Phase Choreography · Sequencing ·
- * Colour Sets · Charges/Lulls/Drops. Edits live in local drafts until Save;
- * the toolbar's intensity slider drives Test Fire (dry-run compile — shows
+/** Scenes — SPECTRA's tabbed scene editor. Desktop: two panes — scene list
+ * (search, create) and the editor. Phone portrait (the owner's in-room
+ * surface): a first-class single-pane arrangement — the editor owns the
+ * full width, and the scene picker collapses into a top selector that
+ * opens a full-screen drawer (with no selection, the list IS the page).
+ * Horizontal tabs replace the legacy long scroll: Summary · Initial Set ·
+ * Drift · Flares · Phase Choreography · Sequencing · Colour Sets ·
+ * Charges/Lulls/Drops. Edits live in local drafts until Save; the
+ * toolbar's intensity slider drives Test Fire (dry-run compile — shows
  * resolved bindings + writes) and the owner's real Fire button. */
 import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
+import useIsPhone from '../lib/useIsPhone';
 import { setUnsavedGuard } from '../lib/unsavedGuard';
 import { fireScene, useDeleteScene, useRegistry, useSaveScene, useScenes } from '../queries';
 import type { FireResult, SceneV2 } from '../types';
@@ -35,6 +40,8 @@ export default function ScenesPage() {
   const saveMut = useSaveScene();
   const delMut = useDeleteScene();
 
+  const isPhone = useIsPhone();
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [drafts, setDrafts] = useState<Record<string, SceneV2>>({});
@@ -112,11 +119,15 @@ export default function ScenesPage() {
   };
 
   /** Test-fire = save, then resolve+compile at the chosen intensity WITHOUT
-   * device contact; the resolved bindings and writes render below. */
+   * device contact; the resolved bindings and writes render below.
+   * NO CONFIRM on the live fire — DELIBERATE ASYMMETRY (owner's order,
+   * 2026-08-13): the press IS the consent; it fires the single scene he
+   * chose and is looking at, and an extra tap doubly hurts on the phone.
+   * The confirm on the GLOBAL colour-set opt-out (ColorSetsTab) STAYS —
+   * that one silently changes every scene in the house. Do not "tidy"
+   * either side of this asymmetry. */
   const testFire = async (dryRun: boolean) => {
     if (!scene) return;
-    if (!dryRun && !confirm(
-      `FIRE "${scene.name}" at intensity ${intensity.toFixed(2)} — this writes to the live LedFX service. Continue?`)) return;
     if (!(await save())) return;
     try {
       const res = await fireScene(scene.id, intensity, dryRun);
@@ -154,55 +165,99 @@ export default function ScenesPage() {
     return null;
   };
 
+  // The list body renders in the desktop pane OR the phone drawer/page —
+  // one place, one behavior (picking closes the drawer when one is open).
+  const sceneList = (
+    <>
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        Scenes <HelpLink topic="scenes-page" />
+        <button className="primary" style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
+          onClick={() => { create(); setPickerOpen(false); }}>
+          + Scene
+        </button>
+        {isPhone && pickerOpen && (
+          <button style={{ fontSize: 12 }} onClick={() => setPickerOpen(false)}>✕</button>
+        )}
+      </div>
+      <div className="field">
+        <input type="text" placeholder="Search…" value={search} style={{ width: '100%' }}
+          onChange={(e) => setSearch(e.target.value)} />
+      </div>
+      <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+        {isLoading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 10 }}>Loading…</div>}
+        {!isLoading && !visible.length && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 10 }}>
+            No scenes yet — create one, or run scripts/seed_spectra_from_v2.py to migrate the SceneV2 world.
+          </div>
+        )}
+        {visible.map((s) => {
+          const dice = sceneDiceLetters(s);
+          return (
+            <div key={s.id} className={`pane-row${s.id === selectedId ? ' selected' : ''}`}
+              onClick={() => { setSelectedId(s.id); setFireResult(null); setPickerOpen(false); }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>
+                  {s.name}
+                  {drafts[s.id] && <span title="Unsaved changes" style={{ color: 'var(--accent2)' }}> •</span>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {s.devices.length} entr{s.devices.length === 1 ? 'y' : 'ies'}
+                  {dice.length > 0 && ` · 🎲 ${dice.map((l) => l.toUpperCase()).join(' ')}`}
+                  {s.color_journey.mode === 'override' && ' · journey override'}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: 16, alignItems: 'start' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '250px 1fr',
+                  gap: isPhone ? 10 : 16, alignItems: 'start' }}>
       <SequencerStatusStrip scenes={scenes} />
       <EngineStatusStrip />
 
-      {/* ── Scene list ── */}
-      <div className="card" style={{ minWidth: 0, maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
-        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          Scenes <HelpLink topic="scenes-page" />
-          <button className="primary" style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }} onClick={create}>
-            + Scene
-          </button>
+      {/* ── Scene list: desktop pane, or the whole page on a phone with no
+             selection (the editor owns the width once a scene is open) ── */}
+      {(!isPhone || !scene) && (
+        <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column',
+                                       maxHeight: isPhone ? 'none' : 'calc(100vh - 80px)' }}>
+          {sceneList}
         </div>
-        <div className="field">
-          <input type="text" placeholder="Search…" value={search} style={{ width: '100%' }}
-            onChange={(e) => setSearch(e.target.value)} />
+      )}
+
+      {/* ── Phone: compact scene selector above the editor; opens the drawer ── */}
+      {isPhone && scene && (
+        <button onClick={() => setPickerOpen(true)} title="Choose another scene"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                   textAlign: 'left', padding: '10px 12px', background: 'var(--surface)',
+                   border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+          <span style={{ color: 'var(--accent)' }}>☰</span>
+          <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden',
+                         textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {scene.name}{drafts[scene.id] ? ' •' : ''}
+          </span>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', flex: 'none' }}>
+            scenes ▾
+          </span>
+        </button>
+      )}
+      {isPhone && pickerOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'var(--bg)',
+                      padding: 10, display: 'flex', flexDirection: 'column' }}>
+          <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {sceneList}
+          </div>
         </div>
-        <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-          {isLoading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 10 }}>Loading…</div>}
-          {!isLoading && !visible.length && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 10 }}>
-              No scenes yet — create one, or run scripts/seed_spectra_from_v2.py to migrate the SceneV2 world.
-            </div>
-          )}
-          {visible.map((s) => {
-            const dice = sceneDiceLetters(s);
-            return (
-              <div key={s.id} className={`pane-row${s.id === selectedId ? ' selected' : ''}`}
-                onClick={() => { setSelectedId(s.id); setFireResult(null); }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>
-                    {s.name}
-                    {drafts[s.id] && <span title="Unsaved changes" style={{ color: 'var(--accent2)' }}> •</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {s.devices.length} entr{s.devices.length === 1 ? 'y' : 'ies'}
-                    {dice.length > 0 && ` · 🎲 ${dice.map((l) => l.toUpperCase()).join(' ')}`}
-                    {s.color_journey.mode === 'override' && ' · journey override'}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      )}
 
       {/* ── Editor ── */}
       {scene ? (
-        <div className="card" style={{ minWidth: 0, maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' }}>
+        <div className="card" style={{ minWidth: 0,
+                                       maxHeight: isPhone ? 'none' : 'calc(100vh - 80px)',
+                                       overflowY: isPhone ? 'visible' : 'auto' }}>
           {/* Toolbar */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <input type="text" value={scene.name} style={{ fontSize: 15, fontWeight: 600, width: 220 }}
@@ -298,11 +353,13 @@ export default function ScenesPage() {
           )}
         </div>
       ) : (
-        <div className="card" style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-          Select a scene on the left, or create one. A SPECTRA scene states what every
-          device shows — every value fixed, ⚡ intensity-mapped, or 🎲 rolled — plus its
-          declared mechanisms: drift, responses, and the colour journey. <HelpLink topic="overview" />
-        </div>
+        !isPhone && (
+          <div className="card" style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+            Select a scene on the left, or create one. A SPECTRA scene states what every
+            device shows — every value fixed, ⚡ intensity-mapped, or 🎲 rolled — plus its
+            declared mechanisms: drift, responses, and the colour journey. <HelpLink topic="overview" />
+          </div>
+        )
       )}
     </div>
   );

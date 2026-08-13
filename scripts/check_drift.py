@@ -1,10 +1,14 @@
-"""Executable spec for the S2 drift conductor (report §2.5, §2.8): leg
-targets through the executor seam, bounce/wrap identities, follow slew,
-colour-rotation accounting, journey custody through the conductor
-(into/out of an override — the binding transition semantics), re-baseline
-on scene fire, carry semantics, the deferral matrix (pause/Dinner
-Party/Ambient hold everything; Force Scene continues), and the production
-DARK discipline (the wired engine records, never executes).
+"""Executable spec for the S2 drift conductor (report §2.5, §2.8 + the
+destination-journey rework): leg targets through the executor seam,
+bounce/wrap identities, follow slew, the DESTINATION-DRIVEN colour journey
+(selection via the shipped selector, per-destination pace from distance,
+travel along the shortest arc, palette rotation WITH the wheel, arrival
+landing exactly and reselecting, no-eligible-destination hold), journey
+custody through the conductor (into/out of an override picking within its
+own palette bounds — the binding transition semantics), re-baseline on
+scene fire clearing the bearing, carry semantics, the deferral matrix
+(pause/Dinner Party/Ambient hold everything; Force Scene continues), and
+the production DARK discipline (the wired engine records, never executes).
 
 Run from repo root: .venv/bin/python scripts/check_drift.py
 Isolated: temp stores, fake clock, in-memory room — no LedFX I/O, no audio.
@@ -56,12 +60,19 @@ from spectra.services.fx_executor import RecordingExecutor
 run = asyncio.run
 
 # ── harness: fake clock, in-memory room, injectable feeds ────────────────────
+from random import Random
+
+from spectra.models.sequencer import SequencerConfig
+
 clock = [1000.0]
 room_box = [color_journey.RoomColorState(wheel_position_deg=100.0,
                                          active_set_id="set-blue")]
 intensity_box: list = [None]
 deferral_box: list = [None]
-set_positions = {"set-blue": 220.0}   # chromatic; overwrite for rainbow cases
+set_positions = {"set-blue": 220.0,   # chromatic; overwrite for rainbow cases
+                 "set-green": 130.0,
+                 "set-red": 10.0}
+cards_box: list[list] = [[]]          # the destination pool per section
 broadcasts: list[dict] = []
 
 
@@ -81,6 +92,10 @@ conductor = DriftConductor(
     room_load=lambda: room_box[0],
     room_save=lambda st: room_box.__setitem__(0, st),
     set_position=lambda sid: set_positions.get(sid),
+    set_cards=lambda: cards_box[0],
+    sequencer_config=lambda: SequencerConfig(),   # selector unconfigured →
+    genre_bucket=lambda: None,                    # neutral-entry fallback
+    rng=Random(7),
 )
 
 GRADIENT = "linear-gradient(90deg, #0000ff 0%, #4000ff 100%)"
@@ -105,11 +120,15 @@ def fire(sc, color_set=None, color_set_id=None):
     return writes
 
 
-# Colour set fixture so set-mode virtuals carry a gradient to rotate.
+# Colour set fixtures: blue is the active palette set-mode virtuals rotate;
+# green/red are destination candidates on the wheel (positions injected).
 from spectra.services.color_sets import ColorSetCard, ColorSetEntry, SetScope
 blue_set = ColorSetCard(id="set-blue", name="Blues", entries=[
     ColorSetEntry(scope=SetScope(categories=["Matrix"]),
                   color_kind="gradient", color_value=GRADIENT)])
+green_set = ColorSetCard(id="set-green", name="Greens", entries=[])
+red_set = ColorSetCard(id="set-red", name="Reds", entries=[])
+cards_box[0] = [blue_set, green_set]
 
 # ── re-baseline builds mechanisms per WINNING virtual ────────────────────────
 writes = fire(scene, blue_set, "set-blue")
@@ -189,19 +208,46 @@ check(conductor.virtuals["v-m1"].brightness_baseline == 0.4
       and conductor.virtuals["v-m1"].gradient == "#ff0000",
       "surge carry updates brightness + palette baselines")
 
-# ── colour journey: the room walks, the palette rotates WITH the wheel ───────
+# ── destination journey: selection, per-destination pace, travel ─────────────
+# Pool: blue (active — excluded from selection) + green @ 130. From 100° the
+# only pick is Greens: 30° away → pace = 30 × clamp(30/90, 0.5, 2) = 15°/min
+# → 5° per 20 s leg. The default room reference pace is the owner's live 30.
 fire(scene, blue_set, "set-blue")
+check(room_box[0].destination is None,
+      "a scene fire clears the journey's bearing (reselect under new custody)")
 room_box[0] = room_box[0].model_copy(update={"wheel_position_deg": 100.0})
-start_deg = 100.0
-n_legs = 6
 executor.writes.clear()
-for _ in range(n_legs):
+run(conductor.tick())
+dest = room_box[0].destination
+check(dest is not None and dest.set_id == "set-green"
+      and abs(dest.pace_deg_per_min - 15.0) < 1e-9
+      and dest.from_deg == 100.0,
+      "the room picks a DESTINATION set; the destination fixes its own pace "
+      "from its distance (30° away → half the 30°/min reference)")
+check(abs(room_box[0].wheel_position_deg - 105.0) < 1e-6,
+      "travel starts the same leg: 5° toward the destination")
+leg_rec = broadcasts[-1]["journey"]
+check(leg_rec["destination"]["set_name"] == "Greens"
+      and abs(leg_rec["destination"]["progress"] - (5.0 / 30.0)) < 1e-3
+      and leg_rec["arrived"] is False,
+      "the leg record shows the destination and progress toward it")
+
+# ── travel continues; ARRIVAL lands exactly and reselects ────────────────────
+for _ in range(4):
     run(conductor.tick())
-expected_delta = 2.0 * (20.0 / 60.0) * n_legs   # default room pace 2°/min
-check(abs(room_box[0].wheel_position_deg - (start_deg + expected_delta))
-      < 1e-6,
-      f"room walk: wheel advances pace·time ({start_deg} → "
-      f"{room_box[0].wheel_position_deg:.2f}°)")
+check(abs(room_box[0].wheel_position_deg - 125.0) < 1e-6,
+      "steady travel: 5°/leg along the shortest arc")
+run(conductor.tick())   # the arrival leg
+check(room_box[0].wheel_position_deg == 130.0
+      and broadcasts[-1]["journey"]["arrived"] is True,
+      "ON ARRIVAL the wheel lands EXACTLY on the destination position")
+dest = room_box[0].destination
+check(dest is not None and dest.set_id == "set-blue"
+      and dest.from_deg == 130.0
+      and abs(dest.pace_deg_per_min - 30.0) < 1e-9,
+      "…and the next destination is selected at once (arrived set excluded; "
+      "Blues 90° away → full reference pace) — the walk sets off again")
+n_legs = 6
 grad_writes = [w for w in executor.writes if "gradient" in w["params"]]
 check(len(grad_writes) == 2 * n_legs,
       "palette rotation glides land on every set-mode virtual each leg")
@@ -214,41 +260,78 @@ def first_stop_hue(gradient: str) -> float:
 
 
 rotated_hue = first_stop_hue(conductor.virtuals["v-m1"].gradient)
-check(abs(rotated_hue - (first_stop_hue(GRADIENT) + expected_delta))
-      % 360.0 < 3.0,
-      "rotation accounting: cumulative palette hue matches the wheel travel")
+hue_diff = (rotated_hue - (first_stop_hue(GRADIENT) + 30.0)) % 360.0
+check(min(hue_diff, 360.0 - hue_diff) < 3.0,
+      "rotation accounting: cumulative palette hue matches the wheel travel "
+      "(100° → 130°)")
 
-# ── rainbow exemption: the walk pauses, nothing rotates ──────────────────────
-set_positions["set-blue"] = None   # the active set is now rainbow/achromatic
+# ── no eligible destination → the walk HOLDS (never aimless creep) ───────────
+fire(scene, blue_set, "set-blue")           # bearing cleared
+cards_box[0] = [blue_set]                    # only the active set remains
 held = room_box[0].wheel_position_deg
 executor.writes.clear()
 run(conductor.tick())
 check(room_box[0].wheel_position_deg == held
+      and room_box[0].destination is None
       and not [w for w in executor.writes if "gradient" in w["params"]],
-      "rainbow palette pauses the walk — wheel and palette hold")
+      "no eligible destination: the wheel and palette hold — a target or "
+      "nothing, never aimless creep")
+cards_box[0] = [blue_set, green_set]
+
+# ── rainbow exemption: the walk pauses, nothing rotates ──────────────────────
+run(conductor.tick())                        # re-acquire a bearing first
+check(room_box[0].destination is not None, "bearing re-acquired")
+set_positions["set-blue"] = None   # the active set is now rainbow/achromatic
+held = room_box[0].wheel_position_deg
+kept = room_box[0].destination
+executor.writes.clear()
+run(conductor.tick())
+check(room_box[0].wheel_position_deg == held
+      and room_box[0].destination == kept
+      and not [w for w in executor.writes if "gradient" in w["params"]],
+      "rainbow palette pauses the walk — wheel, palette, and bearing hold")
 set_positions["set-blue"] = 220.0
 
 # ── journey custody: INTO and OUT OF an override, no snap either way ─────────
+# The override follows the SAME destination model within its own palette
+# bounds: it accepts only Reds, so its bearing must be set-red — picked by
+# the same selector, at the override's own reference pace (|−30| = 30).
 override_scene = SceneV2(
     name="Override", color_journey=SceneColorJourney(
         mode="override", journey=ColorJourneySpec(degrees_per_min=-30.0)),
+    accept_all_sets=False, accepted_set_ids=["set-red"],
     devices=[SceneDeviceConfig(target_kind="virtual", target="v-m1",
                                effect_type="radial", params={"spin": 0.5})])
-before = room_box[0].wheel_position_deg
+cards_box[0] = [blue_set, green_set, red_set]
 fire(override_scene, blue_set, "set-blue")
-check(room_box[0].wheel_position_deg == before,
-      "INTO override: custody transfers, the wheel does not move")
+room_box[0] = room_box[0].model_copy(update={"wheel_position_deg": 100.0})
+before = room_box[0].wheel_position_deg
+check(room_box[0].destination is None,
+      "INTO override: custody transfers, the wheel does not move, the room "
+      "bearing is dropped for the override to pick its own")
 run(conductor.tick())
-check(abs(room_box[0].wheel_position_deg - ((before - 10.0) % 360.0)) < 1e-6,
-      "override steers from the room's position at its own pace/direction")
+dest = room_box[0].destination
+check(dest is not None and dest.set_id == "set-red"
+      and abs(dest.pace_deg_per_min - 30.0) < 1e-9,
+      "the override picks WITHIN ITS OWN PALETTE BOUNDS (only Reds "
+      "accepted), 90° away → its full 30°/min reference pace")
+check(abs(room_box[0].wheel_position_deg - 90.0) < 1e-6,
+      "…and steers from the room's position along the shortest arc "
+      "(100° → 90°, heading for 10°): no snap in")
 exit_deg = room_box[0].wheel_position_deg
+cards_box[0] = [blue_set, green_set]
 fire(scene, blue_set, "set-blue")   # back to an inherit scene
-check(room_box[0].wheel_position_deg == exit_deg,
-      "OUT of override: the room resumes from where the override left it")
+check(room_box[0].wheel_position_deg == exit_deg
+      and room_box[0].destination is None,
+      "OUT of override: the room resumes from where the override left it "
+      "(no snap back) and picks a fresh room bearing")
 run(conductor.tick())
-check(abs(room_box[0].wheel_position_deg
-          - ((exit_deg + 2.0 * (20.0 / 60.0)) % 360.0)) < 1e-6,
-      "the room's own pace steers again — one story, custody handed back")
+dest = room_box[0].destination
+check(dest is not None and dest.set_id == "set-green"
+      and abs(room_box[0].wheel_position_deg
+              - (exit_deg + dest.pace_deg_per_min * (20.0 / 60.0))) < 1e-6,
+      "the room's own destination steers again — one story, custody handed "
+      "back")
 
 # ── pace_factor 0 holds the walk while the scene shows ───────────────────────
 hold_scene = SceneV2(name="Hold", color_journey=SceneColorJourney(
@@ -258,8 +341,39 @@ hold_scene = SceneV2(name="Hold", color_journey=SceneColorJourney(
 fire(hold_scene, blue_set, "set-blue")
 held = room_box[0].wheel_position_deg
 run(conductor.tick())
-check(room_box[0].wheel_position_deg == held,
-      "inherit pace_factor 0 holds the room walk")
+check(room_box[0].wheel_position_deg == held
+      and room_box[0].destination is None,
+      "inherit pace_factor 0 holds the room walk — no destinations picked")
+
+# ── a room is NEVER set-less: the journey bootstraps its first set ───────────
+# Wiped room state (no set, no wheel — the live defect): the first leg
+# selects a first set with the shipped selector and APPLIES it — active
+# set, wheel anchor, colours landed on live set-mode virtuals.
+cards_box[0] = [blue_set]
+fire(scene, blue_set, "set-blue")
+room_box[0] = color_journey.RoomColorState()
+executor.writes.clear()
+run(conductor.tick())
+check(room_box[0].active_set_id == "set-blue"
+      and room_box[0].wheel_position_deg == 220.0,
+      "set-less room: the first leg selects and APPLIES a first set — "
+      "active set + wheel anchor (a room is never set-less)")
+boot_jumps = [w for w in executor.writes
+              if w["kind"] == "jump" and "gradient" in w["params"]]
+check(len(boot_jumps) == 2
+      and all(w["params"]["gradient"] == GRADIENT for w in boot_jumps),
+      "bootstrap lands the set's colours on live set-mode virtuals as a "
+      "JUMP, not effect defaults")
+
+# ── manual apply-this-set (the supported owner/fleet surface) ────────────────
+result = run(conductor.apply_set_directly(green_set))
+check(result["applied"] == "set-green"
+      and room_box[0].active_set_id == "set-green"
+      and room_box[0].wheel_position_deg == 130.0
+      and room_box[0].destination is None,
+      "apply-this-set: active set + wheel anchor move, the bearing clears "
+      "so the journey travels on from the new point")
+cards_box[0] = [blue_set, green_set]
 
 # ── deferral matrix: pause/dinner/ambient hold everything ────────────────────
 fire(scene, blue_set, "set-blue")
@@ -291,8 +405,10 @@ check(st["executor_mode"] == "recording" and st["leg_s"] == 20.0
       and st["active_scene"]["name"] == "Drifting"
       and len(st["mechanisms"]) == 4
       and st["journey"]["custody"] == "room"
+      and "destination" in st["journey"]
       and st["last_leg"] is not None,
-      "conductor status: executor mode, scene, mechanisms, journey, last leg")
+      "conductor status: executor mode, scene, mechanisms, journey incl. "
+      "destination, last leg")
 
 # ── the production wiring is DARK ────────────────────────────────────────────
 from spectra.services import engine
