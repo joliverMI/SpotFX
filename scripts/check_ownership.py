@@ -19,7 +19,10 @@ Sections:
   8. SPECTRA's seam routes transport by owner and refuses mid-handover
   9. the device layer refuses non-dummy devices without a live grant
  10. the orchestrator's failure landings (lying quiesce; activation failure)
- 11. nothing here ever touched audio hardware
+ 11. the readiness gate (order-8): missing/empty/unusable fx-live config
+     REFUSES before the old owner is quiesced — room untouched, refusal
+     names the seeder command
+ 12. nothing here ever touched audio hardware
 
 Run from repo root: .venv/bin/python scripts/check_ownership.py
 Isolated: temp files for every store; no LedFX I/O, no audio, no network.
@@ -341,6 +344,9 @@ class ScriptedSide:
         self._activate_ok = activate_ok
         self._verify_active = verify_active_result
 
+    async def readiness_problems(self):
+        return []
+
     async def quiesce(self):
         self.calls.append("quiesce")
         if not self._quiesce_ok:
@@ -414,7 +420,42 @@ check(s_calls.index("deactivate") < len(s_calls)
       "rollback order: release the partial new writer BEFORE restoring the "
       "old one — never two writers even mid-rollback")
 
-# ── 11. nothing here ever touched audio hardware ─────────────────────────────
+# ── 11. the readiness gate (order-8: refuse BEFORE quiesce) ──────────────────
+from spectra.services.handover import (
+    FX_LIVE_SEED_COMMAND,
+    HandoverRefused,
+    SpectraSide,
+)
+
+unseeded = SpectraSide(config_dir=str(td / "never-seeded"), open_audio=False)
+sides = {lo.SPOT_EFFECTS: ScriptedSide(lo.SPOT_EFFECTS),
+         lo.SPECTRA: unseeded}
+try:
+    asyncio.run(run_handover(lo.SPECTRA, sides, grace_s=0))
+    check(False, "unseeded fx-live config must refuse the handover")
+except HandoverRefused as exc:
+    check(FX_LIVE_SEED_COMMAND in str(exc),
+          "the refusal names the missing preparation and the seeder command")
+check(sides[lo.SPOT_EFFECTS].calls == [],
+      "readiness gate: the OLD OWNER WAS NEVER QUIESCED — refusal happens "
+      "before the record moves, room untouched")
+check(lo.load().owner == lo.SPOT_EFFECTS,
+      "…and the record still says spot-effects owns")
+
+empty_dir = td / "fx-live-empty"
+empty_dir.mkdir()
+(empty_dir / "config.json").write_text(
+    json.dumps({"devices": [], "virtuals": []}))
+sides = {lo.SPOT_EFFECTS: ScriptedSide(lo.SPOT_EFFECTS),
+         lo.SPECTRA: SpectraSide(config_dir=str(empty_dir), open_audio=False)}
+try:
+    asyncio.run(run_handover(lo.SPECTRA, sides, grace_s=0))
+    check(False, "empty fx-live config must refuse the handover")
+except HandoverRefused:
+    check(sides[lo.SPOT_EFFECTS].calls == [],
+          "empty config: handover refuses, old owner never quiesced")
+
+# ── 12. nothing here ever touched audio hardware ─────────────────────────────
 from fx.audio_ingest import AudioIngestHub, LiveDeviceSource
 
 try:

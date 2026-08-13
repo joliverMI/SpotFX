@@ -36,6 +36,14 @@ contract in `data/spectra-design-decisions.md`).
        .venv/bin/python scripts/seed_spectra_fx_live.py --apply    # writes storage/spectra/fx-live/config.json
 
    Re-run `--apply` after any LedFX device/virtual change; it is idempotent.
+
+   **This step is ENFORCED, not remembered** (the order-8 correction): the
+   switch itself checks it as a precondition and REFUSES — before quiescing
+   the current owner, with the room untouched — when the fx-live config is
+   missing, unreadable, empty, or has zero virtuals backed by a vendored
+   driver type. The refusal (HTTP 412) names the missing preparation and
+   this seeder command. Skipping this step can no longer dark the room; it
+   just refuses the switch.
 2. Confirm the record and the dark liveness state:
 
        curl -s localhost:8000/spectra/api/ownership | jq .owner        # "spot-effects"
@@ -48,6 +56,19 @@ contract in `data/spectra-design-decisions.md`).
 
        .venv/bin/python scripts/check_ownership.py
        .venv/bin/python -m pytest tests/test_handover.py -q
+
+Preparation accounting — every rememberable step is either enforced by the
+switch or stated here as why it stays an operator note:
+- Step 1 (fx-live seed): **enforced** (the readiness gate above).
+- Step 2 (record + liveness confirm): **enforced structurally** — an
+  in-flight or already-owner record refuses at `begin_handover` (409), and
+  a live stack without ownership trips the liveness split-brain 503.
+- Step 3 (song source): stays an operator note. It is stated degraded
+  behaviour, not a room-safety issue, and checking spot-effects settings
+  from SPECTRA would cross the import boundary the architecture forbids.
+- Step 4 (proofs): development-time, not checkable at switch time.
+- Reverse direction: the LedFX unit's existence is **enforced** (readiness
+  gate on the rollback path).
 
 ## Go day — taking the room (spot-effects → SPECTRA)
 
@@ -64,6 +85,11 @@ contract in `data/spectra-design-decisions.md`).
             -H 'content-type: application/json' -d '{"to": "spectra"}' | jq .
 
    What runs, in order (services/handover.py):
+   0. **readiness gate** — SPECTRA's fx-live config is checked (present,
+      readable, at least one virtual backed by a vendored driver type). A
+      problem REFUSES the whole handover right here: HTTP 412, the record
+      never moves, LedFX keeps running, the room is untouched. This is the
+      enforced form of preparation step 1.
    1. record → `handing-over/quiescing`; both write planes shed instantly.
    2. quiesce: `systemctl --user stop ledfx` + verify `is-active` says
       stopped (Hue DTLS session released, DDP sending stopped), then a 5 s
@@ -91,7 +117,10 @@ contract in `data/spectra-design-decisions.md`).
     curl -s -X POST localhost:8000/spectra/api/ownership/handover \
          -H 'content-type: application/json' -d '{"to": "spot-effects"}' | jq .
 
-Reverse order: engine dark → live stack torn down (render threads joined,
+Reverse order: **readiness gate first** — the LedFX service unit must exist
+(`systemctl --user cat <unit>`), else the switch refuses with SPECTRA still
+running (a missing unit would otherwise only surface after SPECTRA went
+dark). Then: engine dark → live stack torn down (render threads joined,
 devices deactivated — Hue session released, DDP stopped, audio closed) →
 verify → `systemctl --user start ledfx` + wait for `/api/info` → commit.
 spot-effects' own reassert machinery then pushes cached effect state.
@@ -101,6 +130,10 @@ more switches are planned.
 
 ## If things go wrong
 
+- **Refused handover (HTTP 412)**: not a failure — the readiness gate
+  stopped the switch BEFORE anything happened. The room is untouched, the
+  record never moved, nothing to clean up. The `.error` names the missing
+  preparation and its command; do it and switch again.
 - **Failed handover**: lands single-owner automatically (the proofs cover
   the §4d failure modes: Hue session exclusivity, handshake timeouts, a
   quiesce that lies). Nothing to clean up; retry when ready.
