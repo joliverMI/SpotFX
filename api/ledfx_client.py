@@ -22,6 +22,7 @@ all reads) calls the internal _direct variants and bypasses the bus.
 """
 from __future__ import annotations
 import asyncio
+import itertools
 import logging
 import time
 from collections import deque
@@ -220,6 +221,18 @@ def _get_client() -> httpx.AsyncClient:
 #      hammering a dead/slow LedFX. Auto-closes on the first success.
 _LEDFX_MAX_INFLIGHT = 24          # < pool max_connections (32) so we bind here first
 _HELD_THRESHOLD_MS = 30.0         # record a "held" event when a frame waits >this for a slot
+
+# Hard per-request deadline covering BOTH the semaphore wait and the HTTP
+# attempt. Load-bearing since the 2026-08-12 outage: a request whose
+# timeout/cancellation delivery is lost inside the HTTP stack otherwise holds
+# its slot forever, and once all 24 slots leak this way the gate is starved —
+# every later call parks in acquire() (which has no timeout of its own),
+# nothing completes or FAILS ever again, so the failure-driven breaker/recycle
+# self-heal below is structurally blind to it. asyncio.timeout() lives in OUR
+# stack frame and fires regardless of what the layers beneath do. Must
+# comfortably exceed the worst legitimate request (httpx phases sum to ~5s).
+_LEDFX_REQUEST_DEADLINE_S = 10.0
+_GATE_RESET_MIN_INTERVAL_S = 30.0  # don't rebuild the gate more than once per this
 _BREAKER_FAIL_THRESHOLD = 5       # consecutive failures before the circuit opens
 _BREAKER_COOLDOWN_S = 2.0         # how long the circuit stays open before a half-open probe
 
@@ -246,6 +259,12 @@ _POOL_TIMEOUT_WINDOW_S = 10.0     # sliding window for counting PoolTimeouts
 _POOL_TIMEOUT_RECYCLE_N = 5       # this many PoolTimeouts within the window → recycle
 
 _inflight_sem: Optional[asyncio.Semaphore] = None
+# Write-plane liveness accounting (the 2026-08-12 outage was invisible because
+# nothing tracked "requests are being attempted but none ever finish"):
+_req_seq = itertools.count(1)
+_inflight_started: dict[int, tuple[str, float]] = {}   # token → (label, monotonic start)
+_last_completion = 0.0            # monotonic of the last _request that returned (success OR failure); 0 = none yet
+_last_gate_reset = 0.0            # monotonic of the last starvation gate rebuild
 _consecutive_failures = 0
 _breaker_open_until = 0.0         # time.monotonic() deadline; circuit open while now < this
 _first_failure_at = 0.0           # time.monotonic() of the first failure in the current streak (0 = none)
@@ -278,7 +297,8 @@ _suppressed_fail_logs = 0
 # of the same kind within _EVENT_COALESCE_S collapse into one row with a count,
 # so a burst reads as "held ×312" rather than 312 rows.
 _events: deque = deque(maxlen=60)
-_event_counters: dict = {"held": 0, "shed": 0, "breaker_open": 0, "recovered": 0, "recycled": 0}
+_event_counters: dict = {"held": 0, "shed": 0, "breaker_open": 0, "recovered": 0,
+                         "recycled": 0, "deadline": 0, "gate_reset": 0}
 _EVENT_COALESCE_S = 2.0
 
 
@@ -474,46 +494,124 @@ async def _maybe_recycle_client() -> None:
             pass
 
 
+def _reset_gate(reason: str) -> None:
+    """Starvation self-heal: rebuild the in-flight semaphore at full capacity
+    and drop the client pool. The breaker/recycle machinery can't get here —
+    it is failure-driven and a starved gate produces no failures (2026-08-12:
+    7h outage with zero log lines). Old waiters exit through their own request
+    deadline; holders on the abandoned semaphore release into a dead object,
+    which is harmless."""
+    global _inflight_sem, _client, _last_gate_reset
+    _last_gate_reset = time.monotonic()
+    old_client = _client
+    _client = None
+    _inflight_sem = None                # next _get_sem() builds fresh, all slots free
+    _inflight_started.clear()
+    _record_event("gate_reset", reason)
+    logger.critical("LedFX GATE RESET (%s) — rebuilding in-flight semaphore + client pool", reason)
+    if old_client is not None:
+        try:
+            asyncio.get_running_loop().create_task(_aclose_quiet(old_client))
+        except RuntimeError:
+            pass
+
+
+async def _aclose_quiet(client: httpx.AsyncClient) -> None:
+    try:
+        async with asyncio.timeout(5.0):
+            await client.aclose()
+    except BaseException:
+        pass
+
+
 async def _request(method: str, path: str, *, label: str, **kwargs):
     """Single choke point for every LedFX call on the main client. Applies the
-    circuit breaker and in-flight semaphore, then sends the request.
+    circuit breaker and in-flight semaphore, then sends the request under one
+    hard deadline (_LEDFX_REQUEST_DEADLINE_S) covering BOTH the slot wait and
+    the HTTP attempt.
 
     Returns the httpx.Response on success, or None when the call was shed
-    (circuit open) or failed (logged + recorded). Never raises — callers map
-    None to their own empty/false fallback. measure_latency() deliberately does
-    NOT go through here: it uses the isolated probe client so its RTT reflects
-    true server latency, not queue time."""
+    (circuit open), failed, or hit the deadline — never raises (CancelledError
+    passes through). Callers map None to their own empty/false fallback.
+    measure_latency() deliberately does NOT go through here: it uses the
+    isolated probe client so its RTT reflects true server latency, not queue
+    time.
+
+    Slot lifecycle invariants (each individually sufficient to prevent a
+    repeat of the 2026-08-12 starvation outage):
+      - the semaphore slot is released in an inner finally that no code path
+        can skip, and nothing is awaited while holding a slot outside the
+        deadline scope (the recycle runs after release);
+      - the outer asyncio.timeout() bounds the whole attempt from OUR frame,
+        so even a request wedged below every httpx phase timeout is forced
+        out and its slot freed;
+      - a deadline that expires while still WAITING for a slot means the gate
+        itself is starved (leaked holders) — _reset_gate() rebuilds it."""
+    global _last_completion
     if _breaker_is_open():
         _record_event("shed", label)
         return None
     sem = _get_sem()
+    token = next(_req_seq)
     t0 = time.monotonic()
-    await sem.acquire()
-    held_ms = (time.monotonic() - t0) * 1000
-    if held_ms >= _HELD_THRESHOLD_MS:
-        _record_event("held", label, held_ms=held_ms)
+    got_slot = False
+    resp = None
+    err: Optional[BaseException] = None
     try:
-        resp = await _get_client().request(method, path, **kwargs)
-        resp.raise_for_status()
-        _on_success()
-        return resp
+        async with asyncio.timeout(_LEDFX_REQUEST_DEADLINE_S):
+            await sem.acquire()
+            got_slot = True
+            held_ms = (time.monotonic() - t0) * 1000
+            if held_ms >= _HELD_THRESHOLD_MS:
+                _record_event("held", label, held_ms=held_ms)
+            _inflight_started[token] = (label, time.monotonic())
+            try:
+                resp = await _get_client().request(method, path, **kwargs)
+                resp.raise_for_status()
+            finally:
+                _inflight_started.pop(token, None)
+                sem.release()
+    except TimeoutError as exc:
+        err = exc
+        _record_event("deadline", f"{label} ({'request' if got_slot else 'slot-wait'})")
+        if not got_slot and (time.monotonic() - _last_gate_reset) >= _GATE_RESET_MIN_INTERVAL_S:
+            _reset_gate(
+                f"starved: no slot within {_LEDFX_REQUEST_DEADLINE_S:.0f}s [{label}]"
+            )
     except Exception as exc:
-        _on_failure(exc, label)
-        await _maybe_recycle_client()
+        err = exc
+    _last_completion = time.monotonic()
+    if err is not None:
+        _on_failure(err, label)
+        await _maybe_recycle_client()   # slot already released — cannot leak it
         return None
-    finally:
-        sem.release()
+    _on_success()
+    return resp
 
 
 def get_health() -> dict:
     """Snapshot of LedFX load-governor state for the Debug page. `now` is the
     server wall-clock so the client can render relative times without clock
-    skew. Events are newest-first."""
+    skew. Events are newest-first.
+
+    Write-plane liveness gauges (inflight / oldest_inflight_s /
+    last_completion_age_s): the 2026-08-12 starvation outage was invisible
+    here — breaker closed, zero failures — while no request had completed for
+    7 hours. `last_completion_age_s` climbing while traffic exists (and the
+    RTT probe stays healthy) is THE signature of a wedged write plane."""
+    now_mono = time.monotonic()
+    oldest = min((ts for _, ts in _inflight_started.values()), default=None)
     return {
         "now": time.time(),
         "breaker_open": _breaker_is_open(),
         "consecutive_failures": _consecutive_failures,
         "max_inflight": _LEDFX_MAX_INFLIGHT,
+        "inflight": len(_inflight_started),
+        "oldest_inflight_s": round(now_mono - oldest, 1) if oldest is not None else 0.0,
+        "last_completion_age_s": (
+            round(now_mono - _last_completion, 1) if _last_completion else None
+        ),
+        "request_deadline_s": _LEDFX_REQUEST_DEADLINE_S,
         "counters": dict(_event_counters),
         "events": list(reversed(_events)),
     }

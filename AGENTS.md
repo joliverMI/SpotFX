@@ -31,6 +31,24 @@ React UI (`/app/`) is served from `web/dist` — rebuild with
 `cd web && npx vite build` (frontend-only changes need no restart; refresh
 the browser).
 
+## Tests
+
+`pip install -r requirements-dev.txt && python -m pytest` (plain pytest, no
+async plugin — tests drive their own loop; see `tests/conftest.py` for the
+fake-LedFX harness). No live access from tests, ever.
+
+## LedFX write plane: one gate, and its liveness signal
+
+Every SpotFX→LedFX HTTP call goes through `api/ledfx_client._request()` —
+semaphore + circuit breaker + a hard per-request deadline that also covers the
+slot wait (load-bearing: the 2026-08-12 outage was 24 leaked slots parking
+every later call forever, with zero failures logged — see
+`tests/test_ledfx_gate.py`). When debugging "LedFX seems fine but nothing
+changes": check `/api/debug/ledfx-health` — `last_completion_age_s` climbing
+while the RTT probe is healthy is a wedged write plane, not a LedFX problem.
+Effects self-animate in LedFX, so a dead write plane still *looks* like a
+working light show.
+
 ## Editor Preview (per-level test fires)
 
 `POST /api/events/preview` fires an UNSAVED payload: `{event: MusicEvent}`

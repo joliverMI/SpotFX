@@ -351,6 +351,17 @@ async def resolve_groups(force: bool = False) -> dict[str, str]:
     names = {did: str(cfg.get("name") or did) for did, cfg in hue_cfgs.items()}
     if names:
         _groups_cache = (now, names)
+        return names
+    # Empty result: a genuinely-empty target category and "LedFX unreachable"
+    # are indistinguishable here (ledfx_client maps failures to {}). Serve the
+    # last known groups past their TTL rather than stripping the picker to
+    # "No Hue groups found" during a transient outage (2026-08-12 incident).
+    if _groups_cache:
+        logger.warning(
+            "Ambient: group discovery returned nothing (LedFX unreachable?) — "
+            "serving %d cached group name(s)", len(_groups_cache[1]),
+        )
+        return dict(_groups_cache[1])
     return names
 
 
