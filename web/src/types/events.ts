@@ -241,6 +241,27 @@ export interface DeviceSettingsAction extends ActionBase {
   targets: DeviceSettingTarget[];
 }
 
+/** Per-parameter mode of a BrightnessAction: leave the multiplier alone,
+ *  set it to a value ("change"), or add a nudge delta to it. */
+export type BrightnessMode = 'keep' | 'absolute' | 'nudge';
+
+/** Set/nudge the per-device brightness MULTIPLIERS (fg + bg, 0..1, default 1).
+ *  They multiply with whatever brightness the Color Set/Group pipeline writes
+ *  (final = entry value × multiplier) and re-apply immediately to the scoped
+ *  devices' current effects. Reset to 1.0 on track change. */
+export interface BrightnessAction extends ActionBase {
+  type: 'brightness';
+  scope: MorphScope;                 // empty = inherit nearest Target, else global
+  ramp_ms: Bindable<number> | null;  // null = settings default; 0 = instant
+  intensity_source: IntensitySource; // shared by both nudges' intensity scale
+  brightness_mode: BrightnessMode;
+  brightness_value: Bindable<number> | null; // 0..1 multiplier target (absolute)
+  brightness_nudge: NumericNudge | null;
+  bg_mode: BrightnessMode;
+  bg_value: Bindable<number> | null;         // 0..1 multiplier target (absolute)
+  bg_nudge: NumericNudge | null;
+}
+
 /** HA choose-style random container. */
 export interface RandomOption {
   id: string;
@@ -349,6 +370,7 @@ export type Action =
   | MorphColorAction
   | SceneMorphAction
   | DeviceSettingsAction
+  | BrightnessAction
   | RandomGroupAction
   | SequenceGroupAction
   | ParallelGroupAction

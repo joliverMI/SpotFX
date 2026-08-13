@@ -14,6 +14,7 @@ const DESCRIPTIONS: Record<ActionType, string> = {
   morph_color: 'Rotate the showing colors around the hue wheel',
   scene_morph: 'Step the active Scene Group ±N scenes and fire the result',
   device_settings: 'Virtual-config changes (max brightness, freq band)',
+  brightness: 'Set/nudge brightness & BG brightness multipliers over the Color Set values',
   random_group: 'Pick one weighted option; its actions fire together',
   sequence_group: 'Run children in order with ms or beat delays',
   parallel_group: 'Run children at once, each with its own offset',

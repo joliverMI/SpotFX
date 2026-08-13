@@ -397,6 +397,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['ledfx_ambient_color', 'Applies the complementary of the current ambient color.'],
           ['ledfx_global_transition / ledfx_effect_param', 'Set the global transition / a single effect parameter.'],
           ['device_settings', 'Apply raw device settings.'],
+          ['brightness', 'Set or nudge the per-device Brightness / BG Brightness multipliers that scale the Color Set values. See "Brightness action".'],
           ['sequence / parallel / random group', 'Containers — run children in order / at once / pick one by weight (random options can be energy-gated and tilted).'],
           ['intensity_chooser', 'Container — the firing trigger\'s intensity picks exactly one threshold lane; that lane\'s actions fire together. See "Intensity Chooser".'],
         ],
@@ -459,6 +460,16 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The Default lane also fires when the trigger has no intensity (manual ▶ test fires) and when no dots are defined. Deleting a lane merges its actions into the lane to its left. Lanes hold a full action list (all fire together), plus per-lane target scope and filter labels — same as Parallel lanes. Choosers nest anywhere an action is allowed (depth-capped like other groups).',
           'Versus Random energy gates: a Random group rolls weighted dice among energy-eligible options; a Chooser is a deterministic switch — same intensity, same lane, every time.',
           'The Ramp row (parent/override) forces one ramp on everything the chosen lane fires — through event refs, scene groups and scene lanes. Bind it ⚡ to trigger intensity (0 → slow, 1 → fast) or 🎲 to randomize per fire; see "Ramp overrides".',
+        ],
+      },
+      {
+        id: 'brightness-action',
+        title: 'Brightness action',
+        keywords: 'brightness bg background multiplier dim keep change nudge scale random intensity color set group 🔆',
+        body: [
+          'The 🔆 Brightness action dims (or restores) devices without touching the authored look: each targeted device carries two multipliers — Brightness and BG Brightness — that scale whatever the Color Set / Color Group pipeline writes (final value = set value × multiplier). Both run 0–1 and default to 1 (= the set as authored). Firing applies the result immediately to the device\'s current effect AND to every later Set Color, until the multipliers reset to 1 on track change.',
+          'Each parameter independently keeps, changes, or nudges its multiplier. Keep leaves it alone; change sets it to a value — a fixed number, or ⚡/🎲 bound (e.g. trigger intensity → 0.3–1.0 so quiet triggers dim the room); nudge adds a delta per fire, with a bindable amount, an intensity scale (0 = ignore the beat, 1 = full), a ± random-sign flip, a bounce option that reflects off the range ends, and optional lo/hi limits inside 0–1.',
+          'Targeting works like Morph targets: pick devices/categories, or leave it on parent to inherit the nearest group/lane Target (empty = all devices). Ramp blank = the global smooth ramp; 0 = instant. A Color Set entry that doesn\'t define a brightness value keeps following the effect\'s own level — the multiplier only scales values the color pipeline actually writes (plus the immediate apply on fire). In a revert-enabled sequence, the revert restores both the visible params and the multipliers.',
         ],
       },
       {
