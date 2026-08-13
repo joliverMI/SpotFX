@@ -460,6 +460,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The Default lane also fires when the trigger has no intensity (manual ▶ test fires) and when no dots are defined. Deleting a lane merges its actions into the lane to its left. Lanes hold a full action list (all fire together), plus per-lane target scope and filter labels — same as Parallel lanes. Choosers nest anywhere an action is allowed (depth-capped like other groups).',
           'Versus Random energy gates: a Random group rolls weighted dice among energy-eligible options; a Chooser is a deterministic switch — same intensity, same lane, every time.',
           'The Ramp row (parent/override) forces one ramp on everything the chosen lane fires — through event refs, scene groups and scene lanes. Bind it ⚡ to trigger intensity (0 → slow, 1 → fast) or 🎲 to randomize per fire; see "Ramp overrides".',
+          'Test at ⚡: the row under the threshold strip previews the whole chooser at any intensity you dial in — the engine fires the lane that value would pick (raw 0–1, no song scaling; the → label shows which lane before you fire). Each lane also keeps its own ▶ to fire it directly.',
         ],
       },
       {
@@ -895,6 +896,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Each slot maps a musical moment to an event; blank slots are skipped. Examples: Drop fires at the bass re-entry after a gap; Lull at the peak before an energy drop; Charge during buildups; Scene Fill at energy upticks/downbeats; Flare tiers at harmonic moments of low/mid/high energy. Flare Scene is a fourth tier above Flare High: assign a scene-update event and it fires on the most extreme flare moments (onset/snare bursts) with wide spacing — leave it blank to disable. Label filters support the same "-exclude" syntax as everywhere else.',
           'The Charge / Lull / Drop slots now default to the fixed phase events (see "Charge / Lull / Drop events" under Events) — the effect choreography plus the active scene\'s phase lanes replace per-genre scene picking. All stock genre profiles were repointed 2026-08-07; cached analyzed triggers regenerate automatically on each song\'s next play (the training-profile hash changed).',
+        ],
+      },
+      {
+        id: 'triggerless-current-match',
+        title: 'Current-song highlight',
+        keywords: 'active match highlight current song profile genre default dinner party badge',
+        body: [
+          'The profile list highlights which profile the engine resolved for the CURRENT song, using the engine\'s own resolution order: Dinner Party mode → genre overlap → the default profile. A solid ACTIVE badge means the song is actually playing on synthetic triggerless triggers right now; a subtle MATCH badge means the song has its own triggers, but this is the profile that would take over if it didn\'t (or if Dinner Party is toggled on). Hover the badge for the match reason; the line above the list names the song it applies to. Refreshes every ~15 s.',
         ],
       },
       {

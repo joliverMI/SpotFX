@@ -217,6 +217,50 @@ async def get_training_profiles():
     return list_training_profiles()
 
 
+@router.get("/training-profiles/current-match")
+async def current_profile_match():
+    """Which profile the engine is using — or would use — for the CURRENT
+    song's triggerless/analyzed playback. Resolution runs through the
+    engine's own `_resolve_triggerless_profile` (Dinner Party → genre
+    overlap → default), so the answer can never drift from what actually
+    fires. `active` distinguishes "firing synthetic triggers right now"
+    from "would apply if this song had no triggers"."""
+    from main import engine
+    from models.state import state
+
+    track = state.current_track
+    if track is None:
+        return {"track": None, "profile_id": None, "reason": "no_track",
+                "active": False}
+
+    tp = engine._resolve_triggerless_profile()
+    genres = list(track.genres or [])
+    if not genres and engine._profile:
+        genres = list(engine._profile.artist_genre or [])
+
+    reason = "none"
+    if tp is not None:
+        if state.dinner_party_mode and tp.name.lower().strip() == "dinner party":
+            reason = "dinner_party"
+        elif {g.lower() for g in genres} & {g.lower() for g in tp.genres}:
+            reason = "genre"
+        elif tp.is_default:
+            reason = "default"
+    return {
+        "track": {
+            "uri": track.spotify_uri,
+            "title": track.title,
+            "artist": track.artist,
+            "genres": genres,
+        },
+        "profile_id": tp.id if tp else None,
+        "profile_name": tp.name if tp else None,
+        "reason": reason,
+        # synthetic triggerless triggers are live for this song
+        "active": engine._triggerless_triggers is not None,
+    }
+
+
 @router.post("/training-profiles")
 async def upsert_training_profile(profile: TrainingProfile):
     save_training_profile(profile)

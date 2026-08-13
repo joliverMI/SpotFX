@@ -23,6 +23,14 @@ type TLProfile = Record<string, unknown> & {
 
 interface TrainingSong { uri: string; title?: string; artist?: string; trigger_count?: number; }
 
+interface CurrentMatch {
+  track: { uri: string; title: string; artist: string; genres: string[] } | null;
+  profile_id: string | null;
+  profile_name: string | null;
+  reason: 'dinner_party' | 'genre' | 'default' | 'none' | 'no_track';
+  active: boolean;
+}
+
 interface TuneProgress {
   running: boolean;
   profile_id?: string;
@@ -128,6 +136,14 @@ export default function TriggerlessPage() {
   const { data: trainingSongs = [] } = useQuery({
     queryKey: ['training-songs'],
     queryFn: () => apiGet<TrainingSong[]>('/ai-triggers/training-songs'),
+    retry: false,
+  });
+  // Which profile the engine is using — or would use — for the current song.
+  // Same resolution code path as the engine (Dinner Party → genre → default).
+  const { data: match } = useQuery({
+    queryKey: ['tl-current-match'],
+    queryFn: () => apiGet<CurrentMatch>('/ai-triggers/training-profiles/current-match'),
+    refetchInterval: 15_000,
     retry: false,
   });
 
@@ -309,17 +325,50 @@ export default function TriggerlessPage() {
             setSelectedId(id);
           }}>+ New</button>
         </div>
+        {match?.track && match.profile_id && (
+          <div style={{
+            fontSize: 11, color: 'var(--text-muted)', padding: '2px 4px 8px',
+            borderBottom: '1px solid var(--border)', marginBottom: 6,
+          }}
+            title={`${match.track.title} — ${match.track.artist}\nGenres: ${match.track.genres.join(', ') || '(none)'}`}>
+            {match.active ? '▶ Firing for' : '○ Would apply to'}{' '}
+            <span style={{ color: 'var(--text)' }}>{match.track.title}</span>
+          </div>
+        )}
         <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
           {isLoading && <div className="empty-note" style={{ padding: 8 }}>Loading…</div>}
           {!isLoading && !visible.length && (
             <div style={{ color: 'var(--text-muted)', padding: 8, fontSize: 13 }}>No profiles yet</div>
           )}
-          {visible.map((p) => (
+          {visible.map((p) => {
+            const isMatch = p.id === match?.profile_id;
+            const reasonLabel = match?.reason === 'dinner_party' ? 'dinner party'
+              : match?.reason === 'genre' ? 'genre match'
+              : match?.reason === 'default' ? 'default' : 'match';
+            return (
             <div key={p.id} className={`pane-row${p.id === selectedId ? ' selected' : ''}`}
-              style={{ flexDirection: 'column', alignItems: 'stretch', gap: 2 }}
+              style={{
+                flexDirection: 'column', alignItems: 'stretch', gap: 2,
+                ...(isMatch ? {
+                  borderLeft: '3px solid var(--accent)',
+                  background: match?.active ? 'rgba(29,185,84,0.10)' : 'rgba(29,185,84,0.05)',
+                } : {}),
+              }}
               onClick={() => setSelectedId(p.id)}>
               <div style={{ fontWeight: 600, fontSize: 14 }}>
                 {p.name || '(unnamed)'}
+                {isMatch && (
+                  <span style={{
+                    fontSize: 10, padding: '1px 6px', borderRadius: 8, marginLeft: 6,
+                    background: match?.active ? 'var(--accent)' : 'rgba(29,185,84,0.15)',
+                    color: match?.active ? '#0a0a0a' : 'var(--accent)',
+                  }}
+                    title={match?.active
+                      ? `Firing synthetic triggers for the current song (${reasonLabel})`
+                      : `Would apply if the current song used triggerless (${reasonLabel})`}>
+                    {match?.active ? 'ACTIVE' : 'MATCH'}
+                  </span>
+                )}
                 {p.is_default && (
                   <span style={{
                     fontSize: 10, background: 'rgba(29,185,84,0.15)', color: 'var(--accent)',
@@ -331,7 +380,8 @@ export default function TriggerlessPage() {
                 {(p.genres || []).length ? p.genres!.join(', ') : 'No genres'}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
