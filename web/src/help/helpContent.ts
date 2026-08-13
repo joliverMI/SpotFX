@@ -765,9 +765,20 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'now-source-badge',
         title: 'Trigger source badge',
-        keywords: 'manual ai generated simple auto triggerless override',
+        keywords: 'manual ai generated simple auto triggerless override guest',
         body: [
           'Shows where the current song\'s triggers come from: Manual (hand-built profile), AI Generated, Simple Triggerless (interval-based), Auto Triggerless (analyzed pipeline), or Analyzed Override.',
+          'Guest playback (see "Guest source") always runs Simple Triggerless — a guest session has no saved profile, so the badge shows Simple Triggerless while a guest owns the speakers.',
+        ],
+      },
+      {
+        id: 'guest-source',
+        title: 'Guest source (Snapcast / AirPlay)',
+        keywords: 'guest snapcast airplay librespot connect visitor stream triggerless',
+        body: [
+          'When someone plays to the "Serenity Guest" Spotify Connect device or the AirPlay target, their session belongs to their account — the Spotify API shows nothing, so SpotFX watches the local snapserver instead. While a watched guest stream is playing, SpotFX synthesizes a track from the stream\'s metadata (title/artist when snapserver can read them) and runs simple triggerless lighting for it; a title change counts as a new song.',
+          'The host\'s own Spotify always wins: an actively playing real track takes over immediately, and a paused or idle Spotify answer never interrupts a guest session. Guest tracks are never saved — no song profiles are created and no audio-shape capture runs for them.',
+          'Settings (env/config): guest_source_enabled, snapcast_rpc_url, guest_streams (stream ids in priority order), guest_poll_interval_s.',
         ],
       },
       {

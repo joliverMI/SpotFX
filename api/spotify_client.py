@@ -130,9 +130,20 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
         logger.error("Spotify poll failed: %s", exc)
         return None
 
+    _cur = state.current_track
+    _guest_owned = _cur is not None and _cur.spotify_uri.startswith("guest:")
+
     if not data or not data.get("item"):
-        state.current_track = None
-        state.on_target_device = False
+        if not _guest_owned:
+            # Guest sessions (services/guest_source) own playback state while
+            # Spotify reports nothing — don't clobber a guest-owned track.
+            state.current_track = None
+            state.on_target_device = False
+        return None
+
+    if _guest_owned and not data.get("is_playing"):
+        # A paused/idle Spotify answer must not steal state from an active
+        # guest session; only an actively playing real track takes over.
         return None
 
     device_name = (data.get("device") or {}).get("name", "")

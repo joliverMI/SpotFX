@@ -49,6 +49,16 @@ engine = TriggerEngine()
 async def _on_state_update(app_state) -> None:
     """Called after each Spotify poll — load (or auto-create) profile and broadcast."""
     track = app_state.current_track
+    if track and track.spotify_uri.startswith("guest:"):
+        # Guest-owned playback (services/guest_source drives the engine).
+        # Skip profile handling entirely: auto-creating profiles or starting
+        # audio-shape capture for guest: URIs would write junk to storage.
+        # Capture teardown must still run — pass None (the shutdown-flush
+        # signal) so an in-flight capture stops without a new one starting
+        # for the guest: URI.
+        await audio_shape_service.on_track_change(None)
+        await ws_manager.broadcast_state(app_state)
+        return
     if track:
         profile = load_profile_by_uri(track.spotify_uri)
         if profile is None and track.title and track.artist:
@@ -149,6 +159,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(engine.run(), name="trigger-engine"),
         asyncio.create_task(tune_scheduler.worker_loop(), name="tune-scheduler"),
     ]
+    # Guest source: watches the snapcast Guest/AirPlay streams and drives the
+    # engine in simple-triggerless mode while a guest session owns the speakers.
+    from services import guest_source
+    tasks.append(asyncio.create_task(guest_source.polling_loop(), name="guest-source"))
     # Re-assert Ambient Mode if it was left on across restarts (freeze the Hue
     # devices + hold them at the static color). Deferred as a task so a slow Hue
     # bridge can't stall startup. No parked-virtual selfheal needed — ambient no

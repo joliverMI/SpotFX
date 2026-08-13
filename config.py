@@ -74,6 +74,21 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
+    # ── Guest source (Snapcast Guest / AirPlay streams) ──────────────────────
+    # When someone plays to the librespot "Serenity Guest" Connect device or
+    # the AirPlay target, their session is invisible to the Spotify Web API.
+    # services/guest_source polls snapserver's JSON-RPC instead and drives the
+    # engine in simple-triggerless mode for the duration (see that module).
+    guest_source_enabled: bool = True
+    snapcast_rpc_url: str = "http://127.0.0.1:1780/jsonrpc"
+    # Snapcast stream ids treated as guest sources, in priority order.
+    guest_streams: list = ["Guest", "AirPlay"]
+    guest_poll_interval_s: float = 5.0
+    # Assumed track length when snapserver has no duration metadata — only
+    # bounds how far ahead interval triggers are generated; a title change
+    # regenerates them anyway.
+    guest_default_duration_ms: int = 20 * 60 * 1000
+
     # ── Latency / timing ──────────────────────────────────────────────────────
     # Milliseconds between audio playback and Spotify timestamp
     audio_latency_ms: int = 1000
