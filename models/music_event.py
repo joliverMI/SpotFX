@@ -361,6 +361,35 @@ class DeviceSettingsAction(BaseModel):
     targets: list[DeviceSettingTarget] = Field(default_factory=list)
 
 
+class BrightnessAction(BaseModel):
+    """Set or nudge the per-virtual brightness MULTIPLIERS — one for effect
+    brightness, one for background brightness. Each is 0..1 and defaults to
+    1.0; they multiply with whatever the Color Set / Color Group pipeline
+    writes (final param = entry value × multiplier), so the authored "look"
+    stays intact and this action dims/undims it. Firing also re-applies the
+    result immediately to each scoped virtual's current effect (`brightness` /
+    `background_brightness` params, when present). Multipliers reset to 1.0
+    on track change.
+
+    Per parameter: mode "keep" leaves the multiplier alone; "absolute" sets it
+    (value may be a ⚡/🎲 ValueBinding); "nudge" adds a NumericNudge delta
+    (bindable amount, intensity `scale`, ± random_sign, bounce wrap) to the
+    current multiplier. See services/trigger_engine._execute_brightness."""
+    type:    Literal["brightness"] = "brightness"
+    labels:  list[str] = Field(default_factory=list)
+    weight:  float = 1.0
+    scope:   MorphScope = Field(default_factory=MorphScope)
+    ramp_ms: int | ValueBinding | None = None   # None = settings.smooth_ramp_ms; 0 = instant
+    # Shared by both nudges' intensity `scale` math, like MorphStepAction.
+    intensity_source: Literal["rms_total", "rms_bass", "onset_score"] = "rms_total"
+    brightness_mode:  Literal["keep", "absolute", "nudge"] = "keep"
+    brightness_value: float | ValueBinding | None = None    # 0..1 multiplier target
+    brightness_nudge: NumericNudge | None = None
+    bg_mode:  Literal["keep", "absolute", "nudge"] = "keep"
+    bg_value: float | ValueBinding | None = None            # 0..1 multiplier target
+    bg_nudge: NumericNudge | None = None
+
+
 class EffectParamChange(BaseModel):
     """One parameter change within a LedFxEffectParamAction."""
     param_label: str          # unified label e.g. "Reactivity", "Effect Brightness"
@@ -584,6 +613,7 @@ Action = Annotated[
     | MorphColorAction
     | SceneMorphAction
     | DeviceSettingsAction
+    | BrightnessAction
     | RandomGroupAction
     | SequenceGroupAction
     | ParallelGroupAction

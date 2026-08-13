@@ -24,6 +24,7 @@ export const ACTION_ICONS: Record<Action['type'], string> = {
   morph_color: '🎡',
   scene_morph: '🎞️',
   device_settings: '⚙️',
+  brightness: '🔆',
   random_group: '🎲',
   sequence_group: '➡️',
   parallel_group: '⫴',
@@ -42,6 +43,7 @@ export const ACTION_TYPE_LABELS: Record<Action['type'], string> = {
   morph_color: 'Morph Color',
   scene_morph: 'Scene Morph',
   device_settings: 'Device Settings',
+  brightness: 'Brightness',
   random_group: 'Random Group',
   sequence_group: 'Sequence',
   parallel_group: 'Parallel',
@@ -102,6 +104,24 @@ export function summarizeAction(action: Action, ctx: SummaryContext = {}): strin
     }
     case 'device_settings':
       return `Device settings (${action.targets.length}×)`;
+    case 'brightness': {
+      const bits: string[] = [];
+      const fmt = (v: number | { signal?: string } | null): string =>
+        typeof v === 'number' ? `${v}` : v?.signal === 'random' ? '🎲' : '⚡';
+      for (const [label, mode, value, nudge] of [
+        ['bright', action.brightness_mode, action.brightness_value, action.brightness_nudge],
+        ['bg', action.bg_mode, action.bg_value, action.bg_nudge],
+      ] as const) {
+        if (mode === 'absolute') bits.push(`${label} ×${fmt(value)}`);
+        else if (mode === 'nudge') {
+          const amt = nudge?.amount ?? 0;
+          bits.push(typeof amt === 'number'
+            ? `${label} ${nudge?.random_sign ? '±' + Math.abs(amt) : (amt >= 0 ? '+' : '') + amt}`
+            : `${label} ±${fmt(amt)}`);
+        }
+      }
+      return `Brightness ${bits.length ? bits.join(', ') : '(keep)'}${hasBindingDeep(action) ? ' ⚡' : ''}`;
+    }
     case 'event_ref': {
       const sub = ctx.events?.[action.event_id];
       return sub ? `→ ${sub.name}` : '→ (event ref)';

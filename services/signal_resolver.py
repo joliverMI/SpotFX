@@ -275,6 +275,16 @@ def has_bindings(action) -> bool:
             isinstance(p.target_value, ValueBinding) or isinstance(p.toggle_action, ValueBinding)
             for p in action.params
         )
+    if t == "brightness":
+        if isinstance(action.ramp_ms, ValueBinding):
+            return True
+        if any(isinstance(v, ValueBinding)
+               for v in (action.brightness_value, action.bg_value)):
+            return True
+        return any(
+            n is not None and isinstance(n.amount, ValueBinding)
+            for n in (action.brightness_nudge, action.bg_nudge)
+        )
     return False
 
 
@@ -334,6 +344,15 @@ def resolve_action_bindings(action, signal_fn: SignalFn):
         # a no-op resolution (None) becomes 0° = the executor's no-op path.
         deg = rv(new.degrees, "float_free")
         new.degrees = 0.0 if deg is None else deg
+    elif t == "brightness":
+        new.ramp_ms = rv(new.ramp_ms, "int0")
+        # Multiplier targets are hard 0..1 — float01 clamps bound results.
+        new.brightness_value = rv(new.brightness_value, "float01")
+        new.bg_value = rv(new.bg_value, "float01")
+        for nd in (new.brightness_nudge, new.bg_nudge):
+            if nd is not None and isinstance(nd.amount, ValueBinding):
+                amt = rv(nd.amount, "float_free")
+                nd.amount = 0.0 if amt is None else amt
     elif t == "ledfx_effect_param":
         new.ramp_ms = rv(new.ramp_ms, "int0")
         kept = []

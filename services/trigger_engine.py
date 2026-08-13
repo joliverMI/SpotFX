@@ -334,6 +334,14 @@ class TriggerEngine:
         # Shape-nudge bounce direction per "{virtual_id}::{param}" (in-memory,
         # reset on track change). Used when a Shape sub-field nudge has wrap=True.
         self._nudge_dir: dict[str, int] = {}
+        # Brightness multipliers per virtual ({"fg": 0..1, "bg": 0..1}, absent
+        # key = 1.0), set by the `brightness` action. They scale whatever
+        # brightness the Color Set/Group pipeline writes (final = base × mult).
+        # _bright_base remembers the pre-multiplier value the pipeline last
+        # wrote per virtual so a later brightness fire can re-apply against the
+        # authored value instead of compounding. Both reset on track change.
+        self._bright_mult: dict[str, dict[str, float]] = {}
+        self._bright_base: dict[str, dict[str, float]] = {}
         # Id of the last fired scene_update event. Decides First vs Rest and is the
         # target for the fixed Update/Reset Scene events. Persists across songs
         # (intentionally NOT cleared on track change).
@@ -449,6 +457,8 @@ class TriggerEngine:
             self._color_cursor_dir.clear()
             self._color_cursor_prev.clear()
             self._nudge_dir.clear()
+            self._bright_mult.clear()
+            self._bright_base.clear()
             self._preselected.clear()
             self._preselected_steps.clear()
             self._plan.clear()
@@ -2097,7 +2107,7 @@ class TriggerEngine:
                 if self._scope_is_empty(t.scope):
                     t.scope = scope.model_copy(deep=True)
             return new
-        if action.type == "morph_color":
+        if action.type in ("morph_color", "brightness"):
             if not self._scope_is_empty(action.scope):
                 return action
             return action.model_copy(update={"scope": scope.model_copy(deep=True)})
@@ -2435,6 +2445,22 @@ class TriggerEngine:
             return f"Scene morph {sign}{action.advance}"
         elif action.type == "device_settings":
             return f"Device settings ({len(action.targets)}×)"
+        elif action.type == "brightness":
+            bits = []
+            for label, mode, value, nd in (
+                ("bright", action.brightness_mode, action.brightness_value,
+                 action.brightness_nudge),
+                ("bg", action.bg_mode, action.bg_value, action.bg_nudge),
+            ):
+                if mode == "absolute":
+                    bits.append(f"{label} ×{self._fmt_val(value)}")
+                elif mode == "nudge":
+                    amt = nd.amount if nd is not None else 0.0
+                    if isinstance(amt, (int, float)):
+                        bits.append(f"{label} {amt:+g}")
+                    else:
+                        bits.append(f"{label} ±{self._fmt_val(amt)}")
+            return "Brightness " + (", ".join(bits) if bits else "(keep)")
         elif action.type == "event_ref":
             if _depth < 3:
                 sub = get_event(action.event_id)
@@ -2722,6 +2748,25 @@ class TriggerEngine:
             swatches = [h for h in hexes if not (h.lower() in seen or seen.add(h.lower()))]
             text = f"Color Set “{card.name}”{ramp}"
             return text, swatches[:6], "", text
+
+        if action.type == "brightness":
+            ramp = f" ({self._fmt_ramp(action.ramp_ms)})" if action.ramp_ms is not None else ""
+            parts: list[str] = []
+            for label, mode, value, nd in (
+                ("brightness", action.brightness_mode, action.brightness_value,
+                 action.brightness_nudge),
+                ("bg brightness", action.bg_mode, action.bg_value, action.bg_nudge),
+            ):
+                if mode == "absolute":
+                    parts.append(f"{label} ×{self._fmt_val(value)}")
+                elif mode == "nudge" and nd is not None:
+                    if isinstance(nd.amount, (int, float)):
+                        parts.append(f"{label} ±{abs(nd.amount):g}" if nd.random_sign
+                                     else f"{label} {nd.amount:+g}")
+                    else:
+                        parts.append(f"{label} ±{self._fmt_val(nd.amount)}")
+            scope = self._effective_scope(action.scope, inherited_scope)
+            return _cap(parts or ["brightness (keep)"], _scope_str(scope), "", ramp)
 
         if action.type == "morph_color":
             sign = "-" if action.direction == "backward" else "+"
@@ -3755,6 +3800,10 @@ class TriggerEngine:
         elif action.type == "device_settings":
             await self._apply_device_targets(action.targets)
 
+        elif action.type == "brightness":
+            await self._execute_brightness(action, await_ramps=await_ramps,
+                                           ramp_override=inherited_ramp)
+
         else:
             logger.warning("Unknown action type: %s", action.type)
 
@@ -4610,10 +4659,19 @@ class TriggerEngine:
             ap = morph_aspects.accent_param_for(etype)
             if ap and (vid in base_vids or entry.accent_color is not None):
                 _place(ap, entry.accent_color or "#000000")
+            # Brightness values are scaled by the per-virtual multipliers set
+            # by the `brightness` action (default 1.0); the authored entry
+            # value is remembered as the base so a later brightness fire can
+            # re-apply against it.
+            mult = self._bright_mult.get(vid) or {}
             if entry.brightness is not None and _has("brightness"):
-                _place_num("brightness", entry.brightness)
+                self._bright_base.setdefault(vid, {})["fg"] = float(entry.brightness)
+                _place_num("brightness",
+                           float(entry.brightness) * float(mult.get("fg", 1.0)))
             if entry.background_brightness is not None and _has("background_brightness"):
-                _place_num("background_brightness", entry.background_brightness)
+                self._bright_base.setdefault(vid, {})["bg"] = float(entry.background_brightness)
+                _place_num("background_brightness",
+                           float(entry.background_brightness) * float(mult.get("bg", 1.0)))
             if entry.bg_mode and _has("background_mode") and not _unchanged("background_mode", entry.bg_mode):
                 instant["background_mode"] = entry.bg_mode
 
@@ -4650,6 +4708,148 @@ class TriggerEngine:
         await self._await_ramps_parallel(ramp_jobs)
 
         # Persist post-action state so a later effect switch-back resumes colors.
+        if touched:
+            updates = []
+            for vid in touched:
+                eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+                et, c = eff.get("type"), eff.get("config") or {}
+                if et and c:
+                    updates.append((vid, et, dict(c)))
+            if updates:
+                morph_effect_state.save_many(updates)
+
+    async def _execute_brightness(self, action, await_ramps: bool = False,
+                                  ramp_override: Optional[int] = None) -> None:
+        """Set/nudge the per-virtual brightness multipliers (fg + bg, 0..1,
+        default 1.0) and re-apply the result to each scoped virtual's current
+        effect. The multiplier scales the value the Color Set/Group pipeline
+        authored (final param = base × mult): the base comes from
+        _bright_base (recorded by Set Color); when unknown it is derived from
+        the live cached param and the OLD multiplier, so repeated fires never
+        compound. `brightness` / `background_brightness` live in LedFX's BASE
+        effect schema (defaults 1.0), so every effect accepts the write — no
+        effect_params modeling required. Dark mode stays safe: LedFX's
+        dark_lock clamps any background_brightness write to 0 while locked.
+        `ramp_override` is the nearest scene/group/chooser ramp override —
+        when set it replaces this action's own ramp."""
+        action = resolve_action_bindings(action, self._signal_now)
+        from services import morph_effect_state
+        from services.morph_compiler import resolve_scope
+        from services.effect_params import get_param_meta
+
+        jobs = [
+            ("fg", "brightness", action.brightness_mode,
+             action.brightness_value, action.brightness_nudge),
+            ("bg", "background_brightness", action.bg_mode,
+             action.bg_value, action.bg_nudge),
+        ]
+        jobs = [j for j in jobs if j[2] != "keep"]
+        if not jobs:
+            return
+        vids = resolve_scope(action.scope)
+        if not vids:
+            return
+        await self._refresh_effect_types(vids)
+
+        # One beat-intensity read per fire, shared by both nudges (same
+        # convention as morph_step; neutral 0.5 → factor 1.0).
+        any_scaled = any(mode == "nudge" and nd is not None and nd.scale
+                         for _k, _p, mode, _v, nd in jobs)
+        intensity = (self._beat_intensity_now(action.intensity_source or "rms_total")
+                     if any_scaled else None)
+        eff_intensity = intensity if intensity is not None else 0.5
+
+        ramp_ms = (ramp_override if ramp_override is not None
+                   else action.ramp_ms if action.ramp_ms is not None
+                   else settings.smooth_ramp_ms)
+        instant_coros: list = []
+        ramp_jobs: list = []
+        touched: set[str] = set()
+        for vid in vids:
+            mults = self._bright_mult.setdefault(vid, {})
+            bases = self._bright_base.setdefault(vid, {})
+            eff = (state.ledfx_virtual_cache.get(vid) or {}).get("effect") or {}
+            etype = eff.get("type")
+            cfg = eff.setdefault("config", {}) if etype else {}
+            instant: dict = {}
+            ramp_num: dict = {}
+            for key, param, mode, value, nd in jobs:
+                old = float(mults.get(key, 1.0))
+                if mode == "absolute":
+                    if value is None:
+                        continue
+                    new_mult = min(1.0, max(0.0, float(value)))
+                else:  # nudge
+                    if nd is None:
+                        continue
+                    factor = 1.0 + (eff_intensity - 0.5) * float(nd.scale or 0.0)
+                    delta = float(nd.amount or 0.0) * factor
+                    if nd.random_sign and random.random() < 0.5:
+                        delta = -delta
+                    lo = max(0.0, float(nd.lo)) if nd.lo is not None else 0.0
+                    hi = min(1.0, float(nd.hi)) if nd.hi is not None else 1.0
+                    if lo > hi:
+                        lo, hi = hi, lo
+                    if nd.wrap:
+                        # Bounce off the range like Shape nudges (_nudged_numeric).
+                        dir_key = f"{vid}::__bright_{key}__"
+                        direction = self._nudge_dir.get(dir_key, 1)
+                        raw = old + delta * direction
+                        if raw > hi:
+                            raw = hi - (raw - hi)
+                            self._nudge_dir[dir_key] = -direction
+                        elif raw < lo:
+                            raw = lo + (lo - raw)
+                            self._nudge_dir[dir_key] = -direction
+                        new_mult = min(hi, max(lo, raw))
+                    else:
+                        new_mult = min(hi, max(lo, old + delta))
+                mults[key] = new_mult
+                if not etype:
+                    continue
+                base = bases.get(key)
+                if base is None:
+                    cur = cfg.get(param)
+                    if cur is None:
+                        # brightness / background_brightness are LedFX BASE
+                        # schema params — present on every effect, default 1.0
+                        # — so an absent cache value means "never written".
+                        cur = (get_param_meta(etype, param) or {}).get("default", 1.0)
+                    # cur is normally base × old — but clamp to 1.0: authored
+                    # values never exceed 1, so a larger quotient means the
+                    # old multiplier never actually landed (e.g. it advanced
+                    # against a cold cache) and cur IS the base.
+                    base = min(1.0, float(cur) / old) if old > 0 else float(cur)
+                    bases[key] = base
+                target = min(1.0, max(0.0, float(base) * new_mult))
+                cur = cfg.get(param)
+                if isinstance(cur, (int, float)) and abs(float(cur) - target) < 1e-4:
+                    continue
+                meta = get_param_meta(etype, param) or {}
+                if meta.get("smooth", True) and ramp_ms > 0:
+                    ramp_num[param] = target
+                else:
+                    instant[param] = target
+            if not instant and not ramp_num:
+                continue
+            touched.add(vid)
+            logger.info("brightness: %s/%s instant=%s ramp=%s ramp_ms=%s mult=%s",
+                        vid, etype, instant, ramp_num, ramp_ms,
+                        {k: round(v, 3) for k, v in mults.items()})
+            if instant:
+                instant_coros.append(ledfx_client.set_virtual_effect(vid, etype, instant))
+                cfg.update(instant)
+            if ramp_num:
+                coro = ledfx_client.ramp_effect_params(vid, etype, ramp_num, ramp_ms)
+                if await_ramps:
+                    ramp_jobs.append((coro, cfg, ramp_num))
+                else:
+                    self._spawn_ramp(coro)
+        if instant_coros:
+            await asyncio.gather(*instant_coros, return_exceptions=True)
+        await self._await_ramps_parallel(ramp_jobs)
+
+        # Persist post-action state so a later effect switch-back resumes it.
         if touched:
             updates = []
             for vid in touched:
@@ -5634,7 +5834,7 @@ class TriggerEngine:
                     for _t in _a.targets:
                         if _t.aspect != "effect":
                             target_vids.update(resolve_scope(_t.scope))
-                elif _a.type == "morph_color":
+                elif _a.type in ("morph_color", "brightness"):
                     target_vids.update(resolve_scope(_a.scope))
         if target_vids:
             await _warm(list(target_vids))
@@ -5672,6 +5872,22 @@ class TriggerEngine:
                 elif action.type == "ledfx_ambient_color":
                     for vid in get_virtuals_for_role("ambient"):
                         _snap_effect(vid, ["gradient", "background_color", "sparks_color"])
+
+                elif action.type == "brightness":
+                    # Snapshot the two brightness params AND the multiplier
+                    # state, so revert undoes both the visible value and the
+                    # intent the next Set Color would re-apply.
+                    keys = []
+                    if action.brightness_mode != "keep":
+                        keys.append(("fg", "brightness"))
+                    if action.bg_mode != "keep":
+                        keys.append(("bg", "background_brightness"))
+                    for vid in resolve_scope(action.scope) if keys else []:
+                        _snap_effect(vid, [p for _k, p in keys])
+                        entry = snapshot.setdefault("bright_mult", {}).setdefault(vid, {})
+                        cur = self._bright_mult.get(vid) or {}
+                        for k, _p in keys:
+                            entry.setdefault(k, float(cur.get(k, 1.0)))
 
                 elif action.type == "morph_color":
                     # Snapshot the color params the rotation will touch on each
@@ -5753,6 +5969,11 @@ class TriggerEngine:
         for vid, vcfg in snapshot.get("virtual_configs", {}).items():
             if vcfg:
                 await _lc.set_virtual_config(vid, vcfg)
+
+        # Restore brightness multipliers changed by a `brightness` action so
+        # the next Set Color re-applies the pre-sequence intent.
+        for vid, mults in snapshot.get("bright_mult", {}).items():
+            self._bright_mult.setdefault(vid, {}).update(mults)
 
         logger.info("Revert applied")
 
