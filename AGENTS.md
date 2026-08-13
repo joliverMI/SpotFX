@@ -23,6 +23,22 @@ without updating its `topic=` callers (grep `topic="`).
 Prefer adding a `HelpLink` next to a complex control over embedding
 instructional prose in the UI; short tooltips (`title=`) are fine.
 
+## SPECTRA SceneV2 (side-by-side with legacy scenes)
+
+SceneV2 is the future merged-program scene model: `models/scene_v2.py` (binding
+design answers in its header; product decisions in
+`/home/javi/fleet-spotfx/data/spectra-design-decisions.md`), store
+`services/scene_v2_store.py` (`storage/scenes_v2.json`), compiler
+`services/scene_v2_compiler.py` (dry-run default; live path goes through
+`api/ledfx_client.py`), UI `web/src/scenes/`. Executable spec:
+`.venv/bin/python scripts/check_scene_v2.py`. The legacy `scene_update` event
+path is separate — don't couple the two during the migration.
+
+Owner style rules: no settings-form sprawl for program behavior (settings are
+declared name/type/range/default, driven by a future settings console); write
+code for agents — no ceremony comments, keep explicit names, typed contracts,
+and executable specs.
+
 ## Run / deploy
 
 SpotFX runs as the **user systemd unit `spotfx.service`** (`.venv/bin/python

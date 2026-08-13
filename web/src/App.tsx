@@ -10,6 +10,7 @@ import NowPlayingPage from './nowplaying/NowPlayingPage';
 import DebugPage from './debug/DebugPage';
 import DevicesPage from './devices/DevicesPage';
 import ColorSetsPage from './colorsets/ColorSetsPage';
+import ScenesPage from './scenes/ScenesPage';
 import SetlistsPage from './setlists/SetlistsPage';
 import SettingsPage from './settings/SettingsPage';
 import TriggerlessPage from './triggerless/TriggerlessPage';
@@ -24,6 +25,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/debug', 'Debug'],
   ['/devices', 'Devices'],
   ['/color-sets', 'Color Sets'],
+  ['/scenes', 'Scenes'],
   ['/setlists', 'Set Lists'],
   ['/settings', 'Settings'],
   ['/triggerless', 'Triggerless'],
@@ -57,6 +59,7 @@ export default function App() {
           <Route path="/debug" element={<DebugPage />} />
           <Route path="/devices" element={<DevicesPage />} />
           <Route path="/color-sets" element={<ColorSetsPage />} />
+          <Route path="/scenes" element={<ScenesPage />} />
           <Route path="/setlists" element={<SetlistsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/triggerless" element={<TriggerlessPage />} />
