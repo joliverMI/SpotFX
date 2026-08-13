@@ -542,6 +542,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'native-dancer',
+        title: 'The Dancer effect & "Dancers" scene',
+        keywords:
+          'dancer effect native dance type tai chi ballet cowboy robot moonwalk floss worm hip hop salsa tango partner somersault stage angle burst threshold third color intensity bands',
+        body: [
+          'The native LedFX "dancer" effect (no GIFs) renders one or two procedural stick figures that dance to the beat engine: key poses land on beats, moves chain randomly from each dance\'s move set, and every change — dance type, partner, rotation, even effect switches — blends through choreography instead of cutting. Ten dances ship: tai chi (default — rebuilt as Avatar-style bending forms: big arm swirls, rooted fire strikes, low horizontal stretches), ballet (realistic vocabulary: port de bras, pirouettes, penchée, grand jeté, pas de deux), cowboy line dance, robot, moonwalk, flossing, the worm, hip hop, salsa, tango and k-pop (synchronized pop-and-lock formation). Big stretch poses that land inside a beat window HOLD as a synced flourish while an amplified flame burst fires from the stretched limb.',
+          'The skeleton has a two-segment spine, a neck, and 3D yaw — chest pops and worm waves bend through the spine, heads nod and snap, and spins (pirouettes, chaîné turns, spin-freezes, underarm turns) really rotate the figure with foreshortening. In "together" dances (ballet, salsa, tango) the pair genuinely holds hands: both held arms re-solve to a shared clasp point, releasing only for turns, leaps and swaps.',
+          'The dance runs on a surge clock: it progresses steadily at "Dance Speed" and lunges forward on every beat — harder on loud hits, so big flourishes accelerate straight into the flame bursts. A beat-locked groove layer (pendulum arm swing, shoulder and hip counter-sway, head bob, a lift into every beat) keeps the whole body moving BETWEEN key poses, scaled by each dance\'s energy and the music; fluid dances ease with follow-through so limbs overshoot and settle instead of parking. Colors: each dancer is one solid color — the foreground Gradient sampled 120° after its center (the partner sits 120° before it); "Third Color" shows in stunt flashes (near-black, the default, uses the gradient instead); BG Color stays a normal background layer.',
+          'Flames are THROWN by the dance: on beats louder than "Burst Threshold", the flourishing limb — whichever extremity is actually moving fastest — fires a plume mid-swing along its own motion, inheriting its momentum (a still body radiates from the chest instead). Plumes are buoyant with minor vortices, grab one random third of the gradient, grow in size/brightness/life with loudness, and a hot ember trickle follows the moving limb between beats. Mirrored dancers\' plumes collide at the midline and flare upward like meeting flame fronts.',
+          '"Partner" (the family\'s Reverse toggle: 2 dancers = reversed) adds the second dancer. Mirror dances (tai chi, robot, moonwalk, floss, worm, hip hop): the lead steps aside and the partner drops in Matrix-Neo style, and leaves with a superman takeoff + burst. Together dances (ballet, salsa, tango): the partner falls from the top into a catch, and leaves spun off screen. "Stage Angle" changes of 20°+ make the dancers somersault into the new orientation — in Shape morphs it rides the shared Twist sub-field (absolute or nudge, with lo/hi/wrap), so twist nudges literally flip the dancers; Dance Speed / Dance Intensity / Burst Threshold are per-param nudgeable under the Reactivity aspect. "Trail Length" is the shared particle-family trail.',
+          'Transitions are choreographed: to/from the particle effects the dancers somersault-tuck and dissolve into (or assemble from) particles; radial sucks them in / blooms them out; when Pacman comes in they run away from it. The phased-transition lead fires these switches early so the payoff lands on the trigger.',
+          'The seeded "Dancers" scene (member of Mid Group and Drop Group) picks the dance by trigger intensity — 0-4 calm (tai chi, ballet), 4-7 mid (cowboy, salsa, moonwalk, worm), 7-10 high (hip hop, robot, tango, floss, worm) — then randomly within the band; shape flares re-roll the dance, toggle the partner, or somersault the stage. Re-seed with scripts/seed_dancers_scene.py; author new dances via tools/dancesmith (see its README).',
+        ],
+      },
+      {
         id: 'matrix-blackhole',
         title: 'Blackhole effect',
         keywords: 'swirl vortex spiral blobs gradient infall reverse trail comet',
@@ -563,6 +578,27 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Particle handoff', 'Switching between Blackhole and Orbits (either direction, or recreating the same effect) hands the on-screen particles, trails AND the live gradient to the incoming effect — blobs become orbiting particles and vice versa instead of vanishing, and colors stay continuous until the next SpotFX color action repaints. The spin direction and blob size carry over too: the incoming effect flips its swirl/reverse sign to keep rotating the same way, and eases from the old blob size to its own. Coming from Orbits, EVERY particle is kept and starts swirling in (or erupting out) like a native blob; Handoff Ease sets how many seconds they take to wind up to full speed.'],
           ['Radial handoff', 'Switching to Radial: over the first half of the crossfade every blob breaks orbit and spirals into the radial\'s center, pinching bright; the ring pattern then STRETCHES outward from that point like an explosion (a real zoom of the pattern — the background color just fades in separately), with Twist sign flipped so the spiral keeps rotating the same way. Switching FROM Radial: the pattern converges onto the handover point — with an event horizon everything INSIDE the ring stretches outward to it while everything OUTSIDE collapses onto it, the whole pattern compressing into a narrow band at the ring that dissolves as blobs burst from it; without a horizon it collapses to a point and the burst fires from the center — native outflow in Reverse mode; in infall mode the burst arcs outward, stalls, and falls back in. Longer effect-switch ramps (≥1.2 s) give the two phases room to read.'],
           ['Morph Steps', 'The Shape aspect sub-fields Swirl, Horizon size, Blob size, X/Y offset (absolute or nudge, bindable) and Reverse (tri-state) morph the vortex from scene lanes and flares like any other shape. The Reactivity aspect\'s per-param menu reaches everything else: Spawn Rate, Beat Burst, Infall Speed, Accel, Edge Speed, Max Blobs, Horizon Hold, Impulse Decay….'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'matrix-eye',
+        title: 'Eye effect & "Eye" scene',
+        keywords:
+          'eye iris pupil gaze flames blink eyelid snap stare drift search spin flicker charge lull drop',
+        body: [
+          'A custom LedFX matrix effect: a big eye — black pupil inside a gradient-wheel iris — that watches the room. The gaze drifts among 9 positions (center + 8 on a ring at Gaze Radius), wandering curvy, orbit-like paths when the music is calm and darting straight and angular when it\'s hot; energetic music also searches faster and homes in closer (the "close enough" boundary breathes, so it sometimes locks right onto a spot and sometimes gives up early). Beats louder than Snap Threshold make the gaze dart — fluidly, just very fast — to a new ring position and hold the stare (Snap Hold, longer on bigger hits). The iris rotates at Spin (Spin Audio adds music boost; 0 = constant) and Flames turns on flickering flame tongues growing from the iris rim — an extension of the iris in the same gradient, with flame intensity, randomness AND flicker speed all growing with the music via Flame Audio.',
+        ],
+        table: [
+          ['Iris / Pupil Size', 'Radii as a fraction of the panel. The shared Field Radius shape sub-field lands on the iris, Blob Size on the pupil, so generic size morphs work.'],
+          ['Gaze Radius', 'The ring the 8 look-at positions sit on.'],
+          ['Gaze Depth', '3D eyeball illusion: as the eye looks away from center the iris foreshortens into an ellipse and the pupil leads into the gaze, so it reads as physically looking AT a spot. 0 = flat googly eye.'],
+          ['Drift Speed / Audio Speed', 'Base search speed and how hard the Audio Band boosts it.'],
+          ['Snap Threshold / Snap Hold', 'Impulse a beat needs to snap the gaze (0 = every beat), and the base stare length after a snap.'],
+          ['Spin / Spin Audio', 'Iris rotation (rev/s, sign = direction) and its independent music boost.'],
+          ['Flames / Flame Audio', 'Flame amount from the rim (0 = off) and how much music grows the tongues, their chaos and their flicker rate.'],
+          ['Charge / Lull / Drop', 'Charge streams the flames inward to be absorbed while the iris swells and the pupil shrinks; Lull looks back to center and closes both eyelids from above and below (fast start, pause just overlapping the iris, then shut to a lash line); Drop snaps the eye open with a huge flame explosion.'],
+          ['The "Eye" scene', 'Seeded member of Mid Group, Drop Group and Dark Hype: First fires the Eye Scene Setter (tuned matrix look with flames riding trigger intensity, Strips on Blackhole Strip, Singles power, scene-group color); Shape fires a temporary flame flare (LedFX restores it after a few seconds), a pupil dilation, a gaze widen or a spin flip; Color cycles the "Orbits" color group or an ambient flip. Re-seed with scripts/seed_eye_scene.py.'],
         ],
         kbd: false,
       },
