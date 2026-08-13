@@ -27,4 +27,5 @@ async function errorDetail(res: Response): Promise<string> {
 
 export const apiGet = <T = unknown>(path: string) => api<T>('GET', path);
 export const apiPost = <T = unknown>(path: string, body?: unknown) => api<T>('POST', path, body);
+export const apiPut = <T = unknown>(path: string, body?: unknown) => api<T>('PUT', path, body);
 export const apiDel = <T = unknown>(path: string) => api<T>('DELETE', path);

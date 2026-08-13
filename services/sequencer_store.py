@@ -1,14 +1,17 @@
 """Sequencer runtime storage: storage/sequencer.json (gitignored).
 
-Holds the named curve profiles and the scene-selector config the
-agent-adjustment endpoints read/write. Writes are atomic (tmp + os.replace in
-the same directory). Nothing consumes this file yet — it stays dark until the
-open sequencing decisions land (models/sequencer.py header).
+COMMITTED schema (decision 4 — named curve profiles + inline escape hatch):
 
-The on-disk nesting beyond {curve_profiles, config} is NOT final:
-TODO(decision colorset-flare-mechanism / curve-ownership): per-kind selector
-instances and profile flattening may reshape it; the seeder refuses --apply
-for exactly that reason.
+    { "curve_profiles": { "<profile_id>": CurveProfile },
+      "config":         SequencerConfig }   # models/sequencer.py
+
+config carries the scene selector (entries/affinity/dwell), the flare
+selector (flare_entries), and the dark switch (enabled, default off). The
+colour-set selector joins config in a later change (decision 3 — wired
+last). Writes are atomic (tmp + os.replace in the same directory).
+Consumers: services/scene_sequencer.py (at change moments only) and the
+agent-adjustment endpoints (routers/sequencer_router.py). Seeder:
+scripts/seed_sequencer_from_legacy.py.
 """
 from __future__ import annotations
 

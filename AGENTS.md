@@ -39,6 +39,19 @@ declared name/type/range/default, driven by a future settings console); write
 code for agents — no ceremony comments, keep explicit names, typed contracts,
 and executable specs.
 
+SPECTRA sequencer (DARK — `enabled: false` in `storage/sequencer.json`, its
+own flag, not a settings.py field): `models/sequencer.py`,
+`services/selection_kernel.py` (pure kernel: curve × genre × affinity, zero =
+veto, fallback ladder), `services/scene_sequencer.py` (transition-only clock
+— NO timer, by the owner's decision 5; a long mix holding one scene is
+accepted, don't "fix" it), seeder `scripts/seed_sequencer_from_legacy.py`
+(`--apply` idempotent). Binding decisions:
+`/home/javi/fleet-spotfx/data/spectra-sequencing-design/decision-five-answers.md`.
+Interface split: curves are edited graphically (Scenes page); genre/affinity/
+dwell/enabled only via `PUT /api/sequencer/config` (tell the agent — no
+forms). Spec: `.venv/bin/python scripts/check_sequencer.py`. Colour-set
+selector is deliberately not wired yet (wired last).
+
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 
 `fx/` is the LedFX render pipeline vendored from the fork at commit

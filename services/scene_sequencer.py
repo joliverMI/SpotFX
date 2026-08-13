@@ -1,0 +1,327 @@
+"""SPECTRA scene sequencer engine — rolls the next SceneV2 at change moments.
+
+DARK BY DEFAULT: every moment starts by reading storage/sequencer.json; with
+config.enabled False (the default) the engine records nothing and fires
+nothing. The legacy chooser path is untouched either way (exclusive-
+switchover doctrine).
+
+Change moments (decision 5, binding): SONG TRANSITIONS ONLY. No timer ships.
+The change-moment source is a pluggable seam — ChangeMomentSource below — so
+a timed clock can be added later without rework: a future TimedSource runs
+its own task and calls the same emit callback with source="timer"; the
+engine's moment handling is source-agnostic. Do NOT add that timer here
+without the owner's call. ACCEPTED CONSEQUENCE, on record: a long mix holds
+one scene however hard it builds — that is not a defect and gets no
+timer-based mitigation.
+
+Dwell (report Part 3, in song units): each adopted scene resolves a target of
+N songs from its dwell_weight (fractional weights probabilistic —
+selection_kernel.resolve_dwell_songs). A transition moment first counts one
+served song, then asks the gate; not served yet → the moment passes. A
+trigger-fired legacy scene (observed via state.last_scene_update_id — pure
+observation, no coupling) is adopted with a fresh dwell count.
+
+Deferrals: Force Scene, engine pause, Dinner Party, and Ambient Mode each
+skip the moment entirely (no served count, no roll).
+
+Intensity at a moment (no trigger carries one): librosa section energy at
+the playback position, read RAW per the standing librosa_offset_ms rule;
+fallback = the song's auto intensity scale clamped to 0–1; last resort 0.5.
+
+Fires go through scene_v2_compiler.fire_scene(dry_run=False) → the
+api/ledfx_client._request() gate, honoring the write-plane contract.
+
+Executable spec: scripts/check_sequencer.py (fake clock, injected fire — no
+live LedFX, no audio).
+"""
+from __future__ import annotations
+
+import logging
+import time
+from random import Random
+from typing import Any, Awaitable, Callable, Optional
+
+from models.sequencer import SequencerConfig
+from models.state import state
+from services import selection_kernel as kernel
+from services import sequencer_store
+
+logger = logging.getLogger(__name__)
+
+TRANSITION_SOURCE = "transition"
+
+
+class ChangeMomentSource:
+    """The pluggable clock seam. A source decides WHEN a change moment
+    exists and calls the bound emit callback with its source name; the
+    engine decides what the moment means. Shipped: TransitionSource only.
+    A later TimedSource (dwell_weight × base_dwell_s, owner-approved) binds
+    the same way and needs no engine rework."""
+
+    name = "unset"
+
+    def bind(self, emit: Callable[[str], Awaitable[None]]) -> None:
+        self._emit = emit
+
+    async def _fire(self) -> None:
+        await self._emit(self.name)
+
+
+class TransitionSource(ChangeMomentSource):
+    """Song transitions: a moment each time the playing URI changes to a new
+    one. The first URI seen after startup only ARMS the source — a restart
+    mid-song must not change the room mid-song. Stop/None holds the last
+    URI, so pause→resume of the same song is not a transition."""
+
+    name = TRANSITION_SOURCE
+
+    def __init__(self) -> None:
+        self._last_uri: Optional[str] = None
+
+    async def observe_uri(self, uri: Optional[str]) -> None:
+        if uri is None or uri == self._last_uri:
+            return
+        armed = self._last_uri is not None
+        self._last_uri = uri
+        if armed:
+            await self._fire()
+
+
+class SceneSequencer:
+    """One instance per process (singleton below). Constructor injectables
+    exist for the executable spec only — production uses the defaults."""
+
+    def __init__(
+        self, *,
+        rng: Random | None = None,
+        fire: Callable[..., Awaitable[Any]] | None = None,
+        intensity: Callable[[], float] | None = None,
+        genre_bucket: Callable[[], Optional[str]] | None = None,
+        list_scene_ids: Callable[[], set[str]] | None = None,
+        scene_name: Callable[[str], str] | None = None,
+        broadcast: Callable[[dict], Awaitable[None]] | None = None,
+    ) -> None:
+        self._rng = rng or Random()
+        self._fire = fire or self._default_fire
+        self._intensity = intensity or self._default_intensity
+        self._genre_bucket = genre_bucket or self._default_genre_bucket
+        self._list_scene_ids = list_scene_ids or self._default_list_scene_ids
+        self._scene_name = scene_name or self._default_scene_name
+        self._broadcast = broadcast or self._default_broadcast
+
+        self.transition_source = TransitionSource()
+        self.transition_source.bind(self._on_change_moment)
+
+        # Runtime state — in-memory only, rebuilt from the room after restart.
+        self._active_id: Optional[str] = None
+        self._served_songs: int = 0
+        self._dwell_target: int = 0
+        self._dwell_weight: float = 1.0
+        self._seen_trigger_scene_id: Optional[str] = None
+        self._last_pick: Optional[dict] = None
+        self._last_moment: Optional[dict] = None
+        self._warned_change_mode: Optional[str] = None
+
+    # ── feed (wired from main._on_state_update; a no-op while dark) ─────────
+
+    async def on_track_state(self, track) -> None:
+        await self.transition_source.observe_uri(
+            track.spotify_uri if track else None)
+
+    # ── the moment ──────────────────────────────────────────────────────────
+
+    async def _on_change_moment(self, source: str) -> None:
+        config = sequencer_store.load_config()
+        if not config.enabled:
+            return
+        if config.change_mode != "transition" and \
+                self._warned_change_mode != config.change_mode:
+            self._warned_change_mode = config.change_mode
+            logger.warning(
+                "sequencer change_mode=%s stored, but only the transition "
+                "clock ships (decision 5) — ticking song transitions only",
+                config.change_mode)
+
+        deferral = self.deferral()
+        if deferral is not None:
+            self._record_moment(source, f"deferred:{deferral}")
+            return
+
+        adopted_now = self._observe_trigger_fires(config)
+
+        if self._active_id is not None and not adopted_now:
+            self._served_songs += 1
+            if self._served_songs < self._dwell_target:
+                self._record_moment(source, "held")
+                return
+        elif adopted_now and self._served_songs < self._dwell_target:
+            # Freshly adopted (trigger-fired) scene hasn't been through a
+            # full song yet — this moment neither counts nor changes it.
+            self._record_moment(source, "held")
+            return
+
+        await self._roll(config, source)
+
+    def _observe_trigger_fires(self, config: SequencerConfig) -> bool:
+        """Observe (never drive) the legacy engine: a new
+        state.last_scene_update_id since the last enabled moment means a
+        trigger fired a scene — adopt it with a fresh dwell count. The first
+        enabled moment only baselines the snapshot."""
+        seen = state.last_scene_update_id or None
+        if self._seen_trigger_scene_id is None:
+            self._seen_trigger_scene_id = seen or ""
+            return False
+        if seen and seen != self._seen_trigger_scene_id:
+            self._seen_trigger_scene_id = seen
+            self._adopt(seen, config)
+            logger.info("sequencer: adopted trigger-fired scene %s "
+                        "(dwell reset, target %d songs)", seen, self._dwell_target)
+            return True
+        return False
+
+    def _adopt(self, scene_id: str, config: SequencerConfig) -> None:
+        entry = config.entries.get(scene_id)
+        self._active_id = scene_id
+        self._served_songs = 0
+        self._dwell_weight = entry.dwell_weight if entry else 1.0
+        self._dwell_target = kernel.resolve_dwell_songs(self._dwell_weight, self._rng)
+
+    async def _roll(self, config: SequencerConfig, source: str) -> None:
+        curves = sequencer_store.load_curves()
+        existing = self._list_scene_ids()
+        missing = set(config.entries) - existing
+        if missing:
+            logger.warning("sequencer: %d entr(y/ies) reference no SceneV2 "
+                           "and are skipped: %s", len(missing), sorted(missing))
+        candidates = kernel.build_scene_candidates(
+            config.entries, curves, config.affinity,
+            genre_bucket=self._genre_bucket(), prev_id=self._active_id,
+            restrict_ids=existing)
+        pick = kernel.select(candidates, intensity=self._intensity(),
+                             rng=self._rng, current_id=self._active_id,
+                             terminal=kernel.TERMINAL_STAY)
+        self._last_pick = {
+            "picked_id": pick.picked_id,
+            "picked_name": self._scene_name(pick.picked_id) if pick.picked_id else None,
+            "rung": pick.rung,
+            "intensity": round(pick.intensity, 4),
+            "factors": pick.factors,
+            "source": source,
+            "at": time.time(),
+        }
+        if pick.picked_id is None:
+            self._record_moment(source, "stay")
+            logger.info("sequencer: ladder terminated at STAY (intensity %.2f)",
+                        pick.intensity)
+            return
+        if pick.picked_id == self._active_id:
+            # Only reachable via the re-admit/uniform rungs (the full draw
+            # excludes current). The room already shows this scene — renew
+            # its dwell instead of re-firing it through the write plane.
+            self._adopt(pick.picked_id, config)
+            self._record_moment(source, "renewed")
+            logger.info("sequencer: current scene %s renewed via rung=%s "
+                        "(dwell target %d songs)", pick.picked_id, pick.rung,
+                        self._dwell_target)
+            return
+        try:
+            await self._fire(pick.picked_id)
+        except Exception:
+            logger.exception("sequencer: firing scene %s failed", pick.picked_id)
+            self._record_moment(source, "fire_failed")
+            return
+        self._adopt(pick.picked_id, config)
+        self._record_moment(source, "picked")
+        logger.info("sequencer: picked %s via rung=%s at intensity %.2f "
+                    "(dwell target %d songs, weight %g)", pick.picked_id,
+                    pick.rung, pick.intensity, self._dwell_target,
+                    self._dwell_weight)
+        await self._broadcast({
+            "type": "sequencer_pick",
+            **self._last_pick,
+            "dwell_target_songs": self._dwell_target,
+            "dwell_weight": self._dwell_weight,
+        })
+
+    def _record_moment(self, source: str, result: str) -> None:
+        self._last_moment = {"source": source, "result": result, "at": time.time()}
+
+    # ── observability (GET /api/sequencer/status) ───────────────────────────
+
+    def deferral(self) -> Optional[str]:
+        from config import settings
+        if settings.force_scene_enabled:
+            return "force_scene"
+        if state.paused:
+            return "paused"
+        if state.dinner_party_mode:
+            return "dinner_party"
+        if state.ambient_mode_enabled:
+            return "ambient"
+        return None
+
+    def status(self) -> dict:
+        config = sequencer_store.load_config()
+        return {
+            "enabled": config.enabled,
+            "change_mode": config.change_mode,
+            "next_change_source": TRANSITION_SOURCE,  # the only shipped clock
+            "deferred_by": self.deferral(),
+            "active_scene_id": self._active_id,
+            "active_scene_name": (self._scene_name(self._active_id)
+                                  if self._active_id else None),
+            "dwell": {
+                "served_songs": self._served_songs,
+                "target_songs": self._dwell_target,
+                "weight": self._dwell_weight,
+            } if self._active_id else None,
+            "last_pick": self._last_pick,
+            "last_moment": self._last_moment,
+        }
+
+    # ── production defaults (lazy imports; the spec injects fakes) ──────────
+
+    async def _default_fire(self, scene_id: str) -> None:
+        from services import scene_v2_compiler, scene_v2_store
+        scene = scene_v2_store.get_by_id(scene_id)
+        if scene is None:
+            raise ValueError(f"picked scene {scene_id} not found in scenes_v2")
+        await scene_v2_compiler.fire_scene(scene, dry_run=False)
+
+    def _default_intensity(self) -> float:
+        track = state.current_track
+        if track is None:
+            return 0.5
+        from services.audio_analyzer import load_sections_for_uri
+        from services.signal_resolver import _section_energy
+        v = _section_energy(load_sections_for_uri(track.spotify_uri),
+                            track.interpolated_progress_ms())
+        if v is not None:
+            return v
+        from services.intensity_scale_service import compute_auto_scale
+        scale = compute_auto_scale(track.spotify_uri, list(track.genres or []) or None)
+        if scale is None:
+            return 0.5
+        return max(0.0, min(1.0, scale))
+
+    def _default_genre_bucket(self) -> Optional[str]:
+        track = state.current_track
+        from services.audio_shape_service import _find_profile_for_genres
+        profile = _find_profile_for_genres(list(track.genres) if track else [])
+        return profile.get("name") if profile else None
+
+    def _default_list_scene_ids(self) -> set[str]:
+        from services import scene_v2_store
+        return {s.id for s in scene_v2_store.list_all()}
+
+    def _default_scene_name(self, scene_id: str) -> str:
+        from services import scene_v2_store
+        scene = scene_v2_store.get_by_id(scene_id)
+        return scene.name if scene else scene_id
+
+    async def _default_broadcast(self, payload: dict) -> None:
+        from services.websocket_manager import ws_manager
+        await ws_manager.broadcast(payload)
+
+
+scene_sequencer = SceneSequencer()

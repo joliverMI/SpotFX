@@ -5,13 +5,15 @@
  * legacy scene_update events on the Events page are untouched by this page. */
 import { useMemo, useState } from 'react';
 import CollapsibleCard from '../components/CollapsibleCard';
-import CurveLab from '../components/CurveLab';
 import { useToast } from '../components/Toast';
 import { LabelsInput } from '../components/forms/inputs';
 import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
 import { useColorSetCards, useSaveColorSet } from '../colorsets/queries';
+import CurveProfilesCard from './CurveProfilesCard';
 import DeviceRow from './DeviceRow';
+import SequencerPanel from './SequencerPanel';
+import SequencerStatusStrip from './SequencerStatusStrip';
 import {
   fireSceneV2, useDeleteSceneV2, useEffectConfig, useSaveSceneV2, useScenesV2,
   useWheelPositions,
@@ -140,6 +142,9 @@ export default function ScenesPage() {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
+      {/* ── Sequencer status strip (display only — no controls) ── */}
+      <SequencerStatusStrip scenes={scenes} />
+
       {/* ── Scene list ── */}
       <div className="card" style={{ minWidth: 0, maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -291,6 +296,9 @@ export default function ScenesPage() {
             )}
           </div>
 
+          {/* Sequencing: curve attachment + read-only relationships */}
+          <SequencerPanel scene={scene} scenes={scenes} />
+
           {/* Color Set filter */}
           <div className="card-title" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
             Color Set filter <HelpLink topic="scenes-v2-set-filter" />
@@ -358,12 +366,12 @@ export default function ScenesPage() {
         </div>
       )}
 
-      {/* Dev affordance: sequencer curve-editor preview (SPECTRA sequencing
-        * core — attachment UI awaits the open design decisions). */}
+      {/* Named curve profile library (decision 4) — shared shapes the
+        * per-scene Sequencing panel attaches by reference. */}
       <div style={{ gridColumn: '1 / -1' }}>
         <CollapsibleCard id="scenes-curve-lab" defaultCollapsed
-          title={<>Curve editor lab <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>— dev preview</span></>}>
-          <CurveLab />
+          title={<>Curve profiles <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>— shared likelihood shapes</span></>}>
+          <CurveProfilesCard scenes={scenes} />
         </CollapsibleCard>
       </div>
     </div>

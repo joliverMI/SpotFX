@@ -1,27 +1,30 @@
-"""SPECTRA sequencer data model — the UNAMBIGUOUS CORE of the sequencing
-design (data/spectra-sequencing-design/report.md, Part 4). Data shapes only;
-no engine consumes these yet.
+"""SPECTRA sequencer data model — decision-complete per the five answered
+holds (data/spectra-sequencing-design/decision-five-answers.md; blueprint in
+data/spectra-sequencing-design/report.md Parts 2–4).
 
-Five product-owner decisions are OPEN (captain holds: weighting-structure,
-selection-algorithm, colorset-flare-mechanism, curve-ownership,
-change-trigger-mode). What is pinned here is capture-verbatim and
-decision-neutral:
   - CurvePoint / CurveProfile: points on a line, linear between, sorted-x.
     Duplicate x = a step discontinuity (evaluation: later point wins at
     exactly that x — services/selection_kernel.curve_eval). One flat point
     ≡ a scalar weight.
+  - Curve ownership (decision 4): NAMED profiles referenced by entries via
+    curve_ref, with inline_points as the one-off escape hatch.
   - dwell_weight: relative float > 0, default 1.0, dimensionless — weight 2
-    holds twice as long as weight 1, whatever the base pace is.
+    holds twice as long as weight 1, whatever the base pace is. In the
+    shipped transition-only mode the unit is SONGS (decision 5).
   - AffinityEdge: explicit from/to/mult, directional by construction.
     Self-pairs are rejected: the diagonal IS dwell_weight (report Part 3).
+  - change_mode (decision 5): shipped default is "transition" — song
+    transitions are the only change moments; NO timer runs. "timed"/"both"
+    are stored for a later owner-approved clock but the engine refuses to
+    tick them (services/scene_sequencer.py holds the pluggable seam).
+  - enabled: the sequencer's own dark switch, default OFF. Nothing fires
+    until the agent flips it via PUT /api/sequencer/config.
+  - flare_entries: the flare selector's entries (decision 3) — curve × genre
+    only; dwell_weight is carried by the shared entry shape but flares have
+    no dwell and the selector never reads it.
 
-TODO(decision selection-algorithm): composition + fallback ladder semantics.
-TODO(decision colorset-flare-mechanism): colour-set / flare selector
-    instances; SequencerConfig below is the SCENE selector's shape only.
-TODO(decision curve-ownership): whether curve_ref (named profile) or
-    inline_points is the primary form; both are stored, neither is wired.
-TODO(decision change-trigger-mode): change_mode is stored, consumed by
-    nothing until the engine lands.
+Colour sets are NOT here yet — they are wired last, in a separate change
+(decision 3; the wheel-travel factor already lives in selection_kernel).
 
 Executable spec: scripts/check_sequencer.py
 """
@@ -65,10 +68,12 @@ class SelectorEntry(BaseModel):
     curve_ref:     Optional[str] = None
     inline_points: Optional[list[CurvePoint]] = None
     # Genre bucket (training-profile name) → multiplier; adjusted by telling
-    # the agent, never by a settings form.
+    # the agent, never by a settings form. 0 is a hard veto for that genre.
     genre_mult:   dict[str, float] = Field(default_factory=dict)
     # Relative dwell: weight 2 holds twice as long as weight 1. Dimensionless;
-    # no absolute per-scene seconds anywhere.
+    # no absolute per-scene seconds anywhere. Songs in transition mode;
+    # fractional weights resolve probabilistically at adoption time
+    # (selection_kernel.resolve_dwell_songs). Unread for flare entries.
     dwell_weight: float = Field(default=1.0, gt=0.0)
 
     @model_validator(mode="after")
@@ -84,7 +89,8 @@ class SelectorEntry(BaseModel):
 
 
 class AffinityEdge(BaseModel):
-    # Directional: from→to is a different edge from to→from.
+    # Directional: from→to is a different edge from to→from. 0 is a hard veto
+    # of that succession (the fallback ladder can still relax it).
     from_id: str
     to_id:   str
     mult:    float = Field(default=1.0, ge=0.0)
@@ -98,12 +104,26 @@ class AffinityEdge(BaseModel):
 
 
 class SequencerConfig(BaseModel):
-    """Scene-selector configuration as the agent-adjustment endpoints need it.
-    Stored dark: nothing consumes it until the open decisions land."""
-    change_mode: Literal["both", "transition", "timed"] = "both"
+    """The whole sequencer configuration (storage/sequencer.json "config").
+    Curves are edited graphically; everything else here is adjusted by telling
+    the agent (PUT /api/sequencer/config) — no settings forms."""
+    # Dark switch. Default OFF: the engine consumes nothing and fires nothing
+    # until the agent enables it (exclusive-switchover doctrine — the legacy
+    # chooser path keeps running either way and is never coupled to this).
+    enabled: bool = False
+    # Decision 5: transitions only. "timed"/"both" are accepted for storage so
+    # a later owner-approved timer needs no schema change, but no timer ships —
+    # the engine ticks only on song transitions regardless (and logs when a
+    # stored mode asks for more).
+    change_mode: Literal["transition", "timed", "both"] = "transition"
+    # Base pace for the future timed clock only; meaningless in transition
+    # mode, where the base is one song.
     base_dwell_s: float = Field(default=180.0, gt=0.0)
-    entries:  dict[str, SelectorEntry] = Field(default_factory=dict)  # scene id → entry
+    entries:  dict[str, SelectorEntry] = Field(default_factory=dict)  # SceneV2 id → entry
     affinity: list[AffinityEdge] = Field(default_factory=list)
+    # Flare selector (decision 3): shares the kernel with curve × genre only —
+    # no third factor, no dwell; its terminal ladder rung fires NOTHING.
+    flare_entries: dict[str, SelectorEntry] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _no_duplicate_edges(self) -> "SequencerConfig":
