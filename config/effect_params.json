@@ -51,7 +51,9 @@
       "fireworks",
       "fireworks1d",
       "pacman",
-      "squiggles"
+      "squiggles",
+      "dancer",
+      "eye"
     ],
     "aspect_labels": {
       "shape": "Shape",
@@ -2496,6 +2498,448 @@
         "frequency_range": "Lows (beat+bass)",
         "impulse_decay": 0.06,
         "brightness": 1.0
+      }
+    },
+    "dancer": {
+      "params": {
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color",
+          "note": "Body + burst colors; the dancers sit 120\u00b0 either side of the gradient center, bursts grab one random third of it"
+        },
+        "accent_color": {
+          "label": "Third Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "color",
+          "aspect_scale": 0.5,
+          "note": "Stunt flashes; near-black (the default) colors them from the gradient instead"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "dance_type": {
+          "label": "Dance Type",
+          "type": "string",
+          "smooth": false,
+          "options": [
+            "tai_chi",
+            "ballet",
+            "cowboy",
+            "robot",
+            "moonwalk",
+            "floss",
+            "worm",
+            "hip_hop",
+            "salsa",
+            "tango",
+            "kpop"
+          ],
+          "note": "Changing it blends into the new dance at the next beat \u2014 never cuts"
+        },
+        "reverse": {
+          "label": "Partner",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "note": "Adds the second dancer (same Reverse morph sub-field as the particle family): Neo drop-in / catch entrances, superman / spin-off exits"
+        },
+        "rotation": {
+          "label": "Stage Angle",
+          "type": "numeric",
+          "smooth": false,
+          "min": -360,
+          "max": 360,
+          "aspect": "shape",
+          "distribute": false,
+          "note": "Degrees; 20\u00b0+ deltas somersault the dancers. Morphable via the shared Twist shape sub-field (absolute or nudge \u2014 nudge lo/hi/wrap supported)"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "scale_offset": true,
+          "aspect": "shape",
+          "note": "0.5 = vertically centered"
+        },
+        "radius_scale": {
+          "label": "Figure Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.0,
+          "aspect": "shape"
+        },
+        "blob_size": {
+          "label": "Limb Thickness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6.0,
+          "aspect": "shape",
+          "note": "Shared Blob Size shape sub-field"
+        },
+        "trail_decay": {
+          "label": "Trail Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape",
+          "note": "How much trail the dancers leave and how slowly it fades (same lines as the particle effects)"
+        },
+        "burst_threshold": {
+          "label": "Burst Threshold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "note": "Music level a beat needs to fire a flame burst; 0 = every beat"
+        },
+        "burst_size": {
+          "label": "Burst Size",
+          "type": "integer",
+          "smooth": false,
+          "min": 3,
+          "max": 60,
+          "aspect": "shape",
+          "note": "Flame particles per burst; the shared Edge / particle count shape sub-field lands here on dancer"
+        },
+        "burst_audio": {
+          "label": "Burst Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "note": "How much loudness grows the bursts"
+        },
+        "brightness_audio": {
+          "label": "Audio Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity"
+        },
+        "half_beat": {
+          "label": "Half Beat",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "reactivity"
+        },
+        "jiggle": {
+          "label": "Jiggle",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "note": "Humanize: random variation added to the moves"
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity"
+        },
+        "base_speed": {
+          "label": "Dance Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.5,
+          "aspect": "reactivity",
+          "note": "Steady dance rate; beats surge the dance forward on top of it (louder hits = bigger flourish surges)"
+        },
+        "dance_intensity": {
+          "label": "Dance Intensity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "note": "How hard they dance: scales beat surges + groove sway + pose exaggeration together"
+        }
+      },
+      "defaults": {
+        "gradient": "linear-gradient(90deg, rgb(0,199,140) 0%, rgb(0,255,50) 48%, rgb(0,199,140) 100%)",
+        "accent_color": "#000000",
+        "background_color": "#000000",
+        "background_brightness": 0.0,
+        "dance_type": "tai_chi",
+        "reverse": false,
+        "rotation": 0.0,
+        "x_offset": 0.5,
+        "y_offset": 0.32,
+        "radius_scale": 0.7,
+        "blob_size": 1.9,
+        "trail_decay": 0.0,
+        "burst_threshold": 0.63,
+        "burst_size": 30,
+        "burst_audio": 1.8,
+        "brightness_audio": 0.6,
+        "half_beat": false,
+        "jiggle": 0.25,
+        "frequency_range": "Lows (beat+bass)",
+        "impulse_decay": 0.06,
+        "brightness": 1.0,
+        "base_speed": 2.0,
+        "dance_intensity": 1.0
+      }
+    },
+    "eye": {
+      "params": {
+        "iris_size": {
+          "label": "Iris Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 0.8,
+          "aspect": "shape",
+          "note": "Iris radius as a fraction of the panel; the shared Field Radius (radius_scale) shape sub-field lands here"
+        },
+        "pupil_size": {
+          "label": "Pupil Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.03,
+          "max": 0.6,
+          "aspect": "shape",
+          "note": "Shared Blob Size shape sub-field lands here"
+        },
+        "gaze_radius": {
+          "label": "Gaze Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 0.6,
+          "aspect": "shape",
+          "note": "Radius of the 8-position ring the eye looks around"
+        },
+        "gaze_depth": {
+          "label": "Gaze Depth",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape",
+          "note": "3D eyeball illusion: iris foreshortens + pupil leads toward the gaze; 0 = flat googly eye"
+        },
+        "spin": {
+          "label": "Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "aspect": "shape",
+          "note": "Iris rotation (rev/s); sign sets direction, music speeds it up"
+        },
+        "flames": {
+          "label": "Flames",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape",
+          "note": "Flame amount from the iris rim; shape-flare target \u2014 bump with fallback_s and it burns back down"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape"
+        },
+        "flame_audio": {
+          "label": "Flame Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6,
+          "note": "How much music boosts flame intensity and randomness"
+        },
+        "drift_speed": {
+          "label": "Drift Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6,
+          "note": "Base gaze search speed; music multiplies it"
+        },
+        "speed_audio": {
+          "label": "Audio Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5,
+          "note": "How much the band boosts the gaze search speed"
+        },
+        "spin_audio": {
+          "label": "Spin Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "aspect": "reactivity",
+          "aspect_scale": 0.4,
+          "note": "How much the band speeds up the iris spin; 0 = constant spin"
+        },
+        "snap_threshold": {
+          "label": "Snap Threshold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Impulse a beat needs to snap the gaze to a new ring position; 0 = every beat"
+        },
+        "snap_hold": {
+          "label": "Snap Hold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Base seconds the gaze holds after a snap (bigger hits hold longer)"
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color",
+          "note": "Iris color wheel + flame colors; rotates at Spin"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0
+        }
+      },
+      "defaults": {
+        "iris_size": 0.54,
+        "pupil_size": 0.36,
+        "gaze_radius": 0.5,
+        "spin": 0.08,
+        "flames": 0.0,
+        "x_offset": 0.5,
+        "y_offset": 0.5,
+        "flame_audio": 2.0,
+        "drift_speed": 0.5,
+        "speed_audio": 2.9,
+        "snap_threshold": 0.6,
+        "snap_hold": 0.2,
+        "impulse_decay": 0.06,
+        "frequency_range": "Lows (beat+bass)",
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "background_color": "#000000",
+        "background_brightness": 0.0,
+        "brightness": 1.0,
+        "spin_audio": 0.0,
+        "gaze_depth": 0.6
       }
     }
   }

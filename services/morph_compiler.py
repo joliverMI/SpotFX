@@ -351,7 +351,12 @@ def _patch_shape(
     is_nudge = (mode == "nudge")
     _SHAPE_SUBFIELD_ALIASES = {
         "edges": ("particle_count", "burst_size", "ghost_count"),
-        "blob_size": ("entity_size",),
+        # eye: Blob Size lands on the pupil, Field Radius on the iris
+        "blob_size": ("entity_size", "pupil_size"),
+        "radius_scale": ("iris_size",),
+        # dancer: the Twist sub-field drives the Stage Angle (degrees) —
+        # nudges somersault the pair into new orientations
+        "twist": ("rotation",),
     }
 
     # Booleans (polygon, flip, reverse) — always absolute-mode tri-state regardless of target.mode
