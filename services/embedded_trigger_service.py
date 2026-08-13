@@ -1179,6 +1179,14 @@ def suggest_triggers(
                      + w_uptick * uptick_comp + w_energy * energy_comp
                      + w_dip * dip_comp
                      + w_snare * snare_comp + w_burst * burst_comp)
+            # Normalize by the active weight sum: the score is a weighted
+            # MEAN, so the fixed tier thresholds (shape/flash/scene) keep
+            # their meaning for any weight combo the tuner explores. Without
+            # this, low weight sums made the flash tier mathematically
+            # unreachable and the tuner's optimum was "emit no flares".
+            total /= max(w_bass_hit + w_bass_onset + w_onset + w_harm
+                         + w_uptick + w_energy + w_dip + w_snare + w_burst,
+                         1e-6)
             # bass_comp for tier logic uses the combined bass signal
             bass_comp = bass_hit_comp + bass_onset_comp * 0.5
             scored.append((bi, total, bass_comp, harm_comp))
