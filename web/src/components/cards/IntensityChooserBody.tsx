@@ -6,6 +6,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { cloneForPaste, useClipboard, writeClip } from '../../store/clipboard';
 import { LabelsInput, NumberInput, TextInput } from '../forms/inputs';
 import { ParentScopeToggle } from '../forms/ScopePicker';
+import RampOverride from '../forms/RampOverride';
 import EditableActionContainer from '../tracks/EditableActionContainer';
 import { groupPathOf } from './groupPath';
 import PreviewButton from '../PreviewButton';
@@ -123,6 +124,14 @@ export default function IntensityChooserBody({ uid, action }: { uid: string; act
             }}>{lane.threshold.toFixed(2)}</span>
           </div>
         ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 6px 12px', fontSize: 13 }}>
+        <span style={{ color: 'var(--text-muted)' }}
+          title="Override forces this ramp on everything the chosen lane fires — through scene groups and scenes. ⚡ can map it to trigger intensity (e.g. 0→1500ms, 1→250ms), 🎲 rolls it per fire. Scene / scene-group overrides win over this one.">
+          Ramp
+        </span>
+        <RampOverride value={action.ramp_ms} onChange={(v) => set((g) => { g.ramp_ms = v; })} />
       </div>
 
       {action.lanes.map((lane, j) => (

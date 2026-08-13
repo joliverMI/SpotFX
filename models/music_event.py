@@ -558,6 +558,13 @@ class IntensityChooserAction(BaseModel):
     id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
     labels: list[str] = Field(default_factory=list)
     weight: float = 1.0        # weight of the group itself inside a parent pool
+    # Ramp override: when set, this ramp (ms) is forced on every descendant
+    # action of the chosen lane — through event_refs, scene groups and scene
+    # lanes — replacing their authored ramps. None = no override here (the
+    # nearest ancestor override applies, else each action's own ramp). May be
+    # a ValueBinding (⚡ trigger intensity / 🎲 random), resolved per fire.
+    # A deeper override (scene group / scene event ramp_ms) wins over this one.
+    ramp_ms: int | ValueBinding | None = None
     source: Literal["trigger_intensity"] = "trigger_intensity"
     # Default target for every lane (lanes inherit unless they override).
     scope:  Optional[MorphScope] = None
@@ -705,6 +712,15 @@ class MusicEvent(BaseModel):
     # virtual changes atomically. Honored for event_type == "single" or
     # "morph_set"; ignored (with a warning log) for "sequence" / "beat_sequence".
     scene_override: bool = False
+
+    # Ramp override for scene_update / scene_group events: when set, this ramp
+    # (ms) is forced on every action the scene fire runs (lane picks, member
+    # scenes), replacing their authored ramps. None = no override (inherit the
+    # nearest ancestor override — e.g. an Intensity Scene chooser's ramp —
+    # else each action's own ramp). May be a ValueBinding (⚡ trigger
+    # intensity / 🎲 random), resolved per fire. The DEEPEST override wins:
+    # scene_update.ramp_ms > scene_group.ramp_ms > chooser.ramp_ms.
+    ramp_ms: int | ValueBinding | None = None
 
     # For event_type == "single": randomly picked from this list
     actions: list[Action] = Field(default_factory=list)

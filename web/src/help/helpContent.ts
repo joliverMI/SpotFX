@@ -413,6 +413,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The group that fired last (or is held by Force Scene) is the ACTIVE group — Scene Morph actions step it. Picking a plain Scene Update directly clears the active group. Members that were deleted or are no longer Scene Updates are skipped automatically.',
           'A Scene Group can also designate a Color Group (the "color group" picker in its editor). Set Color actions left on "Scene Group\'s Color Group" (the default for new ones) pull from that group while this Scene Group is active — so switching Scene Groups re-themes the room\'s palette without editing any events. When no group is active, or the active one designates nothing, those actions fall back to the current (last-fired) Color Group.',
           'Dark/Light: the "mode 🌗" select is the group\'s default display mode (see "Dark / Light mode" under Settings), and the 🌙/☀️ group pickers swap in a different Color Group while the resolved mode is Dark or Light — so a group can carry a dimmer palette for dark evenings and a fuller one for light.',
+          'Ramp: the group\'s "Ramp" override (Event settings) forces one transition speed on every member scene fire; a member scene\'s own override still wins. Bindable ⚡/🎲 — see "Ramp overrides".',
         ],
       },
       {
@@ -457,6 +458,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'An Intensity Chooser is a container that fires exactly ONE of its lanes, chosen deterministically by the firing trigger\'s intensity (0–1, after the song\'s intensity scale is applied). Lanes are lower-bound thresholds on a slider: drag the numbered dots to move lane boundaries; everything left of the first dot is the Default lane. The highest dot at or below the intensity wins; two dots on the same value resolve to the higher lane.',
           'The Default lane also fires when the trigger has no intensity (manual ▶ test fires) and when no dots are defined. Deleting a lane merges its actions into the lane to its left. Lanes hold a full action list (all fire together), plus per-lane target scope and filter labels — same as Parallel lanes. Choosers nest anywhere an action is allowed (depth-capped like other groups).',
           'Versus Random energy gates: a Random group rolls weighted dice among energy-eligible options; a Chooser is a deterministic switch — same intensity, same lane, every time.',
+          'The Ramp row (parent/override) forces one ramp on everything the chosen lane fires — through event refs, scene groups and scene lanes. Bind it ⚡ to trigger intensity (0 → slow, 1 → fast) or 🎲 to randomize per fire; see "Ramp overrides".',
+        ],
+      },
+      {
+        id: 'ramp-override',
+        title: 'Ramp overrides (scenes / groups / choosers)',
+        keywords: 'ramp override parent transition speed ms scene group chooser intensity trigger random cascade force',
+        body: [
+          'Scene Updates, Scene Groups, and both chooser types (Intensity / Light Mode) carry an optional Ramp with a parent/override toggle — the same idiom as Target. On parent (the default) the level adds nothing: every action keeps its own authored ramp, or inherits an override from further up. On override, the ramp you set is FORCED on everything that fire runs — through event references, scene group members, scene lanes, Set Color entry ramps and per-target morph ramps — so one number controls how fast the whole scene change lands.',
+          'The deepest override wins: a scene\'s own Ramp beats its Scene Group\'s, which beats the chooser\'s. So the Intensity Scene chooser can set a room-wide default while one group or scene opts into its own speed.',
+          'The value is bindable like any ramp: ⚡ maps it to a music signal — most usefully trigger intensity, e.g. 0 → 1500 ms and 1 → 250 ms so hard hits snap and quiet passages glide (the Intensity Scene event ships with exactly that) — and 🎲 rolls a fresh ramp every fire. Manual ▶ fires carry no intensity, so an intensity-bound ramp uses its fallback (or the mid value).',
+          'Two paths deliberately ignore an inherited override: beat-timed sequences (their ramps are compressed to fit the beat grid — that choreography stays authoritative) and the atomic scene-override fast path (bypassed while an override is active, so the ramp actually applies via normal dispatch).',
         ],
       },
       {
