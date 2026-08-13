@@ -30,8 +30,13 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ── Default score weights per category ────────────────────────────────────────
+# charge and lull are first-class roles (split out of "structural"
+# 2026-08-11): the phase arc's placement quality is only tunable when a
+# well-placed charge and a well-placed lull are distinguishable.
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
     "drop":         4.0,
+    "charge":       3.0,
+    "lull":         3.0,
     "scene_change": 2.0,
     "structural":   3.0,
     "flare":        1.0,
@@ -44,12 +49,29 @@ DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
 }
 
 # Category groups for sub-scores
-SCENE_CATEGORIES = {"drop", "scene_change", "structural", "song_start", "song_end"}
+SCENE_CATEGORIES = {"drop", "charge", "lull", "scene_change", "structural",
+                    "song_start", "song_end"}
 FLARE_CATEGORIES = {"flare", "flare_low", "flare_mid", "flare_high", "flare_scene"}
 
 # Cross-category partial credit: scene-family triggers in the right place but wrong type
-SCENE_FAMILY = {"drop", "scene_change", "structural"}
+SCENE_FAMILY = {"drop", "charge", "lull", "scene_change", "structural"}
 CROSS_CATEGORY_CREDIT = 0.3  # credit for right-place-wrong-type within scene family
+
+# The fixed built-in events have stable ids and unambiguous roles — map them
+# unconditionally so hand-authored triggers on the canon events always count
+# as ground truth, whether or not a training-profile slot points at them.
+# (Before this, Update/Reset Scene and Shape Flare triggers scored as
+# "unknown" and were invisible to the tuner.)
+CANON_EVENT_ROLES: dict[str, str] = {
+    "fixed-charge":       "charge",
+    "fixed-lull":         "lull",
+    "fixed-drop":         "drop",
+    "fixed-update-scene": "scene_change",
+    "fixed-reset-scene":  "scene_change",
+    "fixed-shape-flare":  "flare_mid",
+    "fixed-color-flare":  "flare_low",
+    "fixed-combo-flare":  "flare_high",
+}
 
 # ── Intensity scoring ─────────────────────────────────────────────────────────
 # Ground-truth intensity for human triggers. Manual per-trigger intensities
@@ -148,16 +170,18 @@ class SongScore:
 # ── Role mapping ──────────────────────────────────────────────────────────────
 
 def build_role_map(tp: TrainingProfile) -> dict[str, str]:
-    """Build event_id → role mapping from a training profile's *_event_id fields."""
-    role_map: dict[str, str] = {}
+    """Build event_id → role mapping: canon fixed events first (stable ids,
+    always counted), then the training profile's *_event_id slots (may
+    override for non-canon events), then explicit event_roles."""
+    role_map: dict[str, str] = dict(CANON_EVENT_ROLES)
 
     mapping = {
         "song_start_event_id":  "song_start",
         "beat_start_event_id":  "structural",
         "song_end_event_id":    "song_end",
         "drop_event_id":        "drop",
-        "lull_event_id":        "structural",
-        "charge_event_id":      "structural",
+        "lull_event_id":        "lull",
+        "charge_event_id":      "charge",
         "quiet_event_id":       "scene_change",
         "scene_fill_event_id":  "scene_change",
         "flare_event_id":       "flare",
