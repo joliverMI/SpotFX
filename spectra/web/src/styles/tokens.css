@@ -61,6 +61,14 @@ nav a:hover, nav a.active {
 }
 
 main { flex: 1; padding: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
+/* Phone portrait: the nav keeps one row (four links + help) and content
+ * padding narrows so cards use the width. */
+@media (max-width: 720px) {
+  nav { padding: 6px 8px; gap: 2px; }
+  nav .logo { font-size: 15px; margin-right: 4px; letter-spacing: 0.08em; }
+  nav a { padding: 6px 8px; }
+  main { padding: 10px; }
+}
 
 .card {
   background: var(--surface);
@@ -157,6 +165,12 @@ input[type='range'] { accent-color: var(--accent); }
   border-bottom: 1px solid var(--border);
   margin-bottom: 14px;
   flex-wrap: wrap;
+}
+/* Phone portrait: the tab strip stays one row and scrolls sideways —
+ * wrapping eight tabs stacked four rows deep buried the editor. */
+@media (max-width: 720px) {
+  .tab-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  .tab-bar button { white-space: nowrap; padding: 8px 10px; }
 }
 .tab-bar button {
   border: none;

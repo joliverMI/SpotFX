@@ -64,14 +64,23 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Scenes page & editor tabs',
     keywords: 'editor tabs scene list search save',
     intro:
-      'Left pane: scene list with search; right pane: the tabbed editor. Drafts live locally until Save — an unsaved dot marks edited scenes and leaving the page asks first.',
+      'Left pane: scene list with search; right pane: the tabbed editor. Drafts live locally until Save — an unsaved dot marks edited scenes and leaving the page asks first. On a phone in portrait the page is single-pane: the editor owns the width and the scene picker collapses into the ☰ bar (see "Phone layout").',
     entries: [
       {
         id: 'editor-toolbar',
         title: 'Toolbar: Save, Duplicate, Test Fire, Fire, Delete',
-        keywords: 'test fire dry run real fire intensity slider',
+        keywords: 'test fire dry run real fire intensity slider no confirm consent',
         body: [
           'The intensity slider picks the axis value a fire resolves against, so ⚡ scenes can be previewed anywhere on the axis. Test Fire compiles at that intensity WITHOUT touching devices and shows the resolved bindings, dice rolls, and per-virtual writes. Fire (live) sends the same writes to LedFX — it exists for the owner; use Test Fire for checking work.',
+          'Firing asks for NO confirmation — the press is the consent; it fires the single scene you chose and are looking at. This is a deliberate asymmetry: the global colour-set opt-out (Colour Sets tab) DOES confirm, because that one silently changes every scene in the house.',
+        ],
+      },
+      {
+        id: 'phone-layout',
+        title: 'Phone layout',
+        keywords: 'mobile portrait drawer picker narrow single pane responsive',
+        body: [
+          'On a phone-portrait screen the Scenes page is a first-class single-pane arrangement, not a squeezed desktop: with no scene open the list fills the width; once a scene is open the EDITOR owns the width and the picker collapses into the ☰ bar above it — tap it (or "scenes ▾") to open the full-screen scene drawer with search and + Scene. The editor tabs stay on one row and scroll sideways. The Timeline and Status pages stack their cards full-width.',
         ],
       },
       {
