@@ -69,6 +69,13 @@ variables named `ledfx` (the core object handle) are untouched.
    model (categories/virtual topology, effect-param registry, scope
    resolution) the architecture decision places in the shared library.
    SPECTRA imports it; spot-effects keeps its own services until replaced.
+6. `effects/blackhole.py`: the event-horizon glow and charge/drop halo no
+   longer default to hardcoded `horizon_color` white — `horizon_follow_blobs`
+   (new config key, default `True`) samples the live blob gradient each
+   frame instead (`fx.effects.blackhole.Blackhole2d.draw`); set it `False`
+   to restore the original literal-`horizon_color` behavior byte-for-byte.
+   Not yet ported back to the fork source at `/home/javi/ledfx-src` — the
+   fork and this file have drifted on this one effect until that happens.
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite. When updating vendored files, re-diff against that commit.

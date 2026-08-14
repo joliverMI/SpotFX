@@ -46,6 +46,7 @@ class Blackhole2d(Twod, GradientEffect):
         "impulse_decay",
         "phase",
         "phase_progress",
+        "horizon_follow_blobs",
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -156,8 +157,13 @@ class Blackhole2d(Twod, GradientEffect):
                 default=0.3,
             ): vol.All(vol.Coerce(float), vol.Range(min=-1.0, max=1.0)),
             vol.Optional(
+                "horizon_follow_blobs",
+                description="Event horizon glow and charge/drop halo take the current blob gradient color; when off, horizon_color is used instead",
+                default=True,
+            ): bool,
+            vol.Optional(
                 "horizon_color",
-                description="Color blobs take on while orbiting the event horizon",
+                description="Color blobs take on while orbiting the event horizon (only used when horizon_follow_blobs is off)",
                 default="#ffffff",
             ): validate_color,
             vol.Optional(
@@ -269,9 +275,13 @@ class Blackhole2d(Twod, GradientEffect):
         self.horizon_audio = self._config["horizon_audio"]
         self.horizon_hold = self._config["horizon_hold"]
         self.handoff_ease = self._config["handoff_ease"]
-        self.horizon_rgb = np.array(
+        self.horizon_follow_blobs = self._config["horizon_follow_blobs"]
+        self._horizon_rgb_explicit = np.array(
             parse_color(self._config["horizon_color"]), dtype=np.float32
         )
+        # overwritten per-frame in draw() when horizon_follow_blobs is on;
+        # this is the value used until the first draw() call
+        self.horizon_rgb = self._horizon_rgb_explicit
 
         # charge/lull/drop: edge-detect the phase key. State is created here
         # (not __init__) because config_updated runs first, during
@@ -1114,6 +1124,16 @@ class Blackhole2d(Twod, GradientEffect):
                 r0 = np.concatenate([r0, self.p_r[fresh]]) if prev_n else self.p_r[fresh].copy()
                 th0 = np.concatenate([th0, self.p_theta[fresh]]) if prev_n else self.p_theta[fresh].copy()
         n = self.n
+
+        if self.horizon_follow_blobs:
+            # same gradient position this frame's fresh spawns are baked
+            # with (spin included) — the horizon glow tracks the live blob
+            # color instead of a fixed horizon_color
+            self.horizon_rgb = self.get_gradient_color_vectorized1d(
+                np.array([self.spin_total % 1.0], dtype=np.float32)
+            )[0]
+        else:
+            self.horizon_rgb = self._horizon_rgb_explicit
 
         # ── render ──────────────────────────────────────────────────────
         half_life = 0.02 + self.trail_decay * 0.5
