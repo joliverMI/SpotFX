@@ -23,6 +23,16 @@ export default function RoomOwnershipBar() {
 
   const doRelease = () => {
     release.mutate(undefined, {
+      onSuccess: (result) => {
+        if (result.result !== 'released') {
+          // Loud, not silent: the record moved to released, but a device
+          // could not be confirmed dark — it may still be lit.
+          toast(
+            `Release unverified — these lights may still be lit: ${(result.problems ?? []).join('; ')}`,
+            'error',
+          );
+        }
+      },
       onError: (e) => toast(`Release failed: ${(e as Error).message}`, 'error'),
     });
   };

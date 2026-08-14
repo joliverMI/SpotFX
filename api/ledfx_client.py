@@ -1112,19 +1112,6 @@ async def post_virtual_effect(virtual_id: str, effect_type: str, config: dict) -
     return resp is not None
 
 
-async def set_virtual_active(virtual_id: str, active: bool) -> bool:
-    """Activate/deactivate a virtual (PUT /api/virtuals/{id} {"active": ...}).
-    Used by the source watchdog to revive a consumer effect's source virtual."""
-    if _capture_in_progress():
-        return True   # capture-in-progress mute
-    resp = await _request(
-        "PUT", f"/api/virtuals/{virtual_id}",
-        json={"active": active},
-        label=f"virtual_active:{virtual_id}",
-    )
-    return resp is not None
-
-
 async def set_virtual_effect_fallback(
     virtual_id: str, effect_type: str, config: dict, fallback_s: float
 ) -> bool:

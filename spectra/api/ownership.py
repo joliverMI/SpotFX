@@ -21,7 +21,13 @@
       always safe to allow). Idempotent — pressing it again while already
       released just repeats the note in history. 409 only if a handover is
       genuinely mid-flight (settle it, or wait for the stale-handover
-      recovery, then press again).
+      recovery, then press again). The record always lands `released`;
+      cleanup runs against BOTH worlds regardless of which the record said
+      owned, and a post-release verification read-back decides the result:
+      200 result="released" when confirmed, 207
+      result="released-unverified" with `problems` when a device could not
+      be confirmed dark (the caller should treat this as still-lit until
+      proven otherwise, not as success).
   POST /api/ownership/recover  — land a crash-orphaned handover (age-gated;
       also runs automatically at engine start).
 
@@ -124,12 +130,22 @@ async def post_handover(body: HandoverRequest):
 @router.post("/ownership/release")
 async def post_release():
     """THE PANIC HANDLE. No body, no confirmation, not armed-gated — the
-    press is the consent. 409 only if a handover is genuinely mid-flight."""
+    press is the consent. 409 only if a handover is genuinely mid-flight.
+    The record always lands `released`; when post-release verification
+    can't confirm reality matches (a device still lit), this reports
+    result="released-unverified" with the specific `problems` instead of a
+    clean "released", at HTTP 207 — loud, not silent, per the merge-scout
+    two-writers report (2026-08-13)."""
     try:
-        record = await release_svc.release_room("owner panic release (API)")
+        result = await release_svc.release_room("owner panic release (API)")
     except light_ownership.OwnershipError as exc:
         raise HTTPException(409, str(exc))
-    return {"result": "released", "owner": record.owner,
+    if not result.verified:
+        return JSONResponse(
+            {"result": "released-unverified", "owner": result.record.owner,
+             "problems": result.problems, "record": _record_json()},
+            status_code=207)
+    return {"result": "released", "owner": result.record.owner,
             "record": _record_json()}
 
 
