@@ -442,29 +442,37 @@ with tempfile.TemporaryDirectory() as td:
           "store round-trip keeps curves and config side by side")
     check(not list(Path(td).glob("*.tmp")), "atomic write leaves no tmp files")
 
-    # seeder --apply path: merge, idempotence, preservation
-    sequencer_store.save_config(SequencerConfig(
+    # seeder --apply path targets SPECTRA's own store (spot-effects' after
+    # the process split does not run the sequencer): merge, idempotence,
+    # preservation, exercised against a redirected spectra store, separate
+    # from the legacy `sequencer_store` used above/below for the dark
+    # legacy sequencer API and engine.
+    from spectra import config as spectra_config
+    from spectra.services import sequencer_store as spectra_sequencer_store
+    spectra_config.SEQUENCER_FILE = Path(td) / "spectra_sequencer.json"
+
+    spectra_sequencer_store.save_config(SequencerConfig(
         enabled=False,
         entries={"keepme": SelectorEntry(dwell_weight=3.0)},
         affinity=[AffinityEdge(from_id="x", to_id="y", mult=2.0)]))
     n_profiles, n_entries, n_color = apply_seed(plan)
     check(n_profiles == 2 and n_entries == 1 and n_color == 0,
           "apply writes the plan")
-    applied = sequencer_store.load_config()
+    applied = spectra_sequencer_store.load_config()
     check("v2-nebula" in applied.entries and "keepme" in applied.entries
           and len(applied.affinity) == 1 and applied.enabled is False,
           "apply merges: seeded entries added, unseeded entries / affinity / "
           "dark flag preserved")
-    curve_ids_before = set(sequencer_store.load_curves())
+    curve_ids_before = set(spectra_sequencer_store.load_curves())
     apply_seed(build_seed(legacy_events, V2_MAP))
-    check(set(sequencer_store.load_curves()) == curve_ids_before,
+    check(set(spectra_sequencer_store.load_curves()) == curve_ids_before,
           "re-apply is idempotent — profiles matched by name, no duplicates")
 
     # colour apply: wheel profile installed, entries merged, idempotent
     n_profiles, n_entries, n_color = apply_seed(cplan)
     check(n_color == 2, "colour apply writes both set entries")
-    applied = sequencer_store.load_config()
-    wheel_ids = [pid for pid, pr in sequencer_store.load_curves().items()
+    applied = spectra_sequencer_store.load_config()
+    wheel_ids = [pid for pid, pr in spectra_sequencer_store.load_curves().items()
                  if pr.name == WHEEL_PROFILE_NAME]
     check(len(wheel_ids) == 1 and applied.wheel_travel_curve == wheel_ids[0],
           "downhill wheel profile stored once and installed as "
@@ -474,16 +482,16 @@ with tempfile.TemporaryDirectory() as td:
           and "keepme" in applied.entries and applied.enabled is False,
           "colour entries keyed by shared card id; scene entries / dark flag "
           "untouched")
-    curve_ids_before = set(sequencer_store.load_curves())
+    curve_ids_before = set(spectra_sequencer_store.load_curves())
     apply_seed(build_seed(legacy_events, V2_MAP, [CS_RED, CS_HYPE, CS_GROUP]))
-    check(set(sequencer_store.load_curves()) == curve_ids_before
-          and sequencer_store.load_config().wheel_travel_curve == wheel_ids[0],
+    check(set(spectra_sequencer_store.load_curves()) == curve_ids_before
+          and spectra_sequencer_store.load_config().wheel_travel_curve == wheel_ids[0],
           "colour re-apply idempotent — wheel profile matched by name")
-    owner_cfg = sequencer_store.load_config()
+    owner_cfg = spectra_sequencer_store.load_config()
     owner_cfg.wheel_travel_curve = "owner-custom-curve"
-    sequencer_store.save_config(owner_cfg)
+    spectra_sequencer_store.save_config(owner_cfg)
     apply_seed(build_seed(legacy_events, V2_MAP, [CS_RED, CS_HYPE, CS_GROUP]))
-    check(sequencer_store.load_config().wheel_travel_curve == "owner-custom-curve",
+    check(spectra_sequencer_store.load_config().wheel_travel_curve == "owner-custom-curve",
           "an owner-set wheel_travel_curve is preserved by re-seeding")
 
     from fastapi import FastAPI

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Seed sequencer curve profiles/entries from the legacy chooser machinery.
 DRY-RUN by default (prints the diff table); --apply writes
-storage/sequencer.json through services/sequencer_store (atomic, idempotent).
+storage/spectra/sequencer.json through spectra.services.sequencer_store
+(atomic, idempotent) — SPECTRA reads her own store after the process split,
+not the legacy storage/sequencer.json (spot-effects side, unread by her).
 
 Translates:
   - Intensity-chooser lane thresholds (the load-bearing 'Intensity Scene'
     bands [0, 0.3, 0.65, 0.85, 0.95]) → named band CurveProfiles (trapezoids
     with 0.1 skirts) — the five band profiles of decision 4. Profile identity
     is the NAME: re-running --apply updates points in place, never duplicates.
-  - Each lane's referenced scenes → SelectorEntries on their SceneV2
-    counterparts (matched by name: exact case-insensitive, then the
-    "<name> V2" rebuild convention, then SCENE_RENAMES for the rest — see
-    resolve_v2_id). Weight 1.0 members
+  - Each lane's referenced scenes → SelectorEntries on their SPECTRA SceneV2
+    counterparts (spectra.services.scene_store — her own scene store, which
+    may hold scenes authored directly through her API and absent from the
+    legacy storage/scenes_v2.json; matched by name: exact case-insensitive,
+    then the "<name> V2" rebuild convention, then SCENE_RENAMES for the rest
+    — see resolve_v2_id). Weight 1.0 members
     reference the shared band profile (curve_ref); other weights get INLINE
     points — the same shape at weight× height is a one-off, which is exactly
     what the escape hatch is for. Legacy scenes with no SceneV2 counterpart
@@ -316,13 +320,14 @@ def _seed_colors(plan: SeedPlan, color_cards: list) -> None:
 
 
 def apply_seed(plan: SeedPlan) -> tuple[int, int, int]:
-    """Merge the plan into storage/sequencer.json. Profiles match existing
-    ones BY NAME (id and unrelated profiles preserved); seeded entries
-    replace same-scene/same-set entries; everything else in config — enabled,
-    change_mode, affinity, flare_entries, unseeded entries, an already-set
+    """Merge the plan into storage/spectra/sequencer.json (SPECTRA's own
+    store — see module docstring). Profiles match existing ones BY NAME (id
+    and unrelated profiles preserved); seeded entries replace same-scene/
+    same-set entries; everything else in config — enabled, change_mode,
+    affinity, flare_entries, unseeded entries, an already-set
     wheel_travel_curve — is preserved.
     Returns (profiles_written, entries_written, color_entries_written)."""
-    from services import sequencer_store
+    from spectra.services import sequencer_store
 
     curves = sequencer_store.load_curves()
     id_by_name = {p.name: pid for pid, p in curves.items()}
@@ -357,7 +362,7 @@ def apply_seed(plan: SeedPlan) -> tuple[int, int, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--apply", action="store_true",
-                        help="write storage/sequencer.json (default: dry-run diff table)")
+                        help="write storage/spectra/sequencer.json (default: dry-run diff table)")
     args = parser.parse_args()
 
     from services.profile_manager import EVENTS_FILE
@@ -369,8 +374,9 @@ def main() -> int:
               "translate; colour translation still runs.")
         events = []
 
-    from services import color_set_store, scene_v2_store
-    v2_name_to_id = {s.name.lower(): s.id for s in scene_v2_store.list_all()}
+    from services import color_set_store
+    from spectra.services import scene_store as spectra_scene_store
+    v2_name_to_id = {s.name.lower(): s.id for s in spectra_scene_store.list_all()}
 
     plan = build_seed(events, v2_name_to_id, color_set_store.list_all())
     mode = "APPLY" if args.apply else "DRY RUN"
@@ -385,11 +391,11 @@ def main() -> int:
 
     if not args.apply:
         print("\nNothing written (dry run). Re-run with --apply to write "
-              "storage/sequencer.json.")
+              "storage/spectra/sequencer.json.")
         return 0
 
     n_profiles, n_entries, n_color = apply_seed(plan)
-    from services.sequencer_store import SEQUENCER_FILE
+    from spectra.config import SEQUENCER_FILE
     print(f"\nWrote {SEQUENCER_FILE}: {n_profiles} profile(s), "
           f"{n_entries} scene entr(y/ies), {n_color} colour entr(y/ies) "
           "merged. Sequencer remains dark (config.enabled unchanged).")
