@@ -223,14 +223,19 @@ export interface RoomColorState {
  * action equivalents. brightness_multiplier is the only one wired to a
  * write seam today (fx_executor + scene_compiler); ambient_enabled/_color
  * and global_transition_ms are state-only until the room-modes build.
- * midsong_triggers_enabled (front 3) is the mid-song generation fallback —
- * off skips every GENERATED trigger's fire; hand-authored ones still fire. */
+ * scene_change_mode is the Admiral's settings model (three additive tiers,
+ * replacing front 3's plain midsong_triggers_enabled bool): "transitions" =
+ * a scene change on every song transition only; "analysed" = transitions +
+ * GENERATED (seeded) mid-song triggers; "full" = transitions + generated +
+ * hand-authored triggers + response-engine flares. Default "full". */
+export type SceneChangeMode = 'transitions' | 'analysed' | 'full';
+
 export interface RoomControlState {
   brightness_multiplier: number;
   ambient_enabled: boolean;
   ambient_color: string | null;
   global_transition_ms: number;
-  midsong_triggers_enabled: boolean;
+  scene_change_mode: SceneChangeMode;
 }
 
 /** Full spot-effects Colour Set card shape (read + the one supported

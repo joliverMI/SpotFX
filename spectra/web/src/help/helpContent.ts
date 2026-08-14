@@ -383,14 +383,14 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'room-controls-bar',
-        title: 'Room controls — brightness, ambient, transition pace, mid-song triggers',
-        keywords: 'brightness multiplier dim undim ambient color transition pace global room bar dimmer midsong mid-song trigger fallback',
+        title: 'Room controls — brightness, ambient, transition pace, scene changes',
+        keywords: 'brightness multiplier dim undim ambient color transition pace global room bar dimmer midsong mid-song trigger fallback scene change mode transitions analysed full settings model',
         body: [
-          'The compact strip above the release button, on every page — SPECTRA-native equivalents of three legacy room-wide actions (spectra-kept-equivalents), plus one SPECTRA-native switch.',
+          'The compact strip above the release button, on every page — SPECTRA-native equivalents of three legacy room-wide actions (spectra-kept-equivalents), plus the scene-change settings model.',
           'Brightness: a 0–100% room dimmer (legacy Brightness Multiplier action). It scales brightness/background_brightness UNIFORMLY at the write seams — every drift glide, every surge jump, and every scene fire\'s output — never the authored scene values or the engine\'s own carried baseline, so turning it back to 100% always restores exactly what was authored.',
           'Ambient: on/off + a colour swatch (legacy ledfx_ambient / ledfx_ambient_color actions). State only today — it records the switch on the room-control surface instead of a spot-effects bridge flag; the full Ambient/Dinner-Party room-MODES behaviour (freezing devices, the Hue white takeover) is a separate, later build.',
           'Transition: the room\'s default entry-blend ramp in ms (legacy ledfx_global_transition action) — the fallback a scene fire uses when that scene doesn\'t author its own entry ramp (Scenes → Phase Choreography → Override Blend, entry_ramp_ms). 0 (the default) keeps every undeclared scene an instant switch, unchanged from today.',
-          'Mid-song triggers: on by default. Off skips every GENERATED (seeded, "⟳ Generate" — see the SPECTRA Triggers help) trigger\'s fire, room-wide, without deleting any of them; hand-placed triggers always fire regardless. The one-word fallback to a transitions-only show.',
+          'Scene changes: three understandable, additive ticks for what drives scene changes room-wide. "Transitions only" — a scene change on every song transition, nothing else. "+ Analysed" — transitions plus the analysed mid-song triggers "⟳ Generate" seeds (see the SPECTRA Triggers help). "+ My triggers" (default) — everything: transitions, analysed mid-song triggers, your own hand-placed triggers, AND response-engine flares (charge/lull/drop/flare reactions — a scene\'s own tuned material). Nothing is deleted by moving between ticks — a lower tick just skips firing the higher tiers\' material room-wide.',
         ],
       },
     ],
@@ -605,7 +605,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'SPECTRA Triggers (the mid-song clock)',
     keywords: 'trigger authoring keystone mid-song scene change fire response colour set place drag edit delete generate seed provenance',
     intro:
-      'Scene changes are driven by triggers — ordinary, editable moments placed on the same timeline as the legacy Builder\'s, living in the "SPECTRA Triggers" card just below it. A song that has never been hand-tuned behaves as transitions-only by default; adding, moving, or deleting triggers is how you hand-tune it, one moment at a time. ⟳ Generate seeds the same kind of trigger from the song\'s analysis — see "Generating from analysis" below. This is a separate authoring surface from the legacy trigger dialog above it — the two worlds coexist, and a SPECTRA trigger only ever fires SPECTRA-native things.',
+      'Scene changes are driven by triggers — ordinary, editable moments placed on the same timeline as the legacy Builder\'s, living in the "SPECTRA Triggers" card just below it. Every song always gets a scene change on its own transition (in and out) automatically — no authoring needed; adding, moving, or deleting triggers is how you hand-tune it further, one moment at a time. ⟳ Generate seeds the same kind of trigger from the song\'s analysis — see "Generating from analysis" below. Which of these actually fire room-wide is the room controls bar\'s "Scene changes" setting (see its help entry) — a song that has never been hand-tuned still gets its automatic transitions regardless of that setting. This is a separate authoring surface from the legacy trigger dialog above it — the two worlds coexist, and a SPECTRA trigger only ever fires SPECTRA-native things.',
     entries: [
       {
         id: 'spectra-trigger-actions',
@@ -656,7 +656,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           '⟳ Generate reads this song\'s librosa analysis and seeds a "Fire scene" trigger at every structural section boundary (drops/section changes) it finds, with intensity taken from that section\'s own energy (renormalized per song, quietest → loudest). It\'s deterministic and idempotent — running it again updates or removes seeded triggers to match the current analysis without ever touching one you\'ve placed or edited by hand.',
           'A seeded trigger shows a dashed outline on the strip and its hover summary starts with "Seeded —". It\'s otherwise an ordinary trigger: move it, edit it, or delete it exactly like one you placed yourself. The moment you save any change to a seeded trigger — even just nudging it — it becomes yours: a later ⟳ Generate will never move, edit, or remove it again, and instead seeds a fresh trigger for that same analysis moment alongside your edit.',
           'A generated trigger\'s Scene field starts blank ("— sequencer picks at fire time —") rather than a fixed scene: SPECTRA leaves the WHICH-scene choice to the sequencer\'s own selection kernel (curve × genre × affinity) at the moment it fires, using the trigger\'s own intensity. Pick a scene explicitly in the dialog to pin it instead, same as any hand-placed trigger.',
-          'The room controls bar\'s "Mid-song triggers" checkbox is the one-word fallback: turn it off and every GENERATED trigger stops firing room-wide (hand-placed ones are unaffected) — the song reverts to transitions-only without deleting anything.',
+          'The room controls bar\'s "Scene changes" setting decides which triggers actually fire room-wide (see its help entry): "Transitions only" and "+ Analysed" both skip GENERATED triggers unless you\'ve picked "+ Analysed" or higher, and only "+ My triggers" fires hand-placed ones. Generation and storage happen regardless of the setting — seeded triggers stay visible and editable on the timeline either way.',
         ],
       },
     ],

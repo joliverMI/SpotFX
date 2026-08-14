@@ -15,15 +15,36 @@ legacy picks: decision-legacy-retirement-picks.md):
                           equivalent — the default ramp new scene-entry
                           blends use when a scene doesn't author its own
                           entry_ramp_ms (SceneV2.entry_ramp_ms == 0).
-  midsong_triggers_enabled  front 3's fallback switch
-                          (decision-mid-song-model.md): whether GENERATED
-                          triggers (spectra/services/midsong_generator.py,
-                          source="generated") are allowed to fire —
-                          checked by trigger_engine at fire time, per
-                          crossing, same as a disabled trigger's own
-                          `enabled` gate. Hand-authored triggers always
-                          fire regardless. Default True; flipping it off is
-                          the one-word fallback to transitions-only.
+  scene_change_mode  the Admiral's binding settings model (decision-
+                          mid-song-model.md + its 2026-08-14 framing
+                          correction + the settings-model brief,
+                          corr=c14a9bcee40e6df9), replacing front 3's plain
+                          midsong_triggers_enabled bool with three
+                          understandable, ADDITIVE tiers:
+                            "transitions" — a scene change on every song
+                              transition only (the automatic kernel-picked
+                              fire trigger_engine._fire_transition drives
+                              on every genuine song-to-song change — see
+                              its module docstring). Nothing else.
+                            "analysed"    — transitions PLUS the analysed
+                              mid-song moments midsong_generator seeds
+                              (source="generated" triggers).
+                            "full"        — everything: transitions +
+                              generated mid-song triggers + the owner's
+                              own hand-authored triggers (source=
+                              "authored") + response-engine flares (both
+                              bridge-classified and trigger-driven —
+                              services/engine.fire_response_event's own
+                              gate). Default, and the closest match to
+                              pre-existing behaviour (authored triggers and
+                              flares had no gate at all before this field).
+                          Checked by trigger_engine.tick() (generated vs.
+                          authored gating) and engine.fire_response_event
+                          (flare gating) — the same seams the old bool
+                          switch used. "transitions" and "analysed" are
+                          NOT redundant: they differ in whether generated
+                          mid-song triggers fire, exactly the old switch's
+                          two states.
 
 Scope is deliberately the CONTROLS, not the behaviour: ambient_enabled today
 only records the switch (folding into the room-control surface instead of
@@ -39,11 +60,13 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from spectra import config
+
+SceneChangeMode = Literal["transitions", "analysed", "full"]
 
 
 class RoomControlState(BaseModel):
@@ -55,7 +78,7 @@ class RoomControlState(BaseModel):
     # FALLBACK ramp scene_compiler.fire_scene uses when a scene's own
     # entry_ramp_ms is 0 — the legacy ledfx_global_transition equivalent.
     global_transition_ms: int = Field(default=0, ge=0, le=20000)
-    midsong_triggers_enabled: bool = True
+    scene_change_mode: SceneChangeMode = "full"
 
 
 def apply_brightness(params: dict, multiplier: float) -> dict:
@@ -79,9 +102,25 @@ def load_room_controls() -> RoomControlState:
     path = config.ROOM_CONTROLS_FILE
     if path.exists():
         try:
-            return RoomControlState(**json.loads(path.read_text(encoding="utf-8")))
+            raw = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            return RoomControlState()
+        # One-way migration from the retired midsong_triggers_enabled bool
+        # (pre this settings model) — True mapped to "full" (the closest
+        # match to its actual pre-existing behaviour: generated triggers on,
+        # and authored triggers/flares always fired regardless of the old
+        # switch), False to "transitions" (the owner had deliberately dialed
+        # generated triggers off, so the pure baseline is the most faithful
+        # read of that intent).
+        if "scene_change_mode" not in raw and "midsong_triggers_enabled" in raw:
+            raw["scene_change_mode"] = ("full" if raw.pop("midsong_triggers_enabled")
+                                        else "transitions")
+        else:
+            raw.pop("midsong_triggers_enabled", None)
+        try:
+            return RoomControlState(**raw)
+        except Exception:
+            return RoomControlState()
     return RoomControlState()
 
 

@@ -2,12 +2,25 @@
  * Brightness Multiplier action equivalent, scales every write uniformly at
  * the fx_executor / scene_compiler seams) plus ambient mode/colour and
  * global transition pace (state today — folded into this surface ahead of
- * the full Ambient/Dinner-Party room-modes build, not bridge flags).
+ * the full Ambient/Dinner-Party room-modes build, not bridge flags), plus
+ * the scene-change settings model (three additive ticks — see
+ * SCENE_CHANGE_MODES below and spectra/services/room_controls.py).
  * Mounted once in App.tsx, next to the ownership bar. */
 import { useEffect, useState } from 'react';
 import HelpLink from '../help/HelpLink';
 import { useRoomControls, useSaveRoomControls } from '../queries';
-import type { RoomControlState } from '../types';
+import type { RoomControlState, SceneChangeMode } from '../types';
+
+const SCENE_CHANGE_MODES: { value: SceneChangeMode; label: string; title: string }[] = [
+  { value: 'transitions', label: 'Transitions only',
+    title: 'A scene change on every song transition. Nothing else fires.' },
+  { value: 'analysed', label: '+ Analysed',
+    title: 'Transitions, plus the analysed mid-song triggers "⟳ Generate" seeds. '
+      + 'Your own hand-placed triggers and flares still don’t fire.' },
+  { value: 'full', label: '+ My triggers',
+    title: 'Everything: transitions, analysed mid-song triggers, your own '
+      + 'hand-placed triggers, and response-engine flares.' },
+];
 
 export default function RoomControlsBar() {
   const { data } = useRoomControls();
@@ -70,14 +83,16 @@ export default function RoomControlsBar() {
         ms
       </label>
 
-      <label className="room-control"
-        title="Whether GENERATED (seeded) mid-song triggers are allowed to fire. Off = fall back to transitions-only; hand-placed triggers always fire regardless.">
-        <input
-          type="checkbox"
-          checked={local.midsong_triggers_enabled}
-          onChange={(e) => commit({ ...local, midsong_triggers_enabled: e.target.checked })}
-        />
-        Mid-song triggers
+      <label className="room-control" title="What drives scene changes">
+        Scene changes
+        <select
+          value={local.scene_change_mode}
+          onChange={(e) => commit({ ...local, scene_change_mode: e.target.value as SceneChangeMode })}
+        >
+          {SCENE_CHANGE_MODES.map((m) => (
+            <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
+          ))}
+        </select>
       </label>
 
       <HelpLink topic="room-controls-bar" />
