@@ -885,7 +885,7 @@ stepped = SceneV2(name="Stepped", devices=[SceneDeviceConfig(
                                        "fallback": 1.0}}}],
     drift={"reactivity": DriftRef(inline=DriftSpec(
         kind="creep", rate_per_min=0.05, lo=0.1, hi=0.9))})],
-    responses={"flare": ResponseSpec(bands=[
+    responses={"flare": ResponseSpec(reroll_dice=True, bands=[
         FlareBand(intensity_min=0.0, intensity_max=1.0)])})
 exec4 = RecordingExecutor()
 cond4 = DriftConductor(executor=exec4, drift_profiles=lambda: {},
