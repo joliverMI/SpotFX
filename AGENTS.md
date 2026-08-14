@@ -153,6 +153,20 @@ procedure in `docs/SPECTRA_HANDOVER.md` (go-day seeder
 `scripts/seed_spectra_fx_live.py`). Spec:
 `.venv/bin/python scripts/check_ownership.py` + `tests/test_handover.py`.
 
+A third owner state, `released` (`fx/light_ownership.RELEASED`), is the
+owner's panic handle — `spectra/services/release.py`, `POST
+/spectra/api/ownership/release`, the SPECTRA UI's red button
+(`RoomOwnershipBar.tsx`). Unlike the handover above it is NOT armed-gated
+(going to no-writer is always safe): one atomic step sheds both worlds'
+write grants, then each device is told to let go explicitly rather than
+left to time out — WLED gets the JSON API's `{"live": false}`
+(`fx/utils.py WLED.release_realtime`, wired in `fx/devices/wled.py`), Hue's
+entertainment session is stopped (already explicit — `fx/devices/hue.py`),
+the external LedFX service's active virtuals are deactivated over its API.
+The way back is the SAME guarded handover, still armed- and readiness-gated
+(`run_handover`'s `from_world=="released"` skips the vacuous quiesce step).
+Spec: `tests/test_release.py` + `check_ownership.py` §12.
+
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 
 `fx/` is the LedFX render pipeline vendored from the fork at commit

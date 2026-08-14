@@ -22,7 +22,13 @@ Sections:
  11. the readiness gate (order-8): missing/empty/unusable fx-live config
      REFUSES before the old owner is quiesced — room untouched, refusal
      names the seeder command
- 12. nothing here ever touched audio hardware
+ 12. the panic release (fx.light_ownership.RELEASED): a third settled state,
+     one atomic step (no two-step — no new writer to verify into
+     existence), sheds both write grants, idempotent, refuses only
+     mid-handover; the way back is the SAME guarded handover with
+     from_world=="released". Device-class and API-route proofs live in
+     tests/test_release.py (pytest, not this script).
+ 13. nothing here ever touched audio hardware
 
 Run from repo root: .venv/bin/python scripts/check_ownership.py
 Isolated: temp files for every store; no LedFX I/O, no audio, no network.
@@ -455,7 +461,49 @@ except HandoverRefused:
     check(sides[lo.SPOT_EFFECTS].calls == [],
           "empty config: handover refuses, old owner never quiesced")
 
-# ── 12. nothing here ever touched audio hardware ─────────────────────────────
+# ── 12. the panic release: a third settled state, one atomic step ────────────
+check(lo.load().owner == lo.SPOT_EFFECTS, "settled at spot-effects before release")
+rec = lo.release("spec: panic press")
+check(rec.owner == lo.RELEASED, "release() lands owner=released")
+check(not lo.writes_allowed(lo.SPOT_EFFECTS) and not lo.writes_allowed(lo.SPECTRA),
+      "released grants NEITHER world — same shape as handing-over, but no "
+      "new writer is coming up")
+try:
+    lo.mint_activation_grant(lo.SPECTRA)
+    check(False, "no activation grant while released")
+except lo.OwnershipError:
+    check(True, "released refuses SPECTRA's device-layer grant too — "
+                "FxHost.start() stays refused for any non-dummy config")
+
+rec2 = lo.release("spec: second press")
+check(rec2.owner == lo.RELEASED
+      and any(e["event"] == "release_repeat" for e in rec2.history),
+      "a second press is idempotent, not an error — a panic handle must "
+      "never error on a repeat press")
+
+h = lo.begin_handover(lo.SPECTRA)
+try:
+    lo.release("spec: cannot release mid-handover")
+    check(False, "release mid-handover must refuse")
+except lo.OwnershipError:
+    check(True, "release refuses mid-handover (every transition here "
+                "requires a settled owner first)")
+lo.abort(h.token, "spec: land back at spot-effects")
+
+# The way back reuses check_can_begin/begin_handover with ZERO special
+# casing for from_world=="released" — it is an ordinary from-world; the
+# quiesce-skip lives in the orchestrator (spectra/services/handover.py),
+# proven with the real SpectraSide in tests/test_release.py.
+lo.release("spec: released before the way-back begin")
+h_back = lo.begin_handover(lo.SPECTRA)
+check(h_back.from_world == lo.RELEASED,
+      "begin_handover captures released as an ordinary from-world — no "
+      "code change needed in the record for the way back")
+lo.abort(h_back.token, "spec: land back at released")
+check(lo.load().owner == lo.RELEASED,
+      "abort() lands back at from_world generically — released included")
+
+# ── 13. nothing here ever touched audio hardware ─────────────────────────────
 from fx.audio_ingest import AudioIngestHub, LiveDeviceSource
 
 try:

@@ -6,7 +6,7 @@ from fx.devices import NetworkedDevice
 from fx.devices.ddp import DDPDevice
 from fx.devices.e131 import E131Device
 from fx.devices.udp import UDPRealtimeDevice
-from fx.utils import WLED, wled_support_DDP
+from fx.utils import WLED, async_fire_and_forget, wled_support_DDP
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class WLEDDevice(NetworkedDevice):
     def __init__(self, ledfx, config):
         super().__init__(ledfx, config)
         self.subdevice = None
+        self.wled = None
 
         # moved DEVICE_CONFIGS class var to device_configs instance var as it is manipulated in seperate instances
         # see https://github.com/LedFx/LedFx/pull/237
@@ -112,7 +113,23 @@ class WLEDDevice(NetworkedDevice):
     def deactivate(self):
         if self.subdevice is not None:
             self.subdevice.deactivate()
+        if self.wled is not None:
+            # Explicit release (panic-release path), not just "stop sending
+            # and let the device's own timeout lapse" — see WLED.
+            # release_realtime. Fire-and-forget like the Hue driver's stream
+            # stop: deactivate() must never block on device I/O.
+            async_fire_and_forget(
+                self._async_release_realtime(), loop=self._ledfx.loop
+            )
         super().deactivate()
+
+    async def _async_release_realtime(self):
+        try:
+            await self.wled.release_realtime()
+        except Exception as e:
+            _LOGGER.warning(
+                "WLED %s: failed to release realtime mode: %s", self.name, e
+            )
 
     async def resolve_address(self, success_callback=None):
         await super().resolve_address(success_callback)

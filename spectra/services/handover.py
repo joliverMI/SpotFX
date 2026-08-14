@@ -37,6 +37,15 @@ SPECTRA_HANDOVER_ARMED latch is set, and no code path in either app invokes
 run_handover() on its own. Tests drive the orchestrator with fake sides and
 the SpectraSide against the headless harness (docs/SPECTRA_HANDOVER.md is
 the operator procedure).
+
+The way back from the panic release (fx/light_ownership.RELEASED — the
+one-press "let go" handle, spectra/services/release.py) is this SAME
+orchestrator: run_handover(SPECTRA, ...) with from_world=="released" skips
+the quiesce step (nothing was writing) and, on activation failure, skips
+restoring a from_side (there is none — released was already the safe state
+to fall back to). Still gated by SPECTRA_HANDOVER_ARMED and the readiness
+gate, same as any other handover — coming back is a deliberate, armed
+decision even though letting go is not.
 """
 from __future__ import annotations
 
@@ -129,25 +138,35 @@ async def run_handover(
             f"untouched and the current owner keeps writing. Missing "
             f"preparation: " + "; ".join(problems))
     handover = light_ownership.begin_handover(to_world)
-    from_side = sides[handover.from_world]
+    # The way back from the panic release: from_world is "released", not one
+    # of the two worlds — there is no side to look up, nothing was writing,
+    # and (on activation failure) nothing to restore. released was already
+    # the safe landing, so abort() just lands back there.
+    from_released = handover.from_world == light_ownership.RELEASED
+    from_side = None if from_released else sides[handover.from_world]
     to_side = sides[handover.to_world]
+    from_name = light_ownership.RELEASED if from_released else from_side.name
     logger.warning("handover: %s → %s BEGUN (token=%s)",
-                   from_side.name, to_side.name, handover.token)
+                   from_name, to_side.name, handover.token)
 
-    # Step 1 — quiesce the current writer and VERIFY it stopped.
-    try:
-        await from_side.quiesce()
-        if not await from_side.verify_quiesced():
-            raise HandoverFailed(
-                f"{from_side.name} still writing after quiesce — refusing to "
-                "start a second writer")
+    # Step 1 — quiesce the current writer and VERIFY it stopped. Vacuously
+    # satisfied coming from released: nothing was writing.
+    if from_released:
         await asyncio.sleep(grace_s)
-    except Exception as exc:
-        await _best_effort(from_side.activate, f"restore {from_side.name}")
-        light_ownership.abort(handover.token, f"quiesce failed: {exc}")
-        raise HandoverFailed(
-            f"quiesce failed — landed back at {from_side.name}: {exc}"
-        ) from exc
+    else:
+        try:
+            await from_side.quiesce()
+            if not await from_side.verify_quiesced():
+                raise HandoverFailed(
+                    f"{from_side.name} still writing after quiesce — "
+                    "refusing to start a second writer")
+            await asyncio.sleep(grace_s)
+        except Exception as exc:
+            await _best_effort(from_side.activate, f"restore {from_side.name}")
+            light_ownership.abort(handover.token, f"quiesce failed: {exc}")
+            raise HandoverFailed(
+                f"quiesce failed — landed back at {from_side.name}: {exc}"
+            ) from exc
 
     light_ownership.mark_quiesced(handover.token)
 
@@ -159,10 +178,11 @@ async def run_handover(
     except Exception as exc:
         await _best_effort(to_side.deactivate,
                            f"release partial {to_side.name}")
-        await _best_effort(from_side.activate, f"restore {from_side.name}")
+        if not from_released:
+            await _best_effort(from_side.activate, f"restore {from_side.name}")
         light_ownership.abort(handover.token, f"activation failed: {exc}")
         raise HandoverFailed(
-            f"activation failed — landed back at {from_side.name}: {exc}"
+            f"activation failed — landed back at {from_name}: {exc}"
         ) from exc
 
     record = light_ownership.commit(handover.token)
@@ -348,7 +368,13 @@ async def resume_own_room(side: Optional[SpectraSide] = None) -> bool:
     dark-but-owned, record untouched, liveness 503 carrying the alarm — the
     caller keeps serving so the fleet can see and act. Not gated on the
     SPECTRA_HANDOVER_ARMED latch: the latch guards CHANGING hands; the
-    record saying spectra owns is the owner's standing word."""
+    record saying spectra owns is the owner's standing word.
+
+    A released room (fx.light_ownership.RELEASED — the panic handle) takes
+    the SAME early return as spot-effects owning: this is a plain
+    owner != SPECTRA check, so a restart during a released room never
+    re-lights it. The owner's press stands across restarts; only the
+    guarded handover un-releases the room."""
     record = light_ownership.load()
     if record.owner != light_ownership.SPECTRA:
         return False

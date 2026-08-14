@@ -10,7 +10,18 @@
       is missing (the readiness gate — refused BEFORE quiesce, room
       untouched, the error names the preparation and its command); on a
       step failure returns 502 with the landing — always a settled single
-      owner, never split.
+      owner, never split. FROM `released`, "to": "spectra" runs this SAME
+      staged, readiness-gated handover — the way back from the panic
+      release (spectra/services/handover.py's from_world==RELEASED
+      handling); still requires SPECTRA_HANDOVER_ARMED, same as any other
+      handover.
+  POST /api/ownership/release  — THE PANIC HANDLE (spectra/services/
+      release.py): one press, no body, no confirmation — the press is the
+      consent. NOT gated by SPECTRA_HANDOVER_ARMED (going to no-writer is
+      always safe to allow). Idempotent — pressing it again while already
+      released just repeats the note in history. 409 only if a handover is
+      genuinely mid-flight (settle it, or wait for the stale-handover
+      recovery, then press again).
   POST /api/ownership/recover  — land a crash-orphaned handover (age-gated;
       also runs automatically at engine start).
 
@@ -29,6 +40,12 @@
         owner=spot-effects healthy iff SPECTRA is correctly DARK (a live
                            stack without ownership is the split-brain
                            tripwire → 503).
+        owner=released     healthy-DARK iff the SPECTRA live stack is down
+                           (the panic release's job) — a deliberately
+                           released room reports state "released", healthy
+                           200, same as any other correctly-dark state; a
+                           live stack while released is the same split-brain
+                           tripwire as above → 503.
         handing-over       503, state "switching" — truthful during the
                            brief window the room changes hands.
       Never delete or repoint without the Admiral's word.
@@ -44,6 +61,7 @@ from pydantic import BaseModel
 from fx import light_ownership
 from spectra import config
 from spectra.services import handover as handover_svc
+from spectra.services import release as release_svc
 from spectra.services.live_host import STALE_AFTER_S, live
 
 router = APIRouter(prefix="/api", tags=["spectra-ownership"])
@@ -103,6 +121,18 @@ async def post_handover(body: HandoverRequest):
             "record": _record_json()}
 
 
+@router.post("/ownership/release")
+async def post_release():
+    """THE PANIC HANDLE. No body, no confirmation, not armed-gated — the
+    press is the consent. 409 only if a handover is genuinely mid-flight."""
+    try:
+        record = await release_svc.release_room("owner panic release (API)")
+    except light_ownership.OwnershipError as exc:
+        raise HTTPException(409, str(exc))
+    return {"result": "released", "owner": record.owner,
+            "record": _record_json()}
+
+
 @router.post("/ownership/recover")
 async def post_recover():
     landed = light_ownership.recover_stale_handover()
@@ -125,6 +155,9 @@ async def get_liveness():
     elif record.owner == light_ownership.HANDING_OVER:
         state = "switching"
         healthy = False
+    elif record.owner == light_ownership.RELEASED:
+        state = "split-brain" if live.active else "released"
+        healthy = not live.active
     else:
         state = "split-brain" if live.active else "dark"
         healthy = not live.active

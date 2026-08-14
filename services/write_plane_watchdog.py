@@ -88,9 +88,14 @@ def evaluate(health: dict, prev_counters: dict | None) -> tuple[bool, list[str]]
     Light ownership (SPECTRA S3): when the snapshot says spot-effects does not
     own the lights, the write plane is deliberately surrendered — every call
     is shed at the ownership gate, so no completions and no deadlines is the
-    CORRECT state, excused like a breaker-open outage. The two hard signals
-    stay hard: they are internal to this process regardless of who owns the
-    room. The room's health signal is SPECTRA's liveness endpoint then.
+    CORRECT state, excused like a breaker-open outage. This covers spectra
+    ownership, an in-flight handover, AND a deliberately released room (the
+    panic release, fx.light_ownership.RELEASED) alike — `surrendered` is a
+    plain "!= spot-effects" check, so a released room reads exactly like any
+    other non-owning state here: healthy-dark, no code path change needed.
+    The two hard signals stay hard: they are internal to this process
+    regardless of who owns the room. The room's health signal is SPECTRA's
+    liveness endpoint then.
     """
     counters = health.get("counters") or {}
     hard: list[str] = []       # write-plane-internal — count regardless of breaker

@@ -371,6 +371,22 @@ class WLED:
         )
         self.reboot_flag = False
 
+    async def release_realtime(self):
+        """
+        Explicitly exit realtime/live mode NOW, rather than waiting for the
+        per-packet UDP timeout byte (DRGB/DNRGB/WARLS) to lapse — DDP carries
+        no such byte at all, so this is the only in-protocol way to release a
+        DDP-streamed device promptly. Per WLED's JSON API: "It is expected
+        that {"live":false} is sent once live data sending is terminated."
+        (SPOT-FX panic-release path — see spectra/services/release.py.)
+        """
+        await WLED._wled_request(
+            requests.post,
+            self.ip_address,
+            "json/state",
+            json={"live": False},
+        )
+
     async def get_config(self):
         """
             Uses a JSON API call to determine if the device is WLED or WLED compatible

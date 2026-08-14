@@ -27,11 +27,33 @@ spot-effects event loop's stalls).
 | Handover (armed only) | `POST http://<host>:8000/spectra/api/ownership/handover` |
 | Orphan recovery | `POST http://<host>:8000/spectra/api/ownership/recover` |
 | spot-effects side of the record | `GET http://<host>:8000/api/debug/ledfx-health` (`light_ownership` field) |
+| **Panic release (NOT armed-gated)** | `POST http://<host>:8000/spectra/api/ownership/release` |
 
 The liveness endpoint serves per-virtual frame-flush freshness from the real
 render/write path (HTTP 200 healthy / 503 not), computed inside the SPECTRA
 process. **Never delete or repoint it without the Admiral's word** (the
 contract in `data/spectra-design-decisions.md`).
+
+## Panic release — the emergency exit, no arming required
+
+Unlike the handover below, `POST /spectra/api/ownership/release` is NOT
+gated by `SPECTRA_HANDOVER_ARMED` and needs no body — one press (the SPECTRA
+UI's red "Release to Home Assistant" button, or the bare POST) and whichever
+world owned the room lets go: the ownership record moves to `released`
+first (both worlds' write gates shed immediately), then each device is told
+to let go explicitly — WLED gets the JSON API's `{"live": false}`, Hue's
+entertainment session is stopped, the external LedFX service's active
+virtuals are deactivated over its own API. Home Assistant then has ordinary
+direct control of every device. Idempotent (press it again, nothing errors);
+refuses (409) only if a handover happens to be mid-flight at that exact
+instant — wait a beat and press again.
+
+The way back is the SAME guarded handover as below (`{"to": "spectra"}`),
+still armed- and readiness-gated — released is just another `from_world` to
+it, with nothing to quiesce. See `fx/light_ownership.py` (the `RELEASED`
+state) and `spectra/services/release.py` for the implementation; per-device
+RELEASED semantics are documented in `spectra/web/src/help/helpContent.ts`
+(topic `panic-release`).
 
 ## Preparation (any time before go day, all read-only for the room)
 
