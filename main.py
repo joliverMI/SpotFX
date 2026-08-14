@@ -158,6 +158,13 @@ async def lifespan(app: FastAPI):
     # training runs) — armed here so pending schedules survive restarts.
     from services import tune_scheduler
 
+    # Light ownership: land a crash-orphaned handover (age-gated — never
+    # fights a live orchestrator). Both worlds run this at startup; before
+    # the S3 process split this world's call rode spectra's engine start,
+    # which now happens in the SPECTRA process. stdlib-only import.
+    from fx import light_ownership
+    light_ownership.recover_stale_handover()
+
     # Launch background tasks
     tasks = [
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
@@ -187,16 +194,9 @@ async def lifespan(app: FastAPI):
         _want = set(state.ambient_groups) or None
         tasks.append(asyncio.create_task(ambient_mode.set_groups(_want), name="ambient-restore"))
 
-    # SPECTRA S2 evolution engine (bridge + drift conductor + responses).
-    # The host owns this lifespan because Starlette never runs a mounted
-    # sub-app's. DARK: it records against real lights until S3.
-    from spectra.services import engine as spectra_engine
-    await spectra_engine.start()
-
     logger.info("SpotFX started — http://%s:%d", settings.app_host, settings.app_port)
     yield
     # Shutdown
-    await spectra_engine.stop()
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -233,12 +233,17 @@ app.include_router(scenes_v2_router.router)
 app.include_router(shape_map_router.router)
 app.include_router(sequencer_router.router)
 
-# ── SPECTRA (separate app, shared process until the S3 split) ─────────────────
-# Mounted as its own FastAPI application: /spectra/ serves the SPECTRA UI,
-# /spectra/api/* its backend. spectra/ imports nothing from this app —
-# unmounting here and running `python -m spectra` IS the S3 process split.
-from spectra.app import create_app as _create_spectra_app
-app.mount("/spectra", _create_spectra_app())
+# ── SPECTRA (her OWN process since the S3 split) ──────────────────────────────
+# SPECTRA runs standalone (python -m spectra under spectra.service) so this
+# app's interpreter bursts can never stall her render threads again (the
+# 2026-08-13 frame-rate diagnosis). Nothing here imports spectra/ anymore —
+# /spectra/* is a transparent reverse proxy, which is what keeps the owner's
+# port-8000 bookmark and THE LIVENESS CONTRACT address
+# (GET /spectra/api/liveness) serving verbatim. The SPECTRA process's own
+# port (settings.spectra_port) is the direct address that does not share
+# this event loop's stalls.
+from services.spectra_proxy import SpectraProxy
+app.mount("/spectra", SpectraProxy(settings.spectra_port))
 
 
 # ── Service status (health check for external callers) ────────────────────────

@@ -332,3 +332,44 @@ def production_sides() -> dict[str, WriterSide]:
         light_ownership.SPOT_EFFECTS: SpotEffectsSide(),
         light_ownership.SPECTRA: SpectraSide(),
     }
+
+
+async def resume_own_room(side: Optional[SpectraSide] = None) -> bool:
+    """Process start while the record already says spectra owns — a restart
+    of spectra.service mid-reign. Without this the room stayed dark until a
+    manual handover cycle (the operational gap proven twice on 2026-08-13);
+    now the stack reactivates itself through the SAME guarded path the
+    handover uses: SpectraSide.activate() mints its grant (mintable because
+    owner=spectra outright — no record transition happens, she already
+    owns) and enforces the readiness gate (wait_fresh on real frame
+    flushes) before this returns True.
+
+    Any failure lands exactly where a crashed activation always landed:
+    dark-but-owned, record untouched, liveness 503 carrying the alarm — the
+    caller keeps serving so the fleet can see and act. Not gated on the
+    SPECTRA_HANDOVER_ARMED latch: the latch guards CHANGING hands; the
+    record saying spectra owns is the owner's standing word."""
+    record = light_ownership.load()
+    if record.owner != light_ownership.SPECTRA:
+        return False
+    side = side or SpectraSide()
+    problems = await side.readiness_problems()
+    if problems:
+        # The order-8 gate applies here too: with no usable fx-live config,
+        # activation "succeeds" with zero virtuals (freshness vacuously true)
+        # and liveness would claim live over a dark room. Refuse the same way
+        # the handover does — dark-but-owned, record untouched, liveness 503.
+        for problem in problems:
+            logger.error("resume: readiness gate refuses — %s", problem)
+        return False
+    logger.warning("resume: record says spectra owns — reactivating the "
+                   "live stack")
+    try:
+        await side.activate()
+    except Exception:
+        logger.exception("resume: activation failed — staying dark-but-owned "
+                         "(record untouched; liveness stays 503)")
+        await _best_effort(side.deactivate, "release partial resume")
+        return False
+    logger.warning("resume: live stack reactivated — spectra drives the room")
+    return True

@@ -13,19 +13,24 @@ default: **spot-effects owns**.
 
 ## Addresses
 
+Since the S3 process split, SPECTRA runs as her own process
+(`spectra.service`, port 8010 — `docs/SPECTRA_PROCESS_SPLIT.md`). Every
+port-8000 address below still works verbatim through the spot-effects
+reverse proxy; the same paths on port 8010 reach the SPECTRA process
+directly and are preferred for the fleet checker (they do not share the
+spot-effects event loop's stalls).
+
 | What | Address |
 |---|---|
 | Ownership record (inspect) | `GET http://<host>:8000/spectra/api/ownership` |
-| **Liveness (THE binding contract)** | `GET http://<host>:8000/spectra/api/liveness` |
+| **Liveness (THE binding contract)** | `GET http://<host>:8000/spectra/api/liveness` (direct: `:8010`, same path) |
 | Handover (armed only) | `POST http://<host>:8000/spectra/api/ownership/handover` |
 | Orphan recovery | `POST http://<host>:8000/spectra/api/ownership/recover` |
 | spot-effects side of the record | `GET http://<host>:8000/api/debug/ledfx-health` (`light_ownership` field) |
 
 The liveness endpoint serves per-virtual frame-flush freshness from the real
-render/write path (HTTP 200 healthy / 503 not). After the eventual process
-split it stays at `/spectra/api/liveness` on SPECTRA's own port — the
-fleet's external write-plane checker survives with at most a host:port
-change. **Never delete or repoint it without the Admiral's word** (the
+render/write path (HTTP 200 healthy / 503 not), computed inside the SPECTRA
+process. **Never delete or repoint it without the Admiral's word** (the
 contract in `data/spectra-design-decisions.md`).
 
 ## Preparation (any time before go day, all read-only for the room)
@@ -72,12 +77,14 @@ switch or stated here as why it stays an operator note:
 
 ## Go day — taking the room (spot-effects → SPECTRA)
 
-1. **Arm** (the owner's word, expressed as an env latch on the process):
+1. **Arm** (the owner's word, expressed as an env latch on the process —
+   since the process split the handover API runs in the SPECTRA process,
+   so the latch goes on HER unit):
 
-       systemctl --user edit spotfx     # add:
+       systemctl --user edit spectra    # add:
        # [Service]
        # Environment=SPECTRA_HANDOVER_ARMED=1
-       systemctl --user restart spotfx
+       systemctl --user restart spectra
 
 2. **Switch**:
 
@@ -125,8 +132,17 @@ devices deactivated — Hue session released, DDP stopped, audio closed) →
 verify → `systemctl --user start ledfx` + wait for `/api/info` → commit.
 spot-effects' own reassert machinery then pushes cached effect state.
 
-**Disarm afterwards** (remove the Environment line, restart spotfx) unless
+**Disarm afterwards** (remove the Environment line, restart spectra) unless
 more switches are planned.
+
+**Restart while SPECTRA owns**: a spectra.service restart (deploy, crash,
+watchdog) auto-resumes — at process start, a record that says `spectra`
+reactivates the live stack through the same guarded path the handover uses
+(grant + frame-freshness readiness gate; `handover.resume_own_room`). No
+handover cycle needed. If the resume FAILS (devices unreachable, seed
+missing), the process lands dark-but-owned and keeps serving — liveness
+answers 503 `state: "dark"` and the record is untouched; fix the cause and
+restart spectra, or hand the room back manually.
 
 ## If things go wrong
 
@@ -143,9 +159,9 @@ more switches are planned.
   immediately via `POST /spectra/api/ownership/recover`.
 - **Manual last resort** (process down, room dark):
 
-      systemctl --user stop spotfx
+      systemctl --user stop spectra            # the only possible SPECTRA writer
       rm storage/spectra/ownership.json        # missing record = spot-effects owns
-      systemctl --user start ledfx spotfx
+      systemctl --user start ledfx spectra
 
 - Watchdog notes, both already ownership-aware: spot-effects' LedFX-restart
   watchdog is dormant while not owner (it must not resurrect the stopped

@@ -1,0 +1,54 @@
+# SPECTRA user unit — her own process, her own interpreter (the S3 process
+# split). Exists so spot-effects' 90 ms–5 s GIL bursts can never again stall
+# the render threads (2026-08-13 frame-rate diagnosis). The spot-effects app
+# reverse-proxies /spectra/* here, so every port-8000 address keeps working.
+#
+# Deploy is a PAIR with deploy/spotfx.service, applied in ONE pass (one room
+# interruption) — the owner approved both together; full procedure in
+# docs/SPECTRA_PROCESS_SPLIT.md:
+#   cp deploy/spotfx.service deploy/spectra.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable spectra
+#   systemctl --user restart spotfx spectra     # the one interruption
+#
+# Watchdog reconciliation across the split (detection Option B, scoping
+# report §3): THIS unit's watchdog is gated on frame-flush freshness — the
+# liveness contract's own signal (spectra/services/frame_watchdog.py sends
+# WATCHDOG=1 only while the render plane is provably alive or deliberately
+# dark). spotfx.service keeps its gate-health predicate for when
+# spot-effects owns the lights. Two processes, two dead-man switches, each
+# watching the plane that lives inside it.
+#
+# Handover arming (go day only): the handover API now runs in THIS process,
+# so the latch goes here — systemctl --user edit spectra, add
+# Environment=SPECTRA_HANDOVER_ARMED=1, restart spectra. Disarm afterwards.
+#
+# Restart while SPECTRA owns the room: the process auto-resumes the live
+# stack at start (guarded activation + readiness gate — handover.
+# resume_own_room), so Restart=always genuinely restores the room, not just
+# the API. A failed resume stays dark-but-owned: liveness 503 is the alarm.
+
+[Unit]
+Description=SPECTRA
+# Loose coupling by design: no Requires= in either direction. SPECTRA's
+# bridge reconnects to spot-effects with backoff; the spot-effects proxy
+# answers 502 until this unit is up; a crash of one must never take down
+# the other. After= only orders startup when both launch together.
+After=spotfx.service
+
+[Service]
+Type=notify
+WatchdogSec=90
+TimeoutStartSec=60
+WorkingDirectory=/home/javi/SpotFX
+ExecStart=/home/javi/SpotFX/.venv/bin/python -m spectra
+Restart=always
+RestartSec=3
+Environment=SPECTRA_PORT=8010
+# Small-array numpy in the render pipeline: BLAS thread pools cost more than
+# they give (same reasoning as spotfx.service).
+Environment=OMP_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+
+[Install]
+WantedBy=default.target
