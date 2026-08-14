@@ -451,6 +451,22 @@ class WLED:
 
         return response.json()
 
+    async def get_info(self):
+        """
+            Uses a JSON API call to determine the WLED device info block —
+            distinct from get_state()'s json/state: WLED only reports the
+            realtime "live" flag (plus "lip"/"fps") under json/info, never
+            under json/state (on/bri/ps/seg live there instead).
+
+        Returns:
+            info, dict. Full device info, including "live"
+        """
+        response = await WLED._wled_request(
+            requests.get, self.ip_address, "json/info"
+        )
+
+        return response.json()
+
     async def get_power_state(self):
         """
             Uses a JSON API call to determine the WLED device power state (on/off)

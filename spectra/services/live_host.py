@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 STALE_AFTER_S = 2.0     # a live render loop flushes every ~16-40 ms; 2 s of
                         # silence on an active virtual is a dead write path
 AUDIO_PUMP_SLEEP_S = 0.01
-DEVICE_VERIFY_TIMEOUT_S = 3.0   # per-device json/state read for the live-flag check
+DEVICE_VERIFY_TIMEOUT_S = 3.0   # per-device json/info read for the live-flag check
 DEVICE_LIVE_DEADLINE_S = 25.0  # shared poll-until-live deadline: a real
                                 # take-back's WLEDs start receiving realtime
                                 # SLOWLY and in VARYING ORDER (first live
@@ -321,8 +321,9 @@ class LiveLights:
         reconciler by owner order): frame freshness only proves OUR render
         loop pushed a frame, not that the physical device received it. For
         every real (non-dummy, non-gap) device backing an expected-active
-        virtual, if it's WLED, read its OWN json/state and require
-        live=true.
+        virtual, if it's WLED, read its OWN json/info and require
+        live=true (WLED reports the realtime "live" flag only under
+        json/info — json/state carries on/bri/seg but never "live").
 
         A real take-back's WLEDs rise SLOWLY and in VARYING ORDER (measured
         live: first live flags 6.2-6.4s after activation, different subsets
@@ -357,11 +358,11 @@ class LiveLights:
                     or getattr(device, "wled", None) is None:
                 return device_id, None  # not a WLED device, or not yet initialized
             try:
-                wled_state = await asyncio.wait_for(
-                    device.wled.get_state(), timeout_s)
+                wled_info = await asyncio.wait_for(
+                    device.wled.get_info(), timeout_s)
             except Exception as exc:
                 return device_id, f"could not confirm live state: {exc!r}"
-            if not wled_state.get("live"):
+            if not wled_info.get("live"):
                 return device_id, ("device reports live=false — not "
                                    "receiving realtime data")
             return device_id, None

@@ -87,5 +87,13 @@ variables named `ledfx` (the core object handle) are untouched.
    Behavior otherwise unchanged: still logged, still non-fatal to the
    virtual itself.
 
+8. `utils.py`: new `WLED.get_info()` method (json/info GET, same
+   `_wled_request` pattern as `get_state()`). Not in the fork — added so
+   SPECTRA's device-liveness verification (`spectra/services/
+   live_host.py::device_gaps()`) can read WLED's realtime "live" flag,
+   which the device reports only under json/info, never under json/state
+   (get_state()'s endpoint carries on/bri/ps/seg but no "live" key —
+   verified against real WLED devices, 2026-08-14).
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite. When updating vendored files, re-diff against that commit.
