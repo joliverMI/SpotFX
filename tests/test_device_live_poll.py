@@ -28,8 +28,10 @@ class _FakeVirtual:
 
 
 class _FakeWled:
-    """live flips true after `rises_after` polls; `unreachable` raises on
-    every read instead."""
+    """Mirrors the real WLED API split: json/state (on/bri/seg — no "live"
+    key) vs json/info ("live"/"lip"/"fps"). live flips true after
+    `rises_after` polls of get_info(); `unreachable` raises on every read
+    instead."""
 
     def __init__(self, rises_after=None, unreachable=False):
         self._rises_after = rises_after
@@ -37,11 +39,16 @@ class _FakeWled:
         self.calls = 0
 
     async def get_state(self):
+        if self._unreachable:
+            raise ConnectionError("no route to device")
+        return {"on": True, "bri": 255, "seg": []}
+
+    async def get_info(self):
         self.calls += 1
         if self._unreachable:
             raise ConnectionError("no route to device")
         live = self._rises_after is not None and self.calls >= self._rises_after
-        return {"live": live}
+        return {"live": live, "lip": -1, "fps": 41}
 
 
 class _FakeDevice:
