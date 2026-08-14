@@ -82,7 +82,8 @@ async def fire_response_event(event_class: str, intensity: float) -> None:
     if load_room_controls().scene_change_mode != "full":
         return
     await responses.on_event(event_class, intensity)
-    fire_history.record("responses", event_class)
+    fire_history.record_fire("responses", event_class,
+                             {"event_class": event_class, "intensity": intensity})
     if responses._pending_releases:
         asyncio.create_task(_release_after_hold())
 

@@ -1,8 +1,13 @@
-"""Fire-history counter proof: persistence round-trip in isolation, then
-each of the four production choke points (scene fires, response events,
-colour applies, trigger firings) actually records through
-spectra.services.fire_history — cheap by construction (durable counts,
-never an event log). See spectra/services/fire_history.py.
+"""Fire-history proof: persistence round-trip for both surfaces (counts +
+bounded show log) in isolation, then each of the four production choke
+points (scene fires, response events, colour applies, trigger firings)
+actually records through spectra.services.fire_history — both the durable
+count AND a show-log timeline entry, cheap by construction (bounded log,
+no analytics). See spectra/services/fire_history.py.
+
+Storage isolation for FIRE_HISTORY_FILE/SHOW_LOG_FILE is provided globally
+by tests/conftest.py's autouse _isolated_fire_history fixture — no test
+here needs its own.
 """
 from __future__ import annotations
 
@@ -18,13 +23,7 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-@pytest.fixture(autouse=True)
-def _isolated_store(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "FIRE_HISTORY_FILE",
-                        tmp_path / "fire_history.json")
-
-
-# ── persistence round-trip ────────────────────────────────────────────────
+# ── persistence round-trip: counts ────────────────────────────────────────
 
 def test_record_creates_and_stamps_first_last():
     from spectra.services import fire_history
@@ -86,6 +85,92 @@ def test_corrupt_file_falls_back_to_empty(tmp_path, monkeypatch):
     assert data["scenes"]["s1"]["count"] == 1
 
 
+# ── persistence round-trip: show log ──────────────────────────────────────
+
+def test_show_log_append_and_load_round_trip():
+    from spectra.services import fire_history
+
+    fire_history.append_show_log("scenes", "s1", {"scene_name": "Drift"},
+                                 uri="spotify:track:a", position_ms=1234,
+                                 now_ms=1000)
+    log = fire_history.load_show_log()
+    assert log == [{
+        "wall_ms": 1000, "uri": "spotify:track:a", "position_ms": 1234,
+        "bucket": "scenes", "key": "s1", "detail": {"scene_name": "Drift"},
+    }]
+
+
+def test_show_log_filters_by_uri_and_since():
+    from spectra.services import fire_history
+
+    fire_history.append_show_log("scenes", "a", uri="track:1", now_ms=100)
+    fire_history.append_show_log("scenes", "b", uri="track:2", now_ms=200)
+    fire_history.append_show_log("scenes", "c", uri="track:1", now_ms=300)
+
+    assert [e["key"] for e in fire_history.load_show_log(uri="track:1")] == ["a", "c"]
+    assert [e["key"] for e in fire_history.load_show_log(since_ms=200)] == ["b", "c"]
+    assert [e["key"] for e in
+           fire_history.load_show_log(uri="track:1", since_ms=200)] == ["c"]
+
+
+def test_show_log_bounded_evicts_oldest(monkeypatch):
+    from spectra.services import fire_history
+
+    monkeypatch.setattr(fire_history, "SHOW_LOG_MAX_ENTRIES", 3)
+    for i in range(5):
+        fire_history.append_show_log("scenes", f"s{i}", now_ms=i)
+    log = fire_history.load_show_log()
+    assert [e["key"] for e in log] == ["s2", "s3", "s4"]
+
+
+def test_show_log_missing_track_state_defaults_to_none(monkeypatch):
+    from spectra.services import fire_history
+
+    monkeypatch.setattr(fire_history, "_current_track_state",
+                        lambda: (None, None))
+    fire_history.append_show_log("responses", "flare", now_ms=1)
+    entry = fire_history.load_show_log()[0]
+    assert entry["uri"] is None and entry["position_ms"] is None
+
+
+def test_show_log_append_never_raises_on_corrupt_file(monkeypatch):
+    from spectra.services import fire_history
+
+    config.SHOW_LOG_FILE.write_text("not json")
+    fire_history.append_show_log("scenes", "s1", now_ms=1)  # must not raise
+    assert fire_history.load_show_log()[0]["key"] == "s1"
+
+
+def test_record_fire_writes_both_surfaces():
+    from spectra.services import fire_history
+
+    fire_history.record_fire("scenes", "s1", {"scene_name": "Drift"},
+                             uri="track:1", position_ms=42)
+    assert fire_history.load_all()["scenes"]["s1"]["count"] == 1
+    log = fire_history.load_show_log()
+    assert len(log) == 1
+    assert log[0]["key"] == "s1" and log[0]["uri"] == "track:1"
+
+
+# ── read API: GET /api/fire-history + GET /api/show-log ───────────────────
+
+def test_api_endpoints_expose_both_surfaces():
+    from spectra.api.fire_history import get_fire_history, get_show_log
+    from spectra.services import fire_history
+
+    fire_history.record_fire("scenes", "s1", uri="track:1", position_ms=1)
+    fire_history.record_fire("scenes", "s2", uri="track:2", position_ms=2)
+
+    counts = _run(get_fire_history())
+    assert counts["scenes"]["s1"]["count"] == 1
+
+    full_log = _run(get_show_log(uri=None, since=None))
+    assert len(full_log) == 2
+
+    sliced = _run(get_show_log(uri="track:1", since=None))
+    assert [e["key"] for e in sliced] == ["s1"]
+
+
 # ── choke point 1: scene_sequencer.fire_scene_by_id ───────────────────────
 
 def test_scene_fire_records_by_scene_id(monkeypatch):
@@ -93,6 +178,7 @@ def test_scene_fire_records_by_scene_id(monkeypatch):
 
     class FakeScene:
         id = "scene-1"
+        name = "Scene One"
 
     monkeypatch.setattr("spectra.services.scene_store.get_by_id",
                         lambda sid: FakeScene())
@@ -106,6 +192,10 @@ def test_scene_fire_records_by_scene_id(monkeypatch):
     _run(scene_sequencer.fire_scene_by_id("scene-1", None, 0.7))
     data = fire_history.load_all()
     assert data["scenes"]["scene-1"]["count"] == 1
+    entry = fire_history.load_show_log()[0]
+    assert entry["bucket"] == "scenes" and entry["key"] == "scene-1"
+    assert entry["detail"]["scene_name"] == "Scene One"
+    assert entry["detail"]["intensity"] == 0.7
 
 
 def test_scene_fire_not_found_does_not_record(monkeypatch):
@@ -136,6 +226,9 @@ def test_response_event_records_when_full_tier(monkeypatch):
     _run(engine.fire_response_event("charge", 0.6))
     data = fire_history.load_all()
     assert data["responses"]["charge"]["count"] == 1
+    entry = fire_history.load_show_log()[0]
+    assert entry["bucket"] == "responses" and entry["key"] == "charge"
+    assert entry["detail"] == {"event_class": "charge", "intensity": 0.6}
 
 
 def test_response_event_gated_tier_does_not_record(monkeypatch):
@@ -175,6 +268,9 @@ def test_color_set_apply_records_by_set_id():
     _run(conductor.apply_set_directly(FakeCard()))
     data = fire_history.load_all()
     assert data["color_sets"]["set-a"]["count"] == 1
+    entry = fire_history.load_show_log()[0]
+    assert entry["bucket"] == "color_sets" and entry["key"] == "set-a"
+    assert entry["detail"]["set_name"] == "Set A"
 
 
 # ── choke point 4: trigger_engine's own fires (source + action kind) ──────
@@ -191,9 +287,17 @@ def test_trigger_fire_records_source_and_action_kind():
                           action=FireResponseAction(event_class="drop",
                                                     intensity=0.5))
     te = TriggerEngine(fire_response=fake_fire_response)
+    te._uri = "spotify:track:xyz"
+    te._last_position_ms = 5000
     _run(te._fire(trig))
     data = fire_history.load_all()
     assert data["triggers"]["generated:fire_response"]["count"] == 1
+    entry = fire_history.load_show_log()[0]
+    assert entry["bucket"] == "triggers"
+    assert entry["key"] == "generated:fire_response"
+    assert entry["uri"] == "spotify:track:xyz"
+    assert entry["position_ms"] == 5000
+    assert entry["detail"]["trigger_id"] == trig.id
 
 
 def test_trigger_fire_failure_does_not_record():
