@@ -49,13 +49,19 @@ async def fire_scene_by_id(scene_id: str,
     outside the editor's own test-fire — the sequencer's own rolls and
     SPECTRA-native triggers (spectra.services.trigger_engine) both call
     this, so "fire scene X" means exactly one thing everywhere it happens."""
-    from spectra.services import color_sets, scene_compiler, scene_store
+    from spectra.services import color_sets, fire_history, scene_compiler, scene_store
     scene = scene_store.get_by_id(scene_id)
     if scene is None:
         raise ValueError(f"scene {scene_id} not found in spectra scenes")
     color_set = color_sets.get_by_id(color_set_id) if color_set_id else None
-    return await scene_compiler.fire_scene(scene, intensity=intensity,
-                                           color_set=color_set, dry_run=False)
+    result = await scene_compiler.fire_scene(scene, intensity=intensity,
+                                             color_set=color_set, dry_run=False)
+    fire_history.record_fire("scenes", scene_id, {
+        "scene_name": getattr(scene, "name", scene_id),
+        "color_set_id": color_set_id,
+        "intensity": intensity,
+    })
+    return result
 
 
 class ChangeMomentSource:

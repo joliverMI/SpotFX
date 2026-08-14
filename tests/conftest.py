@@ -190,6 +190,23 @@ def fresh_ledfx_client():
     yield make
 
 
+@pytest.fixture(autouse=True)
+def _isolated_fire_history(tmp_path, monkeypatch):
+    """SPECTRA's fire-history counter/show-log (spectra/services/
+    fire_history.py) is written from inside production choke points
+    (scene_sequencer.fire_scene_by_id, engine.fire_response_event,
+    drift_conductor.apply_set_directly, trigger_engine._fire) with no DI
+    seam of its own — unlike every other SPECTRA store, tests that build
+    those objects with fully injected/in-memory dependencies (e.g.
+    test_trigger_engine.py's real DriftConductor with in-memory room
+    load/save) would otherwise still hit real repo storage. Autouse so no
+    individual test needs to know this store exists.
+    """
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "FIRE_HISTORY_FILE", tmp_path / "fire_history.json")
+    monkeypatch.setattr(scfg, "SHOW_LOG_FILE", tmp_path / "show_log.json")
+
+
 @pytest.fixture()
 def ambient_env(tmp_path, monkeypatch, fresh_ledfx_client):
     """Ambient discovery against the recorded live topology: category file on

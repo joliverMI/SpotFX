@@ -141,6 +141,31 @@ which is actually live before trusting either "transitions only" or the
 sequencer's own status page in isolation — `GET /spectra/api/sequencer/
 status`'s `enabled` field is the tell.
 
+## SPECTRA fire-history: counts + bounded show log
+
+`spectra/services/fire_history.py` hooks the same four production choke
+points named above (`scene_sequencer.fire_scene_by_id`,
+`engine.fire_response_event`, `drift_conductor.apply_set_directly`,
+`trigger_engine`'s own fires) to record durable per-key fire COUNTS
+(`storage/spectra/fire_history.json`, `GET /api/fire-history`) and a
+bounded, entry-capped per-fire SHOW LOG (`storage/spectra/show_log.json`,
+`GET /api/show-log?uri=&since=`) — the foundation for reconstructing a
+played show afterwards. No UI beyond those two endpoints, by design.
+
+Unlike every other SPECTRA store, this one has NO constructor DI seam —
+it's a plain module-level call inside each choke point, not an injectable
+dependency the way `room_load`/`room_save`/`set_position` etc. are. That
+means any test or executable spec that reaches a REAL choke point (not an
+injected fake) writes through to `config.FIRE_HISTORY_FILE`/
+`SHOW_LOG_FILE` whatever they're currently pointed at. `tests/conftest.py`'s
+autouse `_isolated_fire_history` fixture repoints both for every pytest
+test; `scripts/check_triggers.py` / `check_spectra.py` / `check_drift.py`
+each explicitly reassign `scfg.FIRE_HISTORY_FILE`/`SHOW_LOG_FILE` next to
+their other `scfg.*_FILE` repoints (the established per-script isolation
+pattern) — a NEW check script that builds a temp `SPECTRA_STORAGE` and
+reaches any of the four choke points for real needs the same two lines or
+it will write into the real repo's `storage/spectra/`.
+
 ## SPECTRA app (her OWN process since the S3 split)
 
 `spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`), running

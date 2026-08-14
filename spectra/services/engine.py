@@ -77,10 +77,13 @@ async def fire_response_event(event_class: str, intensity: float) -> None:
     crossing by trigger_engine's tick() (it can only be source="authored"),
     so this redundantly-but-harmlessly re-checks that path while being the
     ONLY gate for the bridge's always-classifying path."""
+    from spectra.services import fire_history
     from spectra.services.room_controls import load_room_controls
     if load_room_controls().scene_change_mode != "full":
         return
     await responses.on_event(event_class, intensity)
+    fire_history.record_fire("responses", event_class,
+                             {"event_class": event_class, "intensity": intensity})
     if responses._pending_releases:
         asyncio.create_task(_release_after_hold())
 
