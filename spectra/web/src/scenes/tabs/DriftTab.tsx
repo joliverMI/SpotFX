@@ -7,14 +7,23 @@
 import { useState } from 'react';
 import CurveEditor, { type CurvePoint } from '../../components/CurveEditor';
 import HelpLink from '../../help/HelpLink';
-import { useDriftProfiles, useEngineStatus, useRoomJourney, useSaveDriftProfiles } from '../../queries';
+import {
+  useDriftProfiles, useEngineStatus, useRegistry, useRoomJourney, useSaveDriftProfiles,
+} from '../../queries';
 import { useToast } from '../../components/Toast';
 import type { DriftRef, DriftSpec, SceneV2 } from '../../types';
 
+const MOTIONS: DriftSpec['motion'][] = ['bounce', 'wrap', 'hold'];
+
 function creepText(spec: DriftSpec): string {
+  if (spec.motion === 'hold') {
+    return `wanders on its own at ~${spec.rate_per_min}/min toward ${spec.lo} or ${spec.hi}, then holds there`;
+  }
   const dir = spec.motion === 'bounce' ? 'bouncing between' : 'wrapping through';
   return `wanders on its own at ~${spec.rate_per_min}/min, ${dir} ${spec.lo} and ${spec.hi}`;
 }
+
+type BoundsDraft = { key: string; lo: number; hi: number; motion: DriftSpec['motion'] };
 
 export default function DriftTab({ scene, setScene }: {
   scene: SceneV2;
@@ -24,8 +33,10 @@ export default function DriftTab({ scene, setScene }: {
   const { data: room } = useRoomJourney();
   const { data: profiles = {} } = useDriftProfiles();
   const { data: engine } = useEngineStatus();
+  const { data: registry } = useRegistry();
   const saveProfiles = useSaveDriftProfiles();
   const [draft, setDraft] = useState<{ key: string; points: CurvePoint[] } | null>(null);
+  const [boundsDraft, setBoundsDraft] = useState<BoundsDraft | null>(null);
 
   const engineActive = engine?.conductor.active_scene?.id === scene.id;
   const liveMechs = (param: string) =>
@@ -33,10 +44,12 @@ export default function DriftTab({ scene, setScene }: {
       ? (engine?.conductor.mechanisms ?? []).filter((m) => m.param === param)
       : [];
 
-  const cards: { devIdx: number; entry: string; param: string; ref: DriftRef }[] = [];
+  const cards: { devIdx: number; entry: string; effectType: string; param: string; ref: DriftRef }[] = [];
   scene.devices.forEach((dev, devIdx) => {
     for (const [param, ref] of Object.entries(dev.drift ?? {})) {
-      cards.push({ devIdx, entry: dev.target || 'All Devices', param, ref });
+      cards.push({
+        devIdx, entry: dev.target || 'All Devices', effectType: dev.effect_type, param, ref,
+      });
     }
   });
 
@@ -68,6 +81,42 @@ export default function DriftTab({ scene, setScene }: {
         [profileId]: { ...p, spec: { ...p.spec, inline_points: points, curve_ref: null } },
       });
       toast(`Profile "${p.name}" curve saved — every scene using it follows`, 'success');
+    } catch (e) {
+      toast(`Save failed: ${e}`, 'error');
+    }
+  };
+
+  const setInlineBounds = (devIdx: number, param: string, bounds: BoundsDraft) => {
+    const devices = scene.devices.map((d, i) => {
+      if (i !== devIdx) return d;
+      const ref = d.drift[param];
+      if (!ref?.inline) return d;
+      return {
+        ...d,
+        drift: {
+          ...d.drift,
+          [param]: {
+            ...ref,
+            inline: { ...ref.inline, lo: bounds.lo, hi: bounds.hi, motion: bounds.motion },
+          },
+        },
+      };
+    });
+    setScene({ ...scene, devices });
+  };
+
+  const saveProfileBounds = async (profileId: string, bounds: BoundsDraft) => {
+    const p = profiles[profileId];
+    if (!p) return;
+    try {
+      await saveProfiles.mutateAsync({
+        ...profiles,
+        [profileId]: {
+          ...p,
+          spec: { ...p.spec, lo: bounds.lo, hi: bounds.hi, motion: bounds.motion },
+        },
+      });
+      toast(`Profile "${p.name}" bounds saved — every scene using it follows`, 'success');
     } catch (e) {
       toast(`Save failed: ${e}`, 'error');
     }
@@ -109,7 +158,9 @@ export default function DriftTab({ scene, setScene }: {
       </div>
 
       {/* ── Param drift cards ── */}
-      <div className="card-title">Parameter drift</div>
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        Parameter drift <HelpLink topic="drift-bounds" />
+      </div>
       {!cards.length && (
         <div className="empty-note" style={{ marginBottom: 8 }}>
           No drift declared — every value holds still between fires. Tell the agent what
@@ -117,12 +168,17 @@ export default function DriftTab({ scene, setScene }: {
           a shared profile or describing a one-off.
         </div>
       )}
-      {cards.map(({ devIdx, entry, param, ref }) => {
+      {cards.map(({ devIdx, entry, effectType, param, ref }) => {
         const spec = ref.inline ?? profiles[ref.profile ?? '']?.spec ?? null;
         const profileName = ref.profile ? profiles[ref.profile]?.name ?? ref.profile : null;
         const key = `${devIdx}:${param}`;
         const points = draft?.key === key ? draft.points
           : spec?.inline_points ?? [{ x: 0, y: spec?.lo ?? 0 }, { x: 1, y: spec?.hi ?? 1 }];
+        const paramMeta = registry?.effects[effectType]?.params?.[param];
+        const legalRange = paramMeta?.min !== undefined && paramMeta?.max !== undefined
+          ? { min: paramMeta.min, max: paramMeta.max } : null;
+        const bounds = boundsDraft?.key === key ? boundsDraft
+          : spec?.kind === 'creep' ? { key, lo: spec.lo, hi: spec.hi, motion: spec.motion } : null;
         return (
           <div key={key} style={{ background: 'var(--surface2)', padding: 10, borderRadius: 'var(--radius)', marginBottom: 8, fontSize: 13 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -139,8 +195,48 @@ export default function DriftTab({ scene, setScene }: {
                 </span>
               ))}
             </div>
-            {spec?.kind === 'creep' && (
-              <div style={{ color: 'var(--text-muted)', marginTop: 4 }}>{creepText(spec)}.</div>
+            {spec?.kind === 'creep' && bounds && (
+              <div style={{ marginTop: 4 }}>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 4 }}>{creepText(spec)}.</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    lo{' '}
+                    <input type="number" step="any" value={bounds.lo} style={{ width: 64 }}
+                      onChange={(e) => setBoundsDraft({ ...bounds, lo: Number(e.target.value) })} />
+                  </label>
+                  <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    hi{' '}
+                    <input type="number" step="any" value={bounds.hi} style={{ width: 64 }}
+                      onChange={(e) => setBoundsDraft({ ...bounds, hi: Number(e.target.value) })} />
+                  </label>
+                  <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    boundary{' '}
+                    <select value={bounds.motion}
+                      onChange={(e) => setBoundsDraft({ ...bounds, motion: e.target.value as DriftSpec['motion'] })}>
+                      {MOTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </label>
+                  {legalRange && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title="The effect's own declared legal range for this param — bounds outside it are clamped in automatically">
+                      legal range: {legalRange.min}–{legalRange.max}
+                    </span>
+                  )}
+                  {boundsDraft?.key === key && (
+                    <span style={{ display: 'inline-flex', gap: 8 }}>
+                      <button className="primary" style={{ fontSize: 11, padding: '2px 10px' }}
+                        disabled={boundsDraft.lo >= boundsDraft.hi}
+                        onClick={() => {
+                          if (ref.inline) setInlineBounds(devIdx, param, boundsDraft);
+                          else if (ref.profile) void saveProfileBounds(ref.profile, boundsDraft);
+                          setBoundsDraft(null);
+                        }}>
+                        Save bounds
+                      </button>
+                      <button style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setBoundsDraft(null)}>Discard</button>
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
             {spec?.kind === 'follow' && (
               <div style={{ marginTop: 4 }}>
@@ -177,7 +273,11 @@ export default function DriftTab({ scene, setScene }: {
         surges re-baselining drift, the journey walking the room's wheel. It runs
         DARK (computed and recorded, no light writes) until the S3 handover; the
         Engine strip on this page shows it live. Cards are adjusted by telling the
-        agent — the curve above is the one graphical piece.
+        agent (naming a profile, describing a follow curve); a creep's lo/hi/boundary
+        are the one exception — edit them directly above, since that's what the
+        lights will actually look like. Bounds are always clamped into the param's
+        own legal range (shown alongside), so a drift can never wander a light
+        past what the effect calls usable.
       </p>
     </div>
   );

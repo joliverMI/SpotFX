@@ -66,17 +66,23 @@ class DriftSpec(BaseModel):
     """One drift mechanism — the named-profile body.
 
     creep: bounded autonomous wander — next target = position + rate·leg,
-    reflected ("bounce") or wrapped at [lo, hi].
+    reflected ("bounce"), wrapped ("wrap"), or parked at the bound it
+    reaches and left there ("hold") at [lo, hi]. lo/hi are also intersected
+    against the target param's own registered legal range at drift-conductor
+    resolve time (fx.device_model — see drift_conductor._registry_range) so
+    a wide or default-ish spec can never wander a parameter past what the
+    effect itself declares usable — the class-wide degeneracy floor/ceiling.
     follow: the value tracks the music's energy arc through a drawn
     intensity→value curve (points share the sequencer CurvePoint shape;
-    y IS the parameter value here, not a likelihood), gliding over slew_s.
+    y IS the parameter value here, not a likelihood), gliding over slew_s —
+    the resolved target is intersected against the same registered range.
     """
     kind: Literal["creep", "follow"]
     # creep
     rate_per_min: float = 0.0
     lo: float = 0.0
     hi: float = 1.0
-    motion: Literal["bounce", "wrap"] = "bounce"
+    motion: Literal["bounce", "wrap", "hold"] = "bounce"
     # follow — exactly one of curve_ref (named sequencer CurveProfile id) /
     # inline_points may be set; slew_s is the re-assert glide time.
     curve_ref: Optional[str] = None

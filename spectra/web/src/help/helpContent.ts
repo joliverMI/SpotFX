@@ -114,11 +114,20 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'tab-drift',
         title: 'Drift tab — declarations the engine runs',
-        keywords: 'creep follow wander slow evolution profile inline live legs',
+        keywords: 'creep follow wander slow evolution profile inline live legs bounds',
         body: [
-          'Drift cards state what evolves on its own while the scene holds: creep (bounded wander between lo–hi, bouncing or wrapping) and follow (the value tracks the music\'s energy arc through a drawn intensity→value curve). Declarations use NAMED profiles — one edit retunes every scene using it — with inline one-offs as the escape hatch. Cards are adjusted by telling the agent; the one graphical piece is a follow curve\'s shape, drawn right on the card.',
+          'Drift cards state what evolves on its own while the scene holds: creep (bounded wander between lo–hi, bouncing/wrapping/holding) and follow (the value tracks the music\'s energy arc through a drawn intensity→value curve). Declarations use NAMED profiles — one edit retunes every scene using it — with inline one-offs as the escape hatch. Cards are adjusted by telling the agent, except a creep\'s bounds — see "Creep bounds", below — which are graphical, alongside a follow curve\'s shape.',
           'Since S2 the engine EXECUTES these declarations: when this scene is the engine\'s active scene, each card shows a live ● chip per virtual with the creep\'s current wander position. See the Evolution engine section for how legs run (dark until S3).',
           'The colour journey card also lives here — see the colour journey section.',
+        ],
+      },
+      {
+        id: 'drift-bounds',
+        title: 'Creep bounds — lo, hi, and boundary behaviour',
+        keywords: 'lo hi bounce wrap hold floor ceiling legal range too small shrink degenerate visible',
+        body: [
+          'Every creep card carries an editable lo/hi/boundary row: type the low and high ends of the wander directly, and pick what happens at an edge — bounce (reflect back), wrap (fold through to the other end), or hold (park there and stop, rather than oscillate). Edits save to whichever the card names — an inline one-off saves to the scene, a named profile saves to the profile (every other scene using it follows).',
+          'The row shows the param\'s own "legal range" alongside — the effect\'s own declared min/max for that param (the same numbers its other editors use). Whatever lo/hi you set, the engine always clamps the actual wander into that legal range before it ever reaches a light: a creep or follow declaration can shrink a value, but it can never wander it past what the effect itself calls usable — invisible, zero, black, or silent is not a reachable state. This is why Orbits\' particle size can no longer drift down to nothing: its own effect declares a floor, and every drift on it now respects that floor automatically, on top of whatever bounds you choose here.',
         ],
       },
       {

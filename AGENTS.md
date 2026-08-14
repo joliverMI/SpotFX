@@ -121,6 +121,23 @@ fx/ tween engine. S3 goes live by swapping the executor — nothing else
 changes. Specs: `scripts/check_drift.py` (conductor + journey),
 check_spectra.py (responses/bridge/Mid Group),
 `tests/test_spectra_engine.py` (frame-level proof on the dummy device).
+Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a drift declaration
+is authored param-agnostic (a named profile is reused across effects), so
+its lo/hi can be legal-looking but wrong for the param it lands on — e.g. a
+[0,1]-ish default wandering Orbits' `blob_size` (legal [0.5, 6.0]), silently
+rejected below 0.5 by the effect's own config schema while the conductor's
+own position model kept wandering, stuck near the floor. `drift_conductor.
+_registry_range()` intersects every creep's lo/hi (at Mechanism construction)
+and every follow's resolved target (every leg) against the param's own
+range in the shared `fx.device_model` registry (`config/effect_params.json`)
+— a spec entirely outside that range falls back to the full registered
+range rather than a zero-span window. `DriftSpec.motion` also carries
+`"hold"` (parks at whichever bound it reaches and stops, no bounce-back)
+alongside bounce/wrap. The Scenes → Drift tab's creep cards expose lo/hi/
+motion directly (the one non-agent-edited piece of a drift card besides a
+follow curve) — product judgement: limits/boundary are agent-tellable by
+nature, but they're what the lights visibly do, so they get a compact
+editable row instead. Spec: `scripts/check_drift.py`.
 
 SPECTRA frontend notes: `/spectra/timeline` is the SpotFX Profile
 Builder ported whole (`spectra/web/src/timeline/`, reads/writes the

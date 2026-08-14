@@ -47,7 +47,7 @@ export interface DriftSpec {
   rate_per_min: number;
   lo: number;
   hi: number;
-  motion: 'bounce' | 'wrap';
+  motion: 'bounce' | 'wrap' | 'hold';
   curve_ref: string | null;
   inline_points: CurveMapPoint[] | null;
   slew_s: number;

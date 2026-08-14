@@ -54,7 +54,7 @@ from spectra.models.scene import (ColorJourneySpec, CurveMapPoint, DriftRef,
                                   SceneDeviceConfig, SceneV2)
 from spectra.services import color_journey, color_rotate, scene_compiler
 from spectra.services.binding_resolver import FireContext
-from spectra.services.drift_conductor import DriftConductor
+from spectra.services.drift_conductor import DriftConductor, Mechanism
 from spectra.services.fx_executor import RecordingExecutor
 
 run = asyncio.run
@@ -195,6 +195,99 @@ wrap_mech = conductor.mechanisms[0]
 run(conductor.tick())
 check(abs(wrap_mech.position - 0.05) < 1e-9,
       "creep wrap folds through hi back to lo (0.75 + 0.1 → 0.05)")
+
+# ── degeneracy floor/ceiling: Orbits' particle size never shrinks past its
+# own registered legal range, however the drift spec was authored ──────────
+# (owner defect fix, 2026-08-14) orbits.blob_size is REAL registry data —
+# config/effect_params.json declares min=0.5, max=6.0 (fx/effects/orbits.py's
+# own CONFIG_SCHEMA Range). A creep spec shaped like DriftSpec's bare
+# pydantic defaults (lo=0.0, hi=1.0) — exactly what an under-specified
+# "put a slow wander on it" declaration would carry — must never be allowed
+# to wander the light below 0.5: every glide below that line is silently
+# rejected by the effect's own config schema (fx.effects._apply_config logs
+# and no-ops), so the conductor's position model would drift out of step
+# with the real, stuck light. The mechanism must clamp itself, not rely on
+# the far side to reject.
+size_scene = SceneV2(name="Orbits Size", devices=[SceneDeviceConfig(
+    target_kind="virtual", target="v-m1", effect_type="orbits",
+    params={"blob_size": 1.0},
+    drift={"blob_size": DriftRef(inline=DriftSpec(
+        kind="creep", rate_per_min=0.3, lo=0.0, hi=1.0, motion="bounce"))})])
+fire(size_scene)
+size_mech = conductor.mechanisms[0]
+check(abs(size_mech.eff_lo - 0.5) < 1e-9 and abs(size_mech.eff_hi - 1.0) < 1e-9,
+      "orbits.blob_size creep: [0.0, 1.0] intersects the registered "
+      "[0.5, 6.0] legal range down to [0.5, 1.0] — never the bare spec's 0.0")
+seen = []
+for _ in range(10):
+    run(conductor.tick())
+    seen.append(round(size_mech.position, 6))
+check(all(0.5 <= p <= 1.0 for p in seen) and min(seen) == 0.5,
+      f"orbits.blob_size wanders down to its registered floor and no "
+      f"further — never invisible, never illegal ({seen})")
+
+# follow: the default identity curve (no curve_ref/inline_points) glides
+# toward y = intensity, so silent quiet passages (intensity 0) would target
+# the bare 0.0 without the same registry clamp — one glide, not a wander,
+# so it must clamp the resolved target every leg.
+follow_scene = SceneV2(name="Orbits Size Follow", devices=[SceneDeviceConfig(
+    target_kind="virtual", target="v-m1", effect_type="orbits",
+    params={"blob_size": 2.0},
+    drift={"blob_size": DriftRef(inline=DriftSpec(
+        kind="follow", slew_s=4.0))})])
+fire(follow_scene)
+intensity_box[0] = 0.0
+executor.writes.clear()
+run(conductor.tick())
+follow_write = next(w for w in executor.writes if "blob_size" in w["params"])
+check(follow_write["params"]["blob_size"] == 0.5,
+      "orbits.blob_size follow: the identity curve's 0.0 target at silence "
+      "clamps to the registered floor 0.5, never the raw 0.0")
+intensity_box[0] = None
+
+# hold: parks at whichever bound it reaches and stays — never oscillates
+# back into a state a bounce/wrap motion would revisit.
+hold_scene = SceneV2(name="Orbits Size Hold", devices=[SceneDeviceConfig(
+    target_kind="virtual", target="v-m1", effect_type="orbits",
+    params={"blob_size": 0.9},
+    drift={"blob_size": DriftRef(inline=DriftSpec(
+        kind="creep", rate_per_min=60.0, lo=0.5, hi=1.5, motion="hold"))})])
+fire(hold_scene)
+hold_mech = conductor.mechanisms[0]
+for _ in range(3):
+    run(conductor.tick())
+check(hold_mech.position == 1.5 and hold_mech.direction == 0,
+      "creep hold: parks at the bound it reaches and stops (no bounce back)")
+run(conductor.tick())
+check(hold_mech.position == 1.5,
+      "creep hold: stays parked on later legs")
+
+# a spec authored entirely outside the registered range (e.g. an agent
+# guessing units wrong) falls back to the FULL registered range rather than
+# producing an empty/zero-span window.
+bad_scene = SceneV2(name="Orbits Size Bad", devices=[SceneDeviceConfig(
+    target_kind="virtual", target="v-m1", effect_type="orbits",
+    params={"blob_size": 1.0},
+    drift={"blob_size": DriftRef(inline=DriftSpec(
+        kind="creep", rate_per_min=1.0, lo=10.0, hi=20.0))})])
+fire(bad_scene)
+bad_mech = conductor.mechanisms[0]
+check(abs(bad_mech.eff_lo - 0.5) < 1e-9 and abs(bad_mech.eff_hi - 6.0) < 1e-9,
+      "a spec entirely outside the registered range falls back to the "
+      "FULL registered range, never a zero-span window")
+
+# an unregistered effect/param is untouched — the floor is additive, never
+# a new restriction where none existed.
+dummy_mech = Mechanism("v-x", "made_up_param",
+                       DriftSpec(kind="creep", lo=-5.0, hi=-1.0), -3.0,
+                       effect_type="not-a-real-effect")
+check(dummy_mech.eff_lo == -5.0 and dummy_mech.eff_hi == -1.0,
+      "an unregistered effect/param is left exactly as authored")
+
+# restore the wrap scene's live mechanism for the carry checks below.
+fire(wrap_scene)
+wrap_mech = conductor.mechanisms[0]
+run(conductor.tick())
 
 # ── carry: a surge moves the wander position; bounds still clamp ─────────────
 conductor.on_surge({("v-m1", "spin"): 0.3})
