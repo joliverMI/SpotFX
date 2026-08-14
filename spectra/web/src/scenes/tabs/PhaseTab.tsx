@@ -6,6 +6,7 @@ import type { SceneV2 } from '../../types';
 
 export default function PhaseTab({ scene }: { scene: SceneV2 }) {
   const c = scene.choreography;
+  const pb = scene.phase_blend;
   return (
     <div>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -22,6 +23,22 @@ export default function PhaseTab({ scene }: { scene: SceneV2 }) {
         ) : (
           <>Choreography is <b>off</b> — this scene lands as an instant switch.</>
         )}
+      </div>
+      <div
+        className="card-title"
+        style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 14 }}
+      >
+        Override Blend <HelpLink topic="override-blend-spectra" />
+      </div>
+      <div style={{ background: 'var(--surface2)', padding: 12, borderRadius: 'var(--radius)', fontSize: 13, lineHeight: 1.6 }}>
+        Charge build ramp:{' '}
+        <b>{pb.charge_ramp_ms != null ? `${pb.charge_ramp_ms} ms (overridden)` : '4000 ms (default)'}</b>
+        <br />
+        Lull suspend ramp:{' '}
+        <b>{pb.lull_ramp_ms != null ? `${pb.lull_ramp_ms} ms (overridden)` : '2500 ms (default)'}</b>
+        <br />
+        Scene entry ramp:{' '}
+        <b>{scene.entry_ramp_ms > 0 ? `${scene.entry_ramp_ms} ms blend-in` : 'instant (jump)'}</b>
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
         Adjusted by telling the agent (durations and modes are numbers, not shapes —

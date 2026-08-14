@@ -102,6 +102,23 @@ export default function SummaryTab({ scene, setScene, goTo }: {
             : <span className="empty-note">off — instant switch</span>}
         </Card>
 
+        <Card title="Override Blend" onClick={() => goTo('Phase Choreography')}>
+          {(scene.phase_blend.charge_ramp_ms == null
+            && scene.phase_blend.lull_ramp_ms == null
+            && scene.entry_ramp_ms === 0) ? (
+            <span className="empty-note">default ramps, instant entry</span>
+          ) : (
+            <span>
+              {scene.phase_blend.charge_ramp_ms != null && `charge ${scene.phase_blend.charge_ramp_ms}ms`}
+              {scene.phase_blend.charge_ramp_ms != null && scene.phase_blend.lull_ramp_ms != null && ' · '}
+              {scene.phase_blend.lull_ramp_ms != null && `lull ${scene.phase_blend.lull_ramp_ms}ms`}
+              {(scene.phase_blend.charge_ramp_ms != null || scene.phase_blend.lull_ramp_ms != null)
+                && scene.entry_ramp_ms > 0 && ' · '}
+              {scene.entry_ramp_ms > 0 && `entry blend ${scene.entry_ramp_ms}ms`}
+            </span>
+          )}
+        </Card>
+
         <Card title="Sequencing" onClick={() => goTo('Sequencing')}>
           {!entry && <span className="empty-note">not sequenced</span>}
           {entry && (

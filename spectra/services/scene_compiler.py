@@ -207,14 +207,29 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     writes are the test-fire display: dry and live runs share every step up
     to the seam — a test-fire at a chosen intensity IS the honest window
     into what that intensity selects. With no explicit color_set the scene
-    wears the room's active set."""
+    wears the room's active set. Live writes carry scene.entry_ramp_ms as
+    the OVERRIDE BLEND entry-ramp equivalent (0 = instant, unchanged);
+    when a scene doesn't author its own, the room's global_transition_ms
+    (the ledfx_global_transition equivalent) is the fallback ramp."""
     if color_set is None:
         color_set = room_active_set()
     ctx = FireContext(intensity, rng=rng)
     resolved = resolve_scene(scene, ctx)
     writes = compile_scene(resolved, color_set)
     if not dry_run:
-        await fx_seam.apply_writes(writes)
+        # The brightness-multiplier room control scales the ACTUAL bytes
+        # sent to hardware only — never the returned/baselined writes, so
+        # dry-run and live previews stay byte-identical (the honest-window
+        # invariant) and the engine's carried baseline stays at the
+        # authored level (the multiplier only ever touches final output).
+        from spectra.services import room_controls
+        room = room_controls.load_room_controls()
+        multiplier = room.brightness_multiplier
+        live_writes = writes if multiplier == 1.0 else [
+            {**w, "config": room_controls.apply_brightness(w["config"], multiplier)}
+            for w in writes]
+        entry_ramp_ms = scene.entry_ramp_ms or room.global_transition_ms
+        await fx_seam.apply_writes(live_writes, transition_ms=entry_ramp_ms)
         logger.info("SPECTRA scene '%s' fired at intensity %.2f: %d virtual "
                     "writes%s", scene.name, intensity, len(writes),
                     f" (colour set '{color_set.name}')" if color_set else "")

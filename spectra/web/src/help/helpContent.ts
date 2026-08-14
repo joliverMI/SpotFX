@@ -153,7 +153,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         id: 'tab-phase',
         title: 'Phase Choreography tab',
         keywords: 'transition crossfade anchor descriptive',
-        body: ['Descriptive card: transition length, mode, and the anchor fraction where the payoff lands. Adjusted by telling the agent — durations and modes are numbers, not shapes, so they get no sliders here.'],
+        body: [
+          'Descriptive card: transition length, mode, and the anchor fraction where the payoff lands. Adjusted by telling the agent — durations and modes are numbers, not shapes, so they get no sliders here.',
+          'Below it: the Override Blend equivalent — see "Override Blend (SPECTRA)".',
+        ],
+      },
+      {
+        id: 'override-blend-spectra',
+        title: 'Override Blend (SPECTRA)',
+        keywords: 'blend ramp stretch scale slow fast transition phase charge lull entry jump crossfade',
+        body: [
+          'SPECTRA\'s equivalent of the legacy Override Blend flag (see "Override Blend" under the ported timeline help for the original). A read-only study of the live library (269 legacy blend triggers) found real usage is overwhelmingly Charge/Lull phase builds (265 of 269) with a thin slice on scene selection — so the equivalent has two facets instead of one dynamic rescale.',
+          'Charge/Lull ramp override: a scene may set its own charge and/or lull build ramp (phase_blend.charge_ramp_ms / lull_ramp_ms) instead of the fixed 4000 ms / 2500 ms default — drop never overrides, it always stays the 400 ms snap. Legacy dynamically stretched the ramp to land exactly at the NEXT trigger; SPECTRA\'s S2 engine reacts to bridge events with no forward schedule of what fires next (that needs per-song trigger authoring, a separate large gap), so this authors the buildable half: a configurable ramp per scene rather than a dynamically computed one.',
+          'Scene-entry blend: a scene\'s entry_ramp_ms (0 by default = instant) blends its compiled writes in over that many ms when it fires live, hue-arc for colour — the same tween shape flare colour jumps use, and the mechanism the colour journey\'s "no snap" custody transfer has always promised. It only blends params on a virtual whose already-active effect matches the entry; a genuine effect-type switch still recreates instantly (a boundary of the underlying render engine, not new here).',
+          'Both are agent-tellable — no sliders, same interface-split rule as the rest of this tab.',
+        ],
       },
       {
         id: 'tab-sequencing',
@@ -161,6 +175,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'sequencer curve likelihood dwell affinity genre',
         body: [
           'As shipped in the sequencer increment: the scene\'s likelihood curve (named profile / inline / flat / not sequenced) is graphical; dwell weight, genre multipliers, and affinity render read-only — adjust them by telling the agent. The status strip shows the engine\'s state. The S2 bridge now feeds it song transitions, section-energy intensity, genre buckets, and deferrals — but the sequencer stays dark until its own enabled switch is flipped (ask the agent).',
+          'This curve is also the equivalent of the legacy Energy Gate / Energy Tilt on random options — see "Energy gates/tilt → curves" for the equivalence.',
+        ],
+      },
+      {
+        id: 'energy-gates-equivalence',
+        title: 'Energy gates/tilt → curves (equivalence, not a new feature)',
+        keywords: 'energy gate tilt floor ceiling scale random option veto superseded',
+        body: [
+          'Legacy RandomOptions carried an energy gate (floor/ceiling: zero weight outside the window) and an energy tilt (scale: a linear lean toward the low or high end inside it). SPECTRA\'s selector curves express exactly this, byte-for-byte: a curve of zero outside [floor, ceiling] and a straight line from 1−scale to 1+scale inside it reproduces the legacy gate under the kernel\'s own evaluator — proven in scripts/check_sequencer.py (gate_points/tilt checks against the exact legacy formula, trigger_engine.py:2338) — and the kernel treats a zero-scoring curve as a HARD VETO at runtime (selection_kernel.py), not merely a seeding-time translation.',
+          'No SPECTRA-native "energy gate" control was built: the curve editor already covers the identical shape, and the real library never exercised the legacy control worth porting (1 event ever authored it, 0 real fires). scripts/seed_sequencer_from_legacy.py prints the floor/ceiling/scale → curve translation for any legacy RandomOption it finds, for reference.',
         ],
       },
       {
@@ -355,6 +379,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The red "Release to Home Assistant" button, always reachable (top of every page, next to the nav) — press it and SpotFX AND SPECTRA both let go, no confirmation, the press is the consent. Unlike the handover above this is NOT gated by SPECTRA_HANDOVER_ARMED: releasing is always safe to allow, because there is no new writer coming up. The ownership record moves to "released" first, before anything else happens; then BOTH worlds\' devices are cleaned up EVERY press, regardless of which one the record said owned — a rogue writer the record didn\'t know about (e.g. the external LedFX service started behind its back) still gets addressed. Each device is told to let go explicitly rather than just falling silent: WLED devices get the JSON API\'s {"live": false} so they drop out of realtime now instead of waiting for their timeout to lapse; Hue\'s entertainment/streaming session is stopped so the bridge frees the group; the external LedFX service\'s active virtuals are deactivated over its own API, reached directly (not through SpotFX\'s app) so this always works even after the record moves. A released room shows the banner below until someone takes it back.',
           'Release VERIFIES, it doesn\'t just command: after cleanup it reads real state back — is the SPECTRA stack actually down, are the external LedFX virtuals actually inactive (or the service not even running). If everything checks out, the button and banner behave as above. If a device could not be confirmed dark, a loud toast says so ("these lights may still be lit") and lists what failed — the room record still shows released (that part always succeeds), but treat an unverified release as needing a manual check of the flagged device.',
           'The way back — "Take back (SPECTRA)" on the banner — is the SAME guarded handover described above: readiness-gated, and still requires SPECTRA_HANDOVER_ARMED. Releasing is instant and unconditional; coming back is deliberate, same as any other handover.',
+        ],
+      },
+      {
+        id: 'room-controls-bar',
+        title: 'Room controls — brightness, ambient, transition pace',
+        keywords: 'brightness multiplier dim undim ambient color transition pace global room bar dimmer',
+        body: [
+          'The compact strip above the release button, on every page — SPECTRA-native equivalents of three legacy room-wide actions (spectra-kept-equivalents).',
+          'Brightness: a 0–100% room dimmer (legacy Brightness Multiplier action). It scales brightness/background_brightness UNIFORMLY at the write seams — every drift glide, every surge jump, and every scene fire\'s output — never the authored scene values or the engine\'s own carried baseline, so turning it back to 100% always restores exactly what was authored.',
+          'Ambient: on/off + a colour swatch (legacy ledfx_ambient / ledfx_ambient_color actions). State only today — it records the switch on the room-control surface instead of a spot-effects bridge flag; the full Ambient/Dinner-Party room-MODES behaviour (freezing devices, the Hue white takeover) is a separate, later build.',
+          'Transition: the room\'s default entry-blend ramp in ms (legacy ledfx_global_transition action) — the fallback a scene fire uses when that scene doesn\'t author its own entry ramp (Scenes → Phase Choreography → Override Blend, entry_ramp_ms). 0 (the default) keeps every undeclared scene an instant switch, unchanged from today.',
         ],
       },
     ],

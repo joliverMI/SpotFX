@@ -51,15 +51,20 @@ class RoomReleased(RuntimeError):
     lands."""
 
 
-async def apply_writes(writes: list[dict]) -> None:
+async def apply_writes(writes: list[dict], *, transition_ms: int = 0) -> None:
     """Send compiled writes as effect switches over the transport the
     ownership record grants. Raises on the first hard failure — the API
-    surfaces it to the owner instead of half-applying a scene silently."""
+    surfaces it to the owner instead of half-applying a scene silently.
+
+    transition_ms > 0 is the OVERRIDE BLEND entry-ramp equivalent
+    (SceneV2.entry_ramp_ms): writes blend in (hue-arc for colour) instead of
+    landing as an instant switch. 0 (the default) is today's unchanged
+    instant-jump behaviour."""
     owner = light_ownership.load().owner
     if owner == light_ownership.SPECTRA:
-        await _apply_via_facade(writes)
+        await _apply_via_facade(writes, transition_ms)
     elif owner == light_ownership.SPOT_EFFECTS:
-        await _apply_via_http(writes)
+        await _apply_via_http(writes, transition_ms)
     elif owner == light_ownership.RELEASED:
         raise RoomReleased(
             "room released to Home Assistant — fires are refused until the "
@@ -69,30 +74,39 @@ async def apply_writes(writes: list[dict]) -> None:
             "light handover in progress — fires are refused until it lands")
 
 
-def _body(w: dict) -> dict:
-    return {
+def _body(w: dict, transition_ms: int = 0) -> dict:
+    body = {
         "type": w["effect_type"],
         "config": device_model.round_int_params(w["effect_type"], w["config"]),
     }
+    if transition_ms > 0:
+        # Same tween shape fx_executor uses for glides — hue-arc blend,
+        # never through grey, never a colour-recreation crossfade.
+        body["transition_ms"] = transition_ms
+        body["transition_blend"] = "hue"
+        body["easing"] = "linear"
+    return body
 
 
-async def _apply_via_http(writes: list[dict]) -> None:
+async def _apply_via_http(writes: list[dict], transition_ms: int = 0) -> None:
     async with httpx.AsyncClient(base_url=config.ledfx_url(),
                                  timeout=REQUEST_DEADLINE_S) as client:
         for w in writes:
             async with _slots:
                 resp = await client.put(
-                    f"/api/virtuals/{w['virtual_id']}/effects", json=_body(w))
+                    f"/api/virtuals/{w['virtual_id']}/effects",
+                    json=_body(w, transition_ms))
             resp.raise_for_status()
     logger.info("fx seam: %d writes applied via %s", len(writes),
                 config.ledfx_url())
 
 
-async def _apply_via_facade(writes: list[dict]) -> None:
+async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
     from fx import facade
     for w in writes:
         resp = await facade.handle(
-            "PUT", f"/api/virtuals/{w['virtual_id']}/effects", json=_body(w))
+            "PUT", f"/api/virtuals/{w['virtual_id']}/effects",
+            json=_body(w, transition_ms))
         resp.raise_for_status()
     logger.info("fx seam: %d writes applied in-process (spectra owns)",
                 len(writes))

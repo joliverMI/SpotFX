@@ -4,7 +4,7 @@ import { apiDel, apiGet, apiPost, apiPut, spotfxGet, spotfxPost } from './api/cl
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   ColorWheelPosition, DriftProfile, EngineStatus, FireResult, Registry,
-  RoomColorState, SceneV2, SpotColorSetCard,
+  RoomColorState, RoomControlState, SceneV2, SpotColorSetCard,
 } from './types';
 
 /* ── scenes ── */
@@ -235,6 +235,24 @@ export function useSaveDriftProfiles() {
   return useMutation({
     mutationFn: (profiles: Record<string, DriftProfile>) => apiPut('/drift-profiles', profiles),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-drift-profiles'] }),
+  });
+}
+
+/* ── room controls (brightness multiplier / ambient / global transition) ── */
+
+export function useRoomControls() {
+  return useQuery({
+    queryKey: ['spectra-room-controls'],
+    queryFn: () => apiGet<RoomControlState>('/room-controls'),
+    staleTime: 10_000,
+  });
+}
+
+export function useSaveRoomControls() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (state: RoomControlState) => apiPut('/room-controls', state),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-room-controls'] }),
   });
 }
 

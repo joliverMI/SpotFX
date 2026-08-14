@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Callable
+
+from spectra.services import room_controls
 
 JUMP_MS = 1            # a 1 ms tween lands next frame == an instant jump
 HUE_BLEND = "hue"      # colours travel the wheel, never through grey
@@ -42,14 +44,27 @@ class RecordingExecutor:
 
     mode = "recording"
 
-    def __init__(self, clock=time.monotonic) -> None:
+    def __init__(self, clock=time.monotonic, *,
+                room_controls_load: Callable[[], room_controls.RoomControlState]
+                    | None = None) -> None:
         self._clock = clock
         self._seq = 0
+        self._room_controls_load = (room_controls_load
+                                    or room_controls.load_room_controls)
         self.writes: deque[ExecutorWrite] = deque(maxlen=WRITE_LOG_LIMIT)
         # Modeled value per virtual/param: jumps land immediately, glides are
         # modeled at their target (legs land by the next leg — display truth,
         # not render truth, which only exists behind the facade).
         self.current: dict[str, dict[str, Any]] = {}
+
+    def _room_scaled(self, params: dict[str, Any]) -> dict[str, Any]:
+        """OVERRIDE-BLEND-adjacent room control: the brightness-multiplier
+        equivalent (room_controls.RoomControlState.brightness_multiplier)
+        scales brightness/background_brightness UNIFORMLY at this one write
+        seam — never the caller's own baseline bookkeeping, which stays at
+        the authored (unscaled) level."""
+        return room_controls.apply_brightness(
+            params, self._room_controls_load().brightness_multiplier)
 
     def _record(self, kind: str, virtual_id: str, effect_type: str,
                 params: dict[str, Any], duration_ms: int) -> None:
@@ -63,12 +78,14 @@ class RecordingExecutor:
     async def glide(self, virtual_id: str, effect_type: str,
                     params: dict[str, Any], duration_ms: int) -> None:
         if params:
-            self._record("glide", virtual_id, effect_type, params, duration_ms)
+            self._record("glide", virtual_id, effect_type,
+                         self._room_scaled(params), duration_ms)
 
     async def jump(self, virtual_id: str, effect_type: str,
                    params: dict[str, Any]) -> None:
         if params:
-            self._record("jump", virtual_id, effect_type, params, JUMP_MS)
+            self._record("jump", virtual_id, effect_type,
+                         self._room_scaled(params), JUMP_MS)
 
 
 class FacadeExecutor(RecordingExecutor):
@@ -93,6 +110,7 @@ class FacadeExecutor(RecordingExecutor):
                     params: dict[str, Any], duration_ms: int) -> None:
         if not params:
             return
+        params = self._room_scaled(params)
         await self._put(virtual_id, effect_type, params, duration_ms)
         self._record("glide", virtual_id, effect_type, params, duration_ms)
 
@@ -100,5 +118,6 @@ class FacadeExecutor(RecordingExecutor):
                    params: dict[str, Any]) -> None:
         if not params:
             return
+        params = self._room_scaled(params)
         await self._put(virtual_id, effect_type, params, JUMP_MS)
         self._record("jump", virtual_id, effect_type, params, JUMP_MS)

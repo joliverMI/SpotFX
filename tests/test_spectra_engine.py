@@ -64,12 +64,14 @@ async def _host(tmp_path, sub: str):
     return host, host.virtuals.get(VID)
 
 
-def _engine(clock, *, intensity=1.0, room=None, set_positions=None):
+def _engine(clock, *, intensity=1.0, room=None, set_positions=None,
+           brightness_multiplier=1.0):
     """Conductor + response engine on the FacadeExecutor with an in-memory
     room — the exact production wiring with the executor swapped, which is
     the whole S3 delta."""
     from spectra.models.sequencer import SequencerConfig, SelectorEntry
     from spectra.services import color_journey as cj
+    from spectra.services import room_controls as rc
     from spectra.services.color_sets import ColorSetCard
     from spectra.services.drift_conductor import DriftConductor
     from spectra.services.fx_executor import FacadeExecutor
@@ -80,7 +82,10 @@ def _engine(clock, *, intensity=1.0, room=None, set_positions=None):
     cards = [ColorSetCard(id=sid, name=sid, entries=[]) for sid in positions]
     seq_config = SequencerConfig(color_set_entries={
         sid: SelectorEntry() for sid in positions if sid != "current"})
-    executor = FacadeExecutor(clock=lambda: clock.now)
+    executor = FacadeExecutor(
+        clock=lambda: clock.now,
+        room_controls_load=lambda: rc.RoomControlState(
+            brightness_multiplier=brightness_multiplier))
     conductor = DriftConductor(
         executor=executor, clock=lambda: clock.now, leg_s=20.0,
         intensity=lambda: intensity,
@@ -396,6 +401,41 @@ def test_charge_lull_drop_drive_the_real_phase_machinery(tmp_path):
                 headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
                 assert effect._phase == "none"
                 assert await responder.release_phases() == 0
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_phase_blend_overrides_charge_lull_ramp(tmp_path):
+    """OVERRIDE BLEND equivalent (spectra-kept-equivalents): a scene's
+    phase_blend.charge_ramp_ms/lull_ramp_ms overrides the fixed class
+    default; drop is never overridden (the snap stays fixed); a scene
+    with no override keeps today's PHASE_RAMP_MS behaviour unchanged."""
+    from spectra.models.scene import PhaseBlend, SceneDeviceConfig, SceneV2
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Blended", phase_blend=PhaseBlend(
+        charge_ramp_ms=9000, lull_ramp_ms=1000),
+        devices=[SceneDeviceConfig(
+            target_kind="virtual", target=VID, effect_type="blackhole",
+            params={})])
+
+    async def main():
+        host, virtual = await _host(tmp_path, "phase-blend")
+        try:
+            with headless.fake_clock() as clock:
+                config: dict = {}
+                headless.attach_effect(host, virtual, "blackhole", config)
+                executor, conductor, responder, room_box = _engine(clock)
+                _fire(conductor, scene, config)
+
+                charge = await responder.on_event("charge", 0.8)
+                assert charge["phase"]["ramp_ms"] == 9000
+                lull = await responder.on_event("lull", 0.5)
+                assert lull["phase"]["ramp_ms"] == 1000
+                drop = await responder.on_event("drop", 0.9)
+                assert drop["phase"]["ramp_ms"] == 400
         finally:
             facade.set_host(None)
             await host.shutdown()
