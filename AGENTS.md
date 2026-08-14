@@ -81,8 +81,10 @@ selection (`effect_steps`: a device entry resolves to a DIFFERENT effect
 at/above ⚡ thresholds, fire-time only, base = fallback — decision:
 star-fold-entry-growth; deploy migration for STAR's strips:
 `scripts/seed_star_strips.py --apply`, NEVER by re-running the v2 seeder),
-a four-class `responses` block (legacy `flare_bands` loads as the flare
-class), drift declarations, and
+NAMED FLARE KINDS (`FlareKind`: drift-jump / momentary spike-and-return /
+permanent re-baseline; bands select+scale them; ALL legacy response fields —
+flare_bands, param_patch, gain, reroll/colour flags — load unchanged as
+auto-named kinds, spec-asserted), drift declarations, and
 the colour journey (room-level walk, per-scene OVERRIDE with custody
 semantics — `spectra/services/color_journey.py` docstring is the binding
 statement). Storage: `storage/spectra/` (own scenes/sequencer/drift/room
@@ -106,9 +108,12 @@ destination fixes its own pace from distance, arrival reselects — the
 binding model is `spectra/services/color_journey.py`'s docstring; a room
 is never set-less: bootstrap + `POST /spectra/api/room-color/apply`, and
 fires with no explicit set wear the room's active set), response engine
-(`scene_response.py` — the four classes execute bands: patch jumps, gain
-envelopes, dice re-rolls, flare colour jump via the shipped selector;
-surges CARRY — baselines move permanently; charge/lull/drop ALSO drive
+(`scene_response.py` — the four classes execute each band's NAMED KINDS
+at their scales: dice re-rolls, param moves, gain envelopes, flare colour
+jump via the shipped selector with an intensity-scaled ramp-in (gentle
+2500 ms → hard 150 ms, `color_jump_ramp_ms`); permanent kinds and drift
+jumps CARRY — baselines move; momentary kinds return exactly to the
+carried-now baseline; charge/lull/drop ALSO drive
 the vendored phase machinery band-or-no-band — per-family grammar in
 `docs/SPECTRA_RESPONSES.md`), read-only bridge
 (`bridge.py` — WS client on spot-effects' /ws + `analysis_reader.py`;

@@ -295,11 +295,17 @@ def test_flare_color_jump_and_journey_resume(tmp_path):
                 record = await responder.on_event("flare", 0.6)
                 assert record["color_jump"]["result"] == "jumped"
                 assert record["color_jump"]["picked_id"] == "set-red"
-                # A JUMP, not a blend: the palette is the pick after ONE
-                # frame (a crossfade would still be travelling at 16 ms).
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
-                assert effect._config["gradient"] == "#ff0000"
-                # The room's wheel moved to the pick...
+                # The RAMP-IN (owner refinement of jump-not-blend): at
+                # intensity 0.6 the colours ease in over 1090 ms — the
+                # tween holds the old palette string mid-blend (hue-arc at
+                # LUT level, no crossfade re-creation) and finalizes on
+                # the pick when the ramp lands.
+                assert record["color_jump"]["ramp_ms"] == 1090
+                headless.render_frames(virtual, 30, clock=clock, dt=1 / 60)
+                assert effect._config["gradient"] == BLUE      # mid-ramp
+                headless.render_frames(virtual, 40, clock=clock, dt=1 / 60)
+                assert effect._config["gradient"] == "#ff0000"  # landed
+                # The room's wheel moved to the pick AT SELECTION...
                 assert room_box[0].wheel_position_deg == pytest.approx(10.0)
                 assert room_box[0].active_set_id == "set-red"
 
@@ -402,7 +408,7 @@ def test_charge_lull_drop_drive_the_real_phase_machinery(tmp_path):
 MID_GROUP_PRIMARY = {
     "Black Hole V2": "blackhole",
     "Orbits V2": "orbits",
-    "Mid Star V2": "radial",
+    "STAR": "radial",   # the owner's rename of Mid Star V2
     "Fireworks V2": "fireworks",
     "Squiggles V2": "squiggles",
     "Dancers V2": "dancer",
@@ -453,17 +459,24 @@ def test_mid_group_scenes_animate_on_the_harness(tmp_path):
                         "virtual_id": VID, "effect_type": effect_type,
                         "config": dict(dev.params), "entry_id": orig.id,
                         "color_mode": orig.color.mode}])
-                    # The top flare band executes its patch on the
-                    # rendering effect — the S2 half of the migration.
+                    # The top flare band executes its patch — now the
+                    # auto-named PERMANENT kind the legacy param_patch
+                    # loads as — on the rendering effect.
                     top = max(scene.responses["flare"].bands,
                               key=lambda b: b.intensity_max)
+                    declared = {k.name: k for k in scene.flare_kinds}
+                    top_patch: dict[str, float] = {}
+                    for kname in top.kinds:
+                        if declared[kname].type == "permanent":
+                            top_patch.update(declared[kname].params)
+                    assert top_patch, name   # the migration named the patch
                     record = await responder.on_event("flare", 0.97)
                     assert record["result"] == "applied", name
                     frames = headless.render_frames(virtual, 15,
                                                     clock=clock, dt=1 / 60)
                     assert len(frames) == 15, name
                     int_keys = effect._integer_param_keys()
-                    for key, value in top.param_patch.items():
+                    for key, value in top_patch.items():
                         if device_model.get_param_meta(effect_type,
                                                        key) is None:
                             continue
@@ -530,6 +543,103 @@ def test_effect_selection_on_the_harness(tmp_path, monkeypatch):
                         assert float(effect._config["bass_decay_rate"]) == \
                             pytest.approx(0.6)
                 virtual._active_effect = None
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 8: NAMED FLARE KINDS — the three semantics, band select + scale ────
+# The owner's item-8 shape on the real render pipeline: a band SELECTS its
+# named kinds and SCALES their strength; MOMENTARY spikes return exactly to
+# the carried baseline (including a creep's current wander position);
+# PERMANENT lands become the baseline drift carries from.
+
+def test_flare_kinds_semantics_on_the_harness(tmp_path):
+    from spectra.models.scene import (DriftRef, DriftSpec, FlareBand,
+                                      FlareKind, ResponseSpec,
+                                      SceneDeviceConfig, SceneV2)
+    _categories_fixture(tmp_path)
+    scene = SceneV2(
+        name="Kinds",
+        devices=[SceneDeviceConfig(
+            target_kind="virtual", target=VID, effect_type="concentric",
+            params={"gradient_scale": 1.0, "power_multiplier": 0.2},
+            brightness=0.5,
+            drift={"power_multiplier": DriftRef(inline=DriftSpec(
+                kind="creep", rate_per_min=0.3, lo=0.0, hi=1.0))})],
+        flare_kinds=[
+            FlareKind(name="Anchor", type="permanent",
+                      params={"power_multiplier": 0.8}),
+            FlareKind(name="Slam", type="momentary",
+                      params={"gradient_scale": 1.8}, gain=1.4),
+            FlareKind(name="Nudge", type="momentary",
+                      params={"power_multiplier": 1.0}),
+        ],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=0.8,
+                      kinds={"Anchor": 1.0}),
+            FlareBand(intensity_min=0.8, intensity_max=1.0,
+                      kinds={"Slam": 1.3, "Nudge": 1.0}),
+        ])})
+
+    async def main():
+        host, virtual = await _host(tmp_path, "kinds")
+        try:
+            with headless.fake_clock() as clock:
+                config = {"gradient_scale": 1.0, "power_multiplier": 0.2,
+                          "brightness": 0.5}
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                config)
+                executor, conductor, responder, _ = _engine(clock)
+                _fire(conductor, scene, config)
+
+                # PERMANENT: the value lands and BECOMES the baseline —
+                # the creep resumes its wander from the landed point.
+                record = await responder.on_event("flare", 0.5)
+                assert record["result"] == "applied"
+                assert [k["name"] for k in record["kinds"]] == ["Anchor"]
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["power_multiplier"] == pytest.approx(0.8)
+                mech = conductor.mechanisms[0]
+                assert mech.position == pytest.approx(0.8)
+                await conductor.tick()
+                leg = [w for w in executor.writes if w["kind"] == "glide"
+                       and "power_multiplier" in w["params"]][-1]
+                # 0.3/min over the 20 s leg = +0.1 FROM THE NEW BASELINE.
+                assert leg["params"]["power_multiplier"] == pytest.approx(0.9)
+                headless.render_frames(virtual, 1200, clock=clock, dt=1 / 60)
+
+                # MOMENTARY at band scale ×1.3: the spike lands at
+                # baseline + (declared − baseline)·1.3, the envelope at
+                # 1 + (gain − 1)·1.3 — and everything RETURNS exactly.
+                record = await responder.on_event("flare", 0.9)
+                assert {k["name"] for k in record["kinds"]} \
+                    == {"Slam", "Nudge"}
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] \
+                    == pytest.approx(1.0 + (1.8 - 1.0) * 1.3)   # 2.04
+                assert effect._config["brightness"] \
+                    == pytest.approx(0.5 * (1.0 + 0.4 * 1.3))   # 0.76
+                # Nudge (scale ×1) spiked the creeping param verbatim.
+                assert effect._config["power_multiplier"] == pytest.approx(1.0)
+
+                # The baselines never moved — momentary is momentary.
+                state = conductor.virtuals[VID]
+                assert state.param_baseline["gradient_scale"] == 1.0
+                assert state.brightness_baseline == 0.5
+
+                # The release returns gradient_scale/brightness to their
+                # baselines and the creeping param to the WANDER POSITION
+                # drift carried it to (0.9), not its fire-time value.
+                assert await responder.flush_releases() == 1
+                headless.render_frames(virtual, 120, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0)
+                assert effect._config["brightness"] == pytest.approx(0.5)
+                assert effect._config["power_multiplier"] \
+                    == pytest.approx(mech.position) \
+                    and mech.position == pytest.approx(0.9)
         finally:
             facade.set_host(None)
             await host.shutdown()

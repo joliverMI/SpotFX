@@ -83,16 +83,31 @@ export interface SceneDeviceConfig {
   drift: Record<string, DriftRef>;
 }
 
+/** A NAMED flare kind (item-8 shape): drift_jump jumps the drift (colour
+ * set via the shipped selector, or a 🎲 re-roll); momentary spikes and
+ * RETURNS; permanent lands and BECOMES the baseline drift carries from. */
+export interface FlareKind {
+  name: string;
+  type: 'drift_jump' | 'momentary' | 'permanent';
+  jump: 'color_set' | 'dice' | null;
+  params: Record<string, number>;
+  gain: number;
+}
+
 export interface FlareBand {
   intensity_min: number;
   intensity_max: number;
+  /** Legacy fields — auto-named into kinds on load; always neutral after. */
   curve: 'linear' | 'ease_in' | 'ease_out' | 'pulse';
   gain: number;
   param_patch: Record<string, number>;
+  /** kind name → scale factor: the band SELECTS AND SCALES the kinds. */
+  kinds: Record<string, number>;
 }
 
 export interface ResponseSpec {
   bands: FlareBand[];
+  /** Legacy per-class flags — auto-named into drift-jump kinds on load. */
   reroll_dice: boolean;
   color_set_jump: boolean;
 }
@@ -120,6 +135,7 @@ export interface SceneV2 {
   name: string;
   labels: string[];
   devices: SceneDeviceConfig[];
+  flare_kinds: FlareKind[];
   responses: Partial<Record<ResponseClass, ResponseSpec>>;
   color_journey: SceneColorJourney;
   choreography: PhaseChoreography;
@@ -226,11 +242,12 @@ export const emptyBand = (min = 0, max = 1): FlareBand => ({
   curve: 'linear',
   gain: 1,
   param_patch: {},
+  kinds: {},
 });
 
 export const emptyResponse = (): ResponseSpec => ({
   bands: [],
-  reroll_dice: true,
+  reroll_dice: false,
   color_set_jump: false,
 });
 
@@ -240,6 +257,7 @@ export function newScene(id: string): SceneV2 {
     name: 'New Scene',
     labels: [],
     devices: [],
+    flare_kinds: [],
     responses: {},
     color_journey: { mode: 'inherit', pace_factor: 1, journey: null },
     choreography: { enabled: false, transition_ms: 800, transition_mode: 'Add', anchor_frac: 0.45 },
@@ -296,7 +314,8 @@ export interface SurgeRecord {
   class: string;
   intensity: number;
   result: string;
-  band?: { intensity_min: number; intensity_max: number; curve: string; gain: number };
+  band?: { intensity_min: number; intensity_max: number };
+  kinds?: { name: string; type: string; scale: number; jump?: string }[];
   color_jump?: { result: string; picked_id?: string; rung?: string };
 }
 

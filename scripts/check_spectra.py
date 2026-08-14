@@ -6,9 +6,12 @@ responses block (legacy flare_bands shim), drift declarations, the colour-journe
 semantics (into/out-of custody transfer), binding resolution + dry-run
 compile through the shared device model, store/API round-trips, the
 sequencer engine on SPECTRA stores, the Mid Group seeder, and the S2
-evolution engine: the response engine (band selection, patch broadcast
+evolution engine: the response engine (NAMED FLARE KINDS — the item-8
+model: drift-jump / momentary / permanent semantics, band select + scale,
+the legacy load-unchanged-as-auto-named-kinds guarantee, name-broadcast
 targeting, gain envelopes, dice re-rolls, the flare colour jump with the
-keep-current rung and the journey resuming from the new point), the
+intensity-scaled ramp-in, keep-current rung and the journey resuming from
+the new point), the
 read-only bridge (event classification, feeds, deferral split, RAW section
 energy), and the seven Mid Group scenes' rebuild-table behaviors.
 
@@ -164,9 +167,12 @@ legacy = {"name": "Legacy", "devices": [],
                           {"intensity_min": 0.5, "intensity_max": 1.0,
                            "param_patch": {"flames": 1.0}}]}
 ls = SceneV2(**legacy)
+ls_kinds = {k.name: k for k in ls.flare_kinds}
 check(list(ls.responses) == ["flare"] and len(ls.responses["flare"].bands) == 2
-      and ls.responses["flare"].bands[1].param_patch == {"flames": 1.0},
-      "legacy flare_bands loads unchanged as the flare class (patches kept)")
+      and ls_kinds["Flare patch 0.5–1"].params == {"flames": 1.0}
+      and ls.responses["flare"].bands[1].kinds["Flare patch 0.5–1"] == 1.0,
+      "legacy flare_bands loads unchanged as the flare class "
+      "(patch → auto-named PERMANENT kind on its band)")
 check("flare_bands" not in ls.model_dump(),
       "canonical serialized form carries responses only")
 four = SceneV2(name="four", responses={
@@ -183,6 +189,92 @@ try:
     raise SystemExit("FAIL: overlapping response bands accepted")
 except ValidationError:
     print("ok: overlapping bands rejected per response class")
+
+# ── NAMED FLARE KINDS (item 8): the shape, load-unchanged, validation ────────
+from spectra.models.scene import FlareKind
+
+# The LOAD-UNCHANGED GUARANTEE, spec-asserted on the live library's exact
+# authored shape (Black Hole V2's three flare bands): every legacy field —
+# per-band param_patch, gain (pulse = momentary, linear = permanent),
+# per-class reroll_dice (legacy default True) and flare color_set_jump —
+# becomes an auto-named kind attached to its band at scale ×1, legacy
+# execution fields neutralize (ONE execution surface), and the round-trip
+# is stable.
+lib_shape = {"name": "BH", "devices": [], "responses": {"flare": {"bands": [
+    {"intensity_min": 0.0, "intensity_max": 0.35, "curve": "linear",
+     "gain": 0.7, "param_patch": {"spawn_rate": 0.7, "beat_burst": 1.0}},
+    {"intensity_min": 0.35, "intensity_max": 0.7, "curve": "linear",
+     "gain": 1.0, "param_patch": {"spawn_rate": 1.25, "beat_burst": 3.0}},
+    {"intensity_min": 0.7, "intensity_max": 1.0, "curve": "pulse",
+     "gain": 1.4, "param_patch": {"spawn_rate": 2.0, "beat_burst": 6.0}},
+], "reroll_dice": True, "color_set_jump": True}}}
+bh = SceneV2(**lib_shape)
+bh_kinds = {k.name: k for k in bh.flare_kinds}
+check(bh_kinds["Dice Re-roll"].type == "drift_jump"
+      and bh_kinds["Dice Re-roll"].jump == "dice"
+      and bh_kinds["Colour Jump"].jump == "color_set",
+      "auto-named kinds: reroll_dice → Dice Re-roll, color_set_jump → "
+      "Colour Jump (drift-jump type)")
+check(bh_kinds["Flare patch 0.7–1"].type == "permanent"
+      and bh_kinds["Flare patch 0.7–1"].params
+      == {"spawn_rate": 2.0, "beat_burst": 6.0},
+      "auto-named kinds: a band's param_patch → PERMANENT kind, values kept")
+check(bh_kinds["Flare gain 0.7–1"].type == "momentary"
+      and bh_kinds["Flare gain 0.7–1"].gain == 1.4
+      and bh_kinds["Flare gain 0–0.35"].type == "permanent"
+      and bh_kinds["Flare gain 0–0.35"].gain == 0.7,
+      "auto-named kinds: pulse gain → MOMENTARY, linear gain → PERMANENT")
+top = bh.responses["flare"].bands[2]
+check(set(top.kinds) == {"Flare patch 0.7–1", "Flare gain 0.7–1",
+                         "Dice Re-roll", "Colour Jump"}
+      and all(s == 1.0 for s in top.kinds.values()),
+      "each band attaches exactly its authored kinds at scale ×1")
+mid = bh.responses["flare"].bands[1]
+check(set(mid.kinds) == {"Flare patch 0.35–0.7", "Dice Re-roll",
+                         "Colour Jump"},
+      "a neutral gain (1.0) names no kind — nothing invented")
+check(all(b.gain == 1.0 and b.param_patch == {}
+          for b in bh.responses["flare"].bands)
+      and bh.responses["flare"].reroll_dice is False
+      and bh.responses["flare"].color_set_jump is False,
+      "legacy execution fields neutralize after migration — one surface")
+bh_rt = json.loads(bh.model_dump_json())
+check(bh_rt == json.loads(SceneV2(**bh_rt).model_dump_json()),
+      "migration is idempotent — the canonical form round-trips verbatim")
+check(SceneV2(**lib_shape).model_dump(exclude={"id"})
+      == bh.model_dump(exclude={"id"}),
+      "migration is deterministic — same input, same kinds")
+csj_drop = SceneV2(name="d", responses={"drop": {
+    "bands": [{"intensity_min": 0.0, "intensity_max": 1.0}],
+    "reroll_dice": False, "color_set_jump": True}})
+check("Colour Jump" not in {k.name for k in csj_drop.flare_kinds},
+      "color_set_jump on a non-flare class was a legacy no-op — no kind")
+
+try:
+    FlareKind(name="bad", type="drift_jump")
+    raise SystemExit("FAIL: drift-jump kind without a jump accepted")
+except ValidationError:
+    print("ok: a drift-jump kind must say which drift it jumps")
+try:
+    FlareKind(name="idle", type="momentary")
+    raise SystemExit("FAIL: kind that moves nothing accepted")
+except ValidationError:
+    print("ok: a momentary/permanent kind must declare params and/or gain")
+try:
+    SceneV2(name="bad", flare_kinds=[
+        FlareKind(name="Slam", type="momentary", gain=1.4)],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(kinds={"Ghost": 1.0})])})
+    raise SystemExit("FAIL: band referencing an undeclared kind accepted")
+except ValidationError:
+    print("ok: band kind references must resolve to declared kinds")
+try:
+    SceneV2(name="bad", flare_kinds=[
+        FlareKind(name="Slam", type="momentary", gain=1.4),
+        FlareKind(name="Slam", type="permanent", gain=0.5)])
+    raise SystemExit("FAIL: duplicate kind names accepted")
+except ValidationError:
+    print("ok: duplicate flare kind names rejected")
 
 # ── drift declarations: named profile / inline, validation ───────────────────
 drifting = SceneV2(name="drift", devices=[SceneDeviceConfig(
@@ -527,8 +619,12 @@ star = ms.devices[0].params["star"]
 check(isinstance(star, ValueBinding) and star.dice == "a"
       and star.fallback == mid_raw["devices"][0]["params"]["star"],
       "seeder: Mid Star star → 🎲 dice binding, static value as fallback")
-check(ms.responses["flare"].color_set_jump is True,
-      "seeder: flare class seeds color_set_jump=True")
+check(any(k.name == "Colour Jump" and k.jump == "color_set"
+          for k in ms.flare_kinds)
+      and all("Colour Jump" in b.kinds
+              for b in ms.responses["flare"].bands),
+      "seeder: flare class seeds the Colour Jump kind on every band "
+      "(the legacy Color lane)")
 migrated2, _ = seed_mod.migrate_scene(mid_raw)
 check(migrated == migrated2, "seeder migration is deterministic (idempotent)")
 spin = ms.devices[0].params["spin"]
@@ -596,23 +692,36 @@ responder = ResponseEngine(
     room_save=lambda st: room_box.__setitem__(0, st),
 )
 
-resp_scene = scene.model_copy(deep=True)
-resp_scene.responses = {
-    "flare": ResponseSpec(bands=[
-        FlareBand(intensity_min=0.0, intensity_max=0.5, curve="pulse",
-                  gain=1.6, param_patch={"twist": 0.9}),
-        FlareBand(intensity_min=0.5, intensity_max=1.0, curve="pulse",
-                  gain=2.0)], color_set_jump=True),
-    "charge": ResponseSpec(bands=[
-        FlareBand(intensity_min=0.5, intensity_max=1.0, curve="ease_in",
-                  gain=1.3)], reroll_dice=False),
-    "lull": ResponseSpec(bands=[
-        FlareBand(intensity_min=0.0, intensity_max=1.0, curve="linear",
-                  gain=0.5)], reroll_dice=False),
-    "drop": ResponseSpec(bands=[
-        FlareBand(intensity_min=0.7, intensity_max=1.0,
-                  param_patch={"spin": 1.0, "ghost_param": 5.0})]),
+# LEGACY-AUTHORED responses (the pre-kinds shapes, historical defaults —
+# flare/drop reroll on): the engine below must reproduce the legacy
+# behaviors EXACTLY through their auto-named kinds — the executable half
+# of the load-unchanged guarantee.
+resp_base = json.loads(scene.model_dump_json())
+resp_base.pop("flare_kinds", None)   # legacy input has no kinds key
+resp_base["responses"] = {
+    "flare": {"bands": [
+        {"intensity_min": 0.0, "intensity_max": 0.5, "curve": "pulse",
+         "gain": 1.6, "param_patch": {"twist": 0.9}},
+        {"intensity_min": 0.5, "intensity_max": 1.0, "curve": "pulse",
+         "gain": 2.0}], "reroll_dice": True, "color_set_jump": True},
+    "charge": {"bands": [
+        {"intensity_min": 0.5, "intensity_max": 1.0, "curve": "ease_in",
+         "gain": 1.3}], "reroll_dice": False},
+    "lull": {"bands": [
+        {"intensity_min": 0.0, "intensity_max": 1.0, "curve": "linear",
+         "gain": 0.5}], "reroll_dice": False},
+    "drop": {"bands": [
+        {"intensity_min": 0.7, "intensity_max": 1.0,
+         "param_patch": {"spin": 1.0, "ghost_param": 5.0}}],
+        "reroll_dice": True},
 }
+resp_scene = SceneV2(**resp_base)
+
+
+def kind_recs(record, key):
+    """The executed-kind records carrying a given detail key."""
+    return [k for k in record.get("kinds", []) if key in k]
+
 resolved_fire = scene_compiler.resolve_scene(resp_scene,
                                              FireContext(0.5, rng=Random(3)))
 fire_writes = scene_compiler.compile_scene(resolved_fire)
@@ -624,8 +733,11 @@ check(abs(base_brightness - 0.65) < 1e-6,
 # ── flare: re-roll (authored pairs), patch broadcast, pulse, colour jump ─────
 record = asyncio.run(responder.on_event("flare", 0.3))
 check(record["result"] == "applied"
-      and record["band"]["gain"] == 1.6,
-      "flare at 0.3 lands in its band and applies")
+      and record["band"] == {"intensity_min": 0.0, "intensity_max": 0.5}
+      and {k["name"] for k in record["kinds"]}
+      == {"Dice Re-roll", "Flare patch 0–0.5", "Flare gain 0–0.5",
+          "Colour Jump"},
+      "flare at 0.3 lands in its band and executes its auto-named kinds")
 pairs = {(0.3, 6), (-0.3, 3), (0.0, 5)}
 jumps = [w for w in exec2.writes if w["kind"] == "jump"]
 reroll_jump = next(w for w in jumps if "star" in w["params"])
@@ -641,15 +753,25 @@ pulse_jumps = [w for w in jumps if set(w["params"]) == {"brightness"}]
 check(len(pulse_jumps) == 3 and all(w["params"]["brightness"] == 1.0
                                     for w in pulse_jumps),
       "pulse spike: brightness jumps to baseline×gain clamped (0.65×1.6→1.0)")
-check(record["gain_envelope"][0]["peak"] == 1.0,
-      "the surge record states the spike peak")
+check(kind_recs(record, "gain_envelope")[0]["gain_envelope"][0]["peak"] == 1.0,
+      "the surge record states the spike peak on its kind")
 check(record["color_jump"]["result"] == "jumped"
       and record["color_jump"]["picked_id"] == "set-red",
       "flare colour jump: the selector picked the eligible set")
-grad_jumps = [w for w in jumps if "gradient" in w["params"]]
-check(grad_jumps and all(w["params"]["gradient"] == "#ff0000"
-                         for w in grad_jumps),
-      "colour jump is a JUMP: the pick's colours land as instant writes")
+from spectra.services.scene_response import color_jump_ramp_ms
+check(color_jump_ramp_ms(0.0) == 2500 and color_jump_ramp_ms(1.0) == 150
+      and color_jump_ramp_ms(0.5) == 1325,
+      "colour ramp-in scales INVERSELY with intensity "
+      "(2500 ms gentle end → 150 ms hard end, linear)")
+grad_glides = [w for w in exec2.writes if w["kind"] == "glide"
+               and "gradient" in w["params"]]
+check(grad_glides and all(w["params"]["gradient"] == "#ff0000"
+                          for w in grad_glides)
+      and all(w["duration_ms"] == color_jump_ramp_ms(0.3) == 1795
+              for w in grad_glides)
+      and record["color_jump"]["ramp_ms"] == 1795,
+      "the pick lands with the intensity-scaled ramp-in (0.3 → 1795 ms "
+      "hue-arc glide — the owner's jump-not-blend refinement)")
 check(room_box[0].active_set_id == "set-red"
       and room_box[0].wheel_position_deg == 10.0,
       "a chromatic pick moves the room's wheel — the journey resumes there")
@@ -699,7 +821,7 @@ check(len(arm) == 3 and all(w["params"]["phase_progress"] == 0.0
       "the arm write resets phase_progress to 0.0 (re-arms the edge) and "
       "lands before the ramp glide — the legacy _fire_phase order")
 held = max(0.0, min(1.0, 0.9 * 1.3))
-check(record["gain_envelope"][0]["held"] is True
+check(kind_recs(record, "gain_envelope")[0]["gain_envelope"][0]["held"] is True
       and abs(conductor2.virtuals["v-m1"].brightness_baseline - held) < 1e-6,
       "charge ease_in gain lands and HOLDS — the baseline carries (0.9→1.0)")
 record = asyncio.run(responder.on_event("lull", 0.2))
@@ -802,6 +924,62 @@ jumps4 = [w for w in exec4.writes if w["kind"] == "jump"]
 check(any("reactivity" in w["params"] for w in jumps4)
       and all("blur" not in w["params"] for w in jumps4),
       "after the re-select the re-roll follows the base variant again")
+
+# ── item-8 CANONICAL shape: a band SELECTS AND SCALES its named kinds ────────
+# The owner's example, executed: the top band fires "Slam" + "Colour Roll"
+# at ×1.3 — the param spike lands at baseline + (declared − baseline)·1.3
+# (registry-clamped), the envelope at 1 + (gain − 1)·1.3, the colour roll
+# still routes the shipped selector, and MOMENTARY means both spikes
+# return: the baselines never move.
+canon = SceneV2(**{**{k: v for k, v in resp_base.items()
+                      if k not in ("responses", "id")},
+                   "flare_kinds": [
+    {"name": "Slam", "type": "momentary",
+     "params": {"twist": 0.9}, "gain": 1.5},
+    {"name": "Colour Roll", "type": "drift_jump", "jump": "color_set"},
+], "responses": {"flare": {"bands": [
+    {"intensity_min": 0.8, "intensity_max": 1.0,
+     "kinds": {"Slam": 1.3, "Colour Roll": 1.3}}]}}})
+canon_writes = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(canon, FireContext(0.5, rng=Random(3))))
+room_box[0] = cj.RoomColorState(wheel_position_deg=220.0,
+                                active_set_id="set-blue")
+conductor2.on_scene_fire(canon, canon_writes)
+eligible_box[0] = {"set-red": 10.0}
+exec2.writes.clear()
+record = asyncio.run(responder.on_event("flare", 0.9))
+by_kind = {k["name"]: k for k in record["kinds"]}
+check(set(by_kind) == {"Slam", "Colour Roll"}
+      and by_kind["Slam"]["scale"] == 1.3
+      and by_kind["Colour Roll"]["scale"] == 1.3,
+      "the band SELECTS its named kinds and states their ×1.3 scale")
+tw_hi = float(device_model.get_param_meta("radial", "twist")["max"])
+expected_twist = min(tw_hi, 0.25 + (0.9 - 0.25) * 1.3)
+twist_jump = [w for w in exec2.writes if w["kind"] == "jump"
+              and "twist" in w["params"]][0]
+check(abs(twist_jump["params"]["twist"] - expected_twist) < 1e-9,
+      f"scale ×1.3 moves the spike PAST the declared value along the "
+      f"baseline excursion, registry-clamped ({expected_twist:g})")
+peak = max(0.0, min(1.0, 0.65 * (1.0 + 0.5 * 1.3)))
+check(by_kind["Slam"]["gain_envelope"][0]["peak"] == round(peak, 4),
+      "gain scales by excursion: 1 + (gain − 1)·1.3, clamped at full")
+check(record["color_jump"]["result"] == "jumped"
+      and record["color_jump"]["picked_id"] == "set-red"
+      and record["color_jump"]["ramp_ms"] == 150,
+      "the colour roll routes the SHIPPED selector; scale-steered "
+      "intensity (0.9×1.3 → 1.0) lands the ramp at its hard end (150 ms)")
+st = conductor2.virtuals["v-m1"]
+check(st.param_baseline["twist"] == 0.25,
+      "MOMENTARY at any scale never moves the param baseline")
+check(st.brightness_baseline == 0.9,
+      "the colour roll in the same surge CARRIES the pick's brightness")
+asyncio.run(responder.flush_releases())
+back = [w for w in exec2.writes if w["kind"] == "glide"
+        and "twist" in w["params"]][-1]
+check(back["params"]["twist"] == 0.25
+      and back["params"]["brightness"] == 0.9,
+      "the release returns the spike to the baseline AS CARRIED NOW — "
+      "twist to its own, brightness to the colour roll's landing")
 
 # ── the bridge: classification, feeds, deferral split, RAW section energy ────
 from spectra.services import analysis_reader
@@ -926,12 +1104,13 @@ live_scenes_file = Path(__file__).parent.parent / "storage" / "spectra" / "scene
 check(live_scenes_file.exists(), "seeded SPECTRA scenes present (S1 output)")
 live = {v["name"]: SceneV2(**v)
         for v in json.loads(live_scenes_file.read_text()).values()}
-SEVEN = ["Black Hole V2", "Orbits V2", "Mid Star V2", "Fireworks V2",
-         "Squiggles V2", "Dancers V2", "Eye V2"]
+SEVEN = ["Black Hole V2", "Orbits V2", "STAR", "Fireworks V2",
+         "Squiggles V2", "Dancers V2", "Eye V2"]   # STAR = renamed Mid Star V2
 check(all(name in live for name in SEVEN), "all seven Mid Group scenes seeded")
-check(all(live[n].responses["flare"].color_set_jump and
-          len(live[n].responses["flare"].bands) == 3 for n in SEVEN),
-      "each carries a 3-band flare class with the colour-set jump")
+check(all(any(k.jump == "color_set" for k in live[n].flare_kinds)
+          and len(live[n].responses["flare"].bands) == 3 for n in SEVEN),
+      "each carries a 3-band flare class with the colour-set jump "
+      "(loaded as the auto-named Colour Jump kind)")
 
 def resolved_params(name: str, effect_type: str, intensity, seed: int = 1):
     resolved = scene_compiler.resolve_scene(
@@ -942,10 +1121,10 @@ def resolved_params(name: str, effect_type: str, intensity, seed: int = 1):
 
 seen_pairs = set()
 for seed in range(200):
-    p = resolved_params("Mid Star V2", "radial", 0.5, seed)
+    p = resolved_params("STAR", "radial", 0.5, seed)
     seen_pairs.add((p["star"], p["edges"]))
 check(seen_pairs == {(0.3, 6), (-0.3, 3), (0.0, 5)},
-      "Mid Star: dice variants land ONLY as the three authored pairs")
+      "STAR: dice variants land ONLY as the three authored pairs")
 
 styles = {inten: resolved_params("Dancers V2", "dancer", inten)["dance_type"]
           for inten in (0.2, 0.5, 0.8)}
@@ -989,7 +1168,12 @@ for name in SEVEN:
                            room_save=lambda st: None)
     top = max(sc.responses["flare"].bands, key=lambda b: b.intensity_max)
     rec = asyncio.run(resp3.on_event("flare", 0.97))
-    expected = {k: v for k, v in top.param_patch.items()
+    declared3 = {k.name: k for k in sc.flare_kinds}
+    top_patch = {}
+    for kname in top.kinds:
+        if declared3[kname].type == "permanent":
+            top_patch.update(declared3[kname].params)
+    expected = {k: v for k, v in top_patch.items()
                 if any(device_model.get_param_meta(d.effect_type, k)
                        for d in sc.devices)}
     landed = {}
@@ -1000,9 +1184,57 @@ for name in SEVEN:
           and all(landed.get(k) == v for k, v in expected.items()),
           f"{name}: top flare band executes its patch ({sorted(expected)})")
 
+# Every live scene's AUTHORED response data survives migration verbatim:
+# each raw band's patch is a permanent kind on that band, each non-neutral
+# gain a momentary (pulse) or permanent kind, reroll/colour flags the
+# shared drift-jump kinds — and nothing else was invented.
+raw_live = json.loads(live_scenes_file.read_text())
+verified = 0
+for v in raw_live.values():
+    sc = SceneV2(**v)
+    declared = {k.name: k for k in sc.flare_kinds}
+    for cls, spec_raw in (v.get("responses") or {}).items():
+        loaded = sc.responses[cls]
+        for braw, band in zip(spec_raw.get("bands", []), loaded.bands):
+            patch = braw.get("param_patch") or {}
+            if patch and not any(
+                    declared[n].type == "permanent"
+                    and declared[n].params == patch for n in band.kinds):
+                raise SystemExit(f"FAIL: {v['name']}/{cls}: authored patch "
+                                 f"{patch} lost in migration")
+            gain = braw.get("gain", 1.0)
+            want = ("momentary" if braw.get("curve") == "pulse"
+                    else "permanent")
+            if gain != 1.0 and not any(
+                    declared[n].type == want and declared[n].gain == gain
+                    for n in band.kinds):
+                raise SystemExit(f"FAIL: {v['name']}/{cls}: authored gain "
+                                 f"{gain} lost in migration")
+            if band.gain != 1.0 or band.param_patch:
+                raise SystemExit(f"FAIL: {v['name']}/{cls}: legacy band "
+                                 f"fields not neutralized")
+        if spec_raw.get("reroll_dice", True) != all(
+                any(declared[n].jump == "dice" for n in b.kinds)
+                for b in loaded.bands):
+            raise SystemExit(f"FAIL: {v['name']}/{cls}: reroll flag "
+                             f"mis-migrated")
+        if cls == "flare" and spec_raw.get("color_set_jump") and not all(
+                any(declared[n].jump == "color_set" for n in b.kinds)
+                for b in loaded.bands):
+            raise SystemExit(f"FAIL: {v['name']}: colour jump lost")
+    canon_dump = json.loads(sc.model_dump_json())
+    if canon_dump != json.loads(SceneV2(**canon_dump).model_dump_json()):
+        raise SystemExit(f"FAIL: {v['name']}: canonical form not stable")
+    verified += 1
+check(verified == len(raw_live) >= 9,
+      f"all {verified} live scenes load unchanged as auto-named kinds "
+      f"(authored patches/gains/flags preserved, canonical form stable)")
+
 eye_top = max(live["Eye V2"].responses["flare"].bands,
               key=lambda b: b.intensity_max)
-check(eye_top.param_patch.get("flames") == 1.0,
+eye_kinds = {k.name: k for k in live["Eye V2"].flare_kinds}
+check(any(eye_kinds[n].params.get("flames") == 1.0 for n in eye_top.kinds
+          if eye_kinds[n].type == "permanent"),
       "Eye: the top flare band is the FLAME flare (flames → 1.0)")
 
 # ── the STAR strips migration (the fold's not-foldable row, now foldable) ────

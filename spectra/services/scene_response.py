@@ -26,39 +26,65 @@ Per event, fed by the bridge with the fire's intensity:
      → the class's BAND extras stay silent at that intensity — bands are
      the response's WHEN along the axis (the phase drive above is not
      band-gated).
-  2. One batched pass:
-       re-roll  — the scene's 🎲 (signal="random") bindings re-resolve with
-                  fresh dice and JUMP to the new values (reroll_dice flag).
-       patch    — band.param_patch as a JUMP, name-broadcast targeting: a
-                  key lands on every virtual whose live effect carries that
-                  param (shared registry truth).
-       gain     — the momentary envelope on brightness around the carried
-                  baseline: curve "pulse" spikes to baseline×gain and
-                  glides back (release scheduled after the spike holds a
-                  beat); linear/ease_* glide to baseline×gain and HOLD —
-                  the landed level becomes the new baseline.
-       colour   — flares with color_set_jump roll the shipped colour-set
-                  selector (curve × genre × wheel-travel) against the
-                  scene's eligible sets and the ROOM wheel position, and
-                  JUMP (never blend) to the pick; the terminal rung KEEPS
-                  the current colours (decision 3 — never forced churn).
-                  A chromatic pick moves the room's wheel position, and the
-                  room journey RESUMES FROM THE NEW POINT — the jump moves
-                  the story, the walk carries on.
+  2. THE BAND SELECTS AND SCALES NAMED KINDS (the owner's item-8 shape):
+     band.kinds maps kind name → scale factor; each kind executes per its
+     type, in a fixed order so the carry interplay is deterministic —
+     dice drift-jumps, permanent param moves, momentary param moves,
+     permanent gains, momentary gains, colour drift-jumps (the legacy
+     reroll → patch → gain → colour order, generalized):
+       drift_jump/dice      — the scene's 🎲 (signal="random") bindings
+                  re-resolve with fresh dice and JUMP to the new values.
+                  The rolls CARRY. Scale is inert (a roll has no
+                  magnitude — stated).
+       momentary/permanent params — absolute targets, name-broadcast: a
+                  key lands on every virtual whose live effect carries the
+                  param (shared registry truth). Scale s moves the target
+                  to baseline + (declared − baseline)·s against the
+                  carried-now baseline, clamped to the param's registry
+                  range; ×1 lands the declared value verbatim. PERMANENT
+                  carries — the landed value is the new baseline drift
+                  resumes from. MOMENTARY schedules a return: the release
+                  glides back to the baseline AS CARRIED AT FLUSH TIME (a
+                  creep's current wander position, or the tracked param
+                  baseline) — the spike never moves the baseline.
+       momentary/permanent gain — the brightness envelope around the
+                  carried baseline at effective gain 1 + (gain − 1)·s:
+                  MOMENTARY spikes to baseline×effective and glides back
+                  (release scheduled after the spike holds a beat);
+                  PERMANENT glides to baseline×effective and HOLDS — the
+                  landed level becomes the new baseline.
+       drift_jump/color_set — roll the shipped colour-set selector
+                  (curve × genre × wheel-travel) against the scene's
+                  eligible sets and the ROOM wheel position at the
+                  scale-steered intensity (clamped ×s), and land the pick
+                  with the intensity-scaled RAMP-IN (the owner's
+                  refinement of jump-not-blend: gentle flares ease in over
+                  COLOR_JUMP_RAMP_MS_GENTLE, full-scale flares land hard
+                  near COLOR_JUMP_RAMP_MS_HARD, hue-arc blend — never
+                  through grey, never a crossfade re-creation); the
+                  terminal rung KEEPS the current colours (decision 3 —
+                  never forced churn). A chromatic pick moves the room's
+                  wheel position at selection, and the room journey
+                  RESUMES FROM THE NEW POINT — the jump moves the story,
+                  the walk carries on.
   Stepped-effect entries (SceneDeviceConfig.effect_steps) and surges — the
   stated interplay, simple on purpose: EFFECT SELECTION IS FIRE-TIME ONLY.
-  A surge never switches an entry's effect; re-rolls re-resolve the params
-  of the variant the FIRE selected (the entry's live effect — the same
-  registry gate that already scopes patches), patches broadcast by name
-  against the live effects as always, and the next FIRE re-selects and
-  re-baselines honestly (conductor.on_scene_fire seeds from the fire's
-  writes, which carry the selected effect).
+  A surge never switches an entry's effect; dice re-rolls re-resolve the
+  params of the variant the FIRE selected (the entry's live effect — the
+  same registry gate that already scopes param moves), param moves
+  broadcast by name against the live effects as always, and the next FIRE
+  re-selects and re-baselines honestly (conductor.on_scene_fire seeds from
+  the fire's writes, which carry the selected effect).
 
-  3. CARRY (the owner's words): patches, re-rolls, held gains, and colour
-     jumps permanently move the baseline drift resumes from
-     (conductor.on_surge). A surge on a followed param is an impulse the
-     follow re-asserts from smoothly over slew_s — no bookkeeping needed,
-     the next leg does it by construction.
+  3. CARRY (the owner's words): re-rolls, permanent moves, held gains, and
+     colour jumps permanently move the baseline drift resumes from
+     (conductor.on_surge); momentary moves never do. A surge on a followed
+     param is an impulse the follow re-asserts from smoothly over slew_s —
+     no bookkeeping needed, the next leg does it by construction.
+
+  Legacy flare_bands / param_patch / per-class flags are auto-named into
+  kinds at load (models/scene._migrate_flare_kinds) — this engine executes
+  kinds ONLY; post-validation scenes carry no live legacy fields.
 
 Pulse releases are two-phase on purpose: the spike must LAND (at least one
 render frame) before the release glide starts, or the tween engine would
@@ -78,7 +104,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from fx import device_model
 from spectra.models.binding import ValueBinding
-from spectra.models.scene import FlareBand, ResponseClass, SceneV2
+from spectra.models.scene import FlareBand, FlareKind, ResponseClass, SceneV2
 from spectra.models.sequencer import CurvePoint
 from spectra.services import binding_resolver, color_journey
 from spectra.services import selection_kernel as kernel
@@ -90,6 +116,22 @@ PULSE_HOLD_S = 0.25      # the spike shows for a couple of frames, then releases
 PULSE_RELEASE_S = 1.5    # glide back to baseline
 GAIN_GLIDE_S = 0.8       # linear/ease_* land over this, then hold (carried)
 SURGE_LOG_LIMIT = 50
+
+# Flare colour-jump RAMP-IN (owner refinement of jump-not-blend, not its
+# reversal): the ramp length scales INVERSELY with the fire's intensity —
+# a gentle flare eases its new colours in noticeably, a full-scale flare
+# still lands hard, close to the old immediate jump. Linear between the
+# ends; the blend rides the tween engine's hue arc (never through grey),
+# and the room journey resumes from the landed colour exactly as before.
+COLOR_JUMP_RAMP_MS_GENTLE = 2500   # intensity 0.0 — the felt ease-in
+COLOR_JUMP_RAMP_MS_HARD = 150      # intensity 1.0 — lands hard
+
+
+def color_jump_ramp_ms(intensity: float) -> int:
+    frac = max(0.0, min(1.0, intensity))
+    return int(round(COLOR_JUMP_RAMP_MS_GENTLE
+                     + (COLOR_JUMP_RAMP_MS_HARD
+                        - COLOR_JUMP_RAMP_MS_GENTLE) * frac))
 
 # phase_progress ramp per class — the original program's tuned durations
 # (config.py phase_*_ramp_ms defaults): "Drop stays short — it's the snap."
@@ -135,7 +177,9 @@ class ResponseEngine:
         self._room_save = room_save or color_journey.save_room
 
         self.surges: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
-        self._pending_releases: list[str] = []   # virtual ids awaiting release
+        # (virtual_id, param) pairs a momentary kind spiked, awaiting the
+        # release glide back to the carried baseline.
+        self._pending_releases: list[tuple[str, str]] = []
         self._phase_armed: Optional[str] = None  # "charge"|"lull" awaiting payoff
 
     # ── the event ────────────────────────────────────────────────────────────
@@ -166,28 +210,61 @@ class ResponseEngine:
                 await self._broadcast({"type": "surge", **record})
             return record
         record["band"] = {"intensity_min": band.intensity_min,
-                          "intensity_max": band.intensity_max,
-                          "curve": band.curve, "gain": band.gain}
+                          "intensity_max": band.intensity_max}
+
+        declared = {k.name: k for k in scene.flare_kinds}
+        attached = [(declared[n], s) for n, s in band.kinds.items()]
+        # Fixed execution order (the legacy reroll → patch → gain → colour
+        # pass, generalized): dice first so explicit param kinds override
+        # same-key rolls; permanent params before momentary so a spike on
+        # the same param returns to the just-carried point; gains read the
+        # carried brightness; colour last so its landed brightness is the
+        # release target, never an enveloped one.
+        dice = [(k, s) for k, s in attached
+                if k.type == "drift_jump" and k.jump == "dice"]
+        moves = sorted(((k, s) for k, s in attached if k.params),
+                       key=lambda ks: ks[0].type != "permanent")
+        gains = sorted(((k, s) for k, s in attached
+                        if k.type in ("momentary", "permanent")
+                        and k.gain != 1.0),
+                       key=lambda ks: ks[0].type != "permanent")
+        colours = [(k, s) for k, s in attached
+                   if k.type == "drift_jump" and k.jump == "color_set"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}   # vid → params
+        kind_records: list[dict] = []
 
-        if spec.reroll_dice:
-            record["reroll"] = self._reroll(scene, intensity, jumps, carry)
-        if band.param_patch:
-            record["patch"] = self._patch(band.param_patch, jumps, carry)
+        if dice:   # one fresh roll per fire, however many dice kinds attach
+            kind, scale = dice[0]
+            kind_records.append({
+                "name": kind.name, "type": kind.type, "jump": "dice",
+                "scale": scale,
+                "rolled": self._reroll(scene, intensity, jumps, carry)})
+        for kind, scale in moves:
+            kind_records.append({
+                "name": kind.name, "type": kind.type, "scale": scale,
+                "moved": self._move_params(kind, scale, jumps, carry)})
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
                 await self.executor.jump(vid, state.effect_type, params)
 
-        if band.gain != 1.0:
-            record["gain_envelope"] = await self._gain(band, carry)
+        for kind, scale in gains:
+            kind_records.append({
+                "name": kind.name, "type": kind.type, "scale": scale,
+                "gain_envelope": await self._gain(kind, scale, carry)})
 
-        if event_class == "flare" and spec.color_set_jump:
-            record["color_jump"] = await self._color_jump(scene, intensity,
-                                                          carry)
+        if colours:   # one selector roll per fire — a jump is a jump
+            kind, scale = colours[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            record["color_jump"] = await self._color_jump(
+                scene, sel_intensity, carry)
+            kind_records.append({
+                "name": kind.name, "type": kind.type, "jump": "color_set",
+                "scale": scale, **record["color_jump"]})
 
+        record["kinds"] = kind_records
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p}
                              for (vid, p) in carry]
@@ -238,37 +315,81 @@ class ResponseEngine:
             rolled.extend({"param": p, "value": v} for p, v in targets.items())
         return rolled
 
-    def _patch(self, param_patch: dict[str, float],
-               jumps: dict, carry: dict) -> list[dict]:
-        """Name-broadcast targeting: each key lands on every virtual whose
-        live effect has that param (registry truth). Patches override
-        same-key re-rolls — the band's explicit word wins."""
+    def _carried_value(self, vid: str, state, pname: str,
+                       carry: dict) -> Optional[float]:
+        """The baseline a scale excursion measures from and a momentary
+        move returns to: same-surge carry first, then brightness's own
+        baseline, a creep's current wander position, or the tracked param
+        baseline. None = unknown (scale falls back to the declared value)."""
+        if (vid, pname) in carry:
+            v = carry[(vid, pname)]
+            return float(v) if isinstance(v, (int, float)) \
+                and not isinstance(v, bool) else None
+        if pname == "brightness":
+            return float(state.brightness_baseline)
+        for mech in self.conductor.mechanisms:
+            if mech.vid == vid and mech.param == pname \
+                    and mech.kind == "creep":
+                return float(mech.position)
+        v = state.param_baseline.get(pname)
+        return float(v) if isinstance(v, (int, float)) \
+            and not isinstance(v, bool) else None
+
+    def _move_params(self, kind: FlareKind, scale: float,
+                     jumps: dict, carry: dict) -> list[dict]:
+        """One momentary/permanent kind's param moves. Name-broadcast
+        targeting: each key lands on every virtual whose live effect has
+        that param (registry truth); explicit kinds override same-key
+        re-rolls — the band's word wins. Scale ×1 lands the declared value
+        VERBATIM (legacy parity); any other scale moves the target to
+        baseline + (declared − baseline)·scale, clamped to the param's
+        registry range. PERMANENT enters the carry; MOMENTARY schedules
+        the return instead."""
         landed: list[dict] = []
         for vid, state in self.conductor.virtuals.items():
-            hits = {k: v for k, v in param_patch.items()
-                    if device_model.get_param_meta(state.effect_type, k)
-                    is not None}
-            if not hits:
-                continue
-            jumps.setdefault(vid, {}).update(hits)
-            for k, v in hits.items():
-                carry[(vid, k)] = v
-            landed.append({"virtual_id": vid, "params": hits})
+            moves: dict[str, float] = {}
+            for pname, value in kind.params.items():
+                meta = device_model.get_param_meta(state.effect_type, pname)
+                if meta is None:
+                    continue
+                target = float(value)
+                if scale != 1.0:
+                    base = self._carried_value(vid, state, pname, carry)
+                    if base is not None:
+                        target = base + (target - base) * scale
+                        mkind, lo, hi = binding_resolver.kind_for_meta(meta)
+                        if mkind == binding_resolver.KIND_NUMERIC:
+                            if lo is not None:
+                                target = max(float(lo), target)
+                            if hi is not None:
+                                target = min(float(hi), target)
+                moves[pname] = target
+                if kind.type == "permanent":
+                    carry[(vid, pname)] = target
+                else:
+                    self._pending_releases.append((vid, pname))
+            if moves:
+                jumps.setdefault(vid, {}).update(moves)
+                landed.append({"virtual_id": vid, "params": moves})
         return landed
 
-    async def _gain(self, band: FlareBand, carry: dict) -> list[dict]:
-        """The envelope, around the carried brightness baseline. pulse:
-        spike to baseline×gain, release back (momentary — baseline stays).
-        linear/ease_*: glide to baseline×gain and hold — CARRIED."""
+    async def _gain(self, kind: FlareKind, scale: float,
+                    carry: dict) -> list[dict]:
+        """One kind's brightness envelope around the carried baseline, at
+        effective gain 1 + (gain − 1)·scale — neutral stays neutral, a duck
+        scales into a deeper duck. MOMENTARY: spike to baseline×effective,
+        release back (the baseline stays). PERMANENT: glide to
+        baseline×effective and hold — CARRIED."""
+        effective = 1.0 + (kind.gain - 1.0) * scale
         out: list[dict] = []
         for vid, state in self.conductor.virtuals.items():
             baseline = carry.get((vid, "brightness"),
                                  state.brightness_baseline)
-            peak = max(0.0, min(1.0, float(baseline) * band.gain))
-            if band.curve == "pulse":
+            peak = max(0.0, min(1.0, float(baseline) * effective))
+            if kind.type == "momentary":
                 await self.executor.jump(vid, state.effect_type,
                                          {"brightness": peak})
-                self._pending_releases.append(vid)
+                self._pending_releases.append((vid, "brightness"))
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
@@ -281,24 +402,28 @@ class ResponseEngine:
         return out
 
     async def flush_releases(self) -> int:
-        """Issue pending pulse releases — each virtual glides back to its
-        brightness baseline AS CARRIED NOW (a colour jump in the same surge
-        may have moved it; the release honors the carry, never a stale
-        snapshot). Production schedules this PULSE_HOLD_S after the spike
+        """Issue pending momentary releases — every spiked (virtual, param)
+        glides back to its baseline AS CARRIED NOW (a colour jump or
+        permanent kind in the same surge may have moved it; a creep kept
+        wandering — the release honors the carry, never a stale snapshot).
+        Production schedules this PULSE_HOLD_S after the spike
         (services/engine.py); specs call it directly once the spike has
-        provably landed."""
+        provably landed. Returns virtuals released."""
         pending, self._pending_releases = self._pending_releases, []
-        count = 0
-        for vid in dict.fromkeys(pending):
+        by_vid: dict[str, dict[str, float]] = {}
+        for vid, pname in dict.fromkeys(pending):
             state = self.conductor.virtuals.get(vid)
             if state is None:
                 continue
-            await self.executor.glide(
-                vid, state.effect_type,
-                {"brightness": state.brightness_baseline},
-                int(PULSE_RELEASE_S * 1000))
-            count += 1
-        return count
+            target = self._carried_value(vid, state, pname, {})
+            if target is None:
+                continue
+            by_vid.setdefault(vid, {})[pname] = target
+        for vid, params in by_vid.items():
+            state = self.conductor.virtuals[vid]
+            await self.executor.glide(vid, state.effect_type, params,
+                                      int(PULSE_RELEASE_S * 1000))
+        return len(by_vid)
 
     async def _drive_phase(self, event_class: str) -> dict:
         """Arm + ramp the vendored phase machinery on every phase-capable
@@ -349,9 +474,13 @@ class ResponseEngine:
     async def _color_jump(self, scene: SceneV2, intensity: float,
                           carry: dict) -> dict:
         """The flare colour jump: the shipped selector picks (curve × genre
-        × wheel-travel, terminal KEEP), the pick lands as a JUMP on set-mode
-        virtuals, a chromatic pick moves the room's wheel — and the journey
-        resumes from the new point on the conductor's next leg."""
+        × wheel-travel, terminal KEEP), the pick lands on set-mode virtuals
+        with the intensity-scaled RAMP-IN (color_jump_ramp_ms — a hue-arc
+        glide, gentle flares ease in, big flares land hard), a chromatic
+        pick moves the room's wheel AT SELECTION — and the journey resumes
+        from the new point on the conductor's next leg. The carry records
+        the landed targets, so releases and palette rotation measure from
+        where the ramp finishes, never a mid-blend snapshot."""
         config = self._sequencer_config()
         if not config.color_set_entries:
             return {"result": "selector_unconfigured"}
@@ -377,6 +506,7 @@ class ResponseEngine:
             return {"result": "missing_set", "picked_id": pick.picked_id}
         from spectra.services import scene_compiler
         by_vid = scene_compiler._set_entry_by_virtual(card)
+        ramp_ms = color_jump_ramp_ms(intensity)
         landed = 0
         for vid, state in self.conductor.virtuals.items():
             if not state.set_mode:
@@ -400,7 +530,8 @@ class ResponseEngine:
             if entry.background_brightness is not None:
                 params["background_brightness"] = entry.background_brightness
             if params:
-                await self.executor.jump(vid, state.effect_type, params)
+                await self.executor.glide(vid, state.effect_type, params,
+                                          ramp_ms)
                 landed += 1
         position = eligible.get(pick.picked_id)
         update: dict[str, Any] = {"active_set_id": pick.picked_id}
@@ -412,7 +543,7 @@ class ResponseEngine:
         self._room_save(room.model_copy(update=update))
         return {"result": "jumped", "picked_id": pick.picked_id,
                 "rung": pick.rung, "virtuals": landed,
-                "wheel_position_deg": position}
+                "ramp_ms": ramp_ms, "wheel_position_deg": position}
 
     # ── production defaults (lazy imports; specs inject fakes) ───────────────
 

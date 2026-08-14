@@ -1,15 +1,15 @@
 /** Response tabs — Flares (one class) and Charges/Lulls/Drops (three).
- * The graphical piece is the band strip over the intensity axis; per band,
- * a curve select and gain box. Param patches stay AGENT-ONLY with a visible
- * indicator; the per-class flags (re-roll dice, colour-set jump) render as
- * read-only chips — tell the agent to change them. */
+ * The item-8 doctrine: the scene DECLARES named flare kinds (readable
+ * cards below — their content is agent-adjustable, no settings forms);
+ * the band strip stays the graphical piece, and each band SELECTS AND
+ * SCALES kinds: click a kind chip on a band row to attach/detach it,
+ * set its ×scale inline, or drag the strip's handle to scale the whole
+ * band. */
 import BandStrip from '../../components/BandStrip';
 import HelpLink from '../../help/HelpLink';
-import { NumberInput, Select } from '../../components/inputs';
-import type { ResponseClass, ResponseSpec, SceneV2 } from '../../types';
-import { emptyResponse } from '../../types';
-
-const CURVES = ['linear', 'ease_in', 'ease_out', 'pulse'] as const;
+import { NumberInput } from '../../components/inputs';
+import type { FlareKind, ResponseClass, ResponseSpec, SceneV2 } from '../../types';
+import { emptyBand, emptyResponse } from '../../types';
 
 const CLASS_TITLES: Record<ResponseClass, string> = {
   flare: 'Flares', charge: 'Charges', lull: 'Lulls', drop: 'Drops',
@@ -17,12 +17,39 @@ const CLASS_TITLES: Record<ResponseClass, string> = {
 // The S2 engine executes these: the bridge classifies every spot-effects
 // trigger fire (charge/lull/drop stay themselves; scene changes are not
 // surges; everything else is a flare) and the band containing the fire's
-// intensity applies.
+// intensity fires its attached kinds at their scales.
 const CLASS_HINTS: Record<ResponseClass, string> = {
-  flare: 'Any ordinary trigger fire is a flare. The band containing its intensity EXECUTES: 🎲 re-roll + jump, patches as a jump, gain as the envelope (pulse returns; linear/ease holds), the colour-set jump — and drift resumes from the new baseline (surges carry).',
-  charge: 'A charge (build-up) fires from the music: its band executes — gain/patches coil the room into the payoff.',
-  lull: 'A lull fires: its band executes — typically gain < 1 ducks the room and holds (the ducked level carries).',
-  drop: 'A drop fires: its band executes — the payoff lands as jumps; drift resumes from the new point.',
+  flare: 'Any ordinary trigger fire is a flare. The band containing its intensity fires its attached kinds at their ×scales: drift-jumps roll dice / jump the colour set (ramping in gently on soft flares), momentary kinds spike and return, permanent kinds re-baseline — drift carries on from there.',
+  charge: 'A charge (build-up) fires from the music: the phase machinery builds the arc; the band\'s kinds coil the room into the payoff.',
+  lull: 'A lull fires: the band\'s kinds colour the suspension — typically a permanent gain < 1 ducks the room and carries.',
+  drop: 'A drop fires: the payoff lands; permanent kinds move the baselines and drift resumes from the new point.',
+};
+
+const kindIcon = (k: FlareKind): string =>
+  k.type === 'drift_jump' ? (k.jump === 'color_set' ? '🎨' : '🎲')
+    : k.type === 'momentary' ? '↩' : '⚓';
+
+const kindTypeLabel = (k: FlareKind): string =>
+  k.type === 'drift_jump'
+    ? (k.jump === 'color_set' ? 'drift-jump · colour set' : 'drift-jump · dice')
+    : k.type;
+
+const kindContent = (k: FlareKind): string => {
+  const bits: string[] = [];
+  if (k.type === 'drift_jump') {
+    bits.push(k.jump === 'color_set'
+      ? 'jump the room to the selector\'s next colour set'
+      : 're-roll the scene\'s 🎲 values');
+  }
+  for (const [p, v] of Object.entries(k.params ?? {})) bits.push(`${p} → ${v}`);
+  if (k.gain !== 1) bits.push(`gain ×${k.gain}`);
+  return bits.join(' · ');
+};
+
+const TYPE_HINT: Record<string, string> = {
+  drift_jump: 'Jumps the drift itself — the change CARRIES; the journey walks on from it. On colour jumps the ramp-in eases gentle flares, big ones land hard.',
+  momentary: 'Spikes and RETURNS exactly to the carried baseline — drift never notices.',
+  permanent: 'Lands and BECOMES the new baseline drift carries from.',
 };
 
 export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
@@ -31,31 +58,85 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
   classes: ResponseClass[];
   helpTopic: string;
 }) {
-  const setSpec = (cls: ResponseClass, spec: ResponseSpec | null) => {
+  const kinds = scene.flare_kinds ?? [];
+
+  const setSpec = (cls: ResponseClass, spec: ResponseSpec | null, extraKinds?: FlareKind[]) => {
     const responses = { ...scene.responses };
     if (spec === null) delete responses[cls];
     else responses[cls] = spec;
-    setScene({ ...scene, responses });
+    setScene({
+      ...scene, responses,
+      flare_kinds: extraKinds ? [...kinds, ...extraKinds] : kinds,
+    });
+  };
+
+  const addClass = (cls: ResponseClass) => {
+    // A new flare class starts with the two shared drift-jumps attached
+    // (the historical default behavior); other classes start bare.
+    const missing: FlareKind[] = [];
+    const attach: Record<string, number> = {};
+    if (cls === 'flare') {
+      for (const [name, jump] of [['Dice Re-roll', 'dice'], ['Colour Jump', 'color_set']] as const) {
+        if (!kinds.some((k) => k.name === name)) {
+          missing.push({ name, type: 'drift_jump', jump, params: {}, gain: 1 });
+        }
+        attach[name] = 1;
+      }
+    }
+    setSpec(cls, {
+      ...emptyResponse(),
+      bands: [{ ...emptyBand(), kinds: attach }],
+    }, missing);
+  };
+
+  const setBandKind = (cls: ResponseClass, bandIdx: number, name: string, scale: number | null) => {
+    const spec = scene.responses[cls]!;
+    setSpec(cls, {
+      ...spec,
+      bands: spec.bands.map((b, j) => {
+        if (j !== bandIdx) return b;
+        const next = { ...(b.kinds ?? {}) };
+        if (scale === null) delete next[name];
+        else next[name] = scale;
+        return { ...b, kinds: next };
+      }),
+    });
   };
 
   return (
     <div>
+      <div style={{ marginBottom: 18 }}>
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          Flare kinds <HelpLink topic="flare-kinds" />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
+            declared once, shared by every class below — tell the agent to add or retune one
+          </span>
+        </div>
+        {kinds.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            No kinds declared yet — adding a Flares response seeds the two drift-jumps, or tell the agent what this scene should do when the music hits.
+          </div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {kinds.map((k) => (
+            <div key={k.name} className="card" style={{ padding: '6px 10px', maxWidth: 260 }}
+              title={`${TYPE_HINT[k.type]}\nAgent-adjustable — tell the agent to change it.`}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>
+                {kindIcon(k)} {k.name}
+                <span className="chip" style={{ marginLeft: 6 }}>{kindTypeLabel(k)}</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{kindContent(k)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {classes.map((cls) => {
         const spec = scene.responses[cls];
         return (
           <div key={cls} style={{ marginBottom: 18 }}>
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               {CLASS_TITLES[cls]} <HelpLink topic={helpTopic} />
-              {spec && (
-                <>
-                  <span className="chip" title="On this class's fires, the scene's 🎲 values re-roll (fresh dice) and jump — tell the agent to change">
-                    🎲 re-roll {spec.reroll_dice ? 'on' : 'off'}
-                  </span>
-                  <span className="chip" title="On this class's fires, jump to the next colour set through the selector (jump, not blend; keep-current rung intact) — tell the agent to change">
-                    🎨 set jump {spec.color_set_jump ? 'on' : 'off'}
-                  </span>
-                </>
-              )}
               {spec ? (
                 <button style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px' }}
                   className="danger"
@@ -64,11 +145,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                 </button>
               ) : (
                 <button style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px' }}
-                  onClick={() => setSpec(cls, {
-                    ...emptyResponse(),
-                    color_set_jump: cls === 'flare',
-                    bands: [{ intensity_min: 0, intensity_max: 1, curve: 'linear', gain: 1, param_patch: {} }],
-                  })}>
+                  onClick={() => addClass(cls)}>
                   + respond to {cls}s
                 </button>
               )}
@@ -88,24 +165,30 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                       <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                         [{b.intensity_min.toFixed(2)}–{b.intensity_max.toFixed(2)})
                       </span>
-                      <Select value={b.curve} width={100}
-                        onChange={(v) => setSpec(cls, {
-                          ...spec,
-                          bands: spec.bands.map((x, j) => (j === i ? { ...x, curve: v as typeof b.curve } : x)),
-                        })}
-                        options={CURVES.map((c) => ({ value: c, label: c }))} />
-                      <span style={{ color: 'var(--text-muted)' }}>gain</span>
-                      <NumberInput value={b.gain} min={0} step={0.1} width={64}
-                        onChange={(v) => setSpec(cls, {
-                          ...spec,
-                          bands: spec.bands.map((x, j) => (j === i ? { ...x, gain: v ?? 0 } : x)),
-                        })} />
-                      {Object.keys(b.param_patch ?? {}).length > 0 && (
-                        <span className="chip"
-                          title={`Agent-authored parameter jumps fired with this band — edit via the agent, not here. Saving preserves them untouched.\n${Object.entries(b.param_patch).map(([k, v]) => `${k}: ${v}`).join('\n')}`}>
-                          ⚙ {Object.keys(b.param_patch).length} param{Object.keys(b.param_patch).length === 1 ? '' : 's'} patched — tell the agent
-                        </span>
+                      {kinds.length === 0 && (
+                        <span style={{ color: 'var(--text-muted)' }}>no kinds to attach</span>
                       )}
+                      {kinds.map((k) => {
+                        const attached = (b.kinds ?? {})[k.name] !== undefined;
+                        return (
+                          <span key={k.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <button
+                              style={{ fontSize: 11, padding: '2px 8px', opacity: attached ? 1 : 0.55,
+                                borderColor: attached ? 'var(--accent)' : undefined }}
+                              title={attached ? `${k.name} fires in this band — click to detach` : `attach ${k.name} to this band`}
+                              onClick={() => setBandKind(cls, i, k.name, attached ? null : 1)}>
+                              {kindIcon(k)} {k.name}
+                            </button>
+                            {attached && (
+                              <>
+                                <span style={{ color: 'var(--text-muted)' }}>×</span>
+                                <NumberInput value={b.kinds[k.name]} min={0} step={0.1} width={56}
+                                  onChange={(v) => setBandKind(cls, i, k.name, v ?? 1)} />
+                              </>
+                            )}
+                          </span>
+                        );
+                      })}
                     </div>
                   ))}
               </>
