@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost, apiPut, spotfxGet, spotfxPost } from './api/client';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
-  ColorWheelPosition, DriftProfile, EngineStatus, FireResult, Registry,
-  RoomColorState, RoomControlState, SceneV2, SpectraTrigger, SpotColorSetCard,
+  ColorWheelPosition, DriftProfile, EngineStatus, FeedbackCapture, FeedbackEntry,
+  FireResult, Registry, RoomColorState, RoomControlState, SceneV2, SpectraTrigger,
+  SpotColorSetCard,
 } from './types';
 
 /* ── scenes ── */
@@ -378,5 +379,22 @@ export function useGenerateMidsongTriggers(uri: string | null) {
                deleted: number; skipped_authored: number }>(
         `/triggers/generate?uri=${enc(uri!)}`, {}),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-triggers', uri] }),
+  });
+}
+
+/* ── feedback sessions (Stage 2 — mark-then-nudge, batch send) ── */
+
+/** MARK button's server half — a fresh wall_ms/uri/position_ms triple read
+ * from the live S2 bridge state. Never a cached query: every call must be
+ * a genuinely fresh capture. */
+export const captureFeedbackMark = () => apiGet<FeedbackCapture>('/feedback/mark');
+
+/** POST /api/feedback/batch — the ONE round-trip a whole show's queue
+ * makes. Callers strip the client-only `touched` field before sending. */
+export function useSendFeedbackBatch() {
+  return useMutation({
+    mutationFn: (entries: Omit<FeedbackEntry, 'touched'>[]) =>
+      apiPost<{ status: string; session_id: string; received_ms: number; count: number }>(
+        '/feedback/batch', { entries }),
   });
 }

@@ -166,6 +166,35 @@ pattern) — a NEW check script that builds a temp `SPECTRA_STORAGE` and
 reaches any of the four choke points for real needs the same two lines or
 it will write into the real repo's `storage/spectra/`.
 
+## SPECTRA feedback sessions (Stage 2: mark-then-nudge, batch send)
+
+Binding requirements: `data/spectra-design-decisions.md` "Feedback-session
+design requirements" (his words, two acceptance criteria — MARK-THEN-NUDGE,
+BATCH QUEUE). Server: `spectra/services/feedback.py` (`capture_moment()` —
+the MARK button's live-bridge read; `save_batch()`/`load_all_batches()`/
+`load_entries()` — one Send press lands as one atomic durable record in
+`storage/spectra/feedback.json`, bounded like the show log, oldest whole
+batch evicted first, the just-sent batch never evicted) +
+`spectra/api/feedback.py` (`GET /api/feedback/mark`, `POST
+/api/feedback/batch`, `GET /api/feedback?uri=&since=` — the Stage 3 read
+surface). Unlike fire_history.py this store IS only ever reached through
+its own API router — no hidden production choke point — so no autouse
+pytest fixture was needed; `tests/test_feedback.py` and
+`scripts/check_feedback.py` each set `scfg.FEEDBACK_FILE` locally.
+
+Frontend: `spectra/web/src/feedback/FeedbackPage.tsx` (`/feedback`, nav
+link in `App.tsx`), phone-first. The mark-then-nudge queue itself — every
+mark, nudge, note, reorder, delete — lives ENTIRELY client-side
+(`useSticky`, localStorage) until Send; nudges correct only the captured
+`position_ms`, never `wall_ms` (which is just record-keeping order). MARK
+never round-trips before the entry appears: it pushes an optimistic entry
+from the last-polled `useEngineStatus()` bridge state immediately, then
+patches in the authoritative `GET /api/feedback/mark` capture in the
+background — skipped if the entry has already been nudged/noted
+(`touched`), so a fast edit is never clobbered by a slow capture response.
+A failed Send leaves the queue untouched for a plain retry (proven by
+killing the backend mid-send in the phone-viewport eye-check).
+
 ## SPECTRA app (her OWN process since the S3 split)
 
 `spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`), running

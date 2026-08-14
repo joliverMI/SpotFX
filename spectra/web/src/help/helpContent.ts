@@ -663,4 +663,31 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  {
+    id: 'feedback-page',
+    title: 'Feedback session (mark-then-nudge)',
+    keywords: 'feedback mark nudge queue send batch note timestamp show session review',
+    intro:
+      'A phone-first page for giving timestamped feedback DURING a played show. You react to something, tap Mark, correct the moment with the nudge buttons, then type what happened — all before it ever leaves your phone. Nothing sends until you press Send.',
+    entries: [
+      {
+        id: 'feedback-mark-then-nudge',
+        title: 'Mark, then nudge',
+        keywords: 'mark button position timestamp correct',
+        body: [
+          '● Mark captures the moment: wall time, the current song, and the song position, read from the live music bridge. Marking is instant — it never waits on the network, and never blocks a second Mark while an earlier note is half-typed.',
+          'You react a beat after the moment actually happened, so use the -5s/-1s/+1s/+5s buttons on the mark to correct the captured position BEFORE typing a note — nudging only moves the song position, never the wall-clock order the mark was made in.',
+        ],
+      },
+      {
+        id: 'feedback-queue',
+        title: 'The queue',
+        keywords: 'batch local reload survive correct delete reorder',
+        body: [
+          'Every mark lands in a queue that lives in this browser (localStorage) — it survives a page reload, so a mid-show refresh loses nothing. Edit a note, nudge a position, delete an entry, or reorder with ▲/▼ at any point before sending.',
+          'Send All leaves the whole queue in ONE request — never a per-mark round-trip during the show. If Send fails (bad signal, etc.), the queue stays exactly as it was; just tap Send again.',
+        ],
+      },
+    ],
+  },
 ];

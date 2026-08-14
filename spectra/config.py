@@ -25,6 +25,7 @@ ROOM_CONTROLS_FILE = SPECTRA_STORAGE / "room_controls.json"
 TRIGGERS_FILE = SPECTRA_STORAGE / "triggers.json"
 FIRE_HISTORY_FILE = SPECTRA_STORAGE / "fire_history.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
+FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
