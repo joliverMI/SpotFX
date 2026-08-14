@@ -101,6 +101,48 @@ button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #14061f; font-weight: 600; }
 button.danger:hover { border-color: var(--danger); color: var(--danger); }
 
+/* The panic release: an always-reachable, unmissable action — never buried
+ * in a menu, never behind a confirm dialog (the press IS the consent). */
+.panic-release-btn {
+  display: block;
+  margin: 8px 16px;
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  padding: 7px 14px;
+}
+.panic-release-btn:hover:not(:disabled) { background: var(--danger); color: #1a0505; }
+.panic-release-btn:disabled { opacity: 0.5; cursor: default; }
+
+.release-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #3a0e0e;
+  border-bottom: 2px solid var(--danger);
+  color: #fecaca;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.release-banner .release-banner-msg { flex: 1; min-width: 200px; }
+.release-banner button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .panic-release-btn { margin: 8px; width: calc(100% - 16px); padding: 10px; font-size: 13px; text-align: center; }
+  .release-banner { padding: 10px; font-size: 12.5px; }
+  .release-banner button.primary { width: 100%; padding: 10px; }
+}
+
 input[type='text'], input[type='search'] {
   background: var(--surface2);
   color: var(--text);

@@ -271,3 +271,48 @@ export function useAppStatus() {
     refetchInterval: 10_000,
   });
 }
+
+/* ── light ownership / the panic release ── */
+
+export interface OwnershipRecord {
+  owner: string;
+  handover: {
+    from: string; to: string; step: string; started_at: number;
+    token: string; age_s?: number;
+  } | null;
+  updated_at: number;
+  armed: boolean;
+  live_stack_active: boolean;
+  history: { at: number; event: string; detail: string }[];
+}
+
+/** Polls fast enough that the banner/button reflect a press from another
+ * tab or device within a beat — this is a panic surface, staleness reads
+ * as "did it work?". */
+export function useOwnership() {
+  return useQuery({
+    queryKey: ['spectra-ownership'],
+    queryFn: () => apiGet<OwnershipRecord>('/ownership'),
+    refetchInterval: 4_000,
+  });
+}
+
+/** THE PANIC HANDLE. No body, no confirmation — the press is the consent. */
+export function useReleaseRoom() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<{ result: string; owner: string }>('/ownership/release'),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-ownership'] }),
+  });
+}
+
+/** The way back from released: the normal guarded handover to SPECTRA,
+ * readiness-gated and SPECTRA_HANDOVER_ARMED-gated same as any handover. */
+export function useTakeBackToSpectra() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiPost<{ result: string; owner: string }>('/ownership/handover', { to: 'spectra' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-ownership'] }),
+  });
+}

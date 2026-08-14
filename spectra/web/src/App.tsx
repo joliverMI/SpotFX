@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import RoomOwnershipBar from './components/RoomOwnershipBar';
 import { ToastProvider } from './components/Toast';
 import { confirmLeave } from './lib/unsavedGuard';
 import HelpPage from './help/HelpPage';
@@ -48,6 +49,7 @@ export default function App() {
   return (
     <ToastProvider>
       <NavBar />
+      <RoomOwnershipBar />
       <main>
         <Routes>
           <Route path="/" element={<ScenesPage />} />

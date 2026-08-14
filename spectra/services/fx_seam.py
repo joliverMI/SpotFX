@@ -14,6 +14,9 @@ convention:
   handing-over        REFUSED. During the switch nobody writes; the API
                       surfaces the error to the owner instead of racing the
                       handover.
+  released            REFUSED — the panic handle (fx.light_ownership.
+                      RELEASED). Fires stay refused until the way-back
+                      handover lands.
 
 Bounded concurrency + a hard per-request deadline carry the write-plane
 lesson (the 2026-08-12 outage was leaked slots parking calls forever).
@@ -42,6 +45,12 @@ class HandoverInProgress(RuntimeError):
     """Raised when a fire arrives while the room is changing hands."""
 
 
+class RoomReleased(RuntimeError):
+    """Raised when a fire arrives while the room is released to Home
+    Assistant (the panic handle) — refused until the way-back handover
+    lands."""
+
+
 async def apply_writes(writes: list[dict]) -> None:
     """Send compiled writes as effect switches over the transport the
     ownership record grants. Raises on the first hard failure — the API
@@ -51,6 +60,10 @@ async def apply_writes(writes: list[dict]) -> None:
         await _apply_via_facade(writes)
     elif owner == light_ownership.SPOT_EFFECTS:
         await _apply_via_http(writes)
+    elif owner == light_ownership.RELEASED:
+        raise RoomReleased(
+            "room released to Home Assistant — fires are refused until the "
+            "way-back handover lands")
     else:
         raise HandoverInProgress(
             "light handover in progress — fires are refused until it lands")

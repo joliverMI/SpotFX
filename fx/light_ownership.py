@@ -18,6 +18,20 @@ cannot express two owners. Its values:
     handing-over   the two-step switch is in flight: NEITHER world's write
                    path is granted. The `handover` block carries from/to,
                    the current step, and a token only the orchestrator holds.
+    released       THE PANIC HANDLE (spectra/services/release.py): the owner
+                   pressed the one-press "let go" button. NEITHER world's
+                   write path is granted — same as handing-over, but there is
+                   no new writer coming up and no two-step: release() is a
+                   single atomic step straight from a settled owner. Reachable
+                   only via release(); the way back is the NORMAL guarded
+                   handover (begin_handover treats "released" as an ordinary
+                   from-world, so run_handover's readiness gate and quiesce/
+                   activate machinery apply unchanged) — see
+                   spectra/services/handover.py's from_world==RELEASED
+                   handling: there is nothing to quiesce, so that step is
+                   skipped, and a failed activation lands back at released
+                   (nothing to "restore" — released was already the safe
+                   state).
 
 Exactly-one-owner is enforced by construction, not convention:
   - writes_allowed(world) is consulted by both worlds' write choke points
@@ -61,7 +75,11 @@ OWNERSHIP_FILE = _REPO_ROOT / "storage" / "spectra" / "ownership.json"
 SPOT_EFFECTS = "spot-effects"
 SPECTRA = "spectra"
 HANDING_OVER = "handing-over"
+RELEASED = "released"
 WORLDS = (SPOT_EFFECTS, SPECTRA)
+# Valid values of OwnershipRecord.owner besides HANDING_OVER (which carries
+# its own `handover` block and is validated separately in load()).
+_SETTLED_OWNERS = WORLDS + (RELEASED,)
 
 STEP_QUIESCING = "quiescing"
 STEP_ACTIVATING = "activating"
@@ -132,7 +150,7 @@ def load() -> OwnershipRecord:
                 owner=owner, handover=Handover.from_json(handover),
                 updated_at=float(data.get("updated_at", 0.0)),
                 history=list(data.get("history", [])))
-        if owner not in WORLDS:
+        if owner not in _SETTLED_OWNERS:
             raise ValueError(f"unknown owner {owner!r}")
         return OwnershipRecord(
             owner=owner, handover=None,
@@ -352,6 +370,36 @@ def abort(token: str, reason: str) -> OwnershipRecord:
               f"{handover.step}: {reason}")
         record.owner = handover.from_world
         record.handover = None
+
+    return _transition(mutate)
+
+
+def release(reason: str) -> OwnershipRecord:
+    """owner=<spot-effects|spectra> → released: THE PANIC HANDLE. One atomic
+    step, unlike the two-step handover — there is no new writer coming up to
+    verify, so there is nothing to gate on. Refuses only mid-handover (every
+    transition in this module requires a settled owner first); a genuinely
+    stuck handover self-heals via recover_stale_handover after
+    HANDOVER_STALE_S and the press can be repeated once it lands. Idempotent:
+    pressing it again while already released just notes the repeat press —
+    the owner's press is his consent and a panic handle must never error on
+    a second press.
+
+    The record lands at `released` the instant this returns — both worlds'
+    write_allowed() gates are shed before any device-class cleanup runs (see
+    spectra/services/release.py). A failed device-class stop afterward is
+    logged but never re-opens the write gate; released is the safe landing
+    regardless of whether every device actually heard the message."""
+    def mutate(record: OwnershipRecord) -> None:
+        if record.owner == HANDING_OVER:
+            raise OwnershipError(
+                "cannot release mid-handover — wait for it to settle "
+                "(or recover a stale one) and press again")
+        if record.owner == RELEASED:
+            _note(record, "release_repeat", f"already released: {reason}")
+            return
+        _note(record, "released", f"{record.owner} → released: {reason}")
+        record.owner = RELEASED
 
     return _transition(mutate)
 

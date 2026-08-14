@@ -21,17 +21,24 @@ services/write_plane_watchdog.py):
                                   mean wedged render threads or a dead loop,
                                   which a restart does fix.
   live stack up, spot-effects     NOT alive — split-brain: a live stack
-  owns                            without ownership is a rogue writer, and a
+  or released owns                 without ownership is a rogue writer, and a
                                   restart tears it down (the record's gates
-                                  then keep the reborn process dark).
+                                  then keep the reborn process dark). Same
+                                  verdict for a deliberately-released room:
+                                  a live stack that ignored the panic
+                                  release is exactly as wrong as one that
+                                  never had ownership.
   live stack up, handing-over     alive — the activation step of a handover
                                   legitimately runs a live stack before the
                                   record commits; the orchestrator owns every
                                   failure landing, the watchdog must not race
                                   it.
   live stack down                 alive — a dark process is a healthy
-                                  process. Dark-but-owned only persists when
-                                  the startup resume (handover.
+                                  process, WHATEVER the owner field says
+                                  (spot-effects, spectra dark-but-owned, or a
+                                  deliberately released room — all the same
+                                  healthy-dark shape). Dark-but-owned only
+                                  persists when the startup resume (handover.
                                   resume_own_room) FAILED — devices
                                   unreachable, seed missing — and a restart
                                   would just fail the same way; the alarm is
@@ -93,6 +100,9 @@ def evaluate(owner: str, live_active: bool,
                        "virtuals stopped flushing frames")
     if owner == light_ownership.HANDING_OVER:
         return True, None
+    if owner == light_ownership.RELEASED:
+        return False, ("live stack up while released — the panic release "
+                       "did not take; restart tears the rogue writer down")
     return False, (f"split-brain: live stack up while owner={owner!r} — "
                    "restart tears the rogue writer down")
 
