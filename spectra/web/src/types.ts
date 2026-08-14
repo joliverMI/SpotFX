@@ -263,10 +263,11 @@ export interface RoomControlState {
  * fields changed (spectra/api/room_controls.py). "on"/"off" is a real live
  * takeover; "dark"/"no-hue-devices" means the switch saved but nothing was
  * touched (SPECTRA doesn't own the room right now, or there's no Hue
- * device in it) — the room bar surfaces this so the control never silently
- * lies about having done something. */
+ * device in it); "failed" means SPECTRA tried and every live Hue device
+ * rejected it (bridge unreachable, etc.) — the room bar surfaces all of
+ * these so the control never silently lies about having done something. */
 export interface AmbientResult {
-  status: 'on' | 'off' | 'dark' | 'no-hue-devices';
+  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed';
   devices?: string[];
   lights_set?: number;
 }

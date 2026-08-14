@@ -15,6 +15,7 @@ import type { AmbientResult, RoomControlState, SceneChangeMode } from '../types'
 const AMBIENT_NOTE: Record<string, string> = {
   dark: "SPECTRA isn't driving the lights right now — saved, nothing changed live",
   'no-hue-devices': 'no live Hue device in the room — saved, nothing to hold',
+  failed: 'every live Hue device rejected the change (bridge unreachable?) — saved, but the room may not match this switch',
 };
 
 const SCENE_CHANGE_MODES: { value: SceneChangeMode; label: string; title: string }[] = [
@@ -82,7 +83,10 @@ export default function RoomControlsBar() {
       </label>
 
       {ambientResult && ambientResult.status !== 'on' && ambientResult.status !== 'off' && (
-        <span className="badge badge-gray" title={AMBIENT_NOTE[ambientResult.status]}>
+        <span
+          className={`badge ${ambientResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
+          title={AMBIENT_NOTE[ambientResult.status]}
+        >
           ambient: {ambientResult.status}
         </span>
       )}

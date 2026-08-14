@@ -1042,7 +1042,11 @@ rc.save_room_controls(rc.RoomControlState())   # reset for later sections
 
 # ── Ambient (services/ambient.py): the room bar's Ambient checkbox — a real
 #    Hue takeover, freeze before REST write / REST fade before unfreeze,
-#    Hue-only (WLED left running its normal show), state-only when dark ────
+#    Hue-only (WLED left running its normal show), state-only when dark,
+#    a rejected REST write never counts as a success, and reconcile()
+#    never reports "on"/"off" with nothing actually held ──────────────────
+import httpx
+
 from spectra.services import ambient
 from spectra.services.live_host import live as live_stack
 
@@ -1052,28 +1056,37 @@ check(asyncio.run(ambient.reconcile(True, "#ff0000")) == {"status": "dark"},
       "path every other check above implicitly exercises too")
 
 
+def _hue_handler(calls, fail_light_put=False):
+    def handler(request):
+        path = request.url.path
+        calls.append(("REST", request.method, path))
+        if path == "/clip/v2/resource/entertainment":
+            return httpx.Response(200, json={"data": [{"id": "e1", "owner": {"rid": "d1"}}]})
+        if path == "/clip/v2/resource/light":
+            return httpx.Response(200, json={"data": [{"id": "l1", "owner": {"rid": "d1"}}]})
+        if path.startswith("/clip/v2/resource/entertainment_configuration/"):
+            return httpx.Response(200, json={"data": [{"channels": [{"members": [
+                {"service": {"rtype": "entertainment", "rid": "e1"}}]}]}]})
+        if fail_light_put:
+            return httpx.Response(400, json={"errors": [{"description": "bad xy"}]})
+        return httpx.Response(200, json={"data": []})
+    return handler
+
+
 class _FakeHueDevice:
     type = "hue"
 
-    def __init__(self, ip):
+    def __init__(self, ip, calls, fail_freeze=False):
         self.config = {"ip_address": ip, "entertainment_id": f"ent-{ip}", "username": "u"}
-        self.calls = []
+        self.calls = calls   # shared with the mock bridge handler below
         self.frozen = None
+        self._fail_freeze = fail_freeze
 
     async def set_frozen(self, frozen):
         self.calls.append(("set_frozen", frozen))
+        if self._fail_freeze:
+            raise RuntimeError("bridge unreachable")
         self.frozen = frozen
-
-    def _hue_request(self, method, endpoint, data=None, ssl=False):
-        self.calls.append((method, endpoint, data))
-        if endpoint == "/clip/v2/resource/entertainment":
-            return {"data": [{"id": "e1", "owner": {"rid": "d1"}}]}, {}
-        if endpoint == "/clip/v2/resource/light":
-            return {"data": [{"id": "l1", "owner": {"rid": "d1"}}]}, {}
-        if endpoint.startswith("/clip/v2/resource/entertainment_configuration/"):
-            return {"data": [{"channels": [{"members": [
-                {"service": {"rtype": "entertainment", "rid": "e1"}}]}]}]}, {}
-        return {}, {}   # the light PUT itself
 
 
 class _FakeWledDevice:
@@ -1086,31 +1099,41 @@ class _FakeHost:
 
 
 def _call_index(calls, wanted):
-    """First index of `wanted` in `calls`, matched on (method, endpoint) —
-    call bodies vary run to run, only the ordering matters here."""
     for i, c in enumerate(calls):
-        if c[0] == wanted[0] and c[1] == wanted[1]:
+        if c == wanted:
             return i
     raise AssertionError(f"{wanted} not found in {calls}")
 
 
+def _mock_bridge_client(calls, fail_light_put=False):
+    handler = _hue_handler(calls, fail_light_put=fail_light_put)
+
+    def factory(cfg):
+        return httpx.AsyncClient(base_url=f"https://{cfg['ip_address']}",
+                                 transport=httpx.MockTransport(handler))
+    return factory
+
+
 ambient._light_cache.clear()
-hue_dev = _FakeHueDevice("10.0.0.1")
+bridge_calls = []
+hue_dev = _FakeHueDevice("10.0.0.1", bridge_calls)
 _orig_host = live_stack.host
+_orig_bridge_client = ambient._bridge_client
 live_stack.host = _FakeHost({"hue-lights": hue_dev, "strip": _FakeWledDevice()})
+ambient._bridge_client = _mock_bridge_client(bridge_calls)
 try:
     on_result = asyncio.run(ambient.reconcile(True, "#00ff00"))
     check(on_result == {"status": "on", "devices": ["hue-lights"], "lights_set": 1},
           "ambient ON holds every live Hue device at the chosen colour — "
           "the WLED device is never touched (Hue-only, matching the "
           "legacy scope this ports)")
-    freeze_i = _call_index(hue_dev.calls, ("set_frozen", True))
-    put_i = _call_index(hue_dev.calls, ("PUT", "/clip/v2/resource/light/l1"))
+    freeze_i = _call_index(bridge_calls, ("set_frozen", True))
+    put_i = _call_index(bridge_calls, ("REST", "PUT", "/clip/v2/resource/light/l1"))
     check(freeze_i < put_i,
           "freeze lands before the REST colour write — a live stream frame "
           "must never win the race against REST (legacy's own ordering)")
 
-    hue_dev.calls.clear()
+    bridge_calls.clear()
     ambient.AMBIENT_TRANSITION_MS = 0  # skip the real off-fade sleep for the spec run
     off_result = asyncio.run(ambient.reconcile(False, None))
     check(off_result == {"status": "off", "devices": ["hue-lights"]},
@@ -1118,13 +1141,36 @@ try:
     check(hue_dev.frozen is False,
           "disable ends unfrozen — the room's live scene resumes on its "
           "own, no wake-scene step needed")
-    fade_i = _call_index(hue_dev.calls, ("PUT", "/clip/v2/resource/light/l1"))
-    unfreeze_i = _call_index(hue_dev.calls, ("set_frozen", False))
+    fade_i = _call_index(bridge_calls, ("REST", "PUT", "/clip/v2/resource/light/l1"))
+    unfreeze_i = _call_index(bridge_calls, ("set_frozen", False))
     check(fade_i < unfreeze_i,
           "the brightness-only off-fade lands before unfreezing — a soft "
           "handoff, not a hard cut")
+
+    ambient._light_cache.clear()
+    rejecting_calls = []
+    rejecting_dev = _FakeHueDevice("10.0.0.2", rejecting_calls)
+    live_stack.host = _FakeHost({"hue-lights": rejecting_dev})
+    ambient._bridge_client = _mock_bridge_client(rejecting_calls, fail_light_put=True)
+    rejected_result = asyncio.run(ambient.reconcile(True, "#ff0000"))
+    check(rejected_result["status"] == "on" and rejected_result["lights_set"] == 0,
+          "a Hue CLIP v2 4xx body is valid JSON but must NOT count as a "
+          "successful write — raise_for_status is the gate legacy's own "
+          "status_code < 400 check made explicit (the vendored "
+          "HueDevice._hue_request has no such gate — see the module "
+          "docstring on why this module talks to the bridge directly)")
+
+    ambient._light_cache.clear()
+    dead_dev = _FakeHueDevice("10.0.0.3", [], fail_freeze=True)
+    live_stack.host = _FakeHost({"dead": dead_dev})
+    failed_result = asyncio.run(ambient.reconcile(True, "#ff0000"))
+    check(failed_result == {"status": "failed", "devices": [], "lights_set": 0},
+          "when every live Hue device fails, reconcile reports 'failed' — "
+          "never a false 'on' with nothing actually held (the exact "
+          "failure shape this feature exists to stop reporting)")
 finally:
     live_stack.host = _orig_host
+    ambient._bridge_client = _orig_bridge_client
     ambient.AMBIENT_TRANSITION_MS = 1500
 
 # ── item-8 CANONICAL shape: a band SELECTS AND SCALES its named kinds ────────

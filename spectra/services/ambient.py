@@ -31,12 +31,16 @@ LedFX HTTP API:
     the handoff isn't a hard cut from white to whatever the effect is
     currently outputting.
 
-Freeze/REST calls go through the live HueDevice's own `_hue_request` — its
-only REST surface, no public wrapper exists — off the event loop via
-run_in_executor, same as the class's own internal blocking calls. Bridge
+Light-state REST calls go over a direct httpx.AsyncClient (same pattern as
+spectra/services/ledfx_release.py), not the live HueDevice's own
+`_hue_request` — that vendored helper never checks response.status_code
+(fx/devices/hue.py:175-186 returns response.json() unconditionally), so a
+Hue CLIP v2 4xx error body would silently count as a successful write.
+Legacy's own _apply_hue (services/ambient_mode.py) explicitly gates on
+`status_code < 400`; raise_for_status() here is that same gate. Bridge
 credentials come from the device's public `.config` property
-(fx/utils.py BaseRegistry.config, backed by the same dict `_hue_request`
-itself reads).
+(fx/utils.py BaseRegistry.config). Freezing itself still goes through the
+device's own `set_frozen()` — the one call this module doesn't replicate.
 
 State-only when SPECTRA doesn't own the live stack (dark, or spot-effects
 owns) — reconcile() no-ops and reports "dark" rather than raising, so
@@ -47,6 +51,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -119,31 +125,45 @@ def _fade_dim_payload(brightness_pct: int, ramp_ms: int) -> dict:
     }
 
 
-# ── bridge REST, via the live device's own request surface ─────────────────
+# ── bridge REST, direct to the bridge (not through LedFX) ──────────────────
 
-async def _hue_call(dev: Any, method: str, endpoint: str, data: Optional[dict] = None) -> dict:
-    loop = asyncio.get_running_loop()
-    body, _headers = await loop.run_in_executor(
-        None, dev._hue_request, method, endpoint, data, True)
-    return body
+_REST_TIMEOUT = httpx.Timeout(connect=3.0, read=4.0, write=4.0, pool=1.0)
 
 
-async def _resolve_lights(dev: Any) -> list[str]:
+def _bridge_client(cfg: dict) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url=f"https://{cfg['ip_address']}",
+        headers={"hue-application-key": cfg["username"]},
+        verify=False,  # the bridge uses a self-signed cert
+        timeout=_REST_TIMEOUT,
+    )
+
+
+async def _hue_get(client: httpx.AsyncClient, endpoint: str) -> dict:
+    resp = await client.get(endpoint)
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def _hue_put(client: httpx.AsyncClient, endpoint: str, body: dict) -> None:
+    resp = await client.put(endpoint, json=body)
+    resp.raise_for_status()
+
+
+async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
     """Map the device's entertainment stream to individual Hue `light`
     resource ids, so ambient can PUT each one directly over REST — cached
     per bridge, same as legacy (topology is stable)."""
-    cfg = dev.config
     cache_key = (cfg["ip_address"], cfg["entertainment_id"])
     if cache_key in _light_cache:
         return _light_cache[cache_key]
     try:
-        ent = (await _hue_call(dev, "GET", "/clip/v2/resource/entertainment"))["data"]
+        ent = (await _hue_get(client, "/clip/v2/resource/entertainment"))["data"]
         ent_owner = {e["id"]: e["owner"]["rid"] for e in ent}
-        lights = (await _hue_call(dev, "GET", "/clip/v2/resource/light"))["data"]
+        lights = (await _hue_get(client, "/clip/v2/resource/light"))["data"]
         dev_light = {l["owner"]["rid"]: l["id"] for l in lights}
-        ec = (await _hue_call(
-            dev, "GET",
-            f"/clip/v2/resource/entertainment_configuration/{cfg['entertainment_id']}",
+        ec = (await _hue_get(
+            client, f"/clip/v2/resource/entertainment_configuration/{cfg['entertainment_id']}",
         ))["data"][0]
         rids: list[str] = []
         seen: set[str] = set()
@@ -165,16 +185,22 @@ async def _resolve_lights(dev: Any) -> list[str]:
 
 
 async def _apply_hue(dev: Any, body: dict) -> int:
-    """PUT `body` to every light this device's entertainment stream covers.
-    Best-effort per light — one unreachable bulb must not stop the rest."""
+    """PUT `body` to every light this device's entertainment stream covers,
+    over ONE connection to its bridge (a device can carry ten-plus lights —
+    a fresh TLS handshake per light would make every toggle noticeably
+    slow). Best-effort per light — one unreachable/rejecting bulb must not
+    stop the rest, but a non-2xx response (raise_for_status) still doesn't
+    count toward the returned total — a rejected write is not a write."""
+    cfg = dev.config
     count = 0
-    for rid in await _resolve_lights(dev):
-        try:
-            await _hue_call(dev, "PUT", f"/clip/v2/resource/light/{rid}", body)
-            count += 1
-        except Exception:
-            logger.exception("Ambient: failed to set light %s on %s",
-                             rid, dev.config.get("ip_address"))
+    async with _bridge_client(cfg) as client:
+        for rid in await _resolve_lights(client, cfg):
+            try:
+                await _hue_put(client, f"/clip/v2/resource/light/{rid}", body)
+                count += 1
+            except Exception:
+                logger.exception("Ambient: failed to set light %s on %s",
+                                 rid, cfg.get("ip_address"))
     return count
 
 
@@ -221,8 +247,16 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
                 touched.append(did)
             except Exception:
                 logger.exception("Ambient: failed to hold %s at the ambient colour", did)
+        if not touched:
+            # Every Hue device failed — the switch must NOT report success
+            # with nothing held (the exact failure shape this feature exists
+            # to stop reporting: a control that says "on" while the room
+            # didn't change).
+            logger.error("Ambient: ON requested but every Hue device failed "
+                         "— the room is NOT held")
+            return {"status": "failed", "devices": [], "lights_set": 0}
         logger.info("Ambient ON: %s held at %s, %d light(s) set",
-                    touched or "none", color or "#ffffff", lights_set)
+                    touched, color or "#ffffff", lights_set)
         return {"status": "on", "devices": touched, "lights_set": lights_set}
 
     fade = _fade_dim_payload(AMBIENT_OFF_FADE_PCT, AMBIENT_TRANSITION_MS)
@@ -240,5 +274,9 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
             touched.append(did)
         except Exception:
             logger.exception("Ambient: failed to release %s", did)
-    logger.info("Ambient OFF: %s released", touched or "none")
+    if not touched:
+        logger.error("Ambient: OFF requested but every Hue device failed to "
+                     "release — the room may still be held on the ambient colour")
+        return {"status": "failed", "devices": []}
+    logger.info("Ambient OFF: %s released", touched)
     return {"status": "off", "devices": touched}
