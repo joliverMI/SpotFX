@@ -696,13 +696,22 @@ class Effect(BaseRegistry):
                     "kind": kind,
                 }
                 if kind == "numeric":
-                    start = prior["current"] if prior else self._config.get(key)
+                    # A prior tween on this key may be gradient-kind (stores
+                    # current_curve, not current) if the param was reclassified
+                    # between calls — reuse prior's live value only when its
+                    # kind actually matches (spectra-room-fault-diagnosis,
+                    # KeyError: 'current', 2026-08-14).
+                    start = (prior["current"]
+                             if prior and prior.get("kind") != "gradient"
+                             else self._config.get(key))
                     tw["start"] = float(start)
                     tw["target"] = float(target)
                     tw["current"] = float(start)
                     tw["integer"] = key in int_keys
                 elif kind == "color":
-                    start = prior["current"] if prior else self._config.get(key)
+                    start = (prior["current"]
+                             if prior and prior.get("kind") != "gradient"
+                             else self._config.get(key))
                     tw["start"] = str(start)
                     tw["target"] = str(target)
                     tw["current"] = str(start)

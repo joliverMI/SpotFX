@@ -99,12 +99,39 @@ class FacadeExecutor(RecordingExecutor):
     async def _put(self, virtual_id: str, effect_type: str,
                    params: dict[str, Any], duration_ms: int) -> None:
         from fx import facade
-        resp = await facade.handle(
-            "PUT", f"/api/virtuals/{virtual_id}/effects",
-            json={"type": effect_type, "config": dict(params),
-                  "transition_ms": duration_ms, "easing": "linear",
-                  "transition_blend": HUE_BLEND})
+        if duration_ms > 0 and await self._is_type_switch(
+                facade, virtual_id, effect_type):
+            # fx/facade.py's stale-tween-PUT guard (447-461) silently drops
+            # a combined type-switch+transition PUT — a blend only makes
+            # sense between two states of the SAME effect. Land the switch
+            # instantly first (params here may be a partial patch rather
+            # than the full effect config — an engine glide/jump is only
+            # meant to tune an ALREADY-active effect's params, so a genuine
+            # type mismatch here means some earlier write already landed
+            # wrong; any unspecified params fall back to the new effect's
+            # own schema defaults, and self-correct on the next write).
+            resp = await facade.handle(
+                "PUT", f"/api/virtuals/{virtual_id}/effects",
+                json={"type": effect_type, "config": dict(params)})
+        else:
+            resp = await facade.handle(
+                "PUT", f"/api/virtuals/{virtual_id}/effects",
+                json={"type": effect_type, "config": dict(params),
+                      "transition_ms": duration_ms, "easing": "linear",
+                      "transition_blend": HUE_BLEND})
         resp.raise_for_status()
+
+    @staticmethod
+    async def _is_type_switch(facade, virtual_id: str, effect_type: str) -> bool:
+        """Mirrors fx_seam._is_type_switch — read-only GET, no write-plane
+        effect. Unknown (GET fails) reads as False so the write still goes
+        out as a single PUT and reports the real error, unchanged from
+        today."""
+        resp = await facade.handle("GET", f"/api/virtuals/{virtual_id}")
+        if resp.status_code != 200:
+            return False
+        current = resp.json().get(virtual_id, {}).get("effect", {}).get("type")
+        return current is not None and current != effect_type
 
     async def glide(self, virtual_id: str, effect_type: str,
                     params: dict[str, Any], duration_ms: int) -> None:
