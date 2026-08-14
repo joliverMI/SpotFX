@@ -460,3 +460,35 @@ export const newTrigger = (timestampMs: number): SpectraTrigger => ({
   generator_key: null,
   action: { kind: 'fire_scene', scene_id: '', intensity: 0.5, color_set_id: null },
 });
+
+/** Feedback-session mark-then-nudge queue (Stage 2, GET /api/feedback/mark,
+ * POST /api/feedback/batch). The queue itself lives client-side
+ * (localStorage) until Send — see spectra/web/src/feedback/FeedbackPage.tsx. */
+export interface FeedbackCapture {
+  wall_ms: number;
+  uri: string | null;
+  position_ms: number | null;
+}
+
+export interface FeedbackEntry {
+  id: string;
+  wall_ms: number;
+  uri: string | null;
+  position_ms: number;
+  note: string;
+  /** Client-only: once true, a background capture patch is skipped so it
+   * never clobbers a nudge/note edit already in flight. Stripped before
+   * the entry is sent to POST /api/feedback/batch. */
+  touched: boolean;
+}
+
+export const newFeedbackEntry = (capture: {
+  wall_ms: number; uri: string | null; position_ms: number | null;
+}): FeedbackEntry => ({
+  id: uuid(),
+  wall_ms: capture.wall_ms,
+  uri: capture.uri,
+  position_ms: Math.max(0, capture.position_ms ?? 0),
+  note: '',
+  touched: false,
+});

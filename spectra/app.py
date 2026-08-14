@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 from spectra import config
 from spectra.api import engine as engine_api
-from spectra.api import (fire_history, journey, ownership, registry,
+from spectra.api import (feedback, fire_history, journey, ownership, registry,
                          room_controls, scenes, sequencer, triggers)
 
 
@@ -61,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(room_controls.router)
     app.include_router(triggers.router)
     app.include_router(fire_history.router)
+    app.include_router(feedback.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):
