@@ -34,6 +34,14 @@ const kindTypeLabel = (k: FlareKind): string =>
     ? (k.jump === 'color_set' ? 'drift-jump · colour set' : 'drift-jump · dice')
     : k.type;
 
+const targetContent = (p: string, t: FlareKind['params'][string]): string => {
+  switch (t.mode) {
+    case 'offset': return `${p} → baseline ${t.offset! >= 0 ? '+' : ''}${t.offset}`;
+    case 'random': return `${p} → random ${t.lo}–${t.hi}`;
+    default: return `${p} → ${t.value}`;
+  }
+};
+
 const kindContent = (k: FlareKind): string => {
   const bits: string[] = [];
   if (k.type === 'drift_jump') {
@@ -41,15 +49,16 @@ const kindContent = (k: FlareKind): string => {
       ? 'jump the room to the selector\'s next colour set'
       : 're-roll the scene\'s 🎲 values');
   }
-  for (const [p, v] of Object.entries(k.params ?? {})) bits.push(`${p} → ${v}`);
+  for (const [p, t] of Object.entries(k.params ?? {})) bits.push(targetContent(p, t));
   if (k.gain !== 1) bits.push(`gain ×${k.gain}`);
+  if (k.hold_ms != null) bits.push(`hold ${k.hold_ms} ms`);
   return bits.join(' · ');
 };
 
 const TYPE_HINT: Record<string, string> = {
   drift_jump: 'Jumps the drift itself — the change CARRIES; the journey walks on from it. On colour jumps the ramp-in eases gentle flares, big ones land hard.',
-  momentary: 'Spikes and RETURNS exactly to the carried baseline — drift never notices.',
-  permanent: 'Lands and BECOMES the new baseline drift carries from.',
+  momentary: 'Spikes and RETURNS exactly to the carried baseline (a creep\'s current wander position included) after its hold — 250 ms unless the kind sets its own hold_ms. Each param target is absolute, an offset from the carried baseline (up/down), or a fresh random draw in a range; intensity still steers strength via the band\'s ×scale.',
+  permanent: 'Lands and BECOMES the new baseline drift carries from. Same target expressions as momentary (absolute / offset / random), just never released.',
 };
 
 export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
@@ -78,7 +87,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
     if (cls === 'flare') {
       for (const [name, jump] of [['Dice Re-roll', 'dice'], ['Colour Jump', 'color_set']] as const) {
         if (!kinds.some((k) => k.name === name)) {
-          missing.push({ name, type: 'drift_jump', jump, params: {}, gain: 1 });
+          missing.push({ name, type: 'drift_jump', jump, params: {}, gain: 1, hold_ms: null });
         }
         attach[name] = 1;
       }

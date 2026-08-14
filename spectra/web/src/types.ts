@@ -84,15 +84,34 @@ export interface SceneDeviceConfig {
   drift: Record<string, DriftRef>;
 }
 
+/** One param's target expression on a momentary/permanent kind — the
+ * owner's five-ways extension. absolute (default, legacy-compatible) is
+ * value verbatim; offset is a signed delta from the CARRIED BASELINE at
+ * fire time (up = positive, down = negative — a creep's current wander
+ * position, not its static declared baseline); random rolls once per kind
+ * execution in [lo, hi] and broadcasts like an absolute value. The other
+ * two ways aren't modes here: INTENSITY-DRIVEN is the band's own ×scale
+ * (composes with every mode), ABSOLUTE is this type's default. */
+export interface ParamTarget {
+  mode: 'absolute' | 'offset' | 'random';
+  value: number | null;
+  offset: number | null;
+  lo: number | null;
+  hi: number | null;
+}
+
 /** A NAMED flare kind (item-8 shape): drift_jump jumps the drift (colour
  * set via the shipped selector, or a 🎲 re-roll); momentary spikes and
- * RETURNS; permanent lands and BECOMES the baseline drift carries from. */
+ * RETURNS; permanent lands and BECOMES the baseline drift carries from.
+ * hold_ms (momentary only; null = the fixed PULSE_HOLD_S default, 250 ms)
+ * is the CHOSEN HOLD before the release glide starts. */
 export interface FlareKind {
   name: string;
   type: 'drift_jump' | 'momentary' | 'permanent';
   jump: 'color_set' | 'dice' | null;
-  params: Record<string, number>;
+  params: Record<string, ParamTarget>;
   gain: number;
+  hold_ms: number | null;
 }
 
 export interface FlareBand {

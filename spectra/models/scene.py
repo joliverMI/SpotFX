@@ -21,6 +21,13 @@ plus DECLARED MECHANISMS:
                  momentary   a parameter spike that RETURNS to where it was
                  permanent   the parameter lands and BECOMES the new
                              baseline drift carries from
+               A momentary/permanent kind's params are ParamTarget
+               expressions (absolute / offset-from-baseline / random-in-
+               range — see ParamTarget); INTENSITY-DRIVEN strength is the
+               band's own scale factor, orthogonal to the target mode.
+               momentary also carries an optional hold_ms (CHOSEN HOLD
+               before release; None = the fixed PULSE_HOLD_S default) —
+               see scene_response.py.
   responses  — the four event classes (flare/charge/lull/drop), each an
                intensity-banded ResponseSpec whose bands SELECT AND SCALE
                the named kinds: band.kinds maps kind name → scale factor
@@ -218,6 +225,45 @@ class SceneDeviceConfig(BaseModel):
         return self.params
 
 
+class ParamTarget(BaseModel):
+    """One param's target expression on a momentary/permanent flare kind —
+    the owner's five-ways extension. Five ways to say where a param goes,
+    two independent of this type:
+      absolute  (default, legacy-compatible) value verbatim — a bare
+                number in authored JSON coerces to this shape.
+      offset    a signed delta FROM THE CARRIED BASELINE AT FIRE TIME (a
+                creep's current wander position, the same truth
+                _carried_value already reads for the release) — "star down
+                by 1" is offset=-1.0, up is a positive offset. Unresolvable
+                (no known baseline) skips the param, same as an unknown
+                registry param — a name-broadcast kind never moves blind.
+      random    a fresh uniform draw in [lo, hi], rolled ONCE per kind
+                execution and broadcast to every landing virtual — the same
+                one-declared-value-many-virtuals shape as absolute.
+    The other two ways are orthogonal, not modes here: INTENSITY-DRIVEN is
+    the band's existing scale factor (moves the resolved declared target to
+    baseline + (declared − baseline)·scale — composes with every mode
+    above); ABSOLUTE set value is this type's own default mode."""
+    mode: Literal["absolute", "offset", "random"] = "absolute"
+    value:  Optional[float] = None   # absolute
+    offset: Optional[float] = None   # offset — signed, up = positive
+    lo:     Optional[float] = None   # random
+    hi:     Optional[float] = None   # random
+
+    @model_validator(mode="after")
+    def _shape(self) -> "ParamTarget":
+        if self.mode == "absolute" and self.value is None:
+            raise ValueError("an absolute target needs a value")
+        if self.mode == "offset" and self.offset is None:
+            raise ValueError("an offset target needs an offset")
+        if self.mode == "random":
+            if self.lo is None or self.hi is None:
+                raise ValueError("a random target needs lo and hi")
+            if self.lo > self.hi:
+                raise ValueError(f"random target needs lo ({self.lo}) <= hi ({self.hi})")
+        return self
+
+
 class FlareKind(BaseModel):
     """One NAMED flare kind — a first-class concept the scene declares and
     its bands select. The three types, binding semantics:
@@ -230,17 +276,35 @@ class FlareKind(BaseModel):
       permanent   params/gain land and BECOME the new baseline drift
                   carries from (conductor.on_surge).
     gain is a brightness-envelope multiplier around the carried baseline;
-    params are absolute targets, name-broadcast to every virtual whose live
-    effect carries the param. A band attaches kinds with a scale factor:
-    scale s moves a param to baseline + (declared − baseline)·s and an
-    envelope to 1 + (gain − 1)·s — ×1 is exactly as declared, ×0 is inert;
-    scale is inert on a dice re-roll (a fresh roll has no magnitude) and
-    steers the colour selector's intensity axis on a colour jump."""
+    params are ParamTarget expressions (absolute/offset/random — see that
+    type), name-broadcast to every virtual whose live effect carries the
+    param. A band attaches kinds with a scale factor: scale s moves a
+    param's RESOLVED target to baseline + (resolved − baseline)·s and an
+    envelope to 1 + (gain − 1)·s — ×1 lands the resolved target verbatim,
+    ×0 is inert; scale is inert on a dice re-roll (a fresh roll has no
+    magnitude) and steers the colour selector's intensity axis on a colour
+    jump.
+    hold_ms (momentary only; None = PULSE_HOLD_S, today's fixed 250 ms) is
+    the CHOSEN HOLD before the release glide starts — the release itself is
+    unchanged: it always glides to the baseline AS CARRIED AT RELEASE TIME,
+    a creep's wander included (scene_response.flush_releases)."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent"]
     jump: Optional[Literal["color_set", "dice"]] = None
-    params: dict[str, float] = Field(default_factory=dict)
+    params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
+    hold_ms: Optional[int] = Field(default=None, ge=0, le=60_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_bare_params(cls, data):
+        if isinstance(data, dict) and isinstance(data.get("params"), dict):
+            data = {**data, "params": {
+                k: ({"mode": "absolute", "value": v}
+                    if isinstance(v, (int, float)) and not isinstance(v, bool)
+                    else v)
+                for k, v in data["params"].items()}}
+        return data
 
     @model_validator(mode="after")
     def _shape(self) -> "FlareKind":
@@ -252,6 +316,10 @@ class FlareKind(BaseModel):
                 raise ValueError(
                     f"drift-jump kind '{self.name}' jumps the drift — params/"
                     f"gain belong on a momentary or permanent kind")
+            if self.hold_ms is not None:
+                raise ValueError(
+                    f"drift-jump kind '{self.name}' never releases — "
+                    f"hold_ms belongs on a momentary kind")
         else:
             if self.jump is not None:
                 raise ValueError(
@@ -261,6 +329,10 @@ class FlareKind(BaseModel):
                 raise ValueError(
                     f"kind '{self.name}' moves nothing — declare params "
                     f"and/or a gain ≠ 1")
+            if self.hold_ms is not None and self.type != "momentary":
+                raise ValueError(
+                    f"kind '{self.name}' is permanent — it never releases, "
+                    f"hold_ms belongs on a momentary kind")
         return self
 
 

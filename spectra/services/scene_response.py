@@ -89,8 +89,10 @@ Per event, fed by the bridge with the fire's intensity:
 Pulse releases are two-phase on purpose: the spike must LAND (at least one
 render frame) before the release glide starts, or the tween engine would
 retarget from the pre-spike value and the peak would never show. Production
-schedules flush_releases() after PULSE_HOLD_S; the executable specs call it
-explicitly for determinism.
+schedules one flush_releases(hold_s) task per pending_hold_groups() entry,
+each after its own CHOSEN HOLD (a momentary kind's hold_ms, default
+PULSE_HOLD_S — models.scene.FlareKind); the executable specs call
+flush_releases() directly (hold_s=None drains every group) for determinism.
 
 Executable specs: scripts/check_spectra.py, tests/test_spectra_engine.py.
 """
@@ -104,7 +106,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from fx import device_model
 from spectra.models.binding import ValueBinding
-from spectra.models.scene import FlareBand, FlareKind, ResponseClass, SceneV2
+from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
+                                  ResponseClass, SceneV2)
 from spectra.models.sequencer import CurvePoint
 from spectra.services import binding_resolver, color_journey
 from spectra.services import selection_kernel as kernel
@@ -177,9 +180,13 @@ class ResponseEngine:
         self._room_save = room_save or color_journey.save_room
 
         self.surges: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
-        # (virtual_id, param) pairs a momentary kind spiked, awaiting the
-        # release glide back to the carried baseline.
-        self._pending_releases: list[tuple[str, str]] = []
+        # (virtual_id, param, hold_s) triples a momentary kind spiked,
+        # awaiting the release glide back to the carried baseline — hold_s
+        # is the CHOSEN HOLD (kind.hold_ms or the PULSE_HOLD_S default) so
+        # different kinds in the same surge can hold their spike for
+        # different lengths before releasing (pending_hold_groups groups
+        # them for the engine to schedule one release task per hold).
+        self._pending_releases: list[tuple[str, str, float]] = []
         self._phase_armed: Optional[str] = None  # "charge"|"lull" awaiting payoff
 
     # ── the event ────────────────────────────────────────────────────────────
@@ -335,39 +342,67 @@ class ResponseEngine:
         return float(v) if isinstance(v, (int, float)) \
             and not isinstance(v, bool) else None
 
+    def _resolve_target(self, target: ParamTarget, base: Optional[float],
+                        rolled: dict[str, float], pname: str) -> Optional[float]:
+        """The DECLARED target a ParamTarget expression resolves to, before
+        the band's scale steers it — the same declared/base split the scale
+        formula below has always used, generalized past a bare absolute
+        float. offset needs a known baseline (a creep's current wander
+        position or the tracked param baseline) — unresolvable skips the
+        param, same as an unknown registry param (a name-broadcast kind
+        never moves blind)."""
+        if target.mode == "absolute":
+            return target.value
+        if target.mode == "offset":
+            return None if base is None else base + target.offset
+        return rolled[pname]   # random — pre-rolled once, broadcast to all
+
     def _move_params(self, kind: FlareKind, scale: float,
                      jumps: dict, carry: dict) -> list[dict]:
         """One momentary/permanent kind's param moves. Name-broadcast
         targeting: each key lands on every virtual whose live effect has
         that param (registry truth); explicit kinds override same-key
-        re-rolls — the band's word wins. Scale ×1 lands the declared value
-        VERBATIM (legacy parity); any other scale moves the target to
-        baseline + (declared − baseline)·scale, clamped to the param's
-        registry range. PERMANENT enters the carry; MOMENTARY schedules
-        the return instead."""
+        re-rolls — the band's word wins. Each param's ParamTarget resolves
+        to a declared target (absolute value / baseline + offset / a fresh
+        random draw — random rolls ONCE per kind execution, broadcast like
+        an absolute value); scale ×1 then lands it VERBATIM (legacy
+        parity), any other scale moves it to baseline + (declared −
+        baseline)·scale, clamped to the param's registry range. PERMANENT
+        enters the carry; MOMENTARY schedules the return at its CHOSEN HOLD
+        (kind.hold_ms, default PULSE_HOLD_S) instead."""
         landed: list[dict] = []
+        rolled = {pname: self._rng.uniform(target.lo, target.hi)
+                  for pname, target in kind.params.items()
+                  if target.mode == "random"}
+        hold_s = (kind.hold_ms / 1000.0 if kind.hold_ms is not None
+                  else PULSE_HOLD_S)
         for vid, state in self.conductor.virtuals.items():
             moves: dict[str, float] = {}
-            for pname, value in kind.params.items():
+            for pname, target in kind.params.items():
                 meta = device_model.get_param_meta(state.effect_type, pname)
                 if meta is None:
                     continue
-                target = float(value)
-                if scale != 1.0:
+                base = None
+                if target.mode == "offset" or scale != 1.0:
                     base = self._carried_value(vid, state, pname, carry)
-                    if base is not None:
-                        target = base + (target - base) * scale
-                        mkind, lo, hi = binding_resolver.kind_for_meta(meta)
-                        if mkind == binding_resolver.KIND_NUMERIC:
-                            if lo is not None:
-                                target = max(float(lo), target)
-                            if hi is not None:
-                                target = min(float(hi), target)
-                moves[pname] = target
+                declared = self._resolve_target(target, base, rolled, pname)
+                if declared is None:
+                    continue
+                value = declared
+                if scale != 1.0:
+                    b = base if base is not None else declared
+                    value = b + (declared - b) * scale
+                    mkind, lo, hi = binding_resolver.kind_for_meta(meta)
+                    if mkind == binding_resolver.KIND_NUMERIC:
+                        if lo is not None:
+                            value = max(float(lo), value)
+                        if hi is not None:
+                            value = min(float(hi), value)
+                moves[pname] = value
                 if kind.type == "permanent":
-                    carry[(vid, pname)] = target
+                    carry[(vid, pname)] = value
                 else:
-                    self._pending_releases.append((vid, pname))
+                    self._pending_releases.append((vid, pname, hold_s))
             if moves:
                 jumps.setdefault(vid, {}).update(moves)
                 landed.append({"virtual_id": vid, "params": moves})
@@ -381,6 +416,8 @@ class ResponseEngine:
         release back (the baseline stays). PERMANENT: glide to
         baseline×effective and hold — CARRIED."""
         effective = 1.0 + (kind.gain - 1.0) * scale
+        hold_s = (kind.hold_ms / 1000.0 if kind.hold_ms is not None
+                  else PULSE_HOLD_S)
         out: list[dict] = []
         for vid, state in self.conductor.virtuals.items():
             baseline = carry.get((vid, "brightness"),
@@ -389,7 +426,7 @@ class ResponseEngine:
             if kind.type == "momentary":
                 await self.executor.jump(vid, state.effect_type,
                                          {"brightness": peak})
-                self._pending_releases.append((vid, "brightness"))
+                self._pending_releases.append((vid, "brightness", hold_s))
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
@@ -401,17 +438,38 @@ class ResponseEngine:
                             "held": True})
         return out
 
-    async def flush_releases(self) -> int:
+    def pending_hold_groups(self) -> list[float]:
+        """Distinct CHOSEN HOLDS still pending — the engine spawns one
+        release task per group (asyncio.sleep(hold_s) then
+        flush_releases(hold_s)) so kinds authored with different hold_ms
+        in the same surge each release on their own schedule. A surge with
+        every kind at the PULSE_HOLD_S default returns exactly one group —
+        today's unchanged single-task shape."""
+        return sorted({hold_s for _, _, hold_s in self._pending_releases})
+
+    async def flush_releases(self, hold_s: Optional[float] = None) -> int:
         """Issue pending momentary releases — every spiked (virtual, param)
         glides back to its baseline AS CARRIED NOW (a colour jump or
         permanent kind in the same surge may have moved it; a creep kept
         wandering — the release honors the carry, never a stale snapshot).
-        Production schedules this PULSE_HOLD_S after the spike
-        (services/engine.py); specs call it directly once the spike has
-        provably landed. Returns virtuals released."""
-        pending, self._pending_releases = self._pending_releases, []
+        hold_s=None drains EVERY pending release regardless of its authored
+        hold (test/preview convenience and a final drain point — the /api/
+        engine/event dark injector uses this to settle immediately); a
+        specific hold_s (production: engine._release_after_hold, one task
+        per pending_hold_groups() entry) drains only that hold's group,
+        leaving other holds' entries pending for their own release.
+        Production schedules the default group PULSE_HOLD_S after the
+        spike (services/engine.py); specs call it directly once the spike
+        has provably landed. Returns virtuals released."""
+        if hold_s is None:
+            pending, self._pending_releases = self._pending_releases, []
+        else:
+            due, keep = [], []
+            for entry in self._pending_releases:
+                (due if entry[2] == hold_s else keep).append(entry)
+            pending, self._pending_releases = due, keep
         by_vid: dict[str, dict[str, float]] = {}
-        for vid, pname in dict.fromkeys(pending):
+        for vid, pname, _hold_s in dict.fromkeys(pending):
             state = self.conductor.virtuals.get(vid)
             if state is None:
                 continue

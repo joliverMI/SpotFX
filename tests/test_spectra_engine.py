@@ -51,6 +51,14 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _absolute_params(kind) -> dict:
+    """A FlareKind's params as plain floats — every kind these fixtures
+    build or migrate is absolute-mode-only (ParamTarget's legacy-compatible
+    default)."""
+    return {name: t.value for name, t in kind.params.items()
+            if t.mode == "absolute"}
+
+
 def _categories_fixture(tmp_path) -> None:
     device_model.CATEGORIES_FILE = tmp_path / "device_categories.json"
     device_model.CATEGORIES_FILE.write_text(json.dumps({
@@ -508,7 +516,7 @@ def test_mid_group_scenes_animate_on_the_harness(tmp_path):
                     top_patch: dict[str, float] = {}
                     for kname in top.kinds:
                         if declared[kname].type == "permanent":
-                            top_patch.update(declared[kname].params)
+                            top_patch.update(_absolute_params(declared[kname]))
                     assert top_patch, name   # the migration named the patch
                     record = await responder.on_event("flare", 0.97)
                     assert record["result"] == "applied", name
@@ -680,6 +688,119 @@ def test_flare_kinds_semantics_on_the_harness(tmp_path):
                 assert effect._config["power_multiplier"] \
                     == pytest.approx(mech.position) \
                     and mech.position == pytest.approx(0.9)
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 9: momentary target expressions — offset + random, CHOSEN HOLD,
+#            exact return on a creeping parameter ────────────────────────────
+# The owner's five-ways extension on the real render pipeline: an OFFSET
+# spike measures from wherever a creep currently sits (not its static
+# declared baseline), a RANDOM spike rolls once and broadcasts, different
+# kinds hold their spike for their OWN authored duration
+# (pending_hold_groups → one release per group), and every release still
+# returns EXACTLY to the baseline AS CARRIED AT RELEASE TIME — including
+# a creep that kept wandering DURING the hold.
+
+def test_momentary_target_expressions_and_chosen_hold_on_the_harness(tmp_path):
+    from spectra.models.scene import (DriftRef, DriftSpec, FlareBand,
+                                      FlareKind, ResponseSpec,
+                                      SceneDeviceConfig, SceneV2)
+    _categories_fixture(tmp_path)
+    scene = SceneV2(
+        name="Targets",
+        devices=[SceneDeviceConfig(
+            target_kind="virtual", target=VID, effect_type="concentric",
+            params={"gradient_scale": 1.0, "power_multiplier": 0.2},
+            brightness=0.5,
+            drift={"power_multiplier": DriftRef(inline=DriftSpec(
+                kind="creep", rate_per_min=0.3, lo=0.0, hi=1.0))})],
+        flare_kinds=[
+            FlareKind(name="Anchor", type="permanent",
+                      params={"power_multiplier": 0.8}),
+            FlareKind(name="Dip", type="momentary", hold_ms=600,
+                      params={"power_multiplier": {
+                          "mode": "offset", "offset": -0.15}}),
+            FlareKind(name="Flash", type="momentary",
+                      params={"gradient_scale": {
+                          "mode": "random", "lo": 1.4, "hi": 1.6}}),
+        ],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=0.8,
+                      kinds={"Anchor": 1.0}),
+            FlareBand(intensity_min=0.8, intensity_max=1.0,
+                      kinds={"Dip": 1.0, "Flash": 1.0}),
+        ])})
+
+    async def main():
+        host, virtual = await _host(tmp_path, "targets")
+        try:
+            with headless.fake_clock() as clock:
+                config = {"gradient_scale": 1.0, "power_multiplier": 0.2,
+                          "brightness": 0.5}
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                config)
+                executor, conductor, responder, _ = _engine(clock)
+                _fire(conductor, scene, config)
+
+                # Warm the creep off its static baseline exactly as proof 8
+                # does: Anchor lands 0.8, one leg carries it to 0.9.
+                await responder.on_event("flare", 0.5)
+                await conductor.tick()
+                headless.render_frames(virtual, 1200, clock=clock, dt=1 / 60)
+                mech = conductor.mechanisms[0]
+                assert mech.position == pytest.approx(0.9)
+
+                # Dip (offset -0.15) and Flash (random 1.4–1.6) fire together.
+                record = await responder.on_event("flare", 0.9)
+                assert {k["name"] for k in record["kinds"]} == {"Dip", "Flash"}
+                dip_rec = next(k for k in record["kinds"] if k["name"] == "Dip")
+                flash_rec = next(k for k in record["kinds"] if k["name"] == "Flash")
+                dip_target = dip_rec["moved"][0]["params"]["power_multiplier"]
+                flash_target = flash_rec["moved"][0]["params"]["gradient_scale"]
+                # Offset measures from the creep's CURRENT wander position
+                # (0.9), not the static declared/param baseline (0.2).
+                assert dip_target == pytest.approx(0.9 - 0.15)
+                assert 1.4 <= flash_target <= 1.6
+
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["power_multiplier"] == pytest.approx(dip_target)
+                assert effect._config["gradient_scale"] == pytest.approx(flash_target)
+
+                # Two kinds, two CHOSEN HOLDS: Dip's authored 600 ms and
+                # Flash's default PULSE_HOLD_S (250 ms) are separate groups.
+                from spectra.services.scene_response import PULSE_HOLD_S
+                assert responder.pending_hold_groups() == \
+                    sorted([0.6, PULSE_HOLD_S])
+
+                # The creep keeps wandering DURING the hold — a second leg
+                # carries the MODEL's position from 0.9 to 1.0 (the leg's
+                # own glide retargets the effect independently of the
+                # pending spike) before either release fires.
+                await conductor.tick()
+                assert mech.position == pytest.approx(1.0)
+
+                # Flash's shorter (default) hold releases first: its own
+                # group only — Dip's separate hold group is untouched.
+                released = await responder.flush_releases(PULSE_HOLD_S)
+                assert released == 1
+                assert responder.pending_hold_groups() == [0.6]
+                headless.render_frames(virtual, 120, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0)
+
+                # Dip's release returns EXACTLY to the creep's position AS
+                # CARRIED NOW (1.0 — where the second leg left it) once its
+                # own CHOSEN HOLD elapses, never the 0.9 it was measured
+                # from at spike time.
+                released = await responder.flush_releases(0.6)
+                assert released == 1
+                assert responder.pending_hold_groups() == []
+                headless.render_frames(virtual, 120, clock=clock, dt=1 / 60)
+                assert effect._config["power_multiplier"] == pytest.approx(1.0)
+                assert mech.position == pytest.approx(1.0)
         finally:
             facade.set_host(None)
             await host.shutdown()

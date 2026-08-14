@@ -79,6 +79,15 @@ from spectra.services import (binding_resolver, color_journey, scene_compiler,
                               scene_store)
 from spectra.services.binding_resolver import FireContext
 
+
+def absolute_params(kind) -> dict:
+    """A FlareKind's params as plain floats — every kind these checks build
+    or migrate is absolute-mode-only (ParamTarget's legacy-compatible
+    default), so this is exactly the pre-ParamTarget float dict these
+    assertions compare against."""
+    return {name: t.value for name, t in kind.params.items()
+            if t.mode == "absolute"}
+
 # ── bindings live inside scene params; scalars stay scalars ──────────────────
 spin_map = {"bind": "signal", "signal": "trigger_intensity", "mode": "map",
             "out_min": 0.1, "out_max": 1.0, "fallback": 0.55}
@@ -172,7 +181,7 @@ legacy = {"name": "Legacy", "devices": [],
 ls = SceneV2(**legacy)
 ls_kinds = {k.name: k for k in ls.flare_kinds}
 check(list(ls.responses) == ["flare"] and len(ls.responses["flare"].bands) == 2
-      and ls_kinds["Flare patch 0.5–1"].params == {"flames": 1.0}
+      and absolute_params(ls_kinds["Flare patch 0.5–1"]) == {"flames": 1.0}
       and ls.responses["flare"].bands[1].kinds["Flare patch 0.5–1"] == 1.0,
       "legacy flare_bands loads unchanged as the flare class "
       "(patch → auto-named PERMANENT kind on its band)")
@@ -219,7 +228,7 @@ check(bh_kinds["Dice Re-roll"].type == "drift_jump"
       "auto-named kinds: reroll_dice → Dice Re-roll, color_set_jump → "
       "Colour Jump (drift-jump type)")
 check(bh_kinds["Flare patch 0.7–1"].type == "permanent"
-      and bh_kinds["Flare patch 0.7–1"].params
+      and absolute_params(bh_kinds["Flare patch 0.7–1"])
       == {"spawn_rate": 2.0, "beat_burst": 6.0},
       "auto-named kinds: a band's param_patch → PERMANENT kind, values kept")
 check(bh_kinds["Flare gain 0.7–1"].type == "momentary"
@@ -1278,7 +1287,7 @@ for name in SEVEN:
     top_patch = {}
     for kname in top.kinds:
         if declared3[kname].type == "permanent":
-            top_patch.update(declared3[kname].params)
+            top_patch.update(absolute_params(declared3[kname]))
     expected = {k: v for k, v in top_patch.items()
                 if any(device_model.get_param_meta(d.effect_type, k)
                        for d in sc.devices)}
@@ -1305,7 +1314,7 @@ for v in raw_live.values():
             patch = braw.get("param_patch") or {}
             if patch and not any(
                     declared[n].type == "permanent"
-                    and declared[n].params == patch for n in band.kinds):
+                    and absolute_params(declared[n]) == patch for n in band.kinds):
                 raise SystemExit(f"FAIL: {v['name']}/{cls}: authored patch "
                                  f"{patch} lost in migration")
             gain = braw.get("gain", 1.0)
@@ -1339,8 +1348,8 @@ check(verified == len(raw_live) >= 9,
 eye_top = max(live["Eye V2"].responses["flare"].bands,
               key=lambda b: b.intensity_max)
 eye_kinds = {k.name: k for k in live["Eye V2"].flare_kinds}
-check(any(eye_kinds[n].params.get("flames") == 1.0 for n in eye_top.kinds
-          if eye_kinds[n].type == "permanent"),
+check(any(absolute_params(eye_kinds[n]).get("flames") == 1.0
+          for n in eye_top.kinds if eye_kinds[n].type == "permanent"),
       "Eye: the top flare band is the FLAME flare (flames → 1.0)")
 
 # ── the STAR strips migration (the fold's not-foldable row, now foldable) ────
