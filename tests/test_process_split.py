@@ -320,6 +320,34 @@ def test_resume_failure_lands_dark_but_owned(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_resume_refuses_on_unusable_fx_live_config(tmp_path, monkeypatch):
+    """The order-8 readiness gate applies to the resume path too: with a
+    missing/empty fx-live config, activation would 'succeed' with zero
+    virtuals (freshness vacuously true) and liveness would claim live over a
+    dark room. The resume must refuse the same way the handover does —
+    dark-but-owned, record untouched."""
+    from fx import headless, light_ownership as lo
+    from spectra.services import engine
+    from spectra.services.handover import SpectraSide, resume_own_room
+    from spectra.services.live_host import live
+
+    monkeypatch.setattr(lo, "OWNERSHIP_FILE", tmp_path / "ownership.json")
+    _make_spectra_owner(lo)
+    headless.silence_audio()
+    # No write_headless_config: the go-day seeding step never ran.
+    config_dir = tmp_path / "fx-live-unseeded"
+
+    async def scenario():
+        resumed = await resume_own_room(
+            SpectraSide(config_dir=str(config_dir), open_audio=False))
+        assert resumed is False
+        assert not live.active
+        assert engine.executor.mode == "recording"
+        assert lo.load().owner == lo.SPECTRA
+
+    asyncio.run(scenario())
+
+
 # ── Interpreter isolation wiring ─────────────────────────────────────────────
 
 def test_spotfx_process_imports_no_spectra_module():

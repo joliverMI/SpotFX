@@ -353,6 +353,15 @@ async def resume_own_room(side: Optional[SpectraSide] = None) -> bool:
     if record.owner != light_ownership.SPECTRA:
         return False
     side = side or SpectraSide()
+    problems = await side.readiness_problems()
+    if problems:
+        # The order-8 gate applies here too: with no usable fx-live config,
+        # activation "succeeds" with zero virtuals (freshness vacuously true)
+        # and liveness would claim live over a dark room. Refuse the same way
+        # the handover does — dark-but-owned, record untouched, liveness 503.
+        for problem in problems:
+            logger.error("resume: readiness gate refuses — %s", problem)
+        return False
     logger.warning("resume: record says spectra owns — reactivating the "
                    "live stack")
     try:
