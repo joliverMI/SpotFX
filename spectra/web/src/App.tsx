@@ -6,6 +6,7 @@ import { ToastProvider } from './components/Toast';
 import { confirmLeave } from './lib/unsavedGuard';
 import FeedbackPage from './feedback/FeedbackPage';
 import HelpPage from './help/HelpPage';
+import ReviewPage from './review/ReviewPage';
 import ScenesPage from './scenes/ScenesPage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
@@ -14,6 +15,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/scenes', 'Scenes'],
   ['/timeline', 'Timeline'],
   ['/feedback', 'Feedback'],
+  ['/review', 'Review'],
   ['/status', 'Status'],
   ['/help', 'Help'],
 ];
@@ -42,6 +44,7 @@ function NavBar() {
       <Link to="/scenes" className={cls((p) => p === '/' || p.startsWith('/scenes'))}>Scenes</Link>
       <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
       <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
+      <Link to="/review" className={cls((p) => p === '/review')}>Review</Link>
       <Link to="/status" className={cls((p) => p === '/status')}>Status</Link>
       <Link to="/help" className="help-link" title="Help" aria-label="Help">?</Link>
     </nav>
@@ -62,6 +65,7 @@ export default function App() {
           <Route path="/scenes/:id" element={<ScenesPage />} />
           <Route path="/timeline" element={<BuilderPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
+          <Route path="/review" element={<ReviewPage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/help" element={<HelpPage />} />
         </Routes>

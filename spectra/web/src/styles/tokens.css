@@ -450,3 +450,108 @@ kbd {
   .feedback-mark-btn { padding: 22px; font-size: 22px; }
   .feedback-entry-nudges button { padding: 10px 4px; }
 }
+
+/* ── Show review (Stage 3) — desk-first but phone-usable: a lane bar
+ * mirrors SpectraTriggerBar's proportional-strip pattern (read-only, no
+ * drag), backed by a vertical list twin for narrow widths and a detail
+ * panel for the selected note's surrounding context. */
+.review-picker-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.review-picker-label select { font-size: 14px; padding: 8px 10px; }
+
+.review-song-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+.review-song-picker button { font-size: 12px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.review-lane-bar {
+  position: relative;
+  height: 34px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+.review-lane-marker {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  margin-left: -2px;
+  border: none;
+  border-radius: 1px;
+  cursor: pointer;
+  padding: 0;
+}
+.review-lane-marker.note {
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  margin-left: -3px;
+  border-radius: 2px;
+}
+.review-lane-marker.selected {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+  z-index: 1;
+}
+.review-lane-tooltip {
+  position: absolute;
+  bottom: 100%;
+  transform: translate(-50%, -4px);
+  background: rgba(0,0,0,0.85);
+  color: #fff;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.review-entry-list { display: flex; flex-direction: column; gap: 4px; max-height: 420px; overflow-y: auto; }
+.review-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-size: 13px;
+}
+.review-entry-row:hover { background: var(--surface2); }
+.review-entry-row.selected { border-color: var(--accent); background: var(--surface2); }
+.review-entry-row.note { color: var(--accent2); font-weight: 600; }
+.review-entry-pos { font-family: monospace; color: var(--text-muted); flex-shrink: 0; width: 44px; }
+.review-entry-event-text { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-entry-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.review-note-detail-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.review-note-detail-title { font-weight: 700; }
+.review-note-detail-nav { display: flex; gap: 6px; }
+.review-note-detail-nav button { font-size: 12px; padding: 6px 10px; }
+.review-note-detail-text { background: var(--surface2); border-radius: 6px; padding: 10px; margin-bottom: 12px; white-space: pre-wrap; }
+.review-note-detail-context-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+.review-note-detail-context-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  font-size: 13px;
+  border-radius: 4px;
+}
+.review-note-detail-context-row.selected { background: var(--surface2); }
+.review-note-detail-context-row.note { color: var(--accent2); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .review-song-picker button { max-width: 160px; }
+  .review-entry-list { max-height: 320px; }
+}

@@ -4,8 +4,8 @@ import { apiDel, apiGet, apiPost, apiPut, spotfxGet, spotfxPost } from './api/cl
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   ColorWheelPosition, DriftProfile, EngineStatus, FeedbackCapture, FeedbackEntry,
-  FireResult, Registry, RoomColorState, RoomControlState, SceneV2, SpectraTrigger,
-  SpotColorSetCard,
+  FireResult, Registry, ReviewSession, ReviewTimeline, RoomColorState, RoomControlState,
+  SceneV2, SpectraTrigger, SpotColorSetCard,
 } from './types';
 
 /* ── scenes ── */
@@ -396,5 +396,27 @@ export function useSendFeedbackBatch() {
     mutationFn: (entries: Omit<FeedbackEntry, 'touched'>[]) =>
       apiPost<{ status: string; session_id: string; received_ms: number; count: number }>(
         '/feedback/batch', { entries }),
+  });
+}
+
+/* ── show review (Stage 3 — his notes pinned against the reconstructed show) ── */
+
+/** GET /api/review/sessions — one row per sent feedback batch, newest
+ * first, naming the songs it has notes for (the session/song picker). */
+export function useReviewSessions() {
+  return useQuery({
+    queryKey: ['review-sessions'],
+    queryFn: () => apiGet<ReviewSession[]>('/review/sessions'),
+  });
+}
+
+/** GET /api/review/timeline — one song's merged, ordered timeline within
+ * one session (see spectra/services/show_reconstruction.py). */
+export function useReviewTimeline(sessionId: string | null, uri: string | null) {
+  return useQuery({
+    queryKey: ['review-timeline', sessionId, uri],
+    queryFn: () => apiGet<ReviewTimeline>(
+      `/review/timeline?session_id=${enc(sessionId!)}&uri=${enc(uri!)}`),
+    enabled: !!sessionId && !!uri,
   });
 }

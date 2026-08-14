@@ -511,3 +511,41 @@ export const newFeedbackEntry = (capture: {
   note: '',
   touched: false,
 });
+
+/** Stage 3 review view (GET /api/review/sessions, GET /api/review/timeline)
+ * — see spectra/services/show_reconstruction.py for the merge rule this
+ * mirrors. A session is one sent feedback batch. */
+export type FireHistoryBucket = 'scenes' | 'responses' | 'color_sets' | 'triggers';
+
+export interface ReviewSession {
+  session_id: string;
+  received_ms: number;
+  note_count: number;
+  uris: string[];
+}
+
+export interface ReviewEventItem {
+  type: 'event';
+  wall_ms: number | null;
+  position_ms: number | null;
+  bucket: FireHistoryBucket;
+  key: string;
+  detail: Record<string, unknown>;
+}
+
+export interface ReviewNoteItem {
+  type: 'note';
+  wall_ms: number | null;
+  position_ms: number | null;
+  id: string;
+  note: string;
+}
+
+export type ReviewTimelineItem = ReviewEventItem | ReviewNoteItem;
+
+export interface ReviewTimeline {
+  session_id: string;
+  uri: string;
+  window: { start_wall_ms: number; end_wall_ms: number } | null;
+  timeline: ReviewTimelineItem[];
+}
