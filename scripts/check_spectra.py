@@ -1,6 +1,8 @@
 """Executable spec for the SPECTRA model + engine: value bindings in scene
-params, dice-correlated randomness, the four-class responses block (legacy
-flare_bands shim), drift declarations, the colour-journey OVERRIDE
+params, dice-correlated randomness, intensity-conditional EFFECT SELECTION
+(effect_steps: fire-time variant pick, load-unchanged guarantee, preview
+parity, the engine interplay, the STAR strips migration), the four-class
+responses block (legacy flare_bands shim), drift declarations, the colour-journey OVERRIDE
 semantics (into/out-of custody transfer), binding resolution + dry-run
 compile through the shared device model, store/API round-trips, the
 sequencer engine on SPECTRA stores, the Mid Group seeder, and the S2
@@ -279,6 +281,97 @@ check(fire["dry_run"] is True and len(fire["writes"]) == 3
       and "a" in fire["dice_rolls"],
       "dry-run fire: writes + resolution report + dice rolls, no I/O")
 
+# ── intensity-conditional EFFECT SELECTION (decision: star-fold-entry-growth) ─
+fold = SceneV2(name="Fold", devices=[SceneDeviceConfig(
+    target_kind="category", target="Strips", effect_type="melt",
+    params={},
+    effect_steps=[{"threshold": 0.7, "effect_type": "power",
+                   "params": {"bass_decay_rate": 0.6}}])])
+rt_fold = SceneV2(**json.loads(fold.model_dump_json()))
+check(rt_fold.devices[0].effect_steps[0].effect_type == "power"
+      and rt_fold.devices[0].effect_steps[0].threshold == 0.7,
+      "effect steps round-trip (threshold + per-effect params)")
+check(SceneV2(name="plain", devices=[SceneDeviceConfig(
+    target="Strips", effect_type="melt")]).devices[0].effect_steps == [],
+      "single-effect form stays the plain default (empty steps)")
+
+# LOAD-UNCHANGED GUARANTEE: a pre-growth file (no effect_steps key anywhere)
+# loads to exactly the scene the canonical form holds — same serialization,
+# no selection rows, same compiled effect at every intensity.
+legacy_form = json.loads(scene.model_dump_json())
+for d in legacy_form["devices"]:
+    d.pop("effect_steps")
+legacy_loaded = SceneV2(**legacy_form)
+check(json.loads(legacy_loaded.model_dump_json())
+      == json.loads(scene.model_dump_json()),
+      "load-unchanged: a pre-growth scene file loads identical to canonical")
+for inten in (0.0, 0.5, 1.0):
+    lctx = FireContext(inten, rng=Random(9))
+    lw = scene_compiler.compile_scene(
+        scene_compiler.resolve_scene(legacy_loaded, lctx))
+    check({w["effect_type"] for w in lw} == {"radial"}
+          and not any(r["param"] == "effect" for r in lctx.resolved),
+          f"load-unchanged: single-effect entry keeps its effect at ⚡ {inten}")
+
+
+def fold_write(intensity):
+    fctx = FireContext(intensity, rng=Random(1))
+    res = scene_compiler.resolve_scene(fold, fctx)
+    return scene_compiler.compile_scene(res)[0], fctx
+
+
+w, fctx = fold_write(0.3)
+check(w["effect_type"] == "melt" and "bass_decay_rate" not in w["config"],
+      "below the boundary the entry resolves to the base effect (melt)")
+w, fctx = fold_write(0.7)
+check(w["effect_type"] == "power" and w["config"]["bass_decay_rate"] == 0.6,
+      "at the boundary the step wins: a DIFFERENT effect, its own params")
+check(any(r["param"] == "effect" and r["value"] == "power"
+          for r in fctx.resolved),
+      "the selection lands in the resolution report — the test-fire panel "
+      "states the effect the intensity picked")
+check(fold_write(0.69)[0]["effect_type"] == "melt"
+      and fold_write(1.0)[0]["effect_type"] == "power",
+      "threshold semantics mirror the steps binding (last step <= intensity)")
+check(fold_write(None)[0]["effect_type"] == "melt",
+      "no intensity axis → the base form (the base IS the fallback)")
+try:
+    scene_compiler.compile_scene(fold)
+    raise SystemExit("FAIL: compile accepted unresolved effect steps")
+except ValueError:
+    print("ok: compile_scene refuses unresolved effect steps (resolve first)")
+for bad_steps, why in (
+        ([{"threshold": 0.5, "effect_type": "power"},
+          {"threshold": 0.5, "effect_type": "orbits1d"}],
+         "duplicate thresholds"),
+        ([{"threshold": 0.0, "effect_type": "power"}],
+         "threshold 0 would shadow the base form"),
+        ([{"threshold": 0.5, "effect_type": ""}], "empty step effect"),
+        ([{"threshold": 0.5, "effect_type": "melt"}],
+         "same effect as the base (that's a ⚡ steps binding's job)"),
+):
+    try:
+        SceneDeviceConfig(target="Strips", effect_type="melt",
+                          effect_steps=bad_steps)
+        raise SystemExit(f"FAIL: effect steps accepted ({why})")
+    except ValidationError:
+        print(f"ok: effect steps rejected — {why}")
+dicey = SceneV2(name="dl", devices=[SceneDeviceConfig(
+    target="Strips", effect_type="melt",
+    effect_steps=[{"threshold": 0.6, "effect_type": "power",
+                   "params": {"blur": {"bind": "signal", "signal": "random",
+                              "mode": "steps", "dice": "z",
+                              "steps": [{"threshold": 0.0, "value": 0.0},
+                                        {"threshold": 0.5, "value": 2.0}]}}}])])
+check(dicey.dice_letters() == ["z"],
+      "dice_letters sees step-variant params")
+SceneDeviceConfig(target="Strips", effect_type="melt",
+                  effect_steps=[{"threshold": 0.6, "effect_type": "power",
+                                 "params": {"blur": 1.0}}],
+                  drift={"blur": DriftRef(inline=DriftSpec(
+                      kind="creep", rate_per_min=0.1, lo=0.0, hi=2.0))})
+print("ok: drift may target a param only a step variant sets")
+
 # ── store + API round-trip ───────────────────────────────────────────────────
 from fastapi.testclient import TestClient
 from spectra.app import create_app
@@ -319,6 +412,22 @@ check(rj["journey"]["degrees_per_min"] == 5.0
       and rj["destination"] is None,
       "journey PUT updates the declaration, never teleports the wheel or "
       "hand-steers the bearing")
+
+# ── stepped-effect test-fire through the API: the preview IS the honest
+#    window into the selection ────────────────────────────────────────────────
+scene_store.save(fold)
+api_lo = client.post(f"/api/scenes/{fold.id}/fire",
+                     json={"dry_run": True, "intensity": 0.3}).json()
+api_hi = client.post(f"/api/scenes/{fold.id}/fire",
+                     json={"dry_run": True, "intensity": 0.9}).json()
+check(api_lo["writes"][0]["effect_type"] == "melt"
+      and api_hi["writes"][0]["effect_type"] == "power"
+      and api_hi["writes"][0]["config"]["bass_decay_rate"] == 0.6
+      and any(r["param"] == "effect" and r["value"] == "power"
+              for r in api_hi["resolved_bindings"]),
+      "API test-fire at a chosen intensity shows the effect that intensity "
+      "selects (writes + the effect row) — preview parity")
+scene_store.delete(fold.id)
 
 # ── the manual apply-this-set surface + fires wear the room's set ────────────
 GRAD_BLUE = "linear-gradient(90deg, #0000ff 0%, #4000ff 100%)"
@@ -634,6 +743,66 @@ check(len([w for w in exec2.writes if "phase" in w["params"]])
       == before_phase_writes,
       "a flare drives no phase write — charge/lull/drop own the arc")
 
+# ── stepped-effect entries × the engine: selection is FIRE-TIME ONLY;
+#    surges follow the selected variant; a new fire re-baselines honestly ─────
+stepped = SceneV2(name="Stepped", devices=[SceneDeviceConfig(
+    target_kind="category", target="Strips", effect_type="melt",
+    params={"reactivity": {"bind": "signal", "signal": "random",
+                           "mode": "steps",
+                           "steps": [{"threshold": 0.0, "value": 0.2},
+                                     {"threshold": 0.5, "value": 0.8}],
+                           "fallback": 0.5}},
+    effect_steps=[{"threshold": 0.7, "effect_type": "power",
+                   "params": {"bass_decay_rate": 0.6,
+                              "blur": {"bind": "signal", "signal": "random",
+                                       "mode": "steps",
+                                       "steps": [{"threshold": 0.0,
+                                                  "value": 0.0},
+                                                 {"threshold": 0.5,
+                                                  "value": 2.0}],
+                                       "fallback": 1.0}}}],
+    drift={"reactivity": DriftRef(inline=DriftSpec(
+        kind="creep", rate_per_min=0.05, lo=0.1, hi=0.9))})],
+    responses={"flare": ResponseSpec(bands=[
+        FlareBand(intensity_min=0.0, intensity_max=1.0)])})
+exec4 = RecordingExecutor()
+cond4 = DriftConductor(executor=exec4, drift_profiles=lambda: {},
+                       curve_profiles=lambda: {},
+                       room_load=lambda: cj.RoomColorState(),
+                       room_save=lambda st: None,
+                       set_position=lambda sid: None)
+resp4 = ResponseEngine(conductor=cond4, executor=exec4, rng=Random(2),
+                       sequencer_config=lambda: SequencerConfig(),
+                       room_load=lambda: cj.RoomColorState(),
+                       room_save=lambda st: None)
+hi_writes = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(stepped, FireContext(0.9, rng=Random(1))))
+cond4.on_scene_fire(stepped, hi_writes)
+check(cond4.virtuals["v-s1"].effect_type == "power",
+      "a HIGH fire re-baselines the engine on the SELECTED effect")
+check(cond4.mechanisms == [],
+      "drift on a base-only param sits out while the step variant holds "
+      "(stated, never a glide the live effect can't carry)")
+asyncio.run(resp4.on_event("flare", 0.9))
+jumps4 = [w for w in exec4.writes if w["kind"] == "jump"]
+check(any("blur" in w["params"] for w in jumps4)
+      and all("reactivity" not in w["params"] for w in jumps4),
+      "re-roll follows the SELECTED variant's 🎲 params, never another "
+      "variant's — a surge re-rolls dice, it never re-selects the effect")
+lo_writes = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(stepped, FireContext(0.3, rng=Random(1))))
+cond4.on_scene_fire(stepped, lo_writes)
+check(cond4.virtuals["v-s1"].effect_type == "melt"
+      and len(cond4.mechanisms) == 1,
+      "a LOW fire re-selects: the base effect returns and its drift "
+      "mechanism seeds again")
+exec4.writes.clear()
+asyncio.run(resp4.on_event("flare", 0.3))
+jumps4 = [w for w in exec4.writes if w["kind"] == "jump"]
+check(any("reactivity" in w["params"] for w in jumps4)
+      and all("blur" not in w["params"] for w in jumps4),
+      "after the re-select the re-roll follows the base variant again")
+
 # ── the bridge: classification, feeds, deferral split, RAW section energy ────
 from spectra.services import analysis_reader
 from spectra.services.bridge import SpotEffectsBridge, classify_event
@@ -835,5 +1004,33 @@ eye_top = max(live["Eye V2"].responses["flare"].bands,
               key=lambda b: b.intensity_max)
 check(eye_top.param_patch.get("flames") == 1.0,
       "Eye: the top flare band is the FLAME flare (flames → 1.0)")
+
+# ── the STAR strips migration (the fold's not-foldable row, now foldable) ────
+star_mod = importlib.import_module("scripts.seed_star_strips")
+star_store = json.loads(live_scenes_file.read_text())
+check(star_mod.STAR_ID in star_store,
+      "STAR (d3aab04c…) present in the SPECTRA store")
+star1 = star_mod.with_star_strips(star_store[star_mod.STAR_ID])
+check(star1 == star_mod.with_star_strips(star1),
+      "STAR strips migration is idempotent")
+star_scene = SceneV2(**star1)
+strips_dev = next(d for d in star_scene.devices if d.target == "Strips")
+check(strips_dev.effect_type == "melt"
+      and strips_dev.effect_steps[0].threshold == 0.7
+      and strips_dev.effect_steps[0].effect_type == "power"
+      and strips_dev.effect_steps[0].params == {"bass_decay_rate": 0.6},
+      "STAR strips declaration: melt below ⚡ 0.7, power (bass_decay_rate "
+      "0.6) at/above — exactly as Hype Star had")
+
+
+def star_strips_effect(inten: float) -> str:
+    res = scene_compiler.resolve_scene(star_scene,
+                                       FireContext(inten, rng=Random(6)))
+    return next(d for d in res.devices if d.target == "Strips").effect_type
+
+
+check(star_strips_effect(0.5) == "melt"
+      and star_strips_effect(0.85) == "power",
+      "migrated STAR: strips melt on a MID fire, power on a HIGH fire")
 
 print("\nALL CHECKS PASSED")

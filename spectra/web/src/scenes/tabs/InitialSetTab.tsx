@@ -4,7 +4,13 @@
  * real slider, grouped by aspect; unset params show dimmed at the effect's
  * real default (click the name to enable). Every value carries the ⚡/🎲
  * affordances; colour strings are the one un-bindable value here (palette
- * variation is the colour-set system's job). */
+ * variation is the colour-set system's job).
+ *
+ * Stepped effect (decision: star-fold-entry-growth): an entry may resolve
+ * to a DIFFERENT effect at/above an ⚡ threshold. The honest minimal form:
+ * a variant strip (base + one chip per step) that re-points the SAME params
+ * grid at the selected variant's effect + param set — no second editor, no
+ * sprawl. Colours, brightness and drift stay entry-level. */
 import { useMemo, useState } from 'react';
 import { BindableNumber, BindableOption, BindableToggle } from '../../components/BindingControl';
 import HelpLink from '../../help/HelpLink';
@@ -67,7 +73,11 @@ export default function InitialSetTab({ scene, setScene, registry }: {
           <button key={d.id} className={dev?.id === d.id ? 'active' : ''}
             onClick={() => setActiveEntry(d.id)}>
             {entryTitle(d)}
-            {d.effect_type && <span style={{ opacity: 0.6 }}> · {d.effect_type}</span>}
+            {d.effect_type && (
+              <span style={{ opacity: 0.6 }}>
+                {' '}· {d.effect_type}{(d.effect_steps?.length ?? 0) > 0 ? ' ⚡' : ''}
+              </span>
+            )}
           </button>
         ))}
         <button onClick={addEntry} title="Add a device entry (All Devices / a category / a virtual)">＋ Add entry</button>
@@ -95,6 +105,25 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
 }) {
   const { data: gradients = [] } = useGradients();
   const set = (patch: Partial<SceneDeviceConfig>) => setDev({ ...dev, ...patch });
+
+  // Stepped effect: which variant the params grid edits (-1 = the base
+  // form, otherwise an effect_steps index). Selection is a fire-time step
+  // server-side; here it only re-points the grid.
+  const steps = dev.effect_steps ?? [];
+  const [variantIdx, setVariantIdx] = useState(-1);
+  const variant = variantIdx >= 0 && variantIdx < steps.length ? steps[variantIdx] : null;
+  const effEffect = variant ? variant.effect_type : dev.effect_type;
+  const effParams = variant ? variant.params : dev.params;
+  const setStep = (idx: number, patch: Partial<import('../../types').EffectStep>) =>
+    set({ effect_steps: steps.map((s, i) => (i === idx ? { ...s, ...patch } : s)) });
+  const addStep = () => {
+    set({ effect_steps: [...steps, { threshold: 0.7, effect_type: '', params: {} }] });
+    setVariantIdx(steps.length);
+  };
+  const removeStep = (idx: number) => {
+    set({ effect_steps: steps.filter((_, i) => i !== idx) });
+    setVariantIdx(-1);
+  };
 
   const categories = Object.keys(registry?.categories ?? {});
   const allVirtuals = useMemo(
@@ -125,7 +154,7 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
   const effectOptions =
     dev.target_kind === 'category' && subtreeEffects.length ? subtreeEffects : allEffects;
 
-  const params = registry?.effects[dev.effect_type]?.params ?? {};
+  const params = registry?.effects[effEffect]?.params ?? {};
   const visible = Object.entries(params).filter(([, m]) => !HIDDEN_TYPES.has(m.type ?? ''));
   const byAspect = new Map<string, [string, EffectParamMeta][]>();
   for (const [name, meta] of visible) {
@@ -135,10 +164,11 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
   }
 
   const setParam = (name: string, value: SceneDeviceConfig['params'][string] | null) => {
-    const next = { ...dev.params };
+    const next = { ...effParams };
     if (value === null) delete next[name];
     else next[name] = value;
-    set({ params: next });
+    if (variant) setStep(variantIdx, { params: next });
+    else set({ params: next });
   };
 
   const isSolid = (dev.color.color_kind ?? 'solid') === 'solid';
@@ -173,22 +203,72 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
             ))}
           </select>
         )}
-        <select value={dev.effect_type} style={{ fontSize: 12, minWidth: 130 }}
-          onChange={(e) => set({ effect_type: e.target.value, params: {}, drift: {} })}>
+        <select value={effEffect} style={{ fontSize: 12, minWidth: 130 }}
+          title={variant ? 'The effect this ⚡ step switches to (its params reset)' : undefined}
+          onChange={(e) => {
+            if (variant) setStep(variantIdx, { effect_type: e.target.value, params: {} });
+            else set({ effect_type: e.target.value, params: {}, drift: {} });
+          }}>
           <option value="">— effect —</option>
           {effectOptions.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
+        {steps.length === 0 && dev.effect_type && (
+          <button style={{ fontSize: 11 }} onClick={addStep}
+            title="Stepped effect: switch to a DIFFERENT effect at/above an ⚡ intensity threshold">
+            ⚡ Stepped effect…
+          </button>
+        )}
         <button className="danger" style={{ fontSize: 11, padding: '2px 8px', marginLeft: 'auto' }}
           onClick={onRemove}>✕ Remove entry</button>
       </div>
 
-      {/* Aspect-grouped params */}
-      {dev.effect_type && ASPECT_ORDER.filter((a) => byAspect.has(a)).map((aspect) => (
+      {/* Stepped effect: variant strip — the params grid below edits the
+        * highlighted variant; the fire picks one variant per its intensity. */}
+      {steps.length > 0 && (
+        <div style={{ marginBottom: 6 }}>
+          <div className="param-section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            Effect over ⚡ intensity <HelpLink topic="stepped-effect" />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <button className={variantIdx === -1 ? 'active' : ''} style={{ fontSize: 12 }}
+              title="The base form — what fires below the first threshold (and with no intensity signal)"
+              onClick={() => setVariantIdx(-1)}>
+              {dev.effect_type || '—'} <small>&lt; {steps[0].threshold.toFixed(2)}</small>
+            </button>
+            {steps.map((s, i) => (
+              <button key={i} className={variantIdx === i ? 'active' : ''} style={{ fontSize: 12 }}
+                title="Fires at/above this ⚡ threshold, with its own params"
+                onClick={() => setVariantIdx(i)}>
+                {s.effect_type || '— pick effect —'} <small>≥ {s.threshold.toFixed(2)}</small>
+              </button>
+            ))}
+            <button style={{ fontSize: 11 }} onClick={addStep} title="Add another threshold step">＋ step</button>
+          </div>
+          {variant && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 12 }}>
+              <span style={{ color: 'var(--text-muted)' }}>switches at ⚡ ≥</span>
+              <input type="number" min={0.01} max={1} step={0.05} value={variant.threshold}
+                style={{ width: 70 }}
+                onChange={(e) => setStep(variantIdx, {
+                  threshold: Math.min(1, Math.max(0.01, Number(e.target.value) || 0.01)),
+                })} />
+              <button className="danger" style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={() => removeStep(variantIdx)}>✕ Remove step</button>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Colours, brightness and drift stay entry-level — they ride whichever effect the fire selects.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Aspect-grouped params — the highlighted variant's set */}
+      {effEffect && ASPECT_ORDER.filter((a) => byAspect.has(a)).map((aspect) => (
         <div key={aspect}>
           <div className="param-section-title">{ASPECT_TITLES[aspect]}</div>
           {byAspect.get(aspect)!.map(([name, meta]) => (
             <ParamRow key={name} name={name} meta={meta}
-              value={dev.params[name]}
+              value={effParams[name]}
               onChange={(v) => setParam(name, v)} />
           ))}
         </div>

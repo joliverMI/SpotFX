@@ -15,6 +15,10 @@ The proofs:
   5. the seven Mid Group scenes animate: their seeded bindings resolve and
      land in the real effects, and each scene's top flare band executes
      its patch on the rendering effect,
+  7. intensity-conditional effect selection resolves per fire: one entry
+     attaches melt below the boundary and power at/above it on the real
+     pipeline, with the dry-run preview's writes byte-identical to the
+     live pair — the preview IS the selection's honest window,
   6. charge/lull/drop drive the REAL vendored phase machinery end to end:
      the effect's own state machine enters the phase on the arm write, the
      phase_progress ramp interpolates across render frames, the drop's
@@ -470,6 +474,61 @@ def test_mid_group_scenes_animate_on_the_harness(tmp_path):
                     if effect_type in DRAWS_IN_SILENCE:
                         assert any(float(np.abs(f).sum()) > 0
                                    for f in frames), name
+                virtual._active_effect = None
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 7: intensity-conditional effect selection on the harness ───────────
+
+def test_effect_selection_on_the_harness(tmp_path, monkeypatch):
+    """decision: star-fold-entry-growth — one entry, two effects: melt below
+    ⚡ 0.7, power (bass_decay_rate 0.6) at/above — the STAR strips shape.
+    fire_scene is BOTH the preview and the live entry, so the dry-run at a
+    chosen intensity is the selection's honest window: its writes are the
+    exact resolve+compile pair a live fire hands the seam, and they attach
+    and render on the real pipeline."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.services import scene_compiler
+    from spectra.services.binding_resolver import FireContext
+    _categories_fixture(tmp_path)
+    monkeypatch.setattr(scene_compiler, "room_active_set", lambda: None)
+    scene = SceneV2(name="Star strips", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="melt",
+        params={},
+        effect_steps=[{"threshold": 0.7, "effect_type": "power",
+                       "params": {"bass_decay_rate": 0.6}}])])
+
+    async def main():
+        host, virtual = await _host(tmp_path, "select")
+        try:
+            for intensity, expected in ((0.3, "melt"), (0.69, "melt"),
+                                        (0.7, "power"), (0.9, "power")):
+                preview = await scene_compiler.fire_scene(
+                    scene, intensity=intensity, rng=Random(3))
+                assert preview["dry_run"] is True
+                write = preview["writes"][0]
+                assert write["effect_type"] == expected, intensity
+                assert any(r["param"] == "effect" and r["value"] == expected
+                           for r in preview["resolved_bindings"])
+                # Preview parity: an independent resolve+compile at the same
+                # intensity/seed reproduces the preview's writes exactly.
+                resolved = scene_compiler.resolve_scene(
+                    scene, FireContext(intensity, rng=Random(3)))
+                assert scene_compiler.compile_scene(resolved) == [dict(write)]
+                with headless.fake_clock() as clock:
+                    effect = headless.attach_effect(
+                        host, virtual, write["effect_type"],
+                        dict(write["config"]))
+                    frames = headless.render_frames(virtual, 5, clock=clock,
+                                                    dt=1 / 60)
+                    assert len(frames) == 5
+                    if expected == "power":
+                        assert float(effect._config["bass_decay_rate"]) == \
+                            pytest.approx(0.6)
                 virtual._active_effect = None
         finally:
             facade.set_host(None)

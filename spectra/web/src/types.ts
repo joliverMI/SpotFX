@@ -58,12 +58,25 @@ export interface DriftRef {
   inline: DriftSpec | null;
 }
 
+/** One rung of an entry's intensity-conditional effect selection: at/above
+ * threshold the entry resolves to THIS effect with THIS param set. Every
+ * variant (base + steps) must name a distinct effect. */
+export interface EffectStep {
+  threshold: number;
+  effect_type: string;
+  params: Record<string, ParamValue>;
+}
+
 export interface SceneDeviceConfig {
   id: string;
   target_kind: 'all' | 'category' | 'virtual';
   target: string;
   effect_type: string;
   params: Record<string, ParamValue>;
+  /** [] = the single-effect form (the plain default). Base effect_type/
+   * params is the entry below the first threshold; the last step whose
+   * threshold <= fire intensity wins, replacing effect AND params. */
+  effect_steps: EffectStep[];
   color: SceneColorAssignment;
   brightness: number | ValueBinding | null;
   background_brightness: number | ValueBinding | null;
@@ -200,6 +213,7 @@ export const emptyDevice = (id: string): SceneDeviceConfig => ({
   target: '',
   effect_type: '',
   params: {},
+  effect_steps: [],
   color: emptyColor(),
   brightness: null,
   background_brightness: null,
@@ -237,7 +251,9 @@ export function newScene(id: string): SceneV2 {
 export function sceneDiceLetters(scene: SceneV2): string[] {
   const letters = new Set<string>();
   for (const dev of scene.devices) {
-    for (const v of [...Object.values(dev.params), dev.brightness, dev.background_brightness]) {
+    const values = [...Object.values(dev.params), dev.brightness, dev.background_brightness];
+    for (const step of dev.effect_steps ?? []) values.push(...Object.values(step.params));
+    for (const v of values) {
       if (isBinding(v) && v.dice) letters.add(v.dice);
     }
   }
