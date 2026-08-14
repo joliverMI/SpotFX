@@ -42,6 +42,22 @@ logger = logging.getLogger(__name__)
 TRANSITION_SOURCE = "transition"
 
 
+async def fire_scene_by_id(scene_id: str,
+                           color_set_id: Optional[str] = None,
+                           intensity: float = 0.5) -> dict:
+    """The ONE scene-fire choke point for anything that picks a scene by id
+    outside the editor's own test-fire — the sequencer's own rolls and
+    SPECTRA-native triggers (spectra.services.trigger_engine) both call
+    this, so "fire scene X" means exactly one thing everywhere it happens."""
+    from spectra.services import color_sets, scene_compiler, scene_store
+    scene = scene_store.get_by_id(scene_id)
+    if scene is None:
+        raise ValueError(f"scene {scene_id} not found in spectra scenes")
+    color_set = color_sets.get_by_id(color_set_id) if color_set_id else None
+    return await scene_compiler.fire_scene(scene, intensity=intensity,
+                                           color_set=color_set, dry_run=False)
+
+
 class ChangeMomentSource:
     """The pluggable clock seam. A source decides WHEN a change moment
     exists; the engine decides what the moment means. Shipped:
@@ -342,14 +358,7 @@ class SceneSequencer:
     async def _default_fire(self, scene_id: str,
                             color_set_id: Optional[str] = None,
                             intensity: float = 0.5) -> None:
-        from spectra.services import color_sets, scene_compiler, scene_store
-        scene = scene_store.get_by_id(scene_id)
-        if scene is None:
-            raise ValueError(f"picked scene {scene_id} not found in spectra scenes")
-        color_set = (color_sets.get_by_id(color_set_id)
-                     if color_set_id else None)
-        await scene_compiler.fire_scene(scene, intensity=intensity,
-                                        color_set=color_set, dry_run=False)
+        await fire_scene_by_id(scene_id, color_set_id, intensity)
 
     def _default_eligible_sets(self, scene_id: str) -> dict[str, Optional[float]]:
         from spectra.services import color_sets, color_wheel, scene_store

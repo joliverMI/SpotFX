@@ -4,7 +4,7 @@ import { apiDel, apiGet, apiPost, apiPut, spotfxGet, spotfxPost } from './api/cl
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   ColorWheelPosition, DriftProfile, EngineStatus, FireResult, Registry,
-  RoomColorState, RoomControlState, SceneV2, SpotColorSetCard,
+  RoomColorState, RoomControlState, SceneV2, SpectraTrigger, SpotColorSetCard,
 } from './types';
 
 /* ── scenes ── */
@@ -333,5 +333,36 @@ export function useTakeBackToSpectra() {
     mutationFn: () =>
       apiPost<{ result: string; owner: string }>('/ownership/handover', { to: 'spectra' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-ownership'] }),
+  });
+}
+
+/* ── per-song triggers (THE KEYSTONE — spectra/api/triggers.py) ── */
+
+const enc = encodeURIComponent;
+
+export function useSpectraTriggers(uri: string | null) {
+  return useQuery({
+    queryKey: ['spectra-triggers', uri],
+    queryFn: () => apiGet<SpectraTrigger[]>(`/triggers?uri=${enc(uri!)}`),
+    enabled: !!uri,
+  });
+}
+
+/** Place/move/edit all persist as one upsert — the store replaces by id. */
+export function useSaveSpectraTrigger(uri: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trigger: SpectraTrigger) =>
+      apiPost(`/triggers?uri=${enc(uri!)}`, trigger),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-triggers', uri] }),
+  });
+}
+
+export function useDeleteSpectraTrigger(uri: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (triggerId: string) =>
+      apiDel(`/triggers/${triggerId}?uri=${enc(uri!)}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-triggers', uri] }),
   });
 }

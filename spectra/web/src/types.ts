@@ -1,4 +1,5 @@
 /** TS mirrors for spectra/models — the grown scene model. */
+import { uuid } from './lib/uid';
 
 export type SignalName =
   | 'rms_total' | 'rms_bass' | 'onset_score'
@@ -399,3 +400,41 @@ export interface EngineStatus {
     counts: Record<string, number>;
   };
 }
+
+/** TS mirrors for spectra/models/trigger.py — THE KEYSTONE: a per-song
+ * moment that fires one SPECTRA-native action. Discriminated by `kind`,
+ * same convention as pydantic's Field(discriminator="kind"). */
+export interface FireSceneAction {
+  kind: 'fire_scene';
+  scene_id: string;
+  intensity: number;
+  color_set_id: string | null;
+}
+
+export interface FireResponseAction {
+  kind: 'fire_response';
+  event_class: ResponseClass;
+  intensity: number;
+}
+
+export interface SelectColorSetAction {
+  kind: 'select_color_set';
+  set_id: string;
+}
+
+export type TriggerAction = FireSceneAction | FireResponseAction | SelectColorSetAction;
+export type TriggerActionKind = TriggerAction['kind'];
+
+export interface SpectraTrigger {
+  id: string;
+  timestamp_ms: number;
+  enabled: boolean;
+  action: TriggerAction;
+}
+
+export const newTrigger = (timestampMs: number): SpectraTrigger => ({
+  id: uuid(),
+  timestamp_ms: Math.max(0, Math.round(timestampMs)),
+  enabled: true,
+  action: { kind: 'fire_scene', scene_id: '', intensity: 0.5, color_set_id: null },
+});

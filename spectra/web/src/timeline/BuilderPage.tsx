@@ -17,6 +17,7 @@ import TimelineBar from './components/TimelineBar';
 import ShapeControls from './components/ShapeControls';
 import TriggerDialog from './components/TriggerDialog';
 import TriggerList from './components/TriggerList';
+import SpectraTriggersCard from './components/SpectraTriggersCard';
 import PaletteCard from './components/PaletteCard';
 import OffsetBadge from './components/OffsetBadge';
 import ShiftAllControl from './components/ShiftAllControl';
@@ -282,6 +283,13 @@ export default function BuilderPage() {
             tid ? { kind: 'trigger-triangle', triggerId: tid } : null)}
         />
       </CollapsibleCard>
+
+      <SpectraTriggersCard
+        uri={uri}
+        durationMs={durationMs}
+        getWin={followWin.getWin}
+        getNowMs={getNowMs}
+      />
 
       <CollapsibleCard
         id="shape"

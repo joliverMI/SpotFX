@@ -22,6 +22,7 @@ SEQUENCER_FILE = SPECTRA_STORAGE / "sequencer.json"
 DRIFT_PROFILES_FILE = SPECTRA_STORAGE / "drift_profiles.json"
 ROOM_COLOR_FILE = SPECTRA_STORAGE / "room_color.json"
 ROOM_CONTROLS_FILE = SPECTRA_STORAGE / "room_controls.json"
+TRIGGERS_FILE = SPECTRA_STORAGE / "triggers.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
