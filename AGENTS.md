@@ -362,9 +362,21 @@ retire-not-delete). Built:
   scene-fire bytes) — never the conductor's carried baseline or the
   returned/dry-run writes, so dry-run/live preview parity holds.
   `global_transition_ms` is the room default `entry_ramp_ms` falls back to.
-  `ambient_enabled`/`ambient_color` are state-only today (the full
-  Ambient/Dinner-Party room-MODES build is separate). Spec: the room-control
-  section of `scripts/check_spectra.py` + `tests/test_room_controls.py`.
+  `ambient_enabled`/`ambient_color` drive a real live takeover
+  (`spectra/services/ambient.py`, reconciled from the PUT handler whenever
+  those fields change): every live Hue device in the room (Hue-only,
+  matching the legacy scope — WLED keeps running its normal show) freezes
+  its entertainment stream (`fx/devices/hue.py HueDevice.set_frozen`,
+  in-process, no LedFX HTTP hop) and is held at `ambient_color` via direct
+  bridge REST. No device-category setting (every live Hue device IS the
+  target) and no legacy "wake scene" on disable — a SPECTRA-owned Hue
+  virtual never goes inactive while frozen, so unfreezing alone lets the
+  room's already-running scene pick the stream back up; a brief REST-only
+  brightness fade runs first for a soft handoff. State-only (status "dark")
+  when SPECTRA doesn't own the live stack. Ambient/Dinner-Party as a full
+  room-MODES build is still separate. Spec: the room-control section of
+  `scripts/check_spectra.py` + `tests/test_room_controls.py` +
+  `tests/test_ambient.py`.
 
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 

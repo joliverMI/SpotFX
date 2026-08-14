@@ -239,9 +239,10 @@ export interface RoomColorState {
 
 /** Room-control surface (spectra-kept-equivalents): the legacy Brightness
  * Multiplier / ledfx_ambient / ledfx_ambient_color / ledfx_global_transition
- * action equivalents. brightness_multiplier is the only one wired to a
- * write seam today (fx_executor + scene_compiler); ambient_enabled/_color
- * and global_transition_ms are state-only until the room-modes build.
+ * action equivalents. brightness_multiplier is wired at a write seam
+ * (fx_executor + scene_compiler); ambient_enabled/_color drives a live
+ * Hue takeover (spectra/services/ambient.py) reconciled on every PUT that
+ * changes them; global_transition_ms is state-only.
  * scene_change_mode is the Admiral's settings model (three additive tiers,
  * replacing front 3's plain midsong_triggers_enabled bool): "transitions" =
  * a scene change on every song transition only; "analysed" = transitions +
@@ -255,6 +256,25 @@ export interface RoomControlState {
   ambient_color: string | null;
   global_transition_ms: number;
   scene_change_mode: SceneChangeMode;
+}
+
+/** What actually happened to the room's Hue devices on the last ambient
+ * change — present on PUT /room-controls's response only when the ambient
+ * fields changed (spectra/api/room_controls.py). "on"/"off" is a real live
+ * takeover; "dark"/"no-hue-devices" means the switch saved but nothing was
+ * touched (SPECTRA doesn't own the room right now, or there's no Hue
+ * device in it); "failed" means SPECTRA tried and every live Hue device
+ * rejected it (bridge unreachable, etc.) — the room bar surfaces all of
+ * these so the control never silently lies about having done something. */
+export interface AmbientResult {
+  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed';
+  devices?: string[];
+  lights_set?: number;
+}
+
+export interface RoomControlsSaveResult extends RoomControlState {
+  status: 'saved';
+  ambient_result?: AmbientResult;
 }
 
 /** Full spot-effects Colour Set card shape (read + the one supported
