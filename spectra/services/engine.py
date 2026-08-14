@@ -27,8 +27,9 @@ SPECTRA-native fire_scene triggers both arrive through the same choke point
 trigger-fired) both arrive through fire_response_event above.
 
 Pulse releases: the spike must land a render frame before the release glide
-starts (scene_response docstring); production schedules flush_releases()
-PULSE_HOLD_S after each surge.
+starts (scene_response docstring); production schedules one release task per
+responses.pending_hold_groups() entry — a momentary kind's CHOSEN HOLD
+(hold_ms, default PULSE_HOLD_S) after each surge.
 """
 from __future__ import annotations
 
@@ -37,7 +38,6 @@ import logging
 
 from fx import light_ownership
 from spectra.models.scene import SceneV2
-from spectra.services import scene_response
 from spectra.services.bridge import SpotEffectsBridge
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
@@ -84,13 +84,13 @@ async def fire_response_event(event_class: str, intensity: float) -> None:
     await responses.on_event(event_class, intensity)
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
-    if responses._pending_releases:
-        asyncio.create_task(_release_after_hold())
+    for hold_s in responses.pending_hold_groups():
+        asyncio.create_task(_release_after_hold(hold_s))
 
 
-async def _release_after_hold() -> None:
-    await asyncio.sleep(scene_response.PULSE_HOLD_S)
-    await responses.flush_releases()
+async def _release_after_hold(hold_s: float) -> None:
+    await asyncio.sleep(hold_s)
+    await responses.flush_releases(hold_s)
 
 
 _last_track_uri: str | None = None

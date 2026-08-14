@@ -193,7 +193,23 @@ star-fold-entry-growth; deploy migration for STAR's strips:
 NAMED FLARE KINDS (`FlareKind`: drift-jump / momentary spike-and-return /
 permanent re-baseline; bands select+scale them; ALL legacy response fields —
 flare_bands, param_patch, gain, reroll/colour flags — load unchanged as
-auto-named kinds, spec-asserted), drift declarations, and
+auto-named kinds, spec-asserted). A momentary/permanent kind's params are
+`ParamTarget` expressions, not bare floats (a bare number still coerces to
+`mode="absolute"` on load — every pre-existing kind is untouched): absolute
+(declared value verbatim) / offset (signed delta from the CARRIED baseline
+at fire time — a creep's live wander position, not its static start) /
+random (uniform draw in `[lo, hi]`, rolled once per kind execution and
+broadcast like an absolute value). Intensity-driven strength stays the
+band's own `×scale`, orthogonal to the target mode — it steers whichever
+mode resolves. A momentary kind also carries an optional `hold_ms` (the
+CHOSEN HOLD before release; `None` = the fixed `PULSE_HOLD_S` default,
+250 ms) — `ResponseEngine.pending_hold_groups()` lets kinds with different
+holds in the same fire release on independent schedules
+(`services/engine.py`'s `fire_response_event` spawns one release task per
+group); every release still glides to `_carried_value` AS CARRIED AT
+RELEASE TIME regardless of hold length, so a creep that kept wandering
+during the hold is honoured, never a stale spike-time snapshot. Drift
+declarations, and
 the colour journey (room-level walk, per-scene OVERRIDE with custody
 semantics — `spectra/services/color_journey.py` docstring is the binding
 statement). Storage: `storage/spectra/` (own scenes/sequencer/drift/room
