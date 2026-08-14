@@ -382,13 +382,17 @@ def _sides(**spectra_kw):
     }
 
 
-# Success path: quiesce → verify → activate → verify → commit.
+# Success path: quiesce → verify → activate → verify → RE-verify (report
+# gate e4i: the from-world must still be quiesced immediately before
+# commit) → commit.
 sides = _sides()
 record = asyncio.run(run_handover(lo.SPECTRA, sides, grace_s=0))
 check(record.owner == lo.SPECTRA
-      and sides[lo.SPOT_EFFECTS].calls == ["quiesce", "verify_quiesced"]
+      and sides[lo.SPOT_EFFECTS].calls
+      == ["quiesce", "verify_quiesced", "verify_quiesced"]
       and sides[lo.SPECTRA].calls == ["activate", "verify_active"],
-      "orchestrator: quiesce is VERIFIED before the new writer activates")
+      "orchestrator: quiesce is VERIFIED before the new writer activates, "
+      "and RE-verified immediately before commit")
 hb = lo.begin_handover(lo.SPOT_EFFECTS)
 lo.mark_quiesced(hb.token)
 lo.commit(hb.token)

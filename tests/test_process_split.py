@@ -302,11 +302,18 @@ def test_resume_failure_lands_dark_but_owned(tmp_path, monkeypatch):
         str(config_dir),
         initial_effect={"type": "singleColor", "config": {"color": "#000080"}})
 
-    async def never_fresh(*args, **kwargs):
-        return False
+    # A HARD failure — live.activate() itself raises (host.start() erroring,
+    # a bad grant, no devices at all) — is the case that must land dark. A
+    # virtual/device that merely never came up (the crystal lazy-activation
+    # class) is a SOFT gap instead: activate() no longer raises on that, and
+    # resume_own_room reports it loudly while keeping whatever DID come up
+    # (owner amendment, 2026-08-13 — see spectra/services/handover.py's
+    # resume_own_room docstring). That soft-gap path is covered by
+    # tests/test_crystal_activation_verify.py, not here.
+    async def boom(*args, **kwargs):
+        raise RuntimeError("simulated hard activation failure")
 
-    # The readiness gate refuses — activation must fail and release.
-    monkeypatch.setattr(live, "wait_fresh", never_fresh)
+    monkeypatch.setattr(live, "activate", boom)
 
     async def scenario():
         resumed = await resume_own_room(

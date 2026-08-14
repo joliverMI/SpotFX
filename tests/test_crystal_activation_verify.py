@@ -132,26 +132,33 @@ def test_broken_chain_link_is_a_loud_activation_failure(tmp_path):
     side = SpectraSide(config_dir=str(config_dir), open_audio=False)
 
     async def main():
-        lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
-        # activate() itself does NOT raise on a soft (partial) gap — it
-        # gives the chain its best chance, then returns; verify_active() is
-        # the single source of truth callers act on (run_handover rolls
-        # back a fresh handover on this; resume_own_room instead reports
-        # and keeps the working half up — see that module's docstring).
-        await side.activate()
-        assert live.expected_active_ids == {"chain-mapper", "chain-tail"}
-        gaps = live.activation_gaps()
-        assert "chain-tail" in gaps
-        assert "chain-mapper" not in gaps
-        assert not await side.verify_active()
-        # The working half is genuinely up and painting, not stranded.
-        assert live.host.virtuals.get("chain-mapper").active
+        try:
+            lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
+            # activate() itself does NOT raise on a soft (partial) gap — it
+            # gives the chain its best chance, then returns; verify_active()
+            # is the single source of truth callers act on (run_handover
+            # rolls back a fresh handover on this; resume_own_room instead
+            # reports and keeps the working half up — see that module's
+            # docstring).
+            await side.activate()
+            assert live.expected_active_ids == {"chain-mapper", "chain-tail"}
+            gaps = live.activation_gaps()
+            assert "chain-tail" in gaps
+            assert "chain-mapper" not in gaps
+            assert not await side.verify_active()
+            # The working half is genuinely up and painting, not stranded.
+            assert live.host.virtuals.get("chain-mapper").active
+        finally:
+            # Must run on THIS loop: live.deactivate() -> host.shutdown()
+            # fires LedFxShutdownEvent via call_soon_threadsafe against the
+            # loop captured at FxHost construction. A separate asyncio.run()
+            # here would already have closed that loop, raising before the
+            # render threads are ever joined — a real hang (non-daemon
+            # threads spin forever), not a test artifact.
+            if live.active:
+                await live.deactivate()
 
-    try:
-        _run(main())
-    finally:
-        if live.active:
-            _run(live.deactivate())
+    _run(main())
 
 
 def test_full_chain_activation_reports_zero_gaps(tmp_path):
@@ -165,20 +172,20 @@ def test_full_chain_activation_reports_zero_gaps(tmp_path):
     side = SpectraSide(config_dir=str(config_dir), open_audio=False)
 
     async def main():
-        lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
-        await side.activate()   # must not raise: the whole chain came up
-        assert live.expected_active_ids == {"chain-mapper", "chain-tail"}
-        assert live.activation_gaps() == {}
-        assert await side.verify_active()
-        # device_gaps: neither device is WLED, so nothing to confirm —
-        # empty, not a false failure on non-WLED hardware.
-        assert await live.device_gaps() == {}
+        try:
+            lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
+            await side.activate()   # must not raise: the whole chain came up
+            assert live.expected_active_ids == {"chain-mapper", "chain-tail"}
+            assert live.activation_gaps() == {}
+            assert await side.verify_active()
+            # device_gaps: neither device is WLED, so nothing to confirm —
+            # empty, not a false failure on non-WLED hardware.
+            assert await live.device_gaps() == {}
+        finally:
+            if live.active:
+                await live.deactivate()
 
-    try:
-        _run(main())
-    finally:
-        if live.active:
-            _run(live.deactivate())
+    _run(main())
 
 
 def test_liveness_endpoint_surfaces_activation_gaps(tmp_path):
@@ -194,16 +201,16 @@ def test_liveness_endpoint_surfaces_activation_gaps(tmp_path):
     async def main():
         from spectra.api.ownership import get_liveness
 
-        lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
-        await side.activate()   # does not raise on a soft gap; see above
-        resp = await get_liveness()
-        body = json.loads(bytes(resp.body))
-        assert resp.status_code == 503
-        assert not body["healthy"]
-        assert "chain-tail" in body["activation_gaps"]
+        try:
+            lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
+            await side.activate()   # does not raise on a soft gap; see above
+            resp = await get_liveness()
+            body = json.loads(bytes(resp.body))
+            assert resp.status_code == 503
+            assert not body["healthy"]
+            assert "chain-tail" in body["activation_gaps"]
+        finally:
+            if live.active:
+                await live.deactivate()
 
-    try:
-        _run(main())
-    finally:
-        if live.active:
-            _run(live.deactivate())
+    _run(main())

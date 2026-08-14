@@ -79,7 +79,12 @@ async def _escalate(state: str) -> None:
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
             resp = await client.post(url)
-        if resp.status_code >= 300:
+        if resp.status_code == 207:
+            # released, but the post-release read-back couldn't confirm
+            # every device actually went dark — still loud, not silent.
+            logger.error("reconciler: escalation released but unverified: %s",
+                        resp.text[:200])
+        elif resp.status_code >= 300:
             logger.error("reconciler: escalation release call returned %d: %s",
                         resp.status_code, resp.text[:200])
     except Exception:
