@@ -10,7 +10,13 @@ legacy picks: decision-legacy-retirement-picks.md):
                           conductor's own carried baseline: the authored
                           "look" stays intact, only the OUTPUT is scaled.
   ambient_enabled/_color  the legacy ledfx_ambient / ledfx_ambient_color
-                          action equivalents — room-level state only.
+                          action equivalents. This state is the durable
+                          record; the live takeover itself (freezing the
+                          room's Hue devices, holding them at ambient_color
+                          over direct bridge REST) is driven by
+                          services/ambient.py, reconciled from
+                          api/room_controls.py's PUT handler whenever these
+                          fields change.
   global_transition_ms    the legacy ledfx_global_transition action
                           equivalent — the default ramp new scene-entry
                           blends use when a scene doesn't author its own
@@ -46,11 +52,9 @@ legacy picks: decision-legacy-retirement-picks.md):
                           mid-song triggers fire, exactly the old switch's
                           two states.
 
-Scope is deliberately the CONTROLS, not the behaviour: ambient_enabled today
-only records the switch (folding into the room-control surface instead of
-staying a spot-effects bridge flag, per the owner's routing) — the full
-Ambient/Dinner-Party room-MODES build (freezing devices, Hue white takeover)
-is its own separate checklist item (gap report §3 row 5).
+Ambient is wired live (services/ambient.py) — the Dinner-Party half of the
+room-MODES gap (gap report §3 row 5) is a separate, still-unbuilt mode;
+ambient_enabled/_color here are Ambient's alone.
 
 Storage: storage/spectra/room_controls.json — same atomic tmp+replace
 discipline as color_journey.py's room_color.json.

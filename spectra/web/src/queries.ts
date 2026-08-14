@@ -5,7 +5,7 @@ import type { CurvePoint } from './components/CurveEditor';
 import type {
   ColorWheelPosition, DriftProfile, EngineStatus, FeedbackCapture, FeedbackEntry,
   FireResult, Registry, ReviewSession, ReviewTimeline, RoomColorState, RoomControlState,
-  SceneV2, SpectraTrigger, SpotColorSetCard,
+  RoomControlsSaveResult, SceneV2, SpectraTrigger, SpotColorSetCard,
 } from './types';
 
 /* ── scenes ── */
@@ -252,7 +252,8 @@ export function useRoomControls() {
 export function useSaveRoomControls() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (state: RoomControlState) => apiPut('/room-controls', state),
+    mutationFn: (state: RoomControlState) =>
+      apiPut<RoomControlsSaveResult>('/room-controls', state),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-room-controls'] }),
   });
 }

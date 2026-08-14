@@ -1040,6 +1040,93 @@ check(rc_fire_calls[0][1] == 1500,
       "global_transition_ms — the ledfx_global_transition equivalent")
 rc.save_room_controls(rc.RoomControlState())   # reset for later sections
 
+# ── Ambient (services/ambient.py): the room bar's Ambient checkbox — a real
+#    Hue takeover, freeze before REST write / REST fade before unfreeze,
+#    Hue-only (WLED left running its normal show), state-only when dark ────
+from spectra.services import ambient
+from spectra.services.live_host import live as live_stack
+
+check(asyncio.run(ambient.reconcile(True, "#ff0000")) == {"status": "dark"},
+      "ambient.reconcile no-ops (status 'dark') when SPECTRA doesn't own "
+      "the live stack — this script never activates one, so this is the "
+      "path every other check above implicitly exercises too")
+
+
+class _FakeHueDevice:
+    type = "hue"
+
+    def __init__(self, ip):
+        self.config = {"ip_address": ip, "entertainment_id": f"ent-{ip}", "username": "u"}
+        self.calls = []
+        self.frozen = None
+
+    async def set_frozen(self, frozen):
+        self.calls.append(("set_frozen", frozen))
+        self.frozen = frozen
+
+    def _hue_request(self, method, endpoint, data=None, ssl=False):
+        self.calls.append((method, endpoint, data))
+        if endpoint == "/clip/v2/resource/entertainment":
+            return {"data": [{"id": "e1", "owner": {"rid": "d1"}}]}, {}
+        if endpoint == "/clip/v2/resource/light":
+            return {"data": [{"id": "l1", "owner": {"rid": "d1"}}]}, {}
+        if endpoint.startswith("/clip/v2/resource/entertainment_configuration/"):
+            return {"data": [{"channels": [{"members": [
+                {"service": {"rtype": "entertainment", "rid": "e1"}}]}]}]}, {}
+        return {}, {}   # the light PUT itself
+
+
+class _FakeWledDevice:
+    type = "wled"
+
+
+class _FakeHost:
+    def __init__(self, devices):
+        self.devices = devices
+
+
+def _call_index(calls, wanted):
+    """First index of `wanted` in `calls`, matched on (method, endpoint) —
+    call bodies vary run to run, only the ordering matters here."""
+    for i, c in enumerate(calls):
+        if c[0] == wanted[0] and c[1] == wanted[1]:
+            return i
+    raise AssertionError(f"{wanted} not found in {calls}")
+
+
+ambient._light_cache.clear()
+hue_dev = _FakeHueDevice("10.0.0.1")
+_orig_host = live_stack.host
+live_stack.host = _FakeHost({"hue-lights": hue_dev, "strip": _FakeWledDevice()})
+try:
+    on_result = asyncio.run(ambient.reconcile(True, "#00ff00"))
+    check(on_result == {"status": "on", "devices": ["hue-lights"], "lights_set": 1},
+          "ambient ON holds every live Hue device at the chosen colour — "
+          "the WLED device is never touched (Hue-only, matching the "
+          "legacy scope this ports)")
+    freeze_i = _call_index(hue_dev.calls, ("set_frozen", True))
+    put_i = _call_index(hue_dev.calls, ("PUT", "/clip/v2/resource/light/l1"))
+    check(freeze_i < put_i,
+          "freeze lands before the REST colour write — a live stream frame "
+          "must never win the race against REST (legacy's own ordering)")
+
+    hue_dev.calls.clear()
+    ambient.AMBIENT_TRANSITION_MS = 0  # skip the real off-fade sleep for the spec run
+    off_result = asyncio.run(ambient.reconcile(False, None))
+    check(off_result == {"status": "off", "devices": ["hue-lights"]},
+          "ambient OFF releases every held Hue device")
+    check(hue_dev.frozen is False,
+          "disable ends unfrozen — the room's live scene resumes on its "
+          "own, no wake-scene step needed")
+    fade_i = _call_index(hue_dev.calls, ("PUT", "/clip/v2/resource/light/l1"))
+    unfreeze_i = _call_index(hue_dev.calls, ("set_frozen", False))
+    check(fade_i < unfreeze_i,
+          "the brightness-only off-fade lands before unfreezing — a soft "
+          "handoff, not a hard cut")
+finally:
+    live_stack.host = _orig_host
+    ambient.AMBIENT_TRANSITION_MS = 1500
+
 # ── item-8 CANONICAL shape: a band SELECTS AND SCALES its named kinds ────────
 # The owner's example, executed: the top band fires "Slam" + "Colour Roll"
 # at ×1.3 — the param spike lands at baseline + (declared − baseline)·1.3

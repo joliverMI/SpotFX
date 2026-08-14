@@ -119,14 +119,22 @@ async def _standalone_lifespan(app):
     import os
 
     logger = logging.getLogger("spectra")
-    from spectra.services import (engine, frame_watchdog, handover,
-                                   ownership_reconciler)
+    from spectra.services import (ambient, engine, frame_watchdog, handover,
+                                   ownership_reconciler, room_controls)
     await engine.start()
     # Restart mid-reign: if the ownership record says spectra owns, the
     # live stack reactivates itself through the guarded activation path
     # (grant + readiness gate). Failure stays dark-but-owned and keeps
     # serving — liveness 503 is the alarm.
     await handover.resume_own_room()
+    # Freeze state is in-memory only on the fresh HueDevice objects
+    # resume_own_room() just built (fx/devices/hue.py's own docstring) — a
+    # restart while ambient was held would otherwise silently drop the
+    # takeover while the room bar still shows it ON. Re-assert; a no-op
+    # (status "dark") if resume above didn't bring the stack up.
+    controls = room_controls.load_room_controls()
+    if controls.ambient_enabled:
+        await ambient.reconcile(True, controls.ambient_color)
     watchdog_task = asyncio.create_task(
         frame_watchdog.run_supervised(), name="spectra-frame-watchdog")
     # Record-vs-reality reconciler (report gate e3, 2026-08-13 two-writers
