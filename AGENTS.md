@@ -107,11 +107,39 @@ edited trigger. A generated trigger's `FireSceneAction.scene_id` is `None`
 by default (LibrosaSection carries no scene cue today) — resolved through
 `selection_kernel.select` at FIRE TIME in `trigger_engine._default_select_scene`,
 the same kernel the sequencer's own rolls use, at the trigger's own
-intensity, no dwell/no cross-fire affinity tracking. Room-level fallback
-switch: `RoomControlState.midsong_triggers_enabled` (default True,
-`spectra/services/room_controls.py`) — off skips only GENERATED triggers'
-fires, checked per-crossing in `trigger_engine.tick()`; hand-authored
-triggers ignore it.
+intensity, no dwell/no cross-fire affinity tracking.
+
+**Scene-change settings model** (the Admiral's binding three-tier control,
+corr=c14a9bcee40e6df9, superseding front 3's plain `midsong_triggers_enabled`
+bool): `RoomControlState.scene_change_mode` (`spectra/services/
+room_controls.py`, default `"full"`) is `"transitions"` / `"analysed"` /
+`"full"`, additive. Every tier fires an automatic scene change on genuine
+song-to-song transitions — `trigger_engine._fire_transition`, driven
+directly from `on_track_state` (mirrors `scene_sequencer.TransitionSource`'s
+arm/fire semantics), NOT a stored trigger, because the tick()-based
+edge-crossing window is unreliable at `timestamp_ms=0` (see the module
+docstring). `"analysed"` additionally fires GENERATED mid-song triggers;
+`"full"` additionally fires hand-authored triggers AND response-engine
+flares (gated at `engine.fire_response_event`, the same choke point a
+bridge-classified flare and a trigger's `fire_response` action both reach —
+flares are the owner's authored scene material, same tier as authored
+triggers). Gating lives in `trigger_engine._trigger_allowed` (tick()) and
+`engine.fire_response_event`. A pre-existing `midsong_triggers_enabled`
+value on disk migrates on load (`room_controls.load_room_controls`):
+`True → "full"`, `False → "transitions"`. UI: the room bar's "Scene
+changes" select (`RoomControlsBar.tsx`). Spec:
+`scripts/check_triggers.py`; frame-level: `tests/test_trigger_engine.py`.
+
+`_fire_transition` DEFERS UNCONDITIONALLY when `scene_sequencer`'s own dark
+switch (`sequencer.json`'s `config.enabled`, separate from
+`scene_change_mode`) is `True` — both it and `scene_sequencer.
+on_track_state` are wired off the SAME URI broadcast
+(`services/engine.py`'s `_on_track_uri`), so if the sequencer is live it's
+already firing its own transition pick with richer dwell/affinity state; a
+second independent kernel draw here would double-fire the room. Check
+which is actually live before trusting either "transitions only" or the
+sequencer's own status page in isolation — `GET /spectra/api/sequencer/
+status`'s `enabled` field is the tell.
 
 ## SPECTRA app (her OWN process since the S3 split)
 

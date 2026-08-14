@@ -347,35 +347,103 @@ check(len(fired8) == 1 and len(fired_scene) == fire_scene_calls_before
       "select_scene returning None (the kernel's terminal STAY) fires nothing, "
       "but the crossing still counts as handled — not a failure")
 
-# front 3: the room's midsong_triggers_enabled switch gates GENERATED triggers
-# only — an authored trigger at the same moment still fires
+# the settings model: scene_change_mode gates GENERATED and AUTHORED
+# triggers differently at each of the three tiers
 song["gated"] = [
     SpectraTrigger(timestamp_ms=100, action=FireSceneAction(scene_id="s"),
                   source="generated"),
     SpectraTrigger(timestamp_ms=100, action=FireResponseAction(event_class="flare"),
                   source="authored"),
 ]
-gated_fire_scene: list = []
-gated_fire_resp: list = []
 
 
-async def gated_fire_scene_fn(*a):
-    gated_fire_scene.append(a)
+def _gated_run(mode):
+    fire_scene_calls, fire_resp_calls = [], []
+
+    async def fs(*a):
+        fire_scene_calls.append(a)
+
+    async def fr(*a):
+        fire_resp_calls.append(a)
+
+    eng = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                        fire_scene=fs, fire_response=fr,
+                        scene_change_mode=lambda: mode)
+    asyncio.run(eng.on_track_state("gated"))
+    fired = asyncio.run(eng.tick(100))
+    return len(fired), len(fire_scene_calls), len(fire_resp_calls)
+
+fired_t, scene_t, resp_t = _gated_run("transitions")
+check((fired_t, scene_t, resp_t) == (0, 0, 0),
+      "scene_change_mode=transitions skips BOTH the generated and the "
+      "authored trigger's crossing — only the automatic transition fire "
+      "happens in this tier, and it isn't a stored trigger")
+
+fired_a, scene_a, resp_a = _gated_run("analysed")
+check((fired_a, scene_a, resp_a) == (1, 1, 0),
+      "scene_change_mode=analysed fires the GENERATED trigger's crossing "
+      "but still skips the AUTHORED one")
+
+fired_f, scene_f, resp_f = _gated_run("full")
+check((fired_f, scene_f, resp_f) == (2, 1, 1),
+      "scene_change_mode=full fires both the generated and the authored "
+      "trigger's crossing")
+
+# the automatic transition fire: a genuine song-to-song change (armed after
+# the first URI ever seen) fires through select_scene + fire_scene, in
+# EVERY mode — it's the floor all three tiers share, and it isn't gated by
+# _trigger_allowed at all since it's never a stored trigger
+transition_fires: list = []
 
 
-async def gated_fire_resp_fn(*a):
-    gated_fire_resp.append(a)
+async def transition_fire_scene(scene_id, color_set_id, intensity):
+    transition_fires.append((scene_id, color_set_id, intensity))
 
 
-engine9 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
-                        fire_scene=gated_fire_scene_fn, fire_response=gated_fire_resp_fn,
-                        midsong_enabled=lambda: False)
-asyncio.run(engine9.on_track_state("gated"))
-fired9 = asyncio.run(engine9.tick(100))
-check(len(fired9) == 1 and gated_fire_scene == [] and len(gated_fire_resp) == 1,
-      "midsong_enabled=False skips the GENERATED trigger's crossing but the "
-      "AUTHORED trigger at the same moment still fires — the fallback switch "
-      "only ever gates generated triggers")
+engine_t = TriggerEngine(list_triggers=lambda uri: [], fire_scene=transition_fire_scene,
+                         select_scene=lambda i: "auto-picked", scene_change_mode=lambda: "transitions",
+                         transition_intensity=lambda: 0.33)
+asyncio.run(engine_t.on_track_state("song-x"))   # first URI ever: only arms, no fire
+check(transition_fires == [], "the FIRST song ever seen only arms the transition "
+                              "clock — it isn't itself a transition")
+asyncio.run(engine_t.on_track_state("song-y"))   # a genuine song-to-song change
+check(transition_fires == [("auto-picked", None, 0.33)],
+      "a genuine song change fires the automatic transition scene change, "
+      "using the injected select_scene + the transition's own intensity, "
+      "through the SAME fire_scene choke point every trigger uses")
+asyncio.run(engine_t.on_track_state(None))       # stop: not a transition
+check(len(transition_fires) == 1, "playback stopping (URI -> None) is not a "
+                                  "transition and doesn't fire")
+asyncio.run(engine_t.on_track_state("song-y"))   # resume the SAME song: not a transition
+check(len(transition_fires) == 1, "resuming the SAME song after a stop is not "
+                                  "a transition (mirrors scene_sequencer."
+                                  "TransitionSource's own arm/fire semantics)")
+asyncio.run(engine_t.on_track_state("song-z"))   # a real new song again
+check(len(transition_fires) == 2, "a real new song after a stop fires again")
+
+# select_scene returning None (the kernel's terminal STAY) fires nothing for
+# a transition either, same as a stored fire_scene action
+engine_stay = TriggerEngine(list_triggers=lambda uri: [], fire_scene=transition_fire_scene,
+                            select_scene=lambda i: None, scene_change_mode=lambda: "full")
+asyncio.run(engine_stay.on_track_state("stay-a"))
+before_stay = len(transition_fires)
+asyncio.run(engine_stay.on_track_state("stay-b"))
+check(len(transition_fires) == before_stay,
+      "the kernel's terminal STAY (select_scene -> None) fires nothing on a "
+      "transition, same as a stored fire_scene action would")
+
+# settings-model correction: when scene_sequencer is the live transition
+# authority (its own config.enabled=True), the automatic transition fire
+# defers entirely — no select_scene draw, no fire_scene call
+engine_defer = TriggerEngine(list_triggers=lambda uri: [], fire_scene=transition_fire_scene,
+                             select_scene=lambda i: "would-have-picked",
+                             sequencer_enabled=lambda: True)
+asyncio.run(engine_defer.on_track_state("defer-a"))   # arms
+before_defer = len(transition_fires)
+asyncio.run(engine_defer.on_track_state("defer-b"))   # a genuine transition
+check(len(transition_fires) == before_defer,
+      "sequencer_enabled=True: the automatic transition fire is a no-op — "
+      "the sequencer remains the sole transition authority")
 
 # ═══ 5. production wiring — the real (test-isolated, dark) choke points ═════
 # fire_scene_by_id is NOT exercised here: like scene_sequencer's own spec
@@ -425,14 +493,110 @@ check(picked == kernel_scene.id,
       "selection_kernel.select — the sole configured, existing scene is "
       "the only positive-score candidate, so it wins the draw")
 
-check(prod_engine._default_midsong_enabled() is True,
-      "the production midsong-enabled default reads the real room_controls "
-      "store and reports its documented default (True)")
+# settings-model correction (live reality: scene_sequencer was enabled on
+# the running system): scene_sequencer and trigger_engine both fire off the
+# SAME URI feed (services/engine.py's _on_track_uri calls both, in order,
+# on every broadcast) — prove EXACTLY ONE of them actually fires a scene
+# change per genuine transition, whichever the sequencer's own dark switch
+# (config.enabled) says is live.
+from spectra.services.scene_sequencer import SceneSequencer
+
+
+def _coordination_run(seq_enabled):
+    sequencer_store.save_config(SequencerConfig(enabled=seq_enabled, entries={
+        kernel_scene.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}])}))
+    seq_fires: list = []
+    trig_fires: list = []
+
+    async def seq_fire(sid, cset, inten):
+        seq_fires.append(sid)
+
+    async def trig_fire(sid, cset, inten):
+        trig_fires.append(sid)
+
+    sequencer = SceneSequencer(
+        fire=seq_fire, intensity=lambda: 0.7, wheel_get=lambda: None,
+        wheel_set=lambda d: None, list_scene_ids=lambda: {kernel_scene.id},
+        eligible_sets=lambda sid: {})
+    trig = TriggerEngine(list_triggers=lambda uri: [], fire_scene=trig_fire)
+
+    async def run():
+        # arm both (first URI ever seen), then one genuine transition —
+        # the exact call order+pairing services/engine.py's _on_track_uri
+        # makes for every real broadcast.
+        await sequencer.on_track_state("coord:1")
+        await trig.on_track_state("coord:1")
+        await sequencer.on_track_state("coord:2")
+        await trig.on_track_state("coord:2")
+
+    asyncio.run(run())
+    return seq_fires, trig_fires
+
+
+seq_on, trig_on = _coordination_run(True)
+check(len(seq_on) == 1 and len(trig_on) == 0,
+      "scene_sequencer.config.enabled=True: the sequencer fires the "
+      "transition pick (its own dwell/affinity state), trigger_engine's "
+      "automatic transition fire defers to it — exactly one scene change "
+      "per transition, never two")
+
+seq_off, trig_off = _coordination_run(False)
+check(len(seq_off) == 0 and len(trig_off) == 1,
+      "scene_sequencer.config.enabled=False (its shipped default): "
+      "trigger_engine's automatic transition fire is the sole authority — "
+      "exactly one scene change per transition")
+
+# restore the state section 5's other checks below expect (enabled=False)
+sequencer_store.save_config(SequencerConfig(entries={
+    kernel_scene.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}])}))
+
+check(prod_engine._default_sequencer_enabled() is False,
+      "the production sequencer-enabled default reads the real "
+      "sequencer_store and reflects its state immediately")
+sequencer_store.save_config(SequencerConfig(enabled=True, entries={
+    kernel_scene.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}])}))
+check(prod_engine._default_sequencer_enabled() is True,
+      "flipping sequencer_store's own enabled switch is the production "
+      "default's live source of truth")
+sequencer_store.save_config(SequencerConfig(entries={
+    kernel_scene.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}])}))  # restore
+
+check(prod_engine._default_scene_change_mode() == "full",
+      "the production scene_change_mode default reads the real room_controls "
+      "store and reports its documented default (full)")
 from spectra.services import room_controls as rc
-rc.save_room_controls(rc.RoomControlState(midsong_triggers_enabled=False))
-check(prod_engine._default_midsong_enabled() is False,
-      "flipping room_controls.midsong_triggers_enabled is the one-word "
-      "fallback — the production default reflects it immediately")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="transitions"))
+check(prod_engine._default_scene_change_mode() == "transitions",
+      "the room bar's tick is the production default's live source of "
+      "truth — flipping it takes effect immediately")
+
+# migration: a pre-existing room_controls.json written by the OLD
+# midsong_triggers_enabled bool (pre this settings model) is read correctly
+scfg.ROOM_CONTROLS_FILE.write_text(json.dumps({"midsong_triggers_enabled": True}))
+check(rc.load_room_controls().scene_change_mode == "full",
+      "migrating an old midsong_triggers_enabled=True room_controls.json "
+      "maps to scene_change_mode=full — the closest match, since generated "
+      "triggers were on and authored triggers/flares always fired anyway")
+scfg.ROOM_CONTROLS_FILE.write_text(json.dumps({"midsong_triggers_enabled": False}))
+check(rc.load_room_controls().scene_change_mode == "transitions",
+      "migrating an old midsong_triggers_enabled=False room_controls.json "
+      "maps to scene_change_mode=transitions — the owner had deliberately "
+      "dialed generated triggers off, so the pure baseline is the most "
+      "faithful read of that intent")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
+
+# the settings model's flare gate: engine.fire_response_event (both the
+# bridge's own always-classifying path and a trigger's fire_response
+# action) only reaches the real response engine in scene_change_mode=full —
+# proven above at the default (full); now prove it's actually gated
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="analysed"))
+before_gated = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_response_event("flare", 0.8))
+check(len(spectra_engine.responses.surges) == before_gated,
+      "fire_response_event is a no-op outside scene_change_mode=full — "
+      "flares are the owner's authored scene material (response bands "
+      "tuned per scene), gated the same as hand-authored triggers")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
 
 # ═══ 6. mid-song generation (front 3) ════════════════════════════════════
 

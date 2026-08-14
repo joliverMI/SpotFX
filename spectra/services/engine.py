@@ -68,7 +68,18 @@ responses = ResponseEngine(
 async def fire_response_event(event_class: str, intensity: float) -> None:
     """The ONE response-fire choke point: the bridge's classified legacy
     trigger_fired events and SPECTRA-native fire_response triggers
-    (spectra.services.trigger_engine) both call this."""
+    (spectra.services.trigger_engine) both call this. Flares are the
+    owner's authored material (scene response bands, hand-tuned per scene)
+    — gated to the settings model's "full" tier
+    (room_controls.RoomControlState.scene_change_mode), same as
+    hand-authored triggers. Covers BOTH callers from one seam: a
+    trigger-driven fire_response action is already gated at its own
+    crossing by trigger_engine's tick() (it can only be source="authored"),
+    so this redundantly-but-harmlessly re-checks that path while being the
+    ONLY gate for the bridge's always-classifying path."""
+    from spectra.services.room_controls import load_room_controls
+    if load_room_controls().scene_change_mode != "full":
+        return
     await responses.on_event(event_class, intensity)
     if responses._pending_releases:
         asyncio.create_task(_release_after_hold())

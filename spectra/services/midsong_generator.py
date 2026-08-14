@@ -45,11 +45,11 @@ regenerations of the SAME analysis. generate_for_song:
     through the editing API, so an edited generated trigger has already
     left this function's reach by the time it runs again.
 
-Whether a generated trigger fires at all is the room-level
-midsong_triggers_enabled switch (spectra/services/room_controls.py),
-checked by trigger_engine at fire time — generation and storage happen
-regardless, so seeded triggers are always visible/editable on the timeline
-even with the switch off.
+Whether a generated trigger fires at all is gated by the room-level
+scene_change_mode setting (spectra/services/room_controls.py — "analysed"
+or "full" allow it, "transitions" doesn't), checked by trigger_engine at
+fire time — generation and storage happen regardless of the setting, so
+seeded triggers are always visible/editable on the timeline.
 """
 from __future__ import annotations
 

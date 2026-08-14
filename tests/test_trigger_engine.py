@@ -265,7 +265,109 @@ def test_trigger_fires_select_color_set_action_on_the_real_pipeline(tmp_path):
     _run(main())
 
 
-# ── proof 4: a GENERATED trigger's scene_id=None resolves through the real
+# ── proof 4a: the automatic song-transition fire lands on the real pipeline,
+#    on a genuine song change, NOT on the first song ever seen ──────────────
+
+def test_transition_fire_lands_on_real_pipeline_on_song_change(tmp_path):
+    """The settings model's floor tier ("transitions"): scene changes ON
+    song transitions, driven directly by on_track_state (module docstring's
+    _fire_transition section) rather than a stored trigger — proven here
+    end to end through the real resolve/compile/land pipeline, same as a
+    stored fire_scene trigger's own proof (test 1 above)."""
+    from spectra.models.binding import ValueBinding
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="OnTransition", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": ValueBinding(
+            signal="trigger_intensity", out_min=0.5, out_max=2.0)})])
+
+    async def main():
+        host, virtual = await _host(tmp_path, "transition")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                from spectra.services.drift_conductor import DriftConductor
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+                conductor = DriftConductor(executor=executor,
+                                           clock=lambda: clock.now, leg_s=20.0)
+                fire_scene = await _make_fire_scene(executor, conductor, scene)
+
+                engine = TriggerEngine(
+                    list_triggers=lambda uri: [], fire_scene=fire_scene,
+                    select_scene=lambda intensity: scene.id,
+                    transition_intensity=lambda: 0.5)
+
+                await engine.on_track_state("song:first")   # arms only
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0), \
+                    "the FIRST song ever seen only arms the transition " \
+                    "clock — it isn't itself a transition, so nothing fires"
+
+                await engine.on_track_state("song:second")  # a real transition
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.25), \
+                    "a genuine song-to-song change fired the automatic " \
+                    "transition scene change through the real resolve/" \
+                    "compile/land pipeline, at the transition's own intensity"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 4b: scene_change_mode="transitions" still fires the automatic
+#    transition change but skips a hand-authored trigger at the same moment ──
+
+def test_scene_change_mode_transitions_skips_authored_trigger(tmp_path):
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.models.trigger import FireSceneAction, SpectraTrigger
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Authored", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 1.0})])
+    trig = SpectraTrigger(timestamp_ms=1000, source="authored",
+                          action=FireSceneAction(scene_id=scene.id))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "mode-gate")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 9.0})
+                from spectra.services.drift_conductor import DriftConductor
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+                conductor = DriftConductor(executor=executor,
+                                           clock=lambda: clock.now, leg_s=20.0)
+                fire_scene = await _make_fire_scene(executor, conductor, scene)
+
+                engine = TriggerEngine(
+                    list_triggers=lambda uri: [trig], fire_scene=fire_scene,
+                    scene_change_mode=lambda: "transitions")
+                await engine.on_track_state("gate-song")
+
+                fired = await engine.tick(1000)
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert fired == [] and effect._config["gradient_scale"] == pytest.approx(9.0), \
+                    "scene_change_mode=transitions skips the hand-authored " \
+                    "trigger's crossing — only the automatic transition " \
+                    "fire (proof 4a) happens in this tier"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 5: a GENERATED trigger's scene_id=None resolves through the real
 #    selection kernel, then fires and lands exactly like a hand-picked one ──
 
 def test_generated_trigger_resolves_scene_via_kernel_and_fires_at_its_moment(
