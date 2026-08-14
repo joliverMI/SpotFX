@@ -8,6 +8,8 @@ runs MusicMarkDetector, and writes the marks into the sidecar JSON.
 from __future__ import annotations
 import asyncio
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -966,11 +968,33 @@ async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> bool:
     from services.librosa_service import wav_path, manage_wav_retention, analyze_async
 
     wpath = wav_path(meta)
-    try:
+
+    def _write_wav_atomic() -> None:
+        # Write-then-rename: scripts/rerun_librosa.py (and any other reader)
+        # may be reading this exact path from a concurrent process — a
+        # direct sf.write(wpath, ...) truncates the existing file in place,
+        # so a concurrent open can land mid-write and read a partial/corrupt
+        # WAV ("System error" from soundfile). os.replace() is atomic on the
+        # same filesystem, so a reader always sees either the complete old
+        # file or the complete new one, never a partial write.
         AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
-        await asyncio.get_event_loop().run_in_executor(
-            None, lambda: sf.write(str(wpath), raw_pcm, sample_rate, subtype="FLOAT")
-        )
+        fd, tmp = tempfile.mkstemp(dir=AUDIO_SHAPES_DIR, prefix=wpath.name, suffix=".tmp")
+        os.close(fd)
+        try:
+            # format="WAV" explicitly: the tmp filename doesn't end in .wav
+            # (mkstemp's suffix wins), so soundfile can't infer it from the
+            # extension.
+            sf.write(tmp, raw_pcm, sample_rate, subtype="FLOAT", format="WAV")
+            os.replace(tmp, wpath)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, _write_wav_atomic)
         logger.info("WAV saved: %s (%.1f MB)", wpath.name, wpath.stat().st_size / 1e6)
         manage_wav_retention()
     except Exception as exc:

@@ -538,6 +538,15 @@ profile object to clobber the edit (unlike the HA storage-file gotcha). Writes
 are atomic (tmp + replace) and use `ensure_ascii=True` to match how the app
 serializes profiles (`\uXXXX`).
 
+`storage/audio_shapes/*.wav` writes (`services/audio_shape_service._save_wav_and_analyze`)
+are also tmp+`os.replace` atomic, for the same live-safety reason: an offline
+batch pass (`scripts/rerun_librosa.py`) can be reading a WAV from the same
+path while a live re-capture of that song overwrites it — a direct in-place
+`sf.write` truncates before streaming, so a concurrent reader can land on a
+partial file (`soundfile`'s "System error"/"Format not recognised"). This was
+the 2026-08-14 librosa-backfill failure root cause (19/500 songs); the same
+race exists for anything else that writes into `audio_shapes/` — write atomically.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
