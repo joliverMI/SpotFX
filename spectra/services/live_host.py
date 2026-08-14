@@ -49,6 +49,15 @@ STALE_AFTER_S = 2.0     # a live render loop flushes every ~16-40 ms; 2 s of
                         # silence on an active virtual is a dead write path
 AUDIO_PUMP_SLEEP_S = 0.01
 DEVICE_VERIFY_TIMEOUT_S = 3.0   # per-device json/state read for the live-flag check
+DEVICE_LIVE_DEADLINE_S = 25.0  # shared poll-until-live deadline: a real
+                                # take-back's WLEDs start receiving realtime
+                                # SLOWLY and in VARYING ORDER (first live
+                                # flags observed 6.2-6.4s after activation,
+                                # different subsets rise first on different
+                                # attempts) — a one-shot snapshot races the
+                                # ramp and nondeterministically names
+                                # whichever devices hadn't come up YET
+DEVICE_POLL_INTERVAL_S = 0.5
 
 
 def _config_expected_active_ids(config: dict) -> set[str]:
@@ -303,16 +312,29 @@ class LiveLights:
                 return gaps
             await asyncio.sleep(0.05)
 
-    async def device_gaps(self, timeout_s: float = DEVICE_VERIFY_TIMEOUT_S) -> dict[str, str]:
+    async def device_gaps(self, timeout_s: float = DEVICE_VERIFY_TIMEOUT_S,
+                          deadline_s: float = DEVICE_LIVE_DEADLINE_S,
+                          poll_interval_s: float = DEVICE_POLL_INTERVAL_S,
+                          ) -> dict[str, str]:
         """Device-level verification one layer deeper than our own frame
         stamps (report gate e3, folded in as first-class alongside the
         reconciler by owner order): frame freshness only proves OUR render
         loop pushed a frame, not that the physical device received it. For
         every real (non-dummy, non-gap) device backing an expected-active
         virtual, if it's WLED, read its OWN json/state and require
-        live=true. A device we cannot positively confirm — unreachable or
-        explicitly live=false — is exactly as loud a failure as a virtual
-        that never activated; verified, never assumed."""
+        live=true.
+
+        A real take-back's WLEDs rise SLOWLY and in VARYING ORDER (measured
+        live: first live flags 6.2-6.4s after activation, different subsets
+        first on different attempts, some past a 3s snapshot's window
+        entirely) — so this POLLS each still-dark device on its own
+        `timeout_s`-bounded read until it reports live=true or the shared
+        `deadline_s` elapses, mirroring wait_fully_active()'s poll-until-
+        deadline shape. Only a device STILL dark at the deadline becomes a
+        gap. A device that never answers (unreachable) keeps being retried
+        like any other unconfirmed device and, if still unreachable at the
+        deadline, is named with the same could-not-confirm reason it always
+        had — verified, never assumed."""
         if self.host is None:
             return {}
         device_ids: set[str] = set()
@@ -324,6 +346,8 @@ class LiveLights:
                 device_id = seg[0]
                 if not device_id.startswith("gap-"):
                     device_ids.add(device_id)
+        if not device_ids:
+            return {}
 
         async def _check(device_id: str) -> tuple[str, Optional[str]]:
             device = self.host.devices.get(device_id)
@@ -342,10 +366,17 @@ class LiveLights:
                                    "receiving realtime data")
             return device_id, None
 
-        if not device_ids:
-            return {}
-        results = await asyncio.gather(*(_check(d) for d in device_ids))
-        return {device_id: reason for device_id, reason in results if reason}
+        pending = set(device_ids)
+        gaps: dict[str, str] = {}
+        deadline = time.monotonic() + deadline_s
+        while True:
+            results = await asyncio.gather(*(_check(d) for d in pending))
+            gaps = {device_id: reason for device_id, reason in results
+                   if reason is not None}
+            pending = set(gaps)
+            if not pending or time.monotonic() >= deadline:
+                return gaps
+            await asyncio.sleep(poll_interval_s)
 
     def liveness(self, stale_after_s: float = STALE_AFTER_S) -> dict:
         """Per-virtual frame-flush freshness for the liveness endpoint."""
