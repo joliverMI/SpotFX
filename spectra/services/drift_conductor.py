@@ -530,6 +530,8 @@ class DriftConductor:
         self._room_save(room.model_copy(update=update))
         logger.info("room colour set applied directly: '%s' (%d virtuals)",
                     getattr(card, "name", card.id), landed)
+        from spectra.services import fire_history
+        fire_history.record("color_sets", card.id)
         return {"applied": card.id,
                 "set_name": getattr(card, "name", card.id),
                 "position_deg": position, "virtuals": landed}

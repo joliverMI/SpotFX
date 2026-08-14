@@ -256,6 +256,8 @@ class TriggerEngine:
             return
         logger.info("trigger %s fired: %s @ %dms", trig.id, a.kind, trig.timestamp_ms)
         self.last_fire = {"id": trig.id, "kind": a.kind, "ok": True}
+        from spectra.services import fire_history
+        fire_history.record("triggers", f"{trig.source}:{a.kind}")
 
     # ── observability ─────────────────────────────────────────────────────
 
