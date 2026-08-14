@@ -27,6 +27,24 @@ Mechanisms per leg:
            reselects; the wheel + bearing persist to shared room state
            every leg, so custody transfers never move the position.
 
+Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a creep or follow
+spec is authored PARAM-AGNOSTIC (a named profile is reused across effects —
+decision-4) so it can carry bounds that make sense for one param and are
+wildly wrong for another (e.g. a [0,1]-ish default wandering a pixel-scale
+"particle size" whose own effect declares a [0.5, 6.0] legal range: every
+creep step below 0.5 is silently REJECTED by the effect's own config schema
+— fx.effects.__init__._apply_config logs and no-ops rather than raising —
+so the light sticks at its last legal value while the conductor's OWN
+position model keeps wandering into illegal territory, visibly parked near
+the floor). `_registry_range()` reads the shared fx.device_model param
+registry (config/effect_params.json, the same curated min/max every other
+param editor already trusts) for the mechanism's (effect_type, param) and
+INTERSECTS it with the spec's own lo/hi (creep, at Mechanism construction)
+or clips the resolved target (follow, every leg) — so no drift declaration,
+however authored, can ever push a registered param outside the range its
+own effect calls usable. An unregistered param (no schema, e.g. `fx`-less
+test doubles) is untouched — this is a floor, not a new restriction.
+
 Re-baseline: any scene fire drops every leg and restarts mechanisms from
 the new resolved initial conditions (on_scene_fire, hooked into
 scene_compiler.fire_scene). Carry (the owner's words): surges move the
@@ -81,23 +99,57 @@ class VirtualState:
         self.brightness_baseline: float = float(config.get("brightness", 1.0))
 
 
+def _registry_range(effect_type: str, param: str) -> Optional[tuple[float, float]]:
+    """The param's own declared legal range (config/effect_params.json, via
+    the shared fx.device_model registry) — None for an unregistered effect/
+    param (untouched, never invented). Non-numeric metadata (toggle/enum/
+    string) has no min/max and is likewise left alone."""
+    from fx import device_model
+    meta = device_model.get_param_meta(effect_type, param)
+    if not meta:
+        return None
+    lo, hi = meta.get("min"), meta.get("max")
+    if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+        return None
+    return float(lo), float(hi)
+
+
 class Mechanism:
     def __init__(self, vid: str, param: str, spec: DriftSpec,
-                 baseline: float) -> None:
+                 baseline: float, effect_type: str = "") -> None:
         self.vid = vid
         self.param = param
         self.spec = spec
         self.kind = spec.kind
+        self.effect_type = effect_type
+        # The degeneracy floor/ceiling: intersect the spec's own lo/hi with
+        # the param's registered legal range, if any. An empty intersection
+        # (a profile declared entirely outside the legal range) falls back
+        # to the registry's own range rather than producing a zero-span
+        # window — the registry always wins over a nonsensical spec.
+        self.eff_lo, self.eff_hi = spec.lo, spec.hi
+        reg = _registry_range(effect_type, param)
+        if reg is not None:
+            reg_lo, reg_hi = reg
+            eff_lo, eff_hi = max(spec.lo, reg_lo), min(spec.hi, reg_hi)
+            if eff_lo >= eff_hi:
+                logger.warning(
+                    "drift spec for %s.%s (lo=%g hi=%g) sits outside its "
+                    "registered range [%g, %g] — falling back to the "
+                    "registered range", effect_type, param, spec.lo,
+                    spec.hi, reg_lo, reg_hi)
+                eff_lo, eff_hi = reg_lo, reg_hi
+            self.eff_lo, self.eff_hi = eff_lo, eff_hi
         # creep state: the wander position IS the carried baseline.
-        self.position = min(max(baseline, spec.lo), spec.hi) \
+        self.position = min(max(baseline, self.eff_lo), self.eff_hi) \
             if spec.kind == "creep" else baseline
         self.direction = 1
 
     def as_status(self) -> dict:
         out = {"virtual_id": self.vid, "param": self.param, "kind": self.kind}
         if self.kind == "creep":
-            out.update(position=round(self.position, 4), lo=self.spec.lo,
-                       hi=self.spec.hi, rate_per_min=self.spec.rate_per_min,
+            out.update(position=round(self.position, 4), lo=self.eff_lo,
+                       hi=self.eff_hi, rate_per_min=self.spec.rate_per_min,
                        motion=self.spec.motion)
         else:
             out.update(slew_s=self.spec.slew_s)
@@ -105,20 +157,29 @@ class Mechanism:
 
 
 def _creep_step(mech: Mechanism, leg_s: float) -> float:
-    """Advance a creep's wander one leg — the NumericNudge bounce semantics
-    made continuous; wrap folds into [lo, hi)."""
+    """Advance a creep's wander one leg within the mechanism's EFFECTIVE
+    bounds (spec lo/hi intersected with the registered legal range —
+    Mechanism.__init__) — the NumericNudge bounce semantics made continuous;
+    wrap folds into [lo, hi); hold parks at whichever bound it reaches and
+    stops (direction 0), never oscillating back."""
     spec = mech.spec
-    span = spec.hi - spec.lo
+    lo, hi = mech.eff_lo, mech.eff_hi
+    span = hi - lo
     pos = mech.position + spec.rate_per_min * (leg_s / 60.0) * mech.direction
     if spec.motion == "wrap":
-        pos = spec.lo + ((pos - spec.lo) % span)
+        pos = lo + ((pos - lo) % span)
+    elif spec.motion == "hold":
+        if pos >= hi:
+            pos, mech.direction = hi, 0
+        elif pos <= lo:
+            pos, mech.direction = lo, 0
     else:
-        while pos > spec.hi or pos < spec.lo:
-            if pos > spec.hi:
-                pos = spec.hi - (pos - spec.hi)
+        while pos > hi or pos < lo:
+            if pos > hi:
+                pos = hi - (pos - hi)
                 mech.direction = -1
             else:
-                pos = spec.lo + (spec.lo - pos)
+                pos = lo + (lo - pos)
                 mech.direction = 1
     mech.position = pos
     return pos
@@ -226,7 +287,8 @@ class DriftConductor:
                         else fallback
                 else:
                     baseline = float(w["config"].get(param, 0.0) or 0.0)
-                self.mechanisms.append(Mechanism(vid, param, spec, baseline))
+                self.mechanisms.append(Mechanism(vid, param, spec, baseline,
+                                                 effect_type=state.effect_type))
         room = self._room_load()
         update: dict[str, Any] = {"destination": None}
         if color_set_id is not None:
@@ -255,8 +317,8 @@ class DriftConductor:
                 if mech.vid == vid and mech.param == param \
                         and mech.kind == "creep" \
                         and isinstance(value, (int, float)):
-                    mech.position = min(max(float(value), mech.spec.lo),
-                                        mech.spec.hi)
+                    mech.position = min(max(float(value), mech.eff_lo),
+                                        mech.eff_hi)
             state = self.virtuals.get(vid)
             if state is None:
                 continue
@@ -300,6 +362,9 @@ class DriftConductor:
                 duration = leg_ms
             else:
                 target = curve_eval(self._follow_points(mech.spec), intensity)
+                reg = _registry_range(mech.effect_type, mech.param)
+                if reg is not None:
+                    target = min(max(target, reg[0]), reg[1])
                 duration = int(mech.spec.slew_s * 1000)
             batches.setdefault((mech.vid, duration), {})[mech.param] = target
             legs.append({"virtual_id": mech.vid, "param": mech.param,
