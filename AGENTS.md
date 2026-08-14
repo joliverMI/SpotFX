@@ -91,6 +91,28 @@ calls `spectra/api/triggers.py`). Executable spec:
 trigger's action landing on the real render pipeline):
 `tests/test_trigger_engine.py`.
 
+**Front 3 — mid-song generation** (`spectra/services/midsong_generator.py`,
+`generate_for_song(uri)` / `POST /api/triggers/generate?uri=`, UI's
+"⟳ Generate" button): seeds `fire_scene` triggers at every LibrosaSection
+boundary from `analysis_reader.sections_for_uri` (the S2 bridge's own
+read-only reader — no spot-effects import), intensity = that section's
+energy_rms, per-song minmax+floor renormalized (same convention as
+`scripts/backfill_trigger_intensity.py`). Deterministic, idempotent,
+edit-preserving: `SpectraTrigger.source` ("authored"/"generated") +
+`generator_key` (`f"section:{start_ms}"`) track provenance;
+`spectra/api/triggers.py`'s `upsert_trigger` stamps every human-facing write
+back to `source="authored"` regardless of what's posted — the
+ownership-transfer rule that keeps regeneration from ever clobbering an
+edited trigger. A generated trigger's `FireSceneAction.scene_id` is `None`
+by default (LibrosaSection carries no scene cue today) — resolved through
+`selection_kernel.select` at FIRE TIME in `trigger_engine._default_select_scene`,
+the same kernel the sequencer's own rolls use, at the trigger's own
+intensity, no dwell/no cross-fire affinity tracking. Room-level fallback
+switch: `RoomControlState.midsong_triggers_enabled` (default True,
+`spectra/services/room_controls.py`) — off skips only GENERATED triggers'
+fires, checked per-crossing in `trigger_engine.tick()`; hand-authored
+triggers ignore it.
+
 ## SPECTRA app (her OWN process since the S3 split)
 
 `spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`), running

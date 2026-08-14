@@ -21,7 +21,11 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
 
 export function actionSummary(t: SpectraTrigger, sceneName: (id: string) => string): string {
   const a = t.action;
-  if (a.kind === 'fire_scene') return `${KIND_LABEL.fire_scene}: ${sceneName(a.scene_id) || '—'} @ ⚡${a.intensity.toFixed(2)}`;
+  if (a.kind === 'fire_scene') {
+    const target = a.scene_id ? (sceneName(a.scene_id) || '—') : 'kernel picks';
+    const prefix = t.source === 'generated' ? 'Seeded — ' : '';
+    return `${prefix}${KIND_LABEL.fire_scene}: ${target} @ ⚡${a.intensity.toFixed(2)}`;
+  }
   if (a.kind === 'fire_response') return `${KIND_LABEL.fire_response}: ${a.event_class} @ ⚡${a.intensity.toFixed(2)}`;
   return `${KIND_LABEL.select_color_set}: ${a.set_id || '—'}`;
 }
@@ -122,6 +126,9 @@ export default function SpectraTriggerBar({
             position: 'absolute', top: 2, bottom: 2, left: pct(t.timestamp_ms), width: 5,
             marginLeft: -2, background: KIND_COLOR[t.action.kind],
             opacity: t.enabled ? 1 : 0.35, borderRadius: 1, cursor: 'grab',
+            // Seeded (generated, untouched) triggers get a dashed outline —
+            // still every gesture a hand-placed one has (move/edit/delete).
+            border: t.source === 'generated' ? '1px dashed rgba(255,255,255,0.6)' : 'none',
           }}
         />
       ))}

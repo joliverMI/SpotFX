@@ -19,7 +19,9 @@ const KIND_LABEL: Record<TriggerActionKind, string> = {
 };
 
 const blankAction = (kind: TriggerActionKind, carryIntensity: number): TriggerAction => {
-  if (kind === 'fire_scene') return { kind, scene_id: '', intensity: carryIntensity, color_set_id: null };
+  // scene_id null = "pick at fire time through the sequencer selection kernel"
+  // (front 3's generation-friendly default) — a legal, un-forced choice.
+  if (kind === 'fire_scene') return { kind, scene_id: null, intensity: carryIntensity, color_set_id: null };
   if (kind === 'fire_response') return { kind, event_class: 'flare', intensity: carryIntensity };
   return { kind, set_id: '' };
 };
@@ -69,7 +71,7 @@ export default function SpectraTriggerDialog({
   const recents = readSticky<RecentAction[]>('recentSpectraActions', []);
 
   const valid =
-    (action.kind === 'fire_scene' && !!action.scene_id) ||
+    action.kind === 'fire_scene' ||   // scene_id null = kernel-routed, always valid
     (action.kind === 'fire_response' && !!action.event_class) ||
     (action.kind === 'select_color_set' && !!action.set_id);
   const ms = parseMsTenths(tsText);
@@ -83,7 +85,8 @@ export default function SpectraTriggerDialog({
     const label = actionSummary(saved, sceneName);
     const entry: RecentAction = {
       kind: action.kind, label,
-      ...(action.kind === 'fire_scene' ? { scene_id: action.scene_id } : {}),
+      ...(action.kind === 'fire_scene' && action.scene_id
+        ? { scene_id: action.scene_id } : {}),
       ...(action.kind === 'fire_response' ? { event_class: action.event_class } : {}),
       ...(action.kind === 'select_color_set' ? { set_id: action.set_id } : {}),
     };
@@ -99,7 +102,7 @@ export default function SpectraTriggerDialog({
 
   const applyRecent = (r: RecentAction) => {
     const carry = intensityOf(action);
-    if (r.kind === 'fire_scene') setAction({ kind: 'fire_scene', scene_id: r.scene_id ?? '', intensity: carry, color_set_id: null });
+    if (r.kind === 'fire_scene') setAction({ kind: 'fire_scene', scene_id: r.scene_id ?? null, intensity: carry, color_set_id: null });
     else if (r.kind === 'fire_response') setAction({ kind: 'fire_response', event_class: r.event_class ?? 'flare', intensity: carry });
     else setAction({ kind: 'select_color_set', set_id: r.set_id ?? '' });
   };
@@ -147,12 +150,13 @@ export default function SpectraTriggerDialog({
 
         {action.kind === 'fire_scene' && (
           <>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}
+              title="Blank = pick a scene at fire time through the sequencer selection kernel (curve × genre × affinity), instead of a fixed scene.">
               <span style={{ width: 90, color: 'var(--text-muted)' }}>Scene</span>
-              <SearchSelect value={action.scene_id}
-                onChange={(v) => setAction({ ...action, scene_id: v })}
+              <SearchSelect value={action.scene_id ?? ''}
+                onChange={(v) => setAction({ ...action, scene_id: v || null })}
                 options={(scenes ?? []).map((s) => ({ value: s.id, label: s.name }))}
-                placeholder="— pick a scene —" width={260} allowEmpty={false} />
+                placeholder="— sequencer picks at fire time —" width={260} allowEmpty />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}
               title="Fire wearing THIS colour set instead of the room's active one. Blank = the room's active set.">

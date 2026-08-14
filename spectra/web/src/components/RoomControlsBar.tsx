@@ -70,6 +70,16 @@ export default function RoomControlsBar() {
         ms
       </label>
 
+      <label className="room-control"
+        title="Whether GENERATED (seeded) mid-song triggers are allowed to fire. Off = fall back to transitions-only; hand-placed triggers always fire regardless.">
+        <input
+          type="checkbox"
+          checked={local.midsong_triggers_enabled}
+          onChange={(e) => commit({ ...local, midsong_triggers_enabled: e.target.checked })}
+        />
+        Mid-song triggers
+      </label>
+
       <HelpLink topic="room-controls-bar" />
     </div>
   );

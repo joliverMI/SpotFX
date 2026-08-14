@@ -9,11 +9,23 @@ moment its timestamp is first crossed:
   fire_scene          scene_sequencer.fire_scene_by_id — the SAME choke
                        point the sequencer's own picks use (re-baselines
                        drift via scene_compiler.fire_scene's on_scene_fired).
+                       scene_id=None (a GENERATED trigger's own default,
+                       front 3 — spectra/services/midsong_generator.py)
+                       instead resolves through the sequencer selection
+                       kernel AT FIRE TIME (curve × genre × affinity, using
+                       the TRIGGER's own intensity) — see
+                       _default_select_scene below.
   fire_response        engine.fire_response_event — the SAME path the
                        bridge's classified trigger_fired events already
                        drive (phase drive, band selection, pulse release).
   select_color_set      drift_conductor.apply_set_directly — the SAME
                        manual-apply surface POST /api/room-color/apply uses.
+
+A GENERATED trigger (trig.source == "generated") additionally checks the
+room's midsong_triggers_enabled switch (spectra/services/room_controls.py)
+at the moment its crossing would fire it — off means it's skipped for that
+crossing, exactly like a disabled trigger. Hand-authored triggers ignore
+the switch. This is front 3's one-word fallback to transitions-only.
 
 Two worlds coexist during migration (CLAUDE.md): this engine only ever
 reads storage/spectra/triggers.json and the bridge's read-only feed; it
@@ -37,6 +49,7 @@ headless dummy device).
 from __future__ import annotations
 
 import logging
+from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.trigger import SpectraTrigger
@@ -57,11 +70,17 @@ class TriggerEngine:
         fire_scene: Callable[..., Awaitable[Any]] | None = None,
         fire_response: Callable[[str, float], Awaitable[Any]] | None = None,
         select_color_set: Callable[[str], Awaitable[Any]] | None = None,
+        select_scene: Callable[[float], Optional[str]] | None = None,
+        midsong_enabled: Callable[[], bool] | None = None,
+        rng: Random | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
         self._fire_scene = fire_scene or self._default_fire_scene
         self._fire_response = fire_response or self._default_fire_response
         self._select_color_set = select_color_set or self._default_select_color_set
+        self._select_scene = select_scene or self._default_select_scene
+        self._midsong_enabled = midsong_enabled or self._default_midsong_enabled
+        self._rng = rng or Random()
 
         self._uri: Optional[str] = None
         self._last_position_ms: Optional[int] = None
@@ -97,6 +116,8 @@ class TriggerEngine:
         for trig in self._list_triggers(self._uri):
             if not trig.enabled:
                 continue
+            if trig.source == "generated" and not self._midsong_enabled():
+                continue
             if last < trig.timestamp_ms <= position_ms:
                 await self._fire(trig)
                 fired.append(trig)
@@ -106,7 +127,17 @@ class TriggerEngine:
         a = trig.action
         try:
             if a.kind == "fire_scene":
-                await self._fire_scene(a.scene_id, a.color_set_id, a.intensity)
+                scene_id = a.scene_id
+                if scene_id is None:
+                    scene_id = self._select_scene(a.intensity)
+                    if scene_id is None:
+                        logger.info("trigger %s: kernel picked no scene "
+                                    "(ladder terminated at stay) — nothing fired",
+                                    trig.id)
+                        self.last_fire = {"id": trig.id, "kind": a.kind,
+                                          "ok": True, "picked": None}
+                        return
+                await self._fire_scene(scene_id, a.color_set_id, a.intensity)
             elif a.kind == "fire_response":
                 await self._fire_response(a.event_class, a.intensity)
             else:
@@ -135,6 +166,33 @@ class TriggerEngine:
                                   intensity: float) -> None:
         from spectra.services.scene_sequencer import fire_scene_by_id
         await fire_scene_by_id(scene_id, color_set_id, intensity)
+
+    def _default_select_scene(self, intensity: float) -> Optional[str]:
+        """A generated trigger's scene_id=None resolution: the SAME
+        selection kernel the sequencer's own rolls use
+        (scene_sequencer._roll), but a one-shot draw at the TRIGGER's own
+        intensity — no dwell, no "current scene" affinity tracked across
+        trigger fires (deliberately simpler than the sequencer's continuous
+        state machine; a mid-song trigger names one moment, not a stream of
+        them). picked_id None (the terminal STAY rung, or no configured
+        sequencer entries at all) means nothing fires this crossing."""
+        from spectra.services import scene_store, selection_kernel as kernel
+        from spectra.services import sequencer_store
+        from spectra.services.engine import bridge
+        config = sequencer_store.load_config()
+        curves = sequencer_store.load_curves()
+        existing = {s.id for s in scene_store.list_all()}
+        candidates = kernel.build_scene_candidates(
+            config.entries, curves, config.affinity,
+            genre_bucket=bridge.genre_bucket(), prev_id=None,
+            restrict_ids=existing)
+        pick = kernel.select(candidates, intensity=intensity, rng=self._rng,
+                             current_id=None, terminal=kernel.TERMINAL_STAY)
+        return pick.picked_id
+
+    def _default_midsong_enabled(self) -> bool:
+        from spectra.services.room_controls import load_room_controls
+        return load_room_controls().midsong_triggers_enabled
 
     async def _default_fire_response(self, event_class: str, intensity: float) -> None:
         from spectra.services import engine
