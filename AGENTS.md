@@ -251,6 +251,38 @@ loudly (CRITICAL + the liveness endpoint's `activation_gaps` field) and
 leaves every other device driving — one failing device must never strand
 the rest. Spec: `tests/test_crystal_activation_verify.py`.
 
+The fresh-handover path's naming gap (SpectraSide.verify_active() used to
+return a bare bool — a refused take-back couldn't say which light):
+`live_host.describe_gaps()` builds a named detail from `activation_gaps()`/
+`device_gaps()`, `verify_active()` logs it CRITICAL and stashes it on
+`verification_detail()`, and `run_handover` folds that into the
+`HandoverFailed` message the `/ownership/handover` API's `error` field
+returns verbatim — read by `spectra/web/src/api/client.ts`'s `errorDetail()`
+(which must check BOTH `detail` — FastAPI's default HTTPException shape —
+and `error` — this route's own JSONResponse shape — or a named refusal is
+silently dropped before it reaches the toast). `resume_own_room`'s own
+naming (above) is untouched; both callers now name every gap, by design,
+in the paths built for each.
+
+`expected_active_ids` (what the gate above validates against) used to be
+EVERY virtual fx-live/config.json declares active — that config is seeded
+VERBATIM from the old LedFX world and inherits its dynamic tricks (mask/
+foreground/background layer virtuals, gap-dummy placeholders, a full-span
+duplicate of a mapper virtual, legacy contextual rooms SPECTRA's own scene
+engine never addresses), so the gate could refuse forever on layers never
+supposed to rise. `spectra/services/room_topology.py`'s
+`genuinely_driven_virtual_ids()` — the SAME ground truth
+`scene_compiler.compile_scene()` itself resolves real fires against
+(`fx.device_model`'s imported category topology ∪ stored scenes' literal
+`target_kind="virtual"` targets) — is intersected into `expected_active_ids`
+at every activation; an ABSENT ground truth (no categories imported, no
+scenes) falls back to the raw declared set rather than vacuously passing.
+`scripts/check_spectra_expected_active.py` is the evidence-printing,
+dry-run-by-default correction script (the `seed_spectra_fx_live.py`
+pattern) for the PERSISTED config — diagnostic/belt-and-braces, since the
+runtime intersection above is the actual fix. Spec:
+`tests/test_spectra_activation_truth.py`.
+
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 
 `fx/` is the LedFX render pipeline vendored from the fork at commit

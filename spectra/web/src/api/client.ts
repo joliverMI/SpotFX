@@ -15,8 +15,14 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 }
 
 async function errorDetail(res: Response): Promise<string> {
-  const data = (await res.json().catch(() => null)) as { detail?: unknown } | null;
-  const detail = data?.detail;
+  const data = (await res.json().catch(() => null)) as
+    { detail?: unknown; error?: unknown } | null;
+  // FastAPI's default HTTPException body uses "detail"; the ownership/
+  // handover route's own JSONResponse (HandoverRefused/HandoverFailed,
+  // 412/502) uses "error" instead — without this fallback those named
+  // refusals ("spot-effects activation not verified — 2 virtual(s)...")
+  // were silently dropped and the toast showed only a bare status code.
+  const detail = data?.detail ?? data?.error;
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail)) {
     return detail

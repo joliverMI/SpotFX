@@ -183,7 +183,17 @@ async def run_handover(
     try:
         await to_side.activate()
         if not await to_side.verify_active():
-            raise HandoverFailed(f"{to_side.name} activation not verified")
+            # Report gate (the fresh-handover 'nameless refusal' defect):
+            # a refusal that cannot say why is believed-not-verified in the
+            # reporting layer, the same disease this gate exists to cure.
+            # Sides that can name what failed (SpectraSide) expose it here;
+            # sides that can't (SpotEffectsSide — a single external service,
+            # nothing to name) fall back to the generic message.
+            detail = getattr(to_side, "verification_detail", lambda: None)()
+            message = f"{to_side.name} activation not verified"
+            if detail:
+                message += f" — {detail}"
+            raise HandoverFailed(message)
         # Race-window close (two-writers incident, 2026-08-13 — report gate
         # e4i): re-verify the from-world is STILL quiesced immediately
         # before commit. The record staying HANDING_OVER throughout already
@@ -304,6 +314,7 @@ class SpectraSide:
         self.config_dir = config_dir or str(config.FX_LIVE_CONFIG_DIR)
         self.open_audio = open_audio
         self.audio_source_factory = audio_source_factory
+        self._last_failure_detail: Optional[str] = None
 
     async def readiness_problems(self) -> list[str]:
         """The order-8 gate: SPECTRA cannot take the room on a missing,
@@ -364,10 +375,39 @@ class SpectraSide:
         await live.wait_fully_active(timeout_s=FRESH_VERIFY_TIMEOUT_S)
 
     async def verify_active(self) -> bool:
+        """Bool return preserved for the WriterSide protocol and existing
+        callers/tests; the named WHY behind a False is captured on the side
+        in verification_detail() (report gate: the fresh-handover
+        'nameless refusal' defect — resume_own_room already named its gaps
+        via activation_gaps()/CRITICAL logging + the liveness endpoint;
+        this path had none of that until now)."""
         from spectra.services.live_host import live
-        if not (live.active and live.fresh() and not live.activation_gaps()):
+
+        if not live.active:
+            detail = live.describe_gaps(live.activation_gaps())
+            logger.critical("spectra activation not verified — %s", detail)
+            self._last_failure_detail = detail
             return False
-        return not await live.device_gaps()
+        gaps = live.activation_gaps()
+        if gaps or not live.fresh():
+            detail = live.describe_gaps(gaps)
+            logger.critical("spectra activation not verified — %s", detail)
+            self._last_failure_detail = detail
+            return False
+        device_gaps = await live.device_gaps()
+        if device_gaps:
+            detail = live.describe_gaps({}, device_gaps)
+            logger.critical("spectra activation not verified — %s", detail)
+            self._last_failure_detail = detail
+            return False
+        self._last_failure_detail = None
+        return True
+
+    def verification_detail(self) -> Optional[str]:
+        """Named detail behind the most recent verify_active() False — every
+        light that could not rise. None once a verification has passed (or
+        before any has run)."""
+        return self._last_failure_detail
 
     async def deactivate(self) -> None:
         from fx import facade
