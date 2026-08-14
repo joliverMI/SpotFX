@@ -544,6 +544,19 @@ class SceneV2(BaseModel):
     devices: list[SceneDeviceConfig] = Field(default_factory=list)
     flare_kinds: list[FlareKind] = Field(default_factory=list)
     responses: dict[ResponseClass, ResponseSpec] = Field(default_factory=dict)
+    # UPDATE (the owner's words, 2026-08-14, spectra-trigger-migration-
+    # scoping RULING.md): "a major change within the scene, bigger than the
+    # flare, overriding the drift, going somewhere new on a ramp-in
+    # transition." NOT band-gated like the four ResponseClass axes above —
+    # a fire_scene_update trigger always executes THIS scene's own kind by
+    # name, bypassing intensity-band selection entirely (scene_response.
+    # ResponseEngine.on_update). References a name in flare_kinds, same
+    # declared-kind vocabulary as a band — reuses the type="permanent"
+    # primitive (params/gain land and BECOME the new baseline) rather than
+    # inventing a new content model. None = no update authored for this
+    # scene yet — a fire_scene_update trigger on it is a silent no-op, the
+    # same "nothing declared → nothing happens" convention as an empty band.
+    update_kind: Optional[str] = None
     color_journey: SceneColorJourney = Field(default_factory=SceneColorJourney)
     choreography: PhaseChoreography = Field(default_factory=PhaseChoreography)
     phase_blend: PhaseBlend = Field(default_factory=PhaseBlend)
@@ -589,6 +602,17 @@ class SceneV2(BaseModel):
         if dupes:
             raise ValueError(f"duplicate flare kind name(s): {sorted(dupes)}")
         declared = set(names)
+        if self.update_kind is not None:
+            if self.update_kind not in declared:
+                raise ValueError(
+                    f"update_kind '{self.update_kind}' references an "
+                    f"undeclared kind")
+            by_name = {k.name: k for k in self.flare_kinds}
+            if by_name[self.update_kind].type != "permanent":
+                raise ValueError(
+                    f"update_kind '{self.update_kind}' must be a "
+                    f"type=\"permanent\" kind (got "
+                    f"'{by_name[self.update_kind].type}')")
         for cls, spec in self.responses.items():
             for band in spec.bands:
                 missing = [n for n in band.kinds if n not in declared]

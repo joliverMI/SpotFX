@@ -93,6 +93,22 @@ async def _release_after_hold(hold_s: float) -> None:
     await responses.flush_releases(hold_s)
 
 
+async def fire_scene_update_event(intensity: float) -> None:
+    """The UPDATE choke point (data/spectra-trigger-migration-scoping
+    RULING.md): a SPECTRA-native fire_scene_update trigger
+    (spectra.services.trigger_engine) calls this — there is no legacy
+    bridge-classified equivalent (update_scene/reset_scene never went
+    through the bridge's flare/charge/lull/drop classification either).
+    Gated the same "full" tier as fire_response_event, for the same
+    reason: an authored trigger's own action, same settings-model rule.
+    Never schedules a hold release — on_update only fires permanent kinds,
+    which carry immediately and never pend a return."""
+    from spectra.services.room_controls import load_room_controls
+    if load_room_controls().scene_change_mode != "full":
+        return
+    await responses.on_update(intensity)
+
+
 _last_track_uri: str | None = None
 
 

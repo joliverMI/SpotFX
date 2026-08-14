@@ -136,6 +136,21 @@ def color_jump_ramp_ms(intensity: float) -> int:
                      + (COLOR_JUMP_RAMP_MS_HARD
                         - COLOR_JUMP_RAMP_MS_GENTLE) * frac))
 
+# UPDATE's own ramp-in (the owner's words, spectra-trigger-migration-scoping
+# RULING.md: "a major change ... bigger than the flare ... arriving on a
+# ramp-in transition"). Same intensity-scaled shape as color_jump_ramp_ms
+# (gentle eases in, hard lands quicker) but deliberately slower at both
+# ends — "bigger than a flare" should never glide faster than the flare
+# colour-jump's own hard end.
+UPDATE_RAMP_MS_GENTLE = 3000   # intensity 0.0
+UPDATE_RAMP_MS_HARD = 800      # intensity 1.0 — still a visible glide, never a snap
+
+
+def update_ramp_ms(intensity: float) -> int:
+    frac = max(0.0, min(1.0, intensity))
+    return int(round(UPDATE_RAMP_MS_GENTLE
+                     + (UPDATE_RAMP_MS_HARD - UPDATE_RAMP_MS_GENTLE) * frac))
+
 # phase_progress ramp per class — the original program's tuned durations
 # (config.py phase_*_ramp_ms defaults): "Drop stays short — it's the snap."
 PHASE_RAMP_MS = {"charge": 4000, "lull": 2500, "drop": 400}
@@ -357,25 +372,29 @@ class ResponseEngine:
             return None if base is None else base + target.offset
         return rolled[pname]   # random — pre-rolled once, broadcast to all
 
-    def _move_params(self, kind: FlareKind, scale: float,
-                     jumps: dict, carry: dict) -> list[dict]:
-        """One momentary/permanent kind's param moves. Name-broadcast
+    def _compute_param_moves(self, kind: FlareKind, scale: float,
+                             carry: dict) -> dict[str, dict[str, float]]:
+        """Per-virtual param moves for one kind at this scale — the pure
+        declared/scale/clamp computation. Split out of _move_params so
+        on_update's ramped path (_move_params_ramped) shares the EXACT same
+        math and carry/hold bookkeeping; the two differ only in how the
+        result reaches the executor (an instant jump collected across
+        several kinds vs. this one kind's own ramp). Name-broadcast
         targeting: each key lands on every virtual whose live effect has
-        that param (registry truth); explicit kinds override same-key
-        re-rolls — the band's word wins. Each param's ParamTarget resolves
-        to a declared target (absolute value / baseline + offset / a fresh
+        that param (registry truth). Each param's ParamTarget resolves to a
+        declared target (absolute value / baseline + offset / a fresh
         random draw — random rolls ONCE per kind execution, broadcast like
         an absolute value); scale ×1 then lands it VERBATIM (legacy
         parity), any other scale moves it to baseline + (declared −
         baseline)·scale, clamped to the param's registry range. PERMANENT
         enters the carry; MOMENTARY schedules the return at its CHOSEN HOLD
         (kind.hold_ms, default PULSE_HOLD_S) instead."""
-        landed: list[dict] = []
         rolled = {pname: self._rng.uniform(target.lo, target.hi)
                   for pname, target in kind.params.items()
                   if target.mode == "random"}
         hold_s = (kind.hold_ms / 1000.0 if kind.hold_ms is not None
                   else PULSE_HOLD_S)
+        out: dict[str, dict[str, float]] = {}
         for vid, state in self.conductor.virtuals.items():
             moves: dict[str, float] = {}
             for pname, target in kind.params.items():
@@ -404,17 +423,48 @@ class ResponseEngine:
                 else:
                     self._pending_releases.append((vid, pname, hold_s))
             if moves:
-                jumps.setdefault(vid, {}).update(moves)
-                landed.append({"virtual_id": vid, "params": moves})
+                out[vid] = moves
+        return out
+
+    def _move_params(self, kind: FlareKind, scale: float,
+                     jumps: dict, carry: dict) -> list[dict]:
+        """The band-driven path (on_event): collects this kind's moves into
+        the shared `jumps` dict so every kind in one surge lands in a
+        single instant PUT per virtual (unchanged behaviour)."""
+        landed: list[dict] = []
+        for vid, moves in self._compute_param_moves(kind, scale, carry).items():
+            jumps.setdefault(vid, {}).update(moves)
+            landed.append({"virtual_id": vid, "params": moves})
         return landed
 
-    async def _gain(self, kind: FlareKind, scale: float,
-                    carry: dict) -> list[dict]:
+    async def _move_params_ramped(self, kind: FlareKind, scale: float,
+                                  carry: dict, ramp_ms: int) -> list[dict]:
+        """on_update's own param-move path: same declared/scale/clamp math
+        as _move_params, but glides each virtual to its landed value over
+        ramp_ms instead of an instant jump — the "ramp in transition" his
+        definition calls for. Only ever called with a permanent kind (see
+        on_update), so always carries via _compute_param_moves, never
+        schedules a release."""
+        landed: list[dict] = []
+        for vid, moves in self._compute_param_moves(kind, scale, carry).items():
+            state = self.conductor.virtuals.get(vid)
+            if state is None:
+                continue
+            await self.executor.glide(vid, state.effect_type, moves, ramp_ms)
+            landed.append({"virtual_id": vid, "params": moves})
+        return landed
+
+    async def _gain(self, kind: FlareKind, scale: float, carry: dict,
+                    *, ramp_ms: Optional[int] = None) -> list[dict]:
         """One kind's brightness envelope around the carried baseline, at
         effective gain 1 + (gain − 1)·scale — neutral stays neutral, a duck
         scales into a deeper duck. MOMENTARY: spike to baseline×effective,
         release back (the baseline stays). PERMANENT: glide to
-        baseline×effective and hold — CARRIED."""
+        baseline×effective and hold — CARRIED. `ramp_ms` overrides the
+        default GAIN_GLIDE_S duration for the permanent glide only (on_update
+        passes its own update_ramp_ms so params and gain land on the same
+        transition; every other caller leaves it unset — unchanged
+        behaviour)."""
         effective = 1.0 + (kind.gain - 1.0) * scale
         hold_s = (kind.hold_ms / 1000.0 if kind.hold_ms is not None
                   else PULSE_HOLD_S)
@@ -430,13 +480,59 @@ class ResponseEngine:
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
+                duration_ms = ramp_ms if ramp_ms is not None else int(GAIN_GLIDE_S * 1000)
                 await self.executor.glide(vid, state.effect_type,
                                           {"brightness": peak},
-                                          int(GAIN_GLIDE_S * 1000))
+                                          duration_ms)
                 carry[(vid, "brightness")] = peak
                 out.append({"virtual_id": vid, "lands": round(peak, 4),
                             "held": True})
         return out
+
+    # ── UPDATE (report data/spectra-trigger-migration-scoping/RULING.md) ──
+
+    async def on_update(self, intensity: float) -> dict:
+        """A major change WITHIN the active scene, bigger than a flare,
+        overriding the drift, landing on a ramp-in — the owner's words.
+        Deliberately NOT band-gated like on_event's four classes: this
+        always executes the active scene's OWN designated kind
+        (SceneV2.update_kind), bypassing intensity-band selection entirely
+        — reset and update are the SAME call (his correction: "reset is
+        treated as update"). No update_kind authored on the active scene,
+        or the named kind isn't a declared type="permanent" kind, is a
+        silent no-op — same "nothing declared → nothing happens"
+        convention as on_event's "no band". Only permanent params/gain are
+        supported (never drift_jump/colour — his definition is about
+        magnitude and drift override, not a colour pick; also keeps this
+        path clear of the colour-jump KeyError class documented in
+        spectra-room-fault-diagnosis/report.md section 3)."""
+        scene = self.conductor.scene
+        record: dict[str, Any] = {"at": self._clock(), "class": "update",
+                                  "intensity": round(intensity, 4)}
+        if scene is None:
+            record["result"] = "no_active_scene"
+            self.surges.append(record)
+            return record
+        kind = None
+        if scene.update_kind:
+            kind = {k.name: k for k in scene.flare_kinds}.get(scene.update_kind)
+        if kind is None or kind.type != "permanent":
+            record["result"] = "no_update_kind"
+            self.surges.append(record)
+            return record
+
+        ramp_ms = update_ramp_ms(intensity)
+        record["ramp_ms"] = ramp_ms
+        carry: dict[tuple[str, str], Any] = {}
+        if kind.params:
+            record["moved"] = await self._move_params_ramped(kind, intensity, carry, ramp_ms)
+        if kind.gain != 1.0:
+            record["gained"] = await self._gain(kind, intensity, carry, ramp_ms=ramp_ms)
+        record["result"] = "updated"
+        self.conductor.on_surge(carry)
+        self.surges.append(record)
+        await self._broadcast({"type": "surge", **record})
+        return record
 
     def pending_hold_groups(self) -> list[float]:
         """Distinct CHOSEN HOLDS still pending — the engine spawns one
