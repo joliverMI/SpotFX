@@ -113,7 +113,8 @@ async def _standalone_lifespan(app):
     import os
 
     logger = logging.getLogger("spectra")
-    from spectra.services import engine, frame_watchdog, handover
+    from spectra.services import (engine, frame_watchdog, handover,
+                                   ownership_reconciler)
     await engine.start()
     # Restart mid-reign: if the ownership record says spectra owns, the
     # live stack reactivates itself through the guarded activation path
@@ -122,13 +123,21 @@ async def _standalone_lifespan(app):
     await handover.resume_own_room()
     watchdog_task = asyncio.create_task(
         frame_watchdog.run_supervised(), name="spectra-frame-watchdog")
+    # Record-vs-reality reconciler (report gate e3, 2026-08-13 two-writers
+    # incident): while THIS process owns, ledfx.service must be inactive and
+    # no foreign realtime source may hold her WLEDs — the spectra half of
+    # the check; services/spectra_liveness_reconciler.py is the other half.
+    reconciler_task = asyncio.create_task(
+        ownership_reconciler.run_supervised(), name="spectra-ownership-reconciler")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
-    watchdog_task.cancel()
-    try:
-        await watchdog_task
-    except asyncio.CancelledError:
-        pass
+    for task in (watchdog_task, reconciler_task):
+        task.cancel()
+    for task in (watchdog_task, reconciler_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     await engine.stop()
     # Release the room outputs cleanly on SIGTERM (deploy restarts): a
     # torn-down Hue DTLS session / DDP sender re-handshakes instantly on

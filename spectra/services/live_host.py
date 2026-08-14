@@ -48,6 +48,32 @@ logger = logging.getLogger(__name__)
 STALE_AFTER_S = 2.0     # a live render loop flushes every ~16-40 ms; 2 s of
                         # silence on an active virtual is a dead write path
 AUDIO_PUMP_SLEEP_S = 0.01
+DEVICE_VERIFY_TIMEOUT_S = 3.0   # per-device json/state read for the live-flag check
+
+
+def _config_expected_active_ids(config: dict) -> set[str]:
+    """Every virtual id the persisted fx-live config declares should be
+    running an effect: an "effect" key present and not explicitly paused
+    via "active": false. This is the ground truth
+    fx.virtuals.Virtuals.create_from_config is SUPPOSED to realize — but a
+    per-virtual segment-schema or effect-schema restore failure there is
+    only ever a logged warning, never raised, and a device load failure in
+    fx.devices.Devices.create_from_config is the same shape. Nothing
+    upstream of this module ever compared "what the config wanted" against
+    "what actually came up" — exactly how the crystal darkfault's partial
+    activation reported success (data/spectra-crystal-darkfault/,
+    2026-08-13): the darkened virtual was simply excluded from the OLD
+    freshness check (fresh() below), which only ever looks at whatever
+    ended up `.active`, not at what was supposed to be."""
+    expected: set[str] = set()
+    for virtual_cfg in config.get("virtuals") or []:
+        vid = virtual_cfg.get("id")
+        if not vid or "effect" not in virtual_cfg:
+            continue
+        if virtual_cfg.get("active") is False:
+            continue
+        expected.add(vid)
+    return expected
 
 
 class FrameFreshness:
@@ -89,6 +115,7 @@ class LiveLights:
         self._melbank_sub = None
         self._pump_task: Optional[asyncio.Task] = None
         self._prev_audio_cls = None
+        self.expected_active_ids: set[str] = set()
 
     @property
     def active(self) -> bool:
@@ -113,6 +140,7 @@ class LiveLights:
 
         host = FxHost(config_dir, live_grant=grant)
         self.host = host          # set before start() so a failed start still
+        self.expected_active_ids = _config_expected_active_ids(host.config)
         await host.start()        # deactivates through us
         self.freshness.attach(host)
 
@@ -155,6 +183,7 @@ class LiveLights:
         if self.host is not None:
             host, self.host = self.host, None
             await host.shutdown()
+        self.expected_active_ids = set()
         logger.warning("SPECTRA live stack deactivated — dark")
 
     # ── verification (the same signal the liveness endpoint serves) ─────────
@@ -182,6 +211,97 @@ class LiveLights:
                 return True
             await asyncio.sleep(0.05)
         return False
+
+    def activation_gaps(self, stale_after_s: float = STALE_AFTER_S) -> dict[str, str]:
+        """Every config-declared virtual (expected_active_ids) that is NOT
+        actually up: missing from the live host, not marked active, or not
+        flushing fresh frames. Empty means the config's declared set was
+        fully realized. This is the check fresh()/wait_fresh() cannot make:
+        a virtual absent from active_virtual_ids() is silently EXCLUDED
+        from those (vacuously true) — exactly how the crystal darkfault's
+        partial activation went unnoticed. A non-empty return is a LOUD
+        failure for the caller to raise, never a success."""
+        if self.host is None:
+            return {vid: "live stack not active"
+                   for vid in self.expected_active_ids}
+        ages = self.freshness.ages()
+        gaps: dict[str, str] = {}
+        for vid in self.expected_active_ids:
+            virtual = self.host.virtuals.get(vid)
+            if virtual is None:
+                gaps[vid] = ("missing from the live host — device, segment, "
+                             "or effect restore failed silently at config load")
+                continue
+            if not virtual.active:
+                gaps[vid] = "not active — effect restore failed silently at config load"
+                continue
+            age = ages.get(vid)
+            if age is None or age > stale_after_s:
+                gaps[vid] = f"not flushing frames (last_flush_age_s={age})"
+        return gaps
+
+    async def wait_fully_active(self, timeout_s: float = 10.0,
+                                stale_after_s: float = STALE_AFTER_S) -> dict[str, str]:
+        """Poll until every config-declared virtual is active and fresh AND
+        every already-active virtual stays fresh, or the timeout elapses.
+        Returns the FINAL gap set — empty means fully realized, matching
+        wait_fresh()'s bool contract but naming exactly what's still dark
+        instead of silently excluding it."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            gaps = self.activation_gaps(stale_after_s)
+            if not gaps and self.fresh(stale_after_s):
+                return {}
+            if time.monotonic() >= deadline:
+                if not gaps:
+                    gaps = {"*": "one or more active virtuals stopped "
+                                 "flushing frames"}
+                return gaps
+            await asyncio.sleep(0.05)
+
+    async def device_gaps(self, timeout_s: float = DEVICE_VERIFY_TIMEOUT_S) -> dict[str, str]:
+        """Device-level verification one layer deeper than our own frame
+        stamps (report gate e3, folded in as first-class alongside the
+        reconciler by owner order): frame freshness only proves OUR render
+        loop pushed a frame, not that the physical device received it. For
+        every real (non-dummy, non-gap) device backing an expected-active
+        virtual, if it's WLED, read its OWN json/state and require
+        live=true. A device we cannot positively confirm — unreachable or
+        explicitly live=false — is exactly as loud a failure as a virtual
+        that never activated; verified, never assumed."""
+        if self.host is None:
+            return {}
+        device_ids: set[str] = set()
+        for vid in self.expected_active_ids:
+            virtual = self.host.virtuals.get(vid)
+            if virtual is None:
+                continue
+            for seg in getattr(virtual, "_segments", None) or []:
+                device_id = seg[0]
+                if not device_id.startswith("gap-"):
+                    device_ids.add(device_id)
+
+        async def _check(device_id: str) -> tuple[str, Optional[str]]:
+            device = self.host.devices.get(device_id)
+            if device is None:
+                return device_id, None  # devices.create_from_config already warned
+            if getattr(device, "type", None) != "wled" \
+                    or getattr(device, "wled", None) is None:
+                return device_id, None  # not a WLED device, or not yet initialized
+            try:
+                wled_state = await asyncio.wait_for(
+                    device.wled.get_state(), timeout_s)
+            except Exception as exc:
+                return device_id, f"could not confirm live state: {exc!r}"
+            if not wled_state.get("live"):
+                return device_id, ("device reports live=false — not "
+                                   "receiving realtime data")
+            return device_id, None
+
+        if not device_ids:
+            return {}
+        results = await asyncio.gather(*(_check(d) for d in device_ids))
+        return {device_id: reason for device_id, reason in results if reason}
 
     def liveness(self, stale_after_s: float = STALE_AFTER_S) -> dict:
         """Per-virtual frame-flush freshness for the liveness endpoint."""

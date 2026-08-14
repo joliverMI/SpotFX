@@ -180,6 +180,14 @@ async def lifespan(app: FastAPI):
     from services import write_plane_watchdog
     tasks.append(asyncio.create_task(
         write_plane_watchdog.run_supervised(), name="write-plane-watchdog"))
+    # Record-vs-reality reconciler (report gate e3, 2026-08-13 two-writers
+    # incident): while this process owns, SPECTRA's own liveness must not
+    # report her live stack painting — the spot-effects half of the check;
+    # spectra/services/ownership_reconciler.py is the other half.
+    from services import spectra_liveness_reconciler
+    tasks.append(asyncio.create_task(
+        spectra_liveness_reconciler.run_supervised(),
+        name="spectra-liveness-reconciler"))
     # Guest source: watches the snapcast Guest/AirPlay streams and drives the
     # engine in simple-triggerless mode while a guest session owns the speakers.
     from services import guest_source

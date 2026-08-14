@@ -22,6 +22,15 @@ The ordering exists because of the merge-scout §4d failure modes:
     command that lies must not let the new writer start): verify_quiesced
     consults the world's real state, and the ownership record's quiesce
     gate (mark_quiesced) is only passed on that verification.
+  - The record enters HANDING_OVER (light_ownership.begin_handover) BEFORE
+    quiesce begins, not after — both worlds' GATED write planes (api/
+    ledfx_client._request, the LedFX-restart watchdog, fx_seam) already
+    deny during the whole handover. That does not cover a resurrect that
+    bypasses the gate entirely (a systemd unit dependency, an operator
+    command) — closed instead by re-verifying from_side.verify_quiesced()
+    immediately before commit (report gate e4i, two-writers incident
+    2026-08-13): a resurrect landing in the verify→activate window aborts
+    the handover rather than committing over a second writer.
 
 Rollback discipline: on activation failure the to-side is deactivated FIRST
 (releasing any partial DTLS session / DDP sender / audio device), then the
@@ -175,6 +184,23 @@ async def run_handover(
         await to_side.activate()
         if not await to_side.verify_active():
             raise HandoverFailed(f"{to_side.name} activation not verified")
+        # Race-window close (two-writers incident, 2026-08-13 — report gate
+        # e4i): re-verify the from-world is STILL quiesced immediately
+        # before commit. The record staying HANDING_OVER throughout already
+        # denies both worlds' GATED write planes, but a resurrect that
+        # bypasses the gate entirely (a systemd unit dependency, an operator
+        # `systemctl start`, anything outside this orchestrator) can still
+        # land in the verify→commit gap. Catching it here means aborting
+        # instead of committing a record that claims single ownership over
+        # an outside world that quietly came back.
+        if not from_released and not await from_side.verify_quiesced():
+            logger.critical(
+                "handover: %s resurrected during handover (post-activate, "
+                "pre-commit) — aborting instead of committing over a "
+                "second writer", from_side.name)
+            raise HandoverFailed(
+                f"{from_side.name} resurrected before commit — refusing "
+                "to commit over a second writer")
     except Exception as exc:
         await _best_effort(to_side.deactivate,
                            f"release partial {to_side.name}")
@@ -321,14 +347,27 @@ class SpectraSide:
                             audio_source_factory=self.audio_source_factory)
         facade.set_host(live.host)
         engine.go_live(FacadeExecutor(), grant)
-        if not await live.wait_fresh(timeout_s=FRESH_VERIFY_TIMEOUT_S):
-            raise RuntimeError(
-                "live stack up but active virtuals are not flushing frames "
-                f"within {FRESH_VERIFY_TIMEOUT_S:.0f}s")
+        # The crystal lazy-activation class (report gate e3, folded in as
+        # first-class alongside the reconciler, 2026-08-13): give EVERY
+        # config-declared virtual its best chance to come up (a Hue DTLS
+        # handshake retries for several seconds) before returning. Does NOT
+        # raise on what's still missing after the wait — verify_active()
+        # below is the single source of truth for "fully up", and callers
+        # act on a gap differently: run_handover's activation-failure
+        # handling rolls back to the known-good from-world on ANY gap (there
+        # IS a working fallback to land on); resume_own_room has no
+        # from-world to fall back to, so it reports gaps loudly and keeps
+        # whatever DID come up rather than darkening working devices behind
+        # one broken link (owner amendment, 2026-08-13: "the crystal must
+        # never need a human again" — a stranding teardown on resume would
+        # make that worse, not better).
+        await live.wait_fully_active(timeout_s=FRESH_VERIFY_TIMEOUT_S)
 
     async def verify_active(self) -> bool:
         from spectra.services.live_host import live
-        return live.active and live.fresh()
+        if not (live.active and live.fresh() and not live.activation_gaps()):
+            return False
+        return not await live.device_gaps()
 
     async def deactivate(self) -> None:
         from fx import facade
@@ -361,20 +400,37 @@ async def resume_own_room(side: Optional[SpectraSide] = None) -> bool:
     now the stack reactivates itself through the SAME guarded path the
     handover uses: SpectraSide.activate() mints its grant (mintable because
     owner=spectra outright — no record transition happens, she already
-    owns) and enforces the readiness gate (wait_fresh on real frame
-    flushes) before this returns True.
+    owns), brings up the host, and gives every config-declared virtual its
+    best chance to come up (live.wait_fully_active — the crystal lazy-
+    activation fix) before this returns True.
 
-    Any failure lands exactly where a crashed activation always landed:
-    dark-but-owned, record untouched, liveness 503 carrying the alarm — the
-    caller keeps serving so the fleet can see and act. Not gated on the
-    SPECTRA_HANDOVER_ARMED latch: the latch guards CHANGING hands; the
-    record saying spectra owns is the owner's standing word.
+    A HARD failure — activate() itself raising (grant refused, host.start()
+    erroring, no devices at all) — lands exactly where a crashed activation
+    always landed: dark-but-owned, record untouched, liveness 503, nothing
+    torn half-up. But a SOFT failure — the stack came up and SOME devices
+    are painting, one Hue zone or one WLED in a mapper chain isn't (report
+    "crystal lazy-activation", owner amendment 2026-08-13: verified
+    per-device, never assumed) — must NOT be treated the same way: unlike a
+    fresh handover (which has a known-good from-world to fall back to and
+    so rolls back on ANY gap via verify_active()), a resume has nothing to
+    fall back to but darkness. Tearing down everything over one broken
+    link would strand the working majority for the sake of the one
+    straggler — worse than the original darkfault, and exactly the
+    "needs a human" outcome the owner ruled out. So: report every gap
+    LOUDLY (CRITICAL + the liveness endpoint's activation_gaps, already
+    wired to unhealthy) and leave every other device driving.
+
+    Not gated on the SPECTRA_HANDOVER_ARMED latch: the latch guards
+    CHANGING hands; the record saying spectra owns is the owner's standing
+    word.
 
     A released room (fx.light_ownership.RELEASED — the panic handle) takes
     the SAME early return as spot-effects owning: this is a plain
     owner != SPECTRA check, so a restart during a released room never
     re-lights it. The owner's press stands across restarts; only the
     guarded handover un-releases the room."""
+    from spectra.services.live_host import live
+
     record = light_ownership.load()
     if record.owner != light_ownership.SPECTRA:
         return False
@@ -397,5 +453,15 @@ async def resume_own_room(side: Optional[SpectraSide] = None) -> bool:
                          "(record untouched; liveness stays 503)")
         await _best_effort(side.deactivate, "release partial resume")
         return False
-    logger.warning("resume: live stack reactivated — spectra drives the room")
+    gaps = live.activation_gaps()
+    device_gaps = await live.device_gaps()
+    if gaps or device_gaps:
+        logger.critical(
+            "resume: PARTIAL ACTIVATION — %d virtual(s) never came up "
+            "(%s), %d device(s) unconfirmed (%s); every other device stays "
+            "up — see /spectra/api/liveness activation_gaps",
+            len(gaps), gaps, len(device_gaps), device_gaps)
+    else:
+        logger.warning(
+            "resume: live stack reactivated — spectra drives the whole room")
     return True

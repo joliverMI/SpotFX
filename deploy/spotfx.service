@@ -24,10 +24,14 @@
 # WatchdogSec=90 tolerates 2 missed 30 s ticks. A LedFX-side outage never
 # stops the pings (breaker-open windows are treated as alive by the predicate).
 
+# ledfx.service is intentionally NOT in Wants= (two-writers incident,
+# 2026-08-13): the ownership handover is the only legitimate starter/stopper
+# of ledfx; Wants= resurrected a deliberately-quiesced LedFX on every
+# spotfx restart while SPECTRA owned. After= is kept for ordering only.
 [Unit]
 Description=SpotFX
 After=snapclient.service ledfx.service
-Wants=snapclient.service ledfx.service
+Wants=snapclient.service
 
 [Service]
 # READY=1 is sent by the write-plane watchdog task shortly after the event

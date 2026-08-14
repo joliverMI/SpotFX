@@ -214,6 +214,24 @@ def _spot_effects_owns() -> bool:
     return light_ownership.writes_allowed(light_ownership.SPOT_EFFECTS)
 
 
+def _ledfx_restart_veto_reason() -> Optional[str]:
+    """First-class, named veto for the watchdog's ledfx-restart path (report
+    gate e4iii, two-writers incident 2026-08-13): a handover in flight, or
+    SPECTRA owning outright, or a released room must all veto restarting the
+    external LedFX service — starting it puts a second writer on the room.
+    Separate from the general `_spot_effects_owns()` write-plane gate so the
+    CRITICAL log names WHICH condition vetoed, not just "not spot-effects"."""
+    from fx import light_ownership
+    owner = light_ownership.load().owner
+    if owner == light_ownership.HANDING_OVER:
+        return "a handover is in flight"
+    if owner == light_ownership.SPECTRA:
+        return "SPECTRA owns the lights"
+    if owner == light_ownership.RELEASED:
+        return "the room is released — no writer wanted"
+    return None
+
+
 async def _facade_request(method: str, path: str, *, label: str, **kwargs):
     global _last_completion
     from fx import facade
@@ -323,11 +341,17 @@ _pool_timeout_times: deque = deque(maxlen=64)  # monotonic ts of recent PoolTime
 # reacting, audio source flaps — and the only known cure is restarting the ledfx
 # service. SpotFX already probes RTT every latency_loop tick (via a DEDICATED
 # probe client, so RTT reflects true server response, not write-queue time), so
-# watch for sustained high RTT (or a dead probe) and restart ledfx automatically.
-# Fires only when LedFX is ALREADY effectively stuck, so the brief restart
-# blackout beats staying frozen indefinitely.
-_LEDFX_RTT_DEGRADED_MS = 80.0     # RTT above this (or a failed probe) counts as degraded (normal is ~2-5ms)
-_LEDFX_WATCHDOG_TRIPS = 2         # consecutive degraded ticks (~30s each) before restarting
+# watch for a dead probe and restart ledfx automatically. Fires only when LedFX
+# is ALREADY effectively stuck, so the brief restart blackout beats staying
+# frozen indefinitely.
+#
+# Report gate e4iii (two-writers incident 2026-08-13): the trigger used to be
+# "dead probe OR sustained high RTT" — on 2026-08-13 that restarted a healthy,
+# merely-sluggish LedFX (deploy churn spiked RTT past the threshold) and raced
+# a handover's quiesce by 5ms. RTT above the threshold is now logged as
+# sluggish but never counts toward a restart; only a dead probe does.
+_LEDFX_RTT_DEGRADED_MS = 80.0     # RTT above this is logged as sluggish (informational only; normal is ~2-5ms)
+_LEDFX_WATCHDOG_TRIPS = 2         # consecutive dead-probe ticks (~30s each) before restarting
 _LEDFX_RESTART_MIN_INTERVAL_S = 300.0  # never auto-restart ledfx more than once per this
 _probe_failed = False             # set by measure_latency: True if the last (unmuted) probe raised
 _watchdog_degraded_count = 0
@@ -1508,13 +1532,15 @@ async def _restart_ledfx_service() -> None:
     SpotFX's httpx clients: a LedFX restart severs our keepalive connections,
     leaving CLOSE-WAIT sockets that would wedge the pool — rebuild clean."""
     global _client, _probe_client, _last_ledfx_restart
-    if not _spot_effects_owns():
+    veto = _ledfx_restart_veto_reason()
+    if veto is not None:
         # Merge-scout §4d's trap: restarting LedFX while the room belongs to
         # (or is handing to) SPECTRA starts a second writer fighting for the
-        # Hue session and interleaving DDP frames. Defense in depth — the
-        # watchdog tick already skips when not owner.
-        logger.critical("LedFX watchdog: REFUSING ledfx restart — light "
-                        "ownership is not spot-effects")
+        # Hue session and interleaving DDP frames. Re-checked here immediately
+        # before spawning systemctl (report gate e4iii) — defense in depth on
+        # top of the tick-level skip, closing the window as tight as an
+        # in-process check can.
+        logger.critical("LedFX watchdog: REFUSING ledfx restart — %s", veto)
         return
     _last_ledfx_restart = time.monotonic()
     try:
@@ -1562,15 +1588,30 @@ async def _ledfx_watchdog_tick() -> None:
     global _watchdog_degraded_count
     if _facade_enabled():
         return  # no external ledfx service to restart in facade mode
-    if not _spot_effects_owns():
-        # Ownership surrendered: LedFX is deliberately stopped (or being
-        # stopped). Degradation is the expected state, not a fault to heal.
+    veto = _ledfx_restart_veto_reason()
+    if veto is not None:
+        # Ownership surrendered or in flight: LedFX is deliberately stopped
+        # (or being stopped). Degradation is the expected state, not a fault
+        # to heal. First-class, named veto (report gate e4iii) — logged once
+        # per accumulation reset so a handover-in-flight window is visible
+        # without spamming every tick.
+        if _watchdog_degraded_count:
+            logger.warning("LedFX watchdog: clearing degraded count — %s", veto)
         _watchdog_degraded_count = 0
         return
     if _capture_in_progress():
         return
-    degraded = _probe_failed or (state.ledfx_rtt_ms or 0.0) > _LEDFX_RTT_DEGRADED_MS
-    if not degraded:
+    # Report gate e4iii (two-writers incident 2026-08-13): a spurious restart
+    # is itself a writer-lifecycle mutation, and it raced a handover's quiesce
+    # by 5ms on sustained-high-RTT-but-answering LedFX (deploy churn, not a
+    # stuck process). Only a genuinely DEAD probe counts toward the trip now;
+    # high RTT alone is logged as sluggish but never restarts a healthy LedFX.
+    if not _probe_failed:
+        if (state.ledfx_rtt_ms or 0.0) > _LEDFX_RTT_DEGRADED_MS:
+            logger.warning(
+                "LedFX watchdog: sluggish but answering (rtt=%.0fms) — "
+                "not restart material without a dead probe",
+                state.ledfx_rtt_ms or 0.0)
         _watchdog_degraded_count = 0
         return
     _watchdog_degraded_count += 1
