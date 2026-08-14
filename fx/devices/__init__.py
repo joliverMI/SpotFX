@@ -208,11 +208,71 @@ class Device(BaseRegistry):
     def activate(self):
         self._pixels = np.zeros((self.pixel_count, 3))
         self._active = True
+        self._teardown_dispatched = False
 
     def deactivate(self):
         self._pixels = None
         self._active = False
         # self.flush(np.zeros((self.pixel_count, 3)))
+
+    # Guards Hue/WLED's deactivate() against re-dispatching the same
+    # device-stop coroutine when several code paths each try to deactivate
+    # the same device within one teardown (a virtual's check_and_deactivate_
+    # devices, the vendored LEDFX_SHUTDOWN listener, FxHost's own explicit
+    # pass) — unlike _active, this doesn't require the device to have been
+    # activated first, since deactivate() (e.g. the panic-release path) must
+    # always attempt the stop/release regardless of _active. Reset by
+    # activate().
+    _teardown_dispatched = False
+
+    # Set by _dispatch_teardown_task() when deactivate() fires an unawaited
+    # device-stop coroutine (Hue's bridge action:stop, WLED's {"live": false}
+    # release) that a later async_deactivate() must wait for. None means
+    # nothing is pending — the common case for most device types.
+    _pending_teardown_task = None
+
+    async def async_deactivate(self):
+        """Deactivate and, if deactivate() (called just now, or by an
+        earlier caller — Hue/WLED guard against re-dispatching within one
+        teardown via _teardown_dispatched) dispatched a device-stop
+        coroutine via _dispatch_teardown_task(), block until it has
+        actually run. Default: same as deactivate() — most devices have no
+        such pending I/O.
+
+        FxHost.shutdown() awaits this (instead of calling deactivate()
+        directly) before tearing down the thread executor those coroutines
+        need to run in — see fx/VENDOR.md, "Hue entertainment-stream stop
+        dropped at teardown". Tracking the dispatched task on the instance
+        (rather than assuming THIS call is the one that dispatches it)
+        means it's still delivered no matter which of several deactivate()
+        callers (a virtual's check_and_deactivate_devices, the vendored
+        LEDFX_SHUTDOWN listener, FxHost's own explicit pass) got there
+        first."""
+        self.deactivate()
+        if self._pending_teardown_task is None:
+            # deactivate() dispatches via call_soon_threadsafe (thread-safe,
+            # so it can't create the Task synchronously inline) — yield once
+            # so that queued callback gets to run and set it.
+            await asyncio.sleep(0)
+        task, self._pending_teardown_task = self._pending_teardown_task, None
+        if task is not None:
+            try:
+                await task
+            except Exception:
+                pass  # the task itself already logs its own failure
+
+    def _dispatch_teardown_task(self, coro):
+        """Fire `coro` off onto the event loop (thread-safe — safe to call
+        from any thread, mirroring async_fire_and_forget) and remember the
+        resulting Task so a later async_deactivate() can await it instead of
+        silently dropping it when the caller (e.g. FxHost.shutdown) tears
+        the thread executor down right after deactivate() returns."""
+        self._teardown_dispatched = True
+
+        def callback():
+            self._pending_teardown_task = asyncio.create_task(coro)
+
+        self._ledfx.loop.call_soon_threadsafe(callback)
 
     def set_offline(self):
         self.deactivate()
@@ -794,6 +854,10 @@ class Devices(RegistryLoader):
     def deactivate_devices(self):
         for device in self.values():
             device.deactivate()
+
+    async def async_deactivate_devices(self):
+        for device in self.values():
+            await device.async_deactivate()
 
     def get_device(self, device_id):
         for device in self.values():
