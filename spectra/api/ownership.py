@@ -53,7 +53,15 @@
                            the v1 contract — {} on every prior-shape
                            response, non-empty only on this new failure
                            class; existing consumers reading known keys are
-                           unaffected.
+                           unaffected. write_seam (added 2026-08-14,
+                           spectra-room-fault-diagnosis) is likewise
+                           additive and informational-only, never affecting
+                           `healthy`: fx_seam.stats()'s count of requested
+                           effect-type switches the write seam had to land
+                           as an instant PUT to avoid fx/facade.py's
+                           stale-tween-PUT drop (frame freshness alone
+                           can't tell a virtual streaming the WRONG effect
+                           apart from a healthy one).
         owner=spot-effects healthy iff SPECTRA is correctly DARK (a live
                            stack without ownership is the split-brain
                            tripwire → 503).
@@ -77,6 +85,7 @@ from pydantic import BaseModel
 
 from fx import light_ownership
 from spectra import config
+from spectra.services import fx_seam
 from spectra.services import handover as handover_svc
 from spectra.services import release as release_svc
 from spectra.services.live_host import STALE_AFTER_S, live
@@ -206,6 +215,11 @@ async def get_liveness():
             "virtuals": virtuals,
             "devices": devices,
             "activation_gaps": activation_gaps,
+            # Additive (spectra-room-fault-diagnosis, 2026-08-14): frame
+            # freshness alone can't distinguish "streaming the right effect"
+            # from "streaming a stale one" — see fx_seam.stats()'s own
+            # docstring. Informational only; never affects `healthy`.
+            "write_seam": fx_seam.stats(),
         },
         status_code=200 if healthy else 503,
     )

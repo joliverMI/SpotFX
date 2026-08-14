@@ -141,5 +141,22 @@ variables named `ledfx` (the core object handle) are untouched.
    the stop was touched. Not yet ported back to the fork source at
    `/home/javi/ledfx-src`.
 
+10. `effects/__init__.py`: `Effect.start_param_transitions` fix (BEHAVIOUR
+    CHANGE — spectra-room-fault-diagnosis/report.md, PR
+    fm/spectra-room-fault-fix). Retargeting a param key's in-flight tween
+    from a gradient value to a colour/numeric value (or vice versa) before
+    it completes raised `KeyError: 'current'`: the numeric/color branches
+    (line ~699/705) unconditionally read `prior["current"]`, but a
+    gradient-kind `prior` stores its progress under `current_curve`/
+    `target_curve` instead, never `"current"`. This dropped SPECTRA's
+    flare-driven colour-set jump mid-application (`scene_response.py.
+    _color_jump`, reached via `bridge.py`'s per-message handler, which only
+    logs and moves on — the whole event was silently lost). Fix: reuse
+    `prior["current"]` only when `prior.get("kind") != "gradient"`,
+    mirroring the existing `prior.get("kind") == "gradient"` guard already
+    present in the gradient branch just below. Not yet ported back to the
+    fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
-rewrite. When updating vendored files, re-diff against that commit.
+rewrite and the deviations above. When updating vendored files, re-diff
+against that commit.

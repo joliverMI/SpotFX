@@ -40,6 +40,22 @@ MAX_IN_FLIGHT = 4
 
 _slots = asyncio.Semaphore(MAX_IN_FLIGHT)
 
+# Liveness blind spot (spectra-room-fault-diagnosis, 2026-08-14): frame
+# freshness alone can't tell "streaming the wrong effect" apart from healthy
+# — it only proves the render loop pushed A frame. This is additive
+# observability for the case the fix above now handles instead of hiding:
+# a requested type switch that would have hit fx/facade.py's stale-tween-PUT
+# drop. Not a health signal on its own (a switch landing correctly is
+# expected, ordinary traffic) — surfaced on /spectra/api/liveness for a human
+# to notice a virtual that's switching types unusually often.
+_type_switches_landed = 0
+_last_type_switch: dict | None = None
+
+
+def stats() -> dict:
+    return {"type_switches_landed": _type_switches_landed,
+            "last_type_switch": _last_type_switch}
+
 
 class HandoverInProgress(RuntimeError):
     """Raised when a fire arrives while the room is changing hands."""
@@ -101,12 +117,38 @@ async def _apply_via_http(writes: list[dict], transition_ms: int = 0) -> None:
                 config.ledfx_url())
 
 
+async def _is_type_switch(facade, virtual_id: str, effect_type: str) -> bool:
+    """True if virtual_id is NOT currently running effect_type (read-only
+    GET, no write-plane effect). Unknown (GET fails — bad id, no host) reads
+    as False so the write still goes out as a single PUT and the PUT itself
+    reports the real error, unchanged from today."""
+    resp = await facade.handle("GET", f"/api/virtuals/{virtual_id}")
+    if resp.status_code != 200:
+        return False
+    current = resp.json().get(virtual_id, {}).get("effect", {}).get("type")
+    return current is not None and current != effect_type
+
+
 async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
+    global _type_switches_landed, _last_type_switch
     from fx import facade
     for w in writes:
-        resp = await facade.handle(
-            "PUT", f"/api/virtuals/{w['virtual_id']}/effects",
-            json=_body(w, transition_ms))
+        vid = w["virtual_id"]
+        if transition_ms > 0 and await _is_type_switch(
+                facade, vid, w["effect_type"]):
+            # fx/facade.py's stale-tween-PUT guard (447-461) silently drops
+            # a combined type-switch+transition PUT — a blend only makes
+            # sense between two states of the SAME effect. Land the switch
+            # instantly first; the write already carries the full target
+            # config, so there is nothing left to tween.
+            resp = await facade.handle(
+                "PUT", f"/api/virtuals/{vid}/effects", json=_body(w, 0))
+            _type_switches_landed += 1
+            _last_type_switch = {"virtual_id": vid, "effect_type": w["effect_type"]}
+        else:
+            resp = await facade.handle(
+                "PUT", f"/api/virtuals/{vid}/effects",
+                json=_body(w, transition_ms))
         resp.raise_for_status()
     logger.info("fx seam: %d writes applied in-process (spectra owns)",
                 len(writes))
