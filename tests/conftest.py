@@ -85,13 +85,17 @@ LIVE_CATEGORIES = {
 class FakeLedFX:
     """Minimal HTTP/1.1 LedFX stand-in. mode: 'ok' answers instantly;
     'stall' accepts + reads the request but never responds (the live outage's
-    initiating LedFX behavior)."""
+    initiating LedFX behavior); 'lie' answers PUT /api/virtuals/{id} with
+    {"status": "success"} WITHOUT actually flipping the virtual's active
+    state — a command that claims success without it being true, the exact
+    shape a read-back verification must catch."""
 
     def __init__(self, virtuals=None, devices=None):
         self.mode = "ok"
         self.virtuals = dict(LIVE_VIRTUALS if virtuals is None else virtuals)
         self.devices = dict(LIVE_DEVICES if devices is None else devices)
         self.requests: list[str] = []
+        self.calls: list[tuple[str, str]] = []   # (method, path), method+state-aware
         self._server = None
         self.base_url = ""
 
@@ -107,7 +111,7 @@ class FakeLedFX:
         # (3.12 waits for handlers) — asyncio.run() reaps them at loop teardown.
         self._server.close()
 
-    def _route(self, path: str):
+    def _route(self, method: str, path: str, body: bytes = b""):
         if path == "/api/virtuals":
             return {"virtuals": self.virtuals}
         if path.startswith("/api/devices/") and path.endswith("/freeze"):
@@ -119,7 +123,20 @@ class FakeLedFX:
         if path.startswith("/api/virtuals/"):
             vid = path.split("/")[3]
             v = self.virtuals.get(vid)
-            return {vid: v} if v else None
+            if v is None:
+                return None
+            if method == "PUT" and body:
+                # Mutates real state (not just echoes the request) so a
+                # caller's own follow-up GET proves the write actually
+                # landed — the release-verification proof needs this.
+                try:
+                    data = json.loads(body)
+                except ValueError:
+                    data = {}
+                if "active" in data and self.mode != "lie":
+                    v["active"] = bool(data["active"])
+                return {"status": "success"}
+            return {vid: v}
         return {"status": "ok"}
 
     async def _handle(self, reader, writer):
@@ -128,18 +145,20 @@ class FakeLedFX:
             while True:
                 header = await reader.readuntil(b"\r\n\r\n")
                 request_line = header.split(b"\r\n", 1)[0].decode()
-                path = request_line.split(" ")[1]
+                method, path = request_line.split(" ")[0], request_line.split(" ")[1]
                 clen = 0
                 for line in header.split(b"\r\n"):
                     if line.lower().startswith(b"content-length:"):
                         clen = int(line.split(b":", 1)[1])
+                body = b""
                 if clen:
-                    await reader.readexactly(clen)
+                    body = await reader.readexactly(clen)
                 self.requests.append(path)
+                self.calls.append((method, path))
                 if self.mode == "stall":
                     await asyncio.sleep(3600)
                     return
-                payload = self._route(path)
+                payload = self._route(method, path, body)
                 if payload is None:
                     writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
                 else:

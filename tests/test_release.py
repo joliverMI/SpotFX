@@ -42,6 +42,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fx import headless, light_ownership as lo
+from tests.conftest import FakeLedFX
 
 
 def _run(coro):
@@ -105,67 +106,160 @@ def test_release_from_spectra_also_lands_released(tmp_path):
     assert record.owner == lo.RELEASED
 
 
-# ── 2a. release_room(): spot-effects → deactivate active LedFX virtuals ──────
+# ── 2. release_room(): both worlds' cleanup, over the REAL seams ────────────
+#
+# Three defects fixed here (merge-scout two-writers report, 2026-08-13,
+# judging PR #34 against that night's incident):
+#   1. cleanup no longer branches on from_world — BOTH worlds run every time
+#      a settled owner presses release, so a rogue writer the record didn't
+#      know about (tonight: the record said spectra while systemd's
+#      Wants=ledfx.service had resurrected the external LedFX behind its
+#      back) still gets addressed.
+#   2. the external-LedFX calls go through spectra/services/ledfx_release.py,
+#      a direct client that never touches api.ledfx_client — so they are
+#      never shed by its ownership gate. Proven below against the REAL gate
+#      and a REAL fake-server HTTP round trip, not a monkeypatch of
+#      get_all_virtuals/set_virtual_active themselves (which is what let the
+#      old tests pass while production silently no-opped).
+#   3. release_room() verifies by reading real state back afterward and
+#      reports it in ReleaseResult.verified/.problems instead of just
+#      claiming success.
 
 
-def test_release_room_deactivates_only_active_ledfx_virtuals(tmp_path, monkeypatch):
+def _ledfx_unit_stopped(monkeypatch) -> None:
+    """Verification's cheap path: the external LedFX systemd unit reports
+    not running, so _verify_released() never re-reads virtuals over HTTP."""
+    from spectra.services import handover as handover_svc
+
+    async def fake_systemctl(*args):
+        return 0, "inactive"
+
+    monkeypatch.setattr(handover_svc, "_systemctl", fake_systemctl)
+
+
+def _ledfx_unit_running(monkeypatch) -> None:
+    """Verification's HTTP path: the unit reports active, forcing
+    _verify_released() to re-read virtuals over the direct client."""
+    from spectra.services import handover as handover_svc
+
+    async def fake_systemctl(*args):
+        return 0, "active"
+
+    monkeypatch.setattr(handover_svc, "_systemctl", fake_systemctl)
+
+
+def test_release_room_deactivates_active_ledfx_virtuals_over_the_real_seam(tmp_path, monkeypatch):
+    """A fake external LedFX answers REAL HTTP requests — proving
+    release_room() actually reaches it (defect 2) and that verification
+    confirms the deactivation for real (defect 3), not via a stubbed
+    return value."""
     from spectra.services import release as release_svc
 
     _own_file(tmp_path)
-    virtuals = {
-        "v1": {"active": True},
-        "v2": {"active": False},
-        "v3": {"active": True},
-    }
-    set_calls = []
+    _ledfx_unit_running(monkeypatch)
 
-    async def fake_get_all_virtuals(force=False):
-        assert force is True
-        return {"virtuals": virtuals}
+    async def main():
+        async with FakeLedFX(virtuals={
+            "v1": {"active": True}, "v2": {"active": False}, "v3": {"active": True},
+        }) as srv:
+            monkeypatch.setenv("SPECTRA_LEDFX_URL", srv.base_url)
+            result = await release_svc.release_room("spec: real seam release")
+            assert result.record.owner == lo.RELEASED
+            put_vids = sorted(p.rsplit("/", 1)[-1]
+                              for m, p in srv.calls if m == "PUT")
+            assert put_vids == ["v1", "v3"]
+            assert srv.virtuals["v1"]["active"] is False
+            assert srv.virtuals["v3"]["active"] is False
+            assert result.verified, result.problems
+            assert result.problems == []
 
-    async def fake_set_virtual_active(vid, active):
-        set_calls.append((vid, active))
-        return True
-
-    from api import ledfx_client
-    monkeypatch.setattr(ledfx_client, "get_all_virtuals", fake_get_all_virtuals)
-    monkeypatch.setattr(ledfx_client, "set_virtual_active", fake_set_virtual_active)
-
-    record = _run(release_svc.release_room("spec: spot-effects release"))
-    assert record.owner == lo.RELEASED
-    assert sorted(set_calls) == [("v1", False), ("v3", False)]
+    _run(main())
 
 
 def test_release_room_ledfx_one_virtual_failure_does_not_stop_the_rest(tmp_path, monkeypatch):
     from spectra.services import release as release_svc
 
     _own_file(tmp_path)
-    virtuals = {"v1": {"active": True}, "v2": {"active": True}}
-    set_calls = []
+    _ledfx_unit_running(monkeypatch)
 
-    async def fake_get_all_virtuals(force=False):
-        return {"virtuals": virtuals}
+    async def main():
+        async with FakeLedFX(virtuals={"v1": {"active": True}, "v2": {"active": True}}) as srv:
+            monkeypatch.setenv("SPECTRA_LEDFX_URL", srv.base_url)
 
-    async def flaky_set_virtual_active(vid, active):
-        set_calls.append(vid)
-        if vid == "v1":
-            raise RuntimeError("simulated LedFX timeout")
-        return True
+            real_put = srv._route
 
-    from api import ledfx_client
-    monkeypatch.setattr(ledfx_client, "get_all_virtuals", fake_get_all_virtuals)
-    monkeypatch.setattr(ledfx_client, "set_virtual_active", flaky_set_virtual_active)
+            def flaky_route(method, path, body=b""):
+                if method == "PUT" and path.endswith("/v1"):
+                    raise ConnectionResetError("simulated LedFX timeout")
+                return real_put(method, path, body)
 
-    record = _run(release_svc.release_room("spec: one virtual fails"))
-    # Released stands regardless — cleanup failure never re-opens the gate.
-    assert record.owner == lo.RELEASED
-    assert sorted(set_calls) == ["v1", "v2"]
+            srv._route = flaky_route
+
+            result = await release_svc.release_room("spec: one virtual fails")
+            # Released stands regardless — cleanup failure never re-opens
+            # the gate — but v1's failure to deactivate must surface as an
+            # unverified problem, not a silent success.
+            assert result.record.owner == lo.RELEASED
+            assert srv.virtuals["v2"]["active"] is False
+            assert result.verified is False
+            assert any("v1" in p for p in result.problems)
+
+    _run(main())
+
+
+def test_release_room_reports_unverified_when_a_device_lies(tmp_path, monkeypatch):
+    """Verification-failure path, proven loud (defect 3): a PUT that
+    reports success without actually flipping the device (the exact
+    'command is not proof' failure mode handover.py's verify_quiesced
+    guards against) must still be caught by the read-back."""
+    from spectra.services import release as release_svc
+
+    _own_file(tmp_path)
+    _ledfx_unit_running(monkeypatch)
+
+    async def main():
+        async with FakeLedFX(virtuals={"v1": {"active": True}}) as srv:
+            srv.mode = "lie"
+            monkeypatch.setenv("SPECTRA_LEDFX_URL", srv.base_url)
+            result = await release_svc.release_room("spec: stuck virtual")
+            assert result.record.owner == lo.RELEASED   # still lands released
+            assert result.verified is False
+            assert any("v1" in p for p in result.problems)
+
+    _run(main())
+
+
+def test_ledfx_release_client_bypasses_the_spot_effects_gate(tmp_path, monkeypatch):
+    """The real proof for defect 2: under the SAME released record,
+    api.ledfx_client._request sheds every call (writes_allowed() is
+    spot-effects-exclusive) while spectra.services.ledfx_release — the
+    direct client release cleanup actually uses — reaches the real server,
+    because it never passes through that gate at all. No monkeypatching of
+    either module's request functions."""
+    from api import ledfx_client as lc
+    from spectra.services import ledfx_release
+
+    _own_file(tmp_path)
+    lo.release("spec: prove the gate split")
+
+    async def main():
+        async with FakeLedFX(virtuals={"v1": {"active": True}}) as srv:
+            resp = await lc._request(
+                "GET", "/api/virtuals", label="release-spec-gate")
+            assert resp is None    # the spot-effects gate sheds it
+
+            monkeypatch.setenv("SPECTRA_LEDFX_URL", srv.base_url)
+            raw = await ledfx_release.get_all_virtuals()   # bypasses that gate
+            assert raw["virtuals"]["v1"]["active"] is True
+            assert "/api/virtuals" in srv.requests
+
+    _run(main())
 
 
 # ── 2b. release_room(): spectra → the real live stack tears down ────────────
 
 
-def test_release_room_deactivates_the_real_spectra_live_stack(tmp_path):
+def test_release_room_deactivates_the_real_spectra_live_stack(tmp_path, monkeypatch):
     from spectra.services import engine
     from spectra.services.handover import SpectraSide
     from spectra.services.live_host import live
@@ -175,6 +269,7 @@ def test_release_room_deactivates_the_real_spectra_live_stack(tmp_path):
     headless.silence_audio()
     config_dir = tmp_path / "fx-live"
     headless.write_headless_config(str(config_dir))
+    _ledfx_unit_stopped(monkeypatch)   # no rogue LedFX in this scenario
 
     async def main():
         try:
@@ -186,12 +281,13 @@ def test_release_room_deactivates_the_real_spectra_live_stack(tmp_path):
             lo.commit(h.token)
             assert live.active
 
-            record = await release_svc.release_room("spec: spectra release")
-            assert record.owner == lo.RELEASED
+            result = await release_svc.release_room("spec: spectra release")
+            assert result.record.owner == lo.RELEASED
             # The device layer actually tore down — dummy device deactivated,
             # host gone, engine dark — not just the ownership record moving.
             assert not live.active
             assert engine.executor.mode == "recording"
+            assert result.verified, result.problems
         finally:
             engine.go_dark()
             from fx import facade
@@ -202,11 +298,65 @@ def test_release_room_deactivates_the_real_spectra_live_stack(tmp_path):
     _run(main())
 
 
+def test_release_room_addresses_rogue_ledfx_while_record_says_spectra(tmp_path, monkeypatch):
+    """THE EXACT SHAPE OF THE 2026-08-13 INCIDENT (defect 1's proof): the
+    record says spectra owns while systemd's Wants=ledfx.service resurrected
+    the external LedFX behind the record's back — a second, rogue writer the
+    record doesn't know about. Before this fix, release_room() branched on
+    from_world == SPECTRA and never called _release_ledfx_virtuals at all,
+    leaving the rogue LedFX painting the room alone after the press. Now
+    both worlds are addressed and verified every time."""
+    from spectra.services.handover import SpectraSide
+    from spectra.services.live_host import live
+    from spectra.services import release as release_svc
+
+    _own_file(tmp_path)
+    headless.silence_audio()
+    config_dir = tmp_path / "fx-live"
+    headless.write_headless_config(str(config_dir))
+    _ledfx_unit_running(monkeypatch)   # the rogue LedFX process IS running
+
+    async def main():
+        async with FakeLedFX(virtuals={"rogue-v1": {"active": True}}) as srv:
+            monkeypatch.setenv("SPECTRA_LEDFX_URL", srv.base_url)
+            try:
+                h = lo.begin_handover(lo.SPECTRA)
+                lo.mark_quiesced(h.token)
+                grant = lo.mint_activation_grant(lo.SPECTRA)
+                side = SpectraSide(config_dir=str(config_dir), open_audio=False)
+                await side.activate()
+                lo.commit(h.token)
+                assert lo.load().owner == lo.SPECTRA
+                assert live.active
+
+                result = await release_svc.release_room(
+                    "spec: panic while record says spectra, LedFX rogue")
+
+                assert result.record.owner == lo.RELEASED
+                assert not live.active   # the recorded (legitimate) writer torn down
+                put_paths = [p for m, p in srv.calls if m == "PUT"]
+                assert any(p.endswith("rogue-v1") for p in put_paths), (
+                    "the rogue external LedFX must be addressed even though "
+                    "the record said spectra owned, not spot-effects")
+                assert srv.virtuals["rogue-v1"]["active"] is False
+                assert result.verified, result.problems
+            finally:
+                from spectra.services import engine
+                engine.go_dark()
+                from fx import facade
+                facade.set_host(None)
+                if live.active:
+                    await live.deactivate()
+
+    _run(main())
+
+
 def test_release_room_already_released_skips_device_cleanup(tmp_path, monkeypatch):
     from spectra.services import release as release_svc
 
     _own_file(tmp_path)
     lo.release("first press")
+    _ledfx_unit_stopped(monkeypatch)   # verification's cheap path, no network
 
     called = []
 
@@ -218,9 +368,10 @@ def test_release_room_already_released_skips_device_cleanup(tmp_path, monkeypatc
     monkeypatch.setattr(release_svc, "_release_ledfx_virtuals", must_not_be_called)
     monkeypatch.setattr(release_svc, "_release_spectra_devices", must_not_be_called)
 
-    record = _run(release_svc.release_room("second press"))
-    assert record.owner == lo.RELEASED
+    result = _run(release_svc.release_room("second press"))
+    assert result.record.owner == lo.RELEASED
     assert called == []
+    assert result.verified
 
 
 def test_release_room_refuses_mid_handover(tmp_path, monkeypatch):
@@ -540,6 +691,7 @@ def test_release_api_not_armed_gated(tmp_path, monkeypatch):
 
     _own_file(tmp_path)
     monkeypatch.delenv("SPECTRA_HANDOVER_ARMED", raising=False)
+    _ledfx_unit_stopped(monkeypatch)
 
     async def main():
         result = await post_release()
@@ -554,11 +706,37 @@ def test_release_api_is_idempotent(tmp_path, monkeypatch):
 
     _own_file(tmp_path)
     monkeypatch.delenv("SPECTRA_HANDOVER_ARMED", raising=False)
+    _ledfx_unit_stopped(monkeypatch)
 
     async def main():
         await post_release()
         result = await post_release()  # second press — must not error
         assert result["owner"] == lo.RELEASED
+
+    _run(main())
+
+
+def test_release_api_reports_unverified_loudly(tmp_path, monkeypatch):
+    """The API surface for defect 3: when verification can't confirm reality
+    matches, the route must not report a clean "released". result flips to
+    "released-unverified" at HTTP 207, carrying the specific problems so the
+    UI can warn ("these lights may still be lit") instead of going quiet."""
+    from spectra.api.ownership import post_release
+
+    _own_file(tmp_path)
+    monkeypatch.delenv("SPECTRA_HANDOVER_ARMED", raising=False)
+    _ledfx_unit_running(monkeypatch)
+    # Nothing listens here — the external LedFX is "running" per systemctl
+    # but unreachable over HTTP, exactly like a wedged or half-dead service.
+    monkeypatch.setenv("SPECTRA_LEDFX_URL", "http://127.0.0.1:1")
+
+    async def main():
+        response = await post_release()
+        assert response.status_code == 207
+        body = json.loads(bytes(response.body))
+        assert body["result"] == "released-unverified"
+        assert body["owner"] == lo.RELEASED
+        assert body["problems"]
 
     _run(main())
 

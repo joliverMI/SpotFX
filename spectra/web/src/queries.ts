@@ -301,7 +301,8 @@ export function useOwnership() {
 export function useReleaseRoom() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiPost<{ result: string; owner: string }>('/ownership/release'),
+    mutationFn: () =>
+      apiPost<{ result: string; owner: string; problems?: string[] }>('/ownership/release'),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-ownership'] }),
   });
 }

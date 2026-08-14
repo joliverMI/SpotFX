@@ -180,6 +180,25 @@ left to time out — WLED gets the JSON API's `{"live": false}`
 (`fx/utils.py WLED.release_realtime`, wired in `fx/devices/wled.py`), Hue's
 entertainment session is stopped (already explicit — `fx/devices/hue.py`),
 the external LedFX service's active virtuals are deactivated over its API.
+Cleanup runs against BOTH worlds on every press regardless of which one the
+record said owned (a rogue writer the record doesn't know about, e.g.
+systemd's `Wants=` resurrecting `ledfx.service` behind its back, is
+tonight's-incident-shaped and must still be addressed) — see
+`spectra/services/release.py`'s module docstring. The external-LedFX calls
+go through `spectra/services/ledfx_release.py`, a direct httpx client (same
+pattern as `handover.py`'s `SpotEffectsSide.verify_active()`), never through
+`api.ledfx_client`: that module's ownership gate sheds every call once the
+record has moved to `released` (which happens before cleanup runs), and
+routing around it also keeps spectra/'s import discipline (nothing under
+`spectra/` imports spot-effects runtime internals) — see
+`check_process_split.py` §1b. `release_room()` also verifies afterward
+(`_verify_released()`): SPECTRA's stack via `live.active`, the external
+service via the same systemctl-is-active check `handover.py` uses, falling
+back to a virtuals read-back when that unit is still running. It returns a
+`ReleaseResult` (record/verified/problems) — the record always lands
+`released`, but the API reports `result="released-unverified"` (HTTP 207)
+with the specific `problems` when a device couldn't be confirmed dark,
+instead of silently claiming success.
 The way back is the SAME guarded handover, still armed- and readiness-gated
 (`run_handover`'s `from_world=="released"` skips the vacuous quiesce step).
 Spec: `tests/test_release.py` + `check_ownership.py` §12.

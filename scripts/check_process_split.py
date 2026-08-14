@@ -128,6 +128,22 @@ from spectra.api.ownership import LIVENESS_ADDRESS            # noqa: E402
 check(LIVENESS_ADDRESS == "/spectra/api/liveness",
       "the liveness contract address constant is unchanged")
 
+print("— 1b. spectra import discipline (the reverse direction) —")
+
+out = subprocess.run(
+    [PY, "-c",
+     "import spectra.app, sys, json; print(json.dumps(sorted("
+     "m for m in sys.modules if m == 'api' or m.startswith('api.') "
+     "or m == 'main' or m == 'services' or m.startswith('services.'))))"],
+    capture_output=True, text=True, cwd=REPO, timeout=180)
+check(out.returncode == 0, "importing the spectra app imports clean")
+check(json.loads(out.stdout.splitlines()[-1]) == [],
+      "importing the spectra app loads ZERO spot-effects runtime internals "
+      "(top-level api.*/services.*/main — only fx/ and spectra/'s own code; "
+      "the panic release's external-LedFX calls go through "
+      "spectra/services/ledfx_release.py, a direct client, precisely so "
+      "this stays clean)")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 print("— 2–4. the standalone process, the bridge, the proxied contract —")
