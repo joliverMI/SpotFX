@@ -129,10 +129,17 @@ BINDINGS: dict[str, dict[str, dict[str, dict]]] = {
 def migrate_scene(raw: dict) -> tuple[dict, list[str]]:
     """One scene's SPECTRA form + a human log of what was authored."""
     log: list[str] = []
-    scene = SceneV2(**raw)   # flare_bands shim runs here
-    if "flare" in scene.responses:
-        scene.responses["flare"].color_set_jump = True
+    # Seed color_set_jump on the RAW legacy input so the model's flare-kinds
+    # migration auto-names it into the "Colour Jump" drift-jump kind (a
+    # post-construction attribute write would bypass validation and vanish).
+    raw = dict(raw)
+    if raw.get("flare_bands") and "flare" not in (raw.get("responses") or {}):
+        raw["responses"] = {**(raw.get("responses") or {}),
+                            "flare": {"bands": raw.pop("flare_bands"),
+                                      "color_set_jump": True,
+                                      "reroll_dice": True}}
         log.append("flare class: color_set_jump=True (legacy Color lane)")
+    scene = SceneV2(**raw)   # flare-kinds migration runs here
     table = BINDINGS.get(scene.name, {})
     for dev in scene.devices:
         per_effect = table.get(dev.effect_type, {})

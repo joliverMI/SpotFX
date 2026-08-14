@@ -131,12 +131,22 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'flare-kinds',
+        title: 'Named flare kinds — the three types',
+        keywords: 'kind drift jump momentary permanent slam scale strength declare card',
+        body: [
+          'A scene DECLARES named flare kinds — readable cards at the top of the response tabs, shared by every class. Three types: DRIFT-JUMP (🎨/🎲) jumps the drift itself — the colour-set jump through the shipped selector, or a dice re-roll for shape; both carry, the journey walks on from the new point. MOMENTARY (↩) spikes params/gain and RETURNS exactly to the carried baseline. PERMANENT (⚓) lands and BECOMES the new baseline drift carries from.',
+          'Bands SELECT AND SCALE: each band lists which kinds fire in its intensity window plus a ×scale multiplying their strength (×1 = exactly as declared, ×0 = inert; a dice re-roll has no magnitude, so scale is inert on it; on a colour jump it steers the selector). Kind declarations are agent-adjustable — tell the agent to add, rename, or retune one; attaching to bands and scaling is done right on the band rows.',
+          'Everything authored before kinds existed — band patches, gains, re-roll and colour-jump flags — loads unchanged as auto-named kinds ("Dice Re-roll", "Colour Jump", "Flare patch …", "Flare gain …").',
+        ],
+      },
+      {
         id: 'tab-flares',
         title: 'Flares tab — the band strip',
-        keywords: 'flare bands gain curve patch response intensity strip',
+        keywords: 'flare bands kind scale response intensity strip attach chip',
         body: [
-          'Bands over the intensity axis decide the response when a flare fires. Drag a band\'s edges to move its window, drag the dot to set gain, double-click to remove, click an empty gap to add. The curve select picks the envelope (pulse spikes and returns; linear/ease land and hold). Param patches (⚙) are agent-authored — the strip shows they exist, the agent edits them. Re-roll dice and colour-set jump are per-class flags shown as chips; tell the agent to change them.',
-          'Since S2 these bands EXECUTE: any ordinary trigger fire from spot-effects is a flare at that fire\'s intensity, and the band containing it applies — see the Evolution engine section for the full pass (re-roll, patch, gain, colour jump, carry).',
+          'Bands over the intensity axis decide the response when a flare fires. Drag a band\'s edges to move its window, drag the dot to set the whole band\'s ×scale, double-click to remove, click an empty gap to add. On each band row, click a kind chip to attach or detach that kind, and set its individual ×scale inline — see "Named flare kinds" for what the three types do.',
+          'Since S2 these bands EXECUTE: any ordinary trigger fire from spot-effects is a flare at that fire\'s intensity, and the band containing it fires its kinds — drift-jumps, momentary spikes that return, permanent moves that carry. A colour jump ramps its new colours in over a length that shrinks as intensity grows: gentle flares ease in (~2.5 s), full-scale flares land hard (~0.15 s).',
         ],
       },
       {
@@ -167,7 +177,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'charge lull drop event classes bands phase build suspend release',
         body: [
           'Charges, lulls, and drops now drive the REAL phase choreography that lived in LedFX for the original program — the build/suspend/release grammar written into the particle effects, the dancers, and the eye. Every charge/lull/drop event arms the phase machinery on each device whose effect carries it and ramps the build (charge ~4s, lull ~2.5s, drop 0.4s — the snap), band or no band. See "Response families" below for what each effect family does.',
-          'The band strip here is the scene\'s COLOURING on top of that arc, same idiom as Flares: the band containing the fire\'s intensity adds gain, patches, and re-rolls. A track change releases a lingering charge/lull automatically.',
+          'The band strip here is the scene\'s COLOURING on top of that arc, same idiom as Flares: the band containing the fire\'s intensity fires its attached kinds at their ×scales (see "Named flare kinds"). A track change releases a lingering charge/lull automatically.',
         ],
       },
       {
@@ -281,10 +291,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'engine-surges',
         title: 'Surges — how a response executes',
-        keywords: 'flare band gain pulse patch reroll colour jump carry baseline',
+        keywords: 'flare band kind scale momentary permanent drift jump reroll colour carry baseline ramp',
         body: [
-          'The bridge classifies every spot-effects trigger fire: charge/lull/drop stay themselves, scene changes are observations, everything else is a FLARE. The band containing the fire\'s intensity executes in one pass: the scene\'s 🎲 values re-roll (correlated dice stay correlated) and jump; the band\'s param patches jump (a key lands on every device whose effect has that param); gain shapes brightness (pulse spikes and returns; linear/ease lands and holds); flares with the colour-set jump roll the shipped selector and JUMP to the pick — the keep-current rung never forces churn, and the room journey resumes from the new wheel point.',
-          'Surges CARRY: patches, re-rolls, held gains, and colour jumps move the baseline drift resumes from. A surge on a followed value is an impulse the follow re-asserts from smoothly over its slew.',
+          'The bridge classifies every spot-effects trigger fire: charge/lull/drop stay themselves, scene changes are observations, everything else is a FLARE. The band containing the fire\'s intensity fires its attached kinds at their ×scales, in a fixed order: dice re-rolls (correlated dice stay correlated), permanent then momentary param moves (a key lands on every device whose effect has that param), gain envelopes, then the colour jump — the shipped selector picks, the keep-current rung never forces churn, and the new colours RAMP IN over a length that shrinks with intensity (gentle ~2.5 s, full-scale ~0.15 s) while the room journey resumes from the new wheel point.',
+          'CARRY: re-rolls, permanent moves, held gains, and colour jumps move the baseline drift resumes from. MOMENTARY kinds return exactly — the release honors the carried-now baseline, including a creep\'s current wander position. A surge on a followed value is an impulse the follow re-asserts from smoothly over its slew.',
         ],
       },
       {

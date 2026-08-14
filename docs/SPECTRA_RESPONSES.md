@@ -47,10 +47,12 @@ drive the original program used (`services/trigger_engine.py`
    program's tuned defaults).
 3. The drive fires for **every** charge/lull/drop event — band or no band —
    exactly as the original fired the phase machinery for every phase
-   event. The scene's declared band (gain envelope, param patch, dice
-   re-roll) rides **on top** as the scene's colouring: phase builds the
-   arc, the response class colours it. A surge record with result
-   `phase_only` means the arc ran with no band extras.
+   event. The scene's declared band rides **on top** as the scene's
+   colouring, firing its NAMED FLARE KINDS at their scales (item-8 model:
+   drift-jump / momentary / permanent — `spectra/models/scene.py`
+   `FlareKind`): phase builds the arc, the response class colours it. A
+   surge record with result `phase_only` means the arc ran with no band
+   extras.
 4. **Lifecycle guard**: a track change releases any armed charge/lull with
    an instant `phase "none"` write (`release_phases`) — a build must never
    linger into the next song. The watchdog remains the safety net, not the

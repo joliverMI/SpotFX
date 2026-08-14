@@ -64,10 +64,13 @@ export default function SummaryTab({ scene, setScene, goTo }: {
         <Card title="Responses" onClick={() => goTo(scene.responses.flare ? 'Flares' : 'Charges/Lulls/Drops')}>
           {RESPONSE_CLASSES.map((cls) => {
             const spec = scene.responses[cls];
+            const kindCount = spec
+              ? new Set(spec.bands.flatMap((b) => Object.keys(b.kinds ?? {}))).size
+              : 0;
             return (
               <div key={cls} style={{ color: spec ? undefined : 'var(--text-muted)' }}>
                 {cls}: {spec
-                  ? `${spec.bands.length} band${spec.bands.length === 1 ? '' : 's'}${spec.color_set_jump ? ' · 🎨 set jump' : ''}${spec.reroll_dice ? ' · 🎲 re-roll' : ''}`
+                  ? `${spec.bands.length} band${spec.bands.length === 1 ? '' : 's'} · ${kindCount} kind${kindCount === 1 ? '' : 's'}`
                   : '—'}
               </div>
             );

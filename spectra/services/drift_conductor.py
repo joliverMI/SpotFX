@@ -86,8 +86,10 @@ NEUTRAL_INTENSITY = 0.5  # follow's stated degradation when no feed exists
 class VirtualState:
     """Per-virtual engine truth, seeded at re-baseline: the effect type the
     glides address, whether colour-set colours own this virtual, the current
-    palette strings (rotation baseline), and the brightness baseline the
-    gain envelope returns to."""
+    palette strings (rotation baseline), the brightness baseline the gain
+    envelope returns to, and the per-param numeric baselines momentary
+    flare kinds return to (permanent kinds move them via on_surge; a
+    creep-driven param's live truth stays the mechanism's position)."""
 
     def __init__(self, effect_type: str, entry_id: str, color_mode: str,
                  config: dict[str, Any]) -> None:
@@ -97,6 +99,9 @@ class VirtualState:
         self.gradient: str | None = config.get("gradient")
         self.background_color: str | None = config.get("background_color")
         self.brightness_baseline: float = float(config.get("brightness", 1.0))
+        self.param_baseline: dict[str, float] = {
+            k: float(v) for k, v in config.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)}
 
 
 def _registry_range(effect_type: str, param: str) -> Optional[tuple[float, float]]:
@@ -322,6 +327,8 @@ class DriftConductor:
             state = self.virtuals.get(vid)
             if state is None:
                 continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                state.param_baseline[param] = float(value)
             if param == "brightness" and isinstance(value, (int, float)):
                 state.brightness_baseline = float(value)
             elif param == "gradient" and isinstance(value, str):

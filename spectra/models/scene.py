@@ -14,9 +14,17 @@ plus DECLARED MECHANISMS:
                default, so every existing scene loads unchanged.
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
+  flare_kinds — NAMED FLARE KINDS (the owner's item-8 shape, judged and
+               accepted): each kind is one of three types —
+                 drift_jump  jumps the drift: the colour-set jump through
+                             the shipped selector, or a 🎲 re-roll for shape
+                 momentary   a parameter spike that RETURNS to where it was
+                 permanent   the parameter lands and BECOMES the new
+                             baseline drift carries from
   responses  — the four event classes (flare/charge/lull/drop), each an
-               intensity-banded ResponseSpec; legacy `flare_bands` JSON
-               loads unchanged as the flare class
+               intensity-banded ResponseSpec whose bands SELECT AND SCALE
+               the named kinds: band.kinds maps kind name → scale factor
+               multiplying that kind's strength in that range
   color_journey — the room owns ONE continuous colour journey BY DEFAULT;
                a scene may OVERRIDE it outright as a first-class capability
                (owner's color-drift-scope answer). Transition semantics
@@ -24,9 +32,12 @@ plus DECLARED MECHANISMS:
 
 Loader-compatible with spot-effects' storage/scenes_v2.json: every current
 value is a plain scalar and scalars remain legal everywhere; a legacy
-`flare_bands` key becomes responses["flare"].bands on load. The S2 evolution
-engine consumes the declarations; S1 stores, edits, resolves (test-fire) and
-dry-run compiles them.
+`flare_bands` key becomes responses["flare"].bands on load. COMPATIBILITY
+(binding): everything already authored — flare_bands, per-band param_patch
+and gain envelopes, per-class reroll_dice / color_set_jump — loads
+UNCHANGED as auto-named kinds (`_migrate_flare_kinds`); the engine executes
+kinds ONLY. The S2 evolution engine consumes the declarations; S1 stores,
+edits, resolves (test-fire) and dry-run compiles them.
 
 Executable spec: scripts/check_spectra.py
 """
@@ -207,16 +218,64 @@ class SceneDeviceConfig(BaseModel):
         return self.params
 
 
+class FlareKind(BaseModel):
+    """One NAMED flare kind — a first-class concept the scene declares and
+    its bands select. The three types, binding semantics:
+      drift_jump  jump the drift — jump="color_set" rolls the shipped
+                  colour-set selector and JUMPS to the pick; jump="dice"
+                  re-rolls the scene's 🎲 bindings (fresh shape). Both
+                  CARRY — a drift jump moves the story.
+      momentary   params/gain spike and RETURN exactly to the carried
+                  baseline (the release honors drift's current position).
+      permanent   params/gain land and BECOME the new baseline drift
+                  carries from (conductor.on_surge).
+    gain is a brightness-envelope multiplier around the carried baseline;
+    params are absolute targets, name-broadcast to every virtual whose live
+    effect carries the param. A band attaches kinds with a scale factor:
+    scale s moves a param to baseline + (declared − baseline)·s and an
+    envelope to 1 + (gain − 1)·s — ×1 is exactly as declared, ×0 is inert;
+    scale is inert on a dice re-roll (a fresh roll has no magnitude) and
+    steers the colour selector's intensity axis on a colour jump."""
+    name: str = Field(min_length=1)
+    type: Literal["drift_jump", "momentary", "permanent"]
+    jump: Optional[Literal["color_set", "dice"]] = None
+    params: dict[str, float] = Field(default_factory=dict)
+    gain: float = Field(default=1.0, ge=0.0)
+
+    @model_validator(mode="after")
+    def _shape(self) -> "FlareKind":
+        if self.type == "drift_jump":
+            if self.jump is None:
+                raise ValueError(
+                    f"drift-jump kind '{self.name}' needs jump=color_set|dice")
+            if self.params or self.gain != 1.0:
+                raise ValueError(
+                    f"drift-jump kind '{self.name}' jumps the drift — params/"
+                    f"gain belong on a momentary or permanent kind")
+        else:
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is {self.type} — jump belongs on a "
+                    f"drift_jump kind")
+            if not self.params and self.gain == 1.0:
+                raise ValueError(
+                    f"kind '{self.name}' moves nothing — declare params "
+                    f"and/or a gain ≠ 1")
+        return self
+
+
 class FlareBand(BaseModel):
-    # Response when the event class fires with intensity in [min, max).
-    # gain is the momentary envelope (band curve: pulse spikes and returns;
-    # linear/ease_* land and hold); param_patch is a JUMP — agent-authored,
-    # shown in the UI only as a read-only indicator (flare-patch-ui answer).
+    # One intensity window ([min, max)) that SELECTS AND SCALES the scene's
+    # named kinds: kinds maps kind name → scale factor. The legacy fields
+    # (curve/gain/param_patch) remain accepted input and are auto-named into
+    # kinds on load (_migrate_flare_kinds) — post-validation they are always
+    # neutral; the engine executes kinds only.
     intensity_min: float = Field(default=0.0, ge=0.0, le=1.0)
     intensity_max: float = Field(default=1.0, ge=0.0, le=1.0)
     curve: Literal["linear", "ease_in", "ease_out", "pulse"] = "linear"
     gain:  float = Field(default=1.0, ge=0.0)
     param_patch: dict[str, float] = Field(default_factory=dict)
+    kinds: dict[str, float] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _band_ordered(self) -> "FlareBand":
@@ -224,19 +283,24 @@ class FlareBand(BaseModel):
             raise ValueError(
                 f"band intensity_min ({self.intensity_min}) must be "
                 f"< intensity_max ({self.intensity_max})")
+        for name, scale in self.kinds.items():
+            if scale < 0.0:
+                raise ValueError(
+                    f"kind '{name}' scale must be ≥ 0 (got {scale})")
         return self
 
 
 class ResponseSpec(BaseModel):
-    """One event class's response. The S2 engine: pick the band containing
-    the fire intensity; apply patch-as-jump + gain envelope; re-roll the
-    scene's 🎲 dice when reroll_dice; on flares with color_set_jump, roll the
-    colour-set selector and JUMP (not blend) to the pick — terminal rung
-    keeps current colours. Surges CARRY: the new baseline is where drift
-    resumes from."""
+    """One event class's response: bands over the intensity axis, each
+    selecting and scaling named kinds (band.kinds). The S2 engine picks the
+    band containing the fire intensity and executes its kinds per type.
+    reroll_dice / color_set_jump are the LEGACY per-class flags — accepted
+    input, auto-named into drift-jump kinds on load; a legacy input missing
+    reroll_dice keeps its historical default (True) via the migration, so
+    the field default here is the canonical neutral False."""
     bands: list[FlareBand] = Field(default_factory=list)
-    reroll_dice: bool = True
-    color_set_jump: bool = False   # migration seeds True on the flare class
+    reroll_dice: bool = False
+    color_set_jump: bool = False
 
     @model_validator(mode="after")
     def _no_overlap(self) -> "ResponseSpec":
@@ -298,11 +362,97 @@ class PhaseChoreography(BaseModel):
     anchor_frac:     float = Field(default=0.45, ge=0.0, le=1.0)
 
 
+def _as_dict(value) -> dict:
+    return value.model_dump() if hasattr(value, "model_dump") else dict(value)
+
+
+def _migrate_flare_kinds(data: dict) -> dict:
+    """AUTO-NAMED KINDS — the binding load-unchanged guarantee: everything
+    already authored (per-band param_patch as a permanent kind, per-band
+    gain as a momentary kind when curve="pulse" else permanent, per-class
+    reroll_dice as a shared "Dice Re-roll" drift-jump, flare-class
+    color_set_jump as "Colour Jump") converts to named kinds attached to
+    its bands at scale ×1 — exactly the legacy execution. Legacy execution
+    fields are then neutralized so exactly ONE execution surface exists.
+
+    A LEGACY input (no "flare_kinds" key) keeps the historical reroll_dice
+    default True; a CANONICAL input (key present) treats a missing flag as
+    False. color_set_jump on a non-flare class was a legacy no-op and
+    neutralizes without a kind. Deterministic and idempotent — a second
+    pass converts nothing."""
+    responses = data.get("responses")
+    if not isinstance(responses, dict) or not responses:
+        return data
+    legacy = "flare_kinds" not in data
+    kinds = [_as_dict(k) for k in (data.get("flare_kinds") or [])]
+    by_name = {k.get("name"): k for k in kinds}
+
+    def declare(name: str, body: dict) -> str:
+        existing = by_name.get(name)
+        if existing is not None:
+            same = all(existing.get(f) == body.get(f)
+                       for f in ("type", "jump", "params", "gain"))
+            if same:
+                return name
+            n = 2
+            while f"{name} ({n})" in by_name:
+                n += 1
+            name = f"{name} ({n})"
+        entry = {"name": name, **body}
+        kinds.append(entry)
+        by_name[name] = entry
+        return name
+
+    new_responses: dict = {}
+    for cls, spec in responses.items():
+        spec = _as_dict(spec)
+        bands = [_as_dict(b) for b in (spec.get("bands") or [])]
+        reroll = bool(spec.get("reroll_dice", legacy))
+        colour = bool(spec.get("color_set_jump", False)) and cls == "flare"
+        dice_name = declare("Dice Re-roll", {
+            "type": "drift_jump", "jump": "dice", "params": {}, "gain": 1.0,
+        }) if reroll else None
+        colour_name = declare("Colour Jump", {
+            "type": "drift_jump", "jump": "color_set", "params": {},
+            "gain": 1.0,
+        }) if colour else None
+        out_bands = []
+        for band in bands:
+            refs = dict(band.get("kinds") or {})
+            lo = band.get("intensity_min", 0.0)
+            hi = band.get("intensity_max", 1.0)
+            patch = dict(band.get("param_patch") or {})
+            gain = band.get("gain", 1.0)
+            if patch:
+                refs.setdefault(declare(
+                    f"{cls.capitalize()} patch {lo:g}–{hi:g}",
+                    {"type": "permanent", "jump": None, "params": patch,
+                     "gain": 1.0}), 1.0)
+            if gain != 1.0:
+                momentary = band.get("curve", "linear") == "pulse"
+                refs.setdefault(declare(
+                    f"{cls.capitalize()} gain {lo:g}–{hi:g}",
+                    {"type": "momentary" if momentary else "permanent",
+                     "jump": None, "params": {}, "gain": gain}), 1.0)
+            if dice_name is not None:
+                refs.setdefault(dice_name, 1.0)
+            if colour_name is not None:
+                refs.setdefault(colour_name, 1.0)
+            out_bands.append({**band, "param_patch": {}, "gain": 1.0,
+                              "kinds": refs})
+        new_responses[cls] = {**spec, "bands": out_bands,
+                              "reroll_dice": False, "color_set_jump": False}
+    data["responses"] = new_responses
+    data["flare_kinds"] = kinds
+    return data
+
+
 class SceneV2(BaseModel):
     id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
     name:   str
     labels: list[str] = Field(default_factory=list)
     devices: list[SceneDeviceConfig] = Field(default_factory=list)
+    flare_kinds: list[FlareKind] = Field(default_factory=list)
     responses: dict[ResponseClass, ResponseSpec] = Field(default_factory=dict)
     color_journey: SceneColorJourney = Field(default_factory=SceneColorJourney)
     choreography: PhaseChoreography = Field(default_factory=PhaseChoreography)
@@ -324,10 +474,25 @@ class SceneV2(BaseModel):
             if bands and "flare" not in responses:
                 responses["flare"] = {"bands": bands}
             data["responses"] = responses
+        if isinstance(data, dict):
+            data = _migrate_flare_kinds(dict(data))
         return data
 
     @model_validator(mode="after")
     def _validate(self) -> "SceneV2":
+        names = [k.name for k in self.flare_kinds]
+        dupes = {n for n in names if names.count(n) > 1}
+        if dupes:
+            raise ValueError(f"duplicate flare kind name(s): {sorted(dupes)}")
+        declared = set(names)
+        for cls, spec in self.responses.items():
+            for band in spec.bands:
+                missing = [n for n in band.kinds if n not in declared]
+                if missing:
+                    raise ValueError(
+                        f"{cls} band [{band.intensity_min}, "
+                        f"{band.intensity_max}) references undeclared "
+                        f"kind(s): {missing}")
         seen: set[tuple[str, str]] = set()
         for dev in self.devices:
             if dev.target_kind == "all":
