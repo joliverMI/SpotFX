@@ -208,6 +208,49 @@ The way back is the SAME guarded handover, still armed- and readiness-gated
 (`run_handover`'s `from_world=="released"` skips the vacuous quiesce step).
 Spec: `tests/test_release.py` + `check_ownership.py` §12.
 
+### Two-writers prevention build (2026-08-13 incident: `Wants=ledfx.service`
+in the unit resurrected a deliberately-quiesced LedFX on a routine
+`systemctl restart spotfx` while SPECTRA owned — see
+`/home/javi/fleet-spotfx/data/spectra-two-writers/report.md`)
+
+`deploy/spotfx.service` no longer `Wants=` ledfx (kept in `After=` for
+ordering only) — the handover orchestrator is the only legitimate
+starter/stopper of that unit. Two continuous reconcilers, one per process,
+each periodically assert the ANTI-state (never their own health) rather
+than trusting the ownership record forever once proven true at handover
+time: `spectra/services/ownership_reconciler.py` (while spectra owns,
+`ledfx.service` must be inactive and no foreign realtime source may hold
+her WLEDs — read via each device's own `wled.get_state()` `live`/`lip`)
+and `services/spectra_liveness_reconciler.py` (while spot-effects owns,
+SPECTRA's own `/spectra/api/liveness` must not report `live`/`split-brain`).
+Both alarm-only (CRITICAL log) by default; `SPECTRA_RECONCILER_ESCALATE=1`
+arms a sustained-violation drop to `released` (the already-proven panic
+handle) — same "gated until the owner's word" posture as
+`SPECTRA_HANDOVER_ARMED`. `spectra/services/handover.py`'s `run_handover`
+re-verifies `from_side.verify_quiesced()` immediately before `commit()`
+(closes the verify→commit resurrect gap) and `api/ledfx_client.py`'s
+LedFX-restart watchdog now requires a genuinely dead probe (not sustained
+high RTT alone) plus a named veto (`_ledfx_restart_veto_reason`) checked
+immediately before spawning `systemctl`. Spec:
+`tests/test_ownership_reconciler.py`, `tests/test_ledfx_watchdog_veto.py`,
+`tests/test_handover.py`.
+
+The crystal lazy-activation class (a handover/resume brought up only SOME
+config-declared virtuals and still reported success — a mapper-chain
+virtual excluded from the old "every ACTIVE virtual" freshness check is
+invisible to it, vacuously healthy): `spectra/services/live_host.py`'s
+`LiveLights.activation_gaps()`/`wait_fully_active()`/`device_gaps()`
+compare the fx-live config's declared-active virtuals (whatever a scene
+fire or the seeded baseline persisted) against runtime reality — per-virtual
+frame freshness AND, for WLED-backed virtuals, the device's own `live` flag,
+never assumed from the host's in-memory state alone. A fresh handover
+(`SpectraSide.verify_active()`) rolls back on ANY gap — there's a known-good
+from-world to fall back to. `resume_own_room` (process restart while
+already owner, no from-world to fall back to) instead reports every gap
+loudly (CRITICAL + the liveness endpoint's `activation_gaps` field) and
+leaves every other device driving — one failing device must never strand
+the rest. Spec: `tests/test_crystal_activation_verify.py`.
+
 ## SPECTRA fx/ (vendored LedFX render pipeline, Stage 1)
 
 `fx/` is the LedFX render pipeline vendored from the fork at commit

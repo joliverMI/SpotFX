@@ -41,8 +41,19 @@
       standalone entry serves the identical URL space, so the fleet's
       external checker survives the switchover with at most a host:port
       change.) HTTP 200 when healthy, 503 when not:
-        owner=spectra      healthy iff the live stack is up and every ACTIVE
-                           virtual flushed within stale_after_s.
+        owner=spectra      healthy iff the live stack is up, every ACTIVE
+                           virtual flushed within stale_after_s, AND every
+                           config-declared virtual actually came up
+                           (activation_gaps == {} — the crystal lazy-
+                           activation class, report gate e3, 2026-08-14:
+                           a virtual absent from "every ACTIVE virtual"
+                           above is invisible to that check alone, which
+                           is exactly how a partial activation used to
+                           report healthy). activation_gaps is additive to
+                           the v1 contract — {} on every prior-shape
+                           response, non-empty only on this new failure
+                           class; existing consumers reading known keys are
+                           unaffected.
         owner=spot-effects healthy iff SPECTRA is correctly DARK (a live
                            stack without ownership is the split-brain
                            tripwire → 503).
@@ -164,9 +175,15 @@ async def get_liveness():
         devices = {d.id: {"type": d.type, "online": bool(d.is_online)}
                    for d in live.host.devices.values()}
 
+    activation_gaps = live.activation_gaps() if live.active else {}
     if record.owner == light_ownership.SPECTRA:
         state = "live" if live.active else "dark"
-        healthy = live.active and all(
+        # The crystal lazy-activation class (report gate e3, folded in as
+        # first-class alongside the reconciler, 2026-08-13): a config-
+        # declared virtual that never came up is a loud failure here too,
+        # continuously — not just at the one-shot handover verification
+        # that first reported success on it.
+        healthy = live.active and not activation_gaps and all(
             v["fresh"] for v in virtuals.values() if v["active"])
     elif record.owner == light_ownership.HANDING_OVER:
         state = "switching"
@@ -188,6 +205,7 @@ async def get_liveness():
             "stale_after_s": STALE_AFTER_S,
             "virtuals": virtuals,
             "devices": devices,
+            "activation_gaps": activation_gaps,
         },
         status_code=200 if healthy else 503,
     )

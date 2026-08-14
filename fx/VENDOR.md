@@ -76,6 +76,16 @@ variables named `ledfx` (the core object handle) are untouched.
    to restore the original literal-`horizon_color` behavior byte-for-byte.
    Not yet ported back to the fork source at `/home/javi/ledfx-src` — the
    fork and this file have drifted on this one effect until that happens.
+7. `virtuals.py`: two `except` clauses broadened to `except Exception`
+   (report gate "the crystal lazy-activation class", two-writers incident
+   2026-08-13) — `Virtuals.create_from_config`'s per-virtual effect-restore
+   (was `except (RuntimeError, ValueError)`) and `Virtual.activate`'s
+   `activate_segments` call (was `except ValueError`). Any other exception
+   type (a Hue handshake failure, a socket error) escaped both uncaught and
+   could abort the whole per-virtual activation loop, stranding every
+   virtual still to come in config order — the crystal-mapper darkfault.
+   Behavior otherwise unchanged: still logged, still non-fatal to the
+   virtual itself.
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite. When updating vendored files, re-diff against that commit.

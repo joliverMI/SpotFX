@@ -145,7 +145,10 @@ def test_full_handover_cycle_on_the_harness(tmp_path):
             # Forward: spot-effects → spectra.
             record = await run_handover(lo.SPECTRA, sides, grace_s=0)
             assert record.owner == lo.SPECTRA
-            assert spot.calls == ["quiesce", "verify_quiesced"]
+            # verify_quiesced runs twice: once to pass the quiesce gate, once
+            # more immediately before commit (report gate e4i) to catch a
+            # from-world resurrect in the verify→commit window.
+            assert spot.calls == ["quiesce", "verify_quiesced", "verify_quiesced"]
 
             # The engine is LIVE on the facade executor, pointed at the
             # live host the grant admitted.
@@ -393,6 +396,77 @@ def test_lying_quiesce_never_starts_second_writer(tmp_path):
         assert bus.max_worlds_holding == 1
 
     _run(main())
+
+
+class ResurrectingSide:
+    """Quiesces honestly (the FIRST verify_quiesced passes the gate), then
+    something OUTSIDE this orchestrator's control — systemd's Wants=, an
+    operator `systemctl start`, a stray watchdog — restarts it before
+    commit. Models the two-writers incident's actual mechanism: a
+    resurrect that bypasses this orchestrator entirely, not a lying
+    quiesce call (see test_lying_quiesce_never_starts_second_writer for
+    that, different, failure)."""
+    name = lo.SPOT_EFFECTS
+
+    def __init__(self):
+        self.calls = []
+        self._verify_count = 0
+
+    async def readiness_problems(self):
+        return []
+
+    async def quiesce(self):
+        self.calls.append("quiesce")
+
+    async def verify_quiesced(self):
+        self.calls.append("verify_quiesced")
+        self._verify_count += 1
+        # First check (the quiesce gate) passes; the second (immediately
+        # before commit, report gate e4i) finds it back.
+        return self._verify_count == 1
+
+    async def activate(self):
+        self.calls.append("activate")
+
+    async def verify_active(self):
+        self.calls.append("verify_active")
+        return True
+
+    async def deactivate(self):
+        self.calls.append("deactivate")
+
+
+def test_resurrect_before_commit_aborts(tmp_path, caplog):
+    """Report gate e4i (two-writers incident, 2026-08-13): a from-world
+    resurrect landing in the verify→commit gap must abort the handover
+    instead of committing sole ownership over a second writer."""
+    from spectra.services.handover import HandoverFailed, run_handover
+
+    caplog.set_level("CRITICAL", logger="spectra.services.handover")
+    _own_file(tmp_path)
+    spot = ResurrectingSide()
+    spectra_side = RecordedSide(lo.SPECTRA)
+    sides = {lo.SPOT_EFFECTS: spot, lo.SPECTRA: spectra_side}
+
+    async def main():
+        with pytest.raises(HandoverFailed, match="resurrected"):
+            await run_handover(lo.SPECTRA, sides, grace_s=0)
+        # Landed back single-owner at the world that's actually still
+        # writing (spot-effects — the resurrect is reality), never
+        # committed spectra as sole owner while a second writer paints.
+        assert lo.load().owner == lo.SPOT_EFFECTS
+        assert lo.load().handover is None
+        # The new writer's partial activation was released, not left up.
+        assert spectra_side.calls[-1] == "deactivate"
+        # quiesce, the quiesce-gate check, the pre-commit re-check that
+        # caught the resurrect, then the best-effort "restore" (harmless —
+        # it was already back).
+        assert spot.calls == ["quiesce", "verify_quiesced", "verify_quiesced",
+                              "activate"]
+
+    _run(main())
+    assert any("resurrected" in r.message for r in caplog.records
+               if r.levelname == "CRITICAL")
 
 
 # ── proof 6: the armed latch ─────────────────────────────────────────────────

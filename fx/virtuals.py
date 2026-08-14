@@ -1026,7 +1026,16 @@ class Virtual:
             self._active = True
             try:
                 self.activate_segments(self._segments)
-            except ValueError as e:
+            except Exception as e:
+                # Broadened from ValueError-only (activation-pass-abort
+                # class, spectra-crystal-darkfault 2026-08-13): a device's
+                # activate() raising anything else used to escape this
+                # virtual's activate() entirely, which (called from the
+                # per-virtual loop in Virtuals.create_from_config) could
+                # abort activation of every virtual still to come. This
+                # virtual still ends up marked active with its render thread
+                # started below — its own freshness/liveness check is what
+                # catches a segment that never actually came up.
                 _LOGGER.error("%s", e)
             self._os_active = False
 
@@ -1850,7 +1859,15 @@ class Virtuals:
                         "Virtual %s: effect schema changed, not restoring effect",
                         virtual_cfg["id"],
                     )
-                except (RuntimeError, ValueError) as e:
+                except Exception as e:
+                    # Any device-layer failure (a Hue handshake exception, a
+                    # socket error, anything not RuntimeError/ValueError) used
+                    # to escape this loop uncaught and abort every virtual
+                    # still to come — the "activation-pass-abort" class
+                    # (spectra-crystal-darkfault, 2026-08-13): one broken
+                    # device stranded unrelated virtuals later in config
+                    # order. One virtual's failure must never strand the
+                    # rest — log it and keep going.
                     _LOGGER.warning(
                         "Virtual %s: failed to restore effect: %s",
                         virtual_cfg["id"],
