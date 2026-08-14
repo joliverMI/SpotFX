@@ -367,6 +367,12 @@ class HueDevice(NetworkedDevice):
             self._sock = None
 
     def deactivate(self):
+        # Idempotent: several code paths can each try to deactivate the same
+        # device during one teardown (a virtual's check_and_deactivate_
+        # devices, the vendored LEDFX_SHUTDOWN listener, FxHost's own
+        # explicit pass) — only the first should dispatch the bridge stop.
+        if self._teardown_dispatched:
+            return
         # Stop sends first, cancel any reconnect intent, then tear down.
         self._stream_ready = False
         with self._reconnect_lock:
@@ -374,10 +380,17 @@ class HueDevice(NetworkedDevice):
         self._cleanup_socket()
 
         # Tell the bridge to stop streaming. Offloaded so deactivate (also
-        # reachable on the event loop via set_effect) never blocks it.
-        async_fire_and_forget(
-            self._async_stop_stream(), loop=self._ledfx.loop
-        )
+        # reachable on the event loop via set_effect) never blocks it — the
+        # dispatched Task is remembered on the instance so a subsequent
+        # async_deactivate() can await it instead of it being dropped by a
+        # caller (FxHost.shutdown) that tears the thread executor down right
+        # after deactivate() returns, with no intervening await (fx/VENDOR.md,
+        # "Hue entertainment-stream stop dropped at teardown";
+        # spectra-hue-bridge/report.md). The bridge, never told the stream
+        # ended, then holds the entertainment session open until its own
+        # idle timeout lapses — the next activation eats that as a DTLS
+        # handshake timeout.
+        self._dispatch_teardown_task(self._async_stop_stream())
 
         super().deactivate()
 

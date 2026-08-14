@@ -117,14 +117,34 @@ class FxHost:
     async def shutdown(self) -> None:
         """Deactivate every virtual (joins render threads) and device.
         Does NOT cancel unrelated loop tasks — unlike LedFxCore.async_stop,
-        which kills every task on the loop and can never run inside SpotFX."""
-        self.events.fire_event(LedFxShutdownEvent())
+        which kills every task on the loop and can never run inside SpotFX.
+
+        Devices are deactivated via async_deactivate_devices(), AWAITED,
+        before the thread executor is shut down. Some drivers (Hue, WLED)
+        fire an unawaited device-stop coroutine from their plain deactivate()
+        for other (non-teardown) callers; here that coroutine would never
+        even get scheduled before thread_executor.shutdown() ran out from
+        under it (`RuntimeError: cannot schedule new futures after
+        shutdown`), silently dropping the bridge/API stop call — see
+        fx/VENDOR.md, "Hue entertainment-stream stop dropped at teardown".
+
+        LedFxShutdownEvent fires LAST, after devices are already down, not
+        first: Devices.__init__ registers its own listener for this event
+        (vendored) that redundantly calls the plain, fire-and-forget
+        deactivate_devices() again — firing the event before our own
+        graceful pass raced it against async_deactivate_devices() (whichever
+        ran first on the loop won, and either the graceful await got
+        skipped as a no-op or its own fire-and-forget got dropped the same
+        way). Devices are idempotent once deactivated (fx/VENDOR.md
+        deviation 8), so a redundant listener-triggered deactivate() firing
+        after this point is a safe no-op."""
         for virtual in list(self.virtuals.values()):
             try:
                 virtual.deactivate()
             except Exception:
                 logger.exception("FxHost: virtual %s deactivate failed", virtual.id)
-        self.devices.deactivate_devices()
+        await self.devices.async_deactivate_devices()
+        self.events.fire_event(LedFxShutdownEvent())
         self.thread_executor.shutdown(wait=False, cancel_futures=True)
         self._started = False
 

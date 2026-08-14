@@ -6,7 +6,7 @@ from fx.devices import NetworkedDevice
 from fx.devices.ddp import DDPDevice
 from fx.devices.e131 import E131Device
 from fx.devices.udp import UDPRealtimeDevice
-from fx.utils import WLED, async_fire_and_forget, wled_support_DDP
+from fx.utils import WLED, wled_support_DDP
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,16 +111,22 @@ class WLEDDevice(NetworkedDevice):
         super().activate()
 
     def deactivate(self):
+        # Idempotent — see HueDevice.deactivate()'s comment: several code
+        # paths can each try to deactivate the same device during one
+        # teardown; only the first should dispatch the release.
+        if self._teardown_dispatched:
+            return
         if self.subdevice is not None:
             self.subdevice.deactivate()
         if self.wled is not None:
             # Explicit release (panic-release path), not just "stop sending
             # and let the device's own timeout lapse" — see WLED.
             # release_realtime. Fire-and-forget like the Hue driver's stream
-            # stop: deactivate() must never block on device I/O.
-            async_fire_and_forget(
-                self._async_release_realtime(), loop=self._ledfx.loop
-            )
+            # stop: deactivate() must never block on device I/O — the
+            # dispatched Task is remembered on the instance so a subsequent
+            # async_deactivate() can await it (see Device._dispatch_
+            # teardown_task / HueDevice.deactivate() for why).
+            self._dispatch_teardown_task(self._async_release_realtime())
         super().deactivate()
 
     async def _async_release_realtime(self):
