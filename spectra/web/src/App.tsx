@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import RoomControlsBar from './components/RoomControlsBar';
 import RoomOwnershipBar from './components/RoomOwnershipBar';
 import { ToastProvider } from './components/Toast';
 import { confirmLeave } from './lib/unsavedGuard';
@@ -49,6 +50,7 @@ export default function App() {
   return (
     <ToastProvider>
       <NavBar />
+      <RoomControlsBar />
       <RoomOwnershipBar />
       <main>
         <Routes>

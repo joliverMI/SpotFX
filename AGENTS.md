@@ -152,6 +152,41 @@ Scenes goes single-pane with a drawer picker. The Fire button asks no
 confirm BY OWNER ORDER (deliberate asymmetry: the global colour-set
 opt-out confirm stays) — don't "tidy" either side.
 
+### SPECTRA-kept legacy equivalents (routed build, four items)
+
+Owner decision `data/spectra-gap-inventory/decision-legacy-retirement-picks.md`
+KEPT four legacy capabilities needing SPECTRA equivalents (six others RETIRED,
+retire-not-delete). Built:
+
+- **Override Blend** — `models/scene.py` `PhaseBlend` (per-scene
+  `charge_ramp_ms`/`lull_ramp_ms`, read by `scene_response._drive_phase`)
+  and `SceneV2.entry_ramp_ms` (a scene-fire blend-in ramp, threaded through
+  `fx_seam.apply_writes(transition_ms=...)`, hue-arc, same tween shape as
+  `fx_executor`'s glides). A read-only live-storage study found real legacy
+  usage is 265/269 triggers Charge/Lull phase builds, not scene selection —
+  `phase_blend` is the dominant facet; `entry_ramp_ms` covers the thinner
+  scene-entry one. Legacy's dynamic gap-to-next-trigger stretch has no
+  analogue (S2 has no forward trigger schedule) — both fields are
+  authored/configurable instead, the buildable half of the same grammar.
+- **Energy gates/tilt** — PROVEN EQUIVALENT, nothing built: sequencer
+  likelihood curves already express floor/ceiling/scale gating exactly
+  (`scripts/seed_sequencer_from_legacy.gate_points`, zero=veto in
+  `selection_kernel.py`, spec-proven in `scripts/check_sequencer.py` against
+  the legacy formula at `services/trigger_engine.py:2338`); live usage was 1
+  authored option, 0 fires. See help topic `energy-gates-equivalence`.
+- **Brightness multiplier** + **ambient/global-transition** — new room
+  surface `spectra/services/room_controls.py` + `spectra/api/room_controls.py`
+  (`GET`/`PUT /api/room-controls`), UI `RoomControlsBar.tsx` (mounted next to
+  the ownership bar in `App.tsx`). `brightness_multiplier` scales
+  brightness/background_brightness uniformly at the write seams
+  (`fx_executor` for engine glides/jumps, `scene_compiler.fire_scene` for
+  scene-fire bytes) — never the conductor's carried baseline or the
+  returned/dry-run writes, so dry-run/live preview parity holds.
+  `global_transition_ms` is the room default `entry_ramp_ms` falls back to.
+  `ambient_enabled`/`ambient_color` are state-only today (the full
+  Ambient/Dinner-Party room-MODES build is separate). Spec: the room-control
+  section of `scripts/check_spectra.py` + `tests/test_room_controls.py`.
+
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
 Exactly one process owns the lights. The durable record is

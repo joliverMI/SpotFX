@@ -137,10 +137,36 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   white-space: nowrap;
 }
 
+/* The room-control strip — brightness multiplier, ambient, global
+ * transition pace. Compact, phone-first (wraps to its own rows below 720px
+ * rather than a drawer — it's a handful of always-reachable dials). */
+.room-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 6px 16px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.room-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.room-control input[type="range"] { width: 100px; }
+.room-control input[type="number"] { width: 64px; }
+.room-control-value { min-width: 32px; color: var(--text); }
+
 @media (max-width: 720px) {
   .panic-release-btn { margin: 8px; width: calc(100% - 16px); padding: 10px; font-size: 13px; text-align: center; }
   .release-banner { padding: 10px; font-size: 12.5px; }
   .release-banner button.primary { width: 100%; padding: 10px; }
+  .room-controls-bar { padding: 8px 12px; gap: 10px 16px; }
+  .room-control input[type="range"] { width: 80px; }
 }
 
 input[type='text'], input[type='search'] {

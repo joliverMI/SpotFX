@@ -197,7 +197,7 @@ class ResponseEngine:
             return record
         phase_driven = False
         if event_class in PHASE_RAMP_MS:
-            record["phase"] = await self._drive_phase(event_class)
+            record["phase"] = await self._drive_phase(event_class, scene)
             phase_driven = bool(record["phase"]["targets"])
         spec = scene.responses.get(event_class)
         band = select_band(spec.bands, intensity) if spec else None
@@ -425,15 +425,22 @@ class ResponseEngine:
                                       int(PULSE_RELEASE_S * 1000))
         return len(by_vid)
 
-    async def _drive_phase(self, event_class: str) -> dict:
+    async def _drive_phase(self, event_class: str, scene: SceneV2) -> dict:
         """Arm + ramp the vendored phase machinery on every phase-capable
         virtual — the exact drive the original program used: the instant
         arm write must land before the ramp (jump, then glide — in-process
         the calls are ordered by construction; the legacy path needed an
         explicit bus drain). The choreography itself — blackhole's swallow,
         orbits' collapse, fireworks' rockets, the eye's lids — is the
-        effects' own vendored code, not re-invented here."""
-        ramp_ms = PHASE_RAMP_MS[event_class]
+        effects' own vendored code, not re-invented here.
+
+        OVERRIDE BLEND equivalent (models.scene.PhaseBlend): charge/lull
+        ramps take the scene's configured override when set, else the
+        class default — drop is never overridden, it stays the snap."""
+        override = ({"charge": scene.phase_blend.charge_ramp_ms,
+                     "lull": scene.phase_blend.lull_ramp_ms}
+                    .get(event_class))
+        ramp_ms = override if override is not None else PHASE_RAMP_MS[event_class]
         targets: list[str] = []
         for vid, state in self.conductor.virtuals.items():
             if state.effect_type not in device_model.PHASE_EFFECTS:

@@ -130,6 +130,13 @@ export interface PhaseChoreography {
   anchor_frac: number;
 }
 
+/** OVERRIDE BLEND equivalent, charge/lull facet — null = the fixed class
+ * default (charge 4000 ms, lull 2500 ms); drop is never overridable. */
+export interface PhaseBlend {
+  charge_ramp_ms: number | null;
+  lull_ramp_ms: number | null;
+}
+
 export interface SceneV2 {
   id: string;
   name: string;
@@ -139,6 +146,11 @@ export interface SceneV2 {
   responses: Partial<Record<ResponseClass, ResponseSpec>>;
   color_journey: SceneColorJourney;
   choreography: PhaseChoreography;
+  phase_blend: PhaseBlend;
+  /** OVERRIDE BLEND equivalent, scene-entry facet: blend this scene's
+   * writes in over this ramp (ms) instead of an instant jump when it
+   * fires live. 0 = today's unchanged instant-jump behaviour. */
+  entry_ramp_ms: number;
   accept_all_sets: boolean;
   accepted_set_ids: string[];
 }
@@ -205,6 +217,18 @@ export interface RoomColorState {
   active_set_id: string | null;
 }
 
+/** Room-control surface (spectra-kept-equivalents): the legacy Brightness
+ * Multiplier / ledfx_ambient / ledfx_ambient_color / ledfx_global_transition
+ * action equivalents. brightness_multiplier is the only one wired to a
+ * write seam today (fx_executor + scene_compiler); ambient_enabled/_color
+ * and global_transition_ms are state-only until the room-modes build. */
+export interface RoomControlState {
+  brightness_multiplier: number;
+  ambient_enabled: boolean;
+  ambient_color: string | null;
+  global_transition_ms: number;
+}
+
 /** Full spot-effects Colour Set card shape (read + the one supported
  * opt-out toggle through the spot-effects API — never modified otherwise). */
 export interface SpotColorSetCard {
@@ -261,6 +285,8 @@ export function newScene(id: string): SceneV2 {
     responses: {},
     color_journey: { mode: 'inherit', pace_factor: 1, journey: null },
     choreography: { enabled: false, transition_ms: 800, transition_mode: 'Add', anchor_frac: 0.45 },
+    phase_blend: { charge_ramp_ms: null, lull_ramp_ms: null },
+    entry_ramp_ms: 0,
     accept_all_sets: true,
     accepted_set_ids: [],
   };

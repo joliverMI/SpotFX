@@ -63,6 +63,7 @@ scfg.SCENES_FILE = scfg.SPECTRA_STORAGE / "scenes.json"
 scfg.SEQUENCER_FILE = scfg.SPECTRA_STORAGE / "sequencer.json"
 scfg.DRIFT_PROFILES_FILE = scfg.SPECTRA_STORAGE / "drift_profiles.json"
 scfg.ROOM_COLOR_FILE = scfg.SPECTRA_STORAGE / "room_color.json"
+scfg.ROOM_CONTROLS_FILE = scfg.SPECTRA_STORAGE / "room_controls.json"
 scfg.COLOR_SETS_FILE = td / "color_sets.json"
 scfg.PROFILES_DIR = td / "profiles"
 scfg.AUDIO_SHAPES_DIR = td / "audio_shapes"
@@ -924,6 +925,109 @@ jumps4 = [w for w in exec4.writes if w["kind"] == "jump"]
 check(any("reactivity" in w["params"] for w in jumps4)
       and all("blur" not in w["params"] for w in jumps4),
       "after the re-select the re-roll follows the base variant again")
+
+# ── OVERRIDE BLEND equivalent (spectra-kept-equivalents, live-storage study:
+#    269 legacy blend triggers — 225 Charge, 40 Lull, 4 scene-selection —
+#    trigger_engine._phase_blend_ramp_ms/_blend_factor_for): a scene's
+#    phase_blend overrides the charge/lull ramp; entry_ramp_ms blends a live
+#    fire's writes in via fx_seam instead of an instant jump ─────────────────
+from spectra.models.scene import PhaseBlend
+from spectra.services import fx_seam
+
+check(SceneV2(name="x").phase_blend == PhaseBlend(charge_ramp_ms=None,
+                                                   lull_ramp_ms=None)
+      and SceneV2(name="x").entry_ramp_ms == 0,
+      "no phase_blend / entry_ramp_ms authored: today's fixed-ramp, "
+      "instant-jump behaviour is unchanged")
+
+blended = SceneV2(name="Blended", phase_blend=PhaseBlend(
+    charge_ramp_ms=9000, lull_ramp_ms=1000), devices=[SceneDeviceConfig(
+        target_kind="category", target="Matrix", effect_type="radial",
+        params={})])
+exec5 = RecordingExecutor()
+cond5 = DriftConductor(executor=exec5, drift_profiles=lambda: {},
+                       curve_profiles=lambda: {},
+                       room_load=lambda: cj.RoomColorState(),
+                       room_save=lambda st: None,
+                       set_position=lambda sid: None)
+resp5 = ResponseEngine(conductor=cond5, executor=exec5, rng=Random(3),
+                       sequencer_config=lambda: SequencerConfig(),
+                       room_load=lambda: cj.RoomColorState(),
+                       room_save=lambda st: None)
+cond5.on_scene_fire(blended, scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(blended, FireContext(0.5, rng=Random(1)))))
+charge_rec = asyncio.run(resp5.on_event("charge", 0.8))
+lull_rec = asyncio.run(resp5.on_event("lull", 0.5))
+drop_rec = asyncio.run(resp5.on_event("drop", 0.9))
+check(charge_rec["phase"]["ramp_ms"] == 9000 and lull_rec["phase"]["ramp_ms"] == 1000,
+      "a scene's phase_blend overrides the charge/lull ramp — the dominant "
+      "real Override Blend usage, made configurable per scene")
+check(drop_rec["phase"]["ramp_ms"] == 400,
+      "drop is never overridden by phase_blend — it stays the fixed snap")
+
+check(fx_seam._body({"effect_type": "radial", "config": {"speed": 1.0}})
+      == {"type": "radial", "config": {"speed": 1.0}},
+      "entry_ramp_ms=0 (default): the write body carries no transition "
+      "keys — an unchanged instant switch")
+ramped_body = fx_seam._body(
+    {"effect_type": "radial", "config": {"speed": 1.0}}, 2000)
+check(ramped_body["transition_ms"] == 2000
+      and ramped_body["transition_blend"] == "hue"
+      and ramped_body["easing"] == "linear",
+      "entry_ramp_ms>0: the write body blends in hue-arc over the ramp — "
+      "the same tween shape fx_executor uses for glides, never through grey")
+
+# ── room-control surface (spectra-kept-equivalents): brightness multiplier,
+#    ambient state, global transition pace — the legacy Brightness
+#    Multiplier / ledfx_ambient* / ledfx_global_transition action
+#    equivalents ────────────────────────────────────────────────────────────
+from spectra.services import room_controls as rc
+
+check(rc.load_room_controls() == rc.RoomControlState(),
+      "no room_controls.json on disk: default state — multiplier 1.0 "
+      "(no dimming), no ambient, no global transition default")
+scaled = rc.apply_brightness({"brightness": 0.8, "spin": 2.0}, 0.5)
+check(scaled == {"brightness": 0.4, "spin": 2.0},
+      "apply_brightness scales brightness uniformly, leaves other params alone")
+check(rc.apply_brightness({"brightness": 0.8}, 1.0) is not None
+      and rc.apply_brightness({"speed": 1.0}, 0.5) == {"speed": 1.0},
+      "multiplier 1.0, or no brightness key present: nothing to scale")
+
+exec6 = RecordingExecutor(
+    room_controls_load=lambda: rc.RoomControlState(brightness_multiplier=0.5))
+asyncio.run(exec6.jump("v-rc", "radial", {"brightness": 0.8, "spin": 1.0}))
+check(exec6.writes[-1]["params"] == {"brightness": 0.4, "spin": 1.0},
+      "fx_executor applies the room brightness multiplier uniformly at the "
+      "one write seam every glide/jump passes through")
+
+dimmed_scene = SceneV2(name="Dimmed RC", devices=[SceneDeviceConfig(
+    target_kind="virtual", target="v-rc", effect_type="radial", params={},
+    brightness=0.8,
+    color={"mode": "fixed"})])   # isolate from any active colour set
+rc.save_room_controls(rc.RoomControlState(brightness_multiplier=0.5,
+                                          global_transition_ms=1500))
+rc_fire_calls: list = []
+
+
+async def _fake_apply_writes(writes, *, transition_ms=0):
+    rc_fire_calls.append((writes, transition_ms))
+
+_orig_apply_writes = fx_seam.apply_writes
+fx_seam.apply_writes = _fake_apply_writes
+try:
+    dimmed_result = asyncio.run(
+        scene_compiler.fire_scene(dimmed_scene, dry_run=False))
+finally:
+    fx_seam.apply_writes = _orig_apply_writes
+check(dimmed_result["writes"][0]["config"]["brightness"] == 0.8,
+      "the RETURNED/baselined writes stay unscaled — dry-run/live preview parity")
+check(rc_fire_calls[0][0][0]["config"]["brightness"] == 0.4,
+      "only the bytes actually sent through fx_seam carry the room's "
+      "brightness multiplier")
+check(rc_fire_calls[0][1] == 1500,
+      "a scene with no entry_ramp_ms of its own falls back to the room's "
+      "global_transition_ms — the ledfx_global_transition equivalent")
+rc.save_room_controls(rc.RoomControlState())   # reset for later sections
 
 # ── item-8 CANONICAL shape: a band SELECTS AND SCALES its named kinds ────────
 # The owner's example, executed: the top band fires "Slam" + "Colour Roll"

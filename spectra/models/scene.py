@@ -362,6 +362,24 @@ class PhaseChoreography(BaseModel):
     anchor_frac:     float = Field(default=0.45, ge=0.0, le=1.0)
 
 
+class PhaseBlend(BaseModel):
+    """OVERRIDE BLEND equivalent for the charge/lull phase build — the
+    dominant real usage of legacy Override Blend (269 live triggers studied
+    read-only: 225 Charge, 40 Lull, 4 scene-selection/update — trigger_engine
+    `_phase_blend_ramp_ms`/`_blend_factor_for`). Legacy stretched the ramp
+    DYNAMICALLY to the gap to the next enabled trigger, so a charge always
+    peaked exactly as the lull hit. SPECTRA's S2 engine is bridge-reactive
+    with no forward schedule of trigger fires to compute that gap against
+    (that needs per-song trigger authoring — the gap report's item 1, a
+    separate large gap) — so this authors the buildable half of the same
+    grammar: a per-scene CONFIGURABLE ramp instead of the fixed global
+    default (`scene_response.PHASE_RAMP_MS`), so a scene tuned for a long
+    build can stretch it and one tuned for a tight cut can shorten it.
+    None = unchanged default ramp for that class."""
+    charge_ramp_ms: Optional[int] = Field(default=None, ge=200, le=20000)
+    lull_ramp_ms:   Optional[int] = Field(default=None, ge=200, le=20000)
+
+
 def _as_dict(value) -> dict:
     return value.model_dump() if hasattr(value, "model_dump") else dict(value)
 
@@ -456,6 +474,20 @@ class SceneV2(BaseModel):
     responses: dict[ResponseClass, ResponseSpec] = Field(default_factory=dict)
     color_journey: SceneColorJourney = Field(default_factory=SceneColorJourney)
     choreography: PhaseChoreography = Field(default_factory=PhaseChoreography)
+    phase_blend: PhaseBlend = Field(default_factory=PhaseBlend)
+    # OVERRIDE BLEND equivalent for scene entry (the thinner facet of the
+    # same legacy flag — see PhaseBlend for the dominant charge/lull facet):
+    # blend the scene's compiled writes in over this ramp instead of an
+    # instant jump when the scene fires, hue-arc for colour (fx_seam,
+    # coherent with the flare colour-jump ramp-in — scene_response.
+    # color_jump_ramp_ms, PR38 — and the destination journey's promised
+    # no-snap custody transfer, services/color_journey.on_scene_enter). Only
+    # blends params on a virtual whose ALREADY-ACTIVE effect matches this
+    # scene's entry — a genuine effect-type switch still recreates instantly
+    # (the vendored engine's own tween boundary, unchanged by this field;
+    # see fx_executor's crossfade-branch note). 0 = today's unchanged
+    # instant-jump behaviour.
+    entry_ramp_ms: int = Field(default=0, ge=0, le=20000)
     # accept_all_sets=True: every set not globally opted out is eligible;
     # False narrows to accepted_set_ids.
     accept_all_sets:  bool = True

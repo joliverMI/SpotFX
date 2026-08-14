@@ -47,6 +47,7 @@ scfg.SCENES_FILE = scfg.SPECTRA_STORAGE / "scenes.json"
 scfg.SEQUENCER_FILE = scfg.SPECTRA_STORAGE / "sequencer.json"
 scfg.DRIFT_PROFILES_FILE = scfg.SPECTRA_STORAGE / "drift_profiles.json"
 scfg.ROOM_COLOR_FILE = scfg.SPECTRA_STORAGE / "room_color.json"
+scfg.ROOM_CONTROLS_FILE = scfg.SPECTRA_STORAGE / "room_controls.json"
 scfg.COLOR_SETS_FILE = td / "color_sets.json"
 
 from spectra.models.scene import (ColorJourneySpec, CurveMapPoint, DriftRef,
