@@ -366,3 +366,17 @@ export function useDeleteSpectraTrigger(uri: string | null) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-triggers', uri] }),
   });
 }
+
+/** Front 3's mid-song generation pass (spectra/services/midsong_generator.py) —
+ * idempotent, edit-preserving. Returns a {moments,added,updated,deleted,
+ * skipped_authored} summary. */
+export function useGenerateMidsongTriggers(uri: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiPost<{ moments: number; added: number; updated: number;
+               deleted: number; skipped_authored: number }>(
+        `/triggers/generate?uri=${enc(uri!)}`, {}),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-triggers', uri] }),
+  });
+}

@@ -63,6 +63,7 @@ scfg.SCENES_FILE = scfg.SPECTRA_STORAGE / "scenes.json"
 scfg.SEQUENCER_FILE = scfg.SPECTRA_STORAGE / "sequencer.json"
 scfg.DRIFT_PROFILES_FILE = scfg.SPECTRA_STORAGE / "drift_profiles.json"
 scfg.ROOM_COLOR_FILE = scfg.SPECTRA_STORAGE / "room_color.json"
+scfg.ROOM_CONTROLS_FILE = scfg.SPECTRA_STORAGE / "room_controls.json"
 scfg.TRIGGERS_FILE = scfg.SPECTRA_STORAGE / "triggers.json"
 scfg.COLOR_SETS_FILE = td / "color_sets.json"
 scfg.PROFILES_DIR = td / "profiles"
@@ -90,6 +91,20 @@ check(t_scene.action.kind == "fire_scene", "discriminated union tags fire_scene"
 round_trip = SpectraTrigger(**json.loads(t_scene.model_dump_json()))
 check(round_trip.action.scene_id == "sc1" and round_trip.action.intensity == 0.7,
       "fire_scene action round-trips through JSON by its discriminator")
+check(t_scene.source == "authored" and t_scene.generator_key is None,
+      "a plain SpectraTrigger defaults to source=authored, no generator_key")
+
+# front 3: scene_id=None is a legal fire_scene action (kernel-routed at fire time)
+t_kernel = SpectraTrigger(timestamp_ms=1200,
+                          action=FireSceneAction(scene_id=None, intensity=0.6),
+                          source="generated", generator_key="section:1200")
+check(t_kernel.action.scene_id is None, "fire_scene accepts scene_id=None")
+round_trip_k = SpectraTrigger(**json.loads(t_kernel.model_dump_json()))
+check(round_trip_k.action.scene_id is None and round_trip_k.source == "generated"
+      and round_trip_k.generator_key == "section:1200",
+      "a generated, kernel-routed trigger round-trips its provenance and None scene_id")
+expect_invalid(lambda: FireSceneAction(scene_id="   "),
+              "blank (whitespace-only) scene_id")
 
 t_resp = SpectraTrigger(timestamp_ms=500,
                         action=FireResponseAction(event_class="drop", intensity=0.9))
@@ -162,6 +177,25 @@ r = client.delete(f"/api/triggers/{trig_id}", params={"uri": URI_B})
 check(r.status_code == 200, "DELETE /api/triggers/{id} removes it")
 check(client.delete(f"/api/triggers/{trig_id}", params={"uri": URI_B}).status_code == 404,
       "deleting an already-gone trigger → 404")
+
+# front 3: scene_id=None (kernel-routed) is accepted, no 422
+kernel_routed = json.loads(SpectraTrigger(
+    timestamp_ms=300, action=FireSceneAction(scene_id=None)).model_dump_json())
+r = client.post("/api/triggers", params={"uri": URI_B}, json=kernel_routed)
+check(r.status_code == 200, "POST with scene_id=None (kernel-routed) is accepted")
+
+# front 3: the editing API always stamps source=authored — ownership transfer
+posing_as_generated = json.loads(SpectraTrigger(
+    timestamp_ms=400, action=FireSceneAction(scene_id=scene.id),
+    source="generated", generator_key="section:400").model_dump_json())
+r = client.post("/api/triggers", params={"uri": URI_B}, json=posing_as_generated)
+saved_id = r.json()["id"]
+saved = next(t for t in client.get("/api/triggers", params={"uri": URI_B}).json()
+            if t["id"] == saved_id)
+check(saved["source"] == "authored" and saved["generator_key"] is None,
+      "the authoring API always stamps source=authored (generator_key cleared), "
+      "even when the posted body claims source=generated — editing a generated "
+      "trigger through this endpoint IS the ownership-transfer edit")
 
 # ═══ 4. the clock (fakes — pure crossing/rearm/rewind logic) ════════════════
 
@@ -276,6 +310,73 @@ status = engine.status()
 check(status["track_uri"] == "song" and status["last_fire"]["ok"] is True,
       "status() surfaces the current song and last fire outcome")
 
+# front 3: scene_id=None resolves through the injected select_scene at fire time
+song["kernel"] = [SpectraTrigger(timestamp_ms=100,
+                                 action=FireSceneAction(scene_id=None, intensity=0.42),
+                                 source="generated", generator_key="section:100")]
+select_calls: list[float] = []
+
+
+def fake_select_scene(intensity):
+    select_calls.append(intensity)
+    return "kernel-picked-scene"
+
+
+engine7 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                        fire_scene=fake_fire_scene, select_scene=fake_select_scene)
+asyncio.run(engine7.on_track_state("kernel"))
+fired7 = asyncio.run(engine7.tick(100))
+check(len(fired7) == 1 and select_calls == [0.42]
+      and fired_scene[-1] == ("kernel-picked-scene", None, 0.42),
+      "a scene_id=None fire_scene action resolves through select_scene at the "
+      "TRIGGER's own intensity, then fires the picked scene through the same "
+      "fire_scene choke point a baked scene_id uses")
+
+# scene_id=None + the kernel ladder terminating at STAY (picked_id=None) fires nothing
+song["kernel_stay"] = [SpectraTrigger(timestamp_ms=100,
+                                      action=FireSceneAction(scene_id=None),
+                                      source="generated", generator_key="section:100")]
+fire_scene_calls_before = len(fired_scene)
+engine8 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                        fire_scene=fake_fire_scene, select_scene=lambda i: None)
+asyncio.run(engine8.on_track_state("kernel_stay"))
+fired8 = asyncio.run(engine8.tick(100))
+check(len(fired8) == 1 and len(fired_scene) == fire_scene_calls_before
+      and engine8.last_fire == {"id": song["kernel_stay"][0].id, "kind": "fire_scene",
+                                "ok": True, "picked": None},
+      "select_scene returning None (the kernel's terminal STAY) fires nothing, "
+      "but the crossing still counts as handled — not a failure")
+
+# front 3: the room's midsong_triggers_enabled switch gates GENERATED triggers
+# only — an authored trigger at the same moment still fires
+song["gated"] = [
+    SpectraTrigger(timestamp_ms=100, action=FireSceneAction(scene_id="s"),
+                  source="generated"),
+    SpectraTrigger(timestamp_ms=100, action=FireResponseAction(event_class="flare"),
+                  source="authored"),
+]
+gated_fire_scene: list = []
+gated_fire_resp: list = []
+
+
+async def gated_fire_scene_fn(*a):
+    gated_fire_scene.append(a)
+
+
+async def gated_fire_resp_fn(*a):
+    gated_fire_resp.append(a)
+
+
+engine9 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                        fire_scene=gated_fire_scene_fn, fire_response=gated_fire_resp_fn,
+                        midsong_enabled=lambda: False)
+asyncio.run(engine9.on_track_state("gated"))
+fired9 = asyncio.run(engine9.tick(100))
+check(len(fired9) == 1 and gated_fire_scene == [] and len(gated_fire_resp) == 1,
+      "midsong_enabled=False skips the GENERATED trigger's crossing but the "
+      "AUTHORED trigger at the same moment still fires — the fallback switch "
+      "only ever gates generated triggers")
+
 # ═══ 5. production wiring — the real (test-isolated, dark) choke points ═════
 # fire_scene_by_id is NOT exercised here: like scene_sequencer's own spec
 # coverage (check_spectra.py), it always compiles dry_run=False (the real
@@ -307,5 +408,137 @@ check(color_journey.load_room().active_set_id == "warm-set",
       "the production singleton's select_color_set default reaches the "
       "real drift_conductor.apply_set_directly — the room's active set "
       "moved on the trigger's word, exactly like POST /api/room-color/apply")
+
+# front 3: the production _default_select_scene reaches the REAL selection
+# kernel (build_scene_candidates + select), not just an injected fake.
+from spectra.models.sequencer import SelectorEntry, SequencerConfig
+from spectra.services import sequencer_store
+
+kernel_scene = SceneV2(name="Kernel Pick", devices=[
+    SceneDeviceConfig(target_kind="category", target="Matrix", effect_type="radial")])
+scene_store.save(kernel_scene)
+sequencer_store.save_config(SequencerConfig(entries={
+    kernel_scene.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}])}))
+picked = prod_engine._select_scene(0.5)
+check(picked == kernel_scene.id,
+      "_default_select_scene reached the real sequencer_store config + "
+      "selection_kernel.select — the sole configured, existing scene is "
+      "the only positive-score candidate, so it wins the draw")
+
+check(prod_engine._default_midsong_enabled() is True,
+      "the production midsong-enabled default reads the real room_controls "
+      "store and reports its documented default (True)")
+from spectra.services import room_controls as rc
+rc.save_room_controls(rc.RoomControlState(midsong_triggers_enabled=False))
+check(prod_engine._default_midsong_enabled() is False,
+      "flipping room_controls.midsong_triggers_enabled is the one-word "
+      "fallback — the production default reflects it immediately")
+
+# ═══ 6. mid-song generation (front 3) ════════════════════════════════════
+
+from spectra.services import midsong_generator
+
+GEN_URI = "spotify:track:midsong-gen"
+shapes_dir = scfg.AUDIO_SHAPES_DIR
+shapes_dir.mkdir(parents=True, exist_ok=True)
+(shapes_dir / "gensong.json").write_text(json.dumps({"spotify_uri": GEN_URI}))
+sections_v1 = [
+    {"start_ms": 0, "end_ms": 10000, "label": "intro", "energy_rms": 0.1},
+    {"start_ms": 10000, "end_ms": 30000, "label": "verse", "energy_rms": 0.4},
+    {"start_ms": 30000, "end_ms": 45000, "label": "drop", "energy_rms": 0.9},
+]
+(shapes_dir / "gensong.librosa.json").write_text(json.dumps({"sections": sections_v1}))
+
+moments = midsong_generator.candidate_moments(GEN_URI)
+check([m[0] for m in moments] == [10000, 30000],
+      "candidate_moments skips ms<=0 (the song's own start) and returns the "
+      "remaining section boundaries in analysis order")
+check(moments[0][1] < moments[1][1],
+      "the quieter (verse) boundary seeds a lower intensity than the louder "
+      "(drop) boundary — per-song minmax renormalization keeps relative "
+      "magnitude, same convention as scripts/backfill_trigger_intensity.py")
+check(all(0.0 <= m[1] <= 1.0 for m in moments), "seeded intensities stay in [0,1]")
+
+summary1 = midsong_generator.generate_for_song(GEN_URI)
+check(summary1 == {"moments": 2, "added": 2, "updated": 0, "deleted": 0,
+                   "skipped_authored": 0},
+      "first generation adds one trigger per candidate moment")
+gen_triggers = trigger_store.list_for_song(GEN_URI)
+check(len(gen_triggers) == 2 and all(t.source == "generated" for t in gen_triggers)
+      and all(t.action.scene_id is None for t in gen_triggers),
+      "generated triggers carry source=generated and no baked scene_id "
+      "(kernel-routed at fire time)")
+check({t.generator_key for t in gen_triggers} == {"section:10000", "section:30000"},
+      "generator_key ties each generated trigger back to its analysis moment")
+
+summary2 = midsong_generator.generate_for_song(GEN_URI)
+check(summary2 == {"moments": 2, "added": 0, "updated": 0, "deleted": 0,
+                   "skipped_authored": 0},
+      "regenerating against an UNCHANGED analysis is a pure no-op")
+check({t.id for t in trigger_store.list_for_song(GEN_URI)}
+      == {t.id for t in gen_triggers},
+      "regeneration reuses the same trigger ids — no churn")
+
+# edit preservation: touching a generated trigger through the API claims it
+edited_id = gen_triggers[0].id
+touched = json.loads(SpectraTrigger(
+    id=edited_id, timestamp_ms=gen_triggers[0].timestamp_ms + 500,
+    action=FireSceneAction(scene_id=kernel_scene.id),
+    source="generated", generator_key=gen_triggers[0].generator_key,
+).model_dump_json())
+r = client.post("/api/triggers", params={"uri": GEN_URI}, json=touched)
+check(r.status_code == 200, "editing a generated trigger through the API succeeds")
+check(trigger_store.get(GEN_URI, edited_id).source == "authored",
+      "the editing API flipped the touched trigger to authored")
+
+summary3 = midsong_generator.generate_for_song(GEN_URI)
+edited_after = trigger_store.get(GEN_URI, edited_id)
+check(edited_after.timestamp_ms == gen_triggers[0].timestamp_ms + 500
+      and edited_after.action.scene_id == kernel_scene.id,
+      "regeneration left the edited (now-authored) trigger completely alone")
+check(summary3["skipped_authored"] == 1 and summary3["added"] == 1,
+      "the edited trigger's generator_key is no longer claimed by a generated "
+      "trigger, so regeneration seeds a FRESH generated trigger for that same "
+      "analysis moment — the owner's edit and the reseed coexist")
+
+# a changed analysis deletes stale generated triggers, spares authored ones
+sections_v2 = [
+    {"start_ms": 0, "end_ms": 15000, "label": "intro", "energy_rms": 0.1},
+    {"start_ms": 15000, "end_ms": 40000, "label": "verse", "energy_rms": 0.5},
+    {"start_ms": 40000, "end_ms": 50000, "label": "drop", "energy_rms": 0.95},
+]
+(shapes_dir / "gensong.librosa.json").write_text(json.dumps({"sections": sections_v2}))
+summary4 = midsong_generator.generate_for_song(GEN_URI)
+check(summary4 == {"moments": 2, "added": 2, "updated": 0, "deleted": 2,
+                   "skipped_authored": 1},
+      "a changed analysis deletes generated triggers tied to boundaries that "
+      "no longer exist and seeds fresh ones for the new boundaries")
+after4 = trigger_store.list_for_song(GEN_URI)
+still_edited = trigger_store.get(GEN_URI, edited_id)
+check(still_edited is not None and still_edited.source == "authored"
+      and still_edited.action.scene_id == kernel_scene.id,
+      "the owner's authored/edited trigger survives an analysis change untouched")
+check({t.generator_key for t in after4 if t.source == "generated"}
+      == {"section:15000", "section:40000"},
+      "the surviving generated triggers match only the NEW analysis's boundaries")
+
+# unanalyzed song: a clean no-op, not an error
+NO_ANALYSIS_URI = "spotify:track:no-analysis-yet"
+check(midsong_generator.candidate_moments(NO_ANALYSIS_URI) == [],
+      "no analysis on disk → no candidate moments")
+check(midsong_generator.generate_for_song(NO_ANALYSIS_URI)
+      == {"moments": 0, "added": 0, "updated": 0, "deleted": 0, "skipped_authored": 0},
+      "generation for an unanalyzed song is a clean no-op")
+
+# flat-energy sections (zero span) fall back to 0.5, not a divide-by-zero
+FLAT_URI = "spotify:track:flat-energy"
+(shapes_dir / "flatsong.json").write_text(json.dumps({"spotify_uri": FLAT_URI}))
+(shapes_dir / "flatsong.librosa.json").write_text(json.dumps({"sections": [
+    {"start_ms": 0, "end_ms": 5000, "energy_rms": 0.5},
+    {"start_ms": 5000, "end_ms": 10000, "energy_rms": 0.5},
+]}))
+flat_moments = midsong_generator.candidate_moments(FLAT_URI)
+check(len(flat_moments) == 1 and flat_moments[0][1] == 0.5,
+      "equal-energy sections (zero span) fall back to a flat 0.5 intensity")
 
 print("\nALL CHECKS PASSED")

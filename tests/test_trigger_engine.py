@@ -263,3 +263,85 @@ def test_trigger_fires_select_color_set_action_on_the_real_pipeline(tmp_path):
             await host.shutdown()
 
     _run(main())
+
+
+# ── proof 4: a GENERATED trigger's scene_id=None resolves through the real
+#    selection kernel, then fires and lands exactly like a hand-picked one ──
+
+def test_generated_trigger_resolves_scene_via_kernel_and_fires_at_its_moment(
+    tmp_path, monkeypatch,
+):
+    """front 3 (decision-mid-song-model.md): a mid-song-generated trigger
+    never bakes a scene_id — it names a moment, and spectra.services.
+    trigger_engine's production _default_select_scene resolves WHICH scene
+    through the SAME selection kernel the sequencer's own rolls use
+    (spectra.services.selection_kernel + sequencer_store), at the trigger's
+    own intensity. This proof exercises that real default (not an injected
+    fake) end to end: real sequencer config on disk -> real kernel draw ->
+    real resolve/compile/land on the dummy device, at the exact tick the
+    engine's clock crosses the trigger's timestamp."""
+    from spectra import config as scfg
+    from spectra.models.binding import ValueBinding
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.models.sequencer import SelectorEntry, SequencerConfig
+    from spectra.models.trigger import FireSceneAction, SpectraTrigger
+    from spectra.services import scene_store, sequencer_store
+    from spectra.services.trigger_engine import TriggerEngine
+
+    monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
+    monkeypatch.setattr(scfg, "SEQUENCER_FILE", tmp_path / "sequencer.json")
+
+    _categories_fixture(tmp_path)
+    # Same gradient_scale/trigger_intensity binding as proof 1 — a landed
+    # value can only come from the trigger's own intensity flowing through
+    # both the kernel draw AND the fire.
+    scene = SceneV2(name="Kernel Picked", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": ValueBinding(
+            signal="trigger_intensity", out_min=0.5, out_max=2.0)})])
+    scene_store.save(scene)
+    # The sole candidate: a flat curve, so the kernel's weighted draw has
+    # exactly one positive-score option and must pick it deterministically.
+    sequencer_store.save_config(SequencerConfig(entries={
+        scene.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}])}))
+
+    trig = SpectraTrigger(timestamp_ms=3000,
+                          action=FireSceneAction(scene_id=None, intensity=0.5),
+                          source="generated", generator_key="section:3000")
+
+    async def main():
+        host, virtual = await _host(tmp_path, "kernelfire")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                from spectra.services.drift_conductor import DriftConductor
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+                conductor = DriftConductor(executor=executor,
+                                           clock=lambda: clock.now, leg_s=20.0)
+                fire_scene = await _make_fire_scene(executor, conductor, scene)
+
+                # select_scene is left at its production default — this is
+                # the real kernel, not an injected picker.
+                engine = TriggerEngine(list_triggers=lambda uri: [trig],
+                                       fire_scene=fire_scene)
+                await engine.on_track_state("song:kernel")
+
+                await engine.tick(2000)
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0), \
+                    "nothing fires before the trigger's timestamp is crossed"
+
+                fired = await engine.tick(3000)
+                assert len(fired) == 1 and fired[0].id == trig.id
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.25), \
+                    "the kernel-picked scene fired using the TRIGGER's own " \
+                    "intensity (0.5 -> 1.25), landed on the real dummy " \
+                    "device on the crossing tick — same as a baked scene_id"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())

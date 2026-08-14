@@ -222,12 +222,15 @@ export interface RoomColorState {
  * Multiplier / ledfx_ambient / ledfx_ambient_color / ledfx_global_transition
  * action equivalents. brightness_multiplier is the only one wired to a
  * write seam today (fx_executor + scene_compiler); ambient_enabled/_color
- * and global_transition_ms are state-only until the room-modes build. */
+ * and global_transition_ms are state-only until the room-modes build.
+ * midsong_triggers_enabled (front 3) is the mid-song generation fallback —
+ * off skips every GENERATED trigger's fire; hand-authored ones still fire. */
 export interface RoomControlState {
   brightness_multiplier: number;
   ambient_enabled: boolean;
   ambient_color: string | null;
   global_transition_ms: number;
+  midsong_triggers_enabled: boolean;
 }
 
 /** Full spot-effects Colour Set card shape (read + the one supported
@@ -403,10 +406,13 @@ export interface EngineStatus {
 
 /** TS mirrors for spectra/models/trigger.py — THE KEYSTONE: a per-song
  * moment that fires one SPECTRA-native action. Discriminated by `kind`,
- * same convention as pydantic's Field(discriminator="kind"). */
+ * same convention as pydantic's Field(discriminator="kind"). scene_id null
+ * (front 3) means "pick at fire time through the sequencer selection
+ * kernel" — a generated trigger's own default; a hand-picked scene names
+ * it directly. */
 export interface FireSceneAction {
   kind: 'fire_scene';
-  scene_id: string;
+  scene_id: string | null;
   intensity: number;
   color_set_id: string | null;
 }
@@ -425,10 +431,19 @@ export interface SelectColorSetAction {
 export type TriggerAction = FireSceneAction | FireResponseAction | SelectColorSetAction;
 export type TriggerActionKind = TriggerAction['kind'];
 
+/** source/generator_key: front 3's provenance — "generated" is a
+ * midsong_generator seed (generator_key ties it back to the analysis
+ * moment); "authored" is everything else, including a generated trigger a
+ * human has since touched (the editing API always stamps it back to
+ * authored — see spectra/api/triggers.py). */
+export type TriggerSource = 'authored' | 'generated';
+
 export interface SpectraTrigger {
   id: string;
   timestamp_ms: number;
   enabled: boolean;
+  source: TriggerSource;
+  generator_key: string | null;
   action: TriggerAction;
 }
 
@@ -436,5 +451,7 @@ export const newTrigger = (timestampMs: number): SpectraTrigger => ({
   id: uuid(),
   timestamp_ms: Math.max(0, Math.round(timestampMs)),
   enabled: true,
+  source: 'authored',
+  generator_key: null,
   action: { kind: 'fire_scene', scene_id: '', intensity: 0.5, color_set_id: null },
 });

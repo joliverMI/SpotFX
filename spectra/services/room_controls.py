@@ -15,6 +15,15 @@ legacy picks: decision-legacy-retirement-picks.md):
                           equivalent — the default ramp new scene-entry
                           blends use when a scene doesn't author its own
                           entry_ramp_ms (SceneV2.entry_ramp_ms == 0).
+  midsong_triggers_enabled  front 3's fallback switch
+                          (decision-mid-song-model.md): whether GENERATED
+                          triggers (spectra/services/midsong_generator.py,
+                          source="generated") are allowed to fire —
+                          checked by trigger_engine at fire time, per
+                          crossing, same as a disabled trigger's own
+                          `enabled` gate. Hand-authored triggers always
+                          fire regardless. Default True; flipping it off is
+                          the one-word fallback to transitions-only.
 
 Scope is deliberately the CONTROLS, not the behaviour: ambient_enabled today
 only records the switch (folding into the room-control surface instead of
@@ -46,6 +55,7 @@ class RoomControlState(BaseModel):
     # FALLBACK ramp scene_compiler.fire_scene uses when a scene's own
     # entry_ramp_ms is 0 — the legacy ledfx_global_transition equivalent.
     global_transition_ms: int = Field(default=0, ge=0, le=20000)
+    midsong_triggers_enabled: bool = True
 
 
 def apply_brightness(params: dict, multiplier: float) -> dict:

@@ -25,6 +25,25 @@ label filtering, per-trigger display-mode/colour-group/drop-group overrides,
 Override Blend (all owner-retired or routed elsewhere) — a SPECTRA trigger
 carries only what it needs to name a moment and an action.
 
+Front 3 (mid-song generation, decision-mid-song-model.md binding): a
+generated trigger's fire_scene action carries scene_id=None — "name a
+moment, not a scene" — so spectra.services.trigger_engine routes the pick
+through the sequencer selection kernel (curve × genre × affinity) AT FIRE
+TIME, the same kernel the sequencer's own rolls use
+(spectra.services.midsong_generator). scene_id is only ever baked in at
+generation time when the analysis carries an explicit scene cue (none does
+today — see midsong_generator's module docstring) or when a human picks one
+by hand.
+
+Provenance (front 3): source distinguishes a hand-placed trigger from one
+midsong_generator seeded, and generator_key ties a generated trigger back to
+the analysis moment that produced it — both are how regeneration stays
+idempotent and edit-preserving. spectra.api.triggers.upsert_trigger stamps
+every write that arrives through the human editing API back to
+source="authored" (generator_key cleared) — the ownership-transfer rule: a
+touched generated trigger becomes the owner's, so regeneration never
+overwrites it.
+
 Executable spec: scripts/check_triggers.py
 """
 from __future__ import annotations
@@ -32,20 +51,31 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from spectra.models.scene import ResponseClass
 
 TriggerActionKind = Literal["fire_scene", "fire_response", "select_color_set"]
+TriggerSource = Literal["authored", "generated"]
 
 
 class FireSceneAction(BaseModel):
     kind: Literal["fire_scene"] = "fire_scene"
-    scene_id: str = Field(min_length=1)
+    # None = pick at fire time through the sequencer selection kernel (the
+    # generation-friendly default for a generated trigger — see the module
+    # docstring); a hand-picked or explicit-cue scene names it directly.
+    scene_id: Optional[str] = None
     intensity: float = Field(default=0.5, ge=0.0, le=1.0)
     # None = the scene fires wearing the room's active colour set (the
     # ordinary case — scene_compiler.fire_scene's own default).
     color_set_id: Optional[str] = None
+
+    @field_validator("scene_id")
+    @classmethod
+    def _scene_id_not_blank(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("scene_id must be non-empty when given")
+        return v
 
 
 class FireResponseAction(BaseModel):
@@ -66,11 +96,18 @@ TriggerAction = Annotated[
 
 
 class SpectraTrigger(BaseModel):
-    """One hand-placed (or later, generated) moment in one song. enabled
-    lets an owner disarm a trigger without losing its placement/action —
-    the authoring surface's "delete" is a real removal; this flag is for a
-    future mute gesture, mirrored from the legacy trigger's own field."""
+    """One hand-placed or generated moment in one song. enabled lets an
+    owner disarm a trigger without losing its placement/action — the
+    authoring surface's "delete" is a real removal; this flag is for a
+    future mute gesture, mirrored from the legacy trigger's own field.
+
+    source/generator_key: provenance for front 3's mid-song generation —
+    see the module docstring and spectra.services.midsong_generator. An
+    "authored" trigger (the default, and every pre-front-3 trigger already
+    on disk) is never touched by regeneration."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp_ms: int = Field(ge=0)
     enabled: bool = True
+    source: TriggerSource = "authored"
+    generator_key: Optional[str] = None
     action: TriggerAction

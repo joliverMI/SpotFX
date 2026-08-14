@@ -7,7 +7,10 @@ import { useState } from 'react';
 import CollapsibleCard from '../../components/CollapsibleCard';
 import HelpLink from '../../help/HelpLink';
 import { useToast } from '../../components/Toast';
-import { useDeleteSpectraTrigger, useSaveSpectraTrigger, useScenes, useSpectraTriggers } from '../../queries';
+import {
+  useDeleteSpectraTrigger, useGenerateMidsongTriggers, useSaveSpectraTrigger,
+  useScenes, useSpectraTriggers,
+} from '../../queries';
 import { newTrigger } from '../../types';
 import type { SpectraTrigger } from '../../types';
 import type { Win } from '../canvas/frame';
@@ -29,6 +32,7 @@ export default function SpectraTriggersCard({
   const { data: scenes } = useScenes();
   const saveMutation = useSaveSpectraTrigger(uri);
   const deleteMutation = useDeleteSpectraTrigger(uri);
+  const generateMutation = useGenerateMidsongTriggers(uri);
   const toast = useToast();
   const [editing, setEditing] = useState<{ trigger: SpectraTrigger; isNew: boolean } | null>(null);
 
@@ -51,6 +55,18 @@ export default function SpectraTriggersCard({
               setEditing({ trigger: newTrigger(now), isNew: true });
             }}>
             + Add Trigger
+          </button>
+          <button style={{ fontSize: 12 }}
+            title="Seed/refresh mid-song triggers from this song's analysis — idempotent, never touches a trigger you've edited or placed by hand"
+            disabled={generateMutation.isPending}
+            onClick={() => generateMutation.mutate(undefined, {
+              onSuccess: (summary) => toast(
+                `Generated: +${summary.added} seeded, ${summary.updated} updated, `
+                + `${summary.deleted} removed (stale), ${summary.skipped_authored} of yours left alone`,
+                'info'),
+              onError: (e) => toast(`Generate failed: ${(e as Error).message}`, 'error'),
+            })}>
+            {generateMutation.isPending ? 'Generating…' : '⟳ Generate'}
           </button>
           <HelpLink topic="spectra-triggers" title="SPECTRA trigger authoring" />
         </span>
