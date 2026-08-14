@@ -4,6 +4,14 @@ amended by decision-review-answers.md).
 
 A scene = INITIAL CONDITIONS (every value fixed, ⚡-mapped, or 🎲-rolled)
 plus DECLARED MECHANISMS:
+  effect_steps — intensity-conditional EFFECT SELECTION (decision:
+               star-fold-entry-growth): a device entry may resolve to a
+               DIFFERENT EFFECT at different fire intensities — threshold
+               steps mirroring the steps-binding shape, each step carrying
+               its OWN effect + param set. Selection happens ONCE, at
+               fire/compile time (never a blend, never a mid-hold switch);
+               an empty list is the single-effect form and the plain
+               default, so every existing scene loads unchanged.
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
   responses  — the four event classes (flare/charge/lull/drop), each an
@@ -99,6 +107,17 @@ class DriftRef(BaseModel):
         return self
 
 
+class EffectStep(BaseModel):
+    """One rung of an entry's intensity-conditional effect selection: at or
+    above `threshold` the entry resolves to THIS effect with THIS param set
+    (params may bind, exactly like the base set). Same-effect-different-
+    params rungs are a plain ⚡ steps binding's job — effect steps exist to
+    change the EFFECT, so every variant's effect_type must be distinct."""
+    threshold:   float = Field(gt=0.0, le=1.0)
+    effect_type: str
+    params:      dict[str, SceneParamValue] = Field(default_factory=dict)
+
+
 class SceneDeviceConfig(BaseModel):
     # "all" targets every imported virtual (target stays empty); category
     # targets expand to member virtuals at compile time. Narrower entries
@@ -108,6 +127,13 @@ class SceneDeviceConfig(BaseModel):
     target:      str = ""
     effect_type: str = ""
     params:      dict[str, SceneParamValue] = Field(default_factory=dict)
+    # Intensity-conditional effect selection: the plain effect_type/params
+    # pair is the entry BELOW the first threshold (and when the fire has no
+    # intensity axis — the base is the fallback, mirroring a steps binding);
+    # the last step whose threshold <= fire intensity wins, replacing effect
+    # AND params wholesale. Resolved once per fire in
+    # scene_compiler.resolve_scene; [] = the single-effect form (default).
+    effect_steps: list[EffectStep] = Field(default_factory=list)
     color:       SceneColorAssignment = Field(default_factory=SceneColorAssignment)
     brightness:            float | ValueBinding | None = None  # None = leave alone
     background_brightness: float | ValueBinding | None = None
@@ -122,12 +148,57 @@ class SceneDeviceConfig(BaseModel):
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 if not 0.0 <= float(v) <= 1.0:
                     raise ValueError(f"{field} must be within [0, 1], got {v}")
-        for pname in self.drift:
-            if pname not in self.params and pname not in (
-                    "brightness", "background_brightness"):
+        if self.effect_steps:
+            # Canonical storage form: ascending thresholds (BindingStep rule).
+            self.effect_steps.sort(key=lambda s: s.threshold)
+            thresholds = [s.threshold for s in self.effect_steps]
+            if len(set(thresholds)) != len(thresholds):
                 raise ValueError(
-                    f"drift declared for '{pname}' but the entry sets no such param")
+                    f"effect steps need distinct thresholds (got {thresholds})")
+            effects = [self.effect_type] + [s.effect_type
+                                            for s in self.effect_steps]
+            if "" in effects[1:]:
+                raise ValueError("an effect step has no effect_type")
+            if len(set(effects)) != len(effects):
+                raise ValueError(
+                    "effect steps must each name a DIFFERENT effect "
+                    f"(got {effects}); same-effect variation over intensity "
+                    "is a ⚡ steps binding on the param, not an effect step")
+        step_params = {p for step in self.effect_steps for p in step.params}
+        for pname in self.drift:
+            if pname not in self.params and pname not in step_params \
+                    and pname not in ("brightness", "background_brightness"):
+                raise ValueError(
+                    f"drift declared for '{pname}' but no variant of the "
+                    "entry sets such a param")
         return self
+
+    def select_variant(self, intensity: Optional[float]) -> tuple[
+            str, dict[str, SceneParamValue]]:
+        """The (effect_type, params) a fire at this intensity resolves to:
+        the last step whose threshold <= intensity wins; below the first
+        threshold — or with no intensity axis at all — the base pair is the
+        answer (the base IS the fallback, the steps-binding rule)."""
+        chosen: Optional[EffectStep] = None
+        if intensity is not None:
+            for step in self.effect_steps:   # validator keeps these ascending
+                if intensity >= step.threshold:
+                    chosen = step
+        if chosen is None:
+            return self.effect_type, self.params
+        return chosen.effect_type, chosen.params
+
+    def params_for_effect(self, effect_type: str) -> dict[str, SceneParamValue]:
+        """The param set belonging to the variant a past fire selected,
+        keyed by the entry's LIVE effect (unambiguous — variants must name
+        distinct effects). Engine truth for surges: re-rolls re-resolve the
+        selected variant's bindings, never another variant's. An unknown
+        effect falls back to the base set (the registry gate then decides
+        what actually lands)."""
+        for step in self.effect_steps:
+            if step.effect_type == effect_type:
+                return step.params
+        return self.params
 
 
 class FlareBand(BaseModel):
@@ -279,8 +350,11 @@ class SceneV2(BaseModel):
         """Every dice letter used by the scene's 🎲 bindings, sorted."""
         letters: set[str] = set()
         for dev in self.devices:
-            for value in (*dev.params.values(), dev.brightness,
-                          dev.background_brightness):
+            values = [*dev.params.values(), dev.brightness,
+                      dev.background_brightness]
+            for step in dev.effect_steps:
+                values.extend(step.params.values())
+            for value in values:
                 if isinstance(value, ValueBinding) and value.dice:
                     letters.add(value.dice)
         return sorted(letters)

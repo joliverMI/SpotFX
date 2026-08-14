@@ -203,7 +203,19 @@ class DriftConductor:
             entry = entries.get(state.entry_id)
             if entry is None:
                 continue
+            # Stepped-effect entry: drift follows the variant this fire
+            # selected (the write's effect). A declared drift whose param
+            # the selected variant doesn't set sits out until a fire
+            # selects one that does — stated, never a glide on a param the
+            # live effect doesn't carry.
+            selected_params = (entry.params_for_effect(state.effect_type)
+                               if entry.effect_steps else None)
             for param, ref in entry.drift.items():
+                if (selected_params is not None
+                        and param not in selected_params
+                        and param not in ("brightness",
+                                          "background_brightness")):
+                    continue
                 spec = self._resolve_spec(ref)
                 if spec is None:
                     continue

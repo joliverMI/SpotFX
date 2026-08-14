@@ -45,6 +45,15 @@ Per event, fed by the bridge with the fire's intensity:
                   A chromatic pick moves the room's wheel position, and the
                   room journey RESUMES FROM THE NEW POINT — the jump moves
                   the story, the walk carries on.
+  Stepped-effect entries (SceneDeviceConfig.effect_steps) and surges — the
+  stated interplay, simple on purpose: EFFECT SELECTION IS FIRE-TIME ONLY.
+  A surge never switches an entry's effect; re-rolls re-resolve the params
+  of the variant the FIRE selected (the entry's live effect — the same
+  registry gate that already scopes patches), patches broadcast by name
+  against the live effects as always, and the next FIRE re-selects and
+  re-baselines honestly (conductor.on_scene_fire seeds from the fire's
+  writes, which carry the selected effect).
+
   3. CARRY (the owner's words): patches, re-rolls, held gains, and colour
      jumps permanently move the baseline drift resumes from
      (conductor.on_surge). A surge on a followed param is an impulse the
@@ -194,7 +203,9 @@ class ResponseEngine:
         """Fresh dice: every signal="random" binding re-resolves in one new
         FireContext (correlated letters stay correlated — one roll per
         letter) and the changed params jump on the entry's winning
-        virtuals."""
+        virtuals. Stepped-effect entries re-roll the variant the FIRE
+        selected (keyed by the entry's live effect) — a surge re-rolls
+        dice, it never re-selects the effect."""
         ctx = FireContext(intensity, rng=self._rng)
         entry_vids: dict[str, list[str]] = {}
         for vid, state in self.conductor.virtuals.items():
@@ -204,10 +215,11 @@ class ResponseEngine:
             vids = entry_vids.get(dev.id, [])
             if not vids:
                 continue
+            live_effect = self.conductor.virtuals[vids[0]].effect_type
             targets: dict[str, Any] = {}
-            for pname, value in dev.params.items():
+            for pname, value in dev.params_for_effect(live_effect).items():
                 if isinstance(value, ValueBinding) and value.signal == "random":
-                    meta = device_model.get_param_meta(dev.effect_type, pname)
+                    meta = device_model.get_param_meta(live_effect, pname)
                     kind, lo, hi = binding_resolver.kind_for_meta(meta)
                     out = binding_resolver.apply_binding(value, ctx, kind, lo, hi)
                     if out is not None:

@@ -103,6 +103,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'stepped-effect',
+        title: 'Stepped effect — a different effect at high intensity',
+        keywords: 'effect steps threshold intensity conditional selection melt power star hype fold variant',
+        body: [
+          'An entry can resolve to a DIFFERENT effect at different fire intensities: the ⚡ Stepped effect strip adds threshold steps, each naming its own effect with its own param set (STAR\'s strips: melt below ⚡ 0.7, power at/above — the Hype Star fold). The base effect fires below the first threshold and whenever no intensity signal exists. Selection is a hard step at fire time — never a blend, never a mid-hold switch; the next fire re-selects.',
+          'The params grid edits whichever variant chip is highlighted. Colours, brightness and drift stay entry-level and ride whichever effect the fire selects. Test Fire at a chosen intensity is the honest window: its writes show exactly the effect that intensity picks (an "effect" row appears in the resolution table). Same-effect variation over intensity is a plain ⚡ steps binding on the param — steps here must each name a different effect.',
+        ],
+      },
+      {
         id: 'tab-drift',
         title: 'Drift tab — declarations the engine runs',
         keywords: 'creep follow wander slow evolution profile inline live legs',

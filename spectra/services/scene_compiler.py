@@ -3,12 +3,17 @@ model and the one write seam (fx_seam).
 
 Two stages, deliberately separate (report §2.3):
 
-  resolve_scene(scene, ctx) — every ValueBinding → scalar via
+  resolve_scene(scene, ctx) — FIRST, entries with effect_steps select their
+      variant at the fire intensity (decision: star-fold-entry-growth): the
+      winning step's effect + param set replace the base pair wholesale, and
+      the pick lands in the resolution report as an "effect" row — so the
+      editor's test-fire at a chosen intensity shows exactly the effect that
+      intensity selects. THEN every ValueBinding → scalar via
       binding_resolver (map/steps/fallback/random_sign/dice, coercion from
-      the shared param registry). Returns a fully-scalar deep copy plus a
-      resolution report (the editor's test-fire panel shows exactly what a
-      real fire at that intensity would send). A binding resolving to None
-      leaves its field unset — the fire doesn't touch that param.
+      the shared param registry — against the SELECTED effect's params).
+      Returns a fully-scalar single-effect deep copy plus the report. A
+      binding resolving to None leaves its field unset — the fire doesn't
+      touch that param.
 
   compile_scene(resolved, color_set) — the pure SceneV2 compiler, ported
       verbatim in semantics: "all" expands to every imported virtual,
@@ -42,6 +47,15 @@ def resolve_scene(scene: SceneV2, ctx: FireContext) -> SceneV2:
     value space. ctx.resolved collects the per-binding report."""
     resolved = scene.model_copy(deep=True)
     for dev in resolved.devices:
+        if dev.effect_steps:
+            effect_type, params = dev.select_variant(ctx.intensity)
+            ctx.resolved.append({
+                "entry": dev.target or "all", "param": "effect",
+                "signal": "trigger_intensity", "dice": None,
+                "value": effect_type})
+            dev.effect_type = effect_type
+            dev.params = dict(params)
+            dev.effect_steps = []
         for pname, value in list(dev.params.items()):
             if not isinstance(value, ValueBinding):
                 continue
@@ -117,6 +131,10 @@ def compile_scene(scene: SceneV2,
     scene (resolve_scene first); a stray binding here is a programming error
     and fails loudly rather than serializing into a LedFX config."""
     for dev in scene.devices:
+        if dev.effect_steps:
+            raise ValueError(
+                f"compile_scene got unresolved effect steps on "
+                f"'{dev.target or 'all'}' — run resolve_scene first")
         for pname, value in dev.params.items():
             if isinstance(value, ValueBinding):
                 raise ValueError(
@@ -184,10 +202,12 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                      color_set: Optional[ColorSetCard] = None,
                      dry_run: bool = True,
                      rng: Random | None = None) -> dict[str, Any]:
-    """Resolve at the given intensity, compile, and (live only) send through
-    the seam. The returned resolution report + writes are the test-fire
-    display: dry and live runs share every step up to the seam. With no
-    explicit color_set the scene wears the room's active set."""
+    """Resolve at the given intensity (effect selection included), compile,
+    and (live only) send through the seam. The returned resolution report +
+    writes are the test-fire display: dry and live runs share every step up
+    to the seam — a test-fire at a chosen intensity IS the honest window
+    into what that intensity selects. With no explicit color_set the scene
+    wears the room's active set."""
     if color_set is None:
         color_set = room_active_set()
     ctx = FireContext(intensity, rng=rng)

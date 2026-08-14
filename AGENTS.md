@@ -66,8 +66,13 @@ standalone entry). Import discipline is load-bearing: nothing under
 library, incl. `fx/device_model.py`) and stdlib/third-party; music/state
 inputs arrive via the S2 read-only bridge (below), which degrades to 0.5
 neutral intensity when down (stated). Its scene model (`spectra/models/scene.py`) grows SceneV2
-with value bindings (+`dice` correlation), a four-class `responses` block
-(legacy `flare_bands` loads as the flare class), drift declarations, and
+with value bindings (+`dice` correlation), intensity-stepped effect
+selection (`effect_steps`: a device entry resolves to a DIFFERENT effect
+at/above ⚡ thresholds, fire-time only, base = fallback — decision:
+star-fold-entry-growth; deploy migration for STAR's strips:
+`scripts/seed_star_strips.py --apply`, NEVER by re-running the v2 seeder),
+a four-class `responses` block (legacy `flare_bands` loads as the flare
+class), drift declarations, and
 the colour journey (room-level walk, per-scene OVERRIDE with custody
 semantics — `spectra/services/color_journey.py` docstring is the binding
 statement). Storage: `storage/spectra/` (own scenes/sequencer/drift/room
