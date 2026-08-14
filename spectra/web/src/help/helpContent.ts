@@ -690,4 +690,44 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  {
+    id: 'review-page',
+    title: 'Review (notes against the reconstructed show)',
+    keywords: 'review reconstruct show log playback timeline pin jump session desk',
+    intro:
+      'The desk-review counterpart to the Feedback page: pick a sent feedback session and a song, and see your notes pinned against everything that actually fired during that stretch of the show — scenes, responses, colour sets, and trigger fires, in song-position order. Best used at a desk after the show, but stays usable from a phone.',
+    entries: [
+      {
+        id: 'review-session-song',
+        title: 'Picking a session and song',
+        keywords: 'session picker song batch send',
+        body: [
+          'A "session" is one Send press on the Feedback page — everything queued and sent together. Pick a session from the dropdown, then pick a song from the ones you took notes on in that session; the review is always scoped to one song within one session.',
+        ],
+      },
+      {
+        id: 'review-lane-and-list',
+        title: 'The lane bar and the list',
+        keywords: 'lane bar marker tick pin vertical list',
+        table: [
+          ['Thin tick', 'A show-log event — colour-coded by kind (scene / response / colour set / trigger).'],
+          ['Tall pin', 'One of your notes, pinned at the song position it was nudged to.'],
+          ['Click a marker or row', 'Selects it and opens the detail panel below.'],
+          ['Hover a marker', 'Shows a quick summary without selecting it.'],
+        ],
+        kbd: false,
+        body: [
+          'The lane bar mirrors the SPECTRA trigger strip elsewhere in the app, but read-only — nothing here can be dragged or edited. The list below it shows the same merged timeline vertically, which is easier to scan on a narrow screen.',
+        ],
+      },
+      {
+        id: 'review-note-detail',
+        title: 'Note detail + jumping between notes',
+        keywords: 'context surrounding prev next jump',
+        body: [
+          'Selecting a note shows its text alongside everything else that happened within ±15s of it — the surrounding show, not just the note in isolation. Prev/Next note steps straight to your other notes in this song without hunting on the lane bar.',
+        ],
+      },
+    ],
+  },
 ];

@@ -195,6 +195,31 @@ background — skipped if the entry has already been nudged/noted
 A failed Send leaves the queue untouched for a plain retry (proven by
 killing the backend mid-send in the phone-viewport eye-check).
 
+## SPECTRA feedback sessions (Stage 3: review view — notes pinned on the reconstructed show)
+
+Server: `spectra/services/show_reconstruction.py` reads Stage 1's show log
+(`fire_history.load_show_log`) and Stage 2's sent batches
+(`feedback.load_all_batches`) — no new store. SESSION = one feedback batch
+(one Send press); `list_sessions()` names the songs each has notes for,
+newest first by REVERSING store order (not sorting by `received_ms` —
+two batches sent in the same wall-clock millisecond would tie and
+misorder). `reconstruct(session_id, uri)` windows the show log to that
+song's note wall-times padded ±`SESSION_PAD_MS` (20s), then
+`merge_timeline()` — the pure, spec-tested slice — orders events+notes by
+song `position_ms` (missing-position entries, i.e. bridge-down captures,
+sort last by `wall_ms`). API `spectra/api/show_review.py`:
+`GET /api/review/sessions`, `GET /api/review/timeline?session_id=&uri=`.
+Executable spec: `scripts/check_show_review.py`.
+
+Frontend `spectra/web/src/review/ReviewPage.tsx` (`/review`) extends the
+ported timeline surface family (BuilderPage's lane pattern, PR 29/44)
+rather than inventing a parallel one: `ReviewLaneBar` is
+SpectraTriggerBar's read-only twin (ticks = events, taller pins = notes),
+`ReviewEntryList` is its phone-friendly vertical counterpart, and
+`ReviewNoteDetail` shows a selected note with ±15s of surrounding
+timeline plus Prev/Next note jump. Desk-review surface first but stays
+phone-usable.
+
 ## SPECTRA app (her OWN process since the S3 split)
 
 `spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`), running
