@@ -57,6 +57,40 @@ colours roll only when the sequencer fires a scene, scene + set land in one
 terminal rung KEEPS the current colours (never forced churn). Rainbow sets:
 neutral ×1.0 wheel factor, never move the room's wheel position.
 
+## SPECTRA trigger authoring (THE KEYSTONE — mid-song clock)
+
+Binding decision: scene changes are driven by triggers
+(`/home/javi/fleet-spotfx/data/spectra-gap-inventory/decision-mid-song-model.md`)
+— the shipped transitions-only default and a heavily hand-tuned show are the
+SAME mechanism (an ordinary trigger list) at different densities; a later
+mid-song-generation stage seeds that list programmatically, it doesn't get a
+separate schema or execution path. Model `spectra/models/trigger.py`
+(`SpectraTrigger`: timestamp_ms + one discriminated `TriggerAction` —
+`fire_scene` / `fire_response` / `select_color_set`); store
+`spectra/services/trigger_store.py` (`storage/spectra/triggers.json`, keyed
+by spotify_uri, per-trigger CRUD); engine
+`spectra/services/trigger_engine.py` (`TriggerEngine`: fed by
+`on_track_state(uri)` + `tick(position_ms)` from `services/engine.py`'s own
+poll loop off the S2 bridge; edge-triggered on the forward-crossed
+`(last_position, position]` window — fires once per crossing, rearms
+silently on a song change or a rewind, never backfills). Every action kind
+routes through SPECTRA's existing choke points, not a new write path:
+`fire_scene` → `scene_sequencer.fire_scene_by_id` (the SAME function the
+sequencer's own picks call — factored out for exactly this reuse),
+`fire_response` → `services/engine.fire_response_event` (the same path the
+bridge's classified trigger_fired events drive), `select_color_set` →
+`drift_conductor.apply_set_directly` (the same surface
+`POST /api/room-color/apply` uses). API `spectra/api/triggers.py`
+(`GET/POST /api/triggers?uri=`, `DELETE /api/triggers/{id}?uri=`).
+Authoring UI: `spectra/web/src/timeline/components/SpectraTrigger{Bar,Dialog,
+sCard}.tsx`, mounted in `BuilderPage.tsx` as its own card below the ported
+legacy timeline — a separate authoring surface from the legacy
+MusicTrigger/SongProfile world (two worlds coexist; this surface only ever
+calls `spectra/api/triggers.py`). Executable spec:
+`.venv/bin/python scripts/check_triggers.py`; frame-level proof (a placed
+trigger's action landing on the real render pipeline):
+`tests/test_trigger_engine.py`.
+
 ## SPECTRA app (her OWN process since the S3 split)
 
 `spectra/` is the SPECTRA app (purple-on-black UI at `/spectra/`), running

@@ -13,11 +13,18 @@ What runs in production (shared process, started from the host lifespan):
                changes (proven today by the headless tests, which run the
                same engine against the facade on the dummy device).
   responses  — surges fed by the bridge's classified trigger fires.
+  trigger_engine — THE MID-SONG CLOCK (spectra.services.trigger_engine):
+               polls the bridge's streamed track position every TICK_S and
+               fires the owner's SPECTRA-native per-song triggers at their
+               moments. Legacy scene-change/flare events keep arriving via
+               the bridge unchanged — two worlds coexist during migration.
 
 Scene fires re-baseline the engine: scene_compiler.fire_scene (non-dry)
 hands the ORIGINAL scene (bindings intact — re-rolls need them) plus the
-resolved writes to on_scene_fired(). The sequencer's fires arrive through
-the same choke point.
+resolved writes to on_scene_fired(). The sequencer's own picks and
+SPECTRA-native fire_scene triggers both arrive through the same choke point
+(scene_sequencer.fire_scene_by_id); response events (bridge-classified or
+trigger-fired) both arrive through fire_response_event above.
 
 Pulse releases: the spike must land a render frame before the release glide
 starts (scene_response docstring); production schedules flush_releases()
@@ -35,6 +42,7 @@ from spectra.services.bridge import SpotEffectsBridge
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
 from spectra.services.scene_response import ResponseEngine
+from spectra.services.trigger_engine import trigger_engine
 from spectra.services.ws import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -57,7 +65,10 @@ responses = ResponseEngine(
 )
 
 
-async def _on_response_event(event_class: str, intensity: float) -> None:
+async def fire_response_event(event_class: str, intensity: float) -> None:
+    """The ONE response-fire choke point: the bridge's classified legacy
+    trigger_fired events and SPECTRA-native fire_response triggers
+    (spectra.services.trigger_engine) both call this."""
     await responses.on_event(event_class, intensity)
     if responses._pending_releases:
         asyncio.create_task(_release_after_hold())
@@ -82,14 +93,31 @@ async def _on_track_uri(uri) -> None:
         await responses.release_phases()
     from spectra.services.scene_sequencer import scene_sequencer
     await scene_sequencer.on_track_state(uri)
+    await trigger_engine.on_track_state(uri)
 
 
 bridge = SpotEffectsBridge(
-    on_response_event=_on_response_event,
+    on_response_event=fire_response_event,
     on_track_uri=_on_track_uri,
 )
 
 _conductor_task: asyncio.Task | None = None
+_trigger_task: asyncio.Task | None = None
+
+
+async def _run_trigger_engine() -> None:
+    """The trigger clock — SPECTRA's own poll of the bridge's streamed
+    track position (bridge already interpolates between broadcasts;
+    TICK_S just needs to be short enough that a fast build doesn't skip a
+    tightly-packed trigger cluster). Errors are logged and swallowed per
+    tick — one bad trigger must never stop the clock."""
+    from spectra.services.trigger_engine import TICK_S
+    while True:
+        try:
+            await trigger_engine.tick(bridge.track_position_ms())
+        except Exception:
+            logger.exception("trigger engine: tick failed")
+        await asyncio.sleep(TICK_S)
 
 
 def on_scene_fired(scene: SceneV2, writes: list[dict],
@@ -128,7 +156,7 @@ def go_dark() -> None:
 
 
 async def start() -> None:
-    global _conductor_task
+    global _conductor_task, _trigger_task
     # A handover orphaned by a crash leaves owner=handing-over — both worlds
     # refusing to write (safe but dark). Land it back at its from-world.
     # Age-gated so a live orchestrator in another process is never fought.
@@ -137,20 +165,25 @@ async def start() -> None:
     if _conductor_task is None or _conductor_task.done():
         _conductor_task = asyncio.create_task(conductor.run(),
                                               name="spectra-drift-conductor")
+    if _trigger_task is None or _trigger_task.done():
+        _trigger_task = asyncio.create_task(_run_trigger_engine(),
+                                            name="spectra-trigger-engine")
     logger.info("SPECTRA S2 engine started (executor=%s — dark against real "
                 "lights until S3)", executor.mode)
 
 
 async def stop() -> None:
-    global _conductor_task
+    global _conductor_task, _trigger_task
     await bridge.stop()
-    if _conductor_task is not None and not _conductor_task.done():
-        _conductor_task.cancel()
-        try:
-            await _conductor_task
-        except asyncio.CancelledError:
-            pass
-    _conductor_task = None
+    for attr in ("_conductor_task", "_trigger_task"):
+        task = globals()[attr]
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        globals()[attr] = None
 
 
 def status() -> dict:
@@ -163,4 +196,5 @@ def status() -> dict:
         "conductor": conductor.status(),
         "responses": {"recent_surges": list(responses.surges)[-10:]},
         "bridge": bridge.status(),
+        "triggers": trigger_engine.status(),
     }

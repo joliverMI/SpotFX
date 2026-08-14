@@ -599,4 +599,54 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  {
+    id: 'spectra-triggers',
+    title: 'SPECTRA Triggers (the mid-song clock)',
+    keywords: 'trigger authoring keystone mid-song scene change fire response colour set place drag edit delete',
+    intro:
+      'Scene changes are driven by triggers — ordinary, editable moments placed on the same timeline as the legacy Builder\'s, living in the "SPECTRA Triggers" card just below it. A song that has never been hand-tuned behaves as transitions-only by default; adding, moving, or deleting triggers is how you hand-tune it, one moment at a time. This is a separate authoring surface from the legacy trigger dialog above it — the two worlds coexist, and a SPECTRA trigger only ever fires SPECTRA-native things.',
+    entries: [
+      {
+        id: 'spectra-trigger-actions',
+        title: 'The three action kinds',
+        keywords: 'fire scene fire response select color set intensity class',
+        table: [
+          ['Fire scene', 'Fires a scene by name at a chosen intensity (⚡), optionally wearing a specific colour set instead of the room\'s active one — through the same choke point the sequencer\'s own picks use.'],
+          ['Fire response', 'Fires a response class (flare / charge / lull / drop) at a chosen intensity — the same phase drive and band selection a bridge-classified charge/lull/drop/flare already drives.'],
+          ['Select colour set', 'Moves the room to a named colour set directly — the same manual-apply surface as the Scenes page\'s colour controls.'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'spectra-trigger-authoring',
+        title: 'Placing & editing',
+        keywords: 'double click drag move delete create',
+        table: [
+          ['Double-click empty strip', 'Create a trigger at that moment.'],
+          ['+ Add Trigger', 'Create a trigger at the current playhead.'],
+          ['Click a marker', 'Edit that trigger — timestamp, action, and its fields.'],
+          ['Drag a marker ↔', 'Move the trigger in time (20 ms grid).'],
+          ['Drag a marker out of the strip', 'Delete it.'],
+          ['Hover a marker', 'Shows the action summary (scene/response/colour set + intensity).'],
+        ],
+        kbd: false,
+      },
+      {
+        id: 'spectra-trigger-recents',
+        title: 'Quick-pick recent actions',
+        keywords: 'recent quick pick common palette',
+        body: [
+          'The trigger dialog remembers the last few actions you saved and offers them as one-click buttons — a minimal stand-in for the legacy Builder\'s full keyboard-palette system (a later stage). Picking a recent action carries the intensity you already had dialed in.',
+        ],
+      },
+      {
+        id: 'spectra-trigger-enabled',
+        title: 'Enabled toggle',
+        keywords: 'disarm mute disable',
+        body: [
+          'Unchecking Enabled disarms a trigger without deleting it — its placement and action stay saved, but the clock skips it. Delete removes it outright.',
+        ],
+      },
+    ],
+  },
 ];
