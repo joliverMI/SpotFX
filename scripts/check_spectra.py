@@ -1173,6 +1173,51 @@ finally:
     ambient._bridge_client = _orig_bridge_client
     ambient.AMBIENT_TRANSITION_MS = 1500
 
+# ── Force Scene (legacy Now Playing control, ported verbatim): redirects
+#    every automatic scene pick at the one choke point, scene_sequencer.
+#    fire_scene_by_id — the sequencer's own rolls and trigger_engine's
+#    fire_scene action both call it ──────────────────────────────────────────
+from spectra.services.scene_sequencer import fire_scene_by_id
+
+fs_requested = SceneV2(name="FS Requested")
+fs_held = SceneV2(name="FS Held")
+scene_store.save(fs_requested)
+scene_store.save(fs_held)
+fs_fired: list[str] = []
+
+_orig_fire_scene = scene_compiler.fire_scene
+
+
+async def _fake_fire_scene(scene, *, intensity=0.5, color_set=None,
+                           dry_run=True, rng=None):
+    fs_fired.append(scene.id)
+    return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+            "resolved_bindings": {}, "dice_rolls": {}}
+
+scene_compiler.fire_scene = _fake_fire_scene
+try:
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=True, force_scene_scene_id=fs_held.id))
+    asyncio.run(fire_scene_by_id(fs_requested.id, intensity=0.6))
+    check(fs_fired[-1] == fs_held.id,
+          "Force Scene: the pinned scene fires instead of the one requested "
+          "— the sequencer/trigger caller's own intensity still passes through")
+
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=True, force_scene_scene_id="missing-scene"))
+    asyncio.run(fire_scene_by_id(fs_requested.id, intensity=0.6))
+    check(fs_fired[-1] == fs_requested.id,
+          "Force Scene: a pinned id pointing at a missing scene is treated "
+          "as unset, same as legacy's missing/non-scene event guard")
+
+    rc.save_room_controls(rc.RoomControlState(force_scene_enabled=False))
+    asyncio.run(fire_scene_by_id(fs_requested.id, intensity=0.6))
+    check(fs_fired[-1] == fs_requested.id,
+          "Force Scene disabled: no redirect")
+finally:
+    scene_compiler.fire_scene = _orig_fire_scene
+rc.save_room_controls(rc.RoomControlState())   # reset for later sections
+
 # ── item-8 CANONICAL shape: a band SELECTS AND SCALES its named kinds ────────
 # The owner's example, executed: the top band fires "Slam" + "Colour Roll"
 # at ×1.3 — the param spike lands at baseline + (declared − baseline)·1.3

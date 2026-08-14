@@ -34,6 +34,7 @@ def _isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "SPECTRA_STORAGE", tmp_path)
     monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", tmp_path / "room_controls.json")
     monkeypatch.setattr(scfg, "ROOM_COLOR_FILE", tmp_path / "room_color.json")
+    monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
 
 
 def test_apply_brightness_scales_uniformly_and_is_pure():
@@ -129,3 +130,49 @@ def test_scene_fire_scales_live_bytes_only_and_falls_back_to_global_transition(m
     _run(scene_compiler.fire_scene(scene, dry_run=False))
     assert captured["transition_ms"] == 300, \
         "a scene's own entry_ramp_ms wins over the room's global default"
+
+
+def test_force_scene_redirects_every_automatic_pick(monkeypatch):
+    """The legacy Now Playing Force Scene control, ported to SPECTRA's one
+    scene-fire choke point (scene_sequencer.fire_scene_by_id): while
+    enabled, whatever scene id was about to fire is redirected to the
+    pinned scene — the sequencer's own rolls and trigger_engine's fire_scene
+    action both go through this same function, so one interception covers
+    both."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_compiler, scene_store
+    from spectra.services.scene_sequencer import fire_scene_by_id
+
+    requested = SceneV2(name="Requested")
+    held = SceneV2(name="Held")
+    scene_store.save(requested)
+    scene_store.save(held)
+
+    fired_ids = []
+
+    async def fake_fire_scene(scene, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None):
+        fired_ids.append(scene.id)
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+                "resolved_bindings": {}, "dice_rolls": {}}
+
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=True, force_scene_scene_id=held.id))
+    _run(fire_scene_by_id(requested.id, intensity=0.7))
+    assert fired_ids[-1] == held.id, \
+        "enabled: the pinned scene fires instead of the one requested"
+
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=True, force_scene_scene_id="does-not-exist"))
+    _run(fire_scene_by_id(requested.id, intensity=0.7))
+    assert fired_ids[-1] == requested.id, \
+        "a pinned id pointing at a missing scene is treated as unset"
+
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=False, force_scene_scene_id=held.id))
+    _run(fire_scene_by_id(requested.id, intensity=0.7))
+    assert fired_ids[-1] == requested.id, \
+        "disabled: no redirect even with a scene still picked"
