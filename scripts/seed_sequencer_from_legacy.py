@@ -9,7 +9,9 @@ Translates:
     with 0.1 skirts) — the five band profiles of decision 4. Profile identity
     is the NAME: re-running --apply updates points in place, never duplicates.
   - Each lane's referenced scenes → SelectorEntries on their SceneV2
-    counterparts (matched by name, case-insensitive). Weight 1.0 members
+    counterparts (matched by name: exact case-insensitive, then the
+    "<name> V2" rebuild convention, then SCENE_RENAMES for the rest — see
+    resolve_v2_id). Weight 1.0 members
     reference the shared band profile (curve_ref); other weights get INLINE
     points — the same shape at weight× height is a one-off, which is exactly
     what the escape hatch is for. Legacy scenes with no SceneV2 counterpart
@@ -61,6 +63,26 @@ from models.sequencer import CurvePoint, CurveProfile, SelectorEntry
 BAND_SKIRT = 0.1
 OUTLIER_WEIGHT = 10.0
 WHEEL_PROFILE_NAME = "Wheel travel — prefer small steps"
+
+# Legacy lane scene name → rebuilt SceneV2 name, for renames that don't fit
+# the "<name> V2" convention below (decision: the owner's SceneV2 rebuild).
+SCENE_RENAMES = {"Mid Star": "STAR"}
+
+
+def resolve_v2_id(scene_name: str, v2_name_to_id: dict[str, str]) -> str | None:
+    """Match a legacy lane scene name to its rebuilt SceneV2 id: exact
+    (case-insensitive) first, then the "<name> V2" rebuild convention, then
+    SCENE_RENAMES for the handful that don't fit that convention."""
+    v2_id = v2_name_to_id.get(scene_name.lower())
+    if v2_id is not None:
+        return v2_id
+    v2_id = v2_name_to_id.get(f"{scene_name} V2".lower())
+    if v2_id is not None:
+        return v2_id
+    renamed = SCENE_RENAMES.get(scene_name)
+    if renamed is not None:
+        return v2_name_to_id.get(renamed.lower())
+    return None
 
 
 def wheel_profile_points() -> list[CurvePoint]:
@@ -163,7 +185,7 @@ def build_seed(events: list[dict], v2_name_to_id: dict[str, str],
     plan = SeedPlan()
 
     def add_entry(scene_name: str, profile: CurveProfile, weight: float) -> None:
-        v2_id = v2_name_to_id.get(scene_name.lower())
+        v2_id = resolve_v2_id(scene_name, v2_name_to_id)
         if v2_id is None:
             plan.rows.append(("SKIPPED", scene_name,
                               "no SceneV2 counterpart by that name — create it "
