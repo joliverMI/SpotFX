@@ -76,6 +76,25 @@ def _config_expected_active_ids(config: dict) -> set[str]:
     return expected
 
 
+def _restrict_to_genuinely_driven(declared: set[str]) -> set[str]:
+    """Intersect the config-declared active set with the room's genuinely
+    driven virtuals (spectra/services/room_topology.py) — the
+    "unfalsifiable gate" fix (report gate, 2026-08-14): fx-live/config.json
+    inherits the old LedFX world's dynamic tricks (mask/foreground/
+    background layers, gap-dummy placeholders, a full-span "crystal"
+    duplicate, contextual rooms SPECTRA's scene engine never addresses), so
+    "declared active" alone can refuse forever on layers that were never
+    supposed to rise. Falls back to the raw declared set (unchanged
+    behaviour) when no ground truth is available — an absent ground truth
+    must never make verification vacuously pass on an EMPTY expected set."""
+    from spectra.services.room_topology import genuinely_driven_virtual_ids
+
+    driven = genuinely_driven_virtual_ids()
+    if not driven:
+        return declared
+    return declared & driven
+
+
 class FrameFreshness:
     """Per-virtual monotonic stamp of the last displayed frame, fed by the
     render loop's own VIRTUAL_UPDATE events."""
@@ -140,7 +159,8 @@ class LiveLights:
 
         host = FxHost(config_dir, live_grant=grant)
         self.host = host          # set before start() so a failed start still
-        self.expected_active_ids = _config_expected_active_ids(host.config)
+        self.expected_active_ids = _restrict_to_genuinely_driven(
+            _config_expected_active_ids(host.config))
         await host.start()        # deactivates through us
         self.freshness.attach(host)
 
@@ -239,6 +259,30 @@ class LiveLights:
             if age is None or age > stale_after_s:
                 gaps[vid] = f"not flushing frames (last_flush_age_s={age})"
         return gaps
+
+    def describe_gaps(self, gaps: Optional[dict[str, str]] = None,
+                      device_gaps: Optional[dict[str, str]] = None) -> str:
+        """Named, human-readable detail for a failed verification — every
+        light that could not rise, not just a bare bool. Built for the
+        fresh-handover 'nameless refusal' fix (the resume path already
+        named gaps via activation_gaps()/CRITICAL logging + the liveness
+        endpoint; verify_active() had none of that — this is the shared
+        formatter both paths can use). Defaults to the live instance's own
+        current activation_gaps() when not given explicitly."""
+        gaps = self.activation_gaps() if gaps is None else gaps
+        device_gaps = device_gaps or {}
+        parts = []
+        if gaps:
+            named = "; ".join(f"{vid}: {reason}"
+                              for vid, reason in sorted(gaps.items()))
+            parts.append(f"{len(gaps)} virtual(s) never came up ({named})")
+        if device_gaps:
+            named = "; ".join(f"{did}: {reason}"
+                              for did, reason in sorted(device_gaps.items()))
+            parts.append(f"{len(device_gaps)} device(s) unconfirmed ({named})")
+        if not parts:
+            parts.append("one or more active virtuals stopped flushing frames")
+        return "; ".join(parts)
 
     async def wait_fully_active(self, timeout_s: float = 10.0,
                                 stale_after_s: float = STALE_AFTER_S) -> dict[str, str]:
