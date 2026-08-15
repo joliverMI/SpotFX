@@ -396,6 +396,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'live-energy',
+        title: 'Live Energy — the number driving scene picks and flares',
+        keywords: 'energy intensity section bar top always visible live meter bridge librosa quiet loud',
+        body: [
+          'The ⚡ Energy meter, on every page, next to the room controls — the shared top-bar strip\'s first widget (a future live device preview joins it here later). It shows the SAME number the engine\'s automatic decisions read, not a lookalike recomputed for display: raw librosa section energy at the current playback position (0.00 = the quietest section this song, 1.00 = the loudest), fed by the read-only bridge (see "The read-only bridge"). That one value is wired directly into the drift conductor\'s pace, the sequencer\'s default scene pick, and automatic transition fires — everything the room does on its own without a hand-placed trigger or authored intensity.',
+          'Shows "—" when there\'s no live number to show: the bridge is down, nothing is playing, or this song has no section analysis yet. In every one of those cases the engine itself falls back to a 0.5 neutral internally — the meter doesn\'t fake that number, it tells you why there isn\'t one.',
+          'A hand-placed trigger or a mid-song "⟳ Generate" pick can carry its OWN authored/baked intensity instead of this live value at the moment it fires — this meter always shows the live bridge signal, which is what drives everything that ISN\'T an explicitly authored intensity.',
+        ],
+      },
+      {
         id: 'force-scene',
         title: 'Force Scene — hold one scene',
         keywords: 'force scene hold pin lock stuck stay same scene forever pick redirect reassert',

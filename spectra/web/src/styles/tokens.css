@@ -161,12 +161,53 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .room-control input[type="number"] { width: 64px; }
 .room-control-value { min-width: 32px; color: var(--text); }
 
+/* The shared top-bar strip (TopBarStrip.tsx) — first occupant is the
+ * live energy readout; a future device-preview strip mounts here too.
+ * Its own thin row so it never competes with room-controls-bar's
+ * controls for width on a phone. */
+.top-bar-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 4px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.energy-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.energy-readout-label { font-weight: 600; }
+.energy-meter {
+  display: inline-block;
+  width: 64px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.energy-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+.energy-readout-value { min-width: 32px; color: var(--text); font-variant-numeric: tabular-nums; }
+
 @media (max-width: 720px) {
   .panic-release-btn { margin: 8px; width: calc(100% - 16px); padding: 10px; font-size: 13px; text-align: center; }
   .release-banner { padding: 10px; font-size: 12.5px; }
   .release-banner button.primary { width: 100%; padding: 10px; }
   .room-controls-bar { padding: 8px 12px; gap: 10px 16px; }
   .room-control input[type="range"] { width: 80px; }
+  .top-bar-strip { padding: 6px 12px; gap: 10px 16px; }
+  .energy-meter { width: 44px; }
 }
 
 input[type='text'], input[type='search'] {
