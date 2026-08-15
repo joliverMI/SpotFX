@@ -160,7 +160,31 @@ def _mcp_config_json() -> str:
     code, every call, from this module's own constants, never read from a
     file a deploy step could let drift out of sync. --strict-mcp-config
     (passed alongside this in _argv()) refuses every OTHER MCP source, so
-    this is the only one that can ever be live."""
+    this is the only one that can ever be live.
+
+    ABSOLUTE SCRIPT PATH, NOT `-m` -- a live production defect (2026-08-15,
+    found by firstmate): `claude -p` runs the MCP server it spawns with the
+    PARENT `claude` process's own cwd (_workdir()'s dedicated clean
+    directory -- see this module's docstring for why that has to stay
+    empty), not a per-server `cwd` this dict used to declare and which
+    turned out not to be honoured. `python -m spectra.services.
+    settings_mcp_server` needs `spectra` resolvable via the CURRENT
+    WORKING DIRECTORY before any of that module's own code runs, so from
+    the clean workdir it failed with `ModuleNotFoundError: No module named
+    'spectra'` -- the server never started, the handshake never happened,
+    and the live tool manifest came back empty (the same failure the
+    manifest check is built to catch, just from a real bug instead of a
+    contrived one). An absolute path to the .py file sidesteps `-m`'s
+    package-resolution step entirely (Python adds the SCRIPT's own
+    directory to sys.path, not cwd); settings_mcp_server.py then inserts
+    its own resolved repo root before importing spectra, which the
+    package-resolution step alone can't do. Fixed and reproduced both ways
+    by hand -- see that module's docstring. This still doesn't reopen the
+    clean-workdir requirement: the `claude` process's own cwd, which
+    governs ITS hook/`.mcp.json` auto-discovery, is untouched by any of
+    this -- only the MCP server subprocess's own Python import resolution
+    changed."""
+    server_script = config.REPO_ROOT / "spectra" / "services" / "settings_mcp_server.py"
     return json.dumps({
         "mcpServers": {
             MCP_SERVER_NAME: {
@@ -168,8 +192,7 @@ def _mcp_config_json() -> str:
                 # THIS process's own venv regardless of PATH at spawn time
                 # (systemd units don't inherit an interactive shell's PATH).
                 "command": sys.executable,
-                "args": ["-m", "spectra.services.settings_mcp_server"],
-                "cwd": str(config.REPO_ROOT),
+                "args": [str(server_script)],
             },
         },
     })

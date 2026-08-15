@@ -30,6 +30,23 @@ this file:
      the model fabricating tool-call output in plain prose while the real
      manifest held only the two real tools -- proving `changes` is never
      built from anything but a genuine tool_result payload.
+  6. test_settings_mcp_server_starts_from_a_clean_cwd spawns the EXACT
+     command _mcp_config_json() builds, for real, with its cwd pointed at
+     an empty tmp_path standing in for the dedicated clean workdir, and
+     talks real MCP protocol to it (no `claude` binary, no token, no
+     network) -- the regression proof for a real live production defect
+     (2026-08-15, found by firstmate): `claude -p` runs the MCP server
+     with ITS OWN cwd (the clean workdir), not a per-server `cwd` field
+     this repo used to declare and which turned out not to be honoured,
+     and `-m spectra.services.settings_mcp_server` needs `spectra`
+     resolvable via the CURRENT WORKING DIRECTORY before any of that
+     module's own code runs -- so the server silently failed to start
+     from that specific cwd, and no unit test caught it because none of
+     them launched a real subprocess from a real clean directory. The
+     five points above are all still true after the fix -- the clean
+     workdir itself is untouched; only the MCP server's own import
+     resolution changed (settings_mcp_server.py's own docstring has the
+     full mechanism).
 
 One test (test_live_cli_can_apply_a_change) additionally proves the real
 subprocess loop end to end -- SKIPPED here (no CLAUDE_CODE_OAUTH_TOKEN in
@@ -133,13 +150,22 @@ def test_workdir_refuses_when_a_stray_claude_dir_is_present():
 # ═══ 4. the subprocess is built to the hard line, not left to discipline ═
 
 def test_mcp_config_names_exactly_one_server():
+    from spectra import config as scfg
     from spectra.services import settings_agent_cli as sac
 
     parsed = json.loads(sac._mcp_config_json())
     assert set(parsed["mcpServers"]) == {sac.MCP_SERVER_NAME}
     server = parsed["mcpServers"][sac.MCP_SERVER_NAME]
     assert server["command"] == sys.executable
-    assert server["args"] == ["-m", "spectra.services.settings_mcp_server"]
+    # An ABSOLUTE SCRIPT PATH, not `-m spectra.services.settings_mcp_server`
+    # -- see _mcp_config_json()'s docstring for the live production defect
+    # this fixes: `-m` needs `spectra` resolvable via the CURRENT WORKING
+    # DIRECTORY before the module's own code ever runs, and `claude -p`
+    # spawns this server with the dedicated clean workdir as that cwd, not
+    # the repo. test_settings_mcp_server_starts_from_a_clean_cwd below is
+    # the real, live proof this config actually works from that directory.
+    assert "cwd" not in server, "a per-server cwd override is NOT honoured by claude -p -- don't rely on it"
+    assert server["args"] == [str(scfg.REPO_ROOT / "spectra" / "services" / "settings_mcp_server.py")]
 
 
 def test_argv_never_carries_bare_and_locks_the_tool_surface():
@@ -173,6 +199,40 @@ def test_subprocess_env_strips_api_key_and_isolates_config_dir(monkeypatch, tmp_
     assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "a-real-token"
     assert env["CLAUDE_CONFIG_DIR"] == str(workdir / ".claude-config")
+
+
+def test_settings_mcp_server_starts_from_a_clean_cwd(tmp_path):
+    """THE regression test for the 2026-08-15 live production defect: this
+    spawns the EXACT command _mcp_config_json() builds and speaks real MCP
+    protocol to it (mcp.stdio_client/ClientSession, no `claude` binary
+    involved) with cwd pointed at an EMPTY tmp_path -- standing in for
+    settings_agent_cli._workdir()'s dedicated clean directory, which a
+    real `claude -p` session always uses as the MCP server's own cwd (see
+    _mcp_config_json()'s docstring). Before the fix, this failed exactly
+    the way production did: ModuleNotFoundError inside the subprocess,
+    the MCP handshake never completing. tmp_path is pytest's own fresh
+    directory -- guaranteed to contain nothing related to spectra, so a
+    regression to `-m` or to relying on an unhonoured `cwd` field fails
+    this test the same way it failed live."""
+    import mcp as mcp_pkg
+
+    from spectra.services import settings_agent_cli as sac
+
+    assert list(tmp_path.iterdir()) == [], "tmp_path must start genuinely empty to prove this"
+
+    parsed = json.loads(sac._mcp_config_json())
+    server = parsed["mcpServers"][sac.MCP_SERVER_NAME]
+
+    async def _list_tools():
+        params = mcp_pkg.StdioServerParameters(
+            command=server["command"], args=server["args"], cwd=str(tmp_path))
+        async with mcp_pkg.stdio_client(params) as (read, write):
+            async with mcp_pkg.ClientSession(read, write) as session:
+                await asyncio.wait_for(session.initialize(), timeout=15)
+                return await session.list_tools()
+
+    tools = _run(_list_tools())
+    assert {t.name for t in tools.tools} == {"get_settings", "set_setting"}
 
 
 # ═══ 5. transcript parsing: structured data only, never the model's prose ═
