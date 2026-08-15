@@ -244,12 +244,16 @@ def _isolated_intensity_scale(tmp_path, monkeypatch):
     repoints the read-only source dirs it (via analysis_reader) reads —
     AUDIO_SHAPES_DIR / TRAINING_PROFILES_FILE — to an empty tmp_path so a
     test exercising a production render_intensity default never sweeps the
-    real (possibly very large) library. Autouse so no individual test
-    needs to know this exists."""
+    real (possibly very large) library, and repoints
+    INTENSITY_SCALE_MARKS_FILE (intensity_scale_marks.py, the 2026-08-15
+    per-track manual mark) — a real write path, same class of risk.
+    Autouse so no individual test needs to know this exists."""
     from spectra import config as scfg
     from spectra.services import analysis_reader, intensity_scale
     monkeypatch.setattr(scfg, "INTENSITY_SCALE_CACHE_FILE",
                         tmp_path / "intensity_scale_features.json")
+    monkeypatch.setattr(scfg, "INTENSITY_SCALE_MARKS_FILE",
+                        tmp_path / "intensity_scale_marks.json")
     monkeypatch.setattr(scfg, "AUDIO_SHAPES_DIR", tmp_path / "audio_shapes")
     monkeypatch.setattr(scfg, "TRAINING_PROFILES_FILE",
                         tmp_path / "training_profiles.json")

@@ -419,6 +419,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'intensity-mark',
+        title: '🎚 Mark — the current song\'s intensity scale',
+        keywords: 'intensity mark scale factor genre bass ceiling cap gate hype auto automatic manual override percent percentage',
+        body: [
+          'Next to ⚡ Energy on the top-bar strip. Every song has an intensity SCALING FACTOR — a multiplier on the live energy number above, based on its genre and how bass-forward it measures against the analysed library. 100% means no adjustment; a hyped-up genre like EDM lands well above 100%, a mellow one well below.',
+          'Automatic scaling always tops out at a 75% delivered intensity, on ANY song, however hyped its genre — a deliberate gate, not a bug: the room only reaches full-scale hype effects on a track you\'ve personally marked as one, never automatically.',
+          'Tap "Mark" to set this song\'s factor by hand (0–200%) — the one way past that 75% ceiling. A marked song keeps its number every time it plays again, not just this once. "Edit" changes it, "Clear" removes the mark and returns the song to automatic scaling.',
+        ],
+      },
+      {
         id: 'device-preview',
         title: 'Preview — watch your favourite devices while you edit',
         keywords: 'device preview swatch pixel strip live favourite favorite favourites star pause resume conserve resources ledfx visualisation visualization websocket connected paused reconnecting expand collapse pixel matrix idle tab hidden auto-pause auto pause auto-resume auto resume background tab',

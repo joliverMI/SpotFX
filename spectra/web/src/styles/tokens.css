@@ -211,6 +211,32 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 }
 .energy-readout-value { min-width: 32px; color: var(--text); font-variant-numeric: tabular-nums; }
 
+.intensity-mark {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.intensity-mark-label { font-weight: 600; }
+.intensity-mark-value { min-width: 32px; color: var(--text); font-variant-numeric: tabular-nums; }
+.intensity-mark-set .intensity-mark-value { color: var(--accent); font-weight: 600; }
+.intensity-mark button {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+}
+.intensity-mark button:hover { background: var(--surface3, var(--surface2)); }
+.intensity-mark-editing input[type='number'] {
+  width: 56px;
+  padding: 2px 4px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Device-preview strip (DevicePreviewStrip.tsx) — the top-bar strip's
  * second occupant. A compact swatch per favourite device by default;
  * "Expand" swaps the swatch for a small per-pixel strip. Pause/resume are

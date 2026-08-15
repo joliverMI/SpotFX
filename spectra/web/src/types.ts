@@ -790,3 +790,17 @@ export interface ReviewTimeline {
   window: { start_wall_ms: number; end_wall_ms: number } | null;
   timeline: ReviewTimelineItem[];
 }
+
+/** GET/PUT/DELETE /api/intensity-scale/mark?uri= — the 2026-08-15 per-track
+ * manual mark, the one way past the automatic 0.75 ceiling (spectra/
+ * services/intensity_scale_marks.py). auto_factor is always the un-marked
+ * number (<= 1.25); effective_factor is what actually drives the room right
+ * now (the mark, when set, else auto_factor). */
+export interface IntensityScaleMark {
+  uri: string;
+  mark: number | null;
+  auto_factor: number;
+  effective_factor: number;
+  manual_min: number;
+  manual_max: number;
+}

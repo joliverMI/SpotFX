@@ -8,10 +8,16 @@ song-space via
 
     genre_to_song_scale(g) = clamp(0.6 * g + 0.1, 0.30, 1.25)
 
-calibrated 2026-07-29 against the Admiral's own reference songs (Dopamine
-~= 120%, Let It Be ~= 50%, Soy Peor ~= 100%, sliders EDM 1.85 / Rock 0.7 /
-Trap 1.35 — storage/training_profiles.json, read-only). A per-song BASS
-factor then nudges within the genre:
+calibrated 2026-07-29 against the Admiral's own reference songs — these
+are SCALING FACTORS (a multiplier on measured intensity), not target
+intensities: Dopamine's factor ~= 1.20 (120%), Let It Be's ~= 0.50 (50%),
+Soy Peor's ~= 1.00 (100%, i.e. NO adjustment — not "maximum"), against
+sliders EDM 1.85 / Rock 0.7 / Trap 1.35 (storage/training_profiles.json,
+read-only). Units matter here: a 100% factor is mid-range on the [30%,
+125%] auto scale, nowhere near a ceiling — conflating "his calibration
+factor is 100%" with "he hears this song as maximum intensity" is a
+category error a 2026-08-15 report made and then retracted; don't repeat
+it. A per-song BASS factor then nudges within the genre:
 
     auto = clamp(genre_base * (0.9 + 0.2 * r_bass), 0.30, 1.25)
 
@@ -20,11 +26,11 @@ library on three bass-forward signals (mean rms_low in dB, bass ratio,
 bass-onset density) read from the SAME raw capture files the read-only
 bridge already reads (storage/audio_shapes/*.npz + *.librosa.json —
 analysis_reader.py's own contract: no spot-effects import, storage read
-only). No auto value ever exceeds 125% — SpotFX only let a human's manual
-per-song slider do that, and SPECTRA has no such per-song slider today
-(only room-level settings are agent/UI-tellable — room_controls.py) — see
-song_scaling_factor()'s docstring for what that means for the headroom
-formula below.
+only). No AUTO value ever exceeds 125% (auto_scaling_factor(), always
+clamped to [SCALE_MIN, SCALE_MAX]) — SpotFX let a human's manual per-song
+slider go higher (up to 200%), and so does SPECTRA's own equivalent,
+intensity_scale_marks.py (2026-08-15 ruling: "he marks the track;
+automatic never does" — see song_scaling_factor()'s docstring).
 
 Per-song bass features are cached in SPECTRA's OWN store
 (config.INTENSITY_SCALE_CACHE_FILE, storage/spectra/intensity_scale_
@@ -213,22 +219,37 @@ def compute_auto_scale(spotify_uri: str, genres: Optional[list[str]] = None) -> 
     return round(max(SCALE_MIN, min(SCALE_MAX, scale)), 3)
 
 
-def song_scaling_factor(spotify_uri: Optional[str], genres: Optional[list[str]] = None) -> float:
-    """Public resolver: the bass-ranked auto scale when computable, else
-    the genre base alone (SpotFX's same fallback order — a manual per-song
-    override is SpotFX-only; SPECTRA has no per-song slider, so this is
-    always the AUTO path, capped at SCALE_MAX (125%) — see
-    combine_measured_and_scale()'s docstring for what that caps `final`
-    at). No song at all -> the genre base for an empty genre list (0.7,
-    the SAME number SpotFX shows an unmatched song, not a separate
-    neutral 1.0 — this stays faithful to the ported formula rather than
-    inventing a new fallback)."""
+def auto_scaling_factor(spotify_uri: Optional[str], genres: Optional[list[str]] = None) -> float:
+    """The AUTO-only resolution, IGNORING any manual mark: the bass-ranked
+    auto scale when computable, else the genre base alone (SpotFX's same
+    fallback order). Always capped to [SCALE_MIN, SCALE_MAX] (30-125%) —
+    this is the half of the 0.75 ceiling (combine_measured_and_scale's
+    docstring) that a manual mark exists to let him bypass. No song at
+    all -> the genre base for an empty genre list (0.7, the SAME number
+    SpotFX shows an unmatched song, not a separate neutral 1.0 — this
+    stays faithful to the ported formula rather than inventing a new
+    fallback)."""
     if not spotify_uri:
         return resolve_genre_scale(genres or [])
     auto = compute_auto_scale(spotify_uri, genres)
     if auto is not None:
         return auto
     return resolve_genre_scale(genres or [])
+
+
+def song_scaling_factor(spotify_uri: Optional[str], genres: Optional[list[str]] = None) -> float:
+    """Public resolver, and the ONE place a manual mark takes effect
+    (2026-08-15 ruling — spectra/services/intensity_scale_marks.py): a
+    mark on this song wins outright, clamped to its own [0, 2.0] range,
+    NEVER re-clamped down into the AUTO [SCALE_MIN, SCALE_MAX] range —
+    that's the whole point, it's the one way past the 0.75 ceiling.
+    No mark -> falls through to auto_scaling_factor() unchanged."""
+    if spotify_uri:
+        from spectra.services import intensity_scale_marks
+        mark = intensity_scale_marks.get_mark(spotify_uri)
+        if mark is not None:
+            return mark
+    return auto_scaling_factor(spotify_uri, genres)
 
 
 # ── the headroom-reserve seam (2026-08-15 correction) ────────────────────
@@ -265,13 +286,17 @@ def combine_measured_and_scale(measured_intensity: float,
     scale() — that's a different, independent clamp on a different term,
     not this one.)
 
-    Structural fact worth stating plainly rather than discovering live:
-    SPECTRA has no manual per-song override today, so song_scaling_factor
-    is always the AUTO range (<= SCALE_MAX = 1.25). That means `final`
-    for ANY song, at its single most intense moment (measured_intensity =
-    1.0), can never exceed HEADROOM_RESERVE * SCALE_MAX = 0.75 today — the
-    Admiral's own "120% ceiling" worked example describes a hypothetical
-    manual scaling factor of 2.0 that SPECTRA has no surface to set yet.
+    THE 0.75 CEILING, AND THE ONE WAY PAST IT (2026-08-15 ruling): an
+    AUTO-resolved song_scaling_factor (auto_scaling_factor(), no manual
+    mark) is always <= SCALE_MAX = 1.25, so `final` at that song's single
+    most intense moment (measured_intensity = 1.0) can never exceed
+    HEADROOM_RESERVE * SCALE_MAX = 0.75 — deliberate, his ruling: "0.75
+    STANDS as the automatic ceiling. Nothing automatic ever exceeds it."
+    His own "120% ceiling" worked example (0.6 * 2.0) is reachable only
+    through a manual per-track mark (spectra/services/intensity_scale_
+    marks.py, song_scaling_factor()'s own docstring) — "he marks the
+    track; automatic never does." Without that release valve the 0.6
+    reserve would be a CAP with no way to open it, not a GATE.
     """
     final = measured_intensity * HEADROOM_RESERVE * song_scaling_factor
     return max(0.0, min(1.0, final))
