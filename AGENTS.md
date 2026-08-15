@@ -23,6 +23,19 @@ without updating its `topic=` callers (grep `topic="`).
 Prefer adding a `HelpLink` next to a complex control over embedding
 instructional prose in the UI; short tooltips (`title=`) are fine.
 
+## SPECTRA capability & decision spec (live — check here first)
+
+Before touching anything under `spectra/`, read `docs/SPECTRA_SPEC.md`. It is
+the live reconciliation surface: every SPECTRA-relevant capability's honest
+state (built/agreed/gap/old-world/retired), the Admiral's standing decisions
+(fidelity rule, the four-item day-one switchover bar, closed questions), and
+every open question with what it blocks. It supersedes the one-time
+capability audit it's built from wherever the two disagree — the code wins,
+and the spec says so. It carries its own maintenance protocol, including how
+to translate one of the Admiral's edits into the document rather than leaving
+his sentence sitting unconverted next to the structured parts — follow that
+protocol exactly if you're the one applying his edit.
+
 ## SPECTRA SceneV2 (side-by-side with legacy scenes)
 
 SceneV2 is the future merged-program scene model: `models/scene_v2.py` (binding
