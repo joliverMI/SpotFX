@@ -3,7 +3,7 @@
  * without hunting on the lane bar or scrolling the list by hand. */
 import { fmtMs } from '../../lib/time';
 import type { ReviewTimelineItem } from '../../types';
-import { describeEvent } from '../describeEvent';
+import { BUCKET_COLOR, describeEvent } from '../describeEvent';
 
 const CONTEXT_MS = 15_000;
 
@@ -66,7 +66,12 @@ export default function ReviewNoteDetail({
             <span className="review-entry-pos">{fmtMs(item.position_ms)}</span>
             {item.type === 'note'
               ? <span>📌 {item.note || '(no text)'}</span>
-              : <span>{describeEvent(item)}</span>}
+              : (
+                <span className="review-entry-event-text">
+                  <span className="trigger-color-dot" style={{ background: BUCKET_COLOR[item.bucket] }} />
+                  {describeEvent(item)}
+                </span>
+              )}
           </div>
         ))}
       </div>

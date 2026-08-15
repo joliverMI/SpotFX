@@ -433,6 +433,7 @@ kbd {
  * a locally-queued list of nudge-correctable marks, one Send at the
  * bottom. Mirrors the panic-release button's full-width phone treatment. */
 .feedback-now { margin-bottom: 12px; font-size: 13px; color: var(--text-muted); }
+.feedback-now-pos { font-variant-numeric: tabular-nums; }
 .feedback-mark-btn {
   display: block;
   width: 100%;
@@ -440,8 +441,12 @@ kbd {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  transition: box-shadow 0.15s ease-out, background 0.15s ease-out;
 }
 .feedback-mark-btn:disabled { opacity: 0.6; cursor: default; }
+/* Mark flash confirmation — he's marking without looking at the phone, so
+ * the tap needs to confirm it registered without eye contact. */
+.feedback-mark-btn.flash { box-shadow: 0 0 0 4px rgba(232, 121, 249, 0.5); }
 
 .feedback-queue { display: flex; flex-direction: column; gap: 10px; }
 .feedback-entry {
@@ -462,7 +467,14 @@ kbd {
   font-size: 16px;
   font-weight: 700;
   color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  border-radius: 4px;
+  padding: 1px 3px;
+  transition: background 0.3s ease-out, color 0.3s ease-out;
 }
+/* Nudge highlight — confirms a -1s/+1s correction actually landed before
+ * he moves to the next mark. */
+.feedback-entry-pos.flash { background: rgba(232, 121, 249, 0.4); color: var(--text); }
 .feedback-entry-track { font-size: 12px; color: var(--text-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feedback-entry-ago { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .feedback-entry-actions { display: flex; gap: 4px; }
@@ -497,25 +509,53 @@ kbd {
  * drag), backed by a vertical list twin for narrow widths and a detail
  * panel for the selected note's surrounding context. */
 .review-picker-label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
-.review-picker-label select { font-size: 14px; padding: 8px 10px; }
 
-.review-song-picker { display: flex; gap: 6px; flex-wrap: wrap; }
-.review-song-picker button { font-size: 12px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-song-picker, .review-session-picker { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.review-song-picker button, .review-session-picker button { font-size: 12px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Empty state — icon + heading + a direct action, instead of one italic
+ * sentence (his room is in exactly this state until he's sent a batch).
+ * Precedent: the "Spotify not connected" callout, web/src/nowplaying/
+ * NowPlayingPage.tsx. */
+.empty-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface2);
+}
+.empty-card-icon { font-size: 20px; }
+.empty-card-title { font-weight: 600; margin-bottom: 4px; }
+.empty-card-action { font-size: 13px; color: var(--accent); font-weight: 600; }
+
+.review-lane-bar-wrap { margin-bottom: 20px; }
 .review-lane-bar {
   position: relative;
   height: 34px;
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 6px;
-  margin-bottom: 10px;
+}
+.review-lane-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: rgba(168, 85, 247, 0.18);
+  border-radius: 6px 0 0 6px;
+  pointer-events: none;
+}
+.review-lane-times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .review-lane-marker {
   position: absolute;
@@ -572,7 +612,7 @@ kbd {
 .review-entry-row.selected { border-color: var(--accent); background: var(--surface2); }
 .review-entry-row.note { color: var(--accent2); font-weight: 600; }
 .review-entry-pos { font-family: monospace; color: var(--text-muted); flex-shrink: 0; width: 44px; }
-.review-entry-event-text { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-entry-event-text { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .review-entry-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .review-note-detail-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -593,7 +633,7 @@ kbd {
 .review-note-detail-context-row.note { color: var(--accent2); font-weight: 600; }
 
 @media (max-width: 720px) {
-  .review-song-picker button { max-width: 160px; }
+  .review-song-picker button, .review-session-picker button { max-width: 160px; }
   .review-entry-list { max-height: 320px; }
 }
 
