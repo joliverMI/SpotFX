@@ -17,6 +17,14 @@ software; do not build the Admiral a settings page"). Covers:
   - API surface: registry/log/undo/message/transcribe, including both 503s
     (no ANTHROPIC_API_KEY; no transcriber wired into services/
     transcription.py yet).
+  - The "cli" (subscription) backend switch (services/settings_agent_cli.py):
+    defaults OFF, refuses without an explicit CLAUDE_CODE_OAUTH_TOKEN, never
+    passes --bare, and locks the subprocess to --strict-mcp-config / --tools
+    "" / --allowedTools naming exactly the two settings tools. Live
+    subprocess/transcript-parsing proof is tests/test_settings_agent_cli.py
+    (offline, against real captured transcripts) — this script only proves
+    the switch itself defaults safe, since that's the property every other
+    check in this repo needs to be able to assume.
 
 Run from repo root: .venv/bin/python scripts/check_settings_console.py
 Isolated: temp files for every store; no network, no LedFX I/O, no audio.
@@ -250,5 +258,35 @@ try:
     raise SystemExit("FAIL: connection-refused was swallowed instead of surfacing")
 except tr.TranscriptionUnavailable:
     print("ok: connection-refused (the real bridge's current state) is the honest 503 path, not chased")
+
+# ═══ 7. the "cli" (subscription) backend switch defaults safe ═══════════
+# Full argv/env/transcript-parsing proof lives in
+# tests/test_settings_agent_cli.py (offline, against real captured
+# transcripts) and is not duplicated here — this is the one property every
+# other check in this repo needs to be able to assume without re-deriving it.
+
+os.environ.pop("SPECTRA_SETTINGS_AGENT_BACKEND", None)
+os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+
+from spectra.services import settings_agent_cli as sac  # noqa: E402
+
+check(scfg.settings_agent_backend() == "api",
+      "settings-agent backend defaults to \"api\" — a subscription CLI backend never enables itself")
+check(scfg.settings_agent_cli_oauth_token() == "",
+      "no CLAUDE_CODE_OAUTH_TOKEN configured by default")
+
+try:
+    run(sac.run_turn(None, "set brightness to half"))
+    raise SystemExit("FAIL: the cli backend ran without a token")
+except sa.SettingsAgentUnavailable as e:
+    check("CLAUDE_CODE_OAUTH_TOKEN" in str(e),
+          "cli backend refuses before any subprocess without an explicit token")
+
+check("--bare" not in sac._argv("hi", None), "the cli backend never passes --bare (can't read the OAuth token)")
+check(sac._argv("hi", None)[sac._argv("hi", None).index("--tools") + 1] == "",
+      "the cli backend strips every built-in tool")
+mcp_cfg = json.loads(sac._mcp_config_json())
+check(set(mcp_cfg["mcpServers"]) == {sac.MCP_SERVER_NAME},
+      "the cli backend's --mcp-config names exactly one server")
 
 print("\nALL CHECKS PASSED")

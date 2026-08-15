@@ -57,6 +57,48 @@ def settings_agent_model() -> str:
     return os.getenv("SPECTRA_SETTINGS_AGENT_MODEL", "claude-sonnet-5")
 
 
+def settings_agent_backend() -> str:
+    """"api" (default) or "cli" -- which settings_agent* module
+    spectra/api/settings_console.py's POST /message dispatches to. MUST
+    default to "api": the captain's ruling (data/spectra-console-
+    subscription-backend/) is that a subscription-authenticated CLI
+    backend may be built ready-to-enable but never enables itself. Flipping
+    this to "cli" is inert on its own -- see settings_agent_cli_oauth_token()."""
+    return os.getenv("SPECTRA_SETTINGS_AGENT_BACKEND", "api")
+
+
+def settings_agent_cli_oauth_token() -> str:
+    """CLAUDE_CODE_OAUTH_TOKEN for the "cli" settings-agent backend
+    (spectra/services/settings_agent_cli.py) -- Anthropic's own env var
+    name for a long-lived token from `claude setup-token`
+    (code.claude.com/docs/en/authentication#generate-a-long-lived-token),
+    which bills to the subscription that minted it, not API credits. Same
+    posture as settings_agent_api_key(): a credential belongs in the
+    environment, never a file this repo's own agent could write. Nothing
+    in this codebase ever runs `claude setup-token` or reads an existing
+    interactive `/login` session on its own -- minting a token is a
+    deliberate, human, browser-based act, and the captain has not
+    authorised pointing this at his real account yet."""
+    return os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+
+def settings_agent_cli_binary() -> str:
+    return os.getenv("SPECTRA_SETTINGS_AGENT_CLI_PATH", "claude")
+
+
+def settings_agent_cli_workdir() -> Path:
+    """A dedicated, empty, code-owned working directory for the settings-
+    agent CLI subprocess (spectra/services/settings_agent_cli.py) --
+    never the repo root or any directory that might carry a stray
+    .claude/settings.json, .mcp.json, or CLAUDE.md. Bare mode (which
+    would skip all of that) can't be used here because it also refuses to
+    read CLAUDE_CODE_OAUTH_TOKEN, so this directory's cleanliness is the
+    actual safety boundary against `claude -p` auto-running a hook or
+    auto-connecting a stray MCP server it happens to find -- see
+    settings_agent_cli.py's module docstring."""
+    return SPECTRA_STORAGE / "settings-agent-cli-workdir"
+
+
 def whisper_bridge_url() -> str:
     """Base URL (scheme://host:port) of the local-Whisper bridge
     spectra/services/transcription.py's transcribe() POSTs to. Verified

@@ -1,0 +1,489 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "cwd": "/tmp/claude-1000/-home-javi--treehouse-SpotFX-c65fee-5-SpotFX/a58bae80-459b-4bd8-abaa-6075ad9a87b0/scratchpad/subtest/neutral_cwd",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b",
+    "tools": [
+      "mcp__settings-console__get_settings",
+      "mcp__settings-console__set_setting"
+    ],
+    "mcp_servers": [
+      {
+        "name": "settings-console",
+        "status": "connected"
+      }
+    ],
+    "model": "claude-haiku-4-5",
+    "permissionMode": "default",
+    "slash_commands": [
+      "no-mistakes",
+      "deep-research",
+      "design-sync",
+      "dataviz",
+      "update-config",
+      "verify",
+      "debug",
+      "code-review",
+      "simplify",
+      "batch",
+      "fewer-permission-prompts",
+      "doctor",
+      "loop",
+      "schedule",
+      "claude-api",
+      "run",
+      "run-skill-generator",
+      "agents",
+      "auto-mode-setup",
+      "autocompact",
+      "clear",
+      "color",
+      "compact",
+      "config",
+      "context",
+      "effort",
+      "fast",
+      "heapdump",
+      "init",
+      "mcp",
+      "import",
+      "model",
+      "__remote-workflow",
+      "workflow-launch-exec",
+      "reload-skills",
+      "rename",
+      "ultrareview",
+      "security-review",
+      "usage-credits",
+      "extra-usage",
+      "usage",
+      "insights",
+      "recap",
+      "goal",
+      "design",
+      "design-consent",
+      "design-revoke",
+      "list-agents",
+      "team-onboarding"
+    ],
+    "terminal_slash_commands": [
+      "doctor",
+      "color"
+    ],
+    "apiKeySource": "none",
+    "claude_code_version": "2.1.233",
+    "output_style": "default",
+    "agents": [
+      "claude",
+      "Explore",
+      "general-purpose",
+      "Plan",
+      "statusline-setup"
+    ],
+    "skills": [
+      "no-mistakes",
+      "deep-research",
+      "design-sync",
+      "dataviz",
+      "update-config",
+      "verify",
+      "debug",
+      "code-review",
+      "simplify",
+      "batch",
+      "fewer-permission-prompts",
+      "doctor",
+      "loop",
+      "schedule",
+      "claude-api",
+      "run",
+      "run-skill-generator"
+    ],
+    "plugins": [],
+    "capabilities": [
+      "interrupt_receipt_v1",
+      "interrupt_cancel_queued_v1",
+      "msg_lifecycle_v1"
+    ],
+    "analytics_disabled": false,
+    "product_feedback_disabled": false,
+    "uuid": "5c2ccb03-6c9e-4695-beb8-f88fb069432f",
+    "memory_paths": {
+      "auto": "/home/javi/.claude/projects/-tmp-claude-1000--home-javi--treehouse-SpotFX-c65fee-5-SpotFX-a58bae80-459b-4bd8-abaa-6075ad9a87b0-scratchpad-subtest-neutral-cwd/memory/"
+    },
+    "messaging_socket_path": "/tmp/cc-socks/825583.sock",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 5,
+    "estimated_tokens_delta": 5,
+    "uuid": "fed3f82b-3549-48b6-b4dc-b13e3b7cf078",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 8,
+    "estimated_tokens_delta": 3,
+    "uuid": "175f6f59-8d0a-4182-b0b3-676aba007d1d",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 14,
+    "estimated_tokens_delta": 6,
+    "uuid": "8b028308-8a92-4d9d-9259-b6e7d30fcc26",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 46,
+    "estimated_tokens_delta": 32,
+    "uuid": "dcb87bcc-2c17-459c-923e-413741b8edc5",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 52,
+    "estimated_tokens_delta": 6,
+    "uuid": "de7d4e96-d3fd-4e07-91e6-9a5b2bfcc0d6",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 114,
+    "estimated_tokens_delta": 62,
+    "uuid": "9aaae190-e886-4c12-b159-3da488f72a1d",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011Ce4ujUsSVrPzk2hYZ1V91",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The user wants me to call the set_setting function with:\n- key: \"global_transition_ms\"\n- value: \"1500\"\n\nAnd they want me to report the tool's exact JSON response verbatim.\n\nLet me make this tool call.",
+          "signature": "<elided>"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 2853,
+        "cache_read_input_tokens": 6707,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 2853
+        },
+        "output_tokens": 4,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      },
+      "diagnostics": null,
+      "context_management": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b",
+    "uuid": "3ce746ea-e14b-4c83-a6fd-d9b93d3ae475",
+    "timestamp": "2026-08-15T17:14:17.074Z",
+    "request_id": "req_011Ce4ujTvszcKc5L54xZtKM"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011Ce4ujUsSVrPzk2hYZ1V91",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01ECP7gb1UUxJFTLQTeiPpo6",
+          "name": "mcp__settings-console__set_setting",
+          "input": {
+            "key": "global_transition_ms",
+            "value": "1500"
+          },
+          "caller": {
+            "type": "direct"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 2853,
+        "cache_read_input_tokens": 6707,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 2853
+        },
+        "output_tokens": 4,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      },
+      "diagnostics": null,
+      "context_management": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b",
+    "uuid": "f56ceb4e-9cc4-48f8-be4d-60c1e16e03f4",
+    "timestamp": "2026-08-15T17:14:17.320Z",
+    "request_id": "req_011Ce4ujTvszcKc5L54xZtKM",
+    "tool_use_meta": [
+      {
+        "id": "toolu_01ECP7gb1UUxJFTLQTeiPpo6",
+        "display_name": "Set Setting",
+        "server_display_name": "settings-console-reproof"
+      }
+    ]
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_01ECP7gb1UUxJFTLQTeiPpo6",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"status\": \"applied\",\n  \"id\": \"c951cda8-3ac5-4154-9161-8f8f86dadfd0\",\n  \"ts_ms\": 1786814057325,\n  \"key\": \"global_transition_ms\",\n  \"old_value\": 0,\n  \"new_value\": 1500,\n  \"source\": \"agent\",\n  \"undone\": false\n}"
+            }
+          ]
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b",
+    "uuid": "f561e6bf-f6c7-4b4b-9872-6655fdc00902",
+    "timestamp": "2026-08-15T17:14:17.329Z",
+    "tool_use_result": [
+      {
+        "type": "text",
+        "text": "{\n  \"status\": \"applied\",\n  \"id\": \"c951cda8-3ac5-4154-9161-8f8f86dadfd0\",\n  \"ts_ms\": 1786814057325,\n  \"key\": \"global_transition_ms\",\n  \"old_value\": 0,\n  \"new_value\": 1500,\n  \"source\": \"agent\",\n  \"undone\": false\n}"
+      }
+    ]
+  },
+  {
+    "type": "rate_limit_event",
+    "rate_limit_info": {
+      "status": "allowed",
+      "resetsAt": 1786820400,
+      "rateLimitType": "five_hour",
+      "overageStatus": "rejected",
+      "overageDisabledReason": "out_of_credits",
+      "isUsingOverage": false
+    },
+    "uuid": "6b447380-84d3-4d2d-bc07-da6764b67abe",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 4,
+    "estimated_tokens_delta": 4,
+    "uuid": "c0c89aae-09a3-40ab-b2d4-3801af28cbee",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 36,
+    "estimated_tokens_delta": 32,
+    "uuid": "3018610d-5bc5-41fe-89de-f3bf9ba6adb5",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 58,
+    "estimated_tokens_delta": 22,
+    "uuid": "fa86aab2-5989-43c6-9f94-a75d2c03b970",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 85,
+    "estimated_tokens_delta": 27,
+    "uuid": "be5a0e04-6939-4369-8dd5-a69c4e699c2c",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 90,
+    "estimated_tokens_delta": 5,
+    "uuid": "aaf866fd-e161-4ca0-80a8-cacc00598358",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 152,
+    "estimated_tokens_delta": 62,
+    "uuid": "a5b0d86b-e1dd-4c15-a2b2-58ba7f2ee900",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011Ce4ujcrQUiStwQ5sCKJoB",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The tool call was successful. The user asked for the exact JSON response verbatim, so I should provide exactly what was returned:\n\n```json\n{\n  \"status\": \"applied\",\n  \"id\": \"c951cda8-3ac5-4154-9161-8f8f86dadfd0\",\n  \"ts_ms\": 1786814057325,\n  \"key\": \"global_transition_ms\",\n  \"old_value\": 0,\n  \"new_value\": 1500,\n  \"source\": \"agent\",\n  \"undone\": false\n}\n```",
+          "signature": "<elided>"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 8,
+        "cache_creation_input_tokens": 270,
+        "cache_read_input_tokens": 9560,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 270
+        },
+        "output_tokens": 3,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      },
+      "diagnostics": null,
+      "context_management": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b",
+    "uuid": "1b412cb0-b0a1-4127-98a5-e689c8313706",
+    "timestamp": "2026-08-15T17:14:19.203Z",
+    "request_id": "req_011Ce4ujc61rfeP2LNW9k4u4"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011Ce4ujcrQUiStwQ5sCKJoB",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "```json\n{\n  \"status\": \"applied\",\n  \"id\": \"c951cda8-3ac5-4154-9161-8f8f86dadfd0\",\n  \"ts_ms\": 1786814057325,\n  \"key\": \"global_transition_ms\",\n  \"old_value\": 0,\n  \"new_value\": 1500,\n  \"source\": \"agent\",\n  \"undone\": false\n}\n```"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 8,
+        "cache_creation_input_tokens": 270,
+        "cache_read_input_tokens": 9560,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 270
+        },
+        "output_tokens": 3,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      },
+      "diagnostics": null,
+      "context_management": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b",
+    "uuid": "28b6883c-cfdb-445b-b70e-2aac305e7f31",
+    "timestamp": "2026-08-15T17:14:19.749Z",
+    "request_id": "req_011Ce4ujc61rfeP2LNW9k4u4"
+  },
+  {
+    "is_error": false,
+    "duration_api_ms": 4425,
+    "num_turns": 2,
+    "stop_reason": "end_turn",
+    "session_id": "2d540349-f0b5-4df2-99ce-04513f185b5b",
+    "total_cost_usd": 0.0099107,
+    "usage": {
+      "input_tokens": 18,
+      "cache_creation_input_tokens": 3123,
+      "cache_read_input_tokens": 16267,
+      "output_tokens": 404,
+      "output_tokens_details": {
+        "thinking_tokens": 205
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 3123,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 8,
+          "output_tokens": 257,
+          "cache_read_input_tokens": 9560,
+          "cache_creation_input_tokens": 270,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 270
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5": {
+        "inputTokens": 18,
+        "outputTokens": 404,
+        "cacheReadInputTokens": 16267,
+        "cacheCreationInputTokens": 3123,
+        "webSearchRequests": 0,
+        "costUSD": 0.0099107,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty"
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "subtype": "success",
+    "api_error_status": null,
+    "result": "```json\n{\n  \"status\": \"applied\",\n  \"id\": \"c951cda8-3ac5-4154-9161-8f8f86dadfd0\",\n  \"ts_ms\": 1786814057325,\n  \"key\": \"global_transition_ms\",\n  \"old_value\": 0,\n  \"new_value\": 1500,\n  \"source\": \"agent\",\n  \"undone\": false\n}\n```",
+    "ttft_ms": 1744,
+    "ttft_stream_ms": 761,
+    "time_to_request_ms": 23,
+    "type": "result",
+    "duration_ms": 4454,
+    "uuid": "7bd68077-f399-4ec7-9771-48e37d0fb6e4"
+  }
+]
