@@ -532,6 +532,25 @@ persistent badge on `RoomControlsBar.tsx`, separate from the one-shot
 PUT-outcome badge. Full detail + room-proof status: `docs/SPECTRA_SPEC.md`
 §52. Spec: `tests/test_ambient_music_gate.py`, `tests/test_bridge.py`.
 
+**Reading real Hue bulb state — don't trust a raw CLIP light GET during a
+live entertainment stream.** While a Hue entertainment session is
+streaming (any active SPECTRA scene, not just Ambient), `GET
+/clip/v2/resource/light` does NOT reflect the streamed colour — a bulb
+being actively driven reads as static there, so a WORKING fix looks dead
+and a genuinely frozen one looks fine; this nearly read as a fix failure
+during §52's own live proof. To tell whether bulbs are actually following
+the room, read `entertainment_configuration` status ACTIVE on each of his
+bridges plus continuous glide writes for the relevant virtual in `GET
+/spectra/api/engine/status`'s `executor.recent_writes` (`spectra/services/
+engine.py::status`) — that combination, not the light resource, is what
+"read it at the bridges" means for a streamed scene. The light resource
+IS the right instrument for Ambient's own hold/release (`spectra/
+services/ambient.py`) and the panic-release path (`spectra/services/
+release.py`) — both write over plain REST, not the entertainment stream —
+so the same GET that lies during a streamed scene is correct there. Pick
+the wrong one for the case at hand and you get a confident wrong answer
+either way.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing
