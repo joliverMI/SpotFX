@@ -78,6 +78,31 @@ export default function SequencingTab({ scene, scenes }: {
     }
   };
 
+  // Stop sharing: copy the currently-attached profile's points into this
+  // scene's own inline curve and detach the curve_ref. Same mechanism as
+  // picking "Inline one-off…" from the dropdown, surfaced as an explicit
+  // one-click action at the point of editing so a scene-only tweak never
+  // has to travel through a shared profile by accident.
+  const detachToScene = () => void attach('inline');
+
+  // Promote: give this scene's inline curve a name and turn it into a
+  // shared profile, re-attaching this scene to it by reference. The
+  // reverse of detach — keeps "share it later" cheap, not a one-way door.
+  const promoteToProfile = async () => {
+    const name = prompt('Profile name (e.g. "High-energy ramp"):');
+    if (!name) return;
+    const id = crypto.randomUUID();
+    const pts = draft ?? entry?.inline_points ?? FLAT;
+    try {
+      await saveCurvesMut.mutateAsync({ ...curves, [id]: { id, name, points: pts } });
+      await attachMut.mutateAsync({ sceneId: scene.id, attachment: { kind: 'profile', profileId: id } });
+      setDraft(null);
+      toast(`Promoted to shared profile "${name}"`, 'success');
+    } catch (e) {
+      toast(`Promote failed: ${e}`, 'error');
+    }
+  };
+
   const users = profile ? usedBy(profile.id) : [];
   const affinityEdges = (config?.affinity ?? []).filter(
     (e) => e.from_id === scene.id || e.to_id === scene.id);
@@ -121,10 +146,24 @@ export default function SequencingTab({ scene, scenes }: {
       {(profile || attachment === 'inline') && (
         <div key={`${scene.id}:${attachment}`}>
           <CurveEditor points={points} onChange={setDraft} histogram={hist?.counts} />
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
             {profile
               ? <span>Editing profile “{profile.name}”{users.length > 1 ? ` — changes every scene using it (${users.join(', ')})` : ''}</span>
               : <span>Inline one-off — this scene only</span>}
+            {profile && (
+              <button style={{ fontSize: 11, padding: '2px 8px', marginLeft: draft ? undefined : 'auto' }}
+                title="Copy this profile's curve into this scene only — stops sharing, no effect on other scenes using it"
+                onClick={detachToScene}>
+                Detach — edit just this scene
+              </button>
+            )}
+            {attachment === 'inline' && (
+              <button style={{ fontSize: 11, padding: '2px 8px', marginLeft: draft ? undefined : 'auto' }}
+                title="Save this scene's curve as a named profile other scenes can pull too"
+                onClick={() => void promoteToProfile()}>
+                ⇪ Promote to shared profile…
+              </button>
+            )}
             {draft && (
               <>
                 <button className="primary" style={{ fontSize: 11, padding: '2px 10px', marginLeft: 'auto' }}

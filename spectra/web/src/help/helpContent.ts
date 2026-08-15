@@ -174,9 +174,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'tab-sequencing',
         title: 'Sequencing tab',
-        keywords: 'sequencer curve likelihood dwell affinity genre',
+        keywords: 'sequencer curve likelihood dwell affinity genre profile inline detach promote share',
         body: [
           'As shipped in the sequencer increment: the scene\'s likelihood curve (named profile / inline / flat / not sequenced) is graphical; dwell weight, genre multipliers, and affinity render read-only — adjust them by telling the agent. The status strip shows the engine\'s state. The S2 bridge now feeds it song transitions, section-energy intensity, genre buckets, and deferrals — but the sequencer stays dark until its own enabled switch is flipped (ask the agent).',
+          'A curve is either a named PROFILE (pulled from the dropdown — a shared shape; editing it retunes every scene using it, shown by "shared by N scenes" and the "changes every scene using it" caption) or an INLINE one-off (this scene only, no name, nothing added to the profile library). Pick "Inline one-off…" to save a curve directly to this scene without creating a profile.',
+          'Editing a scene attached to a shared profile? Click "Detach — edit just this scene" first to copy the curve into this scene\'s own inline curve before dragging — otherwise the edit retunes every scene sharing that profile. Editing an inline curve you now want other scenes to reuse? Click "⇪ Promote to shared profile…" to name it and turn it into a profile (this scene re-attaches to the new profile by reference). Both directions are cheap — promoting an inline curve or detaching a profile never touches other scenes\' curves.',
           'This curve is also the equivalent of the legacy Energy Gate / Energy Tilt on random options — see "Energy gates/tilt → curves" for the equivalence.',
         ],
       },
