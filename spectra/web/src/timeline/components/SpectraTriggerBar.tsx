@@ -11,12 +11,14 @@ const KIND_COLOR: Record<TriggerActionKind, string> = {
   fire_scene: '#a855f7',       // violet — matches the SPECTRA purple
   fire_response: '#f59e0b',    // amber
   select_color_set: '#14b8a6', // teal
+  fire_scene_update: '#ef4444', // red — "major change", distinct from the flare amber
 };
 
 const KIND_LABEL: Record<TriggerActionKind, string> = {
   fire_scene: 'Fire scene',
   fire_response: 'Fire response',
   select_color_set: 'Select colour set',
+  fire_scene_update: 'Fire update',
 };
 
 export function actionSummary(t: SpectraTrigger, sceneName: (id: string) => string): string {
@@ -27,6 +29,7 @@ export function actionSummary(t: SpectraTrigger, sceneName: (id: string) => stri
     return `${prefix}${KIND_LABEL.fire_scene}: ${target} @ ⚡${a.intensity.toFixed(2)}`;
   }
   if (a.kind === 'fire_response') return `${KIND_LABEL.fire_response}: ${a.event_class} @ ⚡${a.intensity.toFixed(2)}`;
+  if (a.kind === 'fire_scene_update') return `${KIND_LABEL.fire_scene_update} @ ⚡${a.intensity.toFixed(2)}`;
   return `${KIND_LABEL.select_color_set}: ${a.set_id || '—'}`;
 }
 

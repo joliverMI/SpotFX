@@ -16,6 +16,7 @@ import { actionSummary } from './SpectraTriggerBar';
 
 const KIND_LABEL: Record<TriggerActionKind, string> = {
   fire_scene: 'Fire Scene', fire_response: 'Fire Response', select_color_set: 'Select Colours',
+  fire_scene_update: 'Fire Update',
 };
 
 const blankAction = (kind: TriggerActionKind, carryIntensity: number): TriggerAction => {
@@ -23,6 +24,7 @@ const blankAction = (kind: TriggerActionKind, carryIntensity: number): TriggerAc
   // (front 3's generation-friendly default) — a legal, un-forced choice.
   if (kind === 'fire_scene') return { kind, scene_id: null, intensity: carryIntensity, color_set_id: null };
   if (kind === 'fire_response') return { kind, event_class: 'flare', intensity: carryIntensity };
+  if (kind === 'fire_scene_update') return { kind, intensity: carryIntensity };
   return { kind, set_id: '' };
 };
 
@@ -72,6 +74,7 @@ export default function SpectraTriggerDialog({
 
   const valid =
     action.kind === 'fire_scene' ||   // scene_id null = kernel-routed, always valid
+    action.kind === 'fire_scene_update' ||   // no target field to be missing — always valid
     (action.kind === 'fire_response' && !!action.event_class) ||
     (action.kind === 'select_color_set' && !!action.set_id);
   const ms = parseMsTenths(tsText);
@@ -104,6 +107,7 @@ export default function SpectraTriggerDialog({
     const carry = intensityOf(action);
     if (r.kind === 'fire_scene') setAction({ kind: 'fire_scene', scene_id: r.scene_id ?? null, intensity: carry, color_set_id: null });
     else if (r.kind === 'fire_response') setAction({ kind: 'fire_response', event_class: r.event_class ?? 'flare', intensity: carry });
+    else if (r.kind === 'fire_scene_update') setAction({ kind: 'fire_scene_update', intensity: carry });
     else setAction({ kind: 'select_color_set', set_id: r.set_id ?? '' });
   };
 
@@ -138,7 +142,7 @@ export default function SpectraTriggerDialog({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
           <span style={{ width: 90, color: 'var(--text-muted)' }}>Action</span>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {(['fire_scene', 'fire_response', 'select_color_set'] as TriggerActionKind[]).map((k) => (
+            {(['fire_scene', 'fire_response', 'fire_scene_update', 'select_color_set'] as TriggerActionKind[]).map((k) => (
               <button key={k} className={action.kind === k ? 'primary' : ''}
                 style={{ fontSize: 12 }}
                 onClick={() => setAction(blankAction(k, intensityOf(action)))}>
@@ -180,6 +184,14 @@ export default function SpectraTriggerDialog({
             </select>
             <HelpLink topic="charge-lull-drop" title="Charge / Lull / Drop / Flare" />
           </label>
+        )}
+
+        {action.kind === 'fire_scene_update' && (
+          <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+            Fires the ACTIVE scene's own UPDATE content directly — no
+            target to pick here. If that scene has no update authored
+            yet, this is a silent no-op. <HelpLink topic="spectra-trigger-actions" title="Fire Update" />
+          </div>
         )}
 
         {action.kind === 'select_color_set' && (
