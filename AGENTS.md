@@ -254,7 +254,10 @@ re-porting.
 mechanism (`services/intensity_scale_service.py`, genre slider →
 `genre_to_song_scale` song-space base × a per-song bass-rank factor
 0.9–1.1, calibrated 2026-07-29 against the Admiral's own reference songs —
-Dopamine≈120%/Let It Be≈50%/Soy Peor≈100%). Own SPECTRA-side feature cache
+these are SCALING FACTORS, not target intensities: Dopamine≈1.20,
+Let It Be≈0.50, Soy Peor≈1.00 (100% = no adjustment, not "maximum" — a
+2026-08-15 report conflated the two and retracted the conclusion drawn
+from it; don't repeat that reasoning). Own SPECTRA-side feature cache
 (`storage/spectra/intensity_scale_features.json`, never SpotFX's cache
 file — see `_isolated_intensity_scale` in `tests/conftest.py` for why every
 test repoints this). `song_scaling_factor()` is wired at RENDER choke
@@ -270,10 +273,20 @@ the one seam: `final = measured_intensity * HEADROOM_RESERVE(0.6) *
 song_scaling_factor`, clamped to `[0,1]` ONLY at the very end (clamping
 the scale term early silently defeats the gate — see the constant's own
 docstring for why 0.6 is deliberate, not a fudge factor, and must survive
-any future edit). Structural fact, not yet resolved: SPECTRA has no
-manual per-song override, so `song_scaling_factor` is always ≤1.25
-(`SCALE_MAX`) — `final` can never exceed `0.6*1.25=0.75` for any song
-today; see `docs/SPECTRA_SPEC.md` §53 / OQ-6.
+any future edit).
+
+**The 0.75 auto ceiling + the manual mark (his ruling, same day, BUILT)**:
+0.75 STANDS as the automatic ceiling — `auto_scaling_factor()` (the
+renamed, unchanged AUTO-only resolution) never exceeds `SCALE_MAX=1.25`,
+so nothing automatic ever produces a `final` above `0.6*1.25=0.75`.
+`spectra/services/intensity_scale_marks.py` is the release valve: a
+per-track manual mark (`{uri: factor}`, clamped `[0, 2.0]` — SpotFX's own
+manual-slider ceiling), checked FIRST by `song_scaling_factor()` and
+**never** re-clamped into the auto range — "he marks the track; automatic
+never does." API: `GET/PUT/DELETE /api/intensity-scale/mark?uri=`
+(`spectra/api/intensity_scale.py`). UI: `IntensityMarkControl.tsx` on the
+shared `TopBarStrip`, next to the live energy readout (help topic
+`intensity-mark`).
 
 Same-day edge-trim fix to `midsong_generator._normalized_intensities`
 (the per-song min-max renormalization generated triggers' intensity uses):
