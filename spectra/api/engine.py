@@ -7,7 +7,11 @@
   POST /api/engine/event  — inject one response event at a chosen intensity
       (the responses tabs' preview-of-record: in production it executes
       against the RecordingExecutor, so the surge is computed, logged, and
-      visible — and no light moves).
+      visible — and no light moves). "update" is a valid class here too
+      (spectra-trigger-migration-scoping RULING.md) even though it isn't a
+      ResponseClass — it's the same manual test-fire surface the other four
+      classes already have, routed to ResponseEngine.on_update instead of
+      on_event since UPDATE bypasses band selection entirely.
   POST /api/engine/baseline/{scene_id} — re-baseline the engine on a scene
       WITHOUT firing anything: resolve at the given intensity, hand the
       writes to the conductor. This is how the engine adopts a scene while
@@ -23,6 +27,8 @@ from spectra.services import engine, scene_compiler, scene_store
 from spectra.services.binding_resolver import FireContext
 
 router = APIRouter(prefix="/api/engine", tags=["spectra-engine"])
+
+EVENT_CLASSES = (*RESPONSE_CLASSES, "update")
 
 
 class EventRequest(BaseModel):
@@ -44,9 +50,12 @@ async def get_status():
 
 @router.post("/event")
 async def post_event(body: EventRequest):
-    if body.event_class not in RESPONSE_CLASSES:
-        raise HTTPException(422, f"class must be one of {RESPONSE_CLASSES}")
-    record = await engine.responses.on_event(body.event_class, body.intensity)
+    if body.event_class not in EVENT_CLASSES:
+        raise HTTPException(422, f"class must be one of {EVENT_CLASSES}")
+    if body.event_class == "update":
+        record = await engine.responses.on_update(body.intensity)
+    else:
+        record = await engine.responses.on_event(body.event_class, body.intensity)
     released = await engine.responses.flush_releases()
     return {**record, "releases_flushed": released}
 

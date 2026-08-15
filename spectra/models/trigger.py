@@ -12,6 +12,19 @@ one SPECTRA-native action:
   select_color_set   set_id — the room's supported manual-apply surface
                      (drift_conductor.apply_set_directly), the same one
                      POST /api/room-color/apply uses.
+  fire_scene_update  intensity only — through
+                     spectra.services.scene_response.ResponseEngine.
+                     on_update, the UPDATE behaviour (data/spectra-trigger-
+                     migration-scoping RULING.md, 2026-08-14): "a major
+                     change within the scene, bigger than a flare,
+                     overriding the drift, going somewhere new on a
+                     ramp-in transition." Fires the ACTIVE scene's own
+                     SceneV2.update_kind by name, bypassing intensity-band
+                     selection entirely (unlike fire_response) — no
+                     update_kind authored on the active scene is a silent
+                     no-op, same convention as an empty response band.
+                     Reset is the SAME action (his correction: "reset is
+                     treated as update" — one behaviour, not two).
 
 ONE mechanism, not two (the binding decision): the seeded transitions-only
 default and heavily hand-tuned mid-song shows are the same trigger list at
@@ -55,7 +68,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from spectra.models.scene import ResponseClass
 
-TriggerActionKind = Literal["fire_scene", "fire_response", "select_color_set"]
+TriggerActionKind = Literal["fire_scene", "fire_response", "select_color_set",
+                            "fire_scene_update"]
 TriggerSource = Literal["authored", "generated"]
 
 
@@ -89,8 +103,14 @@ class SelectColorSetAction(BaseModel):
     set_id: str = Field(min_length=1)
 
 
+class FireSceneUpdateAction(BaseModel):
+    kind: Literal["fire_scene_update"] = "fire_scene_update"
+    intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 TriggerAction = Annotated[
-    Union[FireSceneAction, FireResponseAction, SelectColorSetAction],
+    Union[FireSceneAction, FireResponseAction, SelectColorSetAction,
+         FireSceneUpdateAction],
     Field(discriminator="kind"),
 ]
 

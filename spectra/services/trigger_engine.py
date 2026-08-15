@@ -21,6 +21,11 @@ moment its timestamp is first crossed:
                        drive (phase drive, band selection, pulse release).
   select_color_set      drift_conductor.apply_set_directly — the SAME
                        manual-apply surface POST /api/room-color/apply uses.
+  fire_scene_update      engine.fire_scene_update_event — UPDATE (data/
+                       spectra-trigger-migration-scoping RULING.md): a
+                       major change WITHIN the active scene, not band-
+                       gated like fire_response. Reset is the same action
+                       as update (his correction — one behaviour).
 
 THE SETTINGS MODEL (room_controls.RoomControlState.scene_change_mode,
 replacing front 3's plain midsong_triggers_enabled bool): three additive
@@ -163,6 +168,7 @@ class TriggerEngine:
         fire_scene: Callable[..., Awaitable[Any]] | None = None,
         fire_response: Callable[[str, float], Awaitable[Any]] | None = None,
         select_color_set: Callable[[str], Awaitable[Any]] | None = None,
+        fire_scene_update: Callable[[float], Awaitable[Any]] | None = None,
         select_scene: Callable[[float], Optional[str]] | None = None,
         scene_change_mode: Callable[[], str] | None = None,
         transition_intensity: Callable[[], float] | None = None,
@@ -174,6 +180,7 @@ class TriggerEngine:
         self._fire_scene = fire_scene or self._default_fire_scene
         self._fire_response = fire_response or self._default_fire_response
         self._select_color_set = select_color_set or self._default_select_color_set
+        self._fire_scene_update = fire_scene_update or self._default_fire_scene_update
         self._select_scene = select_scene or self._default_select_scene
         self._scene_change_mode = scene_change_mode or self._default_scene_change_mode
         self._transition_intensity = (transition_intensity
@@ -308,6 +315,8 @@ class TriggerEngine:
                 await self._fire_scene(scene_id, a.color_set_id, a.intensity)
             elif a.kind == "fire_response":
                 await self._fire_response(a.event_class, a.intensity)
+            elif a.kind == "fire_scene_update":
+                await self._fire_scene_update(a.intensity)
             else:
                 await self._select_color_set(a.set_id)
         except Exception:
@@ -388,6 +397,10 @@ class TriggerEngine:
     async def _default_fire_response(self, event_class: str, intensity: float) -> None:
         from spectra.services import engine
         await engine.fire_response_event(event_class, intensity)
+
+    async def _default_fire_scene_update(self, intensity: float) -> None:
+        from spectra.services import engine
+        await engine.fire_scene_update_event(intensity)
 
     async def _default_select_color_set(self, set_id: str) -> None:
         from spectra.services import color_sets, engine

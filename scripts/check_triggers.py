@@ -600,6 +600,29 @@ check(len(spectra_engine.responses.surges) == before_gated,
       "tuned per scene), gated the same as hand-authored triggers")
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
 
+# UPDATE's own choke point (spectra-trigger-migration-scoping RULING.md,
+# 2026-08-14): fire_scene_update_event gated the same "full" tier, same
+# reason — an authored trigger's own action. Prove BOTH sides explicitly:
+# "full" actually reaches on_update (surges grows — the record's own result
+# is irrelevant here, whether it lands or no-ops for lack of an active
+# scene is covered by the pytest frame-level proofs), then that any other
+# tier is a no-op before on_update is ever called.
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))
+before_update_full = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_scene_update_event(0.8))
+check(len(spectra_engine.responses.surges) == before_update_full + 1,
+      "fire_scene_update_event reaches the real on_update in "
+      "scene_change_mode=full — surges grew by exactly one")
+
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="analysed"))
+before_update_gated = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_scene_update_event(0.8))
+check(len(spectra_engine.responses.surges) == before_update_gated,
+      "fire_scene_update_event is a no-op outside scene_change_mode=full — "
+      "same gate as fire_response_event, same reason (an authored "
+      "trigger's own action)")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
+
 # ═══ 6. mid-song generation (front 3) ════════════════════════════════════
 
 from spectra.services import midsong_generator

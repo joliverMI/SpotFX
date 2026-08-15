@@ -211,6 +211,67 @@ def test_trigger_fires_response_action_on_the_real_pipeline(tmp_path):
     _run(main())
 
 
+# ── proof 2b: fire_scene_update (UPDATE) fires bypassing band gating ─────────
+
+def test_trigger_fires_scene_update_action_on_the_real_pipeline(tmp_path):
+    """A fire_scene_update trigger reaches the real ResponseEngine.on_update
+    at its moment — no response bands configured at all on this scene,
+    proving update doesn't need them (unlike fire_response's proof 2
+    above)."""
+    from spectra.models.scene import (FlareKind, ParamTarget,
+                                      SceneDeviceConfig, SceneV2)
+    from spectra.models.trigger import FireSceneUpdateAction, SpectraTrigger
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Updating", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 1.0})],
+        flare_kinds=[FlareKind(
+            name="Big Shift", type="permanent",
+            params={"gradient_scale": ParamTarget(mode="absolute", value=1.8)})],
+        update_kind="Big Shift")
+    trig = SpectraTrigger(timestamp_ms=2000,
+                          action=FireSceneUpdateAction(intensity=1.0))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "update")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                executor, conductor, responder, _ = _conductor_and_responder(clock)
+                writes = [{"virtual_id": VID, "effect_type": "concentric",
+                          "config": {"gradient_scale": 1.0},
+                          "entry_id": scene.devices[0].id, "color_mode": "set"}]
+                conductor.on_scene_fire(scene, writes)
+
+                engine = TriggerEngine(list_triggers=lambda uri: [trig],
+                                       fire_scene_update=responder.on_update)
+                await engine.on_track_state("song:update")
+
+                await engine.tick(1000)
+                headless.render_frames(virtual, 60, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0), \
+                    "update hasn't fired before its trigger's moment"
+
+                fired = await engine.tick(2000)
+                assert len(fired) == 1
+                # the ramp-in, not an instant jump: not landed one frame later
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] < 1.8
+                # but landed well past the ramp
+                headless.render_frames(virtual, 300, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.8), \
+                    "fire_scene_update reached the real response engine's " \
+                    "on_update — no response band was configured at all"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
 # ── proof 3: select_color_set drives the real room-colour apply at its moment ──
 
 def test_trigger_fires_select_color_set_action_on_the_real_pipeline(tmp_path):

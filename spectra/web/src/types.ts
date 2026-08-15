@@ -164,6 +164,11 @@ export interface SceneV2 {
   devices: SceneDeviceConfig[];
   flare_kinds: FlareKind[];
   responses: Partial<Record<ResponseClass, ResponseSpec>>;
+  /** UPDATE (RULING.md 2026-08-14): names a type="permanent" entry in
+   * flare_kinds as this scene's own UPDATE content — a fire_scene_update
+   * trigger fires it directly, bypassing band selection. null = not
+   * authored yet, a fire_scene_update trigger on this scene is a no-op. */
+  update_kind: string | null;
   color_journey: SceneColorJourney;
   choreography: PhaseChoreography;
   phase_blend: PhaseBlend;
@@ -345,6 +350,7 @@ export function newScene(id: string): SceneV2 {
     devices: [],
     flare_kinds: [],
     responses: {},
+    update_kind: null,
     color_journey: { mode: 'inherit', pace_factor: 1, journey: null },
     choreography: { enabled: false, transition_ms: 800, transition_mode: 'Add', anchor_frac: 0.45 },
     phase_blend: { charge_ramp_ms: null, lull_ramp_ms: null },
@@ -486,7 +492,19 @@ export interface SelectColorSetAction {
   set_id: string;
 }
 
-export type TriggerAction = FireSceneAction | FireResponseAction | SelectColorSetAction;
+/** UPDATE (data/spectra-trigger-migration-scoping RULING.md, 2026-08-14):
+ * "a major change within the scene, bigger than a flare, overriding the
+ * drift, going somewhere new on a ramp-in transition." Fires the ACTIVE
+ * scene's own SceneV2.update_kind by name, bypassing intensity-band
+ * selection entirely (unlike fire_response) — no update_kind authored on
+ * the active scene is a silent no-op. Reset is the same action. */
+export interface FireSceneUpdateAction {
+  kind: 'fire_scene_update';
+  intensity: number;
+}
+
+export type TriggerAction = FireSceneAction | FireResponseAction | SelectColorSetAction
+  | FireSceneUpdateAction;
 export type TriggerActionKind = TriggerAction['kind'];
 
 /** source/generator_key: front 3's provenance — "generated" is a
