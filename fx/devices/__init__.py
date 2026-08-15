@@ -2,6 +2,7 @@ import asyncio
 import logging
 import socket
 import threading
+import time
 from abc import abstractmethod
 from functools import cached_property, partial
 
@@ -181,13 +182,25 @@ class Device(BaseRegistry):
         # from fighting over the device buffer
         if self.priority_virtual:
             if virtual_id == self.priority_virtual.id:
-                # Priority virtual flushes after all virtuals have updated their pixels
-                frame = self.assemble_frame()
-                self.flush(frame)
+                # Priority virtual flushes after all virtuals have updated
+                # their pixels. A virtual's render loop now ticks at its
+                # FASTEST member's rate (Virtual.render_rate — see
+                # fx/VENDOR.md), so a slower device sharing that virtual
+                # would otherwise receive real network flushes faster than
+                # its own configured refresh_rate. Gate the actual flush per
+                # device to that device's own rate; the pixel buffer above
+                # is still updated every call, so a paced-down flush always
+                # sends the latest frame, never a stale one.
+                now = time.monotonic()
+                min_interval = 1.0 / self.max_refresh_rate if self.max_refresh_rate else 0.0
+                if now - self._last_flush_time >= min_interval:
+                    self._last_flush_time = now
+                    frame = self.assemble_frame()
+                    self.flush(frame)
 
-                self._ledfx.events.fire_event(
-                    DeviceUpdateEvent(self.id, frame)
-                )
+                    self._ledfx.events.fire_event(
+                        DeviceUpdateEvent(self.id, frame)
+                    )
         else:
             _LOGGER.warning(
                 "Flush skipped as %s has no priority_virtual", self.id
@@ -209,6 +222,7 @@ class Device(BaseRegistry):
         self._pixels = np.zeros((self.pixel_count, 3))
         self._active = True
         self._teardown_dispatched = False
+        self._last_flush_time = 0.0
 
     def deactivate(self):
         self._pixels = None
@@ -224,6 +238,12 @@ class Device(BaseRegistry):
     # always attempt the stop/release regardless of _active. Reset by
     # activate().
     _teardown_dispatched = False
+
+    # Per-device real-flush pacing gate (update_pixels): monotonic timestamp
+    # of this device's last actual network flush, independent of how often
+    # its priority virtual's render loop ticks. 0.0 so the first call after
+    # activate() always flushes.
+    _last_flush_time = 0.0
 
     # Set by _dispatch_teardown_task() when deactivate() fires an unawaited
     # device-stop coroutine (Hue's bridge action:stop, WLED's {"live": false}

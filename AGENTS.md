@@ -514,7 +514,13 @@ runtime intersection above is the actual fix. Spec:
 `fx/` is the LedFX render pipeline vendored from the fork at commit
 `149f4470` — provenance, inventory, and the complete deviation list live in
 `fx/VENDOR.md` (keep vendored files verbatim; re-diff against that commit
-when updating). The in-process switch is `settings.fx_in_process` (default
+when updating). A virtual's devices each flush at their OWN configured
+`refresh_rate` now, not the slowest member's (`VENDOR.md` deviation 11,
+`tests/test_per_device_cadence.py`) — `Virtual.refresh_rate` (min, unchanged)
+still feeds `Device.refresh_rate`/`priority_virtual`; a new `Virtual.
+render_rate` (max) drives the render loop, and `Device.update_pixels()`
+paces each device's real network flush to its own `max_refresh_rate`. The
+in-process switch is `settings.fx_in_process` (default
 OFF; production runs HTTP) at the `api/ledfx_client._request()` choke point —
 the public client functions are the seam; don't fork per-transport logic in
 callers. Offline dummy-device harness: `fx/headless.py` +

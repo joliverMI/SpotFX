@@ -157,6 +157,55 @@ variables named `ledfx` (the core object handle) are untouched.
     present in the gradient branch just below. Not yet ported back to the
     fork source at `/home/javi/ledfx-src`.
 
+11. `virtuals.py` + `devices/__init__.py`: per-device flush cadence
+    (BEHAVIOUR CHANGE — data/spectra-crystal-colour-lag/report.md, PR
+    fm/spectra-per-device-cadence). `Virtual.refresh_rate` used to be BOTH
+    the render loop's own clock (`thread_function`'s sleep interval) AND
+    the per-device network-flush ceiling (via `Device.update_pixels`'s
+    unconditional `self.flush(frame)` whenever called by the device's
+    `priority_virtual`) — `min(device.max_refresh_rate for device in
+    self._devices)`, so ANY virtual combining a deliberately slow device
+    (a wifi/pixel-count-constrained unit, capped on purpose) with a faster
+    sibling forced the WHOLE virtual, including the faster device, down to
+    the slow one's cadence. Confirmed live and currently active on the
+    `hues` virtual (`dining-hues` 30fps + `hue-lights` 62fps, both Hue) at
+    diagnosis time; not currently live for `crystal` specifically because
+    `Crystal-Mapper` happens to be a single-real-device virtual today — but
+    the mechanism is real, in the vendored render engine, not topology
+    luck, and the Admiral's ruling (`crystal`'s 30fps config stands,
+    unconditionally) means the general case has to be fixed rather than
+    worked around by keeping crystal permanently siloed.
+
+    Fix, in two parts:
+    - `Virtual.refresh_rate` (min) is UNCHANGED — still feeds
+      `Device.refresh_rate`/`priority_virtual` exactly as before, zero
+      regression risk to that reporting path. A NEW `Virtual.render_rate`
+      (max across `self._devices`) drives the render thread's own sleep
+      interval (`thread_function`) and the two transition-frame-count
+      sizings (`set_effect`, `clear_effect`) — the loop now assembles and
+      offers a frame often enough to serve the FASTEST member.
+    - `Device.update_pixels()`'s real `self.flush(frame)` call (the only
+      choke point all three of `Virtual`'s flush paths — simple/complex/
+      shape-resample segments — converge on) is gated by a per-device
+      pacing check against `self.max_refresh_rate` (a new
+      `_last_flush_time` monotonic timestamp, reset in `activate()`): a
+      device only receives a REAL network flush at its own configured
+      rate, however often its priority virtual's loop actually ticks. The
+      device's pixel buffer (`self._pixels`) is still updated every call,
+      so a paced-down flush always sends the latest frame, never a stale
+      one — this is delivery pacing, not staleness.
+
+    Net effect: a virtual's slowest device keeps rendering at exactly its
+    own configured rate (crystal's 30 is untouched — its own siblings-free
+    virtual is a no-op case for this fix, `min([30]) == max([30])`); any
+    faster sibling sharing a virtual with it is no longer capped down —
+    proven headless in `tests/test_per_device_cadence.py` (two dummy
+    devices, 30fps + 62fps, one virtual, real render thread; asserts the
+    fast device's real-flush count is NOT pulled toward the slow one's) and
+    validated live against the room's one existing mixed-rate virtual
+    (`hues`) via the liveness flush-cadence endpoint. Not yet ported back
+    to the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

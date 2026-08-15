@@ -694,7 +694,7 @@ class Virtual:
                 and not self.fallback_suppress_transition
             ):
                 self.transition_frame_total = (
-                    self.refresh_rate * self._config["transition_time"]
+                    self.render_rate * self._config["transition_time"]
                 )
                 self.transition_frame_counter = 0
                 self.clear_transition_effect()
@@ -763,7 +763,7 @@ class Virtual:
                 self._active_effect = DummyEffect(self.effective_pixel_count)
 
                 self.transition_frame_total = (
-                    self.refresh_rate * self._config["transition_time"]
+                    self.render_rate * self._config["transition_time"]
                 )
                 self.transition_frame_counter = 0
             else:
@@ -930,7 +930,7 @@ class Virtual:
             # this will be more frame accurate on high res sleep systems
             run_time = time.perf_counter() - start_time
             sleep_time = max(
-                0.001, fps_to_sleep_interval(self.refresh_rate) - run_time
+                0.001, fps_to_sleep_interval(self.render_rate) - run_time
             )
             time.sleep(sleep_time)
 
@@ -1504,6 +1504,18 @@ class Virtual:
         if not self._devices:
             return False
         return min(device.max_refresh_rate for device in self._devices)
+
+    @cached_property
+    def render_rate(self):
+        """The virtual's render-loop cadence: the FASTEST member device's
+        rate, not the slowest. `refresh_rate` (min, above) stays the
+        per-device network-flush ceiling — Device.update_pixels() paces each
+        device's actual flush down to its own max_refresh_rate — so a
+        virtual mixing devices no longer forces every member down to its
+        slowest one's cadence; see fx/VENDOR.md."""
+        if not self._devices:
+            return False
+        return max(device.max_refresh_rate for device in self._devices)
 
     @cached_property
     def pixel_count(self):
