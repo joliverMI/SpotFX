@@ -298,6 +298,138 @@ def test_release_room_deactivates_the_real_spectra_live_stack(tmp_path, monkeypa
     _run(main())
 
 
+# ── 2c. release_room(): the pre-release Hue fade (spectra-release-restores-
+#        lights) — the defect this file's PR fixes: deactivate() alone
+#        stopped the entertainment SESSION but never touched the BULB, so
+#        Hue held whatever it last streamed indefinitely. Proven both at
+#        the wiring level (fade runs, and runs before stream teardown) and
+#        against a fake bridge (spectra/services/release_fade.py has its
+#        own payload/ordering/multi-bridge proofs in test_release_fade.py).
+
+
+class _FakeHueDevice:
+    type = "hue"
+
+    def __init__(self, ip: str, calls: list):
+        self.config = {"ip_address": ip, "entertainment_id": f"ent-{ip}", "username": "u"}
+        self.calls = calls
+        self.frozen = None
+
+    async def set_frozen(self, frozen: bool) -> None:
+        self.calls.append(("set_frozen", frozen))
+        self.frozen = frozen
+
+
+class _FakeHost:
+    def __init__(self, devices: dict):
+        self.devices = devices
+
+    async def shutdown(self) -> None:
+        """Lets _release_spectra_devices()'s real live.deactivate() tear
+        this fake host down cleanly after the fade, same as a real FxHost —
+        this test isn't proving teardown fidelity (see
+        test_release_room_deactivates_the_real_spectra_live_stack for
+        that), just that the fade lands first."""
+
+
+def _fake_hue_bridge(calls: list):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(("REST", request.method, path))
+        if path == "/clip/v2/resource/entertainment":
+            return httpx.Response(200, json={"data": [{"id": "e1", "owner": {"rid": "d1"}}]})
+        if path == "/clip/v2/resource/light":
+            return httpx.Response(200, json={"data": [{"id": "l1", "owner": {"rid": "d1"}}]})
+        if path.startswith("/clip/v2/resource/entertainment_configuration/"):
+            return httpx.Response(200, json={"data": [{"channels": [{"members": [
+                {"service": {"rtype": "entertainment", "rid": "e1"}}]}]}]})
+        if path.startswith("/clip/v2/resource/light/"):
+            return httpx.Response(200, json={"data": []})
+        raise AssertionError(f"unexpected request {request.method} {path}")
+
+    def fake_bridge_client(cfg):
+        return httpx.AsyncClient(base_url=f"https://{cfg['ip_address']}",
+                                 transport=httpx.MockTransport(handler))
+    return fake_bridge_client
+
+
+def test_release_room_fades_hue_bulbs_before_stopping_the_stream(tmp_path, monkeypatch):
+    """The actual defect: a live Hue device gets a bridge-side fade-to-off
+    BEFORE the live stack (and its entertainment stream) tears down —
+    proven against a fake bridge, no real hardware."""
+    from spectra.services import release as release_svc, release_fade
+    from spectra.services.live_host import live
+
+    _own_file(tmp_path)   # fresh record — default owner is spot-effects,
+                          # so from_world != RELEASED and cleanup runs
+    _ledfx_unit_stopped(monkeypatch)
+    calls: list = []
+    dev = _FakeHueDevice("10.0.0.1", calls)
+    monkeypatch.setattr(live, "host", _FakeHost({"hue-lights": dev}))
+    monkeypatch.setattr(release_fade, "_bridge_client", _fake_hue_bridge(calls))
+    monkeypatch.setattr(release_fade, "RELEASE_FADE_MS", 0)
+    release_fade._light_cache.clear()
+
+    async def main():
+        try:
+            result = await release_svc.release_room("spec: fade before release")
+            assert result.record.owner == lo.RELEASED
+            assert dev.frozen is True
+            put_calls = [c for c in calls if c[:2] == ("REST", "PUT")]
+            assert len(put_calls) == 2, "dim PUT + off PUT reached the fake bridge"
+        finally:
+            release_fade._light_cache.clear()
+            monkeypatch.setattr(live, "host", None)
+
+    _run(main())
+
+
+def test_release_room_fade_runs_before_spectra_device_teardown(tmp_path, monkeypatch):
+    """Ordering matters: freezing the stream (part of the fade) needs a
+    stream that's still up to freeze — so the fade must run before
+    _release_spectra_devices() tears the live stack down."""
+    from spectra.services import release as release_svc
+
+    _own_file(tmp_path)
+    _ledfx_unit_stopped(monkeypatch)
+    order: list = []
+
+    async def fake_fade():
+        order.append("fade")
+        return {"devices": [], "failed": []}
+
+    async def fake_devices():
+        order.append("spectra_devices")
+
+    async def fake_ledfx():
+        order.append("ledfx_virtuals")
+        return []
+
+    monkeypatch.setattr(release_svc, "_fade_hue_before_release", fake_fade)
+    monkeypatch.setattr(release_svc, "_release_spectra_devices", fake_devices)
+    monkeypatch.setattr(release_svc, "_release_ledfx_virtuals", fake_ledfx)
+
+    result = _run(release_svc.release_room("spec: ordering"))
+    assert result.record.owner == lo.RELEASED
+    assert order == ["fade", "spectra_devices", "ledfx_virtuals"]
+
+
+def test_release_room_fade_is_a_noop_when_spectra_does_not_own_the_live_stack(tmp_path, monkeypatch):
+    """No live stack (dark, or spot-effects owns) — nothing to fade, and the
+    step must not raise or block the rest of release."""
+    from spectra.services import release as release_svc
+    from spectra.services.live_host import live
+
+    _own_file(tmp_path)
+    _ledfx_unit_stopped(monkeypatch)
+    monkeypatch.setattr(live, "host", None)
+
+    result = _run(release_svc._fade_hue_before_release())
+    assert result == {"devices": [], "failed": []}
+
+
 def test_release_room_addresses_rogue_ledfx_while_record_says_spectra(tmp_path, monkeypatch):
     """THE EXACT SHAPE OF THE 2026-08-13 INCIDENT (defect 1's proof): the
     record says spectra owns while systemd's Wants=ledfx.service resurrected
