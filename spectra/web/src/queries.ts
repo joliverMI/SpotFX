@@ -1,11 +1,12 @@
 /** Data hooks for the SPECTRA app (react-query). */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiDel, apiGet, apiPost, apiPut, spotfxGet, spotfxPost } from './api/client';
+import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxGet, spotfxPost } from './api/client';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   ColorWheelPosition, DriftProfile, EngineStatus, FeedbackCapture, FeedbackEntry,
   FireResult, Registry, ReviewSession, ReviewTimeline, RoomColorState, RoomControlState,
-  RoomControlsSaveResult, SceneV2, SpectraTrigger, SpotColorSetCard,
+  RoomControlsSaveResult, SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry,
+  SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
 } from './types';
 
 /* ── scenes ── */
@@ -419,5 +420,66 @@ export function useReviewTimeline(sessionId: string | null, uri: string | null) 
     queryFn: () => apiGet<ReviewTimeline>(
       `/review/timeline?session_id=${enc(sessionId!)}&uri=${enc(uri!)}`),
     enabled: !!sessionId && !!uri,
+  });
+}
+
+/* ── settings console (standing order 5 — spectra/services/settings_console.py) ── */
+
+/** Every declared setting + its live value/range — the read-only summary
+ * strip. Polled, not a form: the chat is the only thing that writes. */
+export function useSettingsRegistry() {
+  return useQuery({
+    queryKey: ['spectra-settings-registry'],
+    queryFn: () => apiGet<SettingsRegistry>('/settings-console/registry'),
+    refetchInterval: 5000,
+  });
+}
+
+/** Recent change-log entries, newest first — the visible "what changed"
+ * record a mis-transcribed voice command needs to be caught by. */
+export function useSettingsLog(limit = 20) {
+  return useQuery({
+    queryKey: ['spectra-settings-log', limit],
+    queryFn: () => apiGet<SettingChangeEntry[]>(`/settings-console/log?limit=${limit}`),
+    refetchInterval: 5000,
+  });
+}
+
+function invalidateSettingsConsole(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ['spectra-settings-registry'] });
+  void qc.invalidateQueries({ queryKey: ['spectra-settings-log'] });
+  void qc.invalidateQueries({ queryKey: ['spectra-room-controls'] });
+}
+
+export function useUndoLastSetting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<UndoResult>('/settings-console/undo'),
+    onSuccess: () => invalidateSettingsConsole(qc),
+  });
+}
+
+export function useSendSettingsMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { session_id: string | null; text: string }) =>
+      apiPost<SettingsMessageResult>('/settings-console/message', body),
+    onSuccess: (result) => {
+      if (result.changes.length > 0) invalidateSettingsConsole(qc);
+    },
+  });
+}
+
+/** POST /settings-console/transcribe — the voice seam. Unimplemented
+ * server-side tonight (spectra/services/transcription.py); the request is
+ * real and fails with a clear 503 the caller surfaces, never a silent
+ * no-op. */
+export function useTranscribeSettingsAudio() {
+  return useMutation({
+    mutationFn: (audio: Blob) => {
+      const form = new FormData();
+      form.append('audio', audio, 'clip.webm');
+      return apiPostForm<TranscribeResult>('/settings-console/transcribe', form);
+    },
   });
 }

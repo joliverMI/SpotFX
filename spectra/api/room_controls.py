@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from spectra.services import ambient, room_controls
+from spectra.services import room_controls
 from spectra.services.room_controls import RoomControlState
 
 router = APIRouter(prefix="/api", tags=["spectra-room-controls"])
@@ -37,11 +37,7 @@ async def put_room_controls(state: RoomControlState):
     previous = room_controls.load_room_controls()
     room_controls.save_room_controls(state)
     response: dict = {"status": "saved", **state.model_dump()}
-    ambient_changed = (
-        previous.ambient_enabled != state.ambient_enabled
-        or (state.ambient_enabled and previous.ambient_color != state.ambient_color)
-    )
-    if ambient_changed:
-        response["ambient_result"] = await ambient.reconcile(
-            state.ambient_enabled, state.ambient_color)
+    ambient_result = await room_controls.reconcile_ambient_if_changed(previous, state)
+    if ambient_result is not None:
+        response["ambient_result"] = ambient_result
     return response

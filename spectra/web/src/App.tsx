@@ -9,6 +9,7 @@ import FeedbackPage from './feedback/FeedbackPage';
 import HelpPage from './help/HelpPage';
 import ReviewPage from './review/ReviewPage';
 import ScenesPage from './scenes/ScenesPage';
+import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
 
@@ -17,6 +18,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/timeline', 'Timeline'],
   ['/feedback', 'Feedback'],
   ['/review', 'Review'],
+  ['/settings', 'Settings'],
   ['/status', 'Status'],
   ['/help', 'Help'],
 ];
@@ -46,6 +48,7 @@ function NavBar() {
       <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
       <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
       <Link to="/review" className={cls((p) => p === '/review')}>Review</Link>
+      <Link to="/settings" className={cls((p) => p === '/settings')}>Settings</Link>
       <Link to="/status" className={cls((p) => p === '/status')}>Status</Link>
       <Link to="/help" className="help-link" title="Help" aria-label="Help">?</Link>
     </nav>
@@ -68,6 +71,7 @@ export default function App() {
           <Route path="/timeline" element={<BuilderPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/settings" element={<SettingsConsolePage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/help" element={<HelpPage />} />
         </Routes>
