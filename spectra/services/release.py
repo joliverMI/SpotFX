@@ -33,16 +33,42 @@ Per device class, RELEASED means (see fx/devices/*.py + PR body / help for
 the full per-class writeup):
   WLED     realtime EXITED explicitly — {"live": false} to the JSON API
            (fx/utils.py WLED.release_realtime), not left to the per-packet
-           UDP timeout byte lapsing on its own.
-  Hue      the entertainment/streaming session STOPPED (action:"stop" to the
-           bridge) — already explicit in the vendored driver
+           UDP timeout byte lapsing on its own. WLED's own firmware then
+           resumes whatever it was last showing on-device (its own preset/
+           effect) rather than holding the final streamed frame — genuinely
+           different in kind from Hue below, verified live 2026-08-14
+           (spectra-release-restores-lights): the incident's stuck bulbs
+           were all Hue, WLED's realtime streaming had already stopped
+           cleanly on its own.
+  Hue      BOTH the light itself and the session are released, in that
+           order: spectra/services/release_fade.fade_and_release_hue()
+           freezes the entertainment stream, bridge-fades brightness down
+           to a resting level over its own `dynamics.duration`, then powers
+           the light off via direct REST — see that module's docstring for
+           the fidelity reasoning (matches legacy's ambient-mode disable
+           FEEL, differs in kind on WHAT it fades toward, since release has
+           no next scene to land on). Runs BEFORE device teardown below,
+           while the stream is still reachable to freeze. Only then does
+           the entertainment/streaming session itself STOP (action:"stop"
+           to the bridge) — already explicit in the vendored driver
            (fx/devices/hue.py HueDevice.deactivate); release just calls it.
+           Without the fade step, deactivate() alone stops the SESSION but
+           never touches the BULB — Hue holds whatever it last streamed
+           indefinitely, which is exactly the defect this file's PR fixes
+           (all 10 Music Group + 7 Dining/Kitchen bulbs across both bridges
+           found stuck on SPECTRA's last frame, session already closed,
+           nothing blocking Home Assistant but nothing telling the bulb to
+           let go either).
   dummy    deactivated (no I/O; a no-op release, correctly).
   external the released side's active virtuals set inactive via the LedFX
   LedFX    REST API (spectra/services/ledfx_release.py, a direct client —
   service  see its docstring for why this bypasses api.ledfx_client rather
            than asking its ownership gate for an exemption). This app never
            restarts or reaches into that process beyond its documented API.
+           No Hue-fade step here: the external LedFX world drives its own
+           devices out-of-process, so there is no in-process device object
+           to freeze/fade — deactivating its virtuals is the same best-
+           effort this file already did before this fix.
 
 Verification (spec gap closed 2026-08-13): a command is not proof. After
 cleanup, _verify_released() reads real state back — the SPECTRA live stack
@@ -81,6 +107,23 @@ async def _best_effort(step, label: str):
                          "this device may still be lit until its own "
                          "timeout", label)
         return None
+
+
+async def _fade_hue_before_release() -> dict:
+    """The pre-release Hue fade (spectra/services/release_fade.py) — every
+    live Hue device gets a bridge-side dim-to-off BEFORE the live stack
+    itself tears down, so the bulb is actually let go rather than abandoned
+    holding SPECTRA's last frame (see this module's docstring, Hue entry).
+    Must run before _release_spectra_devices(): that call's
+    SpectraSide.deactivate() stops the entertainment stream, and freezing
+    it here needs a live, reachable stream to freeze. No-ops when SPECTRA
+    doesn't currently own the live stack — nothing to fade."""
+    from spectra.services import release_fade
+    from spectra.services.live_host import live
+
+    if not live.active or live.host is None:
+        return {"devices": [], "failed": []}
+    return await release_fade.fade_and_release_hue(live.host)
 
 
 async def _release_spectra_devices() -> None:
@@ -170,6 +213,7 @@ async def release_room(reason: str = "owner panic release") -> ReleaseResult:
     record = light_ownership.release(reason)
 
     if from_world != light_ownership.RELEASED:
+        await _best_effort(_fade_hue_before_release, "spectra hue release fade")
         await _best_effort(_release_spectra_devices, "spectra live stack")
         await _best_effort(_release_ledfx_virtuals, "external LedFX virtuals")
 

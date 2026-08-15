@@ -455,9 +455,15 @@ owner's panic handle — `spectra/services/release.py`, `POST
 (going to no-writer is always safe): one atomic step sheds both worlds'
 write grants, then each device is told to let go explicitly rather than
 left to time out — WLED gets the JSON API's `{"live": false}`
-(`fx/utils.py WLED.release_realtime`, wired in `fx/devices/wled.py`), Hue's
-entertainment session is stopped (already explicit — `fx/devices/hue.py`),
-the external LedFX service's active virtuals are deactivated over its API.
+(`fx/utils.py WLED.release_realtime`, wired in `fx/devices/wled.py`; WLED's
+own firmware then resumes its on-device show, unlike Hue below), Hue gets
+BOTH a bridge-side dim-to-off fade over direct REST
+(`spectra/services/release_fade.py`, run before the stream itself stops —
+2026-08-14 fix: stopping the entertainment session alone left the bulb
+holding SPECTRA's last streamed frame indefinitely, since Hue has no
+on-device show to fall back to) and the entertainment session stop
+(already explicit — `fx/devices/hue.py`), the external LedFX service's
+active virtuals are deactivated over its API.
 Cleanup runs against BOTH worlds on every press regardless of which one the
 record said owned (a rogue writer the record doesn't know about, e.g.
 systemd's `Wants=` resurrecting `ledfx.service` behind its back, is
@@ -479,7 +485,10 @@ with the specific `problems` when a device couldn't be confirmed dark,
 instead of silently claiming success.
 The way back is the SAME guarded handover, still armed- and readiness-gated
 (`run_handover`'s `from_world=="released"` skips the vacuous quiesce step).
-Spec: `tests/test_release.py` + `check_ownership.py` §12.
+Spec: `tests/test_release.py` (+ `tests/test_release_fade.py` for the Hue
+fade itself) + `check_ownership.py` §12. Live-fixture proof after a real
+press (offline tests can't reach a bridge): `scripts/verify_release_fixtures.py`
+— read-only, GET-only CLIP v2 + WLED `json/info`, no writes.
 
 ### Two-writers prevention build (2026-08-13 incident: `Wants=ledfx.service`
 in the unit resurrected a deliberately-quiesced LedFX on a routine
