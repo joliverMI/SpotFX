@@ -29,6 +29,23 @@ triggers from an earlier partial run and still be in scope for a refresh
 and this script never re-derives that boundary from a stale snapshot — it
 recomputes both sets fresh against storage on every run.
 
+UNRESOLVABLE URIs (found live 2026-08-15, PR #75 review): trigger_store is
+keyed by spotify_uri, and the live engine's bridge only ever presents what
+the S2 bridge's Spotify integration resolves — "spotify:track:<id>" for
+every one of the 828 other analyzable songs and all 317 pre-existing store
+keys, with zero exceptions. A handful of storage/audio_shapes/*.json
+sidecars carry a synthetic "ledfx:<artist>:<title>" spotify_uri instead —
+their OWN legacy profile file (storage/profiles/) carries the identical
+synthetic value with zero triggers, so the real Spotify id was never
+resolved anywhere in his data at capture time, not just missed by this
+script. A trigger written under that key can never fire: the live engine
+will never hold that string as a track URI. REQUIRED_URI_PREFIX below
+excludes these from the target set (and asserts on every write as a
+second, independent guard) rather than writing dead entries — see
+unresolvable_uris() and the --apply report's "excluded (unresolvable
+spotify_uri)" section, which names each one explicitly, the same way a
+zero-moment song is named rather than silently dropped.
+
 A song already holding at least one authored trigger is NEVER touched:
 generate_for_song's own contract never writes to a song's authored
 triggers (only source="generated" entries keyed by generator_key), and
@@ -66,15 +83,42 @@ except ImportError:
 from spectra import config  # noqa: E402
 from spectra.services import analysis_reader, midsong_generator  # noqa: E402
 
+# The only key shape the live engine's bridge ever presents (828/828 other
+# analyzable songs, 317/317 pre-existing store keys, checked 2026-08-15 —
+# see the module docstring's UNRESOLVABLE URIs section). A trigger written
+# under anything else can never fire.
+REQUIRED_URI_PREFIX = "spotify:track:"
+
 
 def analyzable_uris() -> set[str]:
-    """Every song with a usable (non-empty) librosa section list — the
-    same definition analysis_reader.sections_for_uri itself applies."""
+    """Every song with a usable (non-empty) librosa section list AND a
+    resolvable spotify_uri — the same definition analysis_reader.
+    sections_for_uri applies, narrowed to REQUIRED_URI_PREFIX. Use
+    unresolvable_uris() to see what this excluded and why."""
     analysis_reader._build_index()  # rebuild fresh, don't trust a stale index
     out: set[str] = set()
     for uri in analysis_reader._shape_index:
-        if analysis_reader.sections_for_uri(uri):
+        if uri.startswith(REQUIRED_URI_PREFIX) and analysis_reader.sections_for_uri(uri):
             out.add(uri)
+    return out
+
+
+def unresolvable_uris() -> dict[str, str]:
+    """Analyzable songs (usable librosa sections) whose spotify_uri isn't
+    the shape the live engine can ever present — uri -> "artist - title"
+    for explicit naming in the report, never silently dropped."""
+    analysis_reader._build_index()
+    out: dict[str, str] = {}
+    for uri, stem in analysis_reader._shape_index.items():
+        if uri.startswith(REQUIRED_URI_PREFIX) or not analysis_reader.sections_for_uri(uri):
+            continue
+        path = config.AUDIO_SHAPES_DIR / f"{stem}.json"
+        try:
+            sidecar = json.loads(path.read_text(encoding="utf-8"))
+            name = f"{sidecar.get('artist', '?')} - {sidecar.get('title', '?')}"
+        except Exception:
+            name = "(unknown)"
+        out[uri] = name
     return out
 
 
@@ -116,10 +160,17 @@ def main() -> int:
     if args.limit is not None:
         target = target[:args.limit]
 
+    excluded = unresolvable_uris()
+
     print(f"analyzable songs (usable librosa sections): {len(analyzable)}")
     print(f"songs with >=1 authored trigger (protected, never touched): {len(authored)}")
     print(f"target songs (analyzable, zero authored): {len(analyzable - authored)}")
     print(f"processing this run: {len(target)}")
+    if excluded:
+        print(f"excluded (unresolvable spotify_uri — see module docstring, "
+              f"can never fire): {len(excluded)}")
+        for uri, name in sorted(excluded.items(), key=lambda kv: kv[1]):
+            print(f"    {name} | {uri}")
     print()
 
     t0 = time.time()
@@ -134,6 +185,17 @@ def main() -> int:
             if not moments:
                 zero_moment_songs.append(uri)
             continue
+
+        # Belt-and-suspenders: analyzable_uris() already filters to
+        # REQUIRED_URI_PREFIX, but a write path this consequential (his
+        # live triggers.json) gets its own independent check rather than
+        # trusting the filter never regresses — see the module docstring's
+        # UNRESOLVABLE URIs section (PR #75 review caught 13 written
+        # without this).
+        assert uri.startswith(REQUIRED_URI_PREFIX), (
+            f"refusing to write a trigger keyed by {uri!r} — doesn't match "
+            f"{REQUIRED_URI_PREFIX!r}, the only shape the live engine's "
+            f"bridge ever presents; it could never fire")
 
         result = midsong_generator.generate_for_song(uri)
         if result["skipped_authored"] != 0:
