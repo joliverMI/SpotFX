@@ -12,6 +12,7 @@ pydantic>=2.7.0        # data models (FastAPI uses this)
 pydantic-settings>=2.3.0  # settings from .env
 python-multipart>=0.0.9   # form data support
 redis<7                   # spotipy dep; redis 7.x has Python 3.14 ABC metaclass bug
+anthropic>=0.40.0         # SPECTRA settings-console agent (spectra/services/settings_agent.py)
 librosa>=0.11.0           # musical feature extraction
 soundfile>=0.13.0         # WAV read/write
 

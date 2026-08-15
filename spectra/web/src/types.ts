@@ -296,6 +296,65 @@ export interface RoomControlsSaveResult extends RoomControlState {
   ambient_result?: AmbientResult;
 }
 
+/* ── settings console (standing order 5: talk to the software) ──
+ * spectra/services/settings_console.py is the authority: SettingSpec's
+ * min/max/choices are read live off RoomControlState's own Field
+ * constraints, so this UI is a display of declared data, never a form
+ * that writes directly — only the chat (POST /settings-console/message)
+ * changes anything. */
+export type SettingKind = 'float' | 'int' | 'bool' | 'enum' | 'color';
+
+export interface SettingSpec {
+  key: string;
+  label: string;
+  kind: SettingKind;
+  description: string;
+  unit: string | null;
+  min: number | null;
+  max: number | null;
+  choices: string[] | null;
+}
+
+export interface SettingValue extends SettingSpec {
+  value: number | boolean | string | null;
+}
+
+export interface SettingsRegistry {
+  settings: SettingValue[];
+}
+
+export type SettingChangeSource = 'agent' | 'human' | 'undo';
+
+export interface SettingChangeEntry {
+  id: string;
+  ts_ms: number;
+  key: string;
+  old_value: unknown;
+  new_value: unknown;
+  source: SettingChangeSource;
+  undone: boolean;
+}
+
+export interface AppliedSettingChange extends SettingChangeEntry {
+  status: 'applied';
+}
+
+export interface SettingsMessageResult {
+  session_id: string;
+  reply: string;
+  changes: AppliedSettingChange[];
+}
+
+export interface UndoResult extends AppliedSettingChange {
+  ambient_result?: AmbientResult;
+}
+
+export interface SettingsChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+}
+
 /** Full spot-effects Colour Set card shape (read + the one supported
  * opt-out toggle through the spot-effects API — never modified otherwise). */
 export interface SpotColorSetCard {

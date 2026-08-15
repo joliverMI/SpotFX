@@ -764,4 +764,38 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  {
+    id: 'settings-console',
+    title: 'Settings console — talk to it instead of hunting a form',
+    keywords: 'settings console agent chat voice dictation mic microphone brightness ambient transition scene change undo change log talk to the software',
+    intro:
+      'Type (or speak) what you want changed — "turn brightness down to 40%", "turn ambient on and make it warm white" — and a small model changes it for you. The "Current settings" and "Recent changes" cards below the chat are read-only: they show what the settings are and what changed, but nothing on this page except the chat itself can change a value.',
+    entries: [
+      {
+        id: 'settings-console-scope',
+        title: 'What it can change',
+        keywords: 'brightness ambient colour transition scene change mode scope allowlist force scene',
+        body: [
+          'Five settings, on purpose, not everything the app has: room brightness, the default scene-entry transition time, ambient mode (on/off + colour), and the scene-change tier (transitions only / + analysed / + your triggers). Each one has a declared legal range or set of choices, enforced by the server — an out-of-range or nonsense request is rejected and the agent explains the legal range instead of guessing.',
+          "Force Scene isn't in scope here — it names a scene by id, which fits the room-controls bar's picker better than a spoken request.",
+        ],
+      },
+      {
+        id: 'settings-console-voice',
+        title: 'Voice: the mic button',
+        keywords: 'microphone record dictate speech transcribe',
+        body: [
+          'Tap 🎤 to record, tap again (■) to stop — the clip is sent to SPECTRA\'s own backend for transcription and the result lands in the text box for you to check before sending, not sent automatically. If transcription isn\'t wired up yet you\'ll see a plain message saying so; typed text always works regardless.',
+        ],
+      },
+      {
+        id: 'settings-console-changes',
+        title: 'What changed, and Undo',
+        keywords: 'change log history undo revert mis-transcription mistake wrong',
+        body: [
+          'Every change the agent makes — and every undo — appears in "Recent changes" with its old and new value, so a misheard word is easy to spot. "Undo last" reverts the most recent change (voice or typed) back to its previous value; undoing is itself a logged change, not a deletion, so the history stays honest.',
+        ],
+      },
+    ],
+  },
 ];

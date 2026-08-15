@@ -468,6 +468,57 @@ concept, so legacy's group-member-rotation half has nothing to port to.
 Spec: the Force Scene section of `scripts/check_spectra.py` +
 `tests/test_room_controls.py::test_force_scene_redirects_every_automatic_pick`.
 
+## SPECTRA settings console (standing order 5: talk to the software)
+
+`/settings` — a small Sonnet-class model, not a form, is the only thing
+that changes anything here. Mechanism `spectra/services/settings_console.py`
+(scope: the five RoomControlState fields already labelled "agent-tellable"
+in `room_controls.py`'s own docstring — brightness, ambient enable/colour,
+global transition, scene-change tier; `force_scene_*` deliberately
+excluded, it names a scene by opaque id). `SETTINGS_REGISTRY` is an
+explicit allowlist whose bounds/choices are READ off RoomControlState's own
+`Field(ge=, le=)`/`Literal[...]` (`room_controls.field_bounds`/
+`field_choices`) — never a second hand-typed copy of the range.
+`apply_change()` is the only write path: re-validates the full candidate
+through `RoomControlState.model_validate` (the same class GET/PUT
+`/api/room-controls` binds to) and writes through `room_controls.
+save_room_controls` + the (now-shared) `reconcile_ambient_if_changed` — the
+identical two calls the human PUT handler makes, factored out so the agent
+can't diverge from what a human save does. A bounded, visible change log
+(`storage/spectra/settings_log.json`) plus `undo_last_change()` (reverts by
+re-running `apply_change` with the old value — an undo is validated exactly
+like any other change) is the mis-transcription safety net, not a
+confirm-before-apply step — voice dictation mangles his product names
+routinely (captain-shared.md), so the record + one-step undo answer that
+without adding a round-trip to every spoken command.
+
+THE AUTHORITY BOUNDARY IS STRUCTURAL, not prompt wording — read `settings_
+agent.py`'s module docstring first if touching this. The model is handed
+exactly two tools (`get_settings` read, `set_setting` -> `apply_change`);
+`_dispatch()` is the complete, exhaustive name->code mapping, so there is no
+third branch to reach for a shell/file/HTTP/service-control/light-driving
+call, whatever the prompt or transcript says. `tests/test_settings_console.py`
+proves this without a network call (fabricated tool names/keys rejected,
+nothing persists on rejection) plus one live-model smoke test skipped
+without `ANTHROPIC_API_KEY`. Model id from `spectra.config.
+settings_agent_model()` (env `SPECTRA_SETTINGS_AGENT_MODEL`, default
+`claude-sonnet-5`); API key from `settings_agent_api_key()` (env
+`ANTHROPIC_API_KEY`) — unset means a stated 503, never a silent no-op.
+
+Voice reaches text by the browser RECORDING (MediaRecorder) and POSTing the
+clip to `POST /api/settings-console/transcribe`, not the browser's built-in
+SpeechRecognition (which ships audio to a third-party cloud and forecloses
+ever routing it to a local transcriber). `spectra/services/transcription.py`
+is the one seam a concrete transcriber plugs into — deliberately
+UNIMPLEMENTED (raises `TranscriptionUnavailable` -> a stated 503); its
+`vocabulary_hint()` already assembles live scene/colour-set/device names
+for a future transcriber's vocabulary-biasing input. Typed text is the
+proven-working floor; voice is real plumbing with an honest current
+failure, not a stub in his room (this whole feature ships UNVERIFIED
+against his live instance — see the PR).
+
+Spec: `scripts/check_settings_console.py` + `tests/test_settings_console.py`.
+
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
 Exactly one process owns the lights. The durable record is

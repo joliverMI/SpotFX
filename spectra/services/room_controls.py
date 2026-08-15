@@ -90,14 +90,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
+import typing
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from spectra import config
 
 SceneChangeMode = Literal["transitions", "analysed", "full"]
+
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class RoomControlState(BaseModel):
@@ -112,6 +116,40 @@ class RoomControlState(BaseModel):
     scene_change_mode: SceneChangeMode = "full"
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
+
+    @field_validator("ambient_color")
+    @classmethod
+    def _validate_hex(cls, v: Optional[str]) -> Optional[str]:
+        # Tightened for the settings-console agent (spectra/services/
+        # settings_console.py): the field was previously an unvalidated
+        # str, so ANY text round-tripped through the human colour-picker
+        # path too. Real colour pickers only ever emit #rrggbb, so this
+        # is not a behaviour change for the UI — it closes the gap for a
+        # write path with no picker to constrain it.
+        if v is not None and not _HEX_COLOR_RE.match(v):
+            raise ValueError("must be a #rrggbb hex colour")
+        return v
+
+
+def field_bounds(name: str) -> tuple[Optional[float], Optional[float]]:
+    """(ge, le) declared on a RoomControlState field, or (None, None) if the
+    field carries no numeric bound (bool/enum/str fields). Single source of
+    truth for the settings-console registry — it reads the SAME Field(ge=,
+    le=) constraints this model enforces, so a range can't drift between
+    what a human PUT accepts and what the agent is told is legal."""
+    ge = le = None
+    for constraint in RoomControlState.model_fields[name].metadata:
+        if hasattr(constraint, "ge"):
+            ge = constraint.ge
+        if hasattr(constraint, "le"):
+            le = constraint.le
+    return ge, le
+
+
+def field_choices(name: str) -> Optional[list[str]]:
+    """Literal[...] choices declared on a RoomControlState field, or None."""
+    args = typing.get_args(RoomControlState.model_fields[name].annotation)
+    return list(args) if args and all(isinstance(a, str) for a in args) else None
 
 
 def apply_brightness(params: dict, multiplier: float) -> dict:
@@ -171,3 +209,23 @@ def save_room_controls(state: RoomControlState) -> None:
         except OSError:
             pass
         raise
+
+
+async def reconcile_ambient_if_changed(previous: RoomControlState,
+                                       new_state: RoomControlState) -> Optional[dict]:
+    """The ambient-takeover half of a room-controls save, factored out so
+    both the human PUT /api/room-controls handler (spectra/api/
+    room_controls.py) and the settings-console agent's apply path
+    (spectra/services/settings_console.py) drive the SAME live Hue
+    reconcile on the SAME condition — one write choke point, so the agent
+    can never diverge from what a human save does. Returns the
+    ambient_result dict when the ambient fields actually changed, else
+    None (no reconnect churn on an unrelated field's change)."""
+    changed = (
+        previous.ambient_enabled != new_state.ambient_enabled
+        or (new_state.ambient_enabled and previous.ambient_color != new_state.ambient_color)
+    )
+    if not changed:
+        return None
+    from spectra.services import ambient
+    return await ambient.reconcile(new_state.ambient_enabled, new_state.ambient_color)

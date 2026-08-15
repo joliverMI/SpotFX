@@ -26,6 +26,7 @@ TRIGGERS_FILE = SPECTRA_STORAGE / "triggers.json"
 FIRE_HISTORY_FILE = SPECTRA_STORAGE / "fire_history.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
 FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"
+SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
@@ -40,6 +41,20 @@ def handover_armed() -> bool:
     docs/SPECTRA_HANDOVER.md). The machinery is complete; ARMING it is the
     owner's word, deliberately outside any config file an agent might edit."""
     return os.getenv("SPECTRA_HANDOVER_ARMED", "") == "1"
+
+
+def settings_agent_api_key() -> str:
+    """API key for the settings-console agent (spectra/services/
+    settings_agent.py) — a small Sonnet-class model whose only tool is a
+    validated setting write (spectra/services/settings_console.py). Not a
+    settings.py field: same posture as handover_armed(), a credential
+    belongs in the environment, not a file an agent's own writes could
+    touch."""
+    return os.getenv("ANTHROPIC_API_KEY", "")
+
+
+def settings_agent_model() -> str:
+    return os.getenv("SPECTRA_SETTINGS_AGENT_MODEL", "claude-sonnet-5")
 
 # Read-only spot-effects storage (S2 formalizes this as the bridge).
 COLOR_SETS_FILE = REPO_ROOT / "storage" / "color_sets.json"

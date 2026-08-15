@@ -37,5 +37,17 @@ export const apiPost = <T = unknown>(path: string, body?: unknown) => call<T>('P
 export const apiPut = <T = unknown>(path: string, body?: unknown) => call<T>('PUT', '/spectra/api' + path, body);
 export const apiDel = <T = unknown>(path: string) => call<T>('DELETE', '/spectra/api' + path);
 
+/** Multipart upload — only the settings-console voice seam uses this today
+ * (POST /settings-console/transcribe, an audio blob). */
+export async function apiPostForm<T = unknown>(path: string, form: FormData): Promise<T> {
+  const url = '/spectra/api' + path;
+  const res = await fetch(url, { method: 'POST', body: form });
+  if (!res.ok) {
+    const detail = await errorDetail(res);
+    throw new Error(`POST ${url} → ${res.status}${detail ? `: ${detail}` : ''}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export const spotfxGet = <T = unknown>(path: string) => call<T>('GET', '/api' + path);
 export const spotfxPost = <T = unknown>(path: string, body?: unknown) => call<T>('POST', '/api' + path, body);
