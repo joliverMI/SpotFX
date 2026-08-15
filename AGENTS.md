@@ -401,10 +401,20 @@ retire-not-delete). Built:
   reasoning (fixed post-#56, PR fm/spectra-ambient-release-fidelity, after
   the shipped single-fade version read as an abrupt cut against the legacy
   behaviour it was compared to). State-only (status "dark") when SPECTRA
-  doesn't own the live stack. Ambient/Dinner-Party as a full room-MODES
-  build is still separate. Spec: the room-control section of
-  `scripts/check_spectra.py` + `tests/test_room_controls.py` +
-  `tests/test_ambient.py`.
+  doesn't own the live stack. Ambient's ON path READS EVERY LIGHT BACK from
+  the bridge before counting it held — a 2xx PUT only means the bridge
+  accepted the write, not that the physical bulb (over zigbee, which can
+  silently drop a command under a write burst) took it (live defect,
+  2026-08-15, PR fm/spectra-ambient-verify-per-light: `lights_set` is now a
+  CONFIRMED count, stragglers get bounded+spaced retries, and any light
+  still not holding after that is named in `unconfirmed`/status "partial"
+  rather than folded into the total — see the module docstring). This same
+  attempted-vs-confirmed gap does NOT exist on the release path (already
+  reads real state back) or the scene-fire path (writes virtual effect
+  configs, fails loud on HTTP errors) — checked, not assumed. Ambient/
+  Dinner-Party as a full room-MODES build is still separate. Spec: the
+  room-control section of `scripts/check_spectra.py` +
+  `tests/test_room_controls.py` + `tests/test_ambient.py`.
 
 **Force Scene** — the Admiral's day-one ask, separate from the four-item
 gap-inventory decision above but built on the same room-control surface:

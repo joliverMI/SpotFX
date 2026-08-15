@@ -270,12 +270,20 @@ export interface RoomControlState {
  * takeover; "dark"/"no-hue-devices" means the switch saved but nothing was
  * touched (SPECTRA doesn't own the room right now, or there's no Hue
  * device in it); "failed" means SPECTRA tried and every live Hue device
- * rejected it (bridge unreachable, etc.) — the room bar surfaces all of
- * these so the control never silently lies about having done something. */
+ * rejected it (bridge unreachable, etc.); "partial" means at least one
+ * device held, but SPECTRA read every light back from the bridge and one
+ * or more did NOT confirm the colour after bounded, spaced retries — named
+ * in `unconfirmed` by his own bulb name (spectra/services/ambient.py's
+ * read-back confirmation) — the room bar surfaces all of these so the
+ * control never silently lies about having done something. `lights_set` is
+ * a CONFIRMED count (read back from the bridge), not merely attempted;
+ * `lights_total` is how many lights were targeted. */
 export interface AmbientResult {
-  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed';
+  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed' | 'partial';
   devices?: string[];
   lights_set?: number;
+  lights_total?: number;
+  unconfirmed?: string[];
 }
 
 export interface RoomControlsSaveResult extends RoomControlState {

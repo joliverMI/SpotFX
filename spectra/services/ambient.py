@@ -74,6 +74,35 @@ device's own `set_frozen()` — the one call this module doesn't replicate.
 State-only when SPECTRA doesn't own the live stack (dark, or spot-effects
 owns) — reconcile() no-ops and reports "dark" rather than raising, so
 saving the control never fails even when there's nothing to drive.
+
+Read-back confirmation (fixed after a live defect, 2026-08-15): a 2xx PUT
+response only means the BRIDGE accepted the write — it does not mean the
+physical bulb took it. Live proof: "Ambient ON: ['dining-hues',
+'hue-lights'] held at #f5da8c, 17 light(s) set" logged identically on a run
+where 3 lights (Kitchen Infuse, Dining Hue SE, Dining Hue SC) stayed on
+their old colour and a later run where all 17 actually changed — a burst of
+17 back-to-back REST writes hitting the bridge's own zigbee mesh, which can
+silently drop a command the bridge already 2xx'd (the mesh's radio, not the
+bridge's HTTP stack, is the bottleneck). Toggling Ambient off/on again fixed
+it, consistent with transient mesh congestion rather than a targeting bug —
+the three ARE in Ambient's set. So enabling now reads every light back from
+the bridge after writing it and only counts it as held once its reported
+state matches; `_hold_and_confirm` retries stragglers a bounded number of
+times, SPACED apart (not hammered — hammering a congested mesh makes it
+worse) and also paces the initial write round itself
+(AMBIENT_WRITE_STAGGER_MS) so a burst is less likely to congest the mesh in
+the first place — prevention alongside recovery. `reconcile()`'s "on"
+result can no longer overstate: `lights_set` is now a CONFIRMED count, and
+any light still not holding after retries comes back by its own bridge name
+in `unconfirmed` (status "partial") for a caller to name to the room's
+owner — never silently folded into a bigger "N set" total. Checked but
+deliberately NOT touched in this fix: the release path (services/
+release.py) stops the Hue entertainment stream rather than writing
+individual lights, and already reads real state back
+(`_verify_released()`); the scene-fire path (fx_seam.apply_writes) writes
+virtual effect configs (through the in-process facade or a hard-failing
+HTTP PUT), not one REST call per bulb, so neither carries this exact
+attempted-vs-confirmed gap.
 """
 from __future__ import annotations
 
@@ -94,9 +123,23 @@ AMBIENT_TRANSITION_MS = 1500
 AMBIENT_OFF_FADE_PCT = 35
 AMBIENT_CATCHUP_MS = 8000
 
+# Hold-confirmation pacing (module docstring's "Read-back confirmation").
+# Deliberately spaced, not hammered — the failure this defends against is
+# most likely bridge/mesh congestion, and hammering a congested mesh only
+# makes it worse.
+AMBIENT_WRITE_STAGGER_MS = 50    # gap between successive light PUTs in one
+                                 # hold pass — paces the burst from the
+                                 # start rather than only recovering after
+AMBIENT_CONFIRM_SETTLE_MS = 300  # extra wait after a write round's own
+                                 # bridge-side ramp before reading state back
+AMBIENT_HOLD_ATTEMPTS = 3        # 1 initial write + up to 2 spaced retries
+AMBIENT_RETRY_SPACING_MS = 1200
+_XY_TOLERANCE = 0.01
+_BRIGHTNESS_TOLERANCE_PCT = 3.0
+
 _lock: Optional[asyncio.Lock] = None
-# {(ip_address, entertainment_id): [light resource id, ...]}
-_light_cache: dict[tuple[str, str], list[str]] = {}
+# {(ip_address, entertainment_id): [(light resource id, friendly name), ...]}
+_light_cache: dict[tuple[str, str], list[tuple[str, str]]] = {}
 
 
 def _get_lock() -> asyncio.Lock:
@@ -181,10 +224,14 @@ async def _hue_put(client: httpx.AsyncClient, endpoint: str, body: dict) -> None
     resp.raise_for_status()
 
 
-async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
+async def _resolve_lights_named(client: httpx.AsyncClient, cfg: dict) -> list[tuple[str, str]]:
     """Map the device's entertainment stream to individual Hue `light`
-    resource ids, so ambient can PUT each one directly over REST — cached
-    per bridge, same as legacy (topology is stable)."""
+    resource ids AND their bridge-configured friendly names (his own light
+    names — "Kitchen Infuse", "Dining Hue SE" — the ones a partial hold
+    needs to name back to him), so ambient can PUT/confirm each one
+    directly over REST — cached per bridge, same as legacy (topology is
+    stable). A light with no metadata.name (shouldn't happen on a real
+    bridge) falls back to its resource id rather than dropping it."""
     cache_key = (cfg["ip_address"], cfg["entertainment_id"])
     if cache_key in _light_cache:
         return _light_cache[cache_key]
@@ -193,10 +240,12 @@ async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
         ent_owner = {e["id"]: e["owner"]["rid"] for e in ent}
         lights = (await _hue_get(client, "/clip/v2/resource/light"))["data"]
         dev_light = {l["owner"]["rid"]: l["id"] for l in lights}
+        light_name = {l["id"]: (l.get("metadata") or {}).get("name") or l["id"]
+                     for l in lights}
         ec = (await _hue_get(
             client, f"/clip/v2/resource/entertainment_configuration/{cfg['entertainment_id']}",
         ))["data"][0]
-        rids: list[str] = []
+        rids: list[tuple[str, str]] = []
         seen: set[str] = set()
         for channel in ec.get("channels", []):
             for member in channel.get("members", []):
@@ -205,7 +254,7 @@ async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
                     lr = dev_light.get(ent_owner.get(svc.get("rid")))
                     if lr and lr not in seen:
                         seen.add(lr)
-                        rids.append(lr)
+                        rids.append((lr, light_name.get(lr, lr)))
                     break
     except Exception:
         logger.exception("Ambient: failed to resolve Hue lights for %s",
@@ -213,6 +262,33 @@ async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
         return []
     _light_cache[cache_key] = rids
     return rids
+
+
+async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
+    """Light resource ids only — the OFF/fade/catch-up path doesn't need
+    names, it never reports a per-light outcome."""
+    return [rid for rid, _name in await _resolve_lights_named(client, cfg)]
+
+
+def _state_matches(state: dict, target_xy: tuple[float, float],
+                   target_brightness_pct: float) -> bool:
+    """Does a light's CURRENT bridge-reported state actually carry the
+    ambient hold — not just accept the PUT that asked for it. Tolerances
+    cover the bridge's own xy rounding/gamut clamping and brightness
+    quantization, not a light still mid-ramp (the caller waits out the ramp
+    before calling this)."""
+    if not (state.get("on") or {}).get("on"):
+        return False
+    brightness = (state.get("dimming") or {}).get("brightness")
+    if brightness is None or abs(brightness - target_brightness_pct) > _BRIGHTNESS_TOLERANCE_PCT:
+        return False
+    xy = (state.get("color") or {}).get("xy") or {}
+    x, y = xy.get("x"), xy.get("y")
+    if x is None or y is None:
+        return False
+    if abs(x - target_xy[0]) > _XY_TOLERANCE or abs(y - target_xy[1]) > _XY_TOLERANCE:
+        return False
+    return True
 
 
 async def _apply_hue(dev: Any, body: dict) -> int:
@@ -233,6 +309,63 @@ async def _apply_hue(dev: Any, body: dict) -> int:
                 logger.exception("Ambient: failed to set light %s on %s",
                                  rid, cfg.get("ip_address"))
     return count
+
+
+async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float],
+                            target_brightness_pct: float) -> tuple[list[str], list[str]]:
+    """PUT `body` to every light this device's entertainment stream covers,
+    THEN READ EACH ONE BACK from the bridge — a 2xx PUT only proves the
+    bridge accepted the write, not that the bulb (over zigbee, which can
+    silently drop a command under a write burst — module docstring) carries
+    it. Retries stragglers, spaced apart rather than hammered (module
+    docstring). Retries drop the bridge-side ramp (`dynamics`) — a stubborn
+    light should snap, not take another 1.5s to maybe land. Returns
+    (confirmed light names, still-unconfirmed light names) — best-effort per
+    light, same discipline as _apply_hue, but the unconfirmed half must
+    reach the caller, never get folded into a bigger "N set" count."""
+    cfg = dev.config
+    snap_body = {k: v for k, v in body.items() if k != "dynamics"}
+    async with _bridge_client(cfg) as client:
+        pending = await _resolve_lights_named(client, cfg)
+        if not pending:
+            return [], []
+        confirmed: dict[str, str] = {}
+        for attempt in range(AMBIENT_HOLD_ATTEMPTS):
+            write_body = body if attempt == 0 else snap_body
+            for i, (rid, name) in enumerate(pending):
+                try:
+                    await _hue_put(client, f"/clip/v2/resource/light/{rid}", write_body)
+                except Exception:
+                    logger.exception("Ambient: failed to write %s (%s) on %s",
+                                     name, rid, cfg.get("ip_address"))
+                if i < len(pending) - 1 and AMBIENT_WRITE_STAGGER_MS > 0:
+                    await asyncio.sleep(AMBIENT_WRITE_STAGGER_MS / 1000)
+            settle_ms = (AMBIENT_TRANSITION_MS if attempt == 0 else 0) + AMBIENT_CONFIRM_SETTLE_MS
+            if settle_ms > 0:
+                await asyncio.sleep(settle_ms / 1000)
+            still_pending: list[tuple[str, str]] = []
+            for rid, name in pending:
+                try:
+                    state = (await _hue_get(
+                        client, f"/clip/v2/resource/light/{rid}"))["data"][0]
+                except Exception:
+                    logger.exception("Ambient: could not read back %s (%s) on %s",
+                                     name, rid, cfg.get("ip_address"))
+                    still_pending.append((rid, name))
+                    continue
+                if _state_matches(state, target_xy, target_brightness_pct):
+                    confirmed[rid] = name
+                else:
+                    still_pending.append((rid, name))
+            pending = still_pending
+            if not pending:
+                break
+            if attempt < AMBIENT_HOLD_ATTEMPTS - 1:
+                logger.warning(
+                    "Ambient: %d light(s) not yet confirmed at the ambient "
+                    "colour, retrying: %s", len(pending), [n for _, n in pending])
+                await asyncio.sleep(AMBIENT_RETRY_SPACING_MS / 1000)
+        return sorted(confirmed.values()), sorted(name for _, name in pending)
 
 
 # ── device discovery ─────────────────────────────────────────────────────────
@@ -299,12 +432,18 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
 
     touched: list[str] = []
     if enabled:
-        body = _light_payload(color or "#ffffff", AMBIENT_TRANSITION_MS)
-        lights_set = 0
+        color_hex = color or "#ffffff"
+        body = _light_payload(color_hex, AMBIENT_TRANSITION_MS)
+        target_xy = _hex_to_xy(color_hex)
+        held: list[str] = []
+        unconfirmed: list[str] = []
         for did, dev in sorted(hue_devices.items()):
             try:
                 await dev.set_frozen(True)   # must land before the REST write
-                lights_set += await _apply_hue(dev, body)
+                confirmed_names, straggler_names = await _hold_and_confirm(
+                    dev, body, target_xy, AMBIENT_BRIGHTNESS_PCT)
+                held.extend(confirmed_names)
+                unconfirmed.extend(straggler_names)
                 touched.append(did)
             except Exception:
                 logger.exception("Ambient: failed to hold %s at the ambient colour", did)
@@ -316,9 +455,21 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
             logger.error("Ambient: ON requested but every Hue device failed "
                          "— the room is NOT held")
             return {"status": "failed", "devices": [], "lights_set": 0}
-        logger.info("Ambient ON: %s held at %s, %d light(s) set",
-                    touched, color or "#ffffff", lights_set)
-        return {"status": "on", "devices": touched, "lights_set": lights_set}
+        lights_set = len(held)
+        lights_total = lights_set + len(unconfirmed)
+        if unconfirmed:
+            # This is the log line the live defect made lie: it must not be
+            # able to say more lights were set than were actually confirmed.
+            logger.error(
+                "Ambient ON: %s held at %s, %d/%d light(s) confirmed — "
+                "still NOT holding it: %s", touched, color_hex, lights_set,
+                lights_total, unconfirmed)
+            return {"status": "partial", "devices": touched, "lights_set": lights_set,
+                    "lights_total": lights_total, "unconfirmed": unconfirmed}
+        logger.info("Ambient ON: %s held at %s, %d light(s) confirmed",
+                    touched, color_hex, lights_set)
+        return {"status": "on", "devices": touched, "lights_set": lights_set,
+                "lights_total": lights_total}
 
     fade = _fade_dim_payload(AMBIENT_OFF_FADE_PCT, AMBIENT_TRANSITION_MS)
     for did, dev in sorted(hue_devices.items()):
