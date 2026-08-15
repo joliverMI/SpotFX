@@ -568,10 +568,12 @@ always-live status (`off`/`holding`/`yielding`/`transitioning`, plus the
 chosen `setting`) folds into `GET /spectra/api/engine/status`'s `ambient`
 key and shows as a persistent badge on `RoomControlsBar.tsx`, separate
 from the one-shot PUT-outcome badge. Full detail + room-proof status:
-`docs/SPECTRA_SPEC.md` §52 (the original three states, room-proven) and
-§53 (mode 2, offline-proven, room-proof still pending a window — his
-listening was live throughout the build, by his own explicit order not
-to take his lights for it). Spec: `tests/test_ambient_music_gate.py`,
+`docs/SPECTRA_SPEC.md` §52 and §53 (mode 2), both room-proven live
+2026-08-15 — including the composition question, confirmed not just
+architecturally but measured live: the drift conductor's own ~20s legs
+kept firing on every non-Hue virtual across two full cycles while Hue
+sat held under `"always"`, and the ease-back release re-measured at
+~16.9s, unflattened against the §52 baseline. Spec: `tests/test_ambient_music_gate.py`,
 `tests/test_bridge.py`.
 
 **Reading real Hue bulb state — don't trust a raw CLIP light GET during a
