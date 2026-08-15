@@ -707,4 +707,146 @@ flat_moments = midsong_generator.candidate_moments(FLAT_URI)
 check(len(flat_moments) == 1 and flat_moments[0][1] == 0.5,
       "equal-energy sections (zero span) fall back to a flat 0.5 intensity")
 
+# ═══ 7. auto-generation on first-time-seeing-this-URI (Admiral ask, order 12) ═══
+# "they should be auto-generated if there are none when the song is playing,
+# I shouldn't have to go in and do that" — trigger_engine.maybe_auto_generate,
+# wired from services/engine.py's _on_track_uri on the same edge that resets
+# _last_track_uri (see trigger_engine's AUTO-GENERATION docstring section).
+
+AUTO_URI_A, AUTO_URI_B = "spotify:track:auto-a", "spotify:track:auto-b"
+auto_calls: list[str] = []
+
+
+async def fake_auto_generate(uri):
+    auto_calls.append(uri)
+
+
+async def _settle(seconds=0.05):
+    await asyncio.sleep(seconds)
+
+
+engine_auto = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                            auto_generate=fake_auto_generate)
+
+
+async def _schedule(eng, uri):
+    eng.maybe_auto_generate(uri)
+
+
+async def _schedule_and_settle(eng, uri):
+    eng.maybe_auto_generate(uri)
+    immediate = list(auto_calls)   # captured BEFORE yielding to the loop —
+                                    # a bare asyncio.run() boundary gives a
+                                    # created-but-not-yet-run task a chance
+                                    # to execute during its own cleanup,
+                                    # which would mask this from the caller
+    await asyncio.sleep(0.05)
+    return immediate
+
+
+immediate_calls = asyncio.run(_schedule_and_settle(engine_auto, AUTO_URI_A))
+check(immediate_calls == [],
+      "maybe_auto_generate schedules a background task and returns "
+      "immediately — the caller (services/engine.py's _on_track_uri, and "
+      "therefore the song's own transition fire right after it) is never "
+      "made to wait on generation, satisfying 'must not stall the start "
+      "of a song'")
+check(auto_calls == [AUTO_URI_A],
+      "the scheduled task ran the injected auto_generate for a song with "
+      "zero stored triggers of either source")
+
+# a song that already has ANY stored trigger (authored OR generated) is left
+# alone entirely — the emptiness precondition is itself the guard against
+# ever touching a trigger the Admiral has claimed as his own
+song["already-has-one"] = [_mk(0)]
+asyncio.run(_schedule(engine_auto, "already-has-one"))
+asyncio.run(_settle())
+check(auto_calls == [AUTO_URI_A],
+      "a song with at least one stored trigger is never auto-generated — "
+      "an authored trigger can never be at risk from this path because "
+      "generation is never even attempted when one might be present")
+
+# re-entrancy: a second call for the SAME uri while the first is still
+# running is a no-op, not a second generation fighting the first
+gate_calls: list[str] = []
+
+
+async def gated_auto_generate(uri, gate):
+    gate_calls.append(uri)
+    await gate.wait()
+
+
+async def _reentrancy_run():
+    gate = asyncio.Event()
+    eng = TriggerEngine(list_triggers=lambda uri: [],
+                        auto_generate=lambda uri: gated_auto_generate(uri, gate))
+    eng.maybe_auto_generate(AUTO_URI_B)
+    await asyncio.sleep(0)                       # let it start and block on the gate
+    eng.maybe_auto_generate(AUTO_URI_B)           # would-be second attempt
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.sleep(0)
+
+
+asyncio.run(_reentrancy_run())
+check(gate_calls == [AUTO_URI_B],
+      "a song already generating is never re-scheduled on top of itself — "
+      "the in-flight guard satisfies 'must not fight a generation already "
+      "running' even though generate_for_song's own generator_key de-dupe "
+      "would have made the SECOND completed run idempotent anyway")
+
+# production wiring: the REAL default reaches the REAL midsong_generator via
+# asyncio.to_thread, off the event loop, seeding the real (test-isolated) store
+AUTO_REAL_URI = "spotify:track:auto-real"
+(shapes_dir / "autoreal.json").write_text(json.dumps({"spotify_uri": AUTO_REAL_URI}))
+(shapes_dir / "autoreal.librosa.json").write_text(json.dumps({"sections": [
+    {"start_ms": 0, "end_ms": 8000, "energy_rms": 0.2},
+    {"start_ms": 8000, "end_ms": 20000, "energy_rms": 0.8},
+]}))
+check(trigger_store.list_for_song(AUTO_REAL_URI) == [], "sanity: nothing stored yet")
+asyncio.run(prod_engine._default_auto_generate(AUTO_REAL_URI))
+auto_real = trigger_store.list_for_song(AUTO_REAL_URI)
+check(len(auto_real) == 1 and auto_real[0].source == "generated"
+      and auto_real[0].generator_key == "section:8000",
+      "the production auto-generate default reached the real "
+      "midsong_generator.generate_for_song via asyncio.to_thread and "
+      "seeded a real generated trigger in the real (test-isolated) store")
+
+# the full fire-and-forget path, on the production singleton, for a song it
+# has never seen — proves maybe_auto_generate reaches the same real default
+# without the caller ever awaiting it
+AUTO_REAL_URI2 = "spotify:track:auto-real-2"
+(shapes_dir / "autoreal2.json").write_text(json.dumps({"spotify_uri": AUTO_REAL_URI2}))
+(shapes_dir / "autoreal2.librosa.json").write_text(json.dumps({"sections": [
+    {"start_ms": 5000, "end_ms": 9000, "energy_rms": 0.5},
+]}))
+
+
+async def _wait_until(predicate, timeout_s=2.0, step_s=0.02):
+    import time
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(step_s)
+    return predicate()
+
+
+asyncio.run(_schedule(prod_engine, AUTO_REAL_URI2))
+seeded = asyncio.run(_wait_until(lambda: bool(trigger_store.list_for_song(AUTO_REAL_URI2))))
+check(seeded,
+      "maybe_auto_generate's fire-and-forget task reached the real "
+      "production default on the singleton engine and seeded the song's "
+      "mid-song trigger without any caller ever awaiting it directly — "
+      "this is the exact path services/engine.py's _on_track_uri drives")
+
+# an unanalyzed song degrades honestly: no fabricated trigger, no crash
+NO_ANALYSIS_AUTO_URI = "spotify:track:no-analysis-auto"
+asyncio.run(_schedule(prod_engine, NO_ANALYSIS_AUTO_URI))
+asyncio.run(_settle(0.3))
+check(trigger_store.list_for_song(NO_ANALYSIS_AUTO_URI) == [],
+      "a song with no stored analysis degrades honestly through the "
+      "auto-generate path too — generate_for_song's clean zero-moment "
+      "no-op is preserved, never a fabricated trigger")
+
 print("\nALL CHECKS PASSED")

@@ -105,6 +105,13 @@ async def _on_track_uri(uri) -> None:
     if uri != _last_track_uri:
         _last_track_uri = uri
         await responses.release_phases()
+        if uri is not None:
+            # Admiral ask, order 12: a song with no stored triggers gets
+            # them generated automatically — see trigger_engine's
+            # AUTO-GENERATION docstring section. Fire-and-forget; never
+            # awaited here, so a slow/unanalyzed song can't delay the
+            # scene_sequencer/trigger_engine transition work below.
+            trigger_engine.maybe_auto_generate(uri)
     from spectra.services.scene_sequencer import scene_sequencer
     await scene_sequencer.on_track_state(uri)
     await trigger_engine.on_track_state(uri)
