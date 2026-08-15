@@ -284,11 +284,26 @@ export interface RoomControlState {
  * a CONFIRMED count (read back from the bridge), not merely attempted;
  * `lights_total` is how many lights were targeted. */
 export interface AmbientResult {
-  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed' | 'partial';
+  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed' | 'partial' | 'yielding';
   devices?: string[];
   lights_set?: number;
   lights_total?: number;
   unconfirmed?: string[];
+}
+
+/** spectra/services/ambient_music_gate.py's status() — the room's honest,
+ * always-live read of what Ambient is ACTUALLY doing, distinct from
+ * AmbientResult above (a one-shot save outcome): "off" (the preference is
+ * off), "holding" (frozen at ambient_color right now), "yielding"
+ * (enabled, but standing aside for music or an unresolved playback read —
+ * the music-precedence fix), "transitioning" (a hold/release is
+ * physically in flight). Folded into EngineStatus so the existing 3s poll
+ * shows it live with no separate request. */
+export interface AmbientGateStatus {
+  enabled: boolean;
+  mode: 'off' | 'holding' | 'yielding' | 'transitioning';
+  held: boolean;
+  result?: AmbientResult;
 }
 
 export interface RoomControlsSaveResult extends RoomControlState {
@@ -534,6 +549,7 @@ export interface EngineStatus {
     } | null;
     counts: Record<string, number>;
   };
+  ambient: AmbientGateStatus;
 }
 
 /** TS mirrors for spectra/models/trigger.py — THE KEYSTONE: a per-song

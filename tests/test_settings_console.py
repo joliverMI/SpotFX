@@ -145,8 +145,11 @@ def test_apply_change_reconciles_ambient_only_on_ambient_fields():
         "unrelated field change must not trigger a reconnect"
 
     result = _run(sc.apply_change("ambient_enabled", True))
-    assert result["ambient_result"]["status"] == "dark", \
-        "no live stack owned in tests — the same safe no-op PUT gets"
+    assert result["ambient_result"]["status"] == "yielding", \
+        ("no bridge signal in tests (services/ambient_music_gate.py's "
+         "fail-safe: an unresolved playback read never starts a blind "
+         "hold) — the same safe no-op PUT gets, whether or not a live "
+         "stack is even owned")
 
 
 def test_undo_reverts_through_the_validated_path():

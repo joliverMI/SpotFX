@@ -121,8 +121,8 @@ async def _standalone_lifespan(app):
     import os
 
     logger = logging.getLogger("spectra")
-    from spectra.services import (ambient, engine, frame_watchdog, handover,
-                                   ownership_reconciler, room_controls)
+    from spectra.services import (ambient_music_gate, engine, frame_watchdog,
+                                   handover, ownership_reconciler)
     await engine.start()
     # Restart mid-reign: if the ownership record says spectra owns, the
     # live stack reactivates itself through the guarded activation path
@@ -131,12 +131,17 @@ async def _standalone_lifespan(app):
     await handover.resume_own_room()
     # Freeze state is in-memory only on the fresh HueDevice objects
     # resume_own_room() just built (fx/devices/hue.py's own docstring) — a
-    # restart while ambient was held would otherwise silently drop the
-    # takeover while the room bar still shows it ON. Re-assert; a no-op
-    # (status "dark") if resume above didn't bring the stack up.
-    controls = room_controls.load_room_controls()
-    if controls.ambient_enabled:
-        await ambient.reconcile(True, controls.ambient_color)
+    # restart while ambient was genuinely holding a quiet room would
+    # otherwise silently drop the takeover while the room bar still shows
+    # it ON. Routed through the music-precedence gate (services/
+    # ambient_music_gate.py), NOT a blind reconcile(True, ...): the bridge
+    # hasn't connected yet at this exact point, so is_playing() reads
+    # unknown and the gate correctly holds off rather than freezing a room
+    # that might actually be mid-song — the same decision the first real
+    # bridge broadcast makes moments later (engine.py's _on_track_uri)
+    # picks the hold back up automatically once playback is confirmed
+    # quiet. No-ops fast if ambient_enabled is False.
+    await ambient_music_gate.reconcile_now()
     watchdog_task = asyncio.create_task(
         frame_watchdog.run_supervised(), name="spectra-frame-watchdog")
     # Record-vs-reality reconciler (report gate e3, 2026-08-13 two-writers

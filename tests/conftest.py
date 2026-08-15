@@ -207,6 +207,27 @@ def _isolated_fire_history(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "SHOW_LOG_FILE", tmp_path / "show_log.json")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_ambient_music_gate():
+    """spectra/services/ambient_music_gate.py tracks the live Ambient hold
+    (_held/_held_color/_last_result/_apply_lock) as bare module globals,
+    same no-DI-seam shape as fire_history above — any test that reaches
+    reconcile_ambient_if_changed / reconcile_now (settings-console tests,
+    room-controls PUT tests) would otherwise leak a held/failed state into
+    the next test. Autouse so no individual test needs to know this exists.
+    """
+    from spectra.services import ambient_music_gate as gate
+
+    def _reset():
+        gate._held = False
+        gate._held_color = None
+        gate._last_result = {}
+        gate._apply_lock = None
+    _reset()
+    yield
+    _reset()
+
+
 @pytest.fixture()
 def ambient_env(tmp_path, monkeypatch, fresh_ledfx_client):
     """Ambient discovery against the recorded live topology: category file on

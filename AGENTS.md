@@ -535,6 +535,48 @@ concept, so legacy's group-member-rotation half has nothing to port to.
 Spec: the Force Scene section of `scripts/check_spectra.py` +
 `tests/test_room_controls.py::test_force_scene_redirects_every_automatic_pick`.
 
+**Ambient's music-precedence gate** (found live 2026-08-15: `ambient_enabled:
+true` + a real track playing + an active scene + firing triggers = all 19 Hue
+bulbs sat frozen at ambient cream, following none of it — Ambient wasn't
+competing with music, it was silently swallowing the whole song, and was
+likely a second, independent cause of his original "no scene changes"
+complaint on top of the `scene_change_mode` fix). His ruling: Ambient is the
+room's RESTING state — MUSIC WINS while it plays, Ambient resumes on its own
+the instant it stops. `spectra/services/ambient_music_gate.py` is the single
+choke point every path that can change the live hold now funnels through (a
+human PUT, every bridge state broadcast, process startup/resume) — none of
+them may call `services.ambient.reconcile()` directly, or the precedence rule
+can be bypassed. `RoomControlState.ambient_enabled` still means "I want
+Ambient"; the gate tracks the LIVE hold against a second signal,
+`bridge.is_playing()`. A confirmed read always wins, even over an existing
+hold; an UNKNOWN read never actively changes anything (carries the current
+hold forward) — collapsing unknown onto "release" was rejected because a
+transient bridge blip would otherwise flicker-release an already-quiet held
+room. Visible always-live status (`off`/`holding`/`yielding`/`transitioning`)
+folds into `GET /spectra/api/engine/status`'s `ambient` key and shows as a
+persistent badge on `RoomControlsBar.tsx`, separate from the one-shot
+PUT-outcome badge. Full detail + room-proof status: `docs/SPECTRA_SPEC.md`
+§52. Spec: `tests/test_ambient_music_gate.py`, `tests/test_bridge.py`.
+
+**Reading real Hue bulb state — don't trust a raw CLIP light GET during a
+live entertainment stream.** While a Hue entertainment session is
+streaming (any active SPECTRA scene, not just Ambient), `GET
+/clip/v2/resource/light` does NOT reflect the streamed colour — a bulb
+being actively driven reads as static there, so a WORKING fix looks dead
+and a genuinely frozen one looks fine; this nearly read as a fix failure
+during §52's own live proof. To tell whether bulbs are actually following
+the room, read `entertainment_configuration` status ACTIVE on each of his
+bridges plus continuous glide writes for the relevant virtual in `GET
+/spectra/api/engine/status`'s `executor.recent_writes` (`spectra/services/
+engine.py::status`) — that combination, not the light resource, is what
+"read it at the bridges" means for a streamed scene. The light resource
+IS the right instrument for Ambient's own hold/release (`spectra/
+services/ambient.py`) and the panic-release path (`spectra/services/
+release.py`) — both write over plain REST, not the entertainment stream —
+so the same GET that lies during a streamed scene is correct there. Pick
+the wrong one for the case at hand and you get a confident wrong answer
+either way.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing

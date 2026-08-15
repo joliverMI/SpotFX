@@ -362,6 +362,7 @@ input[type='range'] { accent-color: var(--accent); }
 .badge-purple { background: #2a1444; color: var(--accent); }
 .badge-gray { background: var(--surface2); color: var(--text-muted); }
 .badge-red { background: #3a0e0e; color: var(--danger); }
+.badge-amber { background: #3a2c0e; color: var(--warning); }
 
 .meta-grid {
   display: grid;
