@@ -417,18 +417,26 @@ def test_migrate_flags_invalid_timestamp_without_crashing(tmp_path):
 
 
 def test_migrate_real_corpus_lands_whole_in_one_pass():
-    """The real 10,710-trigger corpus, dry-run, read-only: every trigger is
-    either mapped or a deliberate exclusion (retired / invalid timestamp) —
-    zero unclassified, zero blocked. This is the "lands whole in one pass"
-    proof against the actual data, not a synthetic fixture."""
+    """The real corpus, dry-run, read-only: every trigger is either mapped
+    or a deliberate exclusion (retired / invalid timestamp) — zero
+    unclassified. This is the "lands whole in one pass" proof against the
+    actual data, not a synthetic fixture.
+
+    The total isn't pinned to the scout's original 10,710 — his legacy
+    Builder stayed live and editable throughout this task (confirmed:
+    "Sleep Token - Emergence" was hand-edited during the scout's own
+    counting window, one flare trigger fewer). Only the shape is pinned
+    here (zero unclassified, retired/invalid unchanged, every response/
+    scene-change/update bucket accounted for); the exact total is read
+    fresh and asserted internally consistent instead."""
     import pathlib
     real_profiles = pathlib.Path("/home/javi/SpotFX/storage/profiles")
     if not real_profiles.is_dir():
         pytest.skip("live checkout not present in this environment")
     summary = migrate(str(real_profiles / "*.json"), apply=False)
-    assert summary.total == 10710
     assert summary.unclassified == 0
     assert summary.retired == 5
     assert summary.invalid_timestamp == 5
-    assert summary.mapped == 10700
+    assert summary.total == summary.mapped + summary.retired + summary.invalid_timestamp
+    assert sum(summary.by_class.values()) == summary.mapped
     assert summary.by_class["update"] == 236
