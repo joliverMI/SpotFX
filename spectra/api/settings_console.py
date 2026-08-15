@@ -11,10 +11,18 @@
                                         nothing to undo.
   POST /api/settings-console/message    one chat turn: {session_id?, text}
                                         -> {session_id, reply, changes}.
-                                        503 when no ANTHROPIC_API_KEY is
-                                        configured (the console has no
-                                        model to talk to, not a silent
-                                        no-op).
+                                        Routes to services/settings_agent.py
+                                        (default, ANTHROPIC_API_KEY) or
+                                        services/settings_agent_cli.py
+                                        (config.settings_agent_backend()
+                                        == "cli", a subscription-
+                                        authenticated `claude -p`
+                                        subprocess -- see that module's
+                                        docstring; default OFF, the
+                                        captain's ruling) -- either way,
+                                        503 when that backend has no
+                                        model to talk to, never a silent
+                                        no-op.
   POST /api/settings-console/transcribe multipart audio upload (field
                                         "audio") -> {text, vocabulary_honored}.
                                         503 (via TranscriptionUnavailable)
@@ -38,7 +46,8 @@ from typing import Optional
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from spectra.services import settings_agent, settings_console, transcription
+from spectra import config
+from spectra.services import settings_agent, settings_agent_cli, settings_console, transcription
 from spectra.services.settings_agent import SettingsAgentUnavailable
 from spectra.services.settings_console import SettingChangeError
 from spectra.services.transcription import TranscriptionUnavailable, VocabularyNotHonored
@@ -73,8 +82,14 @@ async def post_undo():
 
 @router.post("/message")
 async def post_message(body: MessageIn):
+    # config.settings_agent_backend() defaults to "api" -- see that
+    # function's docstring and settings_agent_cli.py's module docstring
+    # for the captain's ruling this switch exists to honour: a
+    # subscription-authenticated CLI backend may be built ready to
+    # enable, but never enables itself.
+    agent = settings_agent_cli if config.settings_agent_backend() == "cli" else settings_agent
     try:
-        return await settings_agent.run_turn(body.session_id, body.text)
+        return await agent.run_turn(body.session_id, body.text)
     except SettingsAgentUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
 

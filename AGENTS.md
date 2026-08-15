@@ -546,6 +546,42 @@ settings_agent_model()` (env `SPECTRA_SETTINGS_AGENT_MODEL`, default
 `claude-sonnet-5`); API key from `settings_agent_api_key()` (env
 `ANTHROPIC_API_KEY`) — unset means a stated 503, never a silent no-op.
 
+**Subscription (CLI) backend — built, default OFF, not yet authorised
+against his real account** (`data/spectra-console-subscription-backend/`:
+scout report + the captain's ruling that provisioning an `ANTHROPIC_API_KEY`
+is refused as an answer to "use my subscription, not credits"). `spectra/
+services/settings_agent_cli.py` is a second `run_turn()` implementation
+driving the real `claude` CLI headlessly (`-p`, non-interactive), authenticated
+by `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token` long-lived token —
+Anthropic's own documented mechanism for billing Claude Code automation to a
+Pro/Max/Team/Enterprise subscription instead of API credits). `spectra/api/
+settings_console.py`'s `POST /message` picks it over the API backend only
+when `config.settings_agent_backend()` (env `SPECTRA_SETTINGS_AGENT_BACKEND`)
+reads `"cli"` — default `"api"`, so this is inert until BOTH that env var is
+set AND a token is provisioned; neither this file nor anything else in the
+repo ever runs `claude setup-token` or reads an existing interactive `/login`
+session itself. **THE WIDENED SURFACE IS STRUCTURAL, not a deploy note**: a
+subprocess with its own working directory can auto-run project hooks and
+auto-connect `.mcp.json` servers it finds there (non-bare `-p` mode — `--bare`
+can't be used, it refuses to read the OAuth token at all), so every call
+creates/verifies a dedicated, code-owned, empty working directory
+(`config.settings_agent_cli_workdir()`, refuses if it ever contains a stray
+`.claude/`, `.mcp.json`, or `CLAUDE.md`), passes `--strict-mcp-config` +
+`--tools ""` + `--allowedTools` naming exactly the two tools its own MCP
+server (`spectra/services/settings_mcp_server.py`, a stdio wrapper around the
+SAME `settings_agent._dispatch()` the API backend uses — no second authority)
+exposes, and re-verifies the live `system/init` tool manifest on every single
+response before trusting anything in it. That last check exists because a
+live re-proof caught `claude-haiku-4-5` fabricating tool-call output in plain
+prose, twice, when the real tool manifest didn't contain what it claimed —
+`_parse_transcript()` reads ONLY structured `tool_use`/`tool_result` blocks,
+never the model's narrated text. Tests: `tests/test_settings_agent_cli.py`
+(offline, against real captured transcripts in `tests/fixtures/
+cli_transcript_*.json`) + a live smoke test skipped without
+`CLAUDE_CODE_OAUTH_TOKEN`. **Enabling this against the captain's real account
+is his call, not a deploy default** — flipping `SPECTRA_SETTINGS_AGENT_BACKEND`
+and minting a token are both separate, deliberate, human actions.
+
 Voice reaches text by the browser RECORDING (MediaRecorder) and POSTing the
 clip to `POST /api/settings-console/transcribe`, not the browser's built-in
 SpeechRecognition (which ships audio to a third-party cloud and forecloses
