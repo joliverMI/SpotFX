@@ -174,6 +174,30 @@ which is actually live before trusting either "transitions only" or the
 sequencer's own status page in isolation — `GET /spectra/api/sequencer/
 status`'s `enabled` field is the tell.
 
+**xcorr sync (ported, 2026-08-15)**: `trigger_engine.tick()` fires against
+`bridge.effective_position_ms()` (`spectra/services/bridge.py`), not the
+raw bridge position — spot-effects' own xcorr `shape_offset_ms`, read off
+the `timing` sibling field it already broadcasts on every WS "state"
+message (previously parsed nowhere in SPECTRA), added exactly the way
+spot-effects' own `trigger_engine.py`'s `effective_now = now_ms + offset`
+does. The audio capture + correlation computation itself deliberately
+stays in spot-effects — duplicating it into SPECTRA's process would
+contend for the same PipeWire monitor `fx/audio_ingest.py`'s own
+docstring already documents as a starvation problem within ONE process.
+`ledfx_trigger_buffer_ms`/`ledfx_rtt_ms` (spot-effects' LedFX-HTTP
+write-transport latency terms, folded into ITS `effective_offset_ms`) are
+NOT ported — SPECTRA's executor doesn't share that transport, so there's
+no equivalent to carry over. Root-level spot-effects also still has a full
+parallel timing/debug diagnostic stack (`routers/timing_viz_router.py`,
+`routers/debug_router.py`, `web/src/timingviz/`, `web/src/debug/`) ported
+verbatim into `spectra/web/src/{timingviz,debug}/` — same-origin calls
+into spot-effects' own live endpoints, no new backend. Useful precedent
+for future ports: SPECTRA's ported builder canvas stack
+(`spectra/web/src/timeline/{canvas,components,hooks}`) already diffs
+byte-identical against spot-effects' own `web/src/builder/` modules, so
+check there first before assuming a root-side frontend module needs
+re-porting.
+
 ## SPECTRA fire-history: counts + bounded show log
 
 `spectra/services/fire_history.py` hooks the same four production choke

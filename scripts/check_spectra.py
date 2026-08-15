@@ -1385,6 +1385,24 @@ check(analysis_reader.section_energy_at("spotify:track:nope", 0) is None
       and SpotEffectsBridge(clock=lambda: 0.0).intensity() is None,
       "no analysis / no track → None (callers hold the stated 0.5 neutral)")
 
+# ── the bridge: xcorr sync port (shape_offset_ms / effective_position_ms) ────
+check(br.shape_offset_ms() is None and br.effective_position_ms() == br.track_position_ms(),
+      "no 'timing' broadcast yet → offset unknown, effective position == raw (today's pre-port behaviour)")
+clock_box[0] = 60.0
+asyncio.run(br.handle_message({**state_msg, "timing": {
+    "effective_offset_ms": 7052, "shape_offset_ms": 7052,
+    "shape_offset_quality": 0.93, "ledfx_trigger_buffer_ms": -800,
+    "ledfx_rtt_ms": 0}}))
+raw = br.track_position_ms()
+check(br.shape_offset_ms() == 7052,
+      "shape_offset_ms reads the audio-alignment term off the broadcast timing sibling")
+check(br.effective_position_ms() == raw + 7052,
+      "effective_position_ms = raw + shape_offset_ms, spot-effects' own effective_now formula — "
+      "NOT the full effective_offset_ms (ledfx buffer/rtt don't apply to SPECTRA's own write path)")
+asyncio.run(br.handle_message({**state_msg, "timing": None}))
+check(br.shape_offset_ms() is None,
+      "a later state broadcast with no timing (older spot-effects) clears back to unknown, not stale")
+
 # ── production sequencer defaults read the bridge singleton ──────────────────
 from spectra.services import engine as engine_mod
 from spectra.services.scene_sequencer import scene_sequencer as seq_singleton

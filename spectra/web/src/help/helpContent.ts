@@ -634,6 +634,72 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+
+  /* ── Timing & Debug (ported from spot-effects, same pages) ─────── */
+  {
+    id: 'timing-debug',
+    title: 'Timing & Debug',
+    keywords: 'sync diagnostics xcorr offset latency spot-effects ported',
+    intro:
+      'Read-only diagnostics ported from spot-effects\' own /timing and /debug pages, unchanged — both call spot-effects\' existing endpoints directly (same-origin), the same live xcorr/anchor machinery spot-effects has always run. Timing is a read-only xcorr/anchor dump for any song; Debug shows the live sync state for whatever is playing now. SPECTRA\'s own trigger clock consumes spot-effects\' shape_offset term (see "SPECTRA Triggers" below) — these pages are how you see the offset it\'s using.',
+    entries: [
+      {
+        id: 'timing-lock-history',
+        title: 'Lock history',
+        keywords: 'last 10 songs grade time to lock offset delta search recent plays',
+        body: [
+          'The panel at the top of the Timing page lists the last 10 distinct songs\' lock outcomes: how long into the song the hard lock landed ("time to lock"), the final offset, how far it had to move from the previous baseline (Δ needed), the lock quality Q, and a letter grade. Click any row to load that song\'s full timing dump below; type in the search box to switch to a full-history search (every stored play matching title, artist, or uri).',
+          'Grades: the base comes from the play\'s best Q (A ≥ 0.9, B ≥ 0.8, C ≥ 0.7, D ≥ 0.6, F below). A play that finished its windows without a hard lock drops one notch, and so does a hard lock that landed more than 30 s into the song (the song ran that long on the cold-start baseline).',
+        ],
+      },
+      {
+        id: 'timing-pipeline',
+        title: 'Trigger fire-time pipeline',
+        keywords: 'shape offset buffer rtt effective audio latency',
+        body: [
+          'This box shows spot-effects\' own fire-time pipeline: Spotify song position + shape_offset (from xcorr) + LedFX trigger buffer + LedFX RTT; audio latency shifts where the playhead is drawn, not when triggers fire. SPECTRA\'s own trigger clock only ever applies the shape_offset term (its LedFX buffer/RTT don\'t apply — SPECTRA doesn\'t write through spot-effects\' LedFX HTTP gate) — see the effective_position_ms note under "SPECTRA Triggers".',
+        ],
+      },
+      {
+        id: 'debug-analyzed-override',
+        title: 'Analyzed override',
+        keywords: 'force analyzed triggerless test training profile stored manual triggers',
+        body: [
+          'The "Analyzed override" toggle (track header) makes the current song ignore its stored triggers and run spot-effects\' analyzed-triggerless pipeline instead — useful for testing a tuned training profile against songs that already have hand-built profiles. This affects spot-effects\' own legacy trigger world, not SPECTRA\'s triggers.',
+        ],
+      },
+      {
+        id: 'debug-lock',
+        title: 'Lock badge & live nudge',
+        keywords: 'locked suspect recovering pearson confidence buffer nudge',
+        body: [
+          'The lock badge shows the matcher\'s state (LOCKED / SUSPECT / RECOVERING / IDLE / NO LOCK) with the rolling Pearson r — its live confidence in the current alignment.',
+        ],
+        table: [
+          ['[ / ]', 'Nudge spot-effects\' LedFX trigger buffer −50 / +50 ms live.'],
+        ],
+        kbd: true,
+      },
+      {
+        id: 'debug-shape-canvas',
+        title: 'Reading the shape canvas',
+        keywords: 'saved live capture mismatch magenta centerline legend',
+        body: [
+          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches. Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
+          'Perception trim is a per-track manual offset layered on top of the xcorr result — negative fires lighting earlier, positive later.',
+        ],
+      },
+      {
+        id: 'debug-diff-canvas',
+        title: 'Reading the diff / rolling-R canvas',
+        keywords: 'z-score matcher view correlator gain volume blue orange',
+        body: [
+          'This is the matcher\'s view: both signals squared, binned to 25 ms, and z-scored, so gain/volume differences cancel. Blue above center = live louder than expected; orange below = saved louder. The colored line is the rolling r (lock confidence): green ≥ 0.5, amber ≥ 0.2, red below — gaps mean the span was too quiet to testify. Sustained excursions or time-skewed mirror pairs indicate misalignment.',
+        ],
+      },
+    ],
+  },
+
   {
     id: 'spectra-triggers',
     title: 'SPECTRA Triggers (the mid-song clock)',
@@ -652,6 +718,14 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Select colour set', 'Moves the room to a named colour set directly — the same manual-apply surface as the Scenes page\'s colour controls.'],
         ],
         kbd: false,
+      },
+      {
+        id: 'spectra-trigger-sync',
+        title: 'When a trigger actually fires (xcorr sync)',
+        keywords: 'xcorr sync shape offset lag audio latency effective position timing',
+        body: [
+          'The clock this page ticks against isn\'t the raw Spotify-reported song position — it\'s that position corrected by spot-effects\' own live xcorr audio-alignment offset (shape_offset_ms), the same correction spot-effects\' own trigger engine has always applied before comparing against a trigger\'s timestamp. Without it a migrated trigger fires late or early by however far that song\'s own offset runs (seconds, not milliseconds, for some songs) — see the Timing page\'s "Trigger fire-time pipeline" to see the live number for whatever\'s playing.',
+        ],
       },
       {
         id: 'spectra-trigger-authoring',

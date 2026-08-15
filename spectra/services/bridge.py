@@ -8,9 +8,38 @@ process it lives in).
 Consumed broadcasts (services/websocket_manager.py shapes, unchanged):
   "state"          — track uri/title/progress/playing, paused, Dinner
                      Party, Ambient, last_scene_id (trigger-fired scene
-                     observation), genres (→ training-profile bucket).
+                     observation), genres (→ training-profile bucket),
+                     timing (spot-effects' own xcorr-derived audio/Spotify
+                     -clock correction — see effective_position_ms below).
   "trigger_fired"  — the WHEN of the response engine until spot-effects'
                      trigger engine is replaced; already carries intensity.
+
+xcorr sync (report: SPECTRA xcorr port). spot-effects still owns the audio
+capture + xcorr correlation (services/xcorr_core.py, auto_offset_service.py,
+systemic_offset.py) — duplicating that into a second OS process would mean a
+second sounddevice.InputStream competing for the same PipeWire monitor
+spot-effects already has open, the exact multi-consumer starvation
+fx/audio_ingest.py's own docstring documents (report §2.2) as needing its
+own not-yet-wired fan-out hub even WITHIN one process. So this bridge
+doesn't re-derive the offset; it reads the one spot-effects already
+computes every tick and already broadcasts as a sibling field next to
+`track` on every "state" message (services/websocket_manager.py's
+broadcast_state, payload["timing"] = state.timing) — that payload was
+simply never parsed here before. `effective_position_ms()` applies it with
+spot-effects' own formula (services/trigger_engine.py's
+effective_now = now_ms + offset), and services/engine.py's trigger-engine
+poll now feeds THAT instead of the raw bridge position, so a migrated
+trigger fires at the same music-time spot-effects would have fired it at.
+Only `timing.shape_offset_ms` (the audio-alignment term) is ported —
+spot-effects' effective_offset_ms also adds ledfx_trigger_buffer_ms and
+ledfx_rtt_ms, LedFX-HTTP-write-transport latency compensation for a
+write path (api/ledfx_client's LedFX HTTP gate) SPECTRA's own executor
+(fx_seam / live_host, in-process or direct-device REST, no LedFX HTTP hop)
+doesn't share — a genuine mechanism-differs-in-kind case, not a value worth
+guessing at. Degrades honestly like every other bridge feed: no "timing"
+yet (older spot-effects, bridge just connected, or bridge down) means
+shape_offset_ms() is None and effective_position_ms() falls back to the
+raw position — today's pre-port behaviour, never a stall.
 
 Event classification (the response engine's four classes):
   charge / lull / drop        → that class (the fixed phase events).
@@ -98,6 +127,7 @@ class SpotEffectsBridge:
         self._last_message_at: float | None = None
         self._track: dict | None = None
         self._track_received_at: float | None = None
+        self._timing: dict | None = None
         self.paused = False
         self.dinner_party = False
         self.ambient = False
@@ -122,6 +152,7 @@ class SpotEffectsBridge:
             self.last_scene_id = payload.get("last_scene_id") or None
             self._track = payload.get("track")
             self._track_received_at = self._clock()
+            self._timing = payload.get("timing") or None
             if self._on_track_uri is not None:
                 uri = (self._track or {}).get("spotify_uri")
                 await self._on_track_uri(uri)
@@ -160,6 +191,30 @@ class SpotEffectsBridge:
         if self._track.get("is_playing") and self._track_received_at is not None:
             progress += (self._clock() - self._track_received_at) * 1000.0
         return int(progress)
+
+    def shape_offset_ms(self) -> Optional[int]:
+        """spot-effects' audio-alignment xcorr correction for the current
+        song (services/trigger_engine.py's _shape_offset_ms, mirrored onto
+        state.timing every tick) — None when unknown (no broadcast yet,
+        older spot-effects, or bridge down)."""
+        if not self._timing:
+            return None
+        value = self._timing.get("shape_offset_ms")
+        return int(value) if isinstance(value, (int, float)) else None
+
+    def effective_position_ms(self) -> Optional[int]:
+        """track_position_ms() corrected the same way spot-effects' own
+        trigger engine corrects it (effective_now = now_ms + offset,
+        services/trigger_engine.py:_effective_offset_ms) — the value the
+        SPECTRA trigger clock should tick against so a migrated trigger
+        fires at the same music-time spot-effects would fire it at. Falls
+        back to the raw position when the offset isn't known yet, never
+        blocking the clock."""
+        position = self.track_position_ms()
+        if position is None:
+            return None
+        offset = self.shape_offset_ms()
+        return position if offset is None else position + offset
 
     def intensity(self) -> Optional[float]:
         """Section energy at the playback position (RAW ms — the standing
@@ -267,6 +322,8 @@ class SpotEffectsBridge:
                 "title": (self._track or {}).get("title"),
                 "is_playing": (self._track or {}).get("is_playing"),
                 "position_ms": self.track_position_ms(),
+                "effective_position_ms": self.effective_position_ms(),
+                "shape_offset_ms": self.shape_offset_ms(),
             } if self._track else None),
             "deferral": self.sequencer_deferral(),
             "intensity": self.intensity(),
