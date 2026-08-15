@@ -62,7 +62,7 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
 
     assert set(sc.SETTINGS_REGISTRY) == {
         "brightness_multiplier", "global_transition_ms",
-        "ambient_enabled", "ambient_color", "scene_change_mode",
+        "ambient_mode", "ambient_color", "scene_change_mode",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY
@@ -144,12 +144,18 @@ def test_apply_change_reconciles_ambient_only_on_ambient_fields():
     assert "ambient_result" not in result, \
         "unrelated field change must not trigger a reconnect"
 
-    result = _run(sc.apply_change("ambient_enabled", True))
+    result = _run(sc.apply_change("ambient_mode", "auto"))
     assert result["ambient_result"]["status"] == "yielding", \
         ("no bridge signal in tests (services/ambient_music_gate.py's "
          "fail-safe: an unresolved playback read never starts a blind "
          "hold) — the same safe no-op PUT gets, whether or not a live "
          "stack is even owned")
+
+    result = _run(sc.apply_change("ambient_mode", "always"))
+    assert result["ambient_result"]["status"] == "dark", \
+        ('"always" never consults playback at all, so it actually attempts '
+         "the hold — 'dark' is services.ambient's own honest report that "
+         "no live stack is owned in tests, not the gate declining to act")
 
 
 def test_undo_reverts_through_the_validated_path():

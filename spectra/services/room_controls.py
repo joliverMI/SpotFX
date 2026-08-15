@@ -9,12 +9,43 @@ legacy picks: decision-legacy-retirement-picks.md):
                           scene_compiler for scene-fire writes), never the
                           conductor's own carried baseline: the authored
                           "look" stays intact, only the OUTPUT is scaled.
-  ambient_enabled/_color  the legacy ledfx_ambient / ledfx_ambient_color
-                          action equivalents. This state is the durable
-                          record; the live takeover itself (freezing the
-                          room's Hue devices, holding them at ambient_color
-                          over direct bridge REST) is driven by
-                          services/ambient.py, reconciled from
+  ambient_mode/_color     the legacy ledfx_ambient / ledfx_ambient_color
+                          action equivalents, extended 2026-08-15 to the
+                          Admiral's own three settings (his words: "it needs
+                          to be a third setting where ambient mode can still
+                          come into play when the music is still playing"):
+                            "off"    — Ambient never holds. The whole room
+                                       performs, Hue included. Today's
+                                       unmodified default.
+                            "always" — Hue is held lit at ambient_color
+                                       UNCONDITIONALLY, music playing or
+                                       not — his own request, not the
+                                       precedence bug: "my Hue Lights are
+                                       lit and bright but the other lights
+                                       are still running the show." Every
+                                       non-Hue device is architecturally
+                                       untouched by Ambient regardless
+                                       (services/ambient.py's device filter
+                                       is Hue-only), so this mode composes
+                                       for free with scene selection — no
+                                       code path in selection_kernel.py/
+                                       scene_sequencer.py/trigger_engine.py
+                                       even references ambient state
+                                       (grep-confirmed), so holding Hue can
+                                       never double-penalise or starve the
+                                       show elsewhere.
+                            "auto"   — the 2026-08-15 music-precedence fix
+                                       (§52): holds only when playback is
+                                       CONFIRMED not-playing, releases the
+                                       instant it's confirmed playing,
+                                       carries an unresolved read forward
+                                       rather than guessing either way.
+                          This state is the durable record; the live
+                          takeover itself (freezing the room's Hue devices,
+                          holding them at ambient_color over direct bridge
+                          REST) is driven by services/ambient.py via
+                          services/ambient_music_gate.py (the mode
+                          precedence gate), reconciled from
                           api/room_controls.py's PUT handler whenever these
                           fields change.
   global_transition_ms    the legacy ledfx_global_transition action
@@ -81,7 +112,7 @@ legacy picks: decision-legacy-retirement-picks.md):
 
 Ambient is wired live (services/ambient.py) — the Dinner-Party half of the
 room-MODES gap (gap report §3 row 5) is a separate, still-unbuilt mode;
-ambient_enabled/_color here are Ambient's alone.
+ambient_mode/_color here are Ambient's alone.
 
 Storage: storage/spectra/room_controls.json — same atomic tmp+replace
 discipline as color_journey.py's room_color.json.
@@ -100,13 +131,14 @@ from pydantic import BaseModel, Field, field_validator
 from spectra import config
 
 SceneChangeMode = Literal["transitions", "analysed", "full"]
+AmbientMode = Literal["off", "always", "auto"]
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class RoomControlState(BaseModel):
     brightness_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
-    ambient_enabled: bool = False
+    ambient_mode: AmbientMode = "off"
     ambient_color: Optional[str] = None   # hex; None = no colour authored yet
     # 0 = no room default (today's unchanged instant-jump behaviour for any
     # scene that doesn't author its own entry_ramp_ms). >0 becomes the
@@ -188,6 +220,16 @@ def load_room_controls() -> RoomControlState:
                                         else "transitions")
         else:
             raw.pop("midsong_triggers_enabled", None)
+        # One-way migration from the pre-2026-08-15 ambient_enabled bool
+        # (§52's own field, PR #73, never merged to master under this name)
+        # to the three-setting ambient_mode — True mapped to "auto" (the
+        # closest match: that's exactly what True was BUILT and PROVEN to
+        # mean throughout §52's lifetime, the music-precedence gate), False
+        # to "off" (unchanged meaning either way).
+        if "ambient_mode" not in raw and "ambient_enabled" in raw:
+            raw["ambient_mode"] = "auto" if raw.pop("ambient_enabled") else "off"
+        else:
+            raw.pop("ambient_enabled", None)
         try:
             return RoomControlState(**raw)
         except Exception:
@@ -223,13 +265,16 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     unrelated field's change).
 
     Routes through services.ambient_music_gate rather than calling
-    services.ambient directly — ambient_enabled=True must NOT freeze the
-    room's Hue devices while music is playing (the music-precedence rule,
-    see ambient_music_gate's module docstring); this is the manual-toggle
-    path that rule has to cover too, not just the automatic one."""
+    services.ambient directly — "auto" must NOT freeze the room's Hue
+    devices while music is playing (the music-precedence rule, see
+    ambient_music_gate's module docstring); this is the manual-toggle path
+    that rule has to cover too, not just the automatic one. "always" is
+    unconditional by design (mode 2) — the gate still owns the actual
+    write, this is just the "did anything change" gate for whether to
+    bother calling it at all."""
     changed = (
-        previous.ambient_enabled != new_state.ambient_enabled
-        or (new_state.ambient_enabled and previous.ambient_color != new_state.ambient_color)
+        previous.ambient_mode != new_state.ambient_mode
+        or (new_state.ambient_mode != "off" and previous.ambient_color != new_state.ambient_color)
     )
     if not changed:
         return None

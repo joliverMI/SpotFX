@@ -245,9 +245,10 @@ export interface RoomColorState {
 /** Room-control surface (spectra-kept-equivalents): the legacy Brightness
  * Multiplier / ledfx_ambient / ledfx_ambient_color / ledfx_global_transition
  * action equivalents. brightness_multiplier is wired at a write seam
- * (fx_executor + scene_compiler); ambient_enabled/_color drives a live
- * Hue takeover (spectra/services/ambient.py) reconciled on every PUT that
- * changes them; global_transition_ms is state-only.
+ * (fx_executor + scene_compiler); ambient_mode/_color drives a live
+ * Hue takeover (spectra/services/ambient.py via ambient_music_gate.py)
+ * reconciled on every PUT that changes them; global_transition_ms is
+ * state-only.
  * scene_change_mode is the Admiral's settings model (three additive tiers,
  * replacing front 3's plain midsong_triggers_enabled bool): "transitions" =
  * a scene change on every song transition only; "analysed" = transitions +
@@ -255,9 +256,16 @@ export interface RoomColorState {
  * hand-authored triggers + response-engine flares. Default "full". */
 export type SceneChangeMode = 'transitions' | 'analysed' | 'full';
 
+/** Ambient's own three settings, in the Admiral's own language
+ * (spectra/services/ambient_music_gate.py) — "off" never holds; "always"
+ * holds Hue lit at ambient_color unconditionally while every other device
+ * keeps running the show; "auto" holds only while nothing is playing and
+ * releases the instant music starts, returning on its own when it stops. */
+export type AmbientMode = 'off' | 'always' | 'auto';
+
 export interface RoomControlState {
   brightness_multiplier: number;
-  ambient_enabled: boolean;
+  ambient_mode: AmbientMode;
   ambient_color: string | null;
   global_transition_ms: number;
   scene_change_mode: SceneChangeMode;
@@ -293,14 +301,16 @@ export interface AmbientResult {
 
 /** spectra/services/ambient_music_gate.py's status() — the room's honest,
  * always-live read of what Ambient is ACTUALLY doing, distinct from
- * AmbientResult above (a one-shot save outcome): "off" (the preference is
- * off), "holding" (frozen at ambient_color right now), "yielding"
- * (enabled, but standing aside for music or an unresolved playback read —
- * the music-precedence fix), "transitioning" (a hold/release is
- * physically in flight). Folded into EngineStatus so the existing 3s poll
- * shows it live with no separate request. */
+ * AmbientResult above (a one-shot save outcome). `setting` is the chosen
+ * AmbientMode (what the control says); `mode` is the LIVE reality: "off"
+ * (setting is off), "holding" (frozen at ambient_color right now — true
+ * throughout "always", and only while confirmed-quiet under "auto"),
+ * "yielding" (setting isn't off, but standing aside for music or an
+ * unresolved playback read — only reachable under "auto"), "transitioning"
+ * (a hold/release is physically in flight). Folded into EngineStatus so
+ * the existing 3s poll shows it live with no separate request. */
 export interface AmbientGateStatus {
-  enabled: boolean;
+  setting: AmbientMode;
   mode: 'off' | 'holding' | 'yielding' | 'transitioning';
   held: boolean;
   result?: AmbientResult;

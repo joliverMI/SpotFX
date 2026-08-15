@@ -7,10 +7,11 @@ room-wide switches with a compact UI control on the room bar:
 
 See services/room_controls.py for what each field means and where it's
 applied (fx_executor + scene_compiler write seams for brightness_multiplier;
-global_transition_ms is state-only). ambient_enabled/_color drive the live
-Hue takeover in services/ambient.py — PUT reconciles it (only when the
-ambient fields actually changed, to avoid re-triggering a stream
-reconnect/reconnect on every unrelated slider commit) and folds the outcome
+global_transition_ms is state-only). ambient_mode/_color drive the live
+Hue takeover in services/ambient.py via services/ambient_music_gate.py —
+PUT reconciles it (only when the ambient fields actually changed, to
+avoid re-triggering a stream reconnect on every unrelated slider commit)
+and folds the outcome
 into the response as `ambient_result` so the caller can tell a live takeover
 from a state-only save (SPECTRA dark, or no Hue devices in the room).
 force_scene_enabled/force_scene_scene_id — the legacy Now Playing Force
