@@ -3,7 +3,11 @@
 settings-model brief, corr=c14a9bcee40e6df9). Fed by the S2 bridge's track
 state through two calls (services/engine.py wires both): on_track_state(uri)
 on every broadcast (mirrors scene_sequencer.TransitionSource.observe_uri)
-and tick(position_ms) every TICK_S from the engine's own poll loop. Fires
+and tick(position_ms) every TICK_S from the engine's own poll loop — fed
+bridge.effective_position_ms(), the raw bridge position already corrected
+by spot-effects' own xcorr shape_offset_ms (bridge.py's module docstring),
+so tick() itself stays a plain position-vs-timestamp comparison and never
+needs to know the correction exists. Fires
 each of the current song's stored triggers (trigger_store) exactly once, the
 moment its timestamp is first crossed:
 

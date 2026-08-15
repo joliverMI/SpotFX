@@ -146,12 +146,18 @@ async def _run_trigger_engine() -> None:
     """The trigger clock — SPECTRA's own poll of the bridge's streamed
     track position (bridge already interpolates between broadcasts;
     TICK_S just needs to be short enough that a fast build doesn't skip a
-    tightly-packed trigger cluster). Errors are logged and swallowed per
-    tick — one bad trigger must never stop the clock."""
+    tightly-packed trigger cluster). Ticks on effective_position_ms(), not
+    the raw position — the same xcorr-derived shape_offset_ms spot-effects'
+    own trigger engine applies before comparing against a trigger's
+    timestamp (bridge.py's module docstring has the full port rationale);
+    without it every migrated trigger fires late/early by that song's own
+    offset (measured live: one song at +7052ms) instead of at the moment
+    it was authored against. Errors are logged and swallowed per tick —
+    one bad trigger must never stop the clock."""
     from spectra.services.trigger_engine import TICK_S
     while True:
         try:
-            await trigger_engine.tick(bridge.track_position_ms())
+            await trigger_engine.tick(bridge.effective_position_ms())
         except Exception:
             logger.exception("trigger engine: tick failed")
         await asyncio.sleep(TICK_S)
