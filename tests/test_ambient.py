@@ -63,17 +63,25 @@ def _hue_handler(calls: list, fail_light_put: bool = False):
 class FakeHueDevice:
     type = "hue"
 
-    def __init__(self, ip: str, calls: list, fail_freeze: bool = False):
+    def __init__(self, ip: str, calls: list, fail_freeze: bool = False,
+                live_frame=None):
         self.config = {"ip_address": ip, "entertainment_id": f"ent-{ip}", "username": "u"}
         self.calls = calls   # shared with the mock bridge handler
         self.frozen: bool | None = None
         self._fail_freeze = fail_freeze
+        # None (the default) means "not yet activated" — assemble_frame()
+        # raises AttributeError-shaped by simply not being callable in a
+        # useful way; real devices instead return None, so model that.
+        self._live_frame = live_frame
 
     async def set_frozen(self, frozen: bool) -> None:
         self.calls.append(("set_frozen", frozen))
         if self._fail_freeze:
             raise RuntimeError("bridge unreachable")
         self.frozen = frozen
+
+    def assemble_frame(self):
+        return self._live_frame
 
 
 class FakeWledDevice:
@@ -322,3 +330,106 @@ def test_reconcile_off_reports_failed_when_every_device_fails_to_unfreeze(monkey
     result = _run(ambient.reconcile(False, None))
 
     assert result == {"status": "failed", "devices": []}
+
+
+# ── reconcile(): disable — catch-up ramp (the release-fidelity fix) ────────
+#
+# Legacy (services/ambient_mode.py) eases back into the real show over
+# ambient_catchup_s AFTER the stream reconnects (a captured-effect-config
+# tween); SPECTRA has no separate wake-scene config to tween from, so it
+# eases the still-frozen bulb toward the live pixel buffer BEFORE
+# reconnecting instead (module docstring) — same qualitative fix (a ramp,
+# not a snap), reached through the only primitive available on this side.
+
+def test_live_look_reads_mean_rgb_as_hex_and_brightness():
+    from spectra.services.ambient import _live_look
+
+    class Dev:
+        def assemble_frame(self):
+            return [(200.0, 0.0, 0.0), (100.0, 0.0, 0.0)]  # mean (150, 0, 0)
+
+    color_hex, brightness_pct = _live_look(Dev())
+    assert color_hex == "#960000"
+    assert brightness_pct == round(150 / 255 * 100)
+
+
+def test_live_look_none_when_frame_unavailable():
+    from spectra.services.ambient import _live_look
+
+    class DevNoFrame:
+        def assemble_frame(self):
+            return None
+
+    class DevRaises:
+        def assemble_frame(self):
+            raise RuntimeError("not activated")
+
+    assert _live_look(DevNoFrame()) is None
+    assert _live_look(DevRaises()) is None
+
+
+def test_reconcile_off_ramps_toward_the_live_look_before_unfreezing(monkeypatch, bridge):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    monkeypatch.setattr(ambient, "AMBIENT_TRANSITION_MS", 0)
+    monkeypatch.setattr(ambient, "AMBIENT_CATCHUP_MS", 5)  # keep the test fast
+    dev = FakeHueDevice("10.0.0.1", bridge, live_frame=[(0.0, 255.0, 0.0)])
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    result = _run(ambient.reconcile(False, None))
+
+    assert result == {"status": "off", "devices": ["hue-lights"]}
+    put_calls = [c for c in bridge
+                if c[:2] == ("REST", "PUT") and c[2].startswith("/clip/v2/resource/light/")]
+    assert len(put_calls) == 2, "phase-1 fade PUT, then the catch-up PUT"
+    unfreeze_at = _first_index(bridge, ("set_frozen", False))
+    assert unfreeze_at == len(bridge) - 1, "both REST phases must land before unfreezing"
+
+
+def test_reconcile_off_catchup_payload_targets_the_live_colour(monkeypatch, bridge):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    monkeypatch.setattr(ambient, "AMBIENT_TRANSITION_MS", 0)
+    monkeypatch.setattr(ambient, "AMBIENT_CATCHUP_MS", 5)
+    captured = []
+    orig_apply = ambient._apply_hue
+
+    async def spy(dev, body):
+        captured.append(body)
+        return await orig_apply(dev, body)
+
+    monkeypatch.setattr(ambient, "_apply_hue", spy)
+    dev = FakeHueDevice("10.0.0.1", bridge, live_frame=[(0.0, 0.0, 255.0)])
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    _run(ambient.reconcile(False, None))
+
+    fade_body, catchup_body = captured
+    assert "color" not in fade_body  # phase 1 unchanged: brightness-only dim
+    assert "xy" in catchup_body["color"]  # phase 2: ramps toward the live colour
+    assert catchup_body["dynamics"] == {"duration": 5}
+
+
+def test_reconcile_off_skips_catchup_when_no_live_frame_available(monkeypatch, bridge):
+    """A device with nothing to read (e.g. not yet activated) just releases
+    from the phase-1 fade, same as before this fix — no spurious write."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    monkeypatch.setattr(ambient, "AMBIENT_TRANSITION_MS", 0)
+    monkeypatch.setattr(ambient, "AMBIENT_CATCHUP_MS", 5)
+    dev = FakeHueDevice("10.0.0.1", bridge)  # live_frame defaults to None
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    result = _run(ambient.reconcile(False, None))
+
+    assert result == {"status": "off", "devices": ["hue-lights"]}
+    put_calls = [c for c in bridge
+                if c[:2] == ("REST", "PUT") and c[2].startswith("/clip/v2/resource/light/")]
+    assert len(put_calls) == 1, "only the phase-1 fade PUT — no catch-up write"
+
+
+def test_ambient_catchup_ms_matches_legacy_ambient_catchup_s_default():
+    """config.py's settings.ambient_catchup_s default is 8.0 — the exact
+    number this module's release ramp must match, not re-guess."""
+    from spectra.services.ambient import AMBIENT_CATCHUP_MS
+    assert AMBIENT_CATCHUP_MS == 8000
