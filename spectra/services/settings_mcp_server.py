@@ -15,6 +15,30 @@ FastAPI process. Its only job is to exist as a standalone entry point:
 
     python -m spectra.services.settings_mcp_server
 
+CWD-INDEPENDENT ON PURPOSE (live production defect, 2026-08-15, found by
+firstmate: `claude -p` runs with its cwd set to settings_agent_cli.py's
+dedicated clean workdir -- see that module's docstring for why that
+directory must stay empty -- and does NOT honour the per-server `cwd`
+this module's --mcp-config entry used to declare; the subprocess it spawns
+inherits the PARENT `claude` process's cwd instead. `python -m` resolves
+imports off the CURRENT WORKING DIRECTORY, not this file's own location,
+so `import spectra` silently failed with the server launched from that
+clean workdir -- reproduced by hand: `python -m
+spectra.services.settings_mcp_server` succeeds from the repo root and
+raises `ModuleNotFoundError: No module named 'spectra'` from the clean
+workdir. The fix is entirely LOCAL to this file -- the two lines below
+insert this file's own resolved repo root into sys.path before importing
+spectra, so the module works regardless of the spawning process's cwd,
+regardless of whether any --mcp-config field the CLI does or doesn't
+honour changes in a future version, and regardless of `-m` vs. a direct
+script path. This does NOT touch, weaken, or route around the clean
+workdir requirement itself: that directory governs the `claude` PROCESS's
+OWN cwd, used only for ITS auto-discovery of a project's
+`.claude/settings.json` hooks and `.mcp.json`/`CLAUDE.md` (the actual
+hole `_workdir()` guards) -- a completely different mechanism from this
+file's own sys.path, which affects nothing outside this one Python
+process's own import resolution.
+
 `set_setting`'s `key` parameter is typed as a Literal built from
 settings_console.SETTINGS_REGISTRY's own keys at import time, not
 re-typed by hand -- the same enum constraint settings_agent.TOOLS
@@ -30,11 +54,21 @@ schema that deliberately omitted the enum, to prove the mechanism -- not
 client-side schema policing -- is what refuses)."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any, Literal
 
-from mcp.server import MCPServer
+# Must run before the `spectra.services` import below -- see module
+# docstring's "CWD-INDEPENDENT ON PURPOSE" section. This file lives at
+# <repo_root>/spectra/services/settings_mcp_server.py, so its own resolved
+# path (never the process's cwd) is what locates the repo root.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from spectra.services import settings_agent, settings_console
+from mcp.server import MCPServer  # noqa: E402
+
+from spectra.services import settings_agent, settings_console  # noqa: E402
 
 _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
 
