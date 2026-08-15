@@ -4,6 +4,7 @@
  * dwell, affinity) render read-only — adjusted by telling the agent. */
 import { useState } from 'react';
 import CurveEditor, { type CurvePoint } from '../../components/CurveEditor';
+import CurveThumbnail from '../../components/CurveThumbnail';
 import { useToast } from '../../components/Toast';
 import HelpLink from '../../help/HelpLink';
 import {
@@ -107,27 +108,63 @@ export default function SequencingTab({ scene, scenes }: {
   const affinityEdges = (config?.affinity ?? []).filter(
     (e) => e.from_id === scene.id || e.to_id === scene.id);
 
+  // Grid tiles: each one is either a fixed choice (none/flat/inline) or a
+  // named shared profile, paired with the SAME points its curve editor would
+  // draw — the thumbnail is the real shape, not a stand-in for the name.
+  // Inline's tile previews what it would start from if picked right now
+  // (mirrors attach()'s own seed: the currently-attached profile, or the
+  // scene's current curve), since a not-yet-detached scene has no fixed
+  // inline shape of its own yet.
+  const tiles: { value: string; label: string; points: CurvePoint[] | null; badge?: string }[] = [
+    { value: 'none', label: '— not sequenced —', points: null },
+    { value: 'flat', label: 'Flat 1.0 (no curve)', points: FLAT },
+    ...Object.values(curves)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => {
+        const n = usedBy(p.id).length;
+        return { value: p.id, label: p.name, points: p.points, badge: n > 1 ? `${n} scenes` : undefined };
+      }),
+    { value: 'inline', label: 'Inline one-off…', points: profile ? profile.points : points },
+  ];
+
   return (
     <div>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         Sequencing <HelpLink topic="tab-sequencing" />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Likelihood curve</span>
-        <select value={attachment} style={{ fontSize: 12 }} onChange={(e) => void attach(e.target.value)}>
-          <option value="none">— not sequenced —</option>
-          <option value="flat">Flat 1.0 (no curve)</option>
-          {Object.values(curves).map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Likelihood curve</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 6 }}>
+          {tiles.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              aria-label={t.label}
+              aria-pressed={attachment === t.value}
+              title={t.label}
+              onClick={() => void attach(t.value)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                padding: 5, borderRadius: 'var(--radius)', background: 'var(--surface2)',
+                border: attachment === t.value ? '2px solid var(--accent2)' : '1px solid var(--border)',
+                cursor: 'pointer',
+              }}
+            >
+              {t.points ? <CurveThumbnail points={t.points} /> : (
+                <div style={{
+                  width: 96, height: 48, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', color: 'var(--text-muted)', fontSize: 16,
+                }}>—</div>
+              )}
+              <span style={{
+                fontSize: 11, textAlign: 'center', overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 106,
+              }}>{t.label}</span>
+              {t.badge && <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{t.badge}</span>}
+            </button>
           ))}
-          <option value="inline">Inline one-off…</option>
-        </select>
-        {profile && users.length > 1 && (
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title={users.join(', ')}>
-            shared by {users.length} scenes
-          </span>
-        )}
+        </div>
       </div>
 
       {attachment === 'none' && (
