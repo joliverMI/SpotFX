@@ -1,6 +1,9 @@
-/** Compact room-control strip — brightness multiplier (wired: the legacy
- * Brightness Multiplier action equivalent, scales every write uniformly at
- * the fx_executor / scene_compiler seams) plus ambient mode/colour (wired:
+/** Compact room-control strip — Dark mode (wired: the legacy global
+ * Dark/Light display-mode toggle equivalent, hard-clamps every device's
+ * background black via LedFX's dark_lock — spectra/services/dark_light.py)
+ * plus brightness multiplier (wired: the legacy Brightness Multiplier
+ * action equivalent, scales every write uniformly at the fx_executor /
+ * scene_compiler seams) plus ambient mode/colour (wired:
  * freezes the room's live Hue devices and holds them at the chosen colour
  * over direct bridge REST — spectra/services/ambient.py) and global
  * transition pace (state only), the scene-change settings model (three
@@ -12,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ColorGradientPicker from './ColorGradientPicker';
 import HelpLink from '../help/HelpLink';
 import { useEngineStatus, useRoomControls, useSaveRoomControls, useScenes } from '../queries';
-import type { AmbientMode, AmbientResult, RoomControlState, SceneChangeMode } from '../types';
+import type { AmbientMode, AmbientResult, DarkLightResult, RoomControlState, SceneChangeMode } from '../types';
 import SearchSelect from './forms/SearchSelect';
 
 const AMBIENT_NOTE: Record<string, string> = {
@@ -70,6 +73,13 @@ function formatVerifyAge(seconds: number): string {
   return `${Math.round(seconds / 3600)}h ago`;
 }
 
+const DARK_LIGHT_NOTE: Record<string, string> = {
+  'no-devices': "SPECTRA doesn't know of any virtual to touch — saved, nothing to lock",
+  'handover-in-progress': 'light ownership is mid-handover right now — saved, nothing changed live',
+  released: 'the room is released to Home Assistant right now — saved, nothing changed live',
+  failed: 'could not reach LedFX to apply the change — saved, but the room may not match this switch',
+};
+
 const SCENE_CHANGE_MODES: { value: SceneChangeMode; label: string; title: string }[] = [
   { value: 'transitions', label: 'Transitions only',
     title: 'A scene change on every song transition. Nothing else fires.' },
@@ -89,6 +99,7 @@ export default function RoomControlsBar() {
   const ambientMode = engineStatus?.ambient;
   const [local, setLocal] = useState<RoomControlState | null>(null);
   const [ambientResult, setAmbientResult] = useState<AmbientResult | null>(null);
+  const [darkLightResult, setDarkLightResult] = useState<DarkLightResult | null>(null);
   const sceneOptions = useMemo(
     () => (scenes ?? []).map((s) => ({ value: s.id, label: s.name })),
     [scenes],
@@ -105,12 +116,45 @@ export default function RoomControlsBar() {
   const commit = (next: RoomControlState) => {
     setLocal(next);
     save.mutate(next, {
-      onSuccess: (res) => setAmbientResult(res.ambient_result ?? null),
+      onSuccess: (res) => {
+        setAmbientResult(res.ambient_result ?? null);
+        setDarkLightResult(res.dark_light_result ?? null);
+      },
     });
   };
 
   return (
     <div className="room-controls-bar">
+      <label className="room-control"
+        title="Force every device's background black, hard-clamped at LedFX so no write path can relight it. Switching off repaints whatever was showing before.">
+        <input
+          type="checkbox"
+          checked={local.dark_mode_enabled}
+          onChange={(e) => commit({ ...local, dark_mode_enabled: e.target.checked })}
+        />
+        Dark mode
+        <HelpLink topic="dark-light-mode" />
+      </label>
+
+      {darkLightResult && darkLightResult.status !== 'dark' && darkLightResult.status !== 'light' && (
+        <span
+          className={`badge ${darkLightResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
+          title={DARK_LIGHT_NOTE[darkLightResult.status]}
+        >
+          dark mode: {darkLightResult.status}
+        </span>
+      )}
+
+      {(darkLightResult?.status === 'dark' || darkLightResult?.status === 'light')
+        && (darkLightResult.unconfirmed?.length ?? 0) > 0 && (
+        <span
+          className="badge badge-red"
+          title={`Not confirmed at the requested dark_lock state after read-back: ${(darkLightResult.unconfirmed ?? []).join(', ')}`}
+        >
+          dark mode: {(darkLightResult.locked ?? []).length} locked — unconfirmed: {(darkLightResult.unconfirmed ?? []).join(', ')}
+        </span>
+      )}
+
       <label className="room-control" title="Dims/undims the whole room uniformly">
         Brightness
         <input

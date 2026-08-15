@@ -2,6 +2,16 @@
 don't belong to any one scene (spectra-kept-equivalents, the owner's KEPT
 legacy picks: decision-legacy-retirement-picks.md):
 
+  dark_mode_enabled        the legacy global Dark/Light display-mode toggle
+  dark_light_shield_       equivalent (services/display_mode.py in legacy;
+  categories/_virtuals     day-one bar item, SPECTRA_SPEC.md §9 — NOT the
+                          retired per-node Light Mode Chooser, §36). Full
+                          reasoning, incl. why this is a bool where legacy
+                          has three states, lives in spectra/services/
+                          dark_light.py's module docstring — read that
+                          before touching this. Reconciled the same way
+                          ambient is: reconcile_dark_light_if_changed below,
+                          called from the PUT /api/room-controls handler.
   brightness_multiplier  the legacy Brightness Multiplier action equivalent
                           (models.music_event.BrightnessAction) — dims/undims
                           the WHOLE room uniformly, applied at the write
@@ -137,6 +147,12 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class RoomControlState(BaseModel):
+    dark_mode_enabled: bool = False
+    # Category/virtual exemptions — legacy's default shielded category
+    # (config.py's display_shield_categories) is ["Singles"]; matched here
+    # for exact fidelity, not re-guessed.
+    dark_light_shield_categories: list[str] = Field(default_factory=lambda: ["Singles"])
+    dark_light_shield_virtuals: list[str] = Field(default_factory=list)
     brightness_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
     ambient_mode: AmbientMode = "off"
     ambient_color: Optional[str] = None   # hex; None = no colour authored yet
@@ -280,3 +296,27 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
         return None
     from spectra.services import ambient_music_gate
     return await ambient_music_gate.reconcile_now()
+
+
+async def reconcile_dark_light_if_changed(previous: RoomControlState,
+                                          new_state: RoomControlState) -> Optional[dict]:
+    """The dark_lock-sync half of a room-controls save — same one-choke-point
+    shape as reconcile_ambient_if_changed above, so a human PUT and the
+    settings-console agent's apply path can never diverge. Also re-reconciles
+    on a shield-list edit while already dark (mirrors legacy's services/
+    display_mode.resync(), called when display_shield_* settings change) —
+    a newly (un)shielded virtual should react immediately, not wait for the
+    next full toggle. Returns None (no live effect, nothing to report) when
+    neither condition holds."""
+    changed = (
+        previous.dark_mode_enabled != new_state.dark_mode_enabled
+        or (new_state.dark_mode_enabled and (
+            previous.dark_light_shield_categories != new_state.dark_light_shield_categories
+            or previous.dark_light_shield_virtuals != new_state.dark_light_shield_virtuals))
+    )
+    if not changed:
+        return None
+    from spectra.services import dark_light
+    return await dark_light.reconcile(new_state.dark_mode_enabled,
+                                      new_state.dark_light_shield_categories,
+                                      new_state.dark_light_shield_virtuals)

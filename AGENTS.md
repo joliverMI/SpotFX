@@ -751,6 +751,56 @@ module is one — see `spectra/api/device_preview.py`'s WS endpoint calling
 pause/resume click). Broadcast state on every change of the underlying
 condition, not on the actions that usually cause it.
 
+**Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
+built, room-proof pending); NOT the same feature as the retired per-node
+Light Mode Chooser/§36, which shares only a field name
+(`spectra/web/src/timeline/types.ts`'s per-trigger `display_mode`, still
+unread by any `spectra/*.py`). `RoomControlState.dark_mode_enabled` (room
+bar checkbox) toggles the SAME LedFX-side `dark_lock` clamp legacy's
+`services/display_mode.py` drives — vendored into `fx/` verbatim
+(`fx/virtuals.py`'s CONFIG_SCHEMA, `fx/effects/__init__.py`'s
+`_apply_config` hard clamp), reached over two new ownership-routed
+primitives on `spectra/services/fx_seam.py` (`get_virtuals`/
+`set_virtual_config`, same HTTP-pre-handover/in-process-post-handover
+routing as `apply_writes`). `spectra/services/dark_light.py` is the
+reconcile logic and carries the full fidelity reasoning — read its
+docstring before touching this: a bool (not legacy's three-state
+Default/Dark/Light cycle, since Default only ever meant "defer to a lower
+per-node level" and every such level is retired), and restores from a live
+pre-dark snapshot (captured via `fx_seam.get_virtuals()`, persisted to
+survive a restart, replayed via `fx_seam.apply_writes()`) rather than
+legacy's "re-fire the last Color Set" (that concept belongs to the same
+retired authoring world). Shielding
+(`dark_light_shield_categories`/`_virtuals`, default `["Singles"]` —
+legacy's own default) is ported verbatim via the shared read-only category
+registry (`fx/device_model.get_virtuals_for_category`). **Composes with
+`ambient_mode`'s three settings, not a boolean** (the two features never
+reference each other's fields — composition is architectural, not
+coordinated): whenever a Hue device is ACTUALLY frozen right now —
+`ambient_mode="always"` unconditionally, or `"auto"` while playback reads
+confirmed-not-playing — that device is driven by direct bridge REST
+(`spectra/services/ambient.py`), bypassing LedFX entirely, so `dark_lock`
+has no visible effect on it; the moment that device ISN'T frozen
+(`ambient_mode="off"`, or `"auto"` while confirmed playing), it's
+LedFX-rendered like any other virtual and responds to `dark_lock`
+normally. Dark/light never reads `ambient_mode` to decide this — the
+orthogonality is a property of the write path (a frozen device never
+reaches LedFX's effect config), not a rule either feature encodes about
+the other, the same "compose for free by construction" shape Ambient
+mode 2 found for the selection kernel. Measurement note, same lesson as
+"Reading real Hue bulb state" above: dark/light's own mechanism is
+LedFX-side (`dark_lock` + effect config on `/api/virtuals`), never the
+Hue CLIP light resource — that instrument is for Ambient's own REST-held
+bulbs, a different subsystem; verifying dark/light at the bridges means
+reading LedFX's per-virtual `dark_lock` + effect config back
+(`fx_seam.get_virtuals()`, what `dark_light.py`'s own confirm step and
+`scripts/verify_dark_light_fixtures.py` both do). Spec:
+`tests/test_dark_light.py`, incl. a frame-level proof against a real
+headless dummy host (`fx/headless.py`) that the vendored clamp actually
+engages and the restore repaints the exact pre-dark background.
+Live-fixture check (read-only, GET-only, same pattern as
+`scripts/verify_release_fixtures.py`): `scripts/verify_dark_light_fixtures.py`.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing

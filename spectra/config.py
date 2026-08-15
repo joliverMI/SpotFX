@@ -44,6 +44,10 @@ SCENE_GENESIS_FILE = SPECTRA_STORAGE / "scene_genesis.json"
 DEVICE_PREVIEW_FILE = SPECTRA_STORAGE / "device_preview.json"
 INTENSITY_SCALE_CACHE_FILE = SPECTRA_STORAGE / "intensity_scale_features.json"
 INTENSITY_SCALE_MARKS_FILE = SPECTRA_STORAGE / "intensity_scale_marks.json"
+# Per-virtual pre-dark effect snapshot (spectra/services/dark_light.py) — the
+# "what was showing before Dark" record the Light transition replays, since
+# clearing dark_lock alone restores nothing (see that module's docstring).
+DARK_LIGHT_SNAPSHOT_FILE = SPECTRA_STORAGE / "dark_light_snapshot.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
