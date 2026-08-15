@@ -12,12 +12,16 @@ import ScenesPage from './scenes/ScenesPage';
 import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
+import TimingVizPage from './timingviz/TimingVizPage';
+import DebugPage from './debug/DebugPage';
 
 const PAGE_TITLES: [string, string][] = [
   ['/scenes', 'Scenes'],
   ['/timeline', 'Timeline'],
   ['/feedback', 'Feedback'],
   ['/review', 'Review'],
+  ['/timing', 'Timing'],
+  ['/debug', 'Debug'],
   ['/settings', 'Settings'],
   ['/status', 'Status'],
   ['/help', 'Help'],
@@ -48,6 +52,8 @@ function NavBar() {
       <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
       <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
       <Link to="/review" className={cls((p) => p === '/review')}>Review</Link>
+      <Link to="/timing" className={cls((p) => p === '/timing')}>Timing</Link>
+      <Link to="/debug" className={cls((p) => p === '/debug')}>Debug</Link>
       <Link to="/settings" className={cls((p) => p === '/settings')}>Settings</Link>
       <Link to="/status" className={cls((p) => p === '/status')}>Status</Link>
       <Link to="/help" className="help-link" title="Help" aria-label="Help">?</Link>
@@ -71,6 +77,8 @@ export default function App() {
           <Route path="/timeline" element={<BuilderPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/timing" element={<TimingVizPage />} />
+          <Route path="/debug" element={<DebugPage />} />
           <Route path="/settings" element={<SettingsConsolePage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/help" element={<HelpPage />} />
