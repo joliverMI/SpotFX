@@ -142,6 +142,32 @@ by default (LibrosaSection carries no scene cue today) — resolved through
 the same kernel the sequencer's own rolls use, at the trigger's own
 intensity, no dwell/no cross-fire affinity tracking.
 
+**Auto-generation on first play** (Admiral order 12, `trigger_engine.
+maybe_auto_generate`, wired off `services/engine.py`'s `_on_track_uri` on
+the same first-time-seeing-this-URI edge that resets `_last_track_uri`):
+any song reaching ZERO stored triggers of either source gets
+`generate_for_song` run for it automatically, fire-and-forget
+(`asyncio.create_task`, never awaited, so a slow/unanalyzed song can't
+delay the transition fire). This is reactive only — it fires the first
+time a song is *played*, not proactively for the rest of the library.
+`scripts/import_analysed_triggers.py` (`--apply`) is the proactive
+counterpart: back-fills `generate_for_song` for every song that has usable
+librosa analysis but zero authored triggers (recomputed fresh from
+`storage/spectra/triggers.json` and `analysis_reader` on each run — never
+a stale snapshot), so coverage doesn't wait on him happening to replay
+each one. Both call the identical function, so a song either path already
+touched is a no-op for the other. Dry-run by default, matching
+`scripts/migrate_legacy_triggers.py`'s convention. **Write cost is real**:
+`trigger_store.upsert` does a full read+rewrite of the whole
+`triggers.json` per trigger (measured ~126ms/call against the live
+~11k-trigger corpus) — fine for one human edit, not fine looped inside an
+async request handler for a multi-song batch (blocks the SPECTRA process's
+event loop, stalling bridge polls/ticks/WS broadcasts for the run's whole
+duration). Run bulk generation as a separate offline process against
+`storage/spectra/triggers.json` directly, the same shape
+`migrate_legacy_triggers.py` already used for the authored corpus, never
+through the live HTTP endpoint in a loop.
+
 **Scene-change settings model** (the Admiral's binding three-tier control,
 corr=c14a9bcee40e6df9, superseding front 3's plain `midsong_triggers_enabled`
 bool): `RoomControlState.scene_change_mode` (`spectra/services/
