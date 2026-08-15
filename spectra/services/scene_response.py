@@ -129,16 +129,9 @@ SURGE_LOG_LIMIT = 50
 COLOR_JUMP_RAMP_MS_GENTLE = 2500   # intensity 0.0 — the felt ease-in
 COLOR_JUMP_RAMP_MS_HARD = 150      # intensity 1.0 — lands hard
 
-
-def color_jump_ramp_ms(intensity: float) -> int:
-    frac = max(0.0, min(1.0, intensity))
-    return int(round(COLOR_JUMP_RAMP_MS_GENTLE
-                     + (COLOR_JUMP_RAMP_MS_HARD
-                        - COLOR_JUMP_RAMP_MS_GENTLE) * frac))
-
 # UPDATE's own ramp-in (the owner's words, spectra-trigger-migration-scoping
 # RULING.md: "a major change ... bigger than the flare ... arriving on a
-# ramp-in transition"). Same intensity-scaled shape as color_jump_ramp_ms
+# ramp-in transition"). Same intensity-scaled shape as the colour jump's
 # (gentle eases in, hard lands quicker) but deliberately slower at both
 # ends — "bigger than a flare" should never glide faster than the flare
 # colour-jump's own hard end.
@@ -146,10 +139,23 @@ UPDATE_RAMP_MS_GENTLE = 3000   # intensity 0.0
 UPDATE_RAMP_MS_HARD = 800      # intensity 1.0 — still a visible glide, never a snap
 
 
-def update_ramp_ms(intensity: float) -> int:
+def _intensity_scaled_ramp_ms(intensity: float, gentle_ms: int, hard_ms: int) -> int:
+    """Shared shape behind every intensity-scaled ramp-in in this module:
+    linear between GENTLE (intensity 0.0) and HARD (intensity 1.0), clamped.
+    A future change to the interpolation itself (easing, clamp behaviour)
+    only needs to happen here, not once per ramp family."""
     frac = max(0.0, min(1.0, intensity))
-    return int(round(UPDATE_RAMP_MS_GENTLE
-                     + (UPDATE_RAMP_MS_HARD - UPDATE_RAMP_MS_GENTLE) * frac))
+    return int(round(gentle_ms + (hard_ms - gentle_ms) * frac))
+
+
+def color_jump_ramp_ms(intensity: float) -> int:
+    return _intensity_scaled_ramp_ms(
+        intensity, COLOR_JUMP_RAMP_MS_GENTLE, COLOR_JUMP_RAMP_MS_HARD)
+
+
+def update_ramp_ms(intensity: float) -> int:
+    return _intensity_scaled_ramp_ms(
+        intensity, UPDATE_RAMP_MS_GENTLE, UPDATE_RAMP_MS_HARD)
 
 # phase_progress ramp per class — the original program's tuned durations
 # (config.py phase_*_ramp_ms defaults): "Drop stays short — it's the snap."

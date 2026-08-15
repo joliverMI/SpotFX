@@ -74,14 +74,6 @@ RETIRED_IDS = frozenset({
     "164df939-217e-4081-a2d3-dc523cb5eca3",  # Dinner Party Scenes
 })
 
-# RESET IS TREATED AS UPDATE (his correction) — one behaviour, both route to
-# UPDATE_BUCKET / map_update.
-UPDATE_IDS = frozenset({
-    "fixed-update-scene",
-    "fixed-reset-scene",
-})
-
-
 @dataclass(frozen=True)
 class LedgerEntry:
     event_id: str
@@ -213,8 +205,18 @@ _SETLIST_JUDGMENT: list[LedgerEntry] = [
 ]
 
 LEDGER: dict[str, LedgerEntry] = {e.event_id: e for e in (*_EXACT, *_JUDGMENT, *_SETLIST_JUDGMENT)}
-assert len(LEDGER) == 35, f"expected all 35 known event_ids (28 base-corpus + 7 setlist-only), got {len(LEDGER)}"
-assert all(e.bucket in ALL_BUCKETS for e in LEDGER.values())
+if len(LEDGER) != 35:
+    raise RuntimeError(f"expected all 35 known event_ids (28 base-corpus + "
+                       f"7 setlist-only), got {len(LEDGER)} — a duplicate "
+                       f"event_id was added to the ledger")
+if not all(e.bucket in ALL_BUCKETS for e in LEDGER.values()):
+    raise RuntimeError("a LEDGER entry has a bucket outside ALL_BUCKETS — "
+                       "check for a typo in a newly added entry")
+
+# RESET IS TREATED AS UPDATE (his correction) — one behaviour. Derived from
+# LEDGER, not hand-duplicated, so it can never drift from the entries'
+# actual bucket=="update" assignments above.
+UPDATE_IDS = frozenset(eid for eid, e in LEDGER.items() if e.bucket == UPDATE_BUCKET)
 
 
 def classify(event_id: str) -> Optional[LedgerEntry]:
@@ -259,9 +261,8 @@ def map_scene_change(music_trigger: dict) -> Optional[dict]:
     words exactly.
 
     Returns None for a retired id (Dinner Party Scenes — scrapped, never
-    migrated), a blocked id (update/reset — the behaviour doesn't exist yet,
-    never silently mapped here), a non-scene-change bucket, or an unknown
-    id."""
+    migrated), an update-bucket id (update/reset — routes to map_update
+    instead), a non-scene-change bucket, or an unknown id."""
     entry = classify(music_trigger["event_id"])
     if entry is None or entry.bucket != SCENE_CHANGE_BUCKET or entry.status != "mapped":
         return None
