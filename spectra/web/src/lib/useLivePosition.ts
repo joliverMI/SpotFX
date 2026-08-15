@@ -12,8 +12,23 @@
  * instead of drifting: a pause shows up as `is_playing: false` (advancement
  * stops dead, never counts through it), and a seek or track change shows up
  * as a jump in the polled value (the next tick snaps straight to it, no
- * special-casing needed). */
+ * special-casing needed).
+ *
+ * TICK_MS is the DISPLAY's own repaint cadence, not the interpolation
+ * error: the anchor+elapsed formula below is exact at read time, but the
+ * DOM only repaints once per tick, so whatever's on screen is stale by
+ * somewhere in [0, TICK_MS) at any given instant. Live-room measurement
+ * (in-page, against a fresh independent /engine/status read, PR 65)
+ * found this dominating the residual at the old 100ms tick — mean -58ms,
+ * 25% of samples missing the tenth-of-a-second bar — while a SEPARATE,
+ * upstream source (Spotify's own periodically-rebased position report)
+ * contributes its own few-hundred-ms jitter that no client-side tick rate
+ * can close. 40ms keeps repaint staleness (average ~20ms, worst-case one
+ * tick) well inside the tenth-of-a-second bar without repainting faster
+ * than he can read. */
 import { useEffect, useRef, useState } from 'react';
+
+const TICK_MS = 40;
 
 interface Track {
   position_ms: number | null;
@@ -42,7 +57,7 @@ export function useLivePosition(track: Track | null | undefined): number | null 
 
   useEffect(() => {
     if (!isPlaying || polledPos == null) return undefined;
-    const id = setInterval(() => tick((n) => n + 1), 100);
+    const id = setInterval(() => tick((n) => n + 1), TICK_MS);
     return () => clearInterval(id);
   }, [isPlaying, polledPos]);
 
