@@ -62,10 +62,32 @@ def test_room_controls_store_round_trips(tmp_path):
 
     assert rc.load_room_controls() == rc.RoomControlState(), \
         "no file yet — defaults (multiplier 1.0, no room dimming)"
-    state = rc.RoomControlState(brightness_multiplier=0.6, ambient_enabled=True,
+    state = rc.RoomControlState(brightness_multiplier=0.6, ambient_mode="always",
                                 ambient_color="#ff8800", global_transition_ms=1200)
     rc.save_room_controls(state)
     assert rc.load_room_controls() == state
+
+
+def test_ambient_enabled_migrates_to_ambient_mode(tmp_path, monkeypatch):
+    """One-way migration from the pre-2026-08-15 ambient_enabled bool (§52's
+    own field, never merged to master under that name) to the three-setting
+    ambient_mode — True maps to "auto" (what True was built and proven to
+    mean throughout §52's lifetime), False to "off"."""
+    import json
+    from spectra import config as scfg
+    from spectra.services import room_controls as rc
+    path = tmp_path / "room_controls.json"
+    monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", path)
+
+    path.write_text(json.dumps({"ambient_enabled": True, "ambient_color": "#f5da8c"}))
+    assert rc.load_room_controls().ambient_mode == "auto"
+
+    path.write_text(json.dumps({"ambient_enabled": False}))
+    assert rc.load_room_controls().ambient_mode == "off"
+
+    # A file already on the new field is never touched by the migration.
+    path.write_text(json.dumps({"ambient_mode": "always"}))
+    assert rc.load_room_controls().ambient_mode == "always"
 
 
 def test_fx_executor_applies_room_brightness_multiplier():

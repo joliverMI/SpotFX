@@ -1,6 +1,9 @@
 """SPECTRA's own Ambient Mode — the behaviour behind the room bar's Ambient
-checkbox (spectra.services.room_controls.RoomControlState.ambient_enabled /
-ambient_color).
+control (spectra.services.room_controls.RoomControlState.ambient_mode /
+ambient_color). This module is the single Hue write seam — it knows
+nothing about the three-setting mode surface or music precedence; that
+precedence lives one layer up, in spectra/services/ambient_music_gate.py,
+which is the only caller that decides WHEN to invoke reconcile() below.
 
 The legacy world (services/ambient_mode.py) is the spec for what "ambient"
 MEANS: a calm takeover of the Hue devices in the room — freeze each Hue

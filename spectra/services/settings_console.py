@@ -9,7 +9,7 @@ shell, file, HTTP, or service-control primitive reachable from here.
 
 SCOPE (first build): the five RoomControlState fields (spectra/services/
 room_controls.py) already labelled "agent-tellable room-wide switches" in
-that module's own docstring — brightness, ambient enable/colour, the
+that module's own docstring — brightness, ambient mode/colour, the
 global transition default, and the scene-change tier. force_scene_* is
 deliberately excluded: it targets a scene by opaque id, which is a poor
 fit for "set this setting to this value" (a picker action, not a voice
@@ -114,10 +114,14 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "global_transition_ms", "Transition",
         "Default scene-entry blend time in milliseconds, used when a scene "
         "doesn't author its own — convert spoken seconds to ms (2s -> 2000)."),
-    "ambient_enabled": _spec(
-        "ambient_enabled", "Ambient",
-        "Whether ambient mode (a frozen static colour held on the room's "
-        "live Hue devices) is on."),
+    "ambient_mode": _spec(
+        "ambient_mode", "Ambient",
+        "Ambient mode for the room's live Hue devices, one of three: "
+        "'off' (never holds, the whole room performs), 'always' (Hue held "
+        "lit at ambient_color at all times, other devices keep running "
+        "the show regardless), 'auto' (Hue holds only while nothing is "
+        "playing, releases the instant music starts, and returns on its "
+        "own when it stops)."),
     "ambient_color": _spec(
         "ambient_color", "Ambient colour",
         "The ambient-mode hex colour, #rrggbb — translate a named colour "

@@ -535,28 +535,46 @@ concept, so legacy's group-member-rotation half has nothing to port to.
 Spec: the Force Scene section of `scripts/check_spectra.py` +
 `tests/test_room_controls.py::test_force_scene_redirects_every_automatic_pick`.
 
-**Ambient's music-precedence gate** (found live 2026-08-15: `ambient_enabled:
-true` + a real track playing + an active scene + firing triggers = all 19 Hue
-bulbs sat frozen at ambient cream, following none of it — Ambient wasn't
-competing with music, it was silently swallowing the whole song, and was
-likely a second, independent cause of his original "no scene changes"
-complaint on top of the `scene_change_mode` fix). His ruling: Ambient is the
-room's RESTING state — MUSIC WINS while it plays, Ambient resumes on its own
-the instant it stops. `spectra/services/ambient_music_gate.py` is the single
-choke point every path that can change the live hold now funnels through (a
-human PUT, every bridge state broadcast, process startup/resume) — none of
-them may call `services.ambient.reconcile()` directly, or the precedence rule
-can be bypassed. `RoomControlState.ambient_enabled` still means "I want
-Ambient"; the gate tracks the LIVE hold against a second signal,
-`bridge.is_playing()`. A confirmed read always wins, even over an existing
-hold; an UNKNOWN read never actively changes anything (carries the current
-hold forward) — collapsing unknown onto "release" was rejected because a
-transient bridge blip would otherwise flicker-release an already-quiet held
-room. Visible always-live status (`off`/`holding`/`yielding`/`transitioning`)
-folds into `GET /spectra/api/engine/status`'s `ambient` key and shows as a
-persistent badge on `RoomControlsBar.tsx`, separate from the one-shot
-PUT-outcome badge. Full detail + room-proof status: `docs/SPECTRA_SPEC.md`
-§52. Spec: `tests/test_ambient_music_gate.py`, `tests/test_bridge.py`.
+**Ambient's mode precedence gate** — three settings, in the Admiral's own
+language (`RoomControlState.ambient_mode: "off"|"always"|"auto"`,
+`spectra/services/ambient_music_gate.py`, UI a `RoomControlsBar.tsx`
+dropdown, not the old checkbox). Origin: found live 2026-08-15,
+`ambient_enabled: true` (the old bool) + a real track playing + an active
+scene + firing triggers = all 19 Hue bulbs sat frozen at ambient cream,
+following none of it — a second, independent cause of his "no scene
+changes" complaint on top of the `scene_change_mode` fix. First framed as
+"music always wins"; the Admiral corrected that the SAME session: he
+wants Hue held lit during music TOO, as a deliberate third setting, as
+long as every other device keeps performing — so the fix became three
+modes, not one rule. `"off"` never holds. `"always"` (mode 2, his own
+request) holds Hue UNCONDITIONALLY, playback irrelevant — proven for free
+to never affect other devices, since `selection_kernel.py`/
+`scene_sequencer.py`/`sequencer.py`/`trigger_engine.py` have zero
+functional references to ambient state (grep-confirmed) and the hold
+itself lives at `fx/devices/hue.py`'s device-level `set_frozen()`, the
+last step in the pipeline, strictly downstream of scene selection.
+`"auto"` is the original precedence fix: holds only when playback is
+CONFIRMED not-playing, releases the instant it's confirmed playing. Every
+path that can change the live hold (a human PUT, every bridge state
+broadcast, process startup/resume) funnels through the gate rather than
+calling `services.ambient.reconcile()` directly, so the chosen mode can
+never be bypassed. Under `"auto"`, a confirmed playback read always wins,
+even over an existing hold; an UNKNOWN read never actively changes
+anything (carries the current hold forward) — collapsing unknown onto
+"release" was rejected because a transient bridge blip would otherwise
+flicker-release an already-quiet held room. One-way migration: a stored
+`ambient_enabled: true` maps to `"auto"`, `false` to `"off"`. Visible
+always-live status (`off`/`holding`/`yielding`/`transitioning`, plus the
+chosen `setting`) folds into `GET /spectra/api/engine/status`'s `ambient`
+key and shows as a persistent badge on `RoomControlsBar.tsx`, separate
+from the one-shot PUT-outcome badge. Full detail + room-proof status:
+`docs/SPECTRA_SPEC.md` §52 and §53 (mode 2), both room-proven live
+2026-08-15 — including the composition question, confirmed not just
+architecturally but measured live: the drift conductor's own ~20s legs
+kept firing on every non-Hue virtual across two full cycles while Hue
+sat held under `"always"`, and the ease-back release re-measured at
+~16.9s, unflattened against the §52 baseline. Spec: `tests/test_ambient_music_gate.py`,
+`tests/test_bridge.py`.
 
 **Reading real Hue bulb state — don't trust a raw CLIP light GET during a
 live entertainment stream.** While a Hue entertainment session is

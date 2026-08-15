@@ -85,7 +85,7 @@ from spectra.services import settings_console as sc
 
 check(set(sc.SETTINGS_REGISTRY) == {
     "brightness_multiplier", "global_transition_ms",
-    "ambient_enabled", "ambient_color", "scene_change_mode",
+    "ambient_mode", "ambient_color", "scene_change_mode",
 }, "registry is the deliberate five-key first-build allowlist")
 check("force_scene_enabled" not in sc.SETTINGS_REGISTRY,
       "force_scene_* deliberately excluded (opaque scene id, not voice-shaped)")

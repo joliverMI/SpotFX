@@ -133,14 +133,16 @@ async def _standalone_lifespan(app):
     # resume_own_room() just built (fx/devices/hue.py's own docstring) — a
     # restart while ambient was genuinely holding a quiet room would
     # otherwise silently drop the takeover while the room bar still shows
-    # it ON. Routed through the music-precedence gate (services/
-    # ambient_music_gate.py), NOT a blind reconcile(True, ...): the bridge
-    # hasn't connected yet at this exact point, so is_playing() reads
-    # unknown and the gate correctly holds off rather than freezing a room
-    # that might actually be mid-song — the same decision the first real
-    # bridge broadcast makes moments later (engine.py's _on_track_uri)
-    # picks the hold back up automatically once playback is confirmed
-    # quiet. No-ops fast if ambient_enabled is False.
+    # it ON. Routed through the mode precedence gate (services/
+    # ambient_music_gate.py), NOT a blind reconcile(True, ...): mode
+    # "always" holds immediately regardless (unconditional by design), but
+    # "auto" needs a real playback read first — the bridge hasn't
+    # connected yet at this exact point, so is_playing() reads unknown and
+    # the gate correctly holds off rather than freezing a room that might
+    # actually be mid-song — the same decision the first real bridge
+    # broadcast makes moments later (engine.py's _on_track_uri) picks the
+    # hold back up automatically once playback is confirmed quiet. No-ops
+    # fast if ambient_mode is "off".
     await ambient_music_gate.reconcile_now()
     watchdog_task = asyncio.create_task(
         frame_watchdog.run_supervised(), name="spectra-frame-watchdog")

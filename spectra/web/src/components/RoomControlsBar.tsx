@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ColorGradientPicker from './ColorGradientPicker';
 import HelpLink from '../help/HelpLink';
 import { useEngineStatus, useRoomControls, useSaveRoomControls, useScenes } from '../queries';
-import type { AmbientResult, RoomControlState, SceneChangeMode } from '../types';
+import type { AmbientMode, AmbientResult, RoomControlState, SceneChangeMode } from '../types';
 import SearchSelect from './forms/SearchSelect';
 
 const AMBIENT_NOTE: Record<string, string> = {
@@ -21,16 +21,28 @@ const AMBIENT_NOTE: Record<string, string> = {
   failed: 'every live Hue device rejected the change (bridge unreachable?) — saved, but the room may not match this switch',
 };
 
-/** The live music-precedence mode (spectra/services/ambient_music_gate.py's
- * status(), polled every 3s via useEngineStatus — NOT the one-shot PUT
- * outcome below). This is the honest "what is Ambient actually doing right
- * now" indicator: the checkbox alone can't say it, because "on" now means
- * "I want Ambient" rather than "the room is held" — those diverge whenever
- * music is playing. */
+/** His own three settings (spectra/services/ambient_music_gate.py). */
+const AMBIENT_MODES: { value: AmbientMode; label: string; title: string }[] = [
+  { value: 'off', label: 'Off',
+    title: 'Ambient never holds — the whole room performs, Hue included.' },
+  { value: 'always', label: 'On during music',
+    title: 'Hue held lit at the ambient colour at all times, music playing or not — '
+      + 'every other device keeps running the show regardless.' },
+  { value: 'auto', label: 'Auto-return',
+    title: 'Hue holds only while nothing is playing; releases the instant music starts, '
+      + 'and returns on its own — with the same eased release — when it stops.' },
+];
+
+/** The live mode (spectra/services/ambient_music_gate.py's status(), polled
+ * every 3s via useEngineStatus — NOT the one-shot PUT outcome below). This
+ * is the honest "what is Ambient actually doing right now" indicator: the
+ * select alone can't say it, because "Auto-return" means "hold only when
+ * confirmed quiet" — that diverges from what's actually held whenever
+ * music is playing. Under "On during music" this always reads "holding". */
 const AMBIENT_MODE_NOTE: Record<string, string> = {
-  holding: 'Ambient is actively holding the room at its colour — nothing is playing right now.',
-  yielding: "Ambient is standing aside for music (or its playback state is momentarily unknown) — "
-    + 'it resumes on its own the instant the room goes quiet.',
+  holding: 'Ambient is actively holding the room at its colour.',
+  yielding: "Auto-return is standing aside for music (or its playback state is momentarily "
+    + 'unknown) — it resumes on its own the instant the room goes quiet.',
   transitioning: 'Ambient is mid hold/release right now.',
 };
 const AMBIENT_MODE_BADGE: Record<string, string> = {
@@ -92,27 +104,30 @@ export default function RoomControlsBar() {
         <span className="room-control-value">{Math.round(local.brightness_multiplier * 100)}%</span>
       </label>
 
-      <label className="room-control">
-        <input
-          type="checkbox"
-          checked={local.ambient_enabled}
-          onChange={(e) => commit({ ...local, ambient_enabled: e.target.checked })}
-        />
+      <label className="room-control" title="Ambient">
         Ambient
+        <select
+          value={local.ambient_mode}
+          onChange={(e) => commit({ ...local, ambient_mode: e.target.value as AmbientMode })}
+        >
+          {AMBIENT_MODES.map((m) => (
+            <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
+          ))}
+        </select>
       </label>
 
       <label className="room-control" title="Ambient colour">
         <ColorGradientPicker
           value={local.ambient_color ?? '#ffffff'}
           onChange={(v) => commit({ ...local, ambient_color: v })}
-          disabled={!local.ambient_enabled}
+          disabled={local.ambient_mode === 'off'}
           swatchWidth={40}
           swatchHeight={28}
           title="Ambient colour — a Hue entertainment stream only ever takes one solid colour"
         />
       </label>
 
-      {local.ambient_enabled && ambientMode && ambientMode.mode !== 'off' && (
+      {local.ambient_mode !== 'off' && ambientMode && ambientMode.mode !== 'off' && (
         <span
           className={`badge ${AMBIENT_MODE_BADGE[ambientMode.mode]}`}
           title={AMBIENT_MODE_NOTE[ambientMode.mode]}
