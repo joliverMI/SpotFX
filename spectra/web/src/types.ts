@@ -613,11 +613,23 @@ export interface FeedbackEntry {
   id: string;
   wall_ms: number;
   uri: string | null;
+  /** The best-known captured anchor — the optimistic guess at Mark time,
+   * then whatever the background GET /api/feedback/mark patch corrects it
+   * to. Nudges never mutate this directly (see nudge_offset_ms) so that
+   * correction can always land without clobbering a nudge already applied.
+   * Client-only; the wire value sent on Send is position_ms + nudge_offset_ms. */
   position_ms: number;
+  /** Client-only: sum of his +/-1s/+/-5s taps, applied on top of
+   * position_ms. Kept separate from the anchor specifically so a slow
+   * background capture correction can still land after a fast nudge —
+   * see FeedbackPage.tsx's handleMark. */
+  nudge_offset_ms: number;
   note: string;
-  /** Client-only: once true, a background capture patch is skipped so it
-   * never clobbers a nudge/note edit already in flight. Stripped before
-   * the entry is sent to POST /api/feedback/batch. */
+  /** Client-only: true once nudged or noted — drives the nudge highlight
+   * flash and is otherwise informational (it no longer gates the
+   * background capture patch, which now always corrects position_ms and
+   * re-applies nudge_offset_ms on top). Stripped before the entry is sent
+   * to POST /api/feedback/batch. */
   touched: boolean;
 }
 
@@ -628,6 +640,7 @@ export const newFeedbackEntry = (capture: {
   wall_ms: capture.wall_ms,
   uri: capture.uri,
   position_ms: Math.max(0, capture.position_ms ?? 0),
+  nudge_offset_ms: 0,
   note: '',
   touched: false,
 });

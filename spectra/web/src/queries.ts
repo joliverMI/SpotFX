@@ -392,10 +392,12 @@ export function useGenerateMidsongTriggers(uri: string | null) {
 export const captureFeedbackMark = () => apiGet<FeedbackCapture>('/feedback/mark');
 
 /** POST /api/feedback/batch — the ONE round-trip a whole show's queue
- * makes. Callers strip the client-only `touched` field before sending. */
+ * makes. Callers strip the client-only `touched`/`nudge_offset_ms` fields
+ * before sending (position_ms is already the combined anchor+offset by
+ * the time it reaches here — see FeedbackPage.tsx's handleSend). */
 export function useSendFeedbackBatch() {
   return useMutation({
-    mutationFn: (entries: Omit<FeedbackEntry, 'touched'>[]) =>
+    mutationFn: (entries: Omit<FeedbackEntry, 'touched' | 'nudge_offset_ms'>[]) =>
       apiPost<{ status: string; session_id: string; received_ms: number; count: number }>(
         '/feedback/batch', { entries }),
   });

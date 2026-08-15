@@ -18,6 +18,7 @@
  * usable at phone width — judged honestly at both, not just built for one
  * and shrunk. */
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import CollapsibleCard from '../components/CollapsibleCard';
 import HelpLink from '../help/HelpLink';
 import { useReviewSessions, useReviewTimeline } from '../queries';
@@ -100,17 +101,27 @@ export default function ReviewPage() {
         {!sessions ? (
           <p className="empty-note">Loading sessions…</p>
         ) : sessions.length === 0 ? (
-          <p className="empty-note">No feedback sessions sent yet — send a batch from the Feedback page first.</p>
+          <div className="empty-card">
+            <span className="empty-card-icon">📝</span>
+            <div>
+              <div className="empty-card-title">No feedback sessions yet</div>
+              <Link to="/feedback" className="empty-card-action">Go mark something →</Link>
+            </div>
+          </div>
         ) : (
           <>
-            <label className="review-picker-label">
-              Session
-              <select value={sessionId ?? ''} onChange={(e) => { setSessionId(e.target.value); setUri(null); }}>
-                {sessions.map((s) => (
-                  <option key={s.session_id} value={s.session_id}>{fmtSessionLabel(s)}</option>
-                ))}
-              </select>
-            </label>
+            <div className="review-picker-label">Session</div>
+            <div className="review-session-picker">
+              {sessions.map((s) => (
+                <button
+                  key={s.session_id}
+                  className={s.session_id === sessionId ? 'primary' : ''}
+                  onClick={() => { setSessionId(s.session_id); setUri(null); }}
+                >
+                  {fmtSessionLabel(s)}
+                </button>
+              ))}
+            </div>
 
             {session && session.uris.length > 0 && (
               <div className="review-song-picker">
@@ -140,6 +151,7 @@ export default function ReviewPage() {
               <>
                 <ReviewLaneBar
                   durationMs={durationMs}
+                  playedThroughMs={maxPositionMs}
                   timeline={timeline}
                   selectedIndex={selectedIndex}
                   onSelect={setSelectedIndex}

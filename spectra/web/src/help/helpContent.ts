@@ -707,18 +707,20 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'feedback-mark-then-nudge',
         title: 'Mark, then nudge',
-        keywords: 'mark button position timestamp correct',
+        keywords: 'mark button position timestamp correct tenth flash live',
         body: [
-          '● Mark captures the moment: wall time, the current song, and the song position, read from the live music bridge. Marking is instant — it never waits on the network, and never blocks a second Mark while an earlier note is half-typed.',
-          'You react a beat after the moment actually happened, so use the -5s/-1s/+1s/+5s buttons on the mark to correct the captured position BEFORE typing a note — nudging only moves the song position, never the wall-clock order the mark was made in.',
+          'The "Now:" line tracks the actual song position live, down to a tenth of a second — it interpolates between polls rather than showing the raw (up to 3s stale) value the app last pulled from Spotify, and freezes rather than drifting whenever the song is paused.',
+          '● Mark captures the moment: wall time, the current song, and the song position, read from the live music bridge. Marking is instant — it never waits on the network, and never blocks a second Mark while an earlier note is half-typed. The button flashes "Marked!" so a tap registers without needing to look at the screen.',
+          'You react a beat after the moment actually happened, so use the -5s/-1s/+1s/+5s buttons on the mark to correct the captured position BEFORE typing a note — nudging only moves the song position, never the wall-clock order the mark was made in. A nudge briefly highlights the position so you can see the correction land.',
         ],
       },
       {
         id: 'feedback-queue',
         title: 'The queue',
-        keywords: 'batch local reload survive correct delete reorder',
+        keywords: 'batch local reload survive correct delete reorder colour bar song',
         body: [
           'Every mark lands in a queue that lives in this browser (localStorage) — it survives a page reload, so a mid-show refresh loses nothing. Edit a note, nudge a position, delete an entry, or reorder with ▲/▼ at any point before sending.',
+          'Each entry has a colour bar down its left edge, keyed to its song — on a long multi-song queue it lets you scan by song at a glance instead of reading truncated track IDs.',
           'Send All leaves the whole queue in ONE request — never a per-mark round-trip during the show. If Send fails (bad signal, etc.), the queue stays exactly as it was; just tap Send again.',
         ],
       },
@@ -734,18 +736,19 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'review-session-song',
         title: 'Picking a session and song',
-        keywords: 'session picker song batch send',
+        keywords: 'session picker chip song batch send',
         body: [
-          'A "session" is one Send press on the Feedback page — everything queued and sent together. Pick a session from the dropdown, then pick a song from the ones you took notes on in that session; the review is always scoped to one song within one session.',
+          'A "session" is one Send press on the Feedback page — everything queued and sent together. Pick a session from the chip row, then pick a song from the ones you took notes on in that session; the review is always scoped to one song within one session.',
         ],
       },
       {
         id: 'review-lane-and-list',
         title: 'The lane bar and the list',
-        keywords: 'lane bar marker tick pin vertical list',
+        keywords: 'lane bar marker tick pin vertical list fill progress time swatch',
         table: [
-          ['Thin tick', 'A show-log event — colour-coded by kind (scene / response / colour set / trigger).'],
+          ['Thin tick', 'A show-log event — colour-coded by kind (scene / response / colour set / trigger); the same colour swatch shows on its row in the list below.'],
           ['Tall pin', 'One of your notes, pinned at the song position it was nudged to.'],
+          ['Filled portion of the bar', 'How far into the song the reconstruction reaches, with start/end time labels beneath.'],
           ['Click a marker or row', 'Selects it and opens the detail panel below.'],
           ['Hover a marker', 'Shows a quick summary without selecting it.'],
         ],

@@ -221,10 +221,27 @@ mark, nudge, note, reorder, delete — lives ENTIRELY client-side
 (`useSticky`, localStorage) until Send; nudges correct only the captured
 `position_ms`, never `wall_ms` (which is just record-keeping order). MARK
 never round-trips before the entry appears: it pushes an optimistic entry
-from the last-polled `useEngineStatus()` bridge state immediately, then
+(from `useLivePosition`, below — not the raw poll) immediately, then
 patches in the authoritative `GET /api/feedback/mark` capture in the
-background — skipped if the entry has already been nudged/noted
-(`touched`), so a fast edit is never clobbered by a slow capture response.
+background. That patch always lands on `FeedbackEntry.position_ms` (the
+anchor) regardless of `touched` — a defect fixed post-launch (his words:
+"the faster he works, the more likely his note is filed up to 3 seconds
+off"): a note edit alone used to block the correction from ever landing,
+because note and nudge shared one `touched` guard. `position_ms` is the
+raw anchor; `nudge_offset_ms` is the sum of his +/-1s/+/-5s taps applied
+on top of it (`entryPosition()` combines them for display/send) — keeping
+the offset in its own field is what lets a slow correction re-anchor
+without clobbering a fast nudge. `touched` still flags "nudged or noted"
+for the UI (the nudge highlight flash) but no longer gates anything.
+`FeedbackPage.tsx`'s "Now:" line uses `spectra/web/src/lib/useLivePosition.ts`
+to interpolate `useEngineStatus`'s 3s-polled position between polls, to a
+tenth of a second, re-anchoring (and freezing while paused) on every fresh
+poll — his words: it "needs to be tracking the actual time in the song
+down to the 10th of a second," not the raw Spotify-pull value. This closes
+the gap between Spotify's last report and now; it does NOT correct for
+audio-path latency (what he actually hears vs. what Spotify reports) —
+that residual is unmeasured, and only the legacy cross-correlation engine
+(not built for SPECTRA) addresses it.
 A failed Send leaves the queue untouched for a plain retry (proven by
 killing the backend mid-send in the phone-viewport eye-check).
 

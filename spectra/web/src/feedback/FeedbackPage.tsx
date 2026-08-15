@@ -16,22 +16,31 @@
  *                    keeps the queue intact for a plain retry.
  *
  * Mark itself stays responsive under a slow/dropped network: pressing it
- * appends the entry immediately from the last-polled engine status (optimistic),
- * then a background GET /api/feedback/mark patches in the authoritative
- * wall_ms/uri/position_ms — unless the entry has already been nudged or
- * noted (`touched`), so a fast follow-up edit is never clobbered by a
- * slow capture response. A failed capture leaves the optimistic entry in
+ * appends the entry immediately from the last-polled engine status
+ * (optimistic, using useLivePosition's interpolated estimate rather than
+ * the raw poll — see that hook's header), then a background
+ * GET /api/feedback/mark patches in the authoritative wall_ms/uri/
+ * position_ms. That correction always lands on the entry's ANCHOR
+ * (position_ms) regardless of whether he's already nudged or typed a note
+ * — his note text and his nudge offset live in separate fields
+ * (note, nudge_offset_ms) that this patch never touches, so a fast
+ * mark-then-nudge is never left holding a stale position (a nudge is a
+ * relative correction on top of whatever the anchor turns out to be, not
+ * a replacement for it). A failed capture leaves the optimistic entry in
  * place rather than losing the mark.
  *
  * Server side: spectra/services/feedback.py + spectra/api/feedback.py. */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
+import { fmtMsTenths } from '../lib/time';
+import { useLivePosition } from '../lib/useLivePosition';
 import { useSticky } from '../lib/useSticky';
 import { captureFeedbackMark, useEngineStatus, useSendFeedbackBatch } from '../queries';
 import { newFeedbackEntry, type FeedbackEntry } from '../types';
 
 const NUDGES_MS = [-5000, -1000, 1000, 5000];
+const FLASH_MS = 500;
 
 function fmtPos(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -52,26 +61,61 @@ function shortUri(uri: string | null): string {
   return parts[parts.length - 1].slice(0, 10);
 }
 
+/** Stable per-song colour for the queue's colour bar — a plain string hash
+ * into a hue, no lookups, so a long multi-song queue reads by song at a
+ * glance instead of by truncated Spotify URI. */
+function uriHue(uri: string | null): number {
+  if (!uri) return 0;
+  let h = 0;
+  for (let i = 0; i < uri.length; i += 1) h = (h * 31 + uri.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+/** An entry's position for display/send — the captured anchor plus
+ * whatever nudge offset he's applied on top of it. */
+function entryPosition(e: FeedbackEntry): number {
+  return Math.max(0, e.position_ms + e.nudge_offset_ms);
+}
+
 export default function FeedbackPage() {
   const toast = useToast();
   const { data: eng } = useEngineStatus();
   const [queue, setQueue] = useSticky<FeedbackEntry[]>('feedback-queue', []);
   const [marking, setMarking] = useState(false);
+  const [justMarked, setJustMarked] = useState(false);
+  const [flashedId, setFlashedId] = useState<string | null>(null);
   const send = useSendFeedbackBatch();
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const track = eng?.bridge?.track ?? null;
+  const livePos = useLivePosition(track);
+
+  useEffect(() => () => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    if (markFlashTimer.current) clearTimeout(markFlashTimer.current);
+  }, []);
+
+  function flashEntry(id: string) {
+    setFlashedId(id);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashedId(null), FLASH_MS);
+  }
 
   async function handleMark() {
     const optimistic = newFeedbackEntry({
       wall_ms: Date.now(),
       uri: track?.uri ?? null,
-      position_ms: track?.position_ms ?? null,
+      position_ms: livePos ?? track?.position_ms ?? null,
     });
     setQueue((q) => [optimistic, ...q]);
     setMarking(true);
+    setJustMarked(true);
+    if (markFlashTimer.current) clearTimeout(markFlashTimer.current);
+    markFlashTimer.current = setTimeout(() => setJustMarked(false), FLASH_MS);
     try {
       const captured = await captureFeedbackMark();
-      setQueue((q) => q.map((e) => (e.id === optimistic.id && !e.touched
+      setQueue((q) => q.map((e) => (e.id === optimistic.id
         ? {
             ...e,
             wall_ms: captured.wall_ms,
@@ -88,8 +132,9 @@ export default function FeedbackPage() {
 
   function nudge(id: string, deltaMs: number) {
     setQueue((q) => q.map((e) => (e.id === id
-      ? { ...e, touched: true, position_ms: Math.max(0, e.position_ms + deltaMs) }
+      ? { ...e, touched: true, nudge_offset_ms: Math.max(-e.position_ms, e.nudge_offset_ms + deltaMs) }
       : e)));
+    flashEntry(id);
   }
 
   function setNote(id: string, note: string) {
@@ -114,7 +159,7 @@ export default function FeedbackPage() {
   async function handleSend() {
     if (queue.length === 0) return;
     const payload = queue.map((e) => ({
-      id: e.id, wall_ms: e.wall_ms, uri: e.uri, position_ms: e.position_ms, note: e.note,
+      id: e.id, wall_ms: e.wall_ms, uri: e.uri, position_ms: entryPosition(e), note: e.note,
     }));
     try {
       const result = await send.mutateAsync(payload);
@@ -133,13 +178,19 @@ export default function FeedbackPage() {
         </div>
         <div className="feedback-now">
           {track?.title
-            ? <>Now: <strong>{track.title}</strong>{track.position_ms != null && ` @ ${fmtPos(track.position_ms)}`}</>
+            ? <>Now: <strong>{track.title}</strong>{livePos != null && (
+                <span className="feedback-now-pos"> @ {fmtMsTenths(livePos)}</span>
+              )}</>
             : <span className="empty-note">
                 No track playing{eng && !eng.bridge.connected && ' (bridge down)'}
               </span>}
         </div>
-        <button className="primary feedback-mark-btn" onClick={handleMark} disabled={marking}>
-          ● Mark
+        <button
+          className={`primary feedback-mark-btn ${justMarked ? 'flash' : ''}`}
+          onClick={handleMark}
+          disabled={marking}
+        >
+          {justMarked ? 'Marked!' : '● Mark'}
         </button>
       </div>
 
@@ -150,9 +201,15 @@ export default function FeedbackPage() {
         ) : (
           <div className="feedback-queue">
             {queue.map((e, i) => (
-              <div className="feedback-entry" key={e.id}>
+              <div
+                className="feedback-entry"
+                key={e.id}
+                style={{ borderLeft: `4px solid hsl(${uriHue(e.uri)} 65% 55%)` }}
+              >
                 <div className="feedback-entry-head">
-                  <span className="feedback-entry-pos">{fmtPos(e.position_ms)}</span>
+                  <span className={`feedback-entry-pos ${flashedId === e.id ? 'flash' : ''}`}>
+                    {fmtPos(entryPosition(e))}
+                  </span>
                   <span className="feedback-entry-track" title={e.uri ?? undefined}>{shortUri(e.uri)}</span>
                   <span className="feedback-entry-ago">{fmtAgo(e.wall_ms)}</span>
                   <div className="feedback-entry-actions">

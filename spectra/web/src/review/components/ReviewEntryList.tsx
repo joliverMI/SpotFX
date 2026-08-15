@@ -5,7 +5,7 @@
 import { useEffect, useRef } from 'react';
 import { fmtMs } from '../../lib/time';
 import type { ReviewTimelineItem } from '../../types';
-import { describeEvent } from '../describeEvent';
+import { BUCKET_COLOR, describeEvent } from '../describeEvent';
 
 export default function ReviewEntryList({
   timeline,
@@ -44,7 +44,10 @@ export default function ReviewEntryList({
             {isNote ? (
               <span className="review-entry-note-text">📌 {item.note || '(no text)'}</span>
             ) : (
-              <span className="review-entry-event-text">{describeEvent(item)}</span>
+              <span className="review-entry-event-text">
+                <span className="trigger-color-dot" style={{ background: BUCKET_COLOR[item.bucket] }} />
+                {describeEvent(item)}
+              </span>
             )}
           </div>
         );
