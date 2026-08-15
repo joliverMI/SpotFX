@@ -57,6 +57,26 @@ colours roll only when the sequencer fires a scene, scene + set land in one
 terminal rung KEEPS the current colours (never forced churn). Rainbow sets:
 neutral ×1.0 wheel factor, never move the room's wheel position.
 
+This top-level copy predates the S3 process split and is genuinely dark/unused
+in his real room today (`storage/sequencer.json` has `enabled: false`) —
+`spectra/models/sequencer.py` + `spectra/services/{selection_kernel,
+scene_sequencer}.py` + `storage/spectra/sequencer.json` (own `enabled: true`,
+seeded from this one by `scripts/seed_spectra_from_v2.py`) is the live fork he
+actually uses. Don't assume "sequencer" means the top-level module without
+checking which storage file has `enabled: true` first. A scene's likelihood
+curve (`SelectorEntry.curve_ref`/`inline_points`) can be a shared named
+profile OR a scene-local one-off since the sequencer shipped — his real data
+already mixes both. `spectra/web/src/scenes/tabs/SequencingTab.tsx` (the
+live UI) has explicit "Detach — edit just this scene" (profile → scene-local
+copy) and "⇪ Promote to shared profile…" (scene-local → new named profile)
+actions alongside the pull-a-profile dropdown, so editing a curve never has
+to silently retune a profile shared by other scenes. `web/src/scenes/
+{SequencerPanel,CurveProfilesCard}.tsx` is the spot-effects `/app/` twin of
+this same pattern (its own top-level sequencer, above) — `CurveProfilesCard`
+still forces a `prompt()`-named profile before any edit and has no
+Detach/Promote; left as-is since that Scenes page is frozen pending SPECTRA
+superseding it.
+
 ## SPECTRA trigger authoring (THE KEYSTONE — mid-song clock)
 
 Binding decision: scene changes are driven by triggers
