@@ -133,11 +133,30 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
               <div style={{ fontSize: 12, fontWeight: 600 }}>
                 {kindIcon(k)} {k.name}
                 <span className="chip" style={{ marginLeft: 6 }}>{kindTypeLabel(k)}</span>
+                {scene.update_kind === k.name && (
+                  <span className="chip" style={{ marginLeft: 4 }} title="This scene's fire_scene_update triggers fire this kind">
+                    ⚓ UPDATE
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{kindContent(k)}</div>
             </div>
           ))}
         </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}
+          title="A fire_scene_update trigger fires this scene's designated kind directly, bypassing band selection. Only permanent kinds are eligible — a momentary or drift-jump kind would return or roll, not 'become the new baseline'.">
+          <span style={{ color: 'var(--text-muted)' }}>Update kind</span>
+          <select value={scene.update_kind ?? ''}
+            onChange={(e) => setScene({ ...scene, update_kind: e.target.value || null })}
+            style={{ fontSize: 12 }}>
+            <option value="">— none authored —</option>
+            {kinds.filter((k) => k.type === 'permanent').map((k) => (
+              <option key={k.name} value={k.name}>{k.name}</option>
+            ))}
+          </select>
+          <HelpLink topic="spectra-trigger-actions" title="Fire Update" />
+        </label>
       </div>
 
       {classes.map((cls) => {
