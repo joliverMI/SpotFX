@@ -22,8 +22,17 @@ The proofs:
      mode flip, or a shield-list edit while already dark (mirrors legacy's
      resync() on a shield-setting change) — same wiring test shape as
      test_room_controls.py's ambient/force-scene proofs.
+  6. Music-aware repaint gate: while spot-effects reports a track actively
+     playing, the light-transition does NOT force the stale pre-dark
+     snapshot back (dark_lock still clears) — the room's own live show is
+     left to repaint it on its next natural fire, same lesson as Ambient
+     holding a room static through a song. With nothing playing (paused, or
+     no track — the room-proof's own condition), the snapshot restore
+     proceeds exactly as in proof 1.
 
-No LedFX HTTP, no audio hardware.
+No LedFX HTTP, no audio hardware. Bridge state is touched via
+monkeypatch.setattr only (auto-reverted per test, never a raw mutation) —
+see test_bridge_gates_repaint_on_music_playing below.
 """
 from __future__ import annotations
 
@@ -140,6 +149,85 @@ def test_reconcile_dark_twice_does_not_clobber_snapshot_with_black(tmp_path, mon
         assert result["restored"] == [VID]
         assert virtual.active_effect.config["background_color"] == "#123456"
         assert virtual.active_effect.config["background_brightness"] == 0.7
+
+        await host.shutdown()
+
+    _run(main())
+
+
+# ── 1b. music-aware repaint gate ────────────────────────────────────────────
+
+def _set_playing(monkeypatch, playing: bool) -> None:
+    """Point the S2 bridge singleton (spectra.services.engine.bridge) at a
+    playing/not-playing state via monkeypatch.setattr ONLY — auto-reverted
+    at test teardown regardless of pass/fail, never a raw mutation of the
+    shared singleton (the exact class of state leak a real incident traced
+    back to test_ambient.py's own live_host singleton, 2026-08-15)."""
+    from spectra.services.engine import bridge
+    monkeypatch.setattr(bridge, "paused", not playing)
+    monkeypatch.setattr(bridge, "_track",
+                        {"is_playing": playing, "spotify_uri": "spotify:track:x"}
+                        if playing else None)
+
+
+def test_bridge_gates_repaint_on_music_playing(tmp_path, monkeypatch):
+    from spectra.services import dark_light
+
+    _own(monkeypatch, tmp_path, "spectra")
+    _categories(monkeypatch, tmp_path, {
+        "c1": {"id": "c1", "name": "Main", "parent_id": None,
+               "virtuals": [VID], "effects": ["concentric"]}})
+
+    async def main():
+        host = await headless.start_headless_host(str(tmp_path / "host"))
+        facade.set_host(host)
+        virtual = host.virtuals.get(VID)
+        headless.attach_effect(host, virtual, "concentric",
+                               {"background_color": "#ff0000", "background_brightness": 1.0})
+
+        await dark_light.reconcile(True, [], [])
+        assert virtual.active_effect.config["background_color"] == "#000000"
+
+        _set_playing(monkeypatch, True)
+        result = await dark_light.reconcile(False, [], [])
+        assert result["status"] == "light"
+        assert result["restored"] == []
+        assert result["repaint_skipped"] == "music_playing"
+        # dark_lock still clears — nothing is left forced black...
+        assert virtual.config["dark_lock"] is False
+        # ...but the stale snapshot was NOT forced back over a live show
+        assert virtual.active_effect.config["background_color"] == "#000000"
+
+        await host.shutdown()
+
+    _run(main())
+
+
+def test_bridge_not_playing_still_repaints_as_before(tmp_path, monkeypatch):
+    """Paused, and no track at all, both count as "not playing" — the
+    ordinary snapshot-restore proceeds in either case (the room-proof's own
+    condition: no music authorised, nothing playing)."""
+    from spectra.services import dark_light
+
+    _own(monkeypatch, tmp_path, "spectra")
+    _categories(monkeypatch, tmp_path, {
+        "c1": {"id": "c1", "name": "Main", "parent_id": None,
+               "virtuals": [VID], "effects": ["concentric"]}})
+
+    async def main():
+        host = await headless.start_headless_host(str(tmp_path / "host"))
+        facade.set_host(host)
+        virtual = host.virtuals.get(VID)
+        headless.attach_effect(host, virtual, "concentric",
+                               {"background_color": "#00ff00", "background_brightness": 1.0})
+
+        await dark_light.reconcile(True, [], [])
+
+        _set_playing(monkeypatch, False)  # paused=True, no track
+        result = await dark_light.reconcile(False, [], [])
+        assert result["restored"] == [VID]
+        assert "repaint_skipped" not in result
+        assert virtual.active_effect.config["background_color"] == "#00ff00"
 
         await host.shutdown()
 

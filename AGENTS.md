@@ -787,19 +787,32 @@ normally. Dark/light never reads `ambient_mode` to decide this — the
 orthogonality is a property of the write path (a frozen device never
 reaches LedFX's effect config), not a rule either feature encodes about
 the other, the same "compose for free by construction" shape Ambient
-mode 2 found for the selection kernel. Measurement note, same lesson as
-"Reading real Hue bulb state" above: dark/light's own mechanism is
-LedFX-side (`dark_lock` + effect config on `/api/virtuals`), never the
-Hue CLIP light resource — that instrument is for Ambient's own REST-held
-bulbs, a different subsystem; verifying dark/light at the bridges means
-reading LedFX's per-virtual `dark_lock` + effect config back
+mode 2 found for the selection kernel. The light-transition's OWN repaint
+is ALSO gated on `bridge.is_playing()` (`spectra/services/bridge.py`) —
+while music is actively playing, the stale pre-dark snapshot is
+deliberately not forced back (`dark_lock` still clears;
+`repaint_skipped: "music_playing"` in the result) so the room's own live
+show repaints it instead of a frozen still-frame overriding what's
+currently playing — the same class of mistake `ambient_music_gate.py`'s
+three-mode fix above exists to prevent, reached independently rather than
+by sharing code with it. Measurement note, same lesson as "Reading real
+Hue bulb state" above: dark/light's own mechanism is LedFX-side
+(`dark_lock` + effect config on `/api/virtuals`), never the Hue CLIP
+light resource — that instrument is for Ambient's own REST-held bulbs, a
+different subsystem; verifying dark/light at the bridges means reading
+LedFX's per-virtual `dark_lock` + effect config back
 (`fx_seam.get_virtuals()`, what `dark_light.py`'s own confirm step and
 `scripts/verify_dark_light_fixtures.py` both do). Spec:
-`tests/test_dark_light.py`, incl. a frame-level proof against a real
-headless dummy host (`fx/headless.py`) that the vendored clamp actually
-engages and the restore repaints the exact pre-dark background.
-Live-fixture check (read-only, GET-only, same pattern as
-`scripts/verify_release_fixtures.py`): `scripts/verify_dark_light_fixtures.py`.
+`tests/test_dark_light.py` (10 tests), incl. a frame-level proof against a
+real headless dummy host (`fx/headless.py`) that the vendored clamp
+actually engages, the restore repaints the exact pre-dark background, and
+the music-aware gate holds both ways. Live-fixture check (read-only,
+GET-only, same pattern as `scripts/verify_release_fixtures.py`):
+`scripts/verify_dark_light_fixtures.py` — `--spectra-url`/`--ledfx-url`
+are REQUIRED, no default target (a disposable worktree isolates the
+filesystem, never the network — 127.0.0.1:8010/:8000 reach the same live
+instances from inside any worktree on the host; a verification script that
+defaults to them is a trap, learned live 2026-08-15).
 
 ## SPECTRA settings console (standing order 5: talk to the software)
 

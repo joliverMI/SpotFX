@@ -181,6 +181,17 @@ class SpotEffectsBridge:
     def track_uri(self) -> Optional[str]:
         return (self._track or {}).get("spotify_uri")
 
+    def is_playing(self) -> bool:
+        """True only when spot-effects is actively playing a track right
+        now — not paused, a track is loaded, and its own broadcast
+        is_playing flag agrees. spectra/services/dark_light.py gates its
+        snapshot-restore repaint on this: forcing a stale pre-dark look over
+        a room that should be tracking live music is the same shape of
+        mistake as freezing the room under Ambient during a song — see that
+        module's docstring."""
+        return (not self.paused and self._track is not None
+                and bool(self._track.get("is_playing")))
+
     def track_position_ms(self) -> Optional[int]:
         """Broadcast progress + elapsed-since-received while playing."""
         if not self._track:

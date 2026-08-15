@@ -4,12 +4,28 @@ order 11 requires ("verify at the bridges, not by trusting a success
 message"), packaged so the proof can be re-run the same way instead of by
 hand each time.
 
-Makes ZERO writes: every call here is a plain GET. Trigger the actual
-dark/light toggle separately (the room bar's "Dark mode" checkbox, or
+HAZARD, learned the hard way (2026-08-15, PR #70): a disposable worktree
+isolates the FILESYSTEM ONLY, not the NETWORK. 127.0.0.1:8010 (SPECTRA) and
+127.0.0.1:8000 (spot-effects/LedFX) are the SAME live instances whether
+you're inside the primary checkout or any throwaway worktree on this host
+— there is no such thing as "the localhost in my sandbox" for a loopback
+address. A verification script that silently DEFAULTS to those addresses
+is therefore a trap: running it as a casual sanity check reaches his real,
+live room exactly as surely as a deliberate `curl` would. This script has
+NO default target — --spectra-url and --ledfx-url are both REQUIRED, on
+purpose, so pointing this at anything (his room included) is something you
+had to type, not something that happened by omission. If you actually mean
+his live room, say so explicitly and know that you are doing it; there is
+no "just try it and see" mode.
+
+Makes ZERO writes: every call here is a plain GET regardless of target.
+Trigger the actual dark/light toggle separately (the room bar's "Dark
+mode" checkbox, or
 `curl -X PUT {SPOTFX_URL}/api/room-controls -d '{"dark_mode_enabled": true, ...}'`
 with the rest of the current GET /api/room-controls body) — then run this
 before/after to see the delta independently of whatever the toggle itself
-reported.
+reported. GET-only is a floor, not a licence: only point this at his real
+room with his room in hand, same as any other room-proof step.
 
 Reads, in order:
   1. GET {SPECTRA_URL}/spectra/api/liveness — who currently owns the light
@@ -32,9 +48,10 @@ Reads, in order:
      spectra/fx-live/config.json) — GET http://<ip>/json/info, external
      confirmation independent of both SPECTRA and LedFX's own bookkeeping.
 
-Run from repo root:
-    .venv/bin/python scripts/verify_dark_light_fixtures.py
-    .venv/bin/python scripts/verify_dark_light_fixtures.py --spectra-url http://127.0.0.1:8010
+Run from repo root, both URLs explicit and required — e.g. against a local
+throwaway rehearsal stack you started yourself (NOT his real room):
+    .venv/bin/python scripts/verify_dark_light_fixtures.py \\
+        --spectra-url http://127.0.0.1:9010 --ledfx-url http://127.0.0.1:9888
 """
 from __future__ import annotations
 
@@ -112,20 +129,27 @@ def _report_wled(cfg: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--spectra-url", default=os.getenv("SPECTRA_URL", "http://127.0.0.1:8010"))
-    parser.add_argument("--ledfx-url", default=None,
-                        help="default: spectra.config.ledfx_url()")
+    # NO defaults on either URL, deliberately — see the module docstring's
+    # HAZARD note. A missing --spectra-url/--ledfx-url must refuse loudly,
+    # never silently resolve to a real, live address (his room's or
+    # anyone else's) via an environment variable or a config helper's own
+    # fallback (spectra.config.ledfx_url() defaults to 127.0.0.1:8888/etc,
+    # which is exactly the kind of implicit target this script must not
+    # have).
+    parser.add_argument("--spectra-url", required=True,
+                        help="e.g. http://127.0.0.1:9010 — no default, must be explicit")
+    parser.add_argument("--ledfx-url", required=True,
+                        help="e.g. http://127.0.0.1:9888 — no default, must be explicit")
     parser.add_argument("--fx-live-config", default=None,
                         help="default: storage/spectra/fx-live/config.json under "
                              "SPECTRA_STORAGE_DIR")
     args = parser.parse_args()
 
     from spectra import config as scfg
-    ledfx_url = args.ledfx_url or scfg.ledfx_url()
 
     _report_liveness(args.spectra_url)
     _report_room_controls(args.spectra_url)
-    _report_ledfx_virtuals(ledfx_url)
+    _report_ledfx_virtuals(args.ledfx_url)
 
     config_path = Path(args.fx_live_config) if args.fx_live_config \
         else scfg.FX_LIVE_CONFIG_DIR / "config.json"

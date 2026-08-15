@@ -44,7 +44,20 @@ half — differs in kind, not a corner cut):
   what was REALLY showing, not what was last intentionally fired. Persisted
   to DARK_LIGHT_SNAPSHOT_FILE (survives a SPECTRA restart while dark) and
   replayed via fx_seam.apply_writes() on the transition back to light —
-  itself the exact write path a normal scene fire already uses.
+  itself the exact write path a normal scene fire already uses — BUT ONLY
+  WHEN NOTHING LIVE IS ABOUT TO REPAINT IT ANYWAY: bridge.is_playing()
+  (spectra/services/bridge.py) gates the repaint. The snapshot is a still
+  frame from the moment dark was engaged — while music is actively
+  playing, forcing that stale frame back is the same shape of mistake as
+  Ambient holding the room static through a song: it imposes a frozen look
+  on a room that should be tracking live music, right as the room's own
+  automatic driver (scene_change_mode / trigger_engine / drift) is about to
+  repaint it for real. dark_lock still clears either way (nothing stays
+  forced black); only the STALE repaint is skipped, reported as
+  `repaint_skipped: "music_playing"` in the reconcile result. With no
+  music playing (or paused — the room-proof's own condition), there is no
+  live driver about to repaint it, so the snapshot restore is the only way
+  back and proceeds as before.
 
   No settings.display_light_bg_color backfill. Legacy's "light" mode
   additionally backfills settings.display_light_bg_color/_brightness onto
@@ -201,16 +214,32 @@ async def _reconcile_impl(enabled: bool, shield_categories: list[str],
                              vid, want)
 
     restored: list[str] = []
+    repaint_skipped: Optional[str] = None
     if not enabled and snapshot:
-        writes = [{"virtual_id": vid, "effect_type": snap["type"], "config": snap["config"]}
-                 for vid, snap in snapshot.items()
-                 if vid in virtual_ids and vid not in shielded]
-        if writes:
-            try:
-                await fx_seam.apply_writes(writes, transition_ms=0)
-                restored = [w["virtual_id"] for w in writes]
-            except Exception:
-                logger.exception("dark/light: repaint after unlock failed")
+        from spectra.services.engine import bridge
+        if bridge.is_playing():
+            # Music is live right now — the snapshot is a still frame from
+            # the moment dark was engaged, already stale. Forcing it back is
+            # the same mistake as Ambient holding the room static through a
+            # song: it imposes a frozen look on a room that should be
+            # tracking live music. Leave it to the room's own automatic
+            # driver (scene_change_mode / trigger_engine / drift) to repaint
+            # it on its own next fire — dark_lock is already cleared below,
+            # so nothing is left forced black, just not yet repainted.
+            repaint_skipped = "music_playing"
+            logger.info("dark/light: music is playing — skipping the stale "
+                       "pre-dark repaint, the room's own live show repaints "
+                       "it on its next natural fire")
+        else:
+            writes = [{"virtual_id": vid, "effect_type": snap["type"], "config": snap["config"]}
+                     for vid, snap in snapshot.items()
+                     if vid in virtual_ids and vid not in shielded]
+            if writes:
+                try:
+                    await fx_seam.apply_writes(writes, transition_ms=0)
+                    restored = [w["virtual_id"] for w in writes]
+                except Exception:
+                    logger.exception("dark/light: repaint after unlock failed")
         _clear_snapshot()
 
     # Verify at the bridge — read the ACTUAL resulting state back rather
@@ -238,6 +267,8 @@ async def _reconcile_impl(enabled: bool, shield_categories: list[str],
     }
     if not enabled:
         result["restored"] = sorted(restored)
+        if repaint_skipped:
+            result["repaint_skipped"] = repaint_skipped
     if unconfirmed:
         result["unconfirmed"] = sorted(unconfirmed)
         logger.error("dark/light: %d virtual(s) not confirmed at dark_lock=%s: %s",

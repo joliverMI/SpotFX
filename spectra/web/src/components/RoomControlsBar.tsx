@@ -155,6 +155,15 @@ export default function RoomControlsBar() {
         </span>
       )}
 
+      {darkLightResult?.status === 'light' && darkLightResult.repaint_skipped === 'music_playing' && (
+        <span
+          className="badge badge-gray"
+          title="Music is playing, so the stale pre-dark snapshot was not forced back — the room's own live show repaints it on its next natural fire instead"
+        >
+          dark mode: repaint deferred to live show
+        </span>
+      )}
+
       <label className="room-control" title="Dims/undims the whole room uniformly">
         Brightness
         <input

@@ -295,12 +295,17 @@ export interface RoomControlState {
  * from LedFX, not merely posted) set of virtuals actually holding
  * dark_lock=true; `unconfirmed` names any virtual whose read-back state
  * didn't match what was requested. `restored` (light only) lists virtuals
- * repainted from the pre-dark snapshot. */
+ * repainted from the pre-dark snapshot — empty when there was nothing to
+ * restore OR when `repaint_skipped: "music_playing"` is present: music was
+ * actively playing, so the stale pre-dark snapshot was deliberately NOT
+ * forced back (dark_lock still cleared) — the room's own live show repaints
+ * it on its next natural fire instead of a frozen look overriding it. */
 export interface DarkLightResult {
   status: 'dark' | 'light' | 'no-devices' | 'handover-in-progress' | 'released' | 'failed';
   locked?: string[];
   shielded?: string[];
   restored?: string[];
+  repaint_skipped?: 'music_playing';
   unconfirmed?: string[];
   error?: string;
 }
