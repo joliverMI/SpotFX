@@ -82,8 +82,13 @@ profile OR a scene-local one-off since the sequencer shipped — his real data
 already mixes both. `spectra/web/src/scenes/tabs/SequencingTab.tsx` (the
 live UI) has explicit "Detach — edit just this scene" (profile → scene-local
 copy) and "⇪ Promote to shared profile…" (scene-local → new named profile)
-actions alongside the pull-a-profile dropdown, so editing a curve never has
-to silently retune a profile shared by other scenes. `web/src/scenes/
+actions alongside a pull-a-profile GRID (his ask: choose by shape, not name
+alone — each tile is a `CurveThumbnail`, `spectra/web/src/components/
+CurveThumbnail.tsx`, reusing `CurveEditor.tsx`'s own px/py/path scaling so a
+thumbnail is a scaled render of the real curve, never a second
+interpretation of it; reuse that component for any future read-only curve
+preview rather than re-deriving the scaling math), so editing a curve never
+has to silently retune a profile shared by other scenes. `web/src/scenes/
 {SequencerPanel,CurveProfilesCard}.tsx` is the spot-effects `/app/` twin of
 this same pattern (its own top-level sequencer, above) — `CurveProfilesCard`
 still forces a `prompt()`-named profile before any edit and has no
