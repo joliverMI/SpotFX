@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import ColorGradientPicker from './ColorGradientPicker';
 import HelpLink from '../help/HelpLink';
-import { useRoomControls, useSaveRoomControls, useScenes } from '../queries';
+import { useEngineStatus, useRoomControls, useSaveRoomControls, useScenes } from '../queries';
 import type { AmbientResult, RoomControlState, SceneChangeMode } from '../types';
 import SearchSelect from './forms/SearchSelect';
 
@@ -19,6 +19,24 @@ const AMBIENT_NOTE: Record<string, string> = {
   dark: "SPECTRA isn't driving the lights right now — saved, nothing changed live",
   'no-hue-devices': 'no live Hue device in the room — saved, nothing to hold',
   failed: 'every live Hue device rejected the change (bridge unreachable?) — saved, but the room may not match this switch',
+};
+
+/** The live music-precedence mode (spectra/services/ambient_music_gate.py's
+ * status(), polled every 3s via useEngineStatus — NOT the one-shot PUT
+ * outcome below). This is the honest "what is Ambient actually doing right
+ * now" indicator: the checkbox alone can't say it, because "on" now means
+ * "I want Ambient" rather than "the room is held" — those diverge whenever
+ * music is playing. */
+const AMBIENT_MODE_NOTE: Record<string, string> = {
+  holding: 'Ambient is actively holding the room at its colour — nothing is playing right now.',
+  yielding: "Ambient is standing aside for music (or its playback state is momentarily unknown) — "
+    + 'it resumes on its own the instant the room goes quiet.',
+  transitioning: 'Ambient is mid hold/release right now.',
+};
+const AMBIENT_MODE_BADGE: Record<string, string> = {
+  holding: 'badge-purple',
+  yielding: 'badge-amber',
+  transitioning: 'badge-gray',
 };
 
 const SCENE_CHANGE_MODES: { value: SceneChangeMode; label: string; title: string }[] = [
@@ -36,6 +54,8 @@ export default function RoomControlsBar() {
   const { data } = useRoomControls();
   const save = useSaveRoomControls();
   const { data: scenes } = useScenes();
+  const { data: engineStatus } = useEngineStatus();
+  const ambientMode = engineStatus?.ambient;
   const [local, setLocal] = useState<RoomControlState | null>(null);
   const [ambientResult, setAmbientResult] = useState<AmbientResult | null>(null);
   const sceneOptions = useMemo(
@@ -92,7 +112,16 @@ export default function RoomControlsBar() {
         />
       </label>
 
-      {ambientResult && ambientResult.status !== 'on' && ambientResult.status !== 'off' && (
+      {local.ambient_enabled && ambientMode && ambientMode.mode !== 'off' && (
+        <span
+          className={`badge ${AMBIENT_MODE_BADGE[ambientMode.mode]}`}
+          title={AMBIENT_MODE_NOTE[ambientMode.mode]}
+        >
+          ambient: {ambientMode.mode}
+        </span>
+      )}
+
+      {ambientResult && !['on', 'off', 'yielding'].includes(ambientResult.status) && (
         <span
           className={`badge ${ambientResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
           title={AMBIENT_NOTE[ambientResult.status]}

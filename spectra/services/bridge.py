@@ -225,6 +225,26 @@ class SpotEffectsBridge:
             return None
         return analysis_reader.section_energy_at(uri, position)
 
+    def is_playing(self) -> Optional[bool]:
+        """Whether spot-effects currently reports a track actively
+        playing — the single playback signal the Ambient music-precedence
+        gate reads (services/ambient_music_gate.py). Matches every other
+        feed on this class (track_uri/track_position_ms/intensity): trusts
+        the LAST reported state regardless of the current `connected`
+        flag, so a momentary reconnect gap doesn't erase a moment-old
+        signal — a transient blip must not read as "unknown" and disturb
+        an already-settled Ambient decision (ambient_music_gate's
+        docstring). None only when there has been no signal at all yet
+        (fresh bridge, no message ever received) — never guessed. False
+        both when a track is loaded but paused AND when spot-effects
+        reports no track at all (nothing to play is not playing, same as
+        "the music ended")."""
+        if self._last_message_at is None:
+            return None
+        if not self._track:
+            return False
+        return bool(self._track.get("is_playing"))
+
     def genre_bucket(self) -> Optional[str]:
         genres = (self._track or {}).get("genres") or []
         if not genres:

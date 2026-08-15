@@ -509,6 +509,29 @@ concept, so legacy's group-member-rotation half has nothing to port to.
 Spec: the Force Scene section of `scripts/check_spectra.py` +
 `tests/test_room_controls.py::test_force_scene_redirects_every_automatic_pick`.
 
+**Ambient's music-precedence gate** (found live 2026-08-15: `ambient_enabled:
+true` + a real track playing + an active scene + firing triggers = all 19 Hue
+bulbs sat frozen at ambient cream, following none of it — Ambient wasn't
+competing with music, it was silently swallowing the whole song, and was
+likely a second, independent cause of his original "no scene changes"
+complaint on top of the `scene_change_mode` fix). His ruling: Ambient is the
+room's RESTING state — MUSIC WINS while it plays, Ambient resumes on its own
+the instant it stops. `spectra/services/ambient_music_gate.py` is the single
+choke point every path that can change the live hold now funnels through (a
+human PUT, every bridge state broadcast, process startup/resume) — none of
+them may call `services.ambient.reconcile()` directly, or the precedence rule
+can be bypassed. `RoomControlState.ambient_enabled` still means "I want
+Ambient"; the gate tracks the LIVE hold against a second signal,
+`bridge.is_playing()`. A confirmed read always wins, even over an existing
+hold; an UNKNOWN read never actively changes anything (carries the current
+hold forward) — collapsing unknown onto "release" was rejected because a
+transient bridge blip would otherwise flicker-release an already-quiet held
+room. Visible always-live status (`off`/`holding`/`yielding`/`transitioning`)
+folds into `GET /spectra/api/engine/status`'s `ambient` key and shows as a
+persistent badge on `RoomControlsBar.tsx`, separate from the one-shot
+PUT-outcome badge. Full detail + room-proof status: `docs/SPECTRA_SPEC.md`
+§52. Spec: `tests/test_ambient_music_gate.py`, `tests/test_bridge.py`.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing

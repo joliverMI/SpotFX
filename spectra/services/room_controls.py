@@ -216,16 +216,22 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     """The ambient-takeover half of a room-controls save, factored out so
     both the human PUT /api/room-controls handler (spectra/api/
     room_controls.py) and the settings-console agent's apply path
-    (spectra/services/settings_console.py) drive the SAME live Hue
-    reconcile on the SAME condition — one write choke point, so the agent
-    can never diverge from what a human save does. Returns the
-    ambient_result dict when the ambient fields actually changed, else
-    None (no reconnect churn on an unrelated field's change)."""
+    (spectra/services/settings_console.py) drive the SAME reconcile on the
+    SAME condition — one write choke point, so the agent can never diverge
+    from what a human save does. Returns the ambient_result dict when the
+    ambient fields actually changed, else None (no reconnect churn on an
+    unrelated field's change).
+
+    Routes through services.ambient_music_gate rather than calling
+    services.ambient directly — ambient_enabled=True must NOT freeze the
+    room's Hue devices while music is playing (the music-precedence rule,
+    see ambient_music_gate's module docstring); this is the manual-toggle
+    path that rule has to cover too, not just the automatic one."""
     changed = (
         previous.ambient_enabled != new_state.ambient_enabled
         or (new_state.ambient_enabled and previous.ambient_color != new_state.ambient_color)
     )
     if not changed:
         return None
-    from spectra.services import ambient
-    return await ambient.reconcile(new_state.ambient_enabled, new_state.ambient_color)
+    from spectra.services import ambient_music_gate
+    return await ambient_music_gate.reconcile_now()

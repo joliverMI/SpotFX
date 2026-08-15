@@ -131,6 +131,14 @@ async def _on_track_uri(uri) -> None:
     from spectra.services.scene_sequencer import scene_sequencer
     await scene_sequencer.on_track_state(uri)
     await trigger_engine.on_track_state(uri)
+    # Ambient's music-precedence gate (services/ambient_music_gate.py) —
+    # every bridge broadcast re-evaluates whether Ambient should be
+    # holding the room right now. Backgrounded, not awaited: a hold/
+    # release can take several seconds (services.ambient's own read-back
+    # retries), and this callback must not stall the WS message loop for
+    # that long. The gate's own lock still serialises the actual work.
+    from spectra.services import ambient_music_gate
+    asyncio.create_task(ambient_music_gate.reconcile(bridge.is_playing()))
 
 
 bridge = SpotEffectsBridge(
@@ -230,6 +238,7 @@ async def stop() -> None:
 
 
 def status() -> dict:
+    from spectra.services import ambient_music_gate
     return {
         "increment": "S3",
         "dark": executor.mode == "recording",
@@ -240,4 +249,5 @@ def status() -> dict:
         "responses": {"recent_surges": list(responses.surges)[-10:]},
         "bridge": bridge.status(),
         "triggers": trigger_engine.status(),
+        "ambient": ambient_music_gate.status(),
     }
