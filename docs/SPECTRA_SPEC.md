@@ -61,6 +61,25 @@ comment — **his words are a statement of intent, not a patch to merge as-is.**
 
 ---
 
+## Landed vs. deployed (a real gap this document does not close)
+
+Every state below describes what's in git (`master`), not what `spectra.service` is actually
+running on his box right now. **Those two can diverge, and it already has.** PR #57 (§44) was
+proven live on his real hardware — 11,877 triggers migrated, UPDATE glide confirmed — **while
+the PR was still unmerged**; PR #69's success-case proof (§51) ran against commit `bb1b759` on
+his live room before that commit belonged to a merged PR at all. In both cases, a routine sync
+or resync of the deployed box at that moment would have silently reverted a capability this
+ledger would otherwise call `BUILT`.
+
+**What this means for anyone reading a `BUILT` row: it says the capability exists in `master`'s
+history. It does not say it's what's currently running live.** Checking actual deployed state
+means checking the live box itself (`systemctl --user status spectra`, the commit it's running),
+not this file and not `git log`. This document tracks landed state only and does not attempt to
+track deployment state — that is a distinct, real gap, named here rather than silently assumed
+away.
+
+---
+
 ## Standing decisions
 
 ### D1 — The fidelity rule
@@ -111,6 +130,15 @@ room — S3 hardware handover ([`docs/SPECTRA_HANDOVER.md`](SPECTRA_HANDOVER.md)
 proven but gated off. Nothing in this ledger implies urgency beyond what the day-one bar (D2)
 states.
 
+### D5 — Release doctrine: SPECTRA fades and lets go; Home Assistant owns the restore
+
+Settled 2026-08-15 (reported via firstmate, following PR #67's live-fixture proof — see §49).
+Release-to-HA's job is to relinquish the room cleanly, not to hand it back lit: SPECTRA fades
+each Hue bulb on the bridge, then powers it off, and its contract ends there. Bringing the room
+back up afterward is the Admiral's Home Assistant automation's job, not SPECTRA's. **Do not
+build a "restore to previous state" step into release** as a future "fix" — a dark bulb after
+release is the correct, intended outcome, not an incomplete one.
+
 ---
 
 ## Day-one bar
@@ -121,10 +149,10 @@ checking before saying "ready."
 | Item | State | Evidence |
 |---|---|---|
 | Force Scene | **DONE** | PR #54 merged; room-proven (`tests/test_room_controls.py::test_force_scene_redirects_every_automatic_pick`) |
-| Ambient (incl. release fidelity) | **DONE** | PR #56, #61 merged; room-proven 2026-08-14 (`docs/spectra-room-window-proofs-2026-08-14.md` Proof 2 — PASS, his real Hue lights) |
+| Ambient (incl. release fidelity + confirmed-read-back) | **DONE**, one honest asterisk | PR #56, #61, #69 merged; room-proven 2026-08-14/15 — but §51's confirmed-vs-attempted fix has its success case proven live and its failure/retry case proven headlessly only, see §51 |
 | Global dark/light mode | **NOT STARTED** | §9; `data/backlog.md` `spectra-dark-light-mode` |
 | Colour-set + group authoring | **NOT STARTED** | §10; `data/backlog.md` `spectra-colorset-group-authoring` |
-| Trigger migration | **IN PROGRESS, UNVERIFIED** | §44; PR #57 open; blocked on an open question ([OQ-1](#open-questions)) covering 3,546 of 10,710 triggers |
+| Trigger migration | **DONE, but functionally inert right now** | §44; PR #57 merged, 11,877 triggers live-proven. His room's `scene_change_mode` is `"analysed"` — the migrated triggers sit in place but won't fire until he sets it to `"full"` |
 
 ---
 
@@ -144,7 +172,7 @@ checking before saying "ready."
 Numbering follows the audit's own tier order so a lookup there needs no translation. The audit
 counts 46 capabilities by also numbering four sub-pieces of §1 separately; this ledger folds
 those into §1's note instead of giving them their own rows (no information lost — see §1).
-**§43–§50 are SPECTRA-native builds that emerged after the audit's 2026-08-14 cutoff** — not in
+**§43–§51 are SPECTRA-native builds that emerged after the audit's 2026-08-14 cutoff** — not in
 the original 46, added here because this ledger is the live surface and they didn't exist yet
 when the audit ran.
 
@@ -157,7 +185,7 @@ when the audit ran.
 | §3 | AI-assisted structural trigger placement | `BUILT` (partial) | `spectra/services/midsong_generator.py` seeds one generic fire-scene trigger per section boundary; no genre-tuned profiles, no per-role placement (Song-Start/Bass-Entry/Lull/Charge/Drop/Quiet/Flare), no bass-onset snapping, no auto-tuning. Deliberate scope per its own docstring, not a bug. |
 | §4 | Triggerless & Dinner Party automatic show | `GAP` | Dinner Party is a pause-only signal today (`spectra/services/scene_sequencer.py:411`); the sequencer that could substitute ships dark by design. Explicitly kept, not dropped, per the 2026-08-12 signoff (same one that keeps §12). |
 | §5 | Ambient — Hue entertainment-area selection | `AGREED` | Every live Hue device is held, all-or-nothing (`spectra/services/ambient.py:18-21`, deliberate). `data/backlog.md` `spectra-hue-entertainment-areas` — authorised, no PR yet. His two Hue devices sit on two different bridges, so "which group" and "which bridge" are one axis, not two. |
-| §6 | Ambient — release/handback fidelity | `BUILT` (full) | PR #61 merged. Colour-matched fade → verified unfreeze → live-pixel-buffer catch-up tween, matching legacy's two-phase handback (`spectra/services/ambient.py`). Room-proven 2026-08-14, `docs/spectra-room-window-proofs-2026-08-14.md` Proof 2 (PASS). **DELTA since audit**: the audit read this as a gap; PR #61 closed it the same day. |
+| §6 | Ambient — release/handback fidelity (the OFF path) | `BUILT` (full) | PR #61 merged. Colour-matched fade → verified unfreeze → live-pixel-buffer catch-up tween, matching legacy's two-phase handback (`spectra/services/ambient.py`). Room-proven 2026-08-14, `docs/spectra-room-window-proofs-2026-08-14.md` Proof 2 (PASS). **DELTA since audit**: the audit read this as a gap; PR #61 closed it the same day. See §51 for the ON-path companion fix (confirmed-vs-attempted light hold), a distinct defect found the next day. |
 | §7 | Device Categories (organise/import lights) | `OLD-WORLD` | `spectra/api/registry.py:21-36` reads categories read-only; nothing writes to `device_categories.json` from SPECTRA. No authorised build found — use the legacy app. |
 | §8 | Shape Maps (odd-shaped matrix geometry) | `OLD-WORLD` | Render engine understands shape maps (`fx/virtuals.py`); no router/dialog under `spectra/`. No authorised build found — use the legacy app. |
 | §9 | Global Dark/Light Mode | `AGREED` | Day-one bar item (D2). Only a per-trigger `display_mode` field exists on the ported legacy-proxy dialog (`spectra/web/src/timeline/types.ts:18`) — zero reads of it anywhere under `spectra/*.py`, confirmed by grep 2026-08-15. Not started. `data/backlog.md` `spectra-dark-light-mode`. |
@@ -218,30 +246,32 @@ planned; nothing deleted from legacy either.
 | §41 | Set Lists authoring, incl. per-song alternate "trigger slot" feature | `RETIRED` | Runtime/xcorr-timing side of Set Lists is **not** retired, still live in legacy. **Open question attached** — see [OQ-5](#open-questions): whether "slots" specifically was understood as in-scope when this call was made. |
 | §42 | Per-trigger scene-group-color/drop-group/display-mode overrides | `RETIRED` | Depends on §2, itself gone from SPECTRA. |
 
-### §43–§50 — SPECTRA-native builds since the audit (2026-08-14 → present)
+### §43–§51 — SPECTRA-native builds since the audit (2026-08-14 → present)
 
 Not in the original 46; added because they exist now and this ledger is the live surface.
 
 | § | Capability | State | Notes |
 |---|---|---|---|
 | §43 | Device preview strip (favourite devices, live) | `AGREED` | **New SPECTRA-only build, not a legacy port** — confirmed absent from legacy by the audit's own dedicated search. Approved 2026-08-14 with one addition (a genuine-pause control, not a hidden-but-running widget). Plan: `data/spectra-device-preview-plan/report.md`. Sequenced behind the day-one bar; not started. Mounts on the shared `TopBarStrip.tsx` beside §50. |
-| §44 | UPDATE trigger action + trigger migration completion | `AGREED` | Day-one bar item (D2). PR #57 open — builds the Admiral's own definition of UPDATE (`data/spectra-trigger-migration-scoping/RULING.md`) and migrates his 10,710 hand-placed triggers in one pass. Built, self-reviewed (9 gaps found and fixed), **unverified** — proving it means writing into his authored trigger data, needs a room window. Blocked in part on [OQ-1](#open-questions). |
+| §44 | UPDATE trigger action + trigger migration completion | `BUILT` (full) | Day-one bar item (D2). PR #57 merged (`09d0992`), builds the Admiral's own definition of UPDATE — "a major change within the scene, bigger than a flare, overrides the drift, ramps in" (`data/spectra-trigger-migration-scoping/RULING.md`, quoted verbatim) — as `SceneV2.update_kind` + `ResponseEngine.on_update`, glide-not-jump on an 800–3000ms ramp. **Live-proven**: 10,698 authored + 1,179 generated = 11,877 triggers migrated on his real hardware; UPDATE proven as an 800ms glide landing on target params (`data/backlog.md` `spectra-trigger-migration-scoping`, done). Ran live **while the PR was still unmerged** — see [Landed vs. deployed](#landed-vs-deployed-a-real-gap-this-document-does-not-close). **Scene-id pool question (formerly OQ-1) is RESOLVED, not open**: his ruling was Option B, `scene_id=None` handed to the room's own chooser for all 3,546 pool-based triggers, accepted with open eyes that the chooser may pick a mismatched-mood scene since it doesn't know his hand-built pools — "if he hears it in his room, he will say so, and it is reversible" (`RULING.md` item 1, implemented in `spectra/services/legacy_trigger_migration.py`). Drop-scene triggers get intensity forced to MAX per the same ruling (`RULING.md` item 2). Dinner Party Scenes (the pool, not the §4 capability) dropped from the migration entirely at his word (`RULING.md` item 4) — do not conflate with §4 above, a different capability with its own separate keep-not-drop decision. **Functionally inert right now**: his room's `scene_change_mode` is `"analysed"`, so these migrated triggers are in place but won't fire until he sets it to `"full"` — without that, he'd reasonably conclude the migration failed. |
 | §45 | Settings console (standing order 5, realised for SPECTRA) | `AGREED` | PR #66 open. Built, unverified — needs his room, his voice, and the standing-order-9 worked-example/walkthrough offer, all still outstanding. |
 | §46 | LedFX's own colour picker adopted across SPECTRA | `AGREED` | PR #59 open. Built, unverified, currently conflicts with `master` after the energy-readout landing touched the same top-bar/help surfaces — needs a careful rebase, then a real colour-pick proof in his room (the room-window proof done 2026-08-14 exercised the Ambient path, not this picker). |
 | §47 | Per-device flush cadence (crystal cadence workaround) | `AGREED` | PR #58 open. **Failed in his room twice**, measured on real firmware counters both times (crystal dropped 30→20-24fps on the second attempt). Do not merge or deploy as-is. Root cause open: why its tests pass while his fixtures degrade. His ruling stands: the crystal's 30fps cap itself is deliberate and not to be raised as a "fix" — see [OQ-2](#open-questions), a separate, narrower question. |
 | §48 | Feedback/Review Stage 2+3 polish redesign | `AGREED` | PR #65 open. Built, unverified, first time he'll see `/feedback` and `/review` at all — blocked on two open design questions, [OQ-3](#open-questions) and [OQ-4](#open-questions). |
-| §49 | Release-to-HA actually restores/neutralises the Hue bulbs (not just the stream) | `AGREED` | PR #67 open. Fixes a defect found live 2026-08-14: panic release closed the entertainment stream but abandoned 17 Hue lights lit at 12% on SPECTRA's last frame — legacy fades the bulbs on the bridge before letting go; this ports that. Needs a room proof. |
+| §49 | Release-to-HA actually restores/neutralises the Hue bulbs (not just the stream) | `BUILT` (full) | PR #67 merged (`e3d754a`). Fixes a defect found live 2026-08-14: panic release closed the entertainment stream but abandoned 17 Hue lights lit at 12% on SPECTRA's last frame. `spectra/services/release_fade.py`: freeze the entertainment stream → bridge-side dim fade → power off, run against every live Hue device across **both** bridges (his two Hue devices sit on separate bridges), best-effort per device. D1 "free" case, reasoned explicitly in the PR: legacy's own fade lands ON a colour because a next state follows; release has no next state, so this fades to off instead. WLED verified unaffected (already releases realtime cleanly via its own on-device fallback — genuinely different in kind from Hue, which has none). **Room-proven live at the fixtures, 2026-08-15** (reported via firstmate). See D5 for the settled division of labour this establishes: SPECTRA's job ends at a clean release, restoring the room afterward is Home Assistant's job, not a gap to close here. |
 | §50 | Live section-energy readout (top bar, always visible) | `BUILT` (full) | PR #62 merged. Shows the exact number (`bridge.intensity()`, raw librosa section energy, no smoothing) that already drives the sequencer, the drift conductor, and automatic transition fires — not a display lookalike. Room-proven 2026-08-14, `docs/spectra-room-window-proofs-2026-08-14.md` Proof 1 (PASS): live across `/spectra/scenes` and `/spectra/timeline`, honest `—` dash when no value. First occupant of the shared `TopBarStrip.tsx` mount point §43 will join. |
+| §51 | Ambient — confirmed vs. attempted light read-back (the ON path) | `BUILT`, success case only — see note | PR #69 merged (`36198b1`). Fixes a live defect distinct from §6: `Ambient ON: [...] held at #f5da8c, 17 light(s) set` logged identically whether all 17 bulbs actually carried the colour or 3 silently didn't (a 2xx bridge PUT only means the bridge accepted the write — zigbee can still drop it under a write burst). `ambient.reconcile()`'s ON path now reads every light back and only counts a **confirmed** match; stragglers get bounded, spaced retries plus paced initial writes; anything still not holding comes back named in `unconfirmed` (status `"partial"`), surfaced as a red badge on `RoomControlsBar.tsx` — never folded into a bigger count. **Success case PROVEN LIVE** on his room (commit `bb1b759`, deployed before the PR merged — see [Landed vs. deployed](#landed-vs-deployed-a-real-gap-this-document-does-not-close)): 17/17 confirmed at `#f5da8c` across both bridges, room verified back at his exact baseline after. **Failure case PROVEN HEADLESSLY ONLY, not live** — `tests/test_ambient.py::test_reconcile_on_silently_dropped_write_is_never_reported_as_held` contrives the identical failure shape and asserts the honest partial report, but no bulb inside `dining-hues`/`hue-lights` was actually unreachable at proof time to exercise this for real; if that's done later this row should be upgraded explicitly, not silently assumed. **Checked and confirmed clean, not assumed**: the release path (§49, `spectra/services/release.py`, already reads real state back via `_verify_released()`) and the scene-fire path (`spectra/services/fx_seam.py::apply_writes`, raises loud on HTTP failure rather than under-counting) do **not** share this attempted-vs-confirmed gap. |
 
 ---
 
 ## Open questions
 
 A question nobody is waiting on is not open, it's noise — every row here names what it blocks.
+IDs aren't reused once resolved, so gaps are expected: **OQ-1** (scene-id pool fidelity) was
+resolved by his ruling — see §44's note, not a row here.
 
 | ID | Question | Blocks | Source |
 |---|---|---|---|
-| OQ-1 | Migrated scene-change triggers that pick from a hand-built pool (3,546 of 10,710 real triggers): freeze each to one concrete scene now, computed from its stored intensity, or hand `scene_id=None` to the room sequencer to pick fresh every time? | Finalising §44 / the trigger-migration day-one-bar item for that 33% of his authored triggers. | `data/spectra-trigger-migration-scoping/report.md` §5. Recommendation on file: **Option A** (freeze — exact replay of his hand-built pools, no shuffle on repeat plays). The other 7,164 triggers (67%) are already mapped and validated, not blocked by this. |
 | OQ-2 | Raise the crystal WLED device's `refresh_rate` from 30 to match its siblings at 62 in `storage/spectra/fx-live/config.json`? | The root cause of his "crystal is behind on colour" report (confirmed live two ways: a virtual renders at its slowest device's rate). Distinct from §47's per-device-cadence workaround, which addresses the group-wide drag, not this specific value. | `data/spectra-crystal-colour-lag/report.md`. Reconfiguring a live device value — his word required even though it's instantly reversible. |
 | OQ-3 | Approve, reject, or adjust the 7 proposed CSS/markup-only changes to `/feedback` and `/review`? | Any further build on §48 — the redesign PR (#65) implements these but he has never seen either page. | `data/spectra-feedback-review-design/report.md` + 4 screenshots. Both binding criteria (mark-then-nudge, single-batch queue) are preserved as-is regardless of the answer. |
 | OQ-4 | Does he want quick-tag note shortcuts (emoji chips like drop/love/too-much) on the feedback page? | Whether that feature gets designed or built at all — it was deliberately left out of the §48 mock-up as an explicit guess about his taste, not a stated requirement. | Same report as OQ-3, flagged separately as not-asked-for. |
@@ -253,16 +283,22 @@ A question nobody is waiting on is not open, it's noise — every row here names
 
 - Ledger states are grounded in the 2026-08-14 capability audit (46 capabilities, code-cited,
   `data/spotfx-capability-audit/report.md`) plus a direct code/backlog re-check run while writing
-  this spec (2026-08-15) to catch same-day drift. **Where the two disagreed, the code won** —
-  those rows are tagged "DELTA since audit" (currently: §6).
+  this spec (2026-08-15) to catch same-day drift, updated again the same day after PR #57, #67,
+  and #69 merged. **Where the two disagreed, the code won** — those rows are tagged "DELTA since
+  audit" (currently: §6).
 - **What this document does not cover:** settings/config minutiae the audit itself deliberately
   grouped into parent capabilities rather than itemising (its own stated limitation, inherited
   here); anything outside the original 46 + the day-one bar + backlog captain-decision items as
   of 2026-08-15; exact on-screen animation feel or gesture nuance — the audit is source-only, no
-  live UI runs, and this spec carries that same caveat forward rather than re-verifying it.
+  live UI runs, and this spec carries that same caveat forward rather than re-verifying it;
+  **deployed state vs. landed state** — see [Landed vs. deployed](#landed-vs-deployed-a-real-gap-this-document-does-not-close),
+  a limitation this document names but does not close.
 - **Confidence:** MEDIUM-HIGH on rows carried straight from the audit (inherited, not
-  re-derived). HIGH on the rows independently re-checked against current code while writing this
-  spec: §6, §7, §9, §10, §44 (grep-verified 2026-08-15, cited inline above).
+  re-derived). HIGH on the rows independently re-checked against current code, PR bodies, and
+  cited source docs (not just the backlog's own summary of them) while writing and then updating
+  this spec: §6, §7, §9, §10, §44, §49, §51 — §44 in particular corrected a stale-looking backlog
+  checkbox (the scene-id pool decision reads "open" there, but `RULING.md` and the merged code
+  both show it was actually answered — code and the cited primary source won over the tracker).
 - This spec deliberately does **not** track day-to-day PR review status, CI results, or
   room-window scheduling — see [Maintenance protocol](#maintenance-protocol). That's
   `data/backlog.md`.
