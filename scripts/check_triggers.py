@@ -600,6 +600,19 @@ check(len(spectra_engine.responses.surges) == before_gated,
       "tuned per scene), gated the same as hand-authored triggers")
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
 
+# UPDATE's own choke point (spectra-trigger-migration-scoping RULING.md,
+# 2026-08-14): fire_scene_update_event gated the same "full" tier, same
+# reason — an authored trigger's own action. Proven at the default (full,
+# above) implicitly passes through to on_update; now prove it's gated too.
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="analysed"))
+before_update_gated = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_scene_update_event(0.8))
+check(len(spectra_engine.responses.surges) == before_update_gated,
+      "fire_scene_update_event is a no-op outside scene_change_mode=full — "
+      "same gate as fire_response_event, same reason (an authored "
+      "trigger's own action)")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
+
 # ═══ 6. mid-song generation (front 3) ════════════════════════════════════
 
 from spectra.services import midsong_generator
