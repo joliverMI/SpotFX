@@ -152,16 +152,28 @@ r = client.post("/api/settings-console/message", json={"text": "hello"})
 check(r.status_code == 503 and "ANTHROPIC_API_KEY" in r.json()["detail"],
       "no API key configured -> honest 503, not a fake reply")
 
+from spectra import config as scfg  # noqa: E402  (re-import for clarity at this point)
+
+scfg.whisper_bridge_url = lambda: None  # the "genuinely unconfigured" case
 r = client.post("/api/settings-console/transcribe",
                 files={"audio": ("clip.webm", b"\x00\x01", "audio/webm")})
 check(r.status_code == 503 and "type your request" in r.json()["detail"],
-      "no transcriber wired -> honest 503, mic button never pretends")
+      "no bridge configured -> honest 503, mic button never pretends")
 
 # ═══ 5. the wire contract: a silently-ignored vocabulary is a hard fail ═
 # (coordinated with the ship building the local-Whisper bridge against
-# this endpoint — see transcription.py's wire-contract docstring)
+# this endpoint — see transcription.py's wire-contract docstring). These
+# replace transcribe() wholesale, so still no real network.
 
 from spectra.services import transcription as tr
+
+_real_transcribe = tr.transcribe  # saved so it can be restored without a
+                                  # module reload (which would mint a NEW
+                                  # TranscriptionUnavailable/VocabularyNot
+                                  # Honored class, no longer `is`-identical
+                                  # to the ones settings_console.py already
+                                  # imported — its except clauses would
+                                  # stop catching them)
 
 
 async def forgetful(audio, mime_type, vocabulary=""):
@@ -185,5 +197,58 @@ r = client.post("/api/settings-console/transcribe",
                 files={"audio": ("clip.webm", b"\x00\x01", "audio/webm;codecs=opus")})
 check(r.status_code == 200 and r.json()["vocabulary_honored"] is True,
       "a transcriber that confirms using the vocabulary hint is accepted")
+
+# ═══ 6. the REAL transcribe()'s bridge-facing contract (2026-08-15) ═════
+# httpx.MockTransport only — the real bridge is confirmed down tonight
+# (its ship tore its test container down); these prove transcribe()'s
+# SHAPE against the published contract without a real socket, never by
+# probing/scanning the actual host.
+
+import httpx
+
+tr.transcribe = _real_transcribe  # restore — the checks above replaced it wholesale
+scfg.whisper_bridge_url = lambda: "http://bridge.example"
+
+try:
+    run(tr.transcribe(iter([b"chunk"]), "audio/webm"))
+    raise SystemExit("FAIL: a streamed/iterator audio argument was accepted")
+except tr.TranscriptionUnavailable:
+    print("ok: a non-bytes audio argument is refused before any request is attempted")
+
+oversized = b"0" * (tr.BRIDGE_MAX_AUDIO_BYTES + 1)
+try:
+    run(tr.transcribe(oversized, "audio/webm"))
+    raise SystemExit("FAIL: an over-cap clip was accepted")
+except tr.TranscriptionUnavailable:
+    print("ok: a clip over the bridge's 25MB cap is refused with a clear reason, not a bridge 4xx")
+
+captured = {}
+
+
+def fixed_length_handler(request):
+    captured["content_length"] = request.headers.get("content-length")
+    captured["transfer_encoding"] = request.headers.get("transfer-encoding")
+    captured["x_vocabulary"] = request.headers.get("x-vocabulary")
+    return httpx.Response(200, json={"text": "turn on sunset drift", "vocabulary_applied": True})
+
+
+tr._client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(fixed_length_handler), timeout=5.0)
+result = run(tr.transcribe(b"abc123", "audio/webm;codecs=opus", vocabulary="Sunset Drift"))
+check(captured["content_length"] == "6" and captured["transfer_encoding"] is None,
+      "the real bridge call sends a fixed Content-Length body, never chunked")
+check(captured["x_vocabulary"] == "Sunset%20Drift", "vocabulary travels percent-encoded in X-Vocabulary")
+check(result.vocabulary_honored is True, "vocabulary_applied: true from the bridge translates through")
+
+
+def refused_handler(request):
+    raise httpx.ConnectError("Connection refused", request=request)
+
+
+tr._client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(refused_handler), timeout=5.0)
+try:
+    run(tr.transcribe(b"abc", "audio/webm"))
+    raise SystemExit("FAIL: connection-refused was swallowed instead of surfacing")
+except tr.TranscriptionUnavailable:
+    print("ok: connection-refused (the real bridge's current state) is the honest 503 path, not chased")
 
 print("\nALL CHECKS PASSED")

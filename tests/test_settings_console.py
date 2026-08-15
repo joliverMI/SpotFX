@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import os
 
+import httpx
 import pytest
 
 
@@ -45,6 +46,9 @@ def _isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "SETTINGS_LOG_FILE", tmp_path / "settings_log.json")
     monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
     monkeypatch.setattr(scfg, "COLOR_SETS_FILE", tmp_path / "color_sets.json")
+    # Unconfigured by default, regardless of the host env — tests that need
+    # a "bridge configured" state override this explicitly.
+    monkeypatch.setattr(scfg, "whisper_bridge_url", lambda: None)
 
     from spectra.services import settings_agent
     settings_agent._SESSIONS.clear()
@@ -346,6 +350,103 @@ def test_api_transcribe_empty_vocabulary_needs_no_confirmation(monkeypatch):
         files={"audio": ("clip.webm", b"\x00\x01\x02", "audio/webm;codecs=opus")},
     )
     assert r.status_code == 200
+
+
+# ═══ the bridge-facing contract itself (2026-08-15) — proven with an
+# httpx.MockTransport, never a real socket. The real bridge is confirmed
+# NOT running right now (its ship tore its test container down); these
+# tests prove transcribe()'s SHAPE against the published contract without
+# touching — or hunting for — anything on the real host. ═══════════════
+
+def test_transcribe_rejects_a_streamed_audio_argument(monkeypatch):
+    """The bridge requires fixed Content-Length and rejects chunked
+    transfer-encoding; httpx only guarantees that when `content` is bytes.
+    A caller handing transcribe() a file-like/iterator must be refused
+    before any request is attempted, not silently streamed."""
+    from spectra import config as scfg
+    from spectra.services import transcription
+
+    monkeypatch.setattr(scfg, "whisper_bridge_url", lambda: "http://bridge.example")
+    with pytest.raises(transcription.TranscriptionUnavailable, match="raw bytes"):
+        _run(transcription.transcribe(iter([b"chunk"]), "audio/webm"))
+
+
+def test_transcribe_rejects_audio_over_the_bridge_cap(monkeypatch):
+    from spectra import config as scfg
+    from spectra.services import transcription
+
+    monkeypatch.setattr(scfg, "whisper_bridge_url", lambda: "http://bridge.example")
+    oversized = b"0" * (transcription.BRIDGE_MAX_AUDIO_BYTES + 1)
+    with pytest.raises(transcription.TranscriptionUnavailable, match="cap"):
+        _run(transcription.transcribe(oversized, "audio/webm"))
+
+
+def test_transcribe_sends_fixed_length_never_chunked_and_the_documented_headers(monkeypatch):
+    from spectra import config as scfg
+    from spectra.services import transcription
+
+    monkeypatch.setattr(scfg, "whisper_bridge_url", lambda: "http://bridge.example")
+    captured = {}
+
+    def handler(request):
+        captured["url"] = str(request.url)
+        captured["content_length"] = request.headers.get("content-length")
+        captured["transfer_encoding"] = request.headers.get("transfer-encoding")
+        captured["content_type"] = request.headers.get("content-type")
+        captured["x_vocabulary"] = request.headers.get("x-vocabulary")
+        captured["body"] = request.content
+        return httpx.Response(200, json={"text": "turn on sunset drift", "vocabulary_applied": True})
+
+    monkeypatch.setattr(transcription, "_client",
+                        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+
+    result = _run(transcription.transcribe(
+        b"abc123", "audio/webm;codecs=opus", vocabulary="Sunset Drift"))
+
+    assert result == transcription.TranscriptionResult(
+        text="turn on sunset drift", vocabulary_honored=True)
+    assert captured["url"] == "http://bridge.example/transcribe"
+    assert captured["content_length"] == "6", "fixed-length body, not chunked"
+    assert captured["transfer_encoding"] is None
+    assert captured["content_type"] == "audio/webm;codecs=opus", \
+        "forwarded exactly what the browser sent, never renegotiated"
+    assert captured["x_vocabulary"] == "Sunset%20Drift", "percent-encoded for a header"
+    assert captured["body"] == b"abc123", "raw bytes, never multipart-wrapped"
+
+
+def test_transcribe_raises_when_bridge_does_not_confirm_vocabulary(monkeypatch):
+    from spectra import config as scfg
+    from spectra.services import transcription
+
+    monkeypatch.setattr(scfg, "whisper_bridge_url", lambda: "http://bridge.example")
+
+    def handler(request):
+        return httpx.Response(200, json={"text": "generic text", "vocabulary_applied": False})
+
+    monkeypatch.setattr(transcription, "_client",
+                        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+
+    with pytest.raises(transcription.VocabularyNotHonored):
+        _run(transcription.transcribe(b"abc", "audio/webm", vocabulary="Sunset Drift"))
+
+
+def test_transcribe_connection_refused_is_the_honest_unavailable_state(monkeypatch):
+    """The real bridge is confirmed down tonight — this is what that
+    actually produces: an ordinary connection error, handled as the
+    already-built 503 path, never chased with a retry or a port scan."""
+    from spectra import config as scfg
+    from spectra.services import transcription
+
+    monkeypatch.setattr(scfg, "whisper_bridge_url", lambda: "http://127.0.0.1:8090")
+
+    def handler(request):
+        raise httpx.ConnectError("Connection refused", request=request)
+
+    monkeypatch.setattr(transcription, "_client",
+                        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+
+    with pytest.raises(transcription.TranscriptionUnavailable, match="unreachable"):
+        _run(transcription.transcribe(b"abc", "audio/webm"))
 
 
 # ═══ 6. live-model smoke test (skipped: no ANTHROPIC_API_KEY here) ═══════

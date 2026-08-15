@@ -509,28 +509,51 @@ Voice reaches text by the browser RECORDING (MediaRecorder) and POSTing the
 clip to `POST /api/settings-console/transcribe`, not the browser's built-in
 SpeechRecognition (which ships audio to a third-party cloud and forecloses
 ever routing it to a local transcriber). `spectra/services/transcription.py`
-is the one seam a concrete transcriber plugs into — deliberately
-UNIMPLEMENTED (raises `TranscriptionUnavailable` -> a stated 503); its
-`vocabulary_hint()` already assembles live scene/colour-set/device names
-for a future transcriber's vocabulary-biasing input. Typed text is the
-proven-working floor; voice is real plumbing with an honest current
-failure, not a stub in his room (this whole feature ships UNVERIFIED
-against his live instance — see the PR).
+is the one seam that reaches it — its module docstring is TWO stacked wire
+contracts, read it before touching any of this:
 
-**The wire contract is fixed and documented in `transcription.py`'s own
-docstring** (coordinated with a second ship building a local-Whisper bridge
-against this endpoint — read that docstring before changing any of this):
-`POST /api/settings-console/transcribe`, multipart, one file field named
-`audio`. The browser negotiates `audio/webm;codecs=opus` explicitly
-(`MediaRecorder.isTypeSupported` + `recorder.mimeType` on the Blob, never a
-hardcoded guess) — that's the actual production encoding, WAV is not
-something this client emits. Vocabulary is server-computed per request
-(`vocabulary_hint()`), never a client field. Response:
-`{text, vocabulary_honored}` — **a non-empty vocabulary hint that the
-transcriber doesn't confirm using is a hard 502 in `settings_console.py`'s
-`post_transcribe`, not a quiet 200 with generic text** — the vocabulary is
-the whole reason this seam exists over a plain transcriber, so silently
-dropping it is a bug, enforced in the caller, not left to convention.
+- **Browser-facing (ours to publish):** `POST /api/settings-console/
+  transcribe`, multipart, one file field named `audio`. The browser
+  negotiates `audio/webm;codecs=opus` explicitly (`MediaRecorder.
+  isTypeSupported` + `recorder.mimeType` on the Blob, never a hardcoded
+  guess) — WAV is not something this client emits. Response:
+  `{text, vocabulary_honored}`.
+- **Bridge-facing (2026-08-15, published and proven by the ship building the
+  local-Whisper bridge — SPECTRA CONFORMS, does not renegotiate it):**
+  `POST {whisper_bridge_url()}/transcribe`, RAW audio bytes as the body
+  (never multipart — that shape stops at the API layer above), `Content-
+  Type` forwarded unchanged from the browser, `X-Vocabulary` = the
+  server-computed `vocabulary_hint()` string percent-encoded as a header.
+  Response JSON: `{text, vocabulary_applied, content_type_received}`.
+  `whisper_bridge_url()` (`spectra/config.py`) defaults to
+  `http://127.0.0.1:8090` (verified, mirrors the bridge's own
+  `STT_BRIDGE_PORT` default) — still `SPECTRA_WHISPER_BRIDGE_URL`-
+  overridable, not a literal; loopback only works because both processes
+  are plain host units on the same machine (see that function's docstring
+  for the containerisation caveat, written down on purpose).
+
+Two easy-to-miss bridge facts, enforced not assumed: **Content-Length
+required, chunked rejected** — `transcribe()` only accepts `audio: bytes`
+and refuses anything else (a file/iterator would silently make httpx
+chunk); **25MB body cap**, checked before the request goes out
+(`BRIDGE_MAX_AUDIO_BYTES`) rather than leaving the bridge's own rejection
+to surface as a confusing generic error.
+
+**A non-empty vocabulary hint the bridge doesn't confirm using is a hard
+502, enforced twice, on purpose:** `transcribe()` itself raises
+`VocabularyNotHonored` the instant `vocabulary_applied` isn't literally
+`True` on a non-empty request (never returns a "generic" result), and
+`settings_console.py`'s `post_transcribe` independently re-checks the
+returned `vocabulary_honored` as a backstop against any OTHER
+implementation (a stub, a future swap) that returns normally without
+confirming. Neither trusts the other. `TranscriptionUnavailable` (bridge
+unconfigured/unreachable/malformed, incl. connection-refused) is the
+separate 503 path — the real bridge was confirmed DOWN the night this
+landed (its test container was torn down); that is handled as this exact
+honest-unavailable state, proven with `httpx.MockTransport` only, never by
+probing/scanning the host. This whole feature — including the bridge call
+above — ships UNVERIFIED against a live transcriber and against his room;
+see the PR.
 
 Spec: `scripts/check_settings_console.py` + `tests/test_settings_console.py`.
 

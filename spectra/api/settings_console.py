@@ -41,7 +41,7 @@ from pydantic import BaseModel
 from spectra.services import settings_agent, settings_console, transcription
 from spectra.services.settings_agent import SettingsAgentUnavailable
 from spectra.services.settings_console import SettingChangeError
-from spectra.services.transcription import TranscriptionUnavailable
+from spectra.services.transcription import TranscriptionUnavailable, VocabularyNotHonored
 
 router = APIRouter(prefix="/api/settings-console", tags=["spectra-settings-console"])
 
@@ -89,14 +89,20 @@ async def post_transcribe(audio: UploadFile = File(...)):
             vocabulary=vocabulary)
     except TranscriptionUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
+    except VocabularyNotHonored as exc:
+        # The seam's own bridge call already caught this at the source —
+        # see below for the independent backstop check on whatever a
+        # different transcribe() implementation might return instead.
+        raise HTTPException(502, str(exc)) from exc
 
-    # Hard-fail on a silently-ignored vocabulary hint (spectra/services/
-    # transcription.py's wire-contract docstring) — the vocabulary is the
-    # entire reason this seam exists instead of a plain generic
-    # transcriber, so an implementation that doesn't confirm using it is
-    # treated as broken, never as a degraded-but-fine 200. `is not True`
-    # (not `is False`) so a forgetful implementation that just omits the
-    # field (leaves it None) fails closed too.
+    # Backstop, deliberately re-checking the SAME invariant transcribe()
+    # itself may already enforce (spectra/services/transcription.py's
+    # wire-contract docstring) — the vocabulary is the entire reason this
+    # seam exists instead of a plain generic transcriber, so ANY
+    # implementation that doesn't confirm using it is treated as broken,
+    # never as a degraded-but-fine 200. `is not True` (not `is False`) so
+    # a forgetful implementation that just omits the field (leaves it
+    # None) fails closed too.
     if vocabulary and result.vocabulary_honored is not True:
         raise HTTPException(
             502,

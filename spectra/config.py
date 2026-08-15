@@ -56,6 +56,26 @@ def settings_agent_api_key() -> str:
 def settings_agent_model() -> str:
     return os.getenv("SPECTRA_SETTINGS_AGENT_MODEL", "claude-sonnet-5")
 
+
+def whisper_bridge_url() -> str:
+    """Base URL (scheme://host:port) of the local-Whisper bridge
+    spectra/services/transcription.py's transcribe() POSTs to. Verified
+    address (2026-08-15): http://127.0.0.1:8090 — the bridge's own compose
+    file defaults its STT_BRIDGE_PORT to 8090, so this default mirrors
+    theirs rather than inventing a separate number. Still a configured
+    value, not a literal buried in transcribe() — override with
+    SPECTRA_WHISPER_BRIDGE_URL if the bridge ever moves.
+
+    LOOPBACK ASSUMPTION, written down rather than left silent: 127.0.0.1
+    only reaches the bridge because spectra.service runs as a plain
+    systemd user unit directly on the same host the bridge publishes 8090
+    on — no container boundary between them today. If SPECTRA is ever
+    containerised, loopback stops resolving to the bridge and this needs
+    the host's real address (or a shared network) — that failure would be
+    silent (connection refused, indistinguishable from "bridge not
+    started") unless whoever does the containerising reads this."""
+    return os.getenv("SPECTRA_WHISPER_BRIDGE_URL") or "http://127.0.0.1:8090"
+
 # Read-only spot-effects storage (S2 formalizes this as the bridge).
 COLOR_SETS_FILE = REPO_ROOT / "storage" / "color_sets.json"
 PROFILES_DIR = REPO_ROOT / "storage" / "profiles"

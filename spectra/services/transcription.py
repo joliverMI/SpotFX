@@ -2,74 +2,95 @@
 firstmate): voice reaches text by the browser RECORDING audio (MediaRecorder)
 and POSTing the clip to SPECTRA's own backend — not the browser's built-in
 SpeechRecognition API, which ships the audio straight to a third-party cloud
-service and forecloses ever routing it to a local transcriber instead. Audio
-lands here, at transcribe(), and nowhere else decides how it becomes text —
-swap a local Whisper in later without touching the console, the API route,
-or the frontend.
+service and forecloses ever routing it to a local transcriber instead.
 
-THE WIRE CONTRACT (fixed 2026-08-14 — a second ship is building the local
-Whisper bridge against this; both halves must agree without guessing):
-  POST /api/settings-console/transcribe (spectra/api/settings_console.py),
-  multipart/form-data, ONE file field named "audio". The browser client
-  (spectra/web/src/settings/SettingsConsolePage.tsx) negotiates
-  `MediaRecorder.isTypeSupported('audio/webm;codecs=opus')` explicitly and
-  uses `recorder.mimeType` (the type actually negotiated, not a hardcoded
-  guess) as the Blob's — and therefore the multipart part's — Content-Type.
-  Production traffic today is WEBM/OPUS. A WAV producer is legitimate
-  against this same seam (transcribe() takes raw bytes + a mime_type
-  string, no format is hardcoded below the API layer) but nothing in this
-  codebase emits it — MediaRecorder doesn't natively produce WAV. Whoever
-  ends up implementing transcribe() must accept audio/webm (opus) at
-  minimum; treat WAV as a bonus, not an assumption.
+THE BROWSER-FACING CONTRACT (spectra/api/settings_console.py, ours to
+publish — see its own docstring): POST /api/settings-console/transcribe,
+multipart/form-data, one file field named "audio". The browser negotiates
+`audio/webm;codecs=opus` explicitly (spectra/web/src/settings/
+SettingsConsolePage.tsx). Response: {"text", "vocabulary_honored"}.
 
-  Vocabulary travels as a plain space-joined string (vocabulary_hint()),
-  computed SERVER-SIDE per request from live scene/colour-set/device
-  names — it is NOT a client-supplied field, so a caller can't spoof or
-  omit it; the browser has no vocabulary of its own to send.
+THE BRIDGE-FACING CONTRACT (2026-08-15 — published and proven over real
+HTTP by the ship building the local-Whisper bridge; SPECTRA CONFORMS to
+this, does not renegotiate it): transcribe() below is that conformance —
 
-  Response: {"text": str, "vocabulary_honored": bool | None}.
-  vocabulary_honored is None only when the request carried no vocabulary
-  hint to honor (nothing to confirm). Otherwise a concrete implementation
-  MUST set it — True only when the vocabulary hint was actually handed to
-  the underlying engine (e.g. Whisper's initial_prompt), never defaulted
-  True. THE API LAYER ENFORCES THIS: post_transcribe() hard-fails (502)
-  when a non-empty vocabulary hint was sent but the result doesn't confirm
-  vocabulary_honored is True — a request whose vocabulary was silently
-  ignored is a bug, not a degraded-but-OK transcription, because the
-  vocabulary is the entire reason this seam exists instead of a plain
-  generic transcriber. This is enforced structurally in the caller (spectra/
-  api/settings_console.py), not left to convention — an implementation that
-  forgets to report vocabulary_honored fails closed (None/missing is
-  treated as "not honored" whenever a vocabulary was sent), never silently
-  passed through as a normal 200.
+  POST {SPECTRA_WHISPER_BRIDGE_URL}/transcribe
+  Body: the RAW audio bytes (not multipart — that shape is ours-to-the-
+        browser only and stops at the API layer above).
+  Headers: Content-Type = exactly the mime_type this seam was called
+        with (i.e. what the browser actually sent us — forwarded
+        unchanged, never renegotiated); X-Vocabulary = vocabulary_hint()'s
+        string, percent-encoded (urllib.parse.quote) since it's a header.
+  Response (JSON): {"text": str, "vocabulary_applied": bool,
+        "content_type_received": str}. Their side has no no-vocabulary
+        mode — vocabulary_applied is always meaningful, never N/A.
 
-transcribe() is intentionally UNIMPLEMENTED tonight (explicit instruction:
-don't build the Whisper integration yet). It raises TranscriptionUnavailable
-so the API layer can return a clear, honest 503 rather than a silent no-op —
-the mic button is real (records, POSTs) but its failure is stated, not
-hidden; typed text is the working floor until a transcriber is wired here.
+  ENFORCEMENT, belt and braces at two points on purpose (same invariant,
+  re-derived independently rather than trusted once): (1) transcribe()
+  itself raises VocabularyNotHonored the moment it sees a non-empty
+  vocabulary sent but vocabulary_applied isn't literally True — a
+  request whose vocabulary was silently ignored never even becomes a
+  successful TranscriptionResult here. (2) settings_console.py's
+  post_transcribe independently re-checks the returned
+  TranscriptionResult.vocabulary_honored and 502s if it's not True on a
+  non-empty-vocabulary request — a backstop against ANY transcribe()
+  implementation (this one, a future one, a test stub) that returns
+  normally without actually confirming. Neither trusts the other; both
+  must agree a vocabulary was honored before a 200 ever reaches the
+  browser.
 
-vocabulary_hint() answers the fed-live-vocabulary question concretely
-rather than by assertion: SPECTRA already holds every proper noun a voice
-command would use — scene names, colour-set names, device/virtual ids — all
-live-queryable at request time, so biasing a future transcriber (Whisper's
-`initial_prompt` / vocabulary-biasing param) toward the words he's actually
-likely to say is a plain string join of data this process already has in
-memory. No new store, no new stage — just pass this string down alongside
-the audio when a real transcriber lands here.
+  The bridge's address (spectra.config.whisper_bridge_url()) defaults to
+  http://127.0.0.1:8090 — verified 2026-08-15, mirroring the bridge's own
+  compose-file STT_BRIDGE_PORT default, not an independently-invented
+  number. Still a configured value (SPECTRA_WHISPER_BRIDGE_URL overrides
+  it), not a literal buried here. Loopback works ONLY because
+  spectra.service runs as a plain host process alongside the bridge — see
+  that function's own docstring for the containerisation caveat.
+
+  TWO MORE FACTS THAT PRODUCE A MYSTERY, NOT AN ERROR, IF MISSED (2026-08-15):
+  the bridge REJECTS a chunked/streamed body — Content-Length is required.
+  transcribe() only accepts `audio: bytes` (never a file-like object or
+  iterator) and asserts that type explicitly before sending, because httpx
+  silently switches to chunked transfer-encoding the moment it's handed
+  anything else — this is not "assume bytes behaves"; it's enforced. Body
+  cap is 25MB (BRIDGE_MAX_AUDIO_BYTES) — checked HERE, before the request
+  goes out, with a clear TranscriptionUnavailable, rather than letting the
+  bridge's own rejection surface as a confusing generic HTTP error.
+
+vocabulary_hint() answers the fed-live-vocabulary question concretely:
+SPECTRA already holds every proper noun a voice command would use — scene
+names, colour-set names, device/virtual ids — all live-queryable at
+request time, so biasing the bridge's transcriber toward the words he's
+actually likely to say is a plain string join of data this process
+already has in memory.
 """
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from typing import Optional
 
+import httpx
 from pydantic import BaseModel
+
+from spectra import config
 
 logger = logging.getLogger(__name__)
 
+BRIDGE_TIMEOUT_S = 30.0
+BRIDGE_MAX_AUDIO_BYTES = 25 * 1024 * 1024  # the bridge's own documented cap
+
 
 class TranscriptionUnavailable(Exception):
-    pass
+    """No bridge configured, or the bridge is unreachable/erroring/
+    returned something unparseable. Maps to a 503 — "nothing to talk
+    to" — distinct from VocabularyNotHonored's 502."""
+
+
+class VocabularyNotHonored(Exception):
+    """The bridge responded, but didn't confirm using a non-empty
+    vocabulary hint. Maps to a 502 — the bridge IS there and DID answer,
+    it just didn't hold up its half of the contract."""
 
 
 class TranscriptionResult(BaseModel):
@@ -84,10 +105,10 @@ class TranscriptionResult(BaseModel):
 
 
 def vocabulary_hint(limit: int = 200) -> str:
-    """Space-joined scene / colour-set / device names, for a future
-    transcriber's vocabulary-biasing input. Best-effort: any one source
-    failing (e.g. an empty/corrupt store) just contributes nothing, same
-    posture as feedback.capture_moment's bridge-down degrade."""
+    """Space-joined scene / colour-set / device names, for the bridge's
+    vocabulary-biasing input. Best-effort: any one source failing (e.g. an
+    empty/corrupt store) just contributes nothing, same posture as
+    feedback.capture_moment's bridge-down degrade."""
     words: list[str] = []
 
     try:
@@ -111,11 +132,70 @@ def vocabulary_hint(limit: int = 200) -> str:
     return " ".join(words[:limit])
 
 
+def _client() -> httpx.AsyncClient:
+    """A seam of its own so tests can swap in an httpx.MockTransport
+    without a real socket (same DI pattern as conftest.py's
+    fresh_ledfx_client)."""
+    return httpx.AsyncClient(timeout=BRIDGE_TIMEOUT_S)
+
+
 async def transcribe(audio: bytes, mime_type: str, vocabulary: str = "") -> TranscriptionResult:
-    """(audio bytes, its mime type, a vocabulary hint) -> TranscriptionResult.
-    The ONE seam a concrete transcriber (a local Whisper bridge) plugs
-    into — see the module docstring for the full wire contract this
-    signature is part of, including the vocabulary_honored requirement.
-    Unimplemented tonight; raises TranscriptionUnavailable."""
-    raise TranscriptionUnavailable(
-        "no transcriber configured — type your request instead")
+    """Conforms to the local-Whisper bridge's published contract — see the
+    module docstring. Raises TranscriptionUnavailable (bridge unconfigured/
+    unreachable/malformed -> 503) or VocabularyNotHonored (bridge answered
+    but ignored a non-empty vocabulary hint -> 502)."""
+    base_url = config.whisper_bridge_url()
+    if not base_url:
+        raise TranscriptionUnavailable(
+            "no local-Whisper bridge configured (SPECTRA_WHISPER_BRIDGE_URL "
+            "unset) — type your request instead")
+
+    # The bridge requires a fixed Content-Length body and rejects chunked
+    # transfer-encoding. httpx only emits a fixed-length request when
+    # `content` is bytes/bytearray — a file-like object or iterator would
+    # silently switch it to chunked. Asserting the type here, rather than
+    # trusting the caller, is what actually turns streaming off: nothing
+    # downstream can hand this function something that triggers it.
+    if not isinstance(audio, (bytes, bytearray)):
+        raise TranscriptionUnavailable(
+            "audio must be raw bytes — the bridge requires a fixed "
+            "Content-Length body and rejects chunked transfer-encoding")
+    if len(audio) > BRIDGE_MAX_AUDIO_BYTES:
+        raise TranscriptionUnavailable(
+            f"audio clip is {len(audio)} bytes, over the bridge's "
+            f"{BRIDGE_MAX_AUDIO_BYTES}-byte cap — record a shorter clip")
+
+    headers = {
+        "Content-Type": mime_type,
+        "X-Vocabulary": urllib.parse.quote(vocabulary),
+    }
+    try:
+        async with _client() as client:
+            # content=<bytes> — not a file/iterator — is what gives this a
+            # real Content-Length instead of chunked encoding; see the
+            # type check above for why that's guaranteed, not assumed.
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/transcribe", content=audio, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        # Connection-refused (nothing listening on the bridge port) lands
+        # here too, by design — an honest "unavailable," never chased with
+        # a retry, a scan, or an attempt to start anything.
+        raise TranscriptionUnavailable(
+            f"local-Whisper bridge unreachable or malformed: {exc}") from exc
+
+    text = data.get("text")
+    if not isinstance(text, str):
+        raise TranscriptionUnavailable(
+            f"local-Whisper bridge response missing 'text': {data!r}")
+
+    raw_applied = data.get("vocabulary_applied")
+    vocabulary_applied = raw_applied if isinstance(raw_applied, bool) else None
+    if vocabulary and vocabulary_applied is not True:
+        raise VocabularyNotHonored(
+            "local-Whisper bridge did not confirm using the vocabulary hint "
+            f"(vocabulary_applied={raw_applied!r}) — refusing a silently "
+            "generic transcription")
+
+    return TranscriptionResult(text=text, vocabulary_honored=vocabulary_applied)
