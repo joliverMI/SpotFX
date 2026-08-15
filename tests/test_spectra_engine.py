@@ -268,6 +268,8 @@ def test_update_glides_and_carries_bypassing_bands(tmp_path):
                 assert record["result"] == "updated"
                 expected_ramp = update_ramp_ms(1.0)
                 assert record["ramp_ms"] == expected_ramp
+                # parity with on_event's "applied" records: report what carried
+                assert record["carried"] == [{"virtual_id": VID, "param": "gradient_scale"}]
 
                 glide_write = [w for w in executor.writes if w["kind"] == "glide"][-1]
                 assert glide_write["duration_ms"] == expected_ramp

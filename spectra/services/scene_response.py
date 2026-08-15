@@ -528,8 +528,9 @@ class ResponseEngine:
             record["moved"] = await self._move_params_ramped(kind, intensity, carry, ramp_ms)
         if kind.gain != 1.0:
             record["gained"] = await self._gain(kind, intensity, carry, ramp_ms=ramp_ms)
-        record["result"] = "updated"
         self.conductor.on_surge(carry)
+        record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
+        record["result"] = "updated"
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
         return record
