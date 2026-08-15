@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import RoomControlsBar from './components/RoomControlsBar';
 import RoomOwnershipBar from './components/RoomOwnershipBar';
+import TopBarStrip from './components/TopBarStrip';
 import { ToastProvider } from './components/Toast';
 import { confirmLeave } from './lib/unsavedGuard';
 import FeedbackPage from './feedback/FeedbackPage';
@@ -57,6 +58,7 @@ export default function App() {
     <ToastProvider>
       <NavBar />
       <RoomControlsBar />
+      <TopBarStrip />
       <RoomOwnershipBar />
       <main>
         <Routes>

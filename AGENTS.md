@@ -275,6 +275,20 @@ spot-effects storage READ-ONLY). Executable spec:
 spot-effects help). The spot-effects Scenes page stays as-is until
 superseded; never point `fx/` at live hardware before the S3 handover.
 
+`TopBarStrip.tsx` (`spectra/web/src/components/`, mounted once in
+`App.tsx` next to `RoomControlsBar`) is the shared always-visible strip
+for widgets that belong on every SPECTRA route, not just one page —
+first occupant is `LiveEnergyReadout.tsx`, showing `bridge.intensity()`
+(spectra/services/bridge.py: raw librosa section energy at the live
+playback position, no smoothing) exactly as read from
+`GET /api/engine/status`'s `bridge.intensity` field, already the
+callable wired into the drift conductor, the sequencer's default scene
+pick, and automatic transition fires — the one number this build found
+feeding every automatic (non-authored) decision path. The planned
+device-preview strip (`data/spectra-device-preview-plan/report.md`) is
+designed to mount here too, as a sibling, when authorised — don't build
+a second one-off top-of-app mount point for it.
+
 ## SPECTRA S2 evolution engine
 
 The engine (`spectra/services/engine.py` wires it; start/stop is owned by
