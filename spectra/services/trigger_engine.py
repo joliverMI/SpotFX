@@ -87,6 +87,29 @@ Two worlds coexist during migration (CLAUDE.md): this engine only ever
 reads storage/spectra/triggers.json and the bridge's read-only feed; it
 never touches storage/profiles or the legacy trigger_fired path.
 
+AUTO-GENERATION (Admiral ask, order 12 — "they should be auto-generated if
+there are none when the song is playing, I shouldn't have to go in and do
+that"): maybe_auto_generate(uri), called by services/engine.py's
+_on_track_uri on the SAME first-time-seeing-this-URI edge that already
+resets _last_track_uri, runs midsong_generator.generate_for_song for a song
+with ZERO stored triggers of either source — no timeline visit required.
+Fire-and-forget (scheduled via asyncio.create_task, never awaited by the
+caller) so a slow or never-analyzed song can never delay the transition
+fire or tick work that already ran synchronously before it. Generated
+triggers fire immediately at their normal gate (scene_change_mode
+"analysed"/"full") — no separate review step; holding them for review
+would recreate the exact friction this exists to remove. Never touches a
+trigger he has claimed as his own: the empty-store precondition means no
+authored trigger can be present when generation starts, and
+generate_for_song's own source="generated"-only filtering (front 3) is the
+second, independent guard. An unanalyzed song degrades honestly —
+generate_for_song already returns a clean zero-moment no-op, never a
+fabricated trigger. _generating (per-uri) stops a song from being
+re-scheduled while its own generation is still in flight; the module-level
+generation lock serializes the actual file-writing bodies of concurrent
+generations for DIFFERENT songs, so two songs starting close together can't
+interleave their trigger_store read-modify-write cycles.
+
 Edge-triggered: a trigger fires once, on the first tick whose
 (last_position, position] window crosses its timestamp. A URI change (a
 NEW song, or the bridge dropping to None and reconnecting) rearms: the
@@ -103,6 +126,7 @@ headless dummy device).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
@@ -113,6 +137,20 @@ from spectra.services import trigger_store
 logger = logging.getLogger(__name__)
 
 TICK_S = 0.2
+
+# Serializes the file-writing body of concurrent auto-generations for
+# DIFFERENT songs (trigger_store's read-modify-write cycle isn't itself
+# lock-protected). Lazily created — mirrors spectra/services/ambient.py's
+# _get_lock — so constructing the module-level TriggerEngine singleton
+# below never requires a running event loop.
+_generation_lock: Optional[asyncio.Lock] = None
+
+
+def _get_generation_lock() -> asyncio.Lock:
+    global _generation_lock
+    if _generation_lock is None:
+        _generation_lock = asyncio.Lock()
+    return _generation_lock
 
 
 class TriggerEngine:
@@ -129,6 +167,7 @@ class TriggerEngine:
         scene_change_mode: Callable[[], str] | None = None,
         transition_intensity: Callable[[], float] | None = None,
         sequencer_enabled: Callable[[], bool] | None = None,
+        auto_generate: Callable[[str], Awaitable[Any]] | None = None,
         rng: Random | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
@@ -140,6 +179,8 @@ class TriggerEngine:
         self._transition_intensity = (transition_intensity
                                       or self._default_transition_intensity)
         self._sequencer_enabled = sequencer_enabled or self._default_sequencer_enabled
+        self._auto_generate = auto_generate or self._default_auto_generate
+        self._generating: set[str] = set()
         self._rng = rng or Random()
 
         self._uri: Optional[str] = None
@@ -189,6 +230,26 @@ class TriggerEngine:
             return
         logger.info("song transition: fired scene %s", scene_id)
         self.last_fire = {"id": None, "kind": "transition", "ok": True}
+
+    def maybe_auto_generate(self, uri: Optional[str]) -> None:
+        """Called by services/engine.py's _on_track_uri on the same
+        first-time-seeing-this-URI edge that resets _last_track_uri — a
+        song with zero stored triggers (of either source) gets generated
+        for automatically. Fire-and-forget by design: the caller is never
+        made to wait on this (see the module docstring's AUTO-GENERATION
+        section)."""
+        if not uri or uri in self._generating or self._list_triggers(uri):
+            return
+        self._generating.add(uri)
+        asyncio.create_task(self._run_auto_generate(uri))
+
+    async def _run_auto_generate(self, uri: str) -> None:
+        try:
+            await self._auto_generate(uri)
+        except Exception:
+            logger.exception("auto-generate: trigger generation failed for %s", uri)
+        finally:
+            self._generating.discard(uri)
 
     async def tick(self, position_ms: Optional[int]) -> list[SpectraTrigger]:
         """One evaluation, called every TICK_S with the CURRENT position.
@@ -334,6 +395,19 @@ class TriggerEngine:
         if card is None or card.kind != "set":
             raise ValueError(f"colour set '{set_id}' not found")
         await engine.conductor.apply_set_directly(card)
+
+    async def _default_auto_generate(self, uri: str) -> None:
+        # Off the event loop entirely (candidate_moments can rescan
+        # analysis_reader's whole shape index on a miss) and serialized
+        # against any other song's concurrent auto-generation, so two songs
+        # starting close together can't interleave trigger_store's
+        # read-modify-write file cycle.
+        from spectra.services import midsong_generator
+        async with _get_generation_lock():
+            result = await asyncio.to_thread(midsong_generator.generate_for_song, uri)
+        if result.get("added"):
+            logger.info("auto-generate: seeded %d mid-song trigger(s) for %s "
+                        "(no timeline visit)", result["added"], uri)
 
 
 trigger_engine = TriggerEngine()
