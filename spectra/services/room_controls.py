@@ -51,6 +51,33 @@ legacy picks: decision-legacy-retirement-picks.md):
                           NOT redundant: they differ in whether generated
                           mid-song triggers fire, exactly the old switch's
                           two states.
+  force_scene_enabled/    the legacy Now Playing "Force Scene" control,
+  force_scene_scene_id    ported verbatim (owner direction: reuse the old
+                          system's design/behaviour, not reinvent it).
+                          Legacy semantics (services/trigger_engine.py's
+                          _forced_scene_event/_pick_scene_lanes): while
+                          enabled, whenever a scene WOULD be picked
+                          automatically, the forced scene fires instead - an
+                          unconditional redirect, not a pause. Ported at the
+                          single choke point every automatic SPECTRA scene
+                          pick already funnels through, scene_sequencer.
+                          fire_scene_by_id (sequencer rolls, trigger_engine's
+                          fire_scene action, and its automatic transition
+                          fire all call it) - one interception point, same
+                          as legacy having one settings flag every pick site
+                          checked. Only the SCENE is pinned; the caller's own
+                          resolved colour set/intensity still applies, same
+                          as legacy's "reassert with normal First/Rest."
+                          force_scene_scene_id pointing at a missing scene is
+                          treated as unset (silently falls through), same as
+                          legacy's missing/non-scene event guard. SPECTRA has
+                          no Scene Group concept yet, so the legacy group
+                          member-rotation half of Force Scene has nothing to
+                          port to - out of scope until groups exist. Editor
+                          test-fires (POST /scenes/{id}/fire) bypass
+                          fire_scene_by_id by design and are NOT redirected -
+                          an explicit single fire is not "a scene being
+                          picked."
 
 Ambient is wired live (services/ambient.py) — the Dinner-Party half of the
 room-MODES gap (gap report §3 row 5) is a separate, still-unbuilt mode;
@@ -83,6 +110,8 @@ class RoomControlState(BaseModel):
     # entry_ramp_ms is 0 — the legacy ledfx_global_transition equivalent.
     global_transition_ms: int = Field(default=0, ge=0, le=20000)
     scene_change_mode: SceneChangeMode = "full"
+    force_scene_enabled: bool = False
+    force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
 
 
 def apply_brightness(params: dict, multiplier: float) -> dict:

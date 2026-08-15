@@ -3,14 +3,16 @@
  * the fx_executor / scene_compiler seams) plus ambient mode/colour (wired:
  * freezes the room's live Hue devices and holds them at the chosen colour
  * over direct bridge REST — spectra/services/ambient.py) and global
- * transition pace (state only), plus the scene-change settings model
- * (three additive ticks — see SCENE_CHANGE_MODES below and
- * spectra/services/room_controls.py).
- * Mounted once in App.tsx, next to the ownership bar. */
-import { useEffect, useState } from 'react';
+ * transition pace (state only), the scene-change settings model (three
+ * additive ticks — see SCENE_CHANGE_MODES below and
+ * spectra/services/room_controls.py), and Force Scene — the legacy Now
+ * Playing control ported verbatim (owner direction: reuse the old system's
+ * design/behaviour). Mounted once in App.tsx, next to the ownership bar. */
+import { useEffect, useMemo, useState } from 'react';
 import HelpLink from '../help/HelpLink';
-import { useRoomControls, useSaveRoomControls } from '../queries';
+import { useRoomControls, useSaveRoomControls, useScenes } from '../queries';
 import type { AmbientResult, RoomControlState, SceneChangeMode } from '../types';
+import SearchSelect from './forms/SearchSelect';
 
 const AMBIENT_NOTE: Record<string, string> = {
   dark: "SPECTRA isn't driving the lights right now — saved, nothing changed live",
@@ -32,8 +34,13 @@ const SCENE_CHANGE_MODES: { value: SceneChangeMode; label: string; title: string
 export default function RoomControlsBar() {
   const { data } = useRoomControls();
   const save = useSaveRoomControls();
+  const { data: scenes } = useScenes();
   const [local, setLocal] = useState<RoomControlState | null>(null);
   const [ambientResult, setAmbientResult] = useState<AmbientResult | null>(null);
+  const sceneOptions = useMemo(
+    () => (scenes ?? []).map((s) => ({ value: s.id, label: s.name })),
+    [scenes],
+  );
 
   // Adopt server state unless a local edit is in flight (avoid clobbering
   // a slider drag with a stale refetch).
@@ -113,6 +120,24 @@ export default function RoomControlsBar() {
           ))}
         </select>
       </label>
+
+      <label className="room-control"
+        title="Hold one scene: whenever a new scene would be picked, reassert the forced scene instead">
+        <input
+          type="checkbox"
+          checked={local.force_scene_enabled}
+          onChange={(e) => commit({ ...local, force_scene_enabled: e.target.checked })}
+        />
+        Force Scene
+      </label>
+      {local.force_scene_enabled && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <SearchSelect value={local.force_scene_scene_id ?? ''} options={sceneOptions} width={160}
+            placeholder="— pick scene —" allowEmpty={false}
+            onChange={(v) => commit({ ...local, force_scene_scene_id: v })} />
+          <HelpLink topic="force-scene" />
+        </span>
+      )}
 
       <HelpLink topic="room-controls-bar" />
     </div>

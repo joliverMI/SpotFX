@@ -48,8 +48,21 @@ async def fire_scene_by_id(scene_id: str,
     """The ONE scene-fire choke point for anything that picks a scene by id
     outside the editor's own test-fire — the sequencer's own rolls and
     SPECTRA-native triggers (spectra.services.trigger_engine) both call
-    this, so "fire scene X" means exactly one thing everywhere it happens."""
+    this, so "fire scene X" means exactly one thing everywhere it happens.
+
+    Force Scene (room_controls.RoomControlState.force_scene_enabled/
+    force_scene_scene_id, the legacy Now Playing control ported verbatim)
+    redirects scene_id here — the single interception point every automatic
+    pick already funnels through. Only the scene is pinned; color_set_id/
+    intensity pass through as the caller resolved them, same as legacy's
+    "reassert with normal First/Rest." A forced id pointing at a missing
+    scene is treated as unset (falls through to the requested scene)."""
     from spectra.services import color_sets, fire_history, scene_compiler, scene_store
+    from spectra.services.room_controls import load_room_controls
+    controls = load_room_controls()
+    if controls.force_scene_enabled and controls.force_scene_scene_id:
+        if scene_store.get_by_id(controls.force_scene_scene_id) is not None:
+            scene_id = controls.force_scene_scene_id
     scene = scene_store.get_by_id(scene_id)
     if scene is None:
         raise ValueError(f"scene {scene_id} not found in spectra scenes")

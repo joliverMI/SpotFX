@@ -256,6 +256,12 @@ export interface RoomControlState {
   ambient_color: string | null;
   global_transition_ms: number;
   scene_change_mode: SceneChangeMode;
+  /** Legacy Now Playing "Force Scene" control, ported verbatim: while
+   * enabled, every scene the system would otherwise pick automatically
+   * (sequencer roll, trigger fire, or the automatic transition fire) fires
+   * force_scene_scene_id instead. Does not affect manual editor test-fires. */
+  force_scene_enabled: boolean;
+  force_scene_scene_id: string | null;
 }
 
 /** What actually happened to the room's Hue devices on the last ambient

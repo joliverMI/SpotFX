@@ -13,6 +13,9 @@ ambient fields actually changed, to avoid re-triggering a stream
 reconnect/reconnect on every unrelated slider commit) and folds the outcome
 into the response as `ambient_result` so the caller can tell a live takeover
 from a state-only save (SPECTRA dark, or no Hue devices in the room).
+force_scene_enabled/force_scene_scene_id — the legacy Now Playing Force
+Scene control — redirect every automatic scene pick at scene_sequencer.
+fire_scene_by_id.
 """
 from __future__ import annotations
 

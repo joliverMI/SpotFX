@@ -378,6 +378,25 @@ retire-not-delete). Built:
   `scripts/check_spectra.py` + `tests/test_room_controls.py` +
   `tests/test_ambient.py`.
 
+**Force Scene** — the Admiral's day-one ask, separate from the four-item
+gap-inventory decision above but built on the same room-control surface:
+`RoomControlState.force_scene_enabled`/`force_scene_scene_id`
+(`spectra/services/room_controls.py`), UI in `RoomControlsBar.tsx`. Ported
+verbatim from legacy Now Playing's Force Scene (`settings.force_scene_enabled`/
+`force_scene_event_id`, `services/trigger_engine.py::_forced_scene_event`):
+while enabled, whatever scene id was about to fire automatically is
+redirected to the pinned scene instead — an unconditional reassert, not a
+pause; the caller's own resolved colour set/intensity still applies. Ported
+at `scene_sequencer.fire_scene_by_id`, the single choke point every
+automatic SPECTRA scene pick (sequencer rolls, `trigger_engine`'s
+`fire_scene` action, its automatic transition fire) already funnels
+through — one interception point covers all of them, unlike legacy's several
+call sites. Manual editor test-fires (`POST /scenes/{id}/fire`) bypass that
+choke point by design and are never redirected. SPECTRA has no Scene Group
+concept, so legacy's group-member-rotation half has nothing to port to.
+Spec: the Force Scene section of `scripts/check_spectra.py` +
+`tests/test_room_controls.py::test_force_scene_redirects_every_automatic_pick`.
+
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
 Exactly one process owns the lights. The durable record is
