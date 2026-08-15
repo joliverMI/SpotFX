@@ -461,13 +461,20 @@ export function useUndoLastSetting() {
   });
 }
 
+/** POST /settings-console/message — Sonic's one chat endpoint, shared by
+ * both the Settings page's embedded chat and the Scenes page's popover
+ * (SonicChatPopover.tsx). `changes` can be settings- or scene-domain (see
+ * SonicAppliedChange), so a successful reply invalidates both worlds
+ * rather than trying to sniff which one changed from the result shape. */
 export function useSendSettingsMessage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { session_id: string | null; text: string }) =>
       apiPost<SettingsMessageResult>('/settings-console/message', body),
     onSuccess: (result) => {
-      if (result.changes.length > 0) invalidateSettingsConsole(qc);
+      if (result.changes.length === 0) return;
+      invalidateSettingsConsole(qc);
+      void qc.invalidateQueries({ queryKey: ['spectra-scenes'] });
     },
   });
 }

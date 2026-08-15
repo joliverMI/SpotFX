@@ -81,17 +81,15 @@ export default function SettingsConsolePage() {
       setSessionId(result.session_id);
       setMessages((m) => [...m, { id: uuid(), role: 'assistant', text: result.reply }]);
       if (result.changes.length > 0) {
-        toast(
-          `Changed ${result.changes.map((c) => c.key).join(', ')}`,
-          'success',
-        );
+        const labels = result.changes.map((c) => c.key ?? c.scene_name ?? c.flare_kind ?? c.op ?? 'something');
+        toast(`Changed ${labels.join(', ')}`, 'success');
       }
     } catch {
       setMessages((m) => [...m, {
         id: uuid(), role: 'assistant',
-        text: "Couldn't reach the settings agent — see the toast for why.",
+        text: "Couldn't reach Sonic — see the toast for why.",
       }]);
-      toast('Settings agent unavailable — is ANTHROPIC_API_KEY configured?', 'error');
+      toast('Sonic unavailable — is ANTHROPIC_API_KEY configured?', 'error');
     }
   }
 
@@ -159,13 +157,15 @@ export default function SettingsConsolePage() {
     <div className="settings-console">
       <div className="card settings-console-chat">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          Settings console <HelpLink topic="settings-console" />
+          Sonic — settings console <HelpLink topic="settings-console" />
         </div>
         <div className="settings-console-messages" ref={scrollRef}>
           {messages.length === 0 ? (
             <p className="empty-note">
               Tell it what to change — "turn brightness down to 40%", "switch scene changes to
-              transitions only", "turn ambient on and make it warm white".
+              transitions only", "turn ambient on and make it warm white". Sonic can also manage
+              flares, scene settings, and create new scenes — chat with it from the Scenes page
+              for that.
             </p>
           ) : (
             messages.map((m) => (

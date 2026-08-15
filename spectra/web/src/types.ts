@@ -364,10 +364,31 @@ export interface AppliedSettingChange extends SettingChangeEntry {
   status: 'applied';
 }
 
+/** One applied change from Sonic (spectra/services/settings_agent.py) —
+ * settings and scene/flare operations return different domain-specific
+ * fields (a settings change carries `key`; a scene change carries
+ * `scene_id`/`op` and sometimes `flare_kind`), so this is deliberately
+ * loose beyond the handful every applied result shares. See
+ * scene_console.py / settings_console.py for each op's exact shape. */
+export interface SonicAppliedChange {
+  status: 'applied';
+  id: string;
+  ts_ms: number;
+  op?: string;
+  source: SettingChangeSource;
+  key?: string;
+  scene_id?: string;
+  scene_name?: string;
+  flare_kind?: string;
+  old_value?: unknown;
+  new_value?: unknown;
+  [extra: string]: unknown;
+}
+
 export interface SettingsMessageResult {
   session_id: string;
   reply: string;
-  changes: AppliedSettingChange[];
+  changes: SonicAppliedChange[];
 }
 
 export interface UndoResult extends AppliedSettingChange {

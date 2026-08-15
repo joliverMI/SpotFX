@@ -844,18 +844,28 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
   {
     id: 'settings-console',
-    title: 'Settings console — talk to it instead of hunting a form',
-    keywords: 'settings console agent chat voice dictation mic microphone brightness ambient transition scene change undo change log talk to the software',
+    title: 'Sonic — talk to it instead of hunting a form',
+    keywords: 'settings console sonic agent chat voice dictation mic microphone brightness ambient transition scene change undo change log talk to the software',
     intro:
-      'Type (or speak) what you want changed — "turn brightness down to 40%", "turn ambient on and make it warm white" — and a small model changes it for you. The "Current settings" and "Recent changes" cards below the chat are read-only: they show what the settings are and what changed, but nothing on this page except the chat itself can change a value.',
+      'Type (or speak) what you want changed — "turn brightness down to 40%", "turn ambient on and make it warm white" — and Sonic, a small model, changes it for you. The "Current settings" and "Recent changes" cards below the chat are read-only: they show what the settings are and what changed, but nothing on this page except the chat itself can change a value.',
     entries: [
       {
         id: 'settings-console-scope',
-        title: 'What it can change',
+        title: 'What it can change here',
         keywords: 'brightness ambient colour transition scene change mode scope allowlist force scene',
         body: [
-          'Five settings, on purpose, not everything the app has: room brightness, the default scene-entry transition time, ambient mode (off / on during music / auto-return, + colour), and the scene-change tier (transitions only / + analysed / + your triggers). Each one has a declared legal range or set of choices, enforced by the server — an out-of-range or nonsense request is rejected and the agent explains the legal range instead of guessing.',
+          'Five room-wide settings, on purpose, not everything the app has: room brightness, the default scene-entry transition time, ambient mode (off / on during music / auto-return, + colour), and the scene-change tier (transitions only / + analysed / + your triggers). Each one has a declared legal range or set of choices, enforced by the server — an out-of-range or nonsense request is rejected and Sonic explains the legal range instead of guessing.',
           "Force Scene isn't in scope here — it names a scene by id, which fits the room-controls bar's picker better than a spoken request.",
+        ],
+      },
+      {
+        id: 'sonic-scenes',
+        title: 'Sonic on the Scenes page: flares, scene settings, new scenes',
+        keywords: 'sonic scenes page flare kind flares chat popup pop-up create scene entry ramp phase blend choreography colour journey pace',
+        body: [
+          'The Scenes page has its own floating 💬 button (bottom-right) that opens the same Sonic chat, scoped to a second domain: flares and scenes. It can create a new, empty scene by name (always a brand-new scene — it can never overwrite one of your existing scenes, even given the exact same name); change a scene\'s own scalar settings (entry blend time, charge/lull phase ramps, phase-choreography timing, colour-journey pace, whether it accepts every colour set); and create, update, or remove a scene\'s NAMED flare kinds (the drift-jump / momentary / permanent building blocks a scene\'s charge/lull/flare/drop bands select and scale).',
+          'Say which scene you mean by name — Sonic looks it up rather than needing an id. Every change is re-validated server-side exactly like the settings-only chat: an illegal value, an unknown flare-kind field, or removing a flare kind still referenced by a band is rejected with the legal range or the reason, never silently guessed at.',
+          "Device/effect editing (the Initial Set tab) isn't in scope for Sonic — that stays a deliberately visual, drag-and-tune editor.",
         ],
       },
       {
@@ -863,7 +873,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Voice: the mic button',
         keywords: 'microphone record dictate speech transcribe',
         body: [
-          'Tap 🎤 to record, tap again (■) to stop — the clip is sent to SPECTRA\'s own backend for transcription and the result lands in the text box for you to check before sending, not sent automatically. If transcription isn\'t wired up yet you\'ll see a plain message saying so; typed text always works regardless.',
+          'Tap 🎤 to record, tap again (■) to stop — the clip is sent to SPECTRA\'s own backend for transcription and the result lands in the text box for you to check before sending, not sent automatically. If transcription isn\'t wired up yet you\'ll see a plain message saying so; typed text always works regardless. Both the Settings page chat and the Scenes page popover work the same way.',
         ],
       },
       {
@@ -871,7 +881,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'What changed, and Undo',
         keywords: 'change log history undo revert mis-transcription mistake wrong',
         body: [
-          'Every change the agent makes — and every undo — appears in "Recent changes" with its old and new value, so a misheard word is easy to spot. "Undo last" reverts the most recent change (voice or typed) back to its previous value; undoing is itself a logged change, not a deletion, so the history stays honest.',
+          'Every settings change Sonic makes — and every undo — appears in "Recent changes" with its old and new value, so a misheard word is easy to spot. "Undo last" reverts the most recent settings change (voice or typed) back to its previous value; undoing is itself a logged change, not a deletion, so the history stays honest. Scene/flare changes from the Scenes page popover have their own separate log (visible in each scene\'s own state, not this page\'s "Recent changes" card) — there\'s no undo button for those yet; correct a scene change the same way you\'d fix any other edit, by telling Sonic the right value or editing it in the Scenes page.',
         ],
       },
     ],

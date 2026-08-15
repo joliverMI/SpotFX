@@ -20,11 +20,23 @@ software; do not build the Admiral a settings page"). Covers:
   - The "cli" (subscription) backend switch (services/settings_agent_cli.py):
     defaults OFF, refuses without an explicit CLAUDE_CODE_OAUTH_TOKEN, never
     passes --bare, and locks the subprocess to --strict-mcp-config / --tools
-    "" / --allowedTools naming exactly the two settings tools. Live
+    "" / --allowedTools naming exactly settings_agent.TOOL_NAMES. Live
     subprocess/transcript-parsing proof is tests/test_settings_agent_cli.py
-    (offline, against real captured transcripts) — this script only proves
-    the switch itself defaults safe, since that's the property every other
-    check in this repo needs to be able to assume.
+    (offline, against real captured AND hand-built synthetic transcripts)
+    — this script only proves the switch itself defaults safe, since
+    that's the property every other check in this repo needs to be able
+    to assume.
+  - Sonic's WIDENED scene/flare surface (2026-08-15, services/
+    scene_console.py, merged into settings_agent.ALL_OPERATIONS): the
+    eight-key SCENE_SETTINGS_REGISTRY (bounds read live off SceneV2/
+    PhaseBlend/PhaseChoreography/SceneColorJourney, same discipline as the
+    room settings registry), create_scene's structural can't-collide
+    guarantee, an out-of-range scene setting and a malformed flare kind
+    both rejected with the server's own text, a room setting unreachable
+    through set_scene_setting, and every write here proven to leave a
+    stand-in for one of his real scenes byte-for-byte untouched. Full
+    version of this proof (all four adversarial refusal categories, the
+    fabrication hunt against run_turn() itself): tests/test_scene_console.py.
 
 Run from repo root: .venv/bin/python scripts/check_settings_console.py
 Isolated: temp files for every store; no network, no LedFX I/O, no audio.
@@ -72,6 +84,7 @@ scfg.SHOW_LOG_FILE = scfg.SPECTRA_STORAGE / "show_log.json"
 scfg.TRIGGERS_FILE = scfg.SPECTRA_STORAGE / "triggers.json"
 scfg.FEEDBACK_FILE = scfg.SPECTRA_STORAGE / "feedback.json"
 scfg.SETTINGS_LOG_FILE = scfg.SPECTRA_STORAGE / "settings_log.json"
+scfg.SCENE_AGENT_LOG_FILE = scfg.SPECTRA_STORAGE / "scene_agent_log.json"
 scfg.COLOR_SETS_FILE = td / "color_sets.json"
 scfg.PROFILES_DIR = td / "profiles"
 scfg.AUDIO_SHAPES_DIR = td / "audio_shapes"
@@ -127,8 +140,10 @@ check(rc.load_room_controls().brightness_multiplier == 1.0, "undo's restore land
 
 # ═══ 3. the structural tool boundary ═══════════════════════════════════
 
-check({t["name"] for t in sa.TOOLS} == {"get_settings", "set_setting"},
-      "the model is handed exactly two tools")
+check(set(sc.OPERATIONS) == {"get_settings", "set_setting"},
+      "the settings domain itself is still exactly two operations")
+check({"get_settings", "set_setting"} <= {t["name"] for t in sa.TOOLS},
+      "the merged tool set still carries both settings operations")
 
 for bad_tool in ("run_shell", "restart_service", "deploy", "drive_lights"):
     r = run(sa._dispatch(bad_tool, {}))
@@ -139,6 +154,66 @@ check(not scfg.ROOM_CONTROLS_FILE.exists() or
 
 r = run(sa._dispatch("set_setting", {"key": "force_scene_enabled", "value": True}))
 check(r["status"] == "rejected", "set_setting still enforces the allowlist, not just validate_change directly")
+
+# ═══ 3b. Sonic's WIDENED scene/flare surface (2026-08-15) — a re-proof
+# against the NEW surface, not an inherited assumption; see
+# tests/test_scene_console.py for the full version of this proof. ═══════
+
+from spectra.models.scene import SceneV2 as _SceneV2  # noqa: E402
+from spectra.services import scene_console as scc  # noqa: E402
+from spectra.services import scene_store  # noqa: E402
+
+check(set(scc.SCENE_SETTINGS_REGISTRY) == {
+    "entry_ramp_ms", "phase_blend_charge_ramp_ms", "phase_blend_lull_ramp_ms",
+    "choreography_enabled", "choreography_transition_ms", "choreography_anchor_frac",
+    "color_journey_pace_factor", "accept_all_sets",
+}, "scene settings registry is the deliberate eight-key scalar allowlist")
+check(scc._model_field_bounds(_SceneV2, "entry_ramp_ms") ==
+      (scc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"].min, scc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"].max),
+      "scene registry bounds are read live off SceneV2, not re-typed")
+
+his_scene = _SceneV2(name="STAR", entry_ramp_ms=1234)  # stands in for one of his 9 real scenes
+scene_store.save(his_scene)
+his_scene_bytes_before = scfg.SCENES_FILE.read_bytes()
+
+throwaway = run(scc.apply_create_scene("Throwaway check scene"))
+check(throwaway["scene_id"] != his_scene.id, "create_scene never collides with an existing scene id")
+
+try:
+    run(scc.apply_scene_setting(throwaway["scene_id"], "entry_ramp_ms", 999999))
+    raise SystemExit("FAIL: an out-of-range scene setting was accepted")
+except scc.SceneOpError as e:
+    check("20000" in " ".join(e.detail.get("pydantic_errors", [])),
+          "out-of-range scene setting rejected with the server's own legal-range text")
+
+try:
+    scc._validate_scene_setting(throwaway["scene_id"], "brightness_multiplier", 0.2)
+    raise SystemExit("FAIL: a room setting was reachable through a scene operation")
+except scc.SceneOpError:
+    print("ok: a room-level setting is unreachable through set_scene_setting")
+
+for bad_op in ("delete_scene", "run_shell", "restart_service", "read_file"):
+    r = run(sa._dispatch(bad_op, {"scene_id": throwaway["scene_id"]}))
+    check(r["status"] == "rejected", f"dispatch has no branch for {bad_op!r} either")
+
+check(scfg.SCENES_FILE.read_bytes() != his_scene_bytes_before,
+      "the store DID change (the throwaway scene landed) ...")
+import json as _json  # noqa: E402
+_raw = _json.loads(scfg.SCENES_FILE.read_text())
+check(_json.dumps(_raw[his_scene.id], sort_keys=True) ==
+      _json.dumps(_json.loads(his_scene_bytes_before.decode())[his_scene.id], sort_keys=True),
+      "...but his 'STAR' scene's own stored bytes are byte-identical to before any of this")
+
+flare_result = run(scc.apply_flare_kind(throwaway["scene_id"], name="Boom", type="momentary",
+                                        params={"gain": 1.0}, gain=1.5))
+check(flare_result["status"] == "applied" and flare_result["op"] == "flare_kind_created",
+      "a valid named flare kind is created")
+try:
+    scc._validate_set_flare_kind(throwaway["scene_id"], name="BadJump", type="drift_jump",
+                                 jump="dice", params={"x": 1.0}, gain=1.0, hold_ms=None)
+    raise SystemExit("FAIL: a malformed flare kind (params on a drift_jump) was accepted")
+except scc.SceneOpError as e:
+    check("jumps the drift" in str(e), "malformed flare kind rejected with the server's own shape rule")
 
 # ═══ 4. API surface ═════════════════════════════════════════════════════
 

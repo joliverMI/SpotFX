@@ -36,6 +36,13 @@ record of what changed" + one-step-undo answer to mis-transcription risk
 undo_last_change() re-applies the previous value through apply_change()
 itself, so an undo is validated exactly like any other change, never a
 raw file poke.
+
+OPERATIONS (bottom of file) is this module's contribution to Sonic's
+merged, cross-domain allowlist — settings_agent.py combines it with
+scene_console.OPERATIONS into ALL_OPERATIONS; see sonic_ops.py's docstring
+for why the same declaration enforces AND documents. Sonic's scene/flare
+authority (scene_console.py) is a SEPARATE module with zero import of this
+one — settings stay settings, scenes stay scenes.
 """
 from __future__ import annotations
 
@@ -51,6 +58,7 @@ from pydantic import BaseModel, ValidationError
 from spectra import config
 from spectra.services import room_controls
 from spectra.services.room_controls import RoomControlState
+from spectra.services.sonic_ops import SonicOperation
 
 SETTINGS_LOG_MAX_ENTRIES = 200
 
@@ -242,6 +250,7 @@ async def apply_change(key: str, value: Any, source: str = "agent") -> dict:
     entry = {
         "id": str(uuid.uuid4()),
         "ts_ms": int(time.time() * 1000),
+        "op": "set_setting",
         "key": key,
         "old_value": getattr(previous, key),
         "new_value": getattr(candidate, key),
@@ -254,6 +263,56 @@ async def apply_change(key: str, value: Any, source: str = "agent") -> dict:
     if ambient_result is not None:
         result["ambient_result"] = ambient_result
     return result
+
+
+async def _op_get_settings() -> dict:
+    return describe_current()
+
+
+async def _op_set_setting(key: str, value: Any) -> dict:
+    """Catches SettingChangeError HERE (not in settings_agent.py's
+    dispatcher) so that module can stay domain-agnostic — see
+    sonic_ops.py's docstring for why an operation's own handler owns its
+    domain's exception type."""
+    try:
+        return await apply_change(key, value)
+    except SettingChangeError as exc:
+        return exc.payload()
+
+
+# The one declaration that both enforces (settings_agent.ALL_OPERATIONS is
+# built from this dict) and documents (its catalogue_entry() is what the
+# "list operations" meta-tool shows Sonic) — see sonic_ops.py's docstring.
+OPERATIONS: dict[str, SonicOperation] = {
+    "get_settings": SonicOperation(
+        name="get_settings", domain="settings", kind="read",
+        summary="Read every settings-console setting's current value, "
+                "unit, and legal range/choices.",
+        instructions=(
+            "No arguments. Always small (five settings) — safe to call "
+            "whenever you need a fresh value before changing it."),
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        handler=_op_get_settings),
+    "set_setting": SonicOperation(
+        name="set_setting", domain="settings", kind="write",
+        summary="Change ONE declared room-wide setting.",
+        instructions=(
+            "key must be one of the keys get_settings just showed you. "
+            "The server re-validates the key and value against its "
+            "declared range/choices and rejects anything outside them — "
+            "this is the only way this changes anything. Voice dictation "
+            "can mangle his product names ('spot effects' means SpotFX) — "
+            "read intent, don't over-literally match words."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "enum": sorted(SETTINGS_REGISTRY)},
+                "value": {"description": "The new value — type depends on "
+                                         "the setting (see get_settings)."},
+            },
+            "required": ["key", "value"], "additionalProperties": False},
+        handler=_op_set_setting),
+}
 
 
 async def undo_last_change() -> dict:

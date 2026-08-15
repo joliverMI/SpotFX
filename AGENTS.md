@@ -625,17 +625,48 @@ routinely (captain-shared.md), so the record + one-step undo answer that
 without adding a round-trip to every spoken command.
 
 THE AUTHORITY BOUNDARY IS STRUCTURAL, not prompt wording — read `settings_
-agent.py`'s module docstring first if touching this. The model is handed
-exactly two tools (`get_settings` read, `set_setting` -> `apply_change`);
-`_dispatch()` is the complete, exhaustive name->code mapping, so there is no
-third branch to reach for a shell/file/HTTP/service-control/light-driving
-call, whatever the prompt or transcript says. `tests/test_settings_console.py`
-proves this without a network call (fabricated tool names/keys rejected,
+agent.py`'s module docstring first if touching this. The model — now called
+Sonic in the UI/prompt — is handed exactly the tools declared in
+`settings_agent.ALL_OPERATIONS`, a dict of `spectra/services/sonic_ops.py`
+`SonicOperation` entries merged from each domain module's own `OPERATIONS`
+dict (originally just `get_settings`/`set_setting`; widened 2026-08-15 to
+Sonic's scene/flare authority below — see that section). `_dispatch()` is
+the complete, exhaustive name->handler mapping, so there is no third
+branch to reach for a shell/file/HTTP/service-control/light-driving call,
+whatever the prompt or transcript says, and the SAME `SonicOperation` dict
+also IS the `list_operations` discovery catalogue Sonic queries at
+runtime instead of the prompt trying to describe every capability — see
+`sonic_ops.py`'s own docstring for why guard and catalogue are one
+declaration. `tests/test_settings_console.py`/`tests/test_scene_console.py`
+prove this without a network call (fabricated tool names/keys rejected,
 nothing persists on rejection) plus one live-model smoke test skipped
 without `ANTHROPIC_API_KEY`. Model id from `spectra.config.
 settings_agent_model()` (env `SPECTRA_SETTINGS_AGENT_MODEL`, default
 `claude-sonnet-5`); API key from `settings_agent_api_key()` (env
 `ANTHROPIC_API_KEY`) — unset means a stated 503, never a silent no-op.
+
+**Sonic's scene/flare authority (2026-08-15, his own ask: "manage flares
+and the settings within the scenes and creating scenes")** — a SECOND
+mechanism module, `spectra/services/scene_console.py`, zero import of
+`settings_console.py`/`room_controls.py`, whose only write surface is
+`scene_store.save()`. `SCENE_SETTINGS_REGISTRY` (8 scalar keys: entry
+blend, charge/lull phase ramps, choreography timing, colour-journey pace,
+colour-set acceptance) reads bounds off `SceneV2`/`PhaseBlend`/
+`PhaseChoreography`/`SceneColorJourney`'s own `Field(ge=,le=)`, same
+discipline as the room registry. Named `FlareKind` create/update/remove
+(upsert by name) and `create_scene` (name + labels only — no device/effect
+authoring, that stays the Initial Set tab) round out the enumerated set;
+device/effect editing is deliberately NOT in scope. **The property that
+protects his authored scenes**: `create_scene` only ever builds a fresh
+`SceneV2(name=...)` — id is the model's own `default_factory=uuid4`, so a
+created scene can never collide with, and therefore never overwrite, an
+existing one, and there is no delete/overwrite-by-id operation declared at
+all. Reachable by chat from `/scenes` too, not just `/settings`: `spectra/
+web/src/components/SonicChatPopover.tsx` is a floating 💬 button + panel
+mounted on `ScenesPage.tsx`, talking to the same `POST /settings-console/
+message` endpoint. Full detail, the four adversarial refusal proofs, and
+the fabrication-hunt re-proof against the widened CLI tool manifest:
+`docs/SPECTRA_SPEC.md` §54, `tests/test_scene_console.py`.
 
 **Subscription (CLI) backend — built, default OFF, not yet authorised
 against his real account** (`data/spectra-console-subscription-backend/`:
@@ -658,17 +689,22 @@ can't be used, it refuses to read the OAuth token at all), so every call
 creates/verifies a dedicated, code-owned, empty working directory
 (`config.settings_agent_cli_workdir()`, refuses if it ever contains a stray
 `.claude/`, `.mcp.json`, or `CLAUDE.md`), passes `--strict-mcp-config` +
-`--tools ""` + `--allowedTools` naming exactly the two tools its own MCP
+`--tools ""` + `--allowedTools` naming exactly the tools its own MCP
 server (`spectra/services/settings_mcp_server.py`, a stdio wrapper around the
-SAME `settings_agent._dispatch()` the API backend uses — no second authority)
-exposes, and re-verifies the live `system/init` tool manifest on every single
-response before trusting anything in it. That last check exists because a
-live re-proof caught `claude-haiku-4-5` fabricating tool-call output in plain
-prose, twice, when the real tool manifest didn't contain what it claimed —
-`_parse_transcript()` reads ONLY structured `tool_use`/`tool_result` blocks,
-never the model's narrated text. Tests: `tests/test_settings_agent_cli.py`
-(offline, against real captured transcripts in `tests/fixtures/
-cli_transcript_*.json`) + a live smoke test skipped without
+SAME `settings_agent._dispatch()` the API backend uses — no second authority;
+one hand-written function per `ALL_OPERATIONS` entry, see that file's own
+docstring for why it's not generated) exposes, and re-verifies the live
+`system/init` tool manifest on every single response before trusting
+anything in it. That last check exists because a live re-proof caught
+`claude-haiku-4-5` fabricating tool-call output in plain prose, twice, when
+the real tool manifest didn't contain what it claimed — `_parse_transcript()`
+reads ONLY structured `tool_use`/`tool_result` blocks, never the model's
+narrated text. Tests: `tests/test_settings_agent_cli.py` (offline, against
+real captured transcripts in `tests/fixtures/cli_transcript_*.json` for the
+original two-tool surface — now correctly refused as a stale manifest once
+the tool set widened — plus hand-built, explicitly-labelled
+`cli_transcript_synthetic_*.json` fixtures re-proving the same properties
+against the current, wider surface) + a live smoke test skipped without
 `CLAUDE_CODE_OAUTH_TOKEN`. **Enabling this against the captain's real account
 is his call, not a deploy default** — flipping `SPECTRA_SETTINGS_AGENT_BACKEND`
 and minting a token are both separate, deliberate, human actions.
@@ -723,7 +759,9 @@ probing/scanning the host. This whole feature — including the bridge call
 above — ships UNVERIFIED against a live transcriber and against his room;
 see the PR.
 
-Spec: `scripts/check_settings_console.py` + `tests/test_settings_console.py`.
+Spec: `scripts/check_settings_console.py` (both domains) +
+`tests/test_settings_console.py` (settings) + `tests/test_scene_console.py`
+(scene/flare).
 
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
