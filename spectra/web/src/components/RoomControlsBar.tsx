@@ -9,6 +9,7 @@
  * Playing control ported verbatim (owner direction: reuse the old system's
  * design/behaviour). Mounted once in App.tsx, next to the ownership bar. */
 import { useEffect, useMemo, useState } from 'react';
+import ColorGradientPicker from './ColorGradientPicker';
 import HelpLink from '../help/HelpLink';
 import { useRoomControls, useSaveRoomControls, useScenes } from '../queries';
 import type { AmbientResult, RoomControlState, SceneChangeMode } from '../types';
@@ -81,11 +82,13 @@ export default function RoomControlsBar() {
       </label>
 
       <label className="room-control" title="Ambient colour">
-        <input
-          type="color"
+        <ColorGradientPicker
           value={local.ambient_color ?? '#ffffff'}
-          onChange={(e) => commit({ ...local, ambient_color: e.target.value })}
+          onChange={(v) => commit({ ...local, ambient_color: v })}
           disabled={!local.ambient_enabled}
+          swatchWidth={40}
+          swatchHeight={28}
+          title="Ambient colour — a Hue entertainment stream only ever takes one solid colour"
         />
       </label>
 

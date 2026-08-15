@@ -477,3 +477,26 @@ kbd {
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+
+/* ColorGradientPicker — LedFX's own react-gcolor-picker component, one
+ * trigger/popover shell reused for every colour+gradient surface. */
+.color-gradient-swatch {
+  display: inline-block;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.color-gradient-swatch:disabled { cursor: not-allowed; opacity: 0.5; }
+.color-gradient-popover {
+  position: fixed;
+  z-index: 2000;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+}

@@ -596,3 +596,29 @@ kbd {
   .review-song-picker button { max-width: 160px; }
   .review-entry-list { max-height: 320px; }
 }
+
+/* ColorGradientPicker — LedFX's own react-gcolor-picker component, one
+ * trigger/popover shell reused for every colour+gradient surface. The
+ * picker itself renders its own light-on-white chrome (third-party,
+ * unthemed); the shell around it just gives it a frame that reads
+ * intentionally against the purple-on-black app. */
+.color-gradient-swatch {
+  display: inline-block;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.color-gradient-swatch:disabled { cursor: not-allowed; opacity: 0.5; }
+.color-gradient-popover {
+  position: fixed;
+  z-index: 2000;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+}

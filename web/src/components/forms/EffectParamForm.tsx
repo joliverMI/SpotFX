@@ -2,6 +2,8 @@
  * numeric (+flip_sign), toggle, color, gradient, polar, move_xy, move_polar. */
 import type { EffectParamChange, LedFxEffectParamAction, MorphScope } from '../../types/events';
 import { useGifAssets, useParamLabels } from '../../api/queries';
+import ColorGradientPicker from '../ColorGradientPicker';
+import { useGradients } from '../../colorsets/queries';
 import { Checkbox, ColorInput, NumberInput, Row, Select, TextInput } from './inputs';
 import { ParentScopeToggle } from './ScopePicker';
 import SearchSelect from './SearchSelect';
@@ -30,6 +32,7 @@ export default function EffectParamForm({
 }) {
   const { data: labels } = useParamLabels();
   const { data: gifAssets } = useGifAssets();
+  const { data: gradients = [] } = useGradients();
   const labelInfo = (name: string) => labels?.find((l) => l.label === name);
   const setP = (i: number, fn: (p: EffectParamChange) => void) =>
     update((a) => { fn(a.params[i]); });
@@ -108,11 +111,11 @@ export default function EffectParamForm({
                   onChange={(v) => setP(i, (q) => { q.string_value = v; })} />
               )}
               {kind === 'gradient' && (
-                <TextInput
-                  value={p.string_value ?? ''}
-                  onChange={(v) => setP(i, (q) => { q.string_value = v || null; })}
-                  placeholder="CSS gradient string"
-                  width={280}
+                <ColorGradientPicker
+                  gradient
+                  value={p.string_value || '#ffffff'}
+                  defaultColors={gradients.map((g) => g.value)}
+                  onChange={(v) => setP(i, (q) => { q.string_value = v; })}
                 />
               )}
               {kind === 'string' && (

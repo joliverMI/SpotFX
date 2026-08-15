@@ -1,5 +1,6 @@
 /** One Color Set entry: scope + FG color (gradient/solid) + BG color/mode +
  * brightness pair + third color + ramp. Reuses the events page's ScopeSelect. */
+import ColorGradientPicker from '../components/ColorGradientPicker';
 import { ScopeSelect } from '../components/forms/ScopePicker';
 import type { ColorSetEntry, SavedGradient } from './types';
 
@@ -31,9 +32,8 @@ export default function EntryRow({
   onToggleSelect?: () => void;
 }) {
   const fgEn = !!entry.color_value;
-  const isSolid = (entry.color_kind ?? 'gradient') === 'solid';
-  const inLib = gradients.some((g) => g.value === entry.color_value);
   const set = (patch: Partial<ColorSetEntry>) => onChange({ ...entry, ...patch });
+  const gradientDefaults = gradients.map((g) => g.value);
 
   return (
     <div
@@ -61,31 +61,27 @@ export default function EntryRow({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         <Toggle label="Color" on={fgEn}
           onChange={(on) => set(on
-            ? { color_kind: entry.color_kind ?? 'gradient', color_value: isSolid ? '#ffffff' : gradients[0]?.value ?? '#ffffff' }
+            ? { color_kind: entry.color_kind ?? 'gradient', color_value: gradients[0]?.value ?? '#ffffff' }
             : { color_kind: null, color_value: null })} />
         {fgEn && (
-          <select value={isSolid ? 'solid' : 'gradient'} style={{ fontSize: 12 }}
-            onChange={(e) => {
-              const solid = e.target.value === 'solid';
-              set({ color_kind: solid ? 'solid' : 'gradient', color_value: solid ? '#ffffff' : gradients[0]?.value ?? '' });
-            }}>
-            <option value="gradient">Gradient</option>
-            <option value="solid">Solid</option>
-          </select>
-        )}
-        {fgEn && !isSolid && (
           <>
-            <select value={entry.color_value ?? ''} style={{ width: 180, fontSize: 12 }}
-              onChange={(e) => set({ color_kind: 'gradient', color_value: e.target.value })}>
-              {entry.color_value && !inLib && <option value={entry.color_value}>(unsaved)</option>}
-              {gradients.map((g) => <option key={g.id} value={g.value}>{g.name}</option>)}
-            </select>
-            <button style={{ fontSize: 12, padding: '2px 8px' }} title="Edit / save gradient" onClick={onEditGradient}>✎</button>
+            <ColorGradientPicker
+              gradient
+              value={entry.color_value ?? '#ffffff'}
+              defaultColors={gradientDefaults}
+              swatchWidth={48}
+              swatchHeight={30}
+              title="Solid colour or gradient — click to build either"
+              onChange={(v) => set({
+                color_kind: v.includes('linear-gradient') ? 'gradient' : 'solid',
+                color_value: v,
+              })}
+            />
+            <button style={{ fontSize: 12, padding: '2px 8px' }}
+              title="Save this gradient into the shared library" onClick={onEditGradient}>
+              ⭳ save to library
+            </button>
           </>
-        )}
-        {fgEn && isSolid && (
-          <input type="color" value={entry.color_value ?? '#ffffff'} style={{ width: 48, height: 30, padding: 1 }}
-            onChange={(e) => set({ color_kind: 'solid', color_value: e.target.value })} />
         )}
       </div>
 
@@ -93,8 +89,8 @@ export default function EntryRow({
         <Toggle label="BG Color" on={entry.bg_color != null}
           onChange={(on) => set({ bg_color: on ? '#000000' : null })} />
         {entry.bg_color != null && (
-          <input type="color" value={entry.bg_color} style={{ width: 48, height: 30, padding: 1 }}
-            onChange={(e) => set({ bg_color: e.target.value })} />
+          <ColorGradientPicker value={entry.bg_color} swatchWidth={48} swatchHeight={30}
+            title="Background colour" onChange={(v) => set({ bg_color: v })} />
         )}
         <span style={{ marginLeft: 12 }} />
         <Toggle label="BG Mode" on={entry.bg_mode != null}
@@ -128,8 +124,8 @@ export default function EntryRow({
         <Toggle label="Third Color" on={entry.accent_color != null}
           onChange={(on) => set({ accent_color: on ? '#000000' : null })} />
         {entry.accent_color != null && (
-          <input type="color" value={entry.accent_color} style={{ width: 48, height: 30, padding: 1 }}
-            onChange={(e) => set({ accent_color: e.target.value })} />
+          <ColorGradientPicker value={entry.accent_color} swatchWidth={48} swatchHeight={30}
+            title="Third / accent colour" onChange={(v) => set({ accent_color: v })} />
         )}
       </div>
     </div>

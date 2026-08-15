@@ -1,6 +1,7 @@
 /** One SceneV2 device entry: target (category/virtual) + effect + params +
  * color assignment + brightness pair. Mirrors the Color Sets EntryRow idiom. */
 import { useMemo } from 'react';
+import ColorGradientPicker from '../components/ColorGradientPicker';
 import { useGradients } from '../colorsets/queries';
 import type { EffectConfig } from './queries';
 import type { EffectParamMeta, SceneDeviceConfig } from './types';
@@ -77,8 +78,7 @@ export default function DeviceRow({
     Object.entries(config?.effects[dev.effect_type]?.params ?? {})
       .filter(([, meta]) => EDITABLE_PARAM_TYPES.has(meta.type ?? '')),
   );
-  const isSolid = (dev.color.color_kind ?? 'solid') === 'solid';
-  const inLib = gradients.some((g) => g.value === dev.color.color_value);
+  const colorDefaults = useMemo(() => gradients.map((g) => g.value), [gradients]);
 
   const setParam = (name: string, value: number | boolean | null) => {
     const params = { ...dev.params };
@@ -162,29 +162,27 @@ export default function DeviceRow({
         </select>
         {dev.color.mode === 'fixed' && (
           <>
-            <select value={isSolid ? 'solid' : 'gradient'} style={{ fontSize: 12 }}
-              onChange={(e) => {
-                const solid = e.target.value === 'solid';
-                set({ color: { ...dev.color, color_kind: solid ? 'solid' : 'gradient', color_value: solid ? '#ffffff' : gradients[0]?.value ?? null } });
-              }}>
-              <option value="solid">Solid</option>
-              <option value="gradient">Gradient</option>
-            </select>
-            {isSolid ? (
-              <input type="color" value={dev.color.color_value ?? '#ffffff'} style={{ width: 48, height: 30, padding: 1 }}
-                onChange={(e) => set({ color: { ...dev.color, color_value: e.target.value } })} />
-            ) : (
-              <select value={dev.color.color_value ?? ''} style={{ width: 180, fontSize: 12 }}
-                onChange={(e) => set({ color: { ...dev.color, color_value: e.target.value } })}>
-                {dev.color.color_value && !inLib && <option value={dev.color.color_value}>(unsaved)</option>}
-                {gradients.map((g) => <option key={g.id} value={g.value}>{g.name}</option>)}
-              </select>
-            )}
+            <ColorGradientPicker
+              gradient
+              value={dev.color.color_value ?? '#ffffff'}
+              defaultColors={colorDefaults}
+              swatchWidth={48}
+              swatchHeight={30}
+              title="Solid colour or gradient — click to build either"
+              onChange={(v) => set({
+                color: { ...dev.color, color_kind: v.includes('linear-gradient') ? 'gradient' : 'solid', color_value: v },
+              })}
+            />
             <Toggle label="BG" on={dev.color.bg_color != null}
               onChange={(on) => set({ color: { ...dev.color, bg_color: on ? '#000000' : null } })} />
             {dev.color.bg_color != null && (
-              <input type="color" value={dev.color.bg_color} style={{ width: 48, height: 30, padding: 1 }}
-                onChange={(e) => set({ color: { ...dev.color, bg_color: e.target.value } })} />
+              <ColorGradientPicker
+                value={dev.color.bg_color}
+                swatchWidth={48}
+                swatchHeight={30}
+                title="Background colour"
+                onChange={(v) => set({ color: { ...dev.color, bg_color: v } })}
+              />
             )}
           </>
         )}

@@ -13,6 +13,7 @@
  * sprawl. Colours, brightness and drift stay entry-level. */
 import { useMemo, useState } from 'react';
 import { BindableNumber, BindableOption, BindableToggle } from '../../components/BindingControl';
+import ColorGradientPicker from '../../components/ColorGradientPicker';
 import HelpLink from '../../help/HelpLink';
 import { uuid } from '../../lib/uid';
 import { useGradients } from '../../queries';
@@ -171,8 +172,7 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
     else set({ params: next });
   };
 
-  const isSolid = (dev.color.color_kind ?? 'solid') === 'solid';
-  const inLib = gradients.some((g) => g.value === dev.color.color_value);
+  const colorDefaults = useMemo(() => gradients.map((g) => g.value), [gradients]);
 
   return (
     <div>
@@ -275,7 +275,7 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
       ))}
 
       {/* Colour assignment — the un-bindable value on this page */}
-      <div className="param-section-title">Colours</div>
+      <div className="param-section-title">Colours <HelpLink topic="colour-gradient-picker" /></div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <select value={dev.color.mode} style={{ fontSize: 12 }}
           title="Where colours come from when the scene fires — palette variation is the colour-set system's job"
@@ -289,32 +289,30 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
         </select>
         {dev.color.mode === 'fixed' && (
           <>
-            <select value={isSolid ? 'solid' : 'gradient'} style={{ fontSize: 12 }}
-              onChange={(e) => {
-                const solid = e.target.value === 'solid';
-                set({ color: { ...dev.color, color_kind: solid ? 'solid' : 'gradient', color_value: solid ? '#ffffff' : gradients[0]?.value ?? null } });
-              }}>
-              <option value="solid">Solid</option>
-              <option value="gradient">Gradient</option>
-            </select>
-            {isSolid ? (
-              <input type="color" value={dev.color.color_value ?? '#ffffff'} style={{ width: 48, height: 30, padding: 1 }}
-                onChange={(e) => set({ color: { ...dev.color, color_value: e.target.value } })} />
-            ) : (
-              <select value={dev.color.color_value ?? ''} style={{ width: 180, fontSize: 12 }}
-                onChange={(e) => set({ color: { ...dev.color, color_value: e.target.value } })}>
-                {dev.color.color_value && !inLib && <option value={dev.color.color_value}>(unsaved)</option>}
-                {gradients.map((g) => <option key={g.id} value={g.value}>{g.name}</option>)}
-              </select>
-            )}
+            <ColorGradientPicker
+              gradient
+              value={dev.color.color_value ?? '#ffffff'}
+              defaultColors={colorDefaults}
+              swatchWidth={48}
+              swatchHeight={30}
+              title="Solid colour or gradient — click to build either"
+              onChange={(v) => set({
+                color: { ...dev.color, color_kind: v.includes('linear-gradient') ? 'gradient' : 'solid', color_value: v },
+              })}
+            />
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
               <input type="checkbox" checked={dev.color.bg_color != null}
                 onChange={(e) => set({ color: { ...dev.color, bg_color: e.target.checked ? '#000000' : null } })} />
               BG
             </label>
             {dev.color.bg_color != null && (
-              <input type="color" value={dev.color.bg_color} style={{ width: 48, height: 30, padding: 1 }}
-                onChange={(e) => set({ color: { ...dev.color, bg_color: e.target.value } })} />
+              <ColorGradientPicker
+                value={dev.color.bg_color}
+                swatchWidth={48}
+                swatchHeight={30}
+                title="Background colour"
+                onChange={(v) => set({ color: { ...dev.color, bg_color: v } })}
+              />
             )}
           </>
         )}
