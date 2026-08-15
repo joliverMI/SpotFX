@@ -42,6 +42,7 @@ SCENE_GENESIS_FILE = SPECTRA_STORAGE / "scene_genesis.json"
 # The device-preview strip's favourites + pause state (spectra/services/
 # device_preview.py) — same small-store shape as ROOM_CONTROLS_FILE.
 DEVICE_PREVIEW_FILE = SPECTRA_STORAGE / "device_preview.json"
+INTENSITY_SCALE_CACHE_FILE = SPECTRA_STORAGE / "intensity_scale_features.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).

@@ -248,6 +248,47 @@ byte-identical against spot-effects' own `web/src/builder/` modules, so
 check there first before assuming a root-side frontend module needs
 re-porting.
 
+## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
+
+`spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
+mechanism (`services/intensity_scale_service.py`, genre slider →
+`genre_to_song_scale` song-space base × a per-song bass-rank factor
+0.9–1.1, calibrated 2026-07-29 against the Admiral's own reference songs —
+Dopamine≈120%/Let It Be≈50%/Soy Peor≈100%). Own SPECTRA-side feature cache
+(`storage/spectra/intensity_scale_features.json`, never SpotFX's cache
+file — see `_isolated_intensity_scale` in `tests/conftest.py` for why every
+test repoints this). `song_scaling_factor()` is wired at RENDER choke
+points only — `trigger_engine._fire`/`_fire_transition` and
+`scene_sequencer._roll`'s fire call — never at `selection_kernel.select`'s
+scene/flare/colour-set SELECTION, whose own `genre_mult` already factors
+genre into the pick; scaling intensity there too would double-count genre.
+
+2026-08-15 correction, his words, closed (not a curve-shape question): the
+old plan (`final = measured * song_scaling_factor`) was "just a straight
+multiplication of a factor" — replaced by `combine_measured_and_scale`,
+the one seam: `final = measured_intensity * HEADROOM_RESERVE(0.6) *
+song_scaling_factor`, clamped to `[0,1]` ONLY at the very end (clamping
+the scale term early silently defeats the gate — see the constant's own
+docstring for why 0.6 is deliberate, not a fudge factor, and must survive
+any future edit). Structural fact, not yet resolved: SPECTRA has no
+manual per-song override, so `song_scaling_factor` is always ≤1.25
+(`SCALE_MAX`) — `final` can never exceed `0.6*1.25=0.75` for any song
+today; see `docs/SPECTRA_SPEC.md` §53 / OQ-6.
+
+Same-day edge-trim fix to `midsong_generator._normalized_intensities`
+(the per-song min-max renormalization generated triggers' intensity uses):
+the first/last `EDGE_TRIM_MS` (15s) no longer set the floor/ceiling (a
+cold open/fade-out was dragging the floor down so genuinely quiet MIDDLE
+passages never read as low), and those edge sections clamp to `[0,1]`
+instead of being floored. A track under ~30s (no middle survives
+trimming both ends) falls back to the pre-trim behaviour entirely for
+that song — his stated edge case, resolved not guessed.
+
+Regression tool carrying the calibration forward:
+`scripts/check_intensity_scale_reference_songs.py` (read-only, reports
+the three reference songs' current auto scale + final-at-peak against his
+targets — run against real `storage/audio_shapes`).
+
 ## SPECTRA fire-history: counts + bounded show log
 
 `spectra/services/fire_history.py` hooks the same four production choke

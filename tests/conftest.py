@@ -234,6 +234,34 @@ def _isolated_ambient_music_gate():
     _reset()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_intensity_scale(tmp_path, monkeypatch):
+    """spectra/services/intensity_scale.py (the per-song genre+bass render
+    scale) has no DI seam either — its own module-level feature cache
+    (_features) persists across tests, and its cache FILE
+    (config.INTENSITY_SCALE_CACHE_FILE) is a real write path under
+    storage/spectra/, same class of risk as fire_history above. Also
+    repoints the read-only source dirs it (via analysis_reader) reads —
+    AUDIO_SHAPES_DIR / TRAINING_PROFILES_FILE — to an empty tmp_path so a
+    test exercising a production render_intensity default never sweeps the
+    real (possibly very large) library. Autouse so no individual test
+    needs to know this exists."""
+    from spectra import config as scfg
+    from spectra.services import analysis_reader, intensity_scale
+    monkeypatch.setattr(scfg, "INTENSITY_SCALE_CACHE_FILE",
+                        tmp_path / "intensity_scale_features.json")
+    monkeypatch.setattr(scfg, "AUDIO_SHAPES_DIR", tmp_path / "audio_shapes")
+    monkeypatch.setattr(scfg, "TRAINING_PROFILES_FILE",
+                        tmp_path / "training_profiles.json")
+    intensity_scale.invalidate_cache()
+    analysis_reader._shape_index = {}
+    analysis_reader._index_built = False
+    yield
+    intensity_scale.invalidate_cache()
+    analysis_reader._shape_index = {}
+    analysis_reader._index_built = False
+
+
 @pytest.fixture()
 def ambient_env(tmp_path, monkeypatch, fresh_ledfx_client):
     """Ambient discovery against the recorded live topology: category file on

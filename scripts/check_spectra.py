@@ -584,6 +584,9 @@ seq = SceneSequencer(
     rng=Random(9),
     fire=fake_fire,
     intensity=lambda: 0.7,
+    render_intensity=lambda x: x,  # isolates selection-intensity from the
+                                    # genre+bass render scale (own coverage
+                                    # in check_triggers.py / intensity_scale)
     wheel_get=lambda: wheel_box[0],
     wheel_set=lambda d: wheel_box.__setitem__(0, d),
     list_scene_ids=lambda: {s_a.id, s_b.id},

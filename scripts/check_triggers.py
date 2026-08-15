@@ -231,7 +231,9 @@ async def fake_select_color_set(set_id):
 engine = TriggerEngine(
     list_triggers=lambda uri: song.get(uri, []),
     fire_scene=fake_fire_scene, fire_response=fake_fire_response,
-    select_color_set=fake_select_color_set)
+    select_color_set=fake_select_color_set,
+    render_intensity=lambda x: x)  # isolates routing from the genre+bass
+                                    # render scale (own coverage below)
 
 
 async def run_clock():
@@ -278,7 +280,8 @@ check([len(r) for r in out2] == [0, 0, 0],
 # a response-only song, isolated from `song`'s fire_scene actions
 song["resp"] = [_mk(400, kind="fire_response")]
 engine4 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
-                        fire_response=fake_fire_response)
+                        fire_response=fake_fire_response,
+                        render_intensity=lambda x: x)
 asyncio.run(engine4.on_track_state("resp"))
 asyncio.run(engine4.tick(0))
 asyncio.run(engine4.tick(400))
@@ -325,7 +328,8 @@ def fake_select_scene(intensity):
 
 
 engine7 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
-                        fire_scene=fake_fire_scene, select_scene=fake_select_scene)
+                        fire_scene=fake_fire_scene, select_scene=fake_select_scene,
+                        render_intensity=lambda x: x)
 asyncio.run(engine7.on_track_state("kernel"))
 fired7 = asyncio.run(engine7.tick(100))
 check(len(fired7) == 1 and select_calls == [0.42]
@@ -404,7 +408,8 @@ async def transition_fire_scene(scene_id, color_set_id, intensity):
 
 engine_t = TriggerEngine(list_triggers=lambda uri: [], fire_scene=transition_fire_scene,
                          select_scene=lambda i: "auto-picked", scene_change_mode=lambda: "transitions",
-                         transition_intensity=lambda: 0.33)
+                         transition_intensity=lambda: 0.33,
+                         render_intensity=lambda x: x)
 asyncio.run(engine_t.on_track_state("song-x"))   # first URI ever: only arms, no fire
 check(transition_fires == [], "the FIRST song ever seen only arms the transition "
                               "clock — it isn't itself a transition")
@@ -517,10 +522,12 @@ def _coordination_run(seq_enabled):
         trig_fires.append(sid)
 
     sequencer = SceneSequencer(
-        fire=seq_fire, intensity=lambda: 0.7, wheel_get=lambda: None,
+        fire=seq_fire, intensity=lambda: 0.7, render_intensity=lambda x: x,
+        wheel_get=lambda: None,
         wheel_set=lambda d: None, list_scene_ids=lambda: {kernel_scene.id},
         eligible_sets=lambda sid: {})
-    trig = TriggerEngine(list_triggers=lambda uri: [], fire_scene=trig_fire)
+    trig = TriggerEngine(list_triggers=lambda uri: [], fire_scene=trig_fire,
+                         render_intensity=lambda x: x)
 
     async def run():
         # arm both (first URI ever seen), then one genuine transition —
@@ -622,6 +629,31 @@ check(len(spectra_engine.responses.surges) == before_update_gated,
       "same gate as fire_response_event, same reason (an authored "
       "trigger's own action)")
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
+
+# render-intensity wiring (2026-08-15 headroom-reserve correction): the
+# production _default_render_intensity multiplies a trigger's raw intensity
+# by the CURRENT SONG's genre+bass scale via intensity_scale.py's seam —
+# SELECTION (the kernel proof above) deliberately stays on the raw value;
+# only the FIRE-time value that reaches a choke point is scaled.
+from spectra.services import intensity_scale
+
+# Sets the bridge's track state directly (not handle_message) so this stays
+# a narrow wiring proof — routing through handle_message would also fire
+# _on_track_uri's auto-generate/sequencer/ambient side effects, unrelated
+# to what this check is proving.
+spectra_engine.bridge._track = {
+    "spotify_uri": "spotify:track:render-scale-wiring", "genres": []}
+expected_factor = intensity_scale.song_scaling_factor(
+    "spotify:track:render-scale-wiring", [])
+expected_final = max(0.0, min(1.0, 1.0 * intensity_scale.HEADROOM_RESERVE * expected_factor))
+check(prod_engine._default_render_intensity(1.0) == expected_final,
+      "the production render_intensity default reaches the real bridge + "
+      "intensity_scale.combine_measured_and_scale — a raw 1.0 lands at "
+      "measured * HEADROOM_RESERVE * song_scaling_factor, not raw 1.0")
+check(expected_final < 1.0,
+      "sanity: the headroom reserve alone (0.6x) means even a raw-1.0 "
+      "moment on this song can never reach a bare passthrough")
+spectra_engine.bridge._track = None   # restore for whatever runs next
 
 # ═══ 6. mid-song generation (front 3) ════════════════════════════════════
 

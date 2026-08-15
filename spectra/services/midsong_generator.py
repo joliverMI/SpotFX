@@ -19,6 +19,27 @@ scripts/backfill_trigger_intensity.py established for the legacy world
 (CLAUDE.md: raw energy_rms is max-normalized only, no floor subtraction,
 so the quietest section of every song lands near 0.33, never near 0).
 
+EDGE TRIM (Admiral, 2026-08-15): a cold open or fade-out drags the min-max
+floor down, so genuinely quiet MIDDLE passages never read as low — his fix,
+his words: "trim the first 15 seconds and last 15 seconds of a track when
+we calculate the normalization", with those trimmed portions "set to zero
+because they will probably be negative after the normalization." A section
+is EDGE (excluded from the lo/hi that sets the floor) when its start falls
+in the track's first EDGE_TRIM_MS or its end falls in the last EDGE_TRIM_MS
+— the finest grain this data model offers (one energy_rms per section, no
+sub-section timeline). An edge section's own intensity is then the SAME
+stretch as a middle section but CLAMPED to [0, 1] with no floor added
+(max(0.0, min(1.0, (v-lo)/span))) rather than raised to INTENSITY_FLOOR —
+"probably negative" becomes exactly 0 rather than a floored 0.05, and a
+genuinely loud edge section (an album that opens hot) isn't forced to 0
+either. UNSTATED EDGE CASE, resolved and documented rather than guessed:
+a track under ~2x EDGE_TRIM_MS has no middle section left after trimming
+both ends. Rather than degrade to an all-zero or all-floored result, this
+falls back to the PRE-TRIM behaviour entirely for that song — every
+section counts toward lo/hi and none is force-clamped — the same "can't
+apply gracefully -> keep the working baseline" pattern the rest of this
+codebase uses (e.g. the bridge's stated degradations).
+
 Scene choice: EVERY generated trigger's fire_scene action carries
 scene_id=None — the pick is left to spectra.services.trigger_engine's
 kernel routing AT FIRE TIME (curve × genre × affinity, the same selection
@@ -57,11 +78,15 @@ from spectra.models.trigger import FireSceneAction, SpectraTrigger
 from spectra.services import analysis_reader, trigger_store
 
 INTENSITY_FLOOR = 0.05
+EDGE_TRIM_MS = 15_000
 
 
 def _normalized_intensities(sections: list[dict]) -> list[float]:
     """Per-song min-max stretch of energy_rms with a floor — mirrors
-    scripts/backfill_trigger_intensity.py's default `minmax` curve."""
+    scripts/backfill_trigger_intensity.py's default `minmax` curve, plus
+    the 2026-08-15 edge trim (see the module docstring's EDGE TRIM
+    section): the first/last EDGE_TRIM_MS don't set the floor/ceiling, and
+    their own values clamp to [0, 1] rather than being floored."""
     raw: list[float] = []
     for sec in sections:
         try:
@@ -70,12 +95,31 @@ def _normalized_intensities(sections: list[dict]) -> list[float]:
             raw.append(0.0)
     if not raw:
         return []
-    lo, hi = min(raw), max(raw)
+    duration_ms = max((int(sec.get("end_ms", 0)) for sec in sections), default=0)
+    is_edge = [
+        int(sec.get("start_ms", 0)) < EDGE_TRIM_MS
+        or int(sec.get("end_ms", 0)) > duration_ms - EDGE_TRIM_MS
+        for sec in sections
+    ]
+    middle = [v for v, edge in zip(raw, is_edge) if not edge]
+    if not middle:
+        # No middle left (a short track) — fall back to the pre-trim
+        # behaviour for this song rather than degrade: every section
+        # counts toward lo/hi, none is edge-clamped.
+        middle = raw
+        is_edge = [False] * len(raw)
+    lo, hi = min(middle), max(middle)
     span = hi - lo
     if span <= 1e-9:
         return [0.5 for _ in raw]
-    return [round(INTENSITY_FLOOR + ((v - lo) / span) * (1.0 - INTENSITY_FLOOR), 3)
-            for v in raw]
+    out = []
+    for v, edge in zip(raw, is_edge):
+        stretched = (v - lo) / span
+        if edge:
+            out.append(round(max(0.0, min(1.0, stretched)), 3))
+        else:
+            out.append(round(INTENSITY_FLOOR + stretched * (1.0 - INTENSITY_FLOOR), 3))
+    return out
 
 
 def candidate_moments(uri: str) -> list[tuple[int, float, str]]:

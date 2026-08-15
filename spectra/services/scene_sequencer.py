@@ -22,6 +22,10 @@ hard it builds; drift (S2) softens that without touching the clock.
 
 Fires resolve bindings at the moment's intensity and go through
 scene_compiler.fire_scene(dry_run=False) — scene + colour set in ONE compile.
+That fire-time intensity is the RAW kernel-selection value scaled by the
+current song's genre+bass factor (spectra/services/intensity_scale.py,
+_default_render_intensity) — SELECTION (kernel.select/select_color_set,
+above) stays on the raw value so genre isn't double-counted there.
 
 Executable spec: scripts/check_spectra.py (fake clock, injected fire — no
 live LedFX, no audio).
@@ -121,6 +125,7 @@ class SceneSequencer:
         rng: Random | None = None,
         fire: Callable[..., Awaitable[Any]] | None = None,
         intensity: Callable[[], float] | None = None,
+        render_intensity: Callable[[float], float] | None = None,
         genre_bucket: Callable[[], Optional[str]] | None = None,
         deferral_fn: Callable[[], Optional[str]] | None = None,
         trigger_scene_id: Callable[[], Optional[str]] | None = None,
@@ -135,6 +140,7 @@ class SceneSequencer:
         self._rng = rng or Random()
         self._fire = fire or self._default_fire
         self._intensity = intensity or self._default_intensity
+        self._render_intensity = render_intensity or self._default_render_intensity
         self._genre_bucket = genre_bucket or self._default_genre_bucket
         self._deferral = deferral_fn or self._default_deferral
         self._trigger_scene_id = trigger_scene_id or self._default_trigger_scene_id
@@ -268,9 +274,14 @@ class SceneSequencer:
         color = self._roll_color_set(config, curves, pick.picked_id,
                                      intensity, genre_bucket)
         try:
+            # SELECTION (kernel.select/select_color_set above) stayed on the
+            # RAW intensity — genre_mult already factors genre into the
+            # pick. The FIRE itself gets the current song's genre+bass
+            # render scale on top (intensity_scale.py), same split trigger_
+            # engine.py's own _fire/_fire_transition make.
             await self._fire(pick.picked_id,
                              color["fire_set_id"] if color else None,
-                             intensity)
+                             self._render_intensity(intensity))
         except Exception:
             logger.exception("sequencer: firing scene %s failed", pick.picked_id)
             self._record_moment(source, "fire_failed")
@@ -402,6 +413,14 @@ class SceneSequencer:
         from spectra.services.engine import bridge
         value = bridge.intensity()
         return value if value is not None else 0.5
+
+    def _default_render_intensity(self, raw: float) -> float:
+        # See trigger_engine._default_render_intensity's docstring — same
+        # seam, same rationale (spectra/services/intensity_scale.py).
+        from spectra.services import intensity_scale
+        from spectra.services.engine import bridge
+        return intensity_scale.combine_measured_and_scale(
+            raw, bridge.song_scaling_factor())
 
     def _default_genre_bucket(self) -> Optional[str]:
         from spectra.services.engine import bridge
