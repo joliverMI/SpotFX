@@ -371,10 +371,24 @@ retire-not-delete). Built:
   bridge REST. No device-category setting (every live Hue device IS the
   target) and no legacy "wake scene" on disable — a SPECTRA-owned Hue
   virtual never goes inactive while frozen, so unfreezing alone lets the
-  room's already-running scene pick the stream back up; a brief REST-only
-  brightness fade runs first for a soft handoff. State-only (status "dark")
-  when SPECTRA doesn't own the live stack. Ambient/Dinner-Party as a full
-  room-MODES build is still separate. Spec: the room-control section of
+  room's already-running scene pick the stream back up. Release is a
+  TWO-PHASE bridge-side ramp, still frozen for both: a brief dim fade, then
+  a second ramp toward whatever the live effect is ACTUALLY rendering right
+  now — read from the literal live pixel buffer
+  (`Device.assemble_frame()`, the frame `HueDevice.flush()` already
+  receives and drops while frozen), not a captured scene config — before
+  finally unfreezing. This is SPECTRA's analogue of legacy's own two-phase
+  release (`services/ambient_mode.py`: REST fade toward a wake scene, then
+  an LedFX-side effect-config tween back to a captured pre-ambient look);
+  the two aren't reproducible 1:1 because legacy's driving virtual actually
+  goes dark and needs a wake scene fired, while SPECTRA's never stops
+  rendering, so there's no separate wake config to capture and tween away
+  from — see `spectra/services/ambient.py`'s module docstring for the full
+  reasoning (fixed post-#56, PR fm/spectra-ambient-release-fidelity, after
+  the shipped single-fade version read as an abrupt cut against the legacy
+  behaviour it was compared to). State-only (status "dark") when SPECTRA
+  doesn't own the live stack. Ambient/Dinner-Party as a full room-MODES
+  build is still separate. Spec: the room-control section of
   `scripts/check_spectra.py` + `tests/test_room_controls.py` +
   `tests/test_ambient.py`.
 

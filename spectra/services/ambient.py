@@ -1,6 +1,6 @@
 """SPECTRA's own Ambient Mode — the behaviour behind the room bar's Ambient
 checkbox (spectra.services.room_controls.RoomControlState.ambient_enabled /
-ambient_color), which until now only recorded the switch.
+ambient_color).
 
 The legacy world (services/ambient_mode.py) is the spec for what "ambient"
 MEANS: a calm takeover of the Hue devices in the room — freeze each Hue
@@ -26,10 +26,39 @@ LedFX HTTP API:
     device's OWN flush(); the virtual keeps rendering the room's live scene
     the whole time (fx/devices/hue.py's own docstring) — so unfreezing
     alone is enough for the stream to pick back up wherever the scene
-    already is. A short REST-only brightness fade still runs first (no
-    colour target, since there's no "next scene" to fade toward) purely so
-    the handoff isn't a hard cut from white to whatever the effect is
-    currently outputting.
+    already is.
+
+Release (ambient OFF) is a TWO-PHASE bridge-side ramp, matching legacy's
+own two-phase off-sequence (fade-toward-landing-colour, then ease toward
+the real show) rather than the single fixed-brightness fade this module
+shipped with in PR #56 — that shipped version faded to 35% and unfroze
+immediately, an abrupt cut the Admiral flagged after living with it
+("the spot effects version of transferring from ambient mode to releasing
+was way better", 2026-08-14). Legacy's two phases are a REST fade toward
+the wake scene's colour (services.ambient_mode._wake_fade_color, over
+settings.ambient_transition_s) and, after the stream reconnects, an
+LedFX-side effect-config tween from the wake scene's look back to a
+CAPTURED pre-ambient look (settings.ambient_catchup_s) — that second phase
+has no direct analogue here: SPECTRA's driving virtual never goes dark or
+gets replaced by a wake scene, so there is no separate "wake config" to
+capture-then-tween-away-from the way legacy's LedFX-side tween needs. What
+IS reproducible, and is the same qualitative fix, is easing the HELD BULB
+toward whatever the room's live effect is ACTUALLY rendering right now
+before handing back control — sourced from the literal live pixel buffer
+(Device.assemble_frame(), the exact per-flush frame HueDevice.flush()
+already receives and drops while frozen — see fx/devices/hue.py) rather
+than a captured scene config, since that buffer is a truer target than any
+snapshot legacy could take (SPECTRA's render loop never stopped). Phase 1
+(dim fade, AMBIENT_TRANSITION_MS) and phase 2 (catch-up ramp toward the
+live look, AMBIENT_CATCHUP_MS) both run over Hue's own bridge-side
+`dynamics.duration`, still frozen — the same REST-ramp primitive phase 1
+already used, just re-aimed at a live-derived target instead of a fixed
+dim. Only once that lands does set_frozen(False) hand back to the stream,
+so the jump the stream then picks up from is small. Numbers
+(AMBIENT_TRANSITION_MS=1500, AMBIENT_OFF_FADE_PCT=35, AMBIENT_CATCHUP_MS=
+8000) are legacy's own shipped defaults (ambient_transition_s=1.5,
+ambient_fade_brightness=35, ambient_catchup_s=8.0 in config.py) — not
+re-guessed, matched.
 
 Light-state REST calls go over a direct httpx.AsyncClient (same pattern as
 spectra/services/ledfx_release.py), not the live HueDevice's own
@@ -57,12 +86,13 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Legacy defaults (services/ambient_mode.py's settings.ambient_transition_s /
-# ambient_fade_brightness) — internal timing, not a room-control the Admiral
-# tunes per song, so these stay constants rather than growing the settings
-# surface.
+# ambient_fade_brightness / ambient_catchup_s) — internal timing, not a
+# room-control the Admiral tunes per song, so these stay constants rather
+# than growing the settings surface.
 AMBIENT_BRIGHTNESS_PCT = 100
 AMBIENT_TRANSITION_MS = 1500
 AMBIENT_OFF_FADE_PCT = 35
+AMBIENT_CATCHUP_MS = 8000
 
 _lock: Optional[asyncio.Lock] = None
 # {(ip_address, entertainment_id): [light resource id, ...]}
@@ -103,11 +133,12 @@ def _hex_to_xy(hex_color: str) -> tuple[float, float]:
     return X / total, Y / total
 
 
-def _light_payload(color_hex: str, ramp_ms: Optional[int] = None) -> dict:
+def _light_payload(color_hex: str, ramp_ms: Optional[int] = None,
+                   brightness_pct: int = AMBIENT_BRIGHTNESS_PCT) -> dict:
     x, y = _hex_to_xy(color_hex)
     body: dict = {
         "on": {"on": True},
-        "dimming": {"brightness": float(AMBIENT_BRIGHTNESS_PCT)},
+        "dimming": {"brightness": float(max(1, min(100, brightness_pct)))},
         "color": {"xy": {"x": round(x, 4), "y": round(y, 4)}},
     }
     if ramp_ms and ramp_ms > 0:
@@ -211,6 +242,36 @@ def _hue_devices(host: Any) -> dict[str, Any]:
             if getattr(host.devices.get(did), "type", None) == "hue"}
 
 
+def _live_look(dev: Any) -> Optional[tuple[str, int]]:
+    """Best-effort (hex colour, brightness %) snapshot of what this
+    device's driving virtual is CURRENTLY rendering, for the release
+    catch-up ramp (see module docstring). assemble_frame() is the exact
+    per-flush frame HueDevice.flush() receives and drops while frozen
+    (fx/devices/hue.py) — the render loop never stopped computing it, so
+    this is a live read, not a stale capture. Mean RGB across the frame
+    gives both a representative hue (for the bridge's xy chromaticity) and
+    a brightness proxy (the max channel, standard HSV "value"). None when
+    there's nothing to read (device not yet activated, or the read itself
+    failed) — the caller skips the catch-up ramp for that device rather
+    than aiming it at a fabricated colour."""
+    try:
+        frame = dev.assemble_frame()
+    except Exception:
+        logger.exception("Ambient catch-up: could not read the live frame for %s",
+                         getattr(dev, "name", dev))
+        return None
+    if frame is None or len(frame) == 0:
+        return None
+    n = len(frame)
+    r = sum(px[0] for px in frame) / n
+    g = sum(px[1] for px in frame) / n
+    b = sum(px[2] for px in frame) / n
+    brightness_pct = max(1, min(100, round(max(r, g, b) / 255 * 100)))
+    color_hex = "#{:02x}{:02x}{:02x}".format(
+        max(0, min(255, round(r))), max(0, min(255, round(g))), max(0, min(255, round(b))))
+    return color_hex, brightness_pct
+
+
 # ── public entry point ──────────────────────────────────────────────────────
 
 async def reconcile(enabled: bool, color: Optional[str]) -> dict:
@@ -267,6 +328,27 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
             logger.exception("Ambient: off-fade failed for %s", did)
     if AMBIENT_TRANSITION_MS > 0:
         await asyncio.sleep(AMBIENT_TRANSITION_MS / 1000)
+
+    # Catch-up: ease the still-frozen bulbs toward whatever the room's live
+    # effect is actually showing right now, over the SAME bridge-side ramp
+    # phase 1 used — before handing back to the stream, not after (module
+    # docstring). Best-effort per device; a device with nothing to read
+    # (not yet activated) just releases straight from the phase-1 fade.
+    caught_up = False
+    for did, dev in sorted(hue_devices.items()):
+        look = _live_look(dev)
+        if look is None:
+            continue
+        color_hex, brightness_pct = look
+        try:
+            await _apply_hue(dev, _light_payload(
+                color_hex, AMBIENT_CATCHUP_MS, brightness_pct=brightness_pct))
+            caught_up = True
+        except Exception:
+            logger.exception("Ambient: catch-up ramp failed for %s", did)
+    if caught_up and AMBIENT_CATCHUP_MS > 0:
+        await asyncio.sleep(AMBIENT_CATCHUP_MS / 1000)
+
     for did, dev in sorted(hue_devices.items()):
         try:
             await dev.set_frozen(False)  # re-engages the stream; the room's
@@ -278,5 +360,5 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
         logger.error("Ambient: OFF requested but every Hue device failed to "
                      "release — the room may still be held on the ambient colour")
         return {"status": "failed", "devices": []}
-    logger.info("Ambient OFF: %s released", touched)
+    logger.info("Ambient OFF: %s released (caught up: %s)", touched, caught_up)
     return {"status": "off", "devices": touched}
