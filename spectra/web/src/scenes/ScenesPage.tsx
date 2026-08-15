@@ -9,6 +9,7 @@
  * toolbar's intensity slider drives Test Fire (dry-run compile — shows
  * resolved bindings + writes) and the owner's real Fire button. */
 import { useEffect, useMemo, useState } from 'react';
+import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
@@ -216,6 +217,7 @@ export default function ScenesPage() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '250px 1fr',
                   gap: isPhone ? 10 : 16, alignItems: 'start' }}>
+      <SonicChatPopover />
       <SequencerStatusStrip scenes={scenes} />
       <EngineStatusStrip />
 

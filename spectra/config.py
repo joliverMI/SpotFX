@@ -27,6 +27,10 @@ FIRE_HISTORY_FILE = SPECTRA_STORAGE / "fire_history.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
 FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"
 SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"
+# Sonic's scene/flare change log (spectra/services/scene_console.py) — kept
+# separate from SETTINGS_LOG_FILE so the two domains' audit trails never mix,
+# matching scene_console.py never importing settings_console.py.
+SCENE_AGENT_LOG_FILE = SPECTRA_STORAGE / "scene_agent_log.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).

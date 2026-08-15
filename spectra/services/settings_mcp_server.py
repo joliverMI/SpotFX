@@ -1,12 +1,16 @@
-"""The settings-console's MCP TOOL SURFACE for the "cli" (subscription)
-settings-agent backend (spectra/services/settings_agent_cli.py) -- a
-stdio MCP server exposing EXACTLY get_settings/set_setting, dispatching
-to settings_agent._dispatch(), the SAME exhaustive two-branch mapping the
-Anthropic-API backend's tool loop already uses (settings_agent.py's own
-docstring: "There is no third branch"). This file adds no authority of
-its own -- it is a wire adapter from MCP's stdio protocol onto that one,
-already-proven dispatch function, so a CLI-driven agent and an
-API-driven agent can never diverge in what either is allowed to do.
+"""Sonic's MCP TOOL SURFACE for the "cli" (subscription) settings-agent
+backend (spectra/services/settings_agent_cli.py) -- a stdio MCP server
+exposing EXACTLY the operations declared in settings_agent.ALL_OPERATIONS
+(settings_console.OPERATIONS + scene_console.OPERATIONS + the
+list_operations meta-tool -- widened 2026-08-15 to cover Sonic's scene/
+flare authority alongside the original five settings), dispatching every
+one of them to settings_agent._dispatch(), the SAME exhaustive
+name -> operation lookup the Anthropic-API backend's tool loop already
+uses (settings_agent.py's own docstring: "There is no third source of
+tool names"). This file adds no authority of its own -- it is a wire
+adapter from MCP's stdio protocol onto that one, already-proven dispatch
+function, so a CLI-driven agent and an API-driven agent can never diverge
+in what either is allowed to do.
 
 Spawned as a SUBPROCESS by `claude -p` itself (see settings_agent_cli.py's
 _mcp_config_json(), which names this module by its `python -m` path in
@@ -39,24 +43,41 @@ hole `_workdir()` guards) -- a completely different mechanism from this
 file's own sys.path, which affects nothing outside this one Python
 process's own import resolution.
 
-`set_setting`'s `key` parameter is typed as a Literal built from
-settings_console.SETTINGS_REGISTRY's own keys at import time, not
-re-typed by hand -- the same enum constraint settings_agent.TOOLS
-declares for the Anthropic-API path (also read from SETTINGS_REGISTRY),
-kept in sync automatically because both read the one registry rather
-than each other. The enum is defense-in-depth only: settings_agent.
-_dispatch()/settings_console.apply_change() re-validate the key/value
-server-side regardless of what any schema advertised, exactly as they do
-for the API backend -- see data/spectra-console-subscription-backend/
-report.md for the live re-proof (out-of-range, unknown-key, and
-malformed-type all rejected through this exact path, with a JSON tool
-schema that deliberately omitted the enum, to prove the mechanism -- not
-client-side schema policing -- is what refuses)."""
+Every tool function below is a thin, HAND-WRITTEN wrapper -- one per
+settings_agent.ALL_OPERATIONS entry -- because the `mcp` package's
+add_tool() builds its JSON schema by introspecting a real Python function
+signature (no programmatic "register from a dict" path), so the dynamic,
+data-driven declaration sonic_ops.SonicOperation gives the API backend
+can't be replayed here without synthesizing function objects at runtime --
+a fragility not worth taking on for a backend that is itself dark, default
+OFF, and not yet authorised against his real account (see settings_agent_
+cli.py's module docstring). `test_settings_mcp_server_starts_from_a_clean_
+cwd` (tests/test_settings_agent_cli.py) asserts this file's registered
+tool NAMES equal set(settings_agent.ALL_OPERATIONS) exactly -- forgetting
+to add a wrapper here fails that test (and, in production, fails
+_verify_tool_manifest()'s live manifest check, refusing the whole turn
+rather than silently under-exposing a capability).
+
+Every `key`/`type`/`jump` parameter below is typed as a Literal built from
+the real registry (settings_console.SETTINGS_REGISTRY /
+scene_console.SCENE_SETTINGS_REGISTRY) or the real pydantic model
+(FlareKind) at import time, not re-typed by hand -- the same enum
+constraint the Anthropic-API path's JSON schemas declare (also read from
+those same registries), kept in sync automatically because both read the
+one source rather than each other. The enum is defense-in-depth only:
+settings_agent._dispatch() / settings_console.apply_change() /
+scene_console's apply_* functions re-validate every key/value server-side
+regardless of what any schema advertised, exactly as they do for the API
+backend -- see data/spectra-console-subscription-backend/report.md for
+the live re-proof (out-of-range, unknown-key, and malformed-type all
+rejected through this exact path, with a JSON tool schema that
+deliberately omitted the enum, to prove the mechanism -- not client-side
+schema policing -- is what refuses)."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 # Must run before the `spectra.services` import below -- see module
 # docstring's "CWD-INDEPENDENT ON PURPOSE" section. This file lives at
@@ -68,25 +89,96 @@ if str(_REPO_ROOT) not in sys.path:
 
 from mcp.server import MCPServer  # noqa: E402
 
-from spectra.services import settings_agent, settings_console  # noqa: E402
+from spectra.services import scene_console, settings_agent, settings_console  # noqa: E402
 
 _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
+_SceneKeyEnum = Literal[tuple(sorted(scene_console.SCENE_SETTINGS_REGISTRY))]
+_FlareTypeEnum = Literal["drift_jump", "momentary", "permanent"]
+_JumpEnum = Literal["color_set", "dice"]
 
 mcp = MCPServer("settings-console")
+
+
+async def _call(name: str, **kwargs: Any) -> dict:
+    return await settings_agent._dispatch(name, kwargs)
+
+
+@mcp.tool()
+async def list_operations(domain: Optional[str] = None, name: Optional[str] = None) -> dict:
+    """Discover what Sonic can currently do -- every declared operation
+    across both domains (settings, scene), or full detail for one named
+    operation. Call first if unsure what's available or how to call it."""
+    return await _call("list_operations", domain=domain, name=name)
 
 
 @mcp.tool()
 async def get_settings() -> dict:
     """Read every settings-console setting's current value, type, unit, and legal range/choices."""
-    return await settings_agent._dispatch("get_settings", {})
+    return await _call("get_settings")
 
 
 @mcp.tool()
 async def set_setting(key: _KeyEnum, value: Any) -> dict:
-    """Change ONE declared setting. The server validates the key and value
-    against its declared range/choices server-side and rejects anything
-    outside them -- this is the only way this agent can change anything."""
-    return await settings_agent._dispatch("set_setting", {"key": key, "value": value})
+    """Change ONE declared room-wide setting. The server validates the key
+    and value against its declared range/choices server-side and rejects
+    anything outside them -- this is the only way this agent can change
+    anything."""
+    return await _call("set_setting", key=key, value=value)
+
+
+@mcp.tool()
+async def list_scenes() -> dict:
+    """List every scene's id, name, and labels -- never the full scene."""
+    return await _call("list_scenes")
+
+
+@mcp.tool()
+async def get_scene_settings(scene_id: str) -> dict:
+    """Read one scene's settable settings with their current values and legal ranges."""
+    return await _call("get_scene_settings", scene_id=scene_id)
+
+
+@mcp.tool()
+async def list_flare_kinds(scene_id: str) -> dict:
+    """List a scene's named flare kinds (summary only, not full parameter detail)."""
+    return await _call("list_flare_kinds", scene_id=scene_id)
+
+
+@mcp.tool()
+async def get_flare_kind(scene_id: str, name: str) -> dict:
+    """Read one named flare kind's full definition on one scene."""
+    return await _call("get_flare_kind", scene_id=scene_id, name=name)
+
+
+@mcp.tool()
+async def create_scene(name: str, labels: Optional[list[str]] = None) -> dict:
+    """Create a new, empty scene shell with a name -- always a fresh id,
+    can never overwrite an existing scene."""
+    return await _call("create_scene", name=name, labels=labels)
+
+
+@mcp.tool()
+async def set_scene_setting(scene_id: str, key: _SceneKeyEnum, value: Any) -> dict:
+    """Change ONE declared setting on ONE existing scene. The server
+    re-validates the key and value against that scene's own declared
+    range and rejects anything outside them."""
+    return await _call("set_scene_setting", scene_id=scene_id, key=key, value=value)
+
+
+@mcp.tool()
+async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa: A002
+                         jump: Optional[_JumpEnum] = None,
+                         params: Optional[dict] = None, gain: float = 1.0,
+                         hold_ms: Optional[int] = None) -> dict:
+    """Create or update one NAMED flare kind on one scene, matched by name."""
+    return await _call("set_flare_kind", scene_id=scene_id, name=name, type=type,
+                       jump=jump, params=params, gain=gain, hold_ms=hold_ms)
+
+
+@mcp.tool()
+async def remove_flare_kind(scene_id: str, name: str) -> dict:
+    """Remove one named flare kind from one scene. Refused if still referenced."""
+    return await _call("remove_flare_kind", scene_id=scene_id, name=name)
 
 
 if __name__ == "__main__":

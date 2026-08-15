@@ -65,11 +65,16 @@ this:
      _mcp_config_json(), never a file on disk a deploy step could edit
      out of sync with this module) names exactly ONE MCP server:
      settings_mcp_server.py, which itself only wraps settings_agent.
-     _dispatch() -- the same exhaustive two-branch mapping the API
-     backend uses.
-  4. --allowedTools names exactly those two qualified tool names, so even
-     an unapproved call to a tool that DID somehow exist would be denied,
-     not silently allowed by a permissive default.
+     _dispatch() -- the same exhaustive tool-name -> ALL_OPERATIONS lookup
+     the API backend uses (settings_agent.py: settings_console.OPERATIONS
+     + scene_console.OPERATIONS + the list_operations meta-tool, merged
+     into ONE dict -- widened 2026-08-15 to cover Sonic's scene/flare
+     authority alongside the original five settings, TOOL_NAMES below is
+     derived from that dict so it grows automatically with it).
+  4. --allowedTools names exactly those qualified tool names (one per
+     ALL_OPERATIONS entry), so even an unapproved call to a tool that DID
+     somehow exist would be denied, not silently allowed by a permissive
+     default.
   5. _verify_tool_manifest() below re-checks, on every single call, that
      the live system/init event's `tools` field is byte-identical to
      what's expected -- if a hook, a stray MCP server, or a future CLI
@@ -250,9 +255,14 @@ def _verify_tool_manifest(events: list[dict]) -> None:
 def _parse_transcript(events: list[dict]) -> dict:
     """Structured-only parse -- see module docstring's "WHY THE MODEL'S
     OWN PROSE IS NEVER TRUSTED" section. `changes` comes exclusively from
-    tool_result payloads for the set_setting tool_use blocks; `reply` is
-    the terminal result event's own text, shown to the user as
-    conversation, never consulted to decide what changed."""
+    tool_result payloads whose own `status` field reads "applied" -- a
+    property of the RESULT SHAPE (every write operation across both
+    domains returns {"status": ..., ...}; every read operation doesn't),
+    not a hardcoded tool name, so this generalizes to Sonic's whole
+    cross-domain operation set (settings_agent.ALL_OPERATIONS) without a
+    per-operation special case here. `reply` is the terminal result
+    event's own text, shown to the user as conversation, never consulted
+    to decide what changed."""
     _verify_tool_manifest(events)
 
     tool_use_names: dict[str, str] = {}
@@ -268,8 +278,7 @@ def _parse_transcript(events: list[dict]) -> dict:
             if block.get("type") == "tool_use":
                 tool_use_names[block.get("id")] = block.get("name", "")
             elif block.get("type") == "tool_result":
-                name = tool_use_names.get(block.get("tool_use_id"), "")
-                if not name.endswith("__set_setting"):
+                if block.get("tool_use_id") not in tool_use_names:
                     continue
                 raw = block.get("content")
                 text = raw[0]["text"] if isinstance(raw, list) and raw and isinstance(raw[0], dict) else raw

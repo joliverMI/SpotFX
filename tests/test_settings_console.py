@@ -184,10 +184,16 @@ def test_undo_with_empty_log_rejected():
 
 # ═══ 4. the tool-dispatch boundary itself ════════════════════════════════
 
-def test_dispatch_recognizes_exactly_two_tools():
+def test_dispatch_recognizes_exactly_the_declared_settings_tools():
+    """Sonic's tool set is now wider than settings alone (see
+    tests/test_scene_console.py for the full merged-boundary proof, which
+    is where the exhaustive full-set assertion now lives) — this file only
+    proves the settings HALF is still exactly get_settings/set_setting."""
     from spectra.services import settings_agent as sa
+    from spectra.services import settings_console as sc
 
-    assert {t["name"] for t in sa.TOOLS} == {"get_settings", "set_setting"}
+    assert set(sc.OPERATIONS) == {"get_settings", "set_setting"}
+    assert {"get_settings", "set_setting"} <= {t["name"] for t in sa.TOOLS}
 
 
 def test_dispatch_get_settings_is_read_only():

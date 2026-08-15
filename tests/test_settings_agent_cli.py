@@ -14,22 +14,27 @@ this file:
      it.
   3. The subprocess argv never carries --bare (it can't read the OAuth
      token) and always carries --strict-mcp-config / --tools "" /
-     --allowedTools naming exactly the two settings tools.
+     --allowedTools naming exactly settings_agent.TOOL_NAMES (originally
+     the two settings tools; widened 2026-08-15 to Sonic's full cross-
+     domain operation set, see settings_agent.py / scene_console.py).
   4. The subprocess environment strips ANTHROPIC_API_KEY/AUTH_TOKEN and
      points CLAUDE_CONFIG_DIR at an isolated directory -- an ambient
      interactive `/login` session on the host can never be silently used
      instead of the explicitly-configured token.
   5. _parse_transcript() reads ONLY structured tool_use/tool_result
      blocks and the system/init event's own `tools` field -- never the
-     model's prose -- against four REAL, live-captured transcripts
-     (tests/fixtures/cli_transcript_*.json, captured while building this
-     module and re-proving spectra-console-subscription-backend's report,
-     signatures elided) covering: a valid change applying, an out-of-
-     range value being rejected, a live tool-manifest mismatch (the MCP
-     server failed to load) being refused before anything is trusted, and
-     the model fabricating tool-call output in plain prose while the real
-     manifest held only the two real tools -- proving `changes` is never
-     built from anything but a genuine tool_result payload.
+     model's prose. Section 5 below proves this against four REAL,
+     live-captured transcripts (tests/fixtures/cli_transcript_*.json,
+     captured while building this module and re-proving spectra-console-
+     subscription-backend's report, signatures elided) — pinned to the
+     ORIGINAL two-tool surface, they now correctly REFUSE outright as a
+     stale manifest once the tool surface widened (the regression proof
+     for the widening itself). Section 5b re-proves the same four
+     properties (applied / rejected / hallucinated-with-a-correct-
+     manifest / unavailable-tool-fabrication) against the CURRENT, wider
+     surface using hand-built `cli_transcript_synthetic_*.json` fixtures,
+     explicitly labelled synthetic — no live CLAUDE_CODE_OAUTH_TOKEN
+     exists in this sandbox to capture new real ones tonight.
   6. test_settings_mcp_server_starts_from_a_clean_cwd spawns the EXACT
      command _mcp_config_json() builds, for real, with its cwd pointed at
      an empty tmp_path standing in for the dedicated clean workdir, and
@@ -231,30 +236,45 @@ def test_settings_mcp_server_starts_from_a_clean_cwd(tmp_path):
                 await asyncio.wait_for(session.initialize(), timeout=15)
                 return await session.list_tools()
 
+    from spectra.services import settings_agent as sa
+
     tools = _run(_list_tools())
-    assert {t.name for t in tools.tools} == {"get_settings", "set_setting"}
+    assert {t.name for t in tools.tools} == set(sa.ALL_OPERATIONS), \
+        ("this MCP server must expose exactly one hand-written wrapper per "
+         "settings_agent.ALL_OPERATIONS entry -- see settings_mcp_server.py's "
+         "module docstring for why that's hand-maintained instead of generated")
 
 
-# ═══ 5. transcript parsing: structured data only, never the model's prose ═
+# ═══ 5. transcript parsing: structured data only, never the model's prose.
+#
+# The Admiral's scene/flare widening (2026-08-15) grew settings_agent.
+# ALL_OPERATIONS (and therefore TOOL_NAMES) from {get_settings, set_setting}
+# to eleven names. The four `cli_transcript_*.json` fixtures below (NOT the
+# `_synthetic_` ones further down) are REAL, historical captures pinned to
+# the tool surface as it existed when this module was FIRST built -- their
+# `system/init.tools` field is exactly the old two-name set, unchanged
+# because it's historical evidence, not something to edit to keep old
+# fixtures passing. Re-running them against the CURRENT, wider TOOL_NAMES
+# therefore now correctly REFUSES every one of them (a stale/narrower-than-
+# expected manifest, the exact failure mode #5 in the module docstring
+# exists to catch) -- this is the widening's own regression proof: the
+# manifest check did not get loosened to keep old fixtures superficially
+# green. Behavioral coverage for the CURRENT surface (a real applied
+# change, a real rejection, a correct manifest with hallucinated prose, an
+# unavailable-tool fabrication) is re-proven below in section 5b against
+# hand-built `_synthetic_` fixtures, since no live CLAUDE_CODE_OAUTH_TOKEN
+# exists tonight to capture new real ones (his room is asleep) -- those
+# fixtures are explicitly labelled synthetic, never claimed as live
+# captures. ════════════════════════════════════════════════════════════
 
-def test_parse_transcript_extracts_a_real_applied_change():
+def test_old_real_captures_are_now_correctly_refused_as_a_stale_manifest():
     from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
 
-    result = sac._parse_transcript(_load("cli_transcript_applied.json"))
-    assert len(result["changes"]) == 1
-    change = result["changes"][0]
-    assert change["status"] == "applied"
-    assert change["key"] == "global_transition_ms"
-    assert change["new_value"] == 1500
-    assert result["reply"]
-
-
-def test_parse_transcript_a_real_rejection_applies_nothing():
-    from spectra.services import settings_agent_cli as sac
-
-    result = sac._parse_transcript(_load("cli_transcript_rejected.json"))
-    assert result["changes"] == [], \
-        "a rejected set_setting tool_result must never be counted as applied"
+    for fixture in ("cli_transcript_applied.json", "cli_transcript_rejected.json",
+                    "cli_transcript_hallucinated_capabilities_claim.json"):
+        with pytest.raises(SettingsAgentUnavailable, match="tool manifest"):
+            sac._parse_transcript(_load(fixture))
 
 
 def test_parse_transcript_refuses_a_live_tool_manifest_mismatch():
@@ -272,21 +292,72 @@ def test_parse_transcript_refuses_a_live_tool_manifest_mismatch():
         sac._parse_transcript(_load("cli_transcript_manifest_mismatch.json"))
 
 
-def test_parse_transcript_ignores_hallucinated_capability_claims():
-    """A different real capture: the tool manifest is genuinely correct
-    (exactly the two settings tools, MCP server connected) and no tool
-    was ever called, yet the model's own final reply text claims Read,
-    Write, Edit, Glob, Grep, and unspecified "System Tools" exist. This
-    must not be mistaken for anything having been applied -- `changes`
-    is built only from real tool_result blocks, of which there are none
-    in this transcript."""
+# ═══ 5b. behavioral re-proof against the WIDENED scene/flare surface, with
+# SYNTHETIC (hand-built, clearly labelled) fixtures -- see the section-5
+# header comment for why these are synthetic rather than live captures. ══
+
+def test_parse_transcript_extracts_a_real_applied_scene_change():
+    """Proves _parse_transcript's structured-only extraction generalizes
+    to a SCENE operation, not just set_setting -- `changes` comes from the
+    tool_result's own `status` field regardless of which operation name
+    produced it (see _parse_transcript's own docstring: a property of the
+    result SHAPE, not a hardcoded tool-name suffix check anymore)."""
     from spectra.services import settings_agent_cli as sac
 
-    result = sac._parse_transcript(_load("cli_transcript_hallucinated_capabilities_claim.json"))
+    result = sac._parse_transcript(_load("cli_transcript_synthetic_scene_applied.json"))
+    assert len(result["changes"]) == 1
+    change = result["changes"][0]
+    assert change["status"] == "applied"
+    assert change["op"] == "set_scene_setting"
+    assert change["scene_id"] == "scene-fixture-0001"
+    assert change["new_value"] == 1500
+    assert result["reply"]
+
+
+def test_parse_transcript_a_rejected_scene_change_applies_nothing():
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(_load("cli_transcript_synthetic_scene_rejected.json"))
+    assert result["changes"] == [], \
+        "a rejected set_scene_setting tool_result must never be counted as applied"
+    assert "0-20000" in result["reply"] or "legal" in result["reply"].lower()
+
+
+def test_parse_transcript_ignores_hallucinated_scene_capability_claims():
+    """The tool manifest is genuinely correct (all eleven current tools,
+    MCP server connected) and no tool was ever called, yet the model's
+    own final reply text claims a scene and a flare kind were created.
+    This must not be mistaken for anything having been applied --
+    `changes` is built only from real tool_result blocks, of which there
+    are none in this transcript."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_scene_correct_manifest_hallucinated_prose.json"))
     assert result["changes"] == []
-    assert "Read" in result["reply"], \
+    assert "Sunset Drift" in result["reply"], \
         "the hallucination is real and present in the reply text -- " \
         "the point is that `changes` doesn't believe it"
+
+
+def test_parse_transcript_refuses_the_unavailable_tool_fabrication_case_for_scenes():
+    """THE failure this task was told to hunt explicitly: a tool
+    unavailable (mcp_servers status "failed", tools: []) and the model
+    fabricating a confident, specific claim in plain prose -- "I created a
+    new scene called 'Sunset Drift' and added a 'Boom' flare kind" -- with
+    NO real tool_use/tool_result anywhere in the transcript, the same
+    shape report.md Finding 7 caught on the original two-tool surface. The
+    manifest check must refuse the WHOLE turn before _parse_transcript
+    ever gets to trusting -- or having to specifically distrust -- that
+    fabricated text; scene creation makes an undiscovered fabrication far
+    more dangerous than a settings tweak (he wouldn't find out until a
+    show), so this must fail exactly as loudly as the settings-only case
+    did."""
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    with pytest.raises(SettingsAgentUnavailable, match="tool manifest"):
+        sac._parse_transcript(_load("cli_transcript_synthetic_scene_unavailable_tool_fabrication.json"))
 
 
 # ═══ 6. live smoke test (skipped: no CLAUDE_CODE_OAUTH_TOKEN here, and ═══
