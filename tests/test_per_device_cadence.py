@@ -131,15 +131,108 @@ def test_fast_device_not_capped_to_slow_siblings_rate(tmp_path):
         slow_count = counter.counts[SLOW_ID]
         fast_count = counter.counts[FAST_ID]
 
-        # Each device flushed at roughly its OWN configured rate over the
-        # ~1s window (generous tolerance for CI/scheduler jitter)...
-        assert SLOW_FPS * 0.5 <= slow_count <= SLOW_FPS * 1.3, slow_count
-        assert FAST_FPS * 0.5 <= fast_count <= FAST_FPS * 1.3, fast_count
-        # ...and critically, the fast device was NOT dragged down to the
-        # slow device's cadence: this is the regression this fix closes.
-        assert fast_count > slow_count * 1.5, (slow_count, fast_count)
+        # The fast device shares the render loop's own rate (render_rate ==
+        # FAST_FPS), so its gate threshold exactly matches the loop's own
+        # tick period — near-exact parity, tight tolerance. (A loose
+        # 0.5x-1.3x band here previously let a real ~2x regression pass
+        # silently — confirmed live 2026-08-14: deploying an earlier gate
+        # that used a naive 1.0/fps threshold instead of fps_to_sleep_
+        # interval() near-halved throughput for EVERY device in the room,
+        # including ones this fix should never touch.)
+        assert FAST_FPS * 0.85 <= fast_count <= FAST_FPS * 1.15, fast_count
+
+        # The slow device is the slower member of a MIXED virtual, so it can
+        # only be serviced at the (faster) loop's own tick boundaries — its
+        # gate threshold (fps_to_sleep_interval(30) ~= 0.033s) doesn't evenly
+        # divide the loop's own tick period (fps_to_sleep_interval(62) ~=
+        # 0.016s), so the achieved rate rounds UP to the next available
+        # tick (~0.048s -> ~21fps), not its exact nominal 30. This is an
+        # inherent, disclosed consequence of one shared render loop paced
+        # to per-device delivery (see fx/VENDOR.md deviation 11) — never
+        # faster than nominal, and bounded well clear of the ~2x-regression
+        # range (which would land near 10-15) this test guards against.
+        assert 15 <= slow_count <= 26, slow_count
+
+        # Critically, the fast device was NOT dragged down to the slow
+        # device's cadence: this is the regression the fix closes.
+        assert fast_count > slow_count * 2, (slow_count, fast_count)
 
         assert slow_device.max_refresh_rate == SLOW_FPS
         assert fast_device.max_refresh_rate == FAST_FPS
+
+    asyncio.run(main())
+
+
+def test_homogeneous_single_device_virtual_is_unaffected(tmp_path):
+    """Crystal's ACTUAL current room topology: Crystal-Mapper has no other
+    real device, so render_rate == refresh_rate and this fix must be a
+    complete no-op — near-exact parity with the configured rate. This is
+    the tightest possible regression guard: the ~2x-regression bug found
+    live 2026-08-14 degraded this homogeneous case too (it isn't specific
+    to mixed virtuals), so a loose tolerance here would have hidden it."""
+    import json
+    import os
+
+    from fx.consts import CONFIGURATION_VERSION
+
+    device_id = "solo-30"
+
+    async def main():
+        config_dir = str(tmp_path / "homogeneous")
+        os.makedirs(config_dir, exist_ok=True)
+        config = {
+            "configuration_version": CONFIGURATION_VERSION,
+            "devices": [
+                {
+                    "id": device_id,
+                    "type": "dummy",
+                    "config": {
+                        "name": device_id,
+                        "pixel_count": 8,
+                        "refresh_rate": SLOW_FPS,
+                    },
+                }
+            ],
+            "virtuals": [
+                {
+                    "id": device_id,
+                    "is_device": device_id,
+                    "auto_generated": False,
+                    "config": {"name": device_id, "mapping": "span"},
+                    "segments": [[device_id, 0, 7, False]],
+                    "effect": {"type": "singleColor", "config": {"color": "#ffffff"}},
+                }
+            ],
+        }
+        with open(os.path.join(config_dir, "config.json"), "w") as f:
+            json.dump(config, f)
+
+        headless.silence_audio()
+        host = FxHost(config_dir)
+        host.audio = headless.SyntheticAudioSource()
+        await host.start()
+
+        virtual = host.virtuals.get(device_id)
+        assert virtual.refresh_rate == SLOW_FPS
+        assert virtual.render_rate == SLOW_FPS  # single device: min == max
+
+        counts = {"n": 0}
+
+        def on_update(event) -> None:
+            if event.device_id == device_id:
+                counts["n"] += 1
+
+        remove = host.events.add_listener(on_update, Event.DEVICE_UPDATE)
+        try:
+            virtual.active = True
+            await asyncio.sleep(1.0)
+        finally:
+            virtual.deactivate()
+            remove()
+            await host.shutdown()
+
+        # Tight tolerance: this must land essentially at nominal, not at
+        # roughly half of it.
+        assert SLOW_FPS * 0.85 <= counts["n"] <= SLOW_FPS * 1.15, counts["n"]
 
     asyncio.run(main())

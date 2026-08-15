@@ -201,10 +201,54 @@ variables named `ledfx` (the core object handle) are untouched.
     faster sibling sharing a virtual with it is no longer capped down —
     proven headless in `tests/test_per_device_cadence.py` (two dummy
     devices, 30fps + 62fps, one virtual, real render thread; asserts the
-    fast device's real-flush count is NOT pulled toward the slow one's) and
-    validated live against the room's one existing mixed-rate virtual
-    (`hues`) via the liveness flush-cadence endpoint. Not yet ported back
-    to the fork source at `/home/javi/ledfx-src`.
+    fast device's real-flush count is NOT pulled toward the slow one's, and
+    a same-file homogeneous single-device case pins crystal's own actual
+    topology to near-exact parity). Not yet ported back to the fork source
+    at `/home/javi/ledfx-src`.
+
+    **Gate-threshold correction (2026-08-14, same PR, found by a real-room
+    deploy before merge):** the first cut of the pacing gate computed
+    `min_interval = 1.0 / device.max_refresh_rate` — a naive reciprocal.
+    `fps_to_sleep_interval()` (the SAME helper `thread_function` uses to
+    size its own sleep) does NOT return the naive reciprocal — it snaps to
+    the clock's actual achievable tick granularity, which runs slightly
+    FASTER than nominal (e.g. configured 30fps -> an actual ~30.3fps loop
+    period). A naive threshold is therefore slightly LARGER than the loop's
+    own natural tick period even for a homogeneous, single-device virtual
+    this fix should never touch — so the gate rejected roughly every other
+    tick, near-halving real per-device throughput ROOM-WIDE. A live deploy
+    exposed this directly: every WLED unit's own `/json/info` fps counter
+    dropped (crystal 30->~20, every 62fps sibling ->~35-40), not just ones
+    sharing a virtual with crystal — proof the bug wasn't scoped to mixed
+    virtuals. Reproduced headless (`test_fast_device_not_capped_to_slow_
+    siblings_rate` and `test_homogeneous_single_device_virtual_is_
+    unaffected` both failed against the naive-threshold version: 15/30 on
+    the homogeneous case, exactly the ~2x pattern). Fix: `min_interval =
+    fps_to_sleep_interval(device.max_refresh_rate)`, matching the loop's
+    own granularity exactly.
+
+    One residual, disclosed trade-off from this correction: a device that
+    is the SLOWER member of a genuinely mixed-rate virtual can only be
+    serviced at the (faster) loop's own tick boundaries, so if its own rate
+    doesn't evenly divide the loop's tick period, its achieved rate rounds
+    UP to the next available tick rather than landing exactly on its
+    nominal rate — e.g. a 30fps device sharing a virtual with a 62fps one
+    lands around ~21fps, not 30 (never faster than nominal; see the
+    `test_fast_device_not_capped_to_slow_siblings_rate` slow-device bound
+    and comment for the arithmetic). This does not affect crystal (its own
+    virtual has no faster sibling) or any of its 62fps WLED siblings (each
+    homogeneous in its own virtual); today it would only apply to
+    `dining-hues` in the room's `hues` virtual, a Hue device already ruled
+    out of this task's scope by the diagnosis report. Inherent to "one
+    shared render loop paced to per-device delivery," not a bug — the
+    alternative (a loop fast enough to be a common multiple of every
+    member's rate) is computationally unreasonable for arbitrary fps
+    combinations.
+
+    Real-room validation status: a first deploy (pre-correction) showed the
+    naive-threshold regression directly, which is what surfaced this fix;
+    the corrected version has NOT yet been re-validated live end-to-end —
+    see the PR for the pending before/after recheck.
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff

@@ -26,6 +26,7 @@ from fx.utils import (
     RegistryLoader,
     async_fire_and_forget,
     clean_ip,
+    fps_to_sleep_interval,
     generate_id,
     get_icon_name,
     is_gap_device,
@@ -191,8 +192,25 @@ class Device(BaseRegistry):
                 # device to that device's own rate; the pixel buffer above
                 # is still updated every call, so a paced-down flush always
                 # sends the latest frame, never a stale one.
-                now = time.monotonic()
-                min_interval = 1.0 / self.max_refresh_rate if self.max_refresh_rate else 0.0
+                #
+                # min_interval MUST come from fps_to_sleep_interval (the
+                # SAME helper Virtual.thread_function uses to size its own
+                # sleep), not a naive 1.0/fps: fps_to_sleep_interval snaps to
+                # the clock's actual achievable tick granularity, which runs
+                # slightly FASTER than the naive value (e.g. configured
+                # fps=30 -> an actual ~30.3fps loop period). A naive
+                # 1.0/fps threshold is therefore slightly LARGER than the
+                # loop's own natural tick period even for a homogeneous,
+                # single-device virtual untouched by this fix — so the gate
+                # would reject roughly every other tick, near-halving real
+                # throughput across every device in the room, confirmed live
+                # 2026-08-14 (crystal 30->~20fps, 62fps siblings ->~36-40fps)
+                # and reproduced headless in test_per_device_cadence.py.
+                now = time.perf_counter()
+                min_interval = (
+                    fps_to_sleep_interval(self.max_refresh_rate)
+                    if self.max_refresh_rate else 0.0
+                )
                 if now - self._last_flush_time >= min_interval:
                     self._last_flush_time = now
                     frame = self.assemble_frame()
@@ -239,10 +257,11 @@ class Device(BaseRegistry):
     # activate().
     _teardown_dispatched = False
 
-    # Per-device real-flush pacing gate (update_pixels): monotonic timestamp
-    # of this device's last actual network flush, independent of how often
-    # its priority virtual's render loop ticks. 0.0 so the first call after
-    # activate() always flushes.
+    # Per-device real-flush pacing gate (update_pixels): perf_counter()
+    # timestamp (same clock Virtual.thread_function times its own loop
+    # against) of this device's last actual network flush, independent of
+    # how often its priority virtual's render loop ticks. 0.0 so the first
+    # call after activate() always flushes.
     _last_flush_time = 0.0
 
     # Set by _dispatch_teardown_task() when deactivate() fires an unawaited
