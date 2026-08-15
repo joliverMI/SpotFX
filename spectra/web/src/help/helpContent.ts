@@ -631,11 +631,12 @@ export const HELP_SECTIONS: HelpSection[] = [
     entries: [
       {
         id: 'spectra-trigger-actions',
-        title: 'The three action kinds',
-        keywords: 'fire scene fire response select color set intensity class',
+        title: 'The four action kinds',
+        keywords: 'fire scene fire response fire update select color set intensity class',
         table: [
           ['Fire scene', 'Fires a scene by name at a chosen intensity (⚡), optionally wearing a specific colour set instead of the room\'s active one — through the same choke point the sequencer\'s own picks use.'],
           ['Fire response', 'Fires a response class (flare / charge / lull / drop) at a chosen intensity — the same phase drive and band selection a bridge-classified charge/lull/drop/flare already drives.'],
+          ['Fire update', 'Fires the ACTIVE scene\'s own UPDATE content directly, at a chosen intensity — no target to pick, and it bypasses band selection entirely (unlike Fire response). A major change WITHIN the current scene: bigger than a flare, overrides the drift, lands somewhere new on a ramp-in. If the active scene has no UPDATE authored, this is a silent no-op.'],
           ['Select colour set', 'Moves the room to a named colour set directly — the same manual-apply surface as the Scenes page\'s colour controls.'],
         ],
         kbd: false,
