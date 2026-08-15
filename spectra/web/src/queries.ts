@@ -6,7 +6,7 @@ import type {
   ColorWheelPosition, DriftProfile, EngineStatus, FeedbackCapture, FeedbackEntry,
   FireResult, Registry, ReviewSession, ReviewTimeline, RoomColorState, RoomControlState,
   RoomControlsSaveResult, SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry,
-  SpectraTrigger, SpotColorSetCard, UndoResult,
+  SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
 } from './types';
 
 /* ── scenes ── */
@@ -479,7 +479,7 @@ export function useTranscribeSettingsAudio() {
     mutationFn: (audio: Blob) => {
       const form = new FormData();
       form.append('audio', audio, 'clip.webm');
-      return apiPostForm<{ text: string }>('/settings-console/transcribe', form);
+      return apiPostForm<TranscribeResult>('/settings-console/transcribe', form);
     },
   });
 }

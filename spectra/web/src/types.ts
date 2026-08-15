@@ -355,6 +355,15 @@ export interface SettingsChatMessage {
   text: string;
 }
 
+/** POST /settings-console/transcribe response. vocabulary_honored is null
+ * only when the request carried no vocabulary hint; otherwise the server
+ * itself refuses (502) a transcription that didn't confirm true — see
+ * spectra/services/transcription.py's wire-contract docstring. */
+export interface TranscribeResult {
+  text: string;
+  vocabulary_honored: boolean | null;
+}
+
 /** Full spot-effects Colour Set card shape (read + the one supported
  * opt-out toggle through the spot-effects API — never modified otherwise). */
 export interface SpotColorSetCard {

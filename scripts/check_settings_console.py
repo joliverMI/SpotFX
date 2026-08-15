@@ -157,4 +157,33 @@ r = client.post("/api/settings-console/transcribe",
 check(r.status_code == 503 and "type your request" in r.json()["detail"],
       "no transcriber wired -> honest 503, mic button never pretends")
 
+# ═══ 5. the wire contract: a silently-ignored vocabulary is a hard fail ═
+# (coordinated with the ship building the local-Whisper bridge against
+# this endpoint — see transcription.py's wire-contract docstring)
+
+from spectra.services import transcription as tr
+
+
+async def forgetful(audio, mime_type, vocabulary=""):
+    return tr.TranscriptionResult(text="whatever it heard")  # vocabulary_honored left None
+
+
+tr.transcribe = forgetful
+tr.vocabulary_hint = lambda: "Sunset Drift Warm White"
+r = client.post("/api/settings-console/transcribe",
+                files={"audio": ("clip.webm", b"\x00\x01", "audio/webm;codecs=opus")})
+check(r.status_code == 502 and "vocabulary" in r.json()["detail"],
+      "a transcriber that doesn't confirm using the vocabulary hint is a hard 502, not a quiet 200")
+
+
+async def honest(audio, mime_type, vocabulary=""):
+    return tr.TranscriptionResult(text="turn on sunset drift", vocabulary_honored=True)
+
+
+tr.transcribe = honest
+r = client.post("/api/settings-console/transcribe",
+                files={"audio": ("clip.webm", b"\x00\x01", "audio/webm;codecs=opus")})
+check(r.status_code == 200 and r.json()["vocabulary_honored"] is True,
+      "a transcriber that confirms using the vocabulary hint is accepted")
+
 print("\nALL CHECKS PASSED")

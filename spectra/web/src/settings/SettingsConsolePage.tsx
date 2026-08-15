@@ -122,16 +122,29 @@ export default function SettingsConsolePage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks: BlobPart[] = [];
-      const recorder = new MediaRecorder(stream);
+      // Negotiate explicitly rather than trusting the browser default —
+      // this IS the wire contract a second ship's local-Whisper bridge
+      // builds against (see spectra/services/transcription.py's docstring):
+      // webm/opus, and the Blob's type below is the recorder's own
+      // negotiated mimeType, never a hardcoded guess that could drift
+      // from what was actually encoded.
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : undefined;
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recorder.ondataavailable = (e) => chunks.push(e.data);
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
         try {
           const result = await transcribe.mutateAsync(blob);
           setText((t) => (t ? `${t} ${result.text}` : result.text));
-        } catch {
-          toast("Voice isn't wired up yet — type your request", 'info');
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '';
+          if (message.includes('502')) {
+            toast("Voice request dropped — the transcriber ignored the vocabulary hint", 'error');
+          } else {
+            toast("Voice isn't wired up yet — type your request", 'info');
+          }
         }
       };
       mediaRef.current = { recorder, chunks };

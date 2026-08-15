@@ -15,13 +15,17 @@
                                         configured (the console has no
                                         model to talk to, not a silent
                                         no-op).
-  POST /api/settings-console/transcribe multipart audio upload -> {text}.
+  POST /api/settings-console/transcribe multipart audio upload (field
+                                        "audio") -> {text, vocabulary_honored}.
                                         503 (via TranscriptionUnavailable)
                                         until a real transcriber is wired
                                         into services/transcription.py —
                                         the mic button is real, its
                                         current failure is stated, not
-                                        hidden.
+                                        hidden. 502 when a transcriber IS
+                                        wired but doesn't confirm it used
+                                        the vocabulary hint it was given —
+                                        see the hard-fail block below.
 
 The write authority itself is NOT in this file — see services/
 settings_console.py's module docstring for why the boundary lives in the
@@ -78,10 +82,25 @@ async def post_message(body: MessageIn):
 @router.post("/transcribe")
 async def post_transcribe(audio: UploadFile = File(...)):
     data = await audio.read()
+    vocabulary = transcription.vocabulary_hint()
     try:
-        text = await transcription.transcribe(
+        result = await transcription.transcribe(
             data, audio.content_type or "application/octet-stream",
-            vocabulary=transcription.vocabulary_hint())
+            vocabulary=vocabulary)
     except TranscriptionUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
-    return {"text": text}
+
+    # Hard-fail on a silently-ignored vocabulary hint (spectra/services/
+    # transcription.py's wire-contract docstring) — the vocabulary is the
+    # entire reason this seam exists instead of a plain generic
+    # transcriber, so an implementation that doesn't confirm using it is
+    # treated as broken, never as a degraded-but-fine 200. `is not True`
+    # (not `is False`) so a forgetful implementation that just omits the
+    # field (leaves it None) fails closed too.
+    if vocabulary and result.vocabulary_honored is not True:
+        raise HTTPException(
+            502,
+            "transcriber did not confirm using the vocabulary hint — "
+            "refusing a silently generic transcription")
+
+    return result.model_dump()

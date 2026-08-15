@@ -7,6 +7,42 @@ lands here, at transcribe(), and nowhere else decides how it becomes text —
 swap a local Whisper in later without touching the console, the API route,
 or the frontend.
 
+THE WIRE CONTRACT (fixed 2026-08-14 — a second ship is building the local
+Whisper bridge against this; both halves must agree without guessing):
+  POST /api/settings-console/transcribe (spectra/api/settings_console.py),
+  multipart/form-data, ONE file field named "audio". The browser client
+  (spectra/web/src/settings/SettingsConsolePage.tsx) negotiates
+  `MediaRecorder.isTypeSupported('audio/webm;codecs=opus')` explicitly and
+  uses `recorder.mimeType` (the type actually negotiated, not a hardcoded
+  guess) as the Blob's — and therefore the multipart part's — Content-Type.
+  Production traffic today is WEBM/OPUS. A WAV producer is legitimate
+  against this same seam (transcribe() takes raw bytes + a mime_type
+  string, no format is hardcoded below the API layer) but nothing in this
+  codebase emits it — MediaRecorder doesn't natively produce WAV. Whoever
+  ends up implementing transcribe() must accept audio/webm (opus) at
+  minimum; treat WAV as a bonus, not an assumption.
+
+  Vocabulary travels as a plain space-joined string (vocabulary_hint()),
+  computed SERVER-SIDE per request from live scene/colour-set/device
+  names — it is NOT a client-supplied field, so a caller can't spoof or
+  omit it; the browser has no vocabulary of its own to send.
+
+  Response: {"text": str, "vocabulary_honored": bool | None}.
+  vocabulary_honored is None only when the request carried no vocabulary
+  hint to honor (nothing to confirm). Otherwise a concrete implementation
+  MUST set it — True only when the vocabulary hint was actually handed to
+  the underlying engine (e.g. Whisper's initial_prompt), never defaulted
+  True. THE API LAYER ENFORCES THIS: post_transcribe() hard-fails (502)
+  when a non-empty vocabulary hint was sent but the result doesn't confirm
+  vocabulary_honored is True — a request whose vocabulary was silently
+  ignored is a bug, not a degraded-but-OK transcription, because the
+  vocabulary is the entire reason this seam exists instead of a plain
+  generic transcriber. This is enforced structurally in the caller (spectra/
+  api/settings_console.py), not left to convention — an implementation that
+  forgets to report vocabulary_honored fails closed (None/missing is
+  treated as "not honored" whenever a vocabulary was sent), never silently
+  passed through as a normal 200.
+
 transcribe() is intentionally UNIMPLEMENTED tonight (explicit instruction:
 don't build the Whisper integration yet). It raises TranscriptionUnavailable
 so the API layer can return a clear, honest 503 rather than a silent no-op —
@@ -25,12 +61,26 @@ the audio when a real transcriber lands here.
 from __future__ import annotations
 
 import logging
+from typing import Optional
+
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
 class TranscriptionUnavailable(Exception):
     pass
+
+
+class TranscriptionResult(BaseModel):
+    text: str
+    # None = the request carried no vocabulary hint, nothing to honor.
+    # True = the underlying engine was actually given the vocabulary hint.
+    # False = a vocabulary hint existed but the engine didn't use it.
+    # A caller (spectra/api/settings_console.py) treats anything other
+    # than True — including a missing/None value on a non-empty-vocabulary
+    # request — as a hard failure, never a silent generic pass-through.
+    vocabulary_honored: Optional[bool] = None
 
 
 def vocabulary_hint(limit: int = 200) -> str:
@@ -61,10 +111,11 @@ def vocabulary_hint(limit: int = 200) -> str:
     return " ".join(words[:limit])
 
 
-async def transcribe(audio: bytes, mime_type: str, vocabulary: str = "") -> str:
-    """(audio bytes, its mime type, a vocabulary hint) -> spoken text. The
-    ONE seam a concrete transcriber (browser-native today would still call
-    through here from a client-side result; a local Whisper later) plugs
-    into. Unimplemented — see module docstring."""
+async def transcribe(audio: bytes, mime_type: str, vocabulary: str = "") -> TranscriptionResult:
+    """(audio bytes, its mime type, a vocabulary hint) -> TranscriptionResult.
+    The ONE seam a concrete transcriber (a local Whisper bridge) plugs
+    into — see the module docstring for the full wire contract this
+    signature is part of, including the vocabulary_honored requirement.
+    Unimplemented tonight; raises TranscriptionUnavailable."""
     raise TranscriptionUnavailable(
         "no transcriber configured — type your request instead")

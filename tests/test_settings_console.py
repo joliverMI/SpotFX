@@ -275,6 +275,79 @@ def test_vocabulary_hint_degrades_gracefully_with_no_stores():
     assert isinstance(hint, str)
 
 
+# ═══ the wire contract: a silently-ignored vocabulary is a hard failure ══
+# (2026-08-14, coordinated with the ship building the local-Whisper bridge
+# against this endpoint — see transcription.py's wire-contract docstring)
+
+def test_api_transcribe_hard_fails_when_vocabulary_silently_ignored(monkeypatch):
+    """A concrete transcriber that returns text WITHOUT confirming it used
+    the vocabulary hint must be rejected (502), never accepted as a normal
+    200 — a request whose vocabulary was silently ignored is a bug in the
+    transcriber, not a degraded-but-fine transcription."""
+    from fastapi.testclient import TestClient
+
+    from spectra.app import create_app
+    from spectra.services import transcription
+
+    async def forgetful_transcribe(audio, mime_type, vocabulary=""):
+        return transcription.TranscriptionResult(text="whatever it heard")  # vocabulary_honored left None
+
+    monkeypatch.setattr(transcription, "transcribe", forgetful_transcribe)
+    monkeypatch.setattr(transcription, "vocabulary_hint", lambda: "Sunset Drift Warm White")
+
+    client = TestClient(create_app())
+    r = client.post(
+        "/api/settings-console/transcribe",
+        files={"audio": ("clip.webm", b"\x00\x01\x02", "audio/webm;codecs=opus")},
+    )
+    assert r.status_code == 502
+    assert "vocabulary" in r.json()["detail"]
+
+
+def test_api_transcribe_accepts_a_confirmed_vocabulary_use(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from spectra.app import create_app
+    from spectra.services import transcription
+
+    async def honest_transcribe(audio, mime_type, vocabulary=""):
+        assert vocabulary == "Sunset Drift Warm White"
+        return transcription.TranscriptionResult(text="turn on sunset drift", vocabulary_honored=True)
+
+    monkeypatch.setattr(transcription, "transcribe", honest_transcribe)
+    monkeypatch.setattr(transcription, "vocabulary_hint", lambda: "Sunset Drift Warm White")
+
+    client = TestClient(create_app())
+    r = client.post(
+        "/api/settings-console/transcribe",
+        files={"audio": ("clip.webm", b"\x00\x01\x02", "audio/webm;codecs=opus")},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"text": "turn on sunset drift", "vocabulary_honored": True}
+
+
+def test_api_transcribe_empty_vocabulary_needs_no_confirmation(monkeypatch):
+    """No vocabulary to honor (e.g. an empty library) is not a failure —
+    only a NON-empty, silently-dropped vocabulary is."""
+    from fastapi.testclient import TestClient
+
+    from spectra.app import create_app
+    from spectra.services import transcription
+
+    async def bare_transcribe(audio, mime_type, vocabulary=""):
+        return transcription.TranscriptionResult(text="turn on sunset drift")
+
+    monkeypatch.setattr(transcription, "transcribe", bare_transcribe)
+    monkeypatch.setattr(transcription, "vocabulary_hint", lambda: "")
+
+    client = TestClient(create_app())
+    r = client.post(
+        "/api/settings-console/transcribe",
+        files={"audio": ("clip.webm", b"\x00\x01\x02", "audio/webm;codecs=opus")},
+    )
+    assert r.status_code == 200
+
+
 # ═══ 6. live-model smoke test (skipped: no ANTHROPIC_API_KEY here) ═══════
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"),

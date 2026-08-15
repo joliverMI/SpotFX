@@ -517,6 +517,21 @@ proven-working floor; voice is real plumbing with an honest current
 failure, not a stub in his room (this whole feature ships UNVERIFIED
 against his live instance — see the PR).
 
+**The wire contract is fixed and documented in `transcription.py`'s own
+docstring** (coordinated with a second ship building a local-Whisper bridge
+against this endpoint — read that docstring before changing any of this):
+`POST /api/settings-console/transcribe`, multipart, one file field named
+`audio`. The browser negotiates `audio/webm;codecs=opus` explicitly
+(`MediaRecorder.isTypeSupported` + `recorder.mimeType` on the Blob, never a
+hardcoded guess) — that's the actual production encoding, WAV is not
+something this client emits. Vocabulary is server-computed per request
+(`vocabulary_hint()`), never a client field. Response:
+`{text, vocabulary_honored}` — **a non-empty vocabulary hint that the
+transcriber doesn't confirm using is a hard 502 in `settings_console.py`'s
+`post_transcribe`, not a quiet 200 with generic text** — the vocabulary is
+the whole reason this seam exists over a plain transcriber, so silently
+dropping it is a bug, enforced in the caller, not left to convention.
+
 Spec: `scripts/check_settings_console.py` + `tests/test_settings_console.py`.
 
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
