@@ -857,9 +857,19 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['▶ Preview', 'Apply the selected Set to LedFX right now.'],
           ['Labels', 'Comma-separated, applied when the field loses focus; label filters on triggers/actions pick which sets are eligible.'],
           ['Members', "A Group's member picker is a searchable dropdown — type to filter Sets by name."],
-          ['Gradients', 'Live in a shared library — edit stops and direction, then "Update current" or "Save as new".'],
+          ['Gradients', 'Live in a shared library — click the swatch to build one in the colour picker, then "Update current" or "Save as new".'],
         ],
         kbd: false,
+      },
+      {
+        id: 'colour-gradient-picker',
+        title: 'The colour picker',
+        keywords: 'color picker gradient swatch solid hex stops angle ledfx',
+        body: [
+          'Every colour and gradient field in this app — Color Set entries, scene device colors, effect params, Settings\' Ambient color and gradient library — opens the same picker: LedFX\'s own colour-picker component, not a lookalike. Click a swatch to open it; click outside or press Esc to close.',
+          'Two tabs where both apply (a solid-only field shows Solid only): Solid picks one colour off a board or by hex. Gradient builds a multi-stop CSS gradient — drag to add a stop on the bar, drag a stop to move it, pick each stop\'s colour, set the angle. Saved colours and gradients from the shared library show as quick-pick swatches at the top.',
+          'The value it produces is the exact CSS this app already stores everywhere (e.g. `linear-gradient(90deg, rgb(255,0,0) 0%, rgb(0,0,255) 100%)`) — every colour and gradient you already had keeps working, nothing to redo.',
+        ],
       },
       {
         id: 'colorsets-copy-entries',

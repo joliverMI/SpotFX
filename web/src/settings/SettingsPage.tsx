@@ -3,11 +3,12 @@
  * Advanced-only cards follow the live "Show advanced controls" checkbox. */
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import ReactGPicker from 'react-gcolor-picker';
 import { api, apiGet, apiPost } from '../api/client';
+import ColorGradientPicker, { normalizeGradientAngle } from '../components/ColorGradientPicker';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import { useLongPress } from '../lib/useLongPress';
-import { buildGradientCss, parseCssGradient, type Stop } from '../colorsets/GradientModal';
 import { useGradientMutations, useGradients } from '../colorsets/queries';
 
 type Draft = Record<string, unknown>;
@@ -325,8 +326,8 @@ export default function SettingsPage() {
           </Field>
         ) : (
           <Field label="Color">
-            <input type="color" value={str('ambient_color', '#ffffff')} style={{ width: 48, height: 30, padding: 1 }}
-              onChange={(e) => set('ambient_color', e.target.value)} />
+            <ColorGradientPicker value={str('ambient_color', '#ffffff')} swatchWidth={48} swatchHeight={30}
+              onChange={(v) => set('ambient_color', v)} />
           </Field>
         )}
         <Field label={`Brightness (%): ${num('ambient_brightness', 100)}`}>
@@ -367,9 +368,9 @@ export default function SettingsPage() {
         <Field label="Light mode default background"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input type="color" value={str('display_light_bg_color', '#201830')}
-              style={{ width: 48, height: 30, padding: 1 }}
-              onChange={(e) => set('display_light_bg_color', e.target.value)} />
+            <ColorGradientPicker value={str('display_light_bg_color', '#201830')}
+              swatchWidth={48} swatchHeight={30}
+              onChange={(v) => set('display_light_bg_color', v)} />
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               applied when Light mode is on and the fired Color Set has no background of its own
             </span>
@@ -466,28 +467,20 @@ function GradientProfiles() {
 
   const [editId, setEditId] = useState<string | null | 'new'>(null);
   const [name, setName] = useState('');
-  const [dir, setDir] = useState('90');
-  const [stops, setStops] = useState<Stop[]>([]);
+  const [css, setCss] = useState('#ff0000');
 
   const openEdit = (id: string) => {
     const g = gradients.find((x) => x.id === id);
     if (!g) return;
     setEditId(id);
     setName(g.name);
-    const dm = g.value.match(/linear-gradient\((\d+)deg/);
-    setDir(dm ? dm[1] : '90');
-    setStops(parseCssGradient(g.value));
+    setCss(g.value);
   };
   const openNew = () => {
     setEditId('new');
     setName('');
-    setDir('90');
-    setStops([{ color: '#ff0000', pos: 0 }, { color: '#0000ff', pos: 100 }]);
+    setCss('linear-gradient(90deg, rgb(255, 0, 0) 0%, rgb(0, 0, 255) 100%)');
   };
-
-  const css = buildGradientCss(dir, stops);
-  const setStop = (i: number, patch: Partial<Stop>) =>
-    setStops((s) => s.map((st, j) => (j === i ? { ...st, ...patch } : st)));
 
   const saveGrad = async () => {
     if (!name.trim()) { toast('Enter a gradient name.', 'error'); return; }
@@ -530,36 +523,18 @@ function GradientProfiles() {
               <input type="text" placeholder="e.g. Red to Blue" value={name} style={{ width: '100%' }}
                 onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Direction">
-              <select value={dir} onChange={(e) => setDir(e.target.value)} style={{ width: '100%' }}>
-                <option value="90">→ Horizontal (90°)</option>
-                <option value="0">↑ Vertical (0°)</option>
-                <option value="45">↘ Diagonal (45°)</option>
-                <option value="135">↙ Diagonal (135°)</option>
-                <option value="180">← Reverse (180°)</option>
-              </select>
-            </Field>
-            <Field label="Color Stops">
-              <>
-                {stops.map((st, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <input type="color" value={st.color} style={{ width: 40, height: 28, padding: 1 }}
-                      onChange={(e) => setStop(i, { color: e.target.value })} />
-                    <input type="number" value={st.pos} min={0} max={100} style={{ width: 60 }}
-                      onChange={(e) => setStop(i, { pos: parseInt(e.target.value) || 0 })} />
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
-                    <button className="danger" style={{ fontSize: 11, padding: '2px 8px' }}
-                      onClick={() => setStops((sx) => sx.filter((_, j) => j !== i))}>✕</button>
-                  </div>
-                ))}
-                <button style={{ fontSize: 12, marginTop: 6 }}
-                  onClick={() => setStops((sx) => [...sx, { color: '#ffffff', pos: 50 }])}>
-                  + Add Stop
-                </button>
-              </>
-            </Field>
-            <Field label="Preview">
-              <div style={{ height: 40, borderRadius: 'var(--radius)', border: '1px solid var(--border)', background: css }} />
+            <Field label="Colour / gradient">
+              <ReactGPicker
+                value={css}
+                format="hex"
+                showAlpha={false}
+                debounce
+                debounceMS={200}
+                solid
+                gradient
+                defaultColors={gradients.map((g) => g.value)}
+                onChange={(next: string) => setCss(normalizeGradientAngle(next))}
+              />
             </Field>
             <Field label="CSS Value (read-only)">
               <input type="text" readOnly value={css} style={{ width: '100%', fontSize: 11, color: 'var(--text-muted)' }} />

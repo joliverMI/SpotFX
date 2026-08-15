@@ -1,6 +1,7 @@
 /** Small shared form inputs used by every action form. */
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import ColorGradientPicker from '../ColorGradientPicker';
 
 export function Row({ label, children, help }: { label: string; children: ReactNode; help?: string }) {
   return (
@@ -133,11 +134,11 @@ export function ColorInput({
 }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <input
-        type="color"
+      <ColorGradientPicker
         value={value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#ffffff'}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ width: 34, height: 26, padding: 0, border: '1px solid var(--border)', borderRadius: 4, background: 'none', cursor: 'pointer' }}
+        onChange={onChange}
+        swatchWidth={34}
+        swatchHeight={26}
       />
       <input
         type="text"
@@ -146,6 +147,10 @@ export function ColorInput({
         style={{ width: 120 }}
         onChange={(e) => onChange(e.target.value === '' && nullable ? null : e.target.value)}
       />
+      {nullable && value != null && (
+        <button type="button" style={{ fontSize: 11, padding: '2px 6px' }}
+          title="Clear" onClick={() => onChange(null)}>✕</button>
+      )}
     </span>
   );
 }
