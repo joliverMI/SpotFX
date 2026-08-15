@@ -98,6 +98,18 @@ export default function RoomControlsBar() {
         </span>
       )}
 
+      {ambientResult?.status === 'partial' && (
+        <span
+          className="badge badge-red"
+          title={`Held at ${ambientResult.lights_set ?? 0}/${ambientResult.lights_total ?? '?'} — `
+            + `still showing the old colour: ${(ambientResult.unconfirmed ?? []).join(', ')}. `
+            + 'Read back from the bridge after bounded, spaced retries — not just what was sent.'}
+        >
+          ambient: {ambientResult.lights_set ?? 0}/{ambientResult.lights_total ?? '?'} held —{' '}
+          {(ambientResult.unconfirmed ?? []).join(', ')}
+        </span>
+      )}
+
       <label className="room-control" title="Default scene-entry blend when a scene doesn't set its own">
         Transition
         <input

@@ -1057,6 +1057,14 @@ check(asyncio.run(ambient.reconcile(True, "#ff0000")) == {"status": "dark"},
 
 
 def _hue_handler(calls, fail_light_put=False):
+    # Tracks each light's actual state so a GET read-back reflects whether
+    # a PUT really landed — ambient.reconcile()'s ON path now confirms
+    # every hold this way (see spectra/services/ambient.py's module
+    # docstring on the live defect this closed: a 2xx PUT only means the
+    # bridge accepted the write, not that the bulb took it).
+    state = {"on": {"on": False}, "dimming": {"brightness": 1.0},
+            "color": {"xy": {"x": 0.3127, "y": 0.3290}}}
+
     def handler(request):
         path = request.url.path
         calls.append(("REST", request.method, path))
@@ -1067,8 +1075,12 @@ def _hue_handler(calls, fail_light_put=False):
         if path.startswith("/clip/v2/resource/entertainment_configuration/"):
             return httpx.Response(200, json={"data": [{"channels": [{"members": [
                 {"service": {"rtype": "entertainment", "rid": "e1"}}]}]}]})
+        if path == "/clip/v2/resource/light/l1" and request.method == "GET":
+            return httpx.Response(200, json={"data": [dict(state, id="l1")]})
         if fail_light_put:
             return httpx.Response(400, json={"errors": [{"description": "bad xy"}]})
+        body = json.loads(request.content)
+        state.update({k: v for k, v in body.items() if k in ("on", "dimming", "color")})
         return httpx.Response(200, json={"data": []})
     return handler
 
@@ -1119,12 +1131,23 @@ bridge_calls = []
 hue_dev = _FakeHueDevice("10.0.0.1", bridge_calls)
 _orig_host = live_stack.host
 _orig_bridge_client = ambient._bridge_client
+_orig_confirm_settle = ambient.AMBIENT_CONFIRM_SETTLE_MS
+_orig_write_stagger = ambient.AMBIENT_WRITE_STAGGER_MS
+_orig_retry_spacing = ambient.AMBIENT_RETRY_SPACING_MS
 live_stack.host = _FakeHost({"hue-lights": hue_dev, "strip": _FakeWledDevice()})
 ambient._bridge_client = _mock_bridge_client(bridge_calls)
+# Skip the real hold-confirmation pacing sleeps for the spec run (module
+# docstring: spaced-not-hammered pacing is proven properly in
+# tests/test_ambient.py, not here).
+ambient.AMBIENT_CONFIRM_SETTLE_MS = 0
+ambient.AMBIENT_WRITE_STAGGER_MS = 0
+ambient.AMBIENT_RETRY_SPACING_MS = 0
 try:
     on_result = asyncio.run(ambient.reconcile(True, "#00ff00"))
-    check(on_result == {"status": "on", "devices": ["hue-lights"], "lights_set": 1},
-          "ambient ON holds every live Hue device at the chosen colour — "
+    check(on_result == {"status": "on", "devices": ["hue-lights"],
+                        "lights_set": 1, "lights_total": 1},
+          "ambient ON holds every live Hue device at the chosen colour, "
+          "READ BACK and confirmed from the bridge (not just accepted) — "
           "the WLED device is never touched (Hue-only, matching the "
           "legacy scope this ports)")
     freeze_i = _call_index(bridge_calls, ("set_frozen", True))
@@ -1153,12 +1176,15 @@ try:
     live_stack.host = _FakeHost({"hue-lights": rejecting_dev})
     ambient._bridge_client = _mock_bridge_client(rejecting_calls, fail_light_put=True)
     rejected_result = asyncio.run(ambient.reconcile(True, "#ff0000"))
-    check(rejected_result["status"] == "on" and rejected_result["lights_set"] == 0,
+    check(rejected_result["status"] == "partial" and rejected_result["lights_set"] == 0
+          and rejected_result["unconfirmed"] == ["l1"],
           "a Hue CLIP v2 4xx body is valid JSON but must NOT count as a "
           "successful write — raise_for_status is the gate legacy's own "
           "status_code < 400 check made explicit (the vendored "
           "HueDevice._hue_request has no such gate — see the module "
-          "docstring on why this module talks to the bridge directly)")
+          "docstring on why this module talks to the bridge directly). "
+          "It stays unconfirmed by name through every bounded retry too — "
+          "never a false 'on'")
 
     ambient._light_cache.clear()
     dead_dev = _FakeHueDevice("10.0.0.3", [], fail_freeze=True)
@@ -1172,6 +1198,9 @@ finally:
     live_stack.host = _orig_host
     ambient._bridge_client = _orig_bridge_client
     ambient.AMBIENT_TRANSITION_MS = 1500
+    ambient.AMBIENT_CONFIRM_SETTLE_MS = _orig_confirm_settle
+    ambient.AMBIENT_WRITE_STAGGER_MS = _orig_write_stagger
+    ambient.AMBIENT_RETRY_SPACING_MS = _orig_retry_spacing
 
 # ── Force Scene (legacy Now Playing control, ported verbatim): redirects
 #    every automatic scene pick at the one choke point, scene_sequencer.
