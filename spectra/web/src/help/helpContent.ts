@@ -413,9 +413,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Live Energy — the number driving scene picks and flares',
         keywords: 'energy intensity section bar top always visible live meter bridge librosa quiet loud',
         body: [
-          'The ⚡ Energy meter, on every page, next to the room controls — the shared top-bar strip\'s first widget (a future live device preview joins it here later). It shows the SAME number the engine\'s automatic decisions read, not a lookalike recomputed for display: raw librosa section energy at the current playback position (0.00 = the quietest section this song, 1.00 = the loudest), fed by the read-only bridge (see "The read-only bridge"). That one value is wired directly into the drift conductor\'s pace, the sequencer\'s default scene pick, and automatic transition fires — everything the room does on its own without a hand-placed trigger or authored intensity.',
+          'The ⚡ Energy meter, on every page, next to the room controls — the shared top-bar strip\'s first widget, alongside the device preview (below). It shows the SAME number the engine\'s automatic decisions read, not a lookalike recomputed for display: raw librosa section energy at the current playback position (0.00 = the quietest section this song, 1.00 = the loudest), fed by the read-only bridge (see "The read-only bridge"). That one value is wired directly into the drift conductor\'s pace, the sequencer\'s default scene pick, and automatic transition fires — everything the room does on its own without a hand-placed trigger or authored intensity.',
           'Shows "—" when there\'s no live number to show: the bridge is down, nothing is playing, or this song has no section analysis yet. In every one of those cases the engine itself falls back to a 0.5 neutral internally — the meter doesn\'t fake that number, it tells you why there isn\'t one.',
           'A hand-placed trigger or a mid-song "⟳ Generate" pick can carry its OWN authored/baked intensity instead of this live value at the moment it fires — this meter always shows the live bridge signal, which is what drives everything that ISN\'T an explicitly authored intensity.',
+        ],
+      },
+      {
+        id: 'device-preview',
+        title: 'Preview — watch your favourite devices while you edit',
+        keywords: 'device preview swatch pixel strip live favourite favorite favourites star pause resume conserve resources ledfx visualisation visualization websocket connected paused reconnecting expand collapse pixel matrix',
+        body: [
+          'The "Preview" strip, next to ⚡ Energy — one small colour swatch per favourite device, live, on every page while you tweak scenes, settings, or colour sets. It subscribes to LedFX\'s own visualisation feed (the same one LedFX\'s own Devices page uses) — SPECTRA never invents its own render or reads pixels out of the effect engine directly.',
+          '★ Favourites opens a picker (checkboxes against the same device registry every scene tab uses) to choose which devices show. Leave it empty and it auto-populates with a sensible default (the same "genuinely driven" virtuals the S3 activation gate trusts) so the strip works the first time you open the app, no setup needed. "Reset to default" clears your explicit picks and goes back to that auto-populated list.',
+          '▸ Expand swaps the compact one-swatch-per-device row for a full per-pixel strip, closer to LedFX\'s own device view — remembered on this browser/device, not synced.',
+          'Pause GENUINELY drops the connection to LedFX — not just a blank display. The badge honestly reflects this: "live" (subscribed, showing real colour), "paused" (connection closed, swatches go dark — nothing is being read or transmitted), or "reconnecting…" (LedFX is unreachable; the preview never restarts or wakes it, it just waits and retries). Resume reopens the connection. This state is saved, so it survives a SPECTRA restart.',
+          'If it ever costs you something you\'d rather not pay while you\'re not looking at it, Pause is the answer — it\'s a real off switch, not a cosmetic one.',
         ],
       },
       {
