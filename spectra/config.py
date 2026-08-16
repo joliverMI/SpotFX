@@ -39,6 +39,9 @@ SCENE_AGENT_LOG_FILE = SPECTRA_STORAGE / "scene_agent_log.json"
 # docstring for why both exist and how they're verified, not just written.
 SCENE_BACKUPS_FILE = SPECTRA_STORAGE / "scene_backups.json"
 SCENE_GENESIS_FILE = SPECTRA_STORAGE / "scene_genesis.json"
+# The device-preview strip's favourites + pause state (spectra/services/
+# device_preview.py) — same small-store shape as ROOM_CONTROLS_FILE.
+DEVICE_PREVIEW_FILE = SPECTRA_STORAGE / "device_preview.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
@@ -148,3 +151,13 @@ def ledfx_url() -> str:
     host = os.getenv("LEDFX_HOST", "127.0.0.1")
     port = os.getenv("LEDFX_PORT", "8888")
     return f"http://{host}:{port}"
+
+
+def ledfx_ws_url() -> str:
+    """LedFX's own event WebSocket (ledfx/api/websocket.py) — the device
+    preview's data source (data/spectra-device-preview-plan/report.md §2).
+    Derived from ledfx_url() so both point at the same LedFX process by
+    construction; http(s) swaps to ws(s), never a second hand-typed host."""
+    base = ledfx_url()
+    return ("wss://" + base[len("https://"):] if base.startswith("https://")
+            else "ws://" + base[len("http://"):]) + "/api/websocket"

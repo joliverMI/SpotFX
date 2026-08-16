@@ -3,10 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxGet, spotfxPost } from './api/client';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
-  ColorWheelPosition, DriftProfile, EngineStatus, FeedbackCapture, FeedbackEntry,
-  FireResult, Registry, ReviewSession, ReviewTimeline, RoomColorState, RoomControlState,
-  RoomControlsSaveResult, SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry,
-  SonicAppliedChange, SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
+  ColorWheelPosition, DevicePreviewFavorites, DevicePreviewStatus, DriftProfile, EngineStatus,
+  FeedbackCapture, FeedbackEntry, FireResult, Registry, ReviewSession, ReviewTimeline,
+  RoomColorState, RoomControlState, RoomControlsSaveResult, SceneV2, SettingChangeEntry,
+  SettingsMessageResult, SettingsRegistry, SonicAppliedChange, SpectraTrigger, SpotColorSetCard,
+  TranscribeResult, UndoResult,
 } from './types';
 
 /* ── scenes ── */
@@ -258,6 +259,28 @@ export function useSaveRoomControls() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-room-controls'] }),
   });
 }
+
+/* ── device preview ── */
+
+export function useDevicePreviewFavorites() {
+  return useQuery({
+    queryKey: ['spectra-device-preview-favorites'],
+    queryFn: () => apiGet<DevicePreviewFavorites>('/device-preview/favorites'),
+    staleTime: 10_000,
+  });
+}
+
+export function useSaveDevicePreviewFavorites() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (favorite_virtual_ids: string[]) =>
+      apiPut<DevicePreviewFavorites>('/device-preview/favorites', { favorite_virtual_ids }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-device-preview-favorites'] }),
+  });
+}
+
+export const pauseDevicePreview = () => apiPost<DevicePreviewStatus>('/device-preview/pause');
+export const resumeDevicePreview = () => apiPost<DevicePreviewStatus>('/device-preview/resume');
 
 /* ── engine (S2) ── */
 

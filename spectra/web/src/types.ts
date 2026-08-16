@@ -342,6 +342,43 @@ export interface RoomControlsSaveResult extends RoomControlState {
   ambient_result?: AmbientResult;
 }
 
+/** Device-preview strip (data/spectra-device-preview-plan/report.md).
+ * `favorite_virtual_ids` is his explicit choice (empty = none made yet);
+ * `effective_virtual_ids` is what's actually shown — his choice, or the
+ * zero-configuration default (spectra/services/device_preview.py's
+ * genuinely-driven-virtual auto-population) when he hasn't picked any.
+ * `is_default` tells the picker whether it's showing his own list or the
+ * auto-populated one. */
+export interface DevicePreviewFavorites {
+  favorite_virtual_ids: string[];
+  effective_virtual_ids: string[];
+  is_default: boolean;
+}
+
+/** GET/POST /api/device-preview/{status,pause,resume} and the WS status
+ * push — `connected` is the upstream LedFX visualisation socket, honestly
+ * false whenever paused (see services/device_preview.py's module
+ * docstring for why this must never lie). */
+export interface DevicePreviewStatus {
+  paused: boolean;
+  connected: boolean;
+  favorite_virtual_ids: string[];
+  target_fps: number;
+  frames_relayed: number;
+}
+
+/** One relayed frame off /api/device-preview/ws — LedFX's own
+ * VisualisationUpdateEvent shape, passed through unchanged (pixels stay
+ * base64-or-list exactly as LedFX encoded them; decoded client-side, same
+ * division of labour as LedFX's own frontend). */
+export interface DevicePreviewFrame {
+  type: 'device_preview_frame';
+  vis_id: string;
+  pixels: string | number[][];
+  shape: [number, number];
+  is_device: boolean;
+}
+
 /* ── settings console (standing order 5: talk to the software) ──
  * spectra/services/settings_console.py is the authority: SettingSpec's
  * min/max/choices are read live off RoomControlState's own Field

@@ -32,9 +32,9 @@ from fastapi.staticfiles import StaticFiles
 
 from spectra import config
 from spectra.api import engine as engine_api
-from spectra.api import (feedback, fire_history, journey, ownership, registry,
-                         room_controls, scenes, sequencer, settings_console,
-                         show_review, triggers)
+from spectra.api import (device_preview, feedback, fire_history, journey,
+                         ownership, registry, room_controls, scenes,
+                         sequencer, settings_console, show_review, triggers)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(engine_api.router)
     app.include_router(ownership.router)
     app.include_router(room_controls.router)
+    app.include_router(device_preview.router)
     app.include_router(settings_console.router)
     app.include_router(triggers.router)
     app.include_router(fire_history.router)
@@ -121,9 +122,10 @@ async def _standalone_lifespan(app):
     import os
 
     logger = logging.getLogger("spectra")
-    from spectra.services import (ambient_music_gate, engine, frame_watchdog,
-                                   handover, ownership_reconciler)
+    from spectra.services import (ambient_music_gate, device_preview, engine,
+                                   frame_watchdog, handover, ownership_reconciler)
     await engine.start()
+    await device_preview.start()
     # Restart mid-reign: if the ownership record says spectra owns, the
     # live stack reactivates itself through the guarded activation path
     # (grant + readiness gate). Failure stays dark-but-owned and keeps
@@ -169,6 +171,7 @@ async def _standalone_lifespan(app):
         except asyncio.CancelledError:
             pass
     await engine.stop()
+    await device_preview.stop()
     # Release the room outputs cleanly on SIGTERM (deploy restarts): a
     # torn-down Hue DTLS session / DDP sender re-handshakes instantly on
     # the next activation, a killed one has to time out first (§4d).

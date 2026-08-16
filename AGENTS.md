@@ -1041,6 +1041,20 @@ the browser).
 async plugin — tests drive their own loop; see `tests/conftest.py` for the
 fake-LedFX harness). No live access from tests, ever.
 
+**A fake FastAPI server built inside a test-helper function silently 403s
+every WebSocket handshake if the file has `from __future__ import
+annotations` (every file in this repo does) and the endpoint's own
+`WebSocket`/`WebSocketDisconnect` names are imported locally inside that
+function instead of at module level.** FastAPI resolves a stringified
+annotation against the function's `__globals__` (module namespace), not an
+enclosing function's locals, so it can't find a name that only exists
+inside the helper — and fails by rejecting the handshake with HTTP 403,
+not a clear error. `test_process_split.py`'s `_backend_app()` gets this
+right (imports `WebSocket` etc. at module level, endpoint nested inside
+the function); copy that shape, not a self-contained "import everything
+inside the helper" one, for any new fake-server test fixture
+(`tests/test_device_preview.py`'s `_fake_ledfx_app()` hit exactly this).
+
 ## LedFX write plane: one gate, and its liveness signal
 
 Every SpotFX→LedFX HTTP call goes through `api/ledfx_client._request()` —
