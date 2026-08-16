@@ -99,8 +99,28 @@ _JumpEnum = Literal["color_set", "dice"]
 mcp = MCPServer("settings-console")
 
 
-async def _call(name: str, **kwargs: Any) -> dict:
-    return await settings_agent._dispatch(name, kwargs)
+async def _call(op_name: str, /, **kwargs: Any) -> dict:
+    """`op_name` is POSITIONAL-ONLY (the `/` marker) -- LIVE PRODUCTION
+    DEFECT, found 2026-08-15 running the adversarial set against the real
+    model on the deployed CLI backend: every wrapper below whose own tool
+    happens to have a parameter also called `name` (create_scene,
+    get_flare_kind, set_flare_kind, remove_flare_kind, overwrite_scene,
+    list_operations) called `_call("op", name=name, ...)` -- and because
+    this function's own first parameter used to be a plain keyword-or-
+    positional `name: str`, that keyword `name=` collided with it:
+    `_call() got multiple values for argument 'name'`, TypeError, on
+    every single call to any of those six tools. Caught live because the
+    real Sonnet model, given the real broken tool, reported the failure
+    HONESTLY instead of fabricating success (see tests/
+    test_settings_agent_cli.py::test_settings_mcp_server_actually_invokes_
+    every_tool_without_a_python_level_argument_error) -- the offline
+    proof (test_settings_mcp_server_starts_from_a_clean_cwd) only ever
+    listed tool schemas over MCP, never actually INVOKED a wrapped
+    function with real arguments, so this whole class of bug had no
+    offline coverage until now. `/` makes this the LAST time a future
+    tool's own kwarg name can collide with this dispatcher's own argument
+    name, whatever that kwarg is called -- not just a fix for `name`."""
+    return await settings_agent._dispatch(op_name, kwargs)
 
 
 @mcp.tool()
