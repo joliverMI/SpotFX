@@ -107,6 +107,72 @@ virtual effect configs (through the in-process facade or a hard-failing
 HTTP PUT), not one REST call per bulb, so neither carries this exact
 attempted-vs-confirmed gap.
 
+Burst threshold measurement (2026-08-16, live against his room — measured,
+not reasoned about): a paired report claimed 17 rapid REST writes ~0.12s
+apart all 2xx'd with NOT ONE bulb lit, while the same 17 paced at 0.45s lit
+all 17. Controlled, self-checked, repeated reproduction against BOTH real
+bridges independently — sustained multi-round bursts (not a single round;
+a single round found zero drops at any pace on the first pass), 0.08s
+through 0.60s pacing, 3 trials per pace near the documented Zigbee
+~10 cmd/s ceiling, 48 trials total — found ZERO drops anywhere in that
+range on either bridge, `dining-hues` and `hue-lights` alike. This does
+NOT reproduce the paired report's sharp cliff; the most likely explanation
+is a target-tracking bug in whatever script gathered that original
+evidence — the same class of mistake this investigation's own first
+sustained-burst script made and caught only via a mandatory self-check
+(confirm full success at an unambiguously safe pace before trusting any
+faster result). What IS real and independently confirmed: the bridge
+gives ZERO signal when a write doesn't land — every PUT during every
+trial, dropped or not, returned a clean `HTTP 200` with body
+`{"data":[...],"errors":[]}`, no `429`, no `Retry-After`, no rate-limit
+header of any kind (captured raw for the fastest paces on both bridges).
+A retry strategy therefore has nothing to react to but a read-back — this
+module already only ever trusted read-backs, not response codes, and that
+discipline is now the ENTIRE story, not one layer of several.
+AMBIENT_WRITE_STAGGER_MS was still raised well past the old 50ms (see its
+own comment) as cheap insurance against conditions this one measurement
+session didn't cover, and because `_apply_hue` (the OFF-fade/catch-up
+paths) had NO pacing at all before this pass — a real gap regardless of
+where the ON path's own cliff does or doesn't sit.
+
+Straggler repair (2026-08-16): the retry logic above only ever ran inside
+one `reconcile()` call, immediately after a write. A SEPARATE, real defect
+sat one layer up: `ambient_music_gate.py`'s periodic `verify_now()`
+recheck could name an off-target straggler correctly on every 30s tick,
+forever, and never once try to fix it — proven live: two bulbs (`Loft
+Ceiling Uplight`, `Standing Lamp Side` in one incident) sat wrong for
+hours through repeated correct detections; a plain re-apply of Ambient
+didn't clear them either. `repair_stragglers()` below is the fix — reuses
+`_write_and_confirm`, the exact paced/retried/read-back-confirmed engine
+the initial hold already trusted, restricted to just the named stragglers,
+called from `ambient_music_gate.verify_now()` the moment it finds one.
+Checked fresh, immediately before writing, per straggler: a light reading
+OFF right now is left alone (`left_off`), never re-lit — a bulb he turned
+off himself must stay off, the one thing the periodic verifier was always
+right to leave untouched, now narrowed from "the verifier writes nothing"
+to "the verifier never writes to a light that reads off." Proven live
+against real hardware (not just the headless suite): a forced real
+colour-wrong straggler on `Standing Lamp Side` was detected by
+`verify_held()`, genuinely rewritten by `repair_stragglers()`, and
+confirmed by an independent read-back — see `tests/test_ambient.py`'s
+`repair_stragglers` tests for the headless proofs (an on-but-wrong-colour
+light gets rewritten; an off light never receives a PUT; a light that
+keeps silently dropping the corrective write comes back `unconfirmed`,
+never silently dropped from the report).
+
+False-unlit fix (2026-08-16): a separate, live-reported defect — the
+verifier's lit/unlit readout invented failures on genuinely-correct
+bulbs, specifically ones caught at a different BRIGHTNESS than
+`AMBIENT_BRIGHTNESS_PCT` (a wall-switch or Hue-app dim, or simply his own
+choice) while still on and at the exact ambient hue. `_state_matches`
+(on+colour+brightness, used to confirm OUR OWN write landed) and
+`_color_matches` (on+colour only, used by `verify_held()`/`status()`'s
+reporting surface) are now two DIFFERENT checks — see each function's own
+docstring for why the split is deliberate, not a loosened bug. Proven
+live: forcing a real bulb (`Loft Ceiling Uplight`) to 35% brightness at
+its correct hue, `verify_held()` now reports it LIT; before this fix
+(re-run against the unpatched module for comparison) it reported unlit.
+
 Status-honesty fix (found live 2026-08-15, overnight): the read-back above
 proves a hold at the MOMENT it's written — it says nothing about five
 minutes, or five hours, later. `ambient_music_gate.py`'s own `_apply()`
@@ -119,13 +185,19 @@ sat at `held: true` all night while he'd turned every bulb off before bed.
 it's safe to run on a short independent cadence (services/
 ambient_music_gate.py's periodic verifier) without the write-burst zigbee
 congestion `_hold_and_confirm` above guards against; it reuses the light
-cache and `_state_matches` (the SAME on+colour+brightness check the write
-path already trusts) rather than re-deriving a second, looser notion of
-"held." What changed is not the check itself but WHO runs it and HOW
-OFTEN: previously only a state-changing write ever triggered one; now a
-periodic read-only recheck does too, so a claimed hold can't go stale for
-longer than that cadence, and the gate downgrades `held` the moment it
-finds a light that isn't actually lit.
+cache and `_color_matches` (on+hue only — see that function's own
+docstring for why it's deliberately looser than `_state_matches`, the
+write path's stricter on+colour+brightness check) rather than re-deriving
+a second, looser notion of "held." What changed is not just WHO runs the
+check and HOW OFTEN — previously only a state-changing write ever
+triggered one; now a periodic read-only recheck does too, so a claimed
+hold can't go stale for longer than that cadence — but also, since
+2026-08-16, WHAT HAPPENS on a miss: `repair_stragglers()` gives the
+verifier a bounded, paced, read-back-confirmed way to actually fix an
+on-but-wrong-colour straggler it finds, not just name it (see that
+function's own docstring — a bulb found genuinely OFF is still never
+touched). The gate downgrades `held` only once repair has had its shot
+and a straggler is still off-target.
 """
 from __future__ import annotations
 
@@ -149,8 +221,18 @@ AMBIENT_CATCHUP_MS = 8000
 # Hold-confirmation pacing (module docstring's "Read-back confirmation").
 # Deliberately spaced, not hammered — the failure this defends against is
 # most likely bridge/mesh congestion, and hammering a congested mesh only
-# makes it worse.
-AMBIENT_WRITE_STAGGER_MS = 50    # gap between successive light PUTs in one
+# makes it worse. 300ms (2026-08-16 measurement, module docstring's "Burst
+# threshold measurement" — a MARGIN inside the confirmed-safe band, not the
+# fastest pace that happened to survive): 48 controlled sustained-burst
+# trials against BOTH real bridges independently (dining-hues, hue-lights),
+# 0.08s-0.60s pacing, found ZERO drops anywhere in that range — this constant
+# does not sit at a measured cliff edge, there wasn't a clean one to find.
+# Kept well above 50ms anyway because production logs show occasional
+# single-bulb stragglers even at the old pacing (real zigbee mesh
+# unreliability, not proven to correlate with pace specifically) — pacing is
+# defense in depth, `repair_stragglers()` below is what actually recovers a
+# straggler regardless of why one occurs.
+AMBIENT_WRITE_STAGGER_MS = 300   # gap between successive light PUTs in one
                                  # hold pass — paces the burst from the
                                  # start rather than only recovering after
 AMBIENT_CONFIRM_SETTLE_MS = 300  # extra wait after a write round's own
@@ -293,114 +375,240 @@ async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
     return [rid for rid, _name in await _resolve_lights_named(client, cfg)]
 
 
-def _state_matches(state: dict, target_xy: tuple[float, float],
-                   target_brightness_pct: float) -> bool:
-    """Does a light's CURRENT bridge-reported state actually carry the
-    ambient hold — not just accept the PUT that asked for it. Tolerances
-    cover the bridge's own xy rounding/gamut clamping and brightness
-    quantization, not a light still mid-ramp (the caller waits out the ramp
-    before calling this)."""
+def _color_matches(state: dict, target_xy: tuple[float, float]) -> bool:
+    """Is this light ON and showing the ambient HUE — the visually
+    meaningful definition of "holding the ambient colour", used for
+    status REPORTING (verify_held), deliberately looser than
+    _state_matches below. Brightness is left out on purpose: a bulb he's
+    dimmed via a wall switch or the Hue app is still legitimately showing
+    ambient's colour, just at his own chosen intensity — the same "don't
+    fight him for control" principle ambient_music_gate.py already applies
+    to a bulb he turned fully off. Found live 2026-08-15/16: the verifier
+    reported genuinely-on, genuinely-correct-hue bulbs as "unlit" solely
+    because they read at a different brightness than
+    AMBIENT_BRIGHTNESS_PCT — inventing a failure erodes trust in the
+    honest reporting this project exists to provide."""
     if not (state.get("on") or {}).get("on"):
-        return False
-    brightness = (state.get("dimming") or {}).get("brightness")
-    if brightness is None or abs(brightness - target_brightness_pct) > _BRIGHTNESS_TOLERANCE_PCT:
         return False
     xy = (state.get("color") or {}).get("xy") or {}
     x, y = xy.get("x"), xy.get("y")
     if x is None or y is None:
         return False
-    if abs(x - target_xy[0]) > _XY_TOLERANCE or abs(y - target_xy[1]) > _XY_TOLERANCE:
+    return abs(x - target_xy[0]) <= _XY_TOLERANCE and abs(y - target_xy[1]) <= _XY_TOLERANCE
+
+
+def _state_matches(state: dict, target_xy: tuple[float, float],
+                   target_brightness_pct: float) -> bool:
+    """Did THIS WRITE land — on, hue, AND the specific brightness we just
+    asked for. Strict on purpose, unlike _color_matches above: confirming a
+    write means confirming what we told the bulb to do, not merely that
+    it's plausibly showing ambient's colour. Tolerances cover the bridge's
+    own xy rounding/gamut clamping and brightness quantization, not a light
+    still mid-ramp (the caller waits out the ramp before calling this)."""
+    if not _color_matches(state, target_xy):
         return False
-    return True
+    brightness = (state.get("dimming") or {}).get("brightness")
+    return brightness is not None and abs(brightness - target_brightness_pct) <= _BRIGHTNESS_TOLERANCE_PCT
 
 
 async def _apply_hue(dev: Any, body: dict) -> int:
     """PUT `body` to every light this device's entertainment stream covers,
     over ONE connection to its bridge (a device can carry ten-plus lights —
     a fresh TLS handshake per light would make every toggle noticeably
-    slow). Best-effort per light — one unreachable/rejecting bulb must not
+    slow), PACED the same as _hold_and_confirm below (AMBIENT_WRITE_STAGGER_MS
+    — see that constant's own comment and the module docstring's "Burst
+    threshold measurement" for what 2026-08-16's live measurement actually
+    found; this path — the OFF-fade and catch-up-ramp bursts — had NO
+    pacing at all before this fix, same exposure as the ON path had before
+    PR #69). Best-effort per light — one unreachable/rejecting bulb must not
     stop the rest, but a non-2xx response (raise_for_status) still doesn't
     count toward the returned total — a rejected write is not a write."""
     cfg = dev.config
     count = 0
     async with _bridge_client(cfg) as client:
-        for rid in await _resolve_lights(client, cfg):
+        rids = await _resolve_lights(client, cfg)
+        for i, rid in enumerate(rids):
             try:
                 await _hue_put(client, f"/clip/v2/resource/light/{rid}", body)
                 count += 1
             except Exception:
                 logger.exception("Ambient: failed to set light %s on %s",
                                  rid, cfg.get("ip_address"))
+            if i < len(rids) - 1 and AMBIENT_WRITE_STAGGER_MS > 0:
+                await asyncio.sleep(AMBIENT_WRITE_STAGGER_MS / 1000)
     return count
+
+
+async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
+                             pending: list[tuple[str, str]], body: dict,
+                             target_xy: tuple[float, float],
+                             target_brightness_pct: float) -> tuple[list[str], list[str]]:
+    """The shared paced-write-then-read-back-confirm engine behind both the
+    initial hold (_hold_and_confirm, every light in the entertainment set)
+    and the standalone straggler repair (repair_stragglers, just the
+    lights verify_held() named as off-target). PUTs `body` to every
+    (rid, name) in `pending` over the given already-open connection, THEN
+    READS EACH ONE BACK — a 2xx PUT only proves the bridge accepted the
+    write, not that the bulb (over zigbee, which silently drops commands
+    under sustained load with NO error, no 4xx, no rate-limit header —
+    module docstring) carries it. Retries stragglers, spaced apart rather
+    than hammered. Retries drop the bridge-side ramp (`dynamics`) — a
+    stubborn light should snap, not take another 1.5s to maybe land.
+    Returns (confirmed light names, still-unconfirmed light names) —
+    best-effort per light, but the unconfirmed half must reach the caller,
+    never get folded into a bigger "N set" count."""
+    snap_body = {k: v for k, v in body.items() if k != "dynamics"}
+    confirmed: dict[str, str] = {}
+    for attempt in range(AMBIENT_HOLD_ATTEMPTS):
+        write_body = body if attempt == 0 else snap_body
+        for i, (rid, name) in enumerate(pending):
+            try:
+                await _hue_put(client, f"/clip/v2/resource/light/{rid}", write_body)
+            except Exception:
+                logger.exception("Ambient: failed to write %s (%s) on %s",
+                                 name, rid, cfg.get("ip_address"))
+            if i < len(pending) - 1 and AMBIENT_WRITE_STAGGER_MS > 0:
+                await asyncio.sleep(AMBIENT_WRITE_STAGGER_MS / 1000)
+        settle_ms = (AMBIENT_TRANSITION_MS if attempt == 0 else 0) + AMBIENT_CONFIRM_SETTLE_MS
+        if settle_ms > 0:
+            await asyncio.sleep(settle_ms / 1000)
+        still_pending: list[tuple[str, str]] = []
+        for rid, name in pending:
+            try:
+                state = (await _hue_get(
+                    client, f"/clip/v2/resource/light/{rid}"))["data"][0]
+            except Exception:
+                logger.exception("Ambient: could not read back %s (%s) on %s",
+                                 name, rid, cfg.get("ip_address"))
+                still_pending.append((rid, name))
+                continue
+            if _state_matches(state, target_xy, target_brightness_pct):
+                confirmed[rid] = name
+            else:
+                still_pending.append((rid, name))
+        pending = still_pending
+        if not pending:
+            break
+        if attempt < AMBIENT_HOLD_ATTEMPTS - 1:
+            logger.warning(
+                "Ambient: %d light(s) not yet confirmed at the ambient "
+                "colour, retrying: %s", len(pending), [n for _, n in pending])
+            await asyncio.sleep(AMBIENT_RETRY_SPACING_MS / 1000)
+    return sorted(confirmed.values()), sorted(name for _, name in pending)
 
 
 async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float],
                             target_brightness_pct: float) -> tuple[list[str], list[str]]:
-    """PUT `body` to every light this device's entertainment stream covers,
-    THEN READ EACH ONE BACK from the bridge — a 2xx PUT only proves the
-    bridge accepted the write, not that the bulb (over zigbee, which can
-    silently drop a command under a write burst — module docstring) carries
-    it. Retries stragglers, spaced apart rather than hammered (module
-    docstring). Retries drop the bridge-side ramp (`dynamics`) — a stubborn
-    light should snap, not take another 1.5s to maybe land. Returns
-    (confirmed light names, still-unconfirmed light names) — best-effort per
-    light, same discipline as _apply_hue, but the unconfirmed half must
-    reach the caller, never get folded into a bigger "N set" count."""
+    """Resolve every light this device's entertainment stream covers, then
+    run them through _write_and_confirm. See that function for the actual
+    write/confirm/retry mechanics."""
     cfg = dev.config
-    snap_body = {k: v for k, v in body.items() if k != "dynamics"}
     async with _bridge_client(cfg) as client:
         pending = await _resolve_lights_named(client, cfg)
         if not pending:
             return [], []
-        confirmed: dict[str, str] = {}
-        for attempt in range(AMBIENT_HOLD_ATTEMPTS):
-            write_body = body if attempt == 0 else snap_body
-            for i, (rid, name) in enumerate(pending):
-                try:
-                    await _hue_put(client, f"/clip/v2/resource/light/{rid}", write_body)
-                except Exception:
-                    logger.exception("Ambient: failed to write %s (%s) on %s",
-                                     name, rid, cfg.get("ip_address"))
-                if i < len(pending) - 1 and AMBIENT_WRITE_STAGGER_MS > 0:
-                    await asyncio.sleep(AMBIENT_WRITE_STAGGER_MS / 1000)
-            settle_ms = (AMBIENT_TRANSITION_MS if attempt == 0 else 0) + AMBIENT_CONFIRM_SETTLE_MS
-            if settle_ms > 0:
-                await asyncio.sleep(settle_ms / 1000)
-            still_pending: list[tuple[str, str]] = []
-            for rid, name in pending:
-                try:
-                    state = (await _hue_get(
-                        client, f"/clip/v2/resource/light/{rid}"))["data"][0]
-                except Exception:
-                    logger.exception("Ambient: could not read back %s (%s) on %s",
-                                     name, rid, cfg.get("ip_address"))
-                    still_pending.append((rid, name))
+        return await _write_and_confirm(client, cfg, pending, body, target_xy, target_brightness_pct)
+
+
+async def repair_stragglers(names: list[str], color: Optional[str]) -> dict:
+    """Actively re-assert the ambient colour on named stragglers
+    verify_held() found off-target — the write half the periodic verifier
+    (spectra/services/ambient_music_gate.py's verify_now()) was missing:
+    it could DETECT a straggler on every tick and never once fix it (found
+    live 2026-08-15/16 — two bulbs sat wrong for hours through repeated
+    verify cycles; a direct bridge write fixed both instantly). Paced and
+    read-back confirmed through the SAME engine (_write_and_confirm) as the
+    initial hold — no second, looser notion of "did it land".
+
+    NEVER touches a light that reads OFF right now, checked fresh
+    immediately before writing — a bulb he turned off himself must stay
+    off (ambient_music_gate.py's own "never fight him for control" rule);
+    only an ON-but-wrong-colour straggler (the burst-drop/drift shape this
+    exists to fix) gets rewritten. Best-effort per bridge — one
+    unreachable bridge must not stop repair on the other. Returns
+    {"repaired": [...], "left_off": [...], "unconfirmed": [...]} — every
+    name from `names` lands in exactly one of the three."""
+    from spectra.services.live_host import live
+
+    empty = {"repaired": [], "left_off": [], "unconfirmed": []}
+    if not names or not live.active or live.host is None:
+        return empty
+    hue_devices = _hue_devices(live.host)
+    if not hue_devices:
+        return empty
+
+    async with _get_lock():
+        return await _repair_stragglers_impl(hue_devices, set(names), color)
+
+
+async def _repair_stragglers_impl(hue_devices: dict[str, Any], wanted: set[str],
+                                  color: Optional[str]) -> dict:
+    color_hex = color or "#ffffff"
+    target_xy = _hex_to_xy(color_hex)
+    body = _light_payload(color_hex)  # no ramp_ms — a stubborn light should snap
+    repaired: list[str] = []
+    left_off: list[str] = []
+    unconfirmed: list[str] = []
+
+    for did, dev in sorted(hue_devices.items()):
+        cfg = dev.config
+        try:
+            async with _bridge_client(cfg) as client:
+                named = [(rid, name) for rid, name in
+                        await _resolve_lights_named(client, cfg) if name in wanted]
+                if not named:
                     continue
-                if _state_matches(state, target_xy, target_brightness_pct):
-                    confirmed[rid] = name
-                else:
-                    still_pending.append((rid, name))
-            pending = still_pending
-            if not pending:
-                break
-            if attempt < AMBIENT_HOLD_ATTEMPTS - 1:
-                logger.warning(
-                    "Ambient: %d light(s) not yet confirmed at the ambient "
-                    "colour, retrying: %s", len(pending), [n for _, n in pending])
-                await asyncio.sleep(AMBIENT_RETRY_SPACING_MS / 1000)
-        return sorted(confirmed.values()), sorted(name for _, name in pending)
+                on_now: list[tuple[str, str]] = []
+                for rid, name in named:
+                    try:
+                        state = (await _hue_get(
+                            client, f"/clip/v2/resource/light/{rid}"))["data"][0]
+                    except Exception:
+                        logger.exception(
+                            "Ambient repair: could not read %s (%s) on %s",
+                            name, rid, cfg.get("ip_address"))
+                        unconfirmed.append(name)
+                        continue
+                    if (state.get("on") or {}).get("on"):
+                        on_now.append((rid, name))
+                    else:
+                        left_off.append(name)
+                if not on_now:
+                    continue
+                confirmed_names, straggler_names = await _write_and_confirm(
+                    client, cfg, on_now, body, target_xy, AMBIENT_BRIGHTNESS_PCT)
+                repaired.extend(confirmed_names)
+                unconfirmed.extend(straggler_names)
+        except Exception:
+            logger.exception("Ambient repair: failed to reach %s", did)
+
+    if repaired:
+        logger.warning(
+            "Ambient repair: re-asserted the ambient colour on %d straggler(s): %s",
+            len(repaired), sorted(repaired))
+    if unconfirmed:
+        logger.error(
+            "Ambient repair: %d straggler(s) still not confirmed after repair: %s",
+            len(unconfirmed), sorted(unconfirmed))
+    if left_off:
+        logger.info(
+            "Ambient repair: leaving %d straggler(s) alone — off, not ambient's "
+            "to relight: %s", len(left_off), sorted(left_off))
+    return {"repaired": sorted(repaired), "left_off": sorted(left_off),
+            "unconfirmed": sorted(unconfirmed)}
 
 
 async def verify_held(color: Optional[str]) -> dict:
     """Read-only recheck of whatever this module is CURRENTLY claiming to
     hold — never a PUT, ever (module docstring, "status-honesty fix").
-    Reuses `_resolve_lights_named`'s cache and `_state_matches` (the exact
-    on+colour+brightness test the write path already trusts), so "lit at
-    the ambient colour" means the identical thing whether it was just
-    confirmed by a write or by this independent recheck. Same no-live-
-    stack/no-Hue-devices no-ops as reconcile() — there's nothing to verify
-    either way, and the caller (services/ambient_music_gate.py) treats
-    those the same as "not actually held" rather than as an error."""
+    Reuses `_resolve_lights_named`'s cache and `_color_matches` (on+hue
+    only, deliberately NOT the stricter write-confirmation check — module
+    docstring on why brightness doesn't gate "is the room lit"), so a bulb
+    he's dimmed out of band still reads as holding the ambient colour.
+    Same no-live-stack/no-Hue-devices no-ops as reconcile() — there's
+    nothing to verify either way, and the caller (services/
+    ambient_music_gate.py) treats those the same as "not actually held"
+    rather than as an error."""
     from spectra.services.live_host import live
 
     if not live.active or live.host is None:
@@ -427,7 +635,7 @@ async def verify_held(color: Optional[str]) -> dict:
                             name, rid, cfg.get("ip_address"))
                         unlit.append(name)
                         continue
-                    if _state_matches(state, target_xy, AMBIENT_BRIGHTNESS_PCT):
+                    if _color_matches(state, target_xy):
                         lit.append(name)
                     else:
                         unlit.append(name)

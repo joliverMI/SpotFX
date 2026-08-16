@@ -181,16 +181,26 @@ class FakeHost:
 @pytest.fixture
 def hue_room(monkeypatch):
     """One live Hue device wired to services.live_host.live, plus a mocked
-    bridge — the shared fixture for every reconcile() proof below."""
+    bridge — the shared fixture for every reconcile() proof below. ONE
+    handler (and therefore one persistent bulb `state`) built ONCE and
+    reused for every _bridge_client() call this test makes — ambient.py
+    opens a fresh client per operation (the hold, an out-of-band write, a
+    later verify/repair), so a handler rebuilt per-call would silently
+    reset the mocked bulb back to its off/D65 default on every single
+    call, masking whether a later check is reading real prior state or
+    just a coincidental fresh default (matches tests/test_ambient.py's own
+    `bridge` fixture)."""
     from spectra.services import ambient
     from spectra.services.live_host import live
     calls: list = []
     dev = FakeHueDevice(calls)
     monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
 
+    handler = _hue_handler(calls)
+
     def fake_bridge_client(cfg):
         return httpx.AsyncClient(base_url=f"https://{cfg['ip_address']}",
-                                 transport=httpx.MockTransport(_hue_handler(calls)))
+                                 transport=httpx.MockTransport(handler))
     monkeypatch.setattr(ambient, "_bridge_client", fake_bridge_client)
     return dev, calls
 
@@ -545,6 +555,42 @@ def test_verify_now_downgrades_held_when_a_light_is_found_off(hue_room):
     assert st["verify"]["unlit"] == ["l1"]
     assert all(c[1] != "PUT" for c in calls[calls_before_verify:]), \
         "the verifier itself must never write — only the out-of-band turn-off did"
+
+
+def test_verify_now_repairs_an_on_but_wrong_colour_straggler(hue_room):
+    """The fix for the paired live defect: a straggler that's still ON but
+    drifted to the wrong colour must be actively re-asserted by the
+    periodic verifier — not merely named, the way the off-bulb case above
+    (correctly) stays hands-off. status() must read back to "holding" once
+    the repair lands, with no further human/agent action."""
+    from spectra.services import ambient
+    from spectra.services.ambient_music_gate import reconcile, verify_now, status
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+
+    held = _run(reconcile(True))
+    assert held["status"] == "on"
+    assert status()["mode"] == "holding"
+
+    async def _drift_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"color": {"xy": {"x": 0.15, "y": 0.06}}})
+    _run(_drift_out_of_band())
+    calls_before_verify = len(calls)
+
+    result = _run(verify_now())
+
+    assert result["status"] == "verified"
+    assert result["repair"]["repaired"] == ["l1"], \
+        "the straggler must actually be rewritten, not just named"
+    put_calls_after_detect = [c for c in calls[calls_before_verify:] if c[1] == "PUT"]
+    assert put_calls_after_detect, \
+        "an on-but-wrong-colour straggler DOES get written to, unlike an off one"
+    st = status()
+    assert st["held"] is True, "a fully repaired hold must read back as held"
+    assert st["mode"] == "holding"
+    assert st["verify"]["unlit"] == []
 
 
 def test_verify_now_downgrades_held_when_live_stack_no_longer_active(hue_room, monkeypatch):

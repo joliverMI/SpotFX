@@ -119,11 +119,22 @@ identical write" short-circuit) is untouched. status() also reports
 `verified_age_s` (seconds since whichever check — write or periodic — most
 recently ran) and the raw `verify` result whenever there's one to show, so
 a caller can always tell "confirmed 4s ago" from "confirmed 20 minutes
-ago" rather than treating every `result` as equally live. Deliberately
-NOT built: the verifier never WRITES to re-assert a hold it finds broken —
-a bulb he turned off himself must stay off; this module reports reality,
-it does not fight him for control of it (services/ambient.py's own
-module docstring frames the analogous choice on the release path).
+ago" rather than treating every `result` as equally live.
+
+verify_now() used to be read-only end to end — the GET-only recheck ran,
+but a light it found broken was only ever named, never fixed (2026-08-15
+live incident: two bulbs sat wrong for hours through repeated verify
+cycles that correctly named them every time and repaired neither —
+"detects but does not repair" is only marginally better than not
+noticing). 2026-08-16: an off-target light now gets one paced,
+read-back-confirmed repair attempt (services.ambient.repair_stragglers())
+before this reports "partial". The one thing that stayed deliberately
+NOT built: repair_stragglers() never re-lights a light that reads OFF
+right now — a bulb he turned off himself must stay off; this module
+reports reality, it does not fight him for control of it (services/
+ambient.py's own module docstring frames the analogous choice on the
+release path) — the "never fight him" rule survives, narrowed to the one
+case it was ever actually about.
 
 Concurrency: _apply_lock serialises this module's own decisions (a burst
 of bridge broadcasts must not fire a burst of redundant Hue reconciles);
@@ -298,14 +309,27 @@ async def _apply(ambient_mode: AmbientMode, desired: bool, color: Optional[str])
 
 async def verify_now() -> dict:
     """The independent periodic recheck (module docstring, "Status
-    honesty") — GET-only, NEVER a write (services.ambient.verify_held's own
-    docstring). Skips entirely when nothing is currently claimed held
+    honesty"). Skips entirely when nothing is currently claimed held
     (nothing to check) or a write is already in flight (its own read-back
     is fresher than anything this could add — see the concurrency note in
-    the module docstring). A confirmed miss downgrades `_verified_ok`
-    (status()'s `held`/`mode` react immediately) but never touches `_held`
-    itself — the write-intent short-circuit above is untouched, so a
-    colour/mode change still re-applies exactly as before."""
+    the module docstring). The GET-only recheck itself is unconditional
+    (services.ambient.verify_held's own docstring); what follows is NOT —
+    a light it finds off-target gets one paced, read-back-confirmed REPAIR
+    attempt (services.ambient.repair_stragglers, 2026-08-16) before this
+    reports "partial", the fix for the live defect this module's docstring
+    used to describe as deliberate: two bulbs sat wrong for hours while
+    verify_now() named them correctly on every tick and repaired neither —
+    "detects but does not repair" is only marginally better than not
+    noticing. repair_stragglers() itself still never touches a light that
+    reads OFF right now (checked fresh, immediately before writing) — a
+    bulb he turned off himself stays off; only an ON-but-wrong-colour
+    straggler (the burst-drop/drift shape) gets rewritten, so "reports
+    reality, does not fight him for control" still holds for the one case
+    it was ever meant to protect. A confirmed miss that repair could not
+    fully clear downgrades `_verified_ok` (status()'s `held`/`mode` react
+    immediately) but never touches `_held` itself — the write-intent
+    short-circuit above is untouched, so a colour/mode change still
+    re-applies exactly as before."""
     if not _held:
         return {}
     lock = _get_apply_lock()
@@ -316,8 +340,17 @@ async def verify_now() -> dict:
     status_ = result.get("status")
     if status_ == "verified":
         unlit = result.get("unlit") or []
-        _record_verify("verified", result.get("lights_lit", 0),
-                       result.get("lights_total", 0), unlit)
+        lights_lit = result.get("lights_lit", 0)
+        if unlit:
+            repair = await ambient.repair_stragglers(unlit, controls.ambient_color)
+            result["repair"] = repair
+            if repair["repaired"]:
+                lights_lit += len(repair["repaired"])
+                logger.warning(
+                    "Ambient: repaired %d straggler(s) the periodic verifier "
+                    "found off-target: %s", len(repair["repaired"]), repair["repaired"])
+            unlit = sorted(set(unlit) - set(repair["repaired"]))
+        _record_verify("verified", lights_lit, result.get("lights_total", 0), unlit)
         if unlit:
             logger.error(
                 "Ambient: verification found %d/%d light(s) no longer at "
