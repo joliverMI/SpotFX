@@ -132,7 +132,8 @@ def test_trigger_fires_scene_action_with_its_own_intensity_at_its_moment(tmp_pat
                 fire_scene = await _make_fire_scene(executor, conductor, scene)
 
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
-                                       fire_scene=fire_scene)
+                                       fire_scene=fire_scene,
+                                       render_intensity=lambda x: x)
                 await engine.on_track_state("song:1")
 
                 await engine.tick(4000)   # before the trigger's moment
@@ -189,7 +190,8 @@ def test_trigger_fires_response_action_on_the_real_pipeline(tmp_path):
                 conductor.on_scene_fire(scene, writes)
 
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
-                                       fire_response=responder.on_event)
+                                       fire_response=responder.on_event,
+                                       render_intensity=lambda x: x)
                 await engine.on_track_state("song:2")
 
                 await engine.tick(1000)
@@ -247,7 +249,8 @@ def test_trigger_fires_scene_update_action_on_the_real_pipeline(tmp_path):
                 conductor.on_scene_fire(scene, writes)
 
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
-                                       fire_scene_update=responder.on_update)
+                                       fire_scene_update=responder.on_update,
+                                       render_intensity=lambda x: x)
                 await engine.on_track_state("song:update")
 
                 await engine.tick(1000)
@@ -361,7 +364,8 @@ def test_transition_fire_lands_on_real_pipeline_on_song_change(tmp_path):
                 engine = TriggerEngine(
                     list_triggers=lambda uri: [], fire_scene=fire_scene,
                     select_scene=lambda intensity: scene.id,
-                    transition_intensity=lambda: 0.5)
+                    transition_intensity=lambda: 0.5,
+                    render_intensity=lambda x: x)
 
                 await engine.on_track_state("song:first")   # arms only
                 headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
@@ -488,7 +492,8 @@ def test_generated_trigger_resolves_scene_via_kernel_and_fires_at_its_moment(
                 # select_scene is left at its production default — this is
                 # the real kernel, not an injected picker.
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
-                                       fire_scene=fire_scene)
+                                       fire_scene=fire_scene,
+                                       render_intensity=lambda x: x)
                 await engine.on_track_state("song:kernel")
 
                 await engine.tick(2000)

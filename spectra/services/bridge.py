@@ -245,11 +245,27 @@ class SpotEffectsBridge:
             return False
         return bool(self._track.get("is_playing"))
 
+    def track_genres(self) -> list[str]:
+        return list((self._track or {}).get("genres") or [])
+
     def genre_bucket(self) -> Optional[str]:
-        genres = (self._track or {}).get("genres") or []
+        genres = self.track_genres()
         if not genres:
             return None
-        return analysis_reader.genre_bucket(list(genres))
+        return analysis_reader.genre_bucket(genres)
+
+    def song_scaling_factor(self) -> float:
+        """The current song's per-song genre+bass render-intensity scale
+        (spectra.services.intensity_scale, the SpotFX v2 port) — the
+        `song_scaling_factor` term in intensity_scale.combine_measured_and_
+        scale's headroom formula. Neutral 1.0 with no track (never blocks a
+        fire); every other degradation (no bass data, no genre match) is
+        handled inside intensity_scale.song_scaling_factor itself."""
+        uri = self.track_uri()
+        if uri is None:
+            return 1.0
+        from spectra.services import intensity_scale
+        return intensity_scale.song_scaling_factor(uri, self.track_genres())
 
     def conductor_deferral(self) -> Optional[str]:
         """Pause / Dinner Party / Ambient hold drift; Force Scene does NOT

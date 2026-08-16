@@ -52,7 +52,9 @@ def _build_index() -> None:
     _index_built = True
 
 
-def sections_for_uri(uri: str) -> Optional[list]:
+def stem_for_uri(uri: str) -> Optional[str]:
+    """uri -> audio-shape file stem, rebuilding the index once on a miss so
+    a freshly captured song appears without a restart."""
     global _index_built
     if not _index_built:
         _build_index()
@@ -60,8 +62,13 @@ def sections_for_uri(uri: str) -> Optional[list]:
     if stem is None:
         _build_index()
         stem = _shape_index.get(uri)
-        if stem is None:
-            return None
+    return stem
+
+
+def sections_for_uri(uri: str) -> Optional[list]:
+    stem = stem_for_uri(uri)
+    if stem is None:
+        return None
     path = config.AUDIO_SHAPES_DIR / f"{stem}.librosa.json"
     try:
         sections = json.loads(path.read_text(encoding="utf-8")).get("sections")
@@ -90,10 +97,12 @@ def section_energy_at(uri: str, now_ms: int) -> Optional[float]:
         return None
 
 
-def genre_bucket(genres: list[str]) -> Optional[str]:
-    """Best-matching training-profile name for a song's genres (the ported
+def training_profile_for_genres(genres: list[str]) -> Optional[dict]:
+    """Best-matching training-profile dict for a song's genres (the ported
     _find_profile_for_genres matching: case-insensitive substring either
-    way, else the default profile), or None."""
+    way, else the default profile), or None. genre_bucket() and
+    intensity_scale.py's genre base both resolve through this one matcher
+    so they never disagree about which profile a song belongs to."""
     path = config.TRAINING_PROFILES_FILE
     if not path.exists():
         return None
@@ -106,8 +115,14 @@ def genre_bucket(genres: list[str]) -> Optional[str]:
         for pg in profile.get("genres", []):
             pg_lower = pg.lower()
             if any(pg_lower in sg or sg in pg_lower for sg in lowered):
-                return profile.get("name")
+                return profile
     for profile in profiles:
         if profile.get("is_default"):
-            return profile.get("name")
+            return profile
     return None
+
+
+def genre_bucket(genres: list[str]) -> Optional[str]:
+    """Best-matching training-profile NAME for a song's genres, or None."""
+    profile = training_profile_for_genres(genres)
+    return profile.get("name") if profile else None

@@ -4,10 +4,10 @@ import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spo
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   ColorWheelPosition, DevicePreviewFavorites, DevicePreviewStatus, DriftProfile, EngineStatus,
-  FeedbackCapture, FeedbackEntry, FireResult, Registry, ReviewSession, ReviewTimeline,
-  RoomColorState, RoomControlState, RoomControlsSaveResult, SceneV2, SettingChangeEntry,
-  SettingsMessageResult, SettingsRegistry, SonicAppliedChange, SpectraTrigger, SpotColorSetCard,
-  TranscribeResult, UndoResult,
+  FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark, Registry, ReviewSession,
+  ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult, SceneV2,
+  SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange, SpectraTrigger,
+  SpotColorSetCard, TranscribeResult, UndoResult,
 } from './types';
 
 /* ── scenes ── */
@@ -552,5 +552,37 @@ export function useTranscribeSettingsAudio() {
       form.append('audio', audio, 'clip.webm');
       return apiPostForm<TranscribeResult>('/settings-console/transcribe', form);
     },
+  });
+}
+
+/* ── intensity-scale mark (2026-08-15 ruling: the one way past the
+   automatic 0.75 ceiling — "he marks the track; automatic never does") ── */
+
+export function useIntensityScaleMark(uri: string | null) {
+  return useQuery({
+    queryKey: ['spectra-intensity-mark', uri],
+    queryFn: () => apiGet<IntensityScaleMark>(`/intensity-scale/mark?uri=${encodeURIComponent(uri!)}`),
+    enabled: uri != null,
+    refetchInterval: 5000,
+  });
+}
+
+export function useSetIntensityScaleMark(uri: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (factor: number) =>
+      apiPut<{ uri: string; mark: number }>(
+        `/intensity-scale/mark?uri=${encodeURIComponent(uri!)}`, { factor }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-intensity-mark', uri] }),
+  });
+}
+
+export function useClearIntensityScaleMark(uri: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiDel<{ uri: string; cleared: boolean }>(
+        `/intensity-scale/mark?uri=${encodeURIComponent(uri!)}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-intensity-mark', uri] }),
   });
 }

@@ -267,6 +267,60 @@ byte-identical against spot-effects' own `web/src/builder/` modules, so
 check there first before assuming a root-side frontend module needs
 re-porting.
 
+## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
+
+`spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
+mechanism (`services/intensity_scale_service.py`, genre slider →
+`genre_to_song_scale` song-space base × a per-song bass-rank factor
+0.9–1.1, calibrated 2026-07-29 against the Admiral's own reference songs —
+these are SCALING FACTORS, not target intensities: Dopamine≈1.20,
+Let It Be≈0.50, Soy Peor≈1.00 (100% = no adjustment, not "maximum" — a
+2026-08-15 report conflated the two and retracted the conclusion drawn
+from it; don't repeat that reasoning). Own SPECTRA-side feature cache
+(`storage/spectra/intensity_scale_features.json`, never SpotFX's cache
+file — see `_isolated_intensity_scale` in `tests/conftest.py` for why every
+test repoints this). `song_scaling_factor()` is wired at RENDER choke
+points only — `trigger_engine._fire`/`_fire_transition` and
+`scene_sequencer._roll`'s fire call — never at `selection_kernel.select`'s
+scene/flare/colour-set SELECTION, whose own `genre_mult` already factors
+genre into the pick; scaling intensity there too would double-count genre.
+
+2026-08-15 correction, his words, closed (not a curve-shape question): the
+old plan (`final = measured * song_scaling_factor`) was "just a straight
+multiplication of a factor" — replaced by `combine_measured_and_scale`,
+the one seam: `final = measured_intensity * HEADROOM_RESERVE(0.6) *
+song_scaling_factor`, clamped to `[0,1]` ONLY at the very end (clamping
+the scale term early silently defeats the gate — see the constant's own
+docstring for why 0.6 is deliberate, not a fudge factor, and must survive
+any future edit).
+
+**The 0.75 auto ceiling + the manual mark (his ruling, same day, BUILT)**:
+0.75 STANDS as the automatic ceiling — `auto_scaling_factor()` (the
+renamed, unchanged AUTO-only resolution) never exceeds `SCALE_MAX=1.25`,
+so nothing automatic ever produces a `final` above `0.6*1.25=0.75`.
+`spectra/services/intensity_scale_marks.py` is the release valve: a
+per-track manual mark (`{uri: factor}`, clamped `[0, 2.0]` — SpotFX's own
+manual-slider ceiling), checked FIRST by `song_scaling_factor()` and
+**never** re-clamped into the auto range — "he marks the track; automatic
+never does." API: `GET/PUT/DELETE /api/intensity-scale/mark?uri=`
+(`spectra/api/intensity_scale.py`). UI: `IntensityMarkControl.tsx` on the
+shared `TopBarStrip`, next to the live energy readout (help topic
+`intensity-mark`).
+
+Same-day edge-trim fix to `midsong_generator._normalized_intensities`
+(the per-song min-max renormalization generated triggers' intensity uses):
+the first/last `EDGE_TRIM_MS` (15s) no longer set the floor/ceiling (a
+cold open/fade-out was dragging the floor down so genuinely quiet MIDDLE
+passages never read as low), and those edge sections clamp to `[0,1]`
+instead of being floored. A track under ~30s (no middle survives
+trimming both ends) falls back to the pre-trim behaviour entirely for
+that song — his stated edge case, resolved not guessed.
+
+Regression tool carrying the calibration forward:
+`scripts/check_intensity_scale_reference_songs.py` (read-only, reports
+the three reference songs' current auto scale + final-at-peak against his
+targets — run against real `storage/audio_shapes`).
+
 ## SPECTRA fire-history: counts + bounded show log
 
 `spectra/services/fire_history.py` hooks the same four production choke
