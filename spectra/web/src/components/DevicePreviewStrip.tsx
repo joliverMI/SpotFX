@@ -11,14 +11,28 @@
  * reopens the upstream LedFX connection — this component never fakes that
  * by hiding swatches while a hidden feed keeps running; `connected` here
  * is the server's own honest state, not a local guess, and swatches only
- * ever render live colour while BOTH unpaused and connected.
+ * ever render live colour while unpaused, not auto-paused, AND connected.
+ *
+ * HIDDEN-TAB AUTO-PAUSE (OQ-7, decided 2026-08-15): a browser tab going
+ * hidden auto-pauses the feed too (api/devicePreviewWs.ts closes its own
+ * socket, which genuinely drops the upstream LedFX connection server-side
+ * — see that module's docstring), and returning to the tab auto-resumes
+ * it with no click needed. This is a SEPARATE, ephemeral mechanism from
+ * his own sticky Pause button — never persisted, never the same badge —
+ * so he can always tell at a glance which one is in effect: "paused"
+ * (gray) means he clicked Pause and it stays that way until he clicks
+ * Resume; "idle — tab hidden" (blue) means only that this tab isn't
+ * looking right now and it will pick back up on its own.
  *
  * Default view is a compact single swatch per favourite device (LedFX's
  * own per-pixel average — see api/devicePreviewWs.ts's averageRgb);
  * "Expand" reveals the full per-pixel strip, remembered client-side
  * (report §5), same local-first pattern as the feedback queue. */
 import { useEffect, useState } from 'react';
-import { averageRgb, decodePixels, onDevicePreviewFrame, onDevicePreviewStatus } from '../api/devicePreviewWs';
+import {
+  averageRgb, decodePixels, onDevicePreviewFrame, onDevicePreviewStatus,
+  onDevicePreviewTabHiddenPause,
+} from '../api/devicePreviewWs';
 import HelpLink from '../help/HelpLink';
 import { pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites } from '../queries';
 import type { DevicePreviewFrame, DevicePreviewStatus } from '../types';
@@ -34,12 +48,14 @@ export default function DevicePreviewStrip() {
   const [expanded, setExpanded] = useState(() => localStorage.getItem(EXPANDED_KEY) === '1');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pausePending, setPausePending] = useState(false);
+  const [tabHiddenPause, setTabHiddenPause] = useState(false);
   const toast = useToast();
 
   useEffect(() => onDevicePreviewStatus(setStatus), []);
   useEffect(() => onDevicePreviewFrame((frame) => {
     setFrames((prev) => ({ ...prev, [frame.vis_id]: frame }));
   }), []);
+  useEffect(() => onDevicePreviewTabHiddenPause(setTabHiddenPause), []);
 
   const toggleExpanded = () => setExpanded((prev) => {
     const next = !prev;
@@ -49,7 +65,7 @@ export default function DevicePreviewStrip() {
 
   const paused = status?.paused ?? false;
   const connected = status?.connected ?? false;
-  const live = !paused && connected;
+  const live = !paused && !tabHiddenPause && connected;
 
   const togglePause = async () => {
     setPausePending(true);
@@ -95,14 +111,18 @@ export default function DevicePreviewStrip() {
       )}
 
       <span
-        className={`badge ${paused ? 'badge-gray' : connected ? 'badge-purple' : 'badge-amber'}`}
+        className={`badge ${
+          paused ? 'badge-gray' : tabHiddenPause ? 'badge-blue' : connected ? 'badge-purple' : 'badge-amber'
+        }`}
         title={paused
-          ? 'Paused — the connection to LedFX is closed, not just hidden, so nothing is being subscribed to right now'
-          : connected
-            ? "Live — subscribed to LedFX's own visualisation feed"
-            : 'Preview unavailable — reconnecting to LedFX (never restarts or wakes it)'}
+          ? 'Paused — you clicked Pause. The connection to LedFX is closed, not just hidden — stays this way until you click Resume.'
+          : tabHiddenPause
+            ? "Idle — this tab isn't visible, so the connection to LedFX is closed to conserve resources. It reopens on its own the moment you switch back — nothing to click."
+            : connected
+              ? "Live — subscribed to LedFX's own visualisation feed"
+              : 'Preview unavailable — reconnecting to LedFX (never restarts or wakes it)'}
       >
-        {paused ? 'paused' : connected ? 'live' : 'reconnecting…'}
+        {paused ? 'paused' : tabHiddenPause ? 'idle — tab hidden' : connected ? 'live' : 'reconnecting…'}
       </span>
 
       <button type="button" className="device-preview-btn" disabled={pausePending || favoriteIds.length === 0}

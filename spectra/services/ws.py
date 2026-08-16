@@ -28,6 +28,9 @@ class WSManager:
         except ValueError:
             pass
 
+    def client_count(self) -> int:
+        return len(self._connections)
+
     async def broadcast(self, payload: dict) -> None:
         conns = list(self._connections)
         if not conns:

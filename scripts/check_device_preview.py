@@ -6,15 +6,19 @@ appended to it):
     genuinely-driven default (room_topology's own ground truth), sorted,
     capped at DEFAULT_FAVORITES_CAP.
   - DevicePreviewRelay's _active_event only wants an upstream connection
-    when unpaused AND favourites exist.
+    when unpaused AND favourites exist AND at least one downstream viewer
+    is connected (OQ-7's demand-driven hidden-tab auto-pause — a SEPARATE
+    mechanism from the sticky pause flag, never touching it).
   - frame throttling is per-vis_id and independent across vis_ids.
   - the API surface (favorites GET/PUT, status, pause/resume).
 
-The live-socket proof that pause actually closes the upstream connection
-(not just the display) is a separate, slower test —
-tests/test_device_preview.py's test_pause_actually_closes_the_upstream_
-socket_not_just_the_display, which spins up a real fake-LedFX WebSocket
-server on an ephemeral loopback port. Run it directly for that proof:
+The live-socket proofs that pause (and, separately, zero viewers)
+actually close the upstream connection — not just the display — are
+slower tests in tests/test_device_preview.py, each spinning up a real
+fake-LedFX WebSocket server on an ephemeral loopback port:
+test_pause_actually_closes_the_upstream_socket_not_just_the_display and
+test_last_viewer_leaving_closes_the_upstream_socket_and_a_viewer_
+returning_reopens_it. Run them directly for that proof:
   .venv/bin/python -m pytest tests/test_device_preview.py -q
 
 Run from repo root: .venv/bin/python scripts/check_device_preview.py
@@ -93,6 +97,20 @@ relay.pause()
 check(not relay._active_event.is_set(), "paused — must not want upstream regardless of favourites")
 relay.resume()
 check(relay._active_event.is_set(), "resumed — wants upstream again")
+
+# ═══ 2b. OQ-7 — demand-driven hidden-tab auto-pause ═══════════════════════
+
+has_viewer = {"v": False}
+viewer_relay = dp.DevicePreviewRelay(has_viewers=lambda: has_viewer["v"])
+viewer_relay.set_favorites(["a"])
+check(not viewer_relay._active_event.is_set(), "unpaused + favourites but zero viewers — no upstream")
+has_viewer["v"] = True
+viewer_relay.viewers_changed()
+check(viewer_relay._active_event.is_set(), "a viewer connected — wants upstream")
+has_viewer["v"] = False
+viewer_relay.viewers_changed()
+check(not viewer_relay._active_event.is_set(), "last viewer left — auto-paused")
+check(viewer_relay.paused is False, "auto-pause via zero viewers never touches the sticky pause flag")
 
 # ═══ 3. per-vis_id frame throttling ═════════════════════════════════════
 
