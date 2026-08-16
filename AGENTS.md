@@ -834,6 +834,29 @@ pause against the ORIGINAL LedFX-only relay in that state would have
 required either a real handover back to the external service (never do
 this to "test" the preview) or exactly the source correction above.
 
+**Device preview's expanded view is shape-aware, not always one flat
+line** (fixed 2026-08-16, PR fm/spectra-preview-phone-matrix, his own
+report after using it once: "the preview stretches out in a line super
+far... I don't see any Matrix for The Matrix previews"). The backend has
+always emitted the real `shape: [rows, cols]` on every frame — this was a
+frontend-only defect, not a payload gap; check the payload before
+assuming otherwise if this area comes up again. `DevicePreviewStrip.tsx`
+now branches on `shape[0]`: more than one row draws as a CSS grid
+(`device-preview-matrix`, `repeat(cols, 1fr)` via a `--cols`/`--rows`
+custom property + `aspect-ratio`, no JS measurement) so a real matrix
+(his `crystal-mapper` favourite, 72×37) reads as a grid instead of one
+2664-pixel line; exactly one row draws as `device-preview-pixel-strip`
+with `flex: 1` pixels sharing the container's full width rather than a
+fixed per-pixel width, so short strips (his other favourites: 17/10/7
+pixels) read as clean lines regardless of length. Expanded devices stack
+vertically, so expanding always grows the page downward. Collapsed
+mode's separate overflow (`.device-preview-strip` was `white-space:
+nowrap` with no `flex-wrap`) now wraps instead of running off a phone's
+right edge. Verified against a static harness reproducing his real
+favourite shapes at 390×844 and 360×780 (headless Chromium via
+chrome-devtools-axi) — his live `:8010` instance was read-only and
+untouched.
+
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
 built, room-proof pending); NOT the same feature as the retired per-node
 Light Mode Chooser/§36, which shares only a field name

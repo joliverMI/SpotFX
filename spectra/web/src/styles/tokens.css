@@ -248,12 +248,36 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   align-items: center;
   gap: 8px;
   color: var(--text-muted);
-  white-space: nowrap;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 .device-preview-label { font-weight: 600; }
 .device-preview-empty { font-style: italic; }
-.device-preview-chips { display: flex; align-items: center; gap: 6px; }
+.device-preview-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
+/* Expanded: devices stack vertically ("expand grows downward, not
+ * sideways" — his own rule) instead of sitting side by side. */
+.device-preview-chips.expanded {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 10px;
+}
 .device-preview-device { display: flex; align-items: center; }
+.device-preview-device.expanded {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  max-width: min(360px, 100%);
+}
+.device-preview-device-label {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .device-preview-swatch {
   display: inline-block;
   width: 20px;
@@ -262,14 +286,33 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   border: 1px solid var(--border);
   transition: background-color 0.2s linear;
 }
+/* A strip (shape rows === 1) — reads as ONE line. Pixels share the
+ * container's width equally (flex: 1, not a fixed per-pixel width), so a
+ * 7-pixel dining-room strip and a 900+-pixel strip both stay inside the
+ * container instead of running off the side. */
 .device-preview-pixel-strip {
   display: flex;
-  height: 14px;
+  width: 100%;
+  height: 22px;
   border-radius: 3px;
   overflow: hidden;
   border: 1px solid var(--border);
 }
-.device-preview-pixel { display: inline-block; width: 3px; height: 100%; }
+.device-preview-pixel { flex: 1 1 0; min-width: 0; height: 100%; }
+/* A matrix (shape rows > 1) — reads as a GRID, at its own aspect ratio, at
+ * 100% of the available width; height follows from aspect-ratio, so it
+ * grows downward as rows increase, never sideways past the container. */
+.device-preview-matrix {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
+  aspect-ratio: var(--cols) / var(--rows);
+  width: 100%;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.device-preview-matrix-cell { width: 100%; height: 100%; }
 .device-preview-btn { padding: 3px 8px; font-size: 11.5px; }
 .device-preview-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
