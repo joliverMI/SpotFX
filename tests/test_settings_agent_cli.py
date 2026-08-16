@@ -245,6 +245,88 @@ def test_settings_mcp_server_starts_from_a_clean_cwd(tmp_path):
          "module docstring for why that's hand-maintained instead of generated")
 
 
+def test_settings_mcp_server_actually_invokes_every_tool_without_a_python_level_argument_error(tmp_path):
+    """THE regression test for a SECOND live production defect
+    (2026-08-15, found running the adversarial set against the REAL model
+    on the deployed CLI backend, his real subscription live): six tools
+    whose own parameter is ALSO called `name` (create_scene,
+    get_flare_kind, set_flare_kind, remove_flare_kind, overwrite_scene,
+    list_operations) each called `_call("op", name=name, ...)` --
+    `_call`'s own first parameter used to be a plain `name: str`, so that
+    keyword collided with it: `_call() got multiple values for argument
+    'name'`, a TypeError, on EVERY call to any of those six tools. The
+    real Sonnet model, given the genuinely broken tool, reported the
+    failure honestly instead of fabricating success -- but the defect
+    itself had NO offline coverage: test_settings_mcp_server_starts_
+    from_a_clean_cwd above only ever calls session.list_tools() (listing
+    schemas), never session.call_tool() (actually invoking a wrapped
+    function with real arguments), so a Python-level argument-binding
+    crash inside any wrapper was invisible to every existing test. This
+    one actually CALLS all six previously-broken tools (plus a seventh,
+    unaffected one, as a control) through the real MCP subprocess and
+    asserts none of them fail with a Python argument-binding error --
+    `_call`'s fix (positional-only `op_name`, see its own docstring)
+    makes this pass; reverting that fix reproduces the exact live
+    failure here, offline."""
+    import mcp as mcp_pkg
+
+    from spectra.services import settings_agent_cli as sac
+
+    storage_dir = tmp_path / "storage"
+    workdir = tmp_path / "workdir"
+    storage_dir.mkdir()
+    workdir.mkdir()
+
+    parsed = json.loads(sac._mcp_config_json())
+    server = parsed["mcpServers"][sac.MCP_SERVER_NAME]
+    env = dict(os.environ)
+    env["SPECTRA_STORAGE_DIR"] = str(storage_dir)
+
+    async def _exercise():
+        params = mcp_pkg.StdioServerParameters(
+            command=server["command"], args=server["args"], cwd=str(workdir), env=env)
+        async with mcp_pkg.stdio_client(params) as (read, write):
+            async with mcp_pkg.ClientSession(read, write) as session:
+                await asyncio.wait_for(session.initialize(), timeout=15)
+
+                async def call(tool_name, arguments):
+                    result = await session.call_tool(tool_name, arguments)
+                    text = result.content[0].text
+                    assert "multiple values for argument" not in text, \
+                        f"{tool_name}({arguments}) hit the name-collision defect: {text}"
+                    return json.loads(text)
+
+                # The previously-broken six, exercised for real, in the
+                # order a real conversation would naturally use them.
+                detail = await call("list_operations", {"name": "create_scene"})
+                assert detail["operation"]["name"] == "create_scene"
+
+                created = await call("create_scene", {"name": "MCP Regression Scene", "labels": []})
+                assert created["status"] == "applied"
+                scene_id = created["scene_id"]
+
+                kind = await call("set_flare_kind", {
+                    "scene_id": scene_id, "name": "TestKind", "type": "permanent",
+                    "params": {"gain": 1.0}, "gain": 1.5})
+                assert kind["status"] == "applied"
+
+                fetched = await call("get_flare_kind", {"scene_id": scene_id, "name": "TestKind"})
+                assert fetched["flare_kind"]["name"] == "TestKind"
+
+                overwritten = await call("overwrite_scene", {
+                    "scene_id": scene_id, "name": "MCP Regression Scene (renamed)"})
+                assert overwritten["status"] == "applied"
+
+                removed = await call("remove_flare_kind", {"scene_id": scene_id, "name": "TestKind"})
+                assert removed["status"] == "applied"
+
+                # Control: an unaffected tool (no "name" kwarg) must still work.
+                settings = await call("get_scene_settings", {"scene_id": scene_id})
+                assert settings["scene_id"] == scene_id
+
+    _run(_exercise())
+
+
 # ═══ 5. transcript parsing: structured data only, never the model's prose.
 #
 # TWO widenings have grown settings_agent.ALL_OPERATIONS (and therefore
