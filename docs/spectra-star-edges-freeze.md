@@ -39,6 +39,36 @@ re-verify with the same live-fire + flare-event sequence above. Not run during t
 applying a live scene-data migration was judged outside a pure proof task's authority and was
 escalated instead; see the task status log.
 
+## Re-proof after the migration was applied (2026-08-16, ~01:42Z)
+
+The Admiral backed up the pre-migration file
+(`data/spectra-star-flare-edges/scenes.json.backup-pre-freeze`) and ran
+`scripts/freeze_star_edges.py --apply` against the live store himself. Re-verified live,
+`scene_store` re-reads `SCENES_FILE` from disk on every call (no in-memory cache — same
+pattern as `profile_manager`), so no restart was needed and none was requested or performed.
+
+- Live scene JSON now reads exactly as this file's "What changed" section describes: `edges`
+  binding `sticky: true`, `dice: null`, equal 25% bands → `3/4/5/6`; `edges` is gone from both
+  `"Flare patch 0.7–1"` and `"Drop patch 0.7–1"`.
+- Reproduced the exact sequence that previously caught the bug: live-fired STAR
+  (`dry_run: false`, baseline `edges=3`), then the identical `flare`-class event at
+  intensity 0.9. `"Dice Re-roll"` now only rolls `star`; `"Flare patch 0.7–1"` now only moves
+  `spin`/`star`. `edges` does not appear anywhere in the response, and is no longer in the
+  event's `carried` list at all (previously it was).
+- Broadened the storm: 8 more real `flare`/`drop` fires at intensity 0.9 against a second live
+  STAR baseline (`edges=4`) — `edges` never appeared in any response.
+- Initial-roll distribution, 20 dry-run fires at intensity 0.5:
+  `4 5 6 5 5 4 3 4 6 3 3 3 3 3 6 6 4 5 5 3` — all four values 3/4/5/6 present (crucially
+  including `4`, which never once appeared pre-migration across 10 samples), nothing outside
+  that set. A live (`dry_run: false`) fire also rolled `edges=4` directly against his fixtures.
+- Room-controls (`brightness_multiplier`, `ambient_mode`, `ambient_color`,
+  `global_transition_ms`, `scene_change_mode`, `force_scene_enabled`) and ownership/health
+  (`dark: false`, `light_ownership: spectra`, `activation_gaps: null`) read identical before
+  and after this re-proof — nothing else was touched, no restart performed.
+
+**Both halves of the rule are now proven live: the edge count never moves once a run starts,
+and the initial roll lands in 3/4/5/6.**
+
 ## What changed
 
 **Once a scene run starts, nothing moves its edge count again.** The initial value is a fresh,
