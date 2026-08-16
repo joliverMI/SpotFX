@@ -179,9 +179,11 @@ never silently dropped from the report).
 
 False-unlit fix (2026-08-16): a separate, live-reported defect — the
 verifier's lit/unlit readout invented failures on genuinely-correct
-bulbs, specifically ones caught at a different BRIGHTNESS than
-`AMBIENT_BRIGHTNESS_PCT` (a wall-switch or Hue-app dim, or simply his own
-choice) while still on and at the exact ambient hue. `_state_matches`
+bulbs, specifically ones caught at a different BRIGHTNESS than the
+ambient hold's own target (then a hard-coded constant, since removed —
+see "No AMBIENT_BRIGHTNESS_PCT constant" below) while still on and at
+the exact ambient hue — a wall-switch or Hue-app dim, or simply his own
+choice. `_state_matches`
 (on+colour+brightness, used to confirm OUR OWN write landed) and
 `_color_matches` (on+colour only, used by `verify_held()`/`status()`'s
 reporting surface) are now two DIFFERENT checks — see each function's own
@@ -230,15 +232,30 @@ logger = logging.getLogger(__name__)
 # ambient_fade_brightness / ambient_catchup_s) — internal timing, not a
 # room-control the Admiral tunes per song, so these stay constants rather
 # than growing the settings surface.
-AMBIENT_BRIGHTNESS_PCT = 100
-# 3000, not legacy's 1500 (2026-08-16, docs/SPECTRA_SPEC.md §63): his stated
-# preference, given BEFORE he had actually watched the live 1.5s glide (he
-# later corrected that his "agreement" was courtesy about our description,
-# not an observation) — so this value is unproven, not eyewitness-confirmed;
-# see §63 for the full correction and don't record a future re-test as
-# redundant. Governs both the ON hold's colour ramp and the OFF fade below
-# (the same constant, deliberately — see _write_and_confirm's settle_ms for
-# why raising it doesn't also lengthen a retry, which snaps).
+#
+# No AMBIENT_BRIGHTNESS_PCT constant here (removed 2026-08-16) — it used
+# to be the ONLY source of brightness on the ON-hold path, hard-coded to
+# 100 regardless of the colour, so a "darker" ambient colour could never
+# actually dim anything (the hex only ever fed the bridge's xy
+# chromaticity, which discards luminance), and the write's own read-back
+# couldn't catch the gap because it was confirming against the exact same
+# constant it had just written. Brightness is now DERIVED from whichever
+# colour is in effect (`_hsv_value_pct` below) — the Admiral's own ruling
+# on this fix, not a legacy port: legacy's settings.ambient_brightness was
+# always an independent, separately-authored slider, never derived from
+# colour either. See room_controls.py's ambient_brightness_note docstring
+# entry for the full history, and `_hsv_value_pct`'s own docstring for why
+# HSV Value (not relative luminance or CIE L*) is the chosen measure.
+#
+# AMBIENT_TRANSITION_MS: 3000, not legacy's 1500 (2026-08-16, docs/
+# SPECTRA_SPEC.md §63): his stated preference, given BEFORE he had
+# actually watched the live 1.5s glide (he later corrected that his
+# "agreement" was courtesy about our description, not an observation) —
+# so this value is unproven, not eyewitness-confirmed; see §63 for the
+# full correction and don't record a future re-test as redundant.
+# Governs both the ON hold's colour ramp and the OFF fade below (the same
+# constant, deliberately — see _write_and_confirm's settle_ms for why
+# raising it doesn't also lengthen a retry, which snaps).
 AMBIENT_TRANSITION_MS = 3000
 AMBIENT_OFF_FADE_PCT = 35
 AMBIENT_CATCHUP_MS = 8000
@@ -306,8 +323,60 @@ def _hex_to_xy(hex_color: str) -> tuple[float, float]:
     return X / total, Y / total
 
 
+def _hsv_value_pct(hex_color: str) -> int:
+    """HSV Value — the max RGB channel, scaled 1..100% — the Admiral's own
+    choice (2026-08-16 ruling, fixing 'Ambient throws away the brightness
+    of the colour he picks') for deriving Ambient's brightness from
+    whichever colour is in effect: "I want the brightness of the color
+    that I choose for both ambient modes to be applied to the lights."
+
+    Chosen over relative luminance and CIE L* after comparing all three on
+    his own colours: `_hex_to_xy` above already hands the bridge a hue's
+    full chromaticity (saturation AND lightness, via the Wide-gamut D65
+    matrix), so a brightness measure that ALSO discounts for a hue's
+    intrinsic dimness double-counts it — relative luminance computes a
+    saturated #0000ff at ~7%, so authoring a vivid blue would leave the
+    bulb effectively off, exactly the "fights the picker" failure this fix
+    exists to prevent. HSV Value keeps pure white and any fully-saturated
+    colour at 100% (a colour picked at full intensity reads as authored at
+    full intensity) and only drops as the colour is genuinely lightened or
+    darkened — his cream (#f5da8c) lands at 96% (an imperceptible ~4%
+    dimmer than today's hard-coded 100, not the ~29% drop relative
+    luminance would have made to his everyday resting ambient, which he
+    never asked for and would notice), his darker cream (#8b7e53) at 55%.
+
+    Same formula `_live_look` below already uses for its own brightness
+    proxy off the live rendered frame (max(r,g,b)/255) — one measure, not
+    two independent reimplementations. Legacy (services/ambient_mode.py)
+    never derived brightness from colour at all — settings.ambient_brightness
+    was a wholly separate, independently-authored slider — so this
+    derivation is a SPECTRA-specific behaviour the Admiral asked for on
+    this fix, not a legacy port; see room_controls.py's
+    ambient_brightness_note docstring entry for the full history. Invalid
+    hex falls back to 100 — matching `_hex_to_xy`'s own D65-white fallback
+    (full brightness), not a guessed dim value for malformed input."""
+    h = hex_color.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    try:
+        r = int(h[0:2], 16)
+        g = int(h[2:4], 16)
+        b = int(h[4:6], 16)
+    except (ValueError, IndexError):
+        return 100
+    return max(1, min(100, round(max(r, g, b) / 255 * 100)))
+
+
 def _light_payload(color_hex: str, ramp_ms: Optional[int] = None,
-                   brightness_pct: int = AMBIENT_BRIGHTNESS_PCT) -> dict:
+                   brightness_pct: Optional[int] = None) -> dict:
+    """Brightness defaults to the HSV Value derived from `color_hex` itself
+    (`_hsv_value_pct`) — see that function's docstring for why. An explicit
+    `brightness_pct` is still accepted for the one caller that derives
+    brightness from a DIFFERENT source: the release catch-up ramp, which
+    targets the live rendered frame's own colour AND brightness together
+    (`_live_look`), not an authored ambient hex."""
+    if brightness_pct is None:
+        brightness_pct = _hsv_value_pct(color_hex)
     x, y = _hex_to_xy(color_hex)
     body: dict = {
         "on": {"on": True},
@@ -410,9 +479,9 @@ def _color_matches(state: dict, target_xy: tuple[float, float]) -> bool:
     fight him for control" principle ambient_music_gate.py already applies
     to a bulb he turned fully off. Found live 2026-08-15/16: the verifier
     reported genuinely-on, genuinely-correct-hue bulbs as "unlit" solely
-    because they read at a different brightness than
-    AMBIENT_BRIGHTNESS_PCT — inventing a failure erodes trust in the
-    honest reporting this project exists to provide."""
+    because they read at a different brightness than the hold's own
+    target — inventing a failure erodes trust in the honest reporting
+    this project exists to provide."""
     if not (state.get("on") or {}).get("on"):
         return False
     xy = (state.get("color") or {}).get("xy") or {}
@@ -587,7 +656,9 @@ async def _repair_stragglers_impl(hue_devices: dict[str, Any], wanted: set[str],
                                   color: Optional[str]) -> dict:
     color_hex = color or "#ffffff"
     target_xy = _hex_to_xy(color_hex)
-    body = _light_payload(color_hex)  # no ramp_ms — a stubborn light should snap
+    brightness_pct = _hsv_value_pct(color_hex)
+    # no ramp_ms — a stubborn light should snap
+    body = _light_payload(color_hex, brightness_pct=brightness_pct)
     repaired: list[str] = []
     left_off: list[str] = []
     unconfirmed: list[str] = []
@@ -618,7 +689,7 @@ async def _repair_stragglers_impl(hue_devices: dict[str, Any], wanted: set[str],
                 if not on_now:
                     continue
                 confirmed_names, straggler_names = await _write_and_confirm(
-                    client, cfg, on_now, body, target_xy, AMBIENT_BRIGHTNESS_PCT)
+                    client, cfg, on_now, body, target_xy, brightness_pct)
                 repaired.extend(confirmed_names)
                 unconfirmed.extend(straggler_names)
         except Exception:
@@ -732,10 +803,13 @@ def _live_look(dev: Any) -> Optional[tuple[str, int]]:
 
 async def reconcile(enabled: bool, color: Optional[str]) -> dict:
     """Drive the room's live Hue devices toward `enabled` (held at `color`,
-    default white) or released. Locked so rapid toggles can't overlap and
-    fight each other over a device's stream state. No-ops (status "dark")
-    when SPECTRA doesn't currently own the live stack — the room-control
-    save must never fail just because there's nothing to drive right now."""
+    default white, at the brightness `_hsv_value_pct(color)` derives from
+    that same hex — see that function's docstring for why brightness is
+    DERIVED, not a separate knob) or released. Locked so rapid toggles
+    can't overlap and fight each other over a device's stream state.
+    No-ops (status "dark") when SPECTRA doesn't currently own the live
+    stack — the room-control save must never fail just because there's
+    nothing to drive right now."""
     async with _get_lock():
         return await _reconcile_impl(enabled, color)
 
@@ -756,7 +830,8 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
     touched: list[str] = []
     if enabled:
         color_hex = color or "#ffffff"
-        body = _light_payload(color_hex, AMBIENT_TRANSITION_MS)
+        brightness_pct = _hsv_value_pct(color_hex)
+        body = _light_payload(color_hex, AMBIENT_TRANSITION_MS, brightness_pct=brightness_pct)
         target_xy = _hex_to_xy(color_hex)
         held: list[str] = []
         unconfirmed: list[str] = []
@@ -764,7 +839,7 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
             try:
                 await dev.set_frozen(True)   # must land before the REST write
                 confirmed_names, straggler_names = await _hold_and_confirm(
-                    dev, body, target_xy, AMBIENT_BRIGHTNESS_PCT)
+                    dev, body, target_xy, brightness_pct)
                 held.extend(confirmed_names)
                 unconfirmed.extend(straggler_names)
                 touched.append(did)
@@ -784,13 +859,13 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
             # This is the log line the live defect made lie: it must not be
             # able to say more lights were set than were actually confirmed.
             logger.error(
-                "Ambient ON: %s held at %s, %d/%d light(s) confirmed — "
-                "still NOT holding it: %s", touched, color_hex, lights_set,
-                lights_total, unconfirmed)
+                "Ambient ON: %s held at %s @ %d%%, %d/%d light(s) confirmed — "
+                "still NOT holding it: %s", touched, color_hex, brightness_pct,
+                lights_set, lights_total, unconfirmed)
             return {"status": "partial", "devices": touched, "lights_set": lights_set,
                     "lights_total": lights_total, "unconfirmed": unconfirmed}
-        logger.info("Ambient ON: %s held at %s, %d light(s) confirmed",
-                    touched, color_hex, lights_set)
+        logger.info("Ambient ON: %s held at %s @ %d%%, %d light(s) confirmed",
+                    touched, color_hex, brightness_pct, lights_set)
         return {"status": "on", "devices": touched, "lights_set": lights_set,
                 "lights_total": lights_total}
 
