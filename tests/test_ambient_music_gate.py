@@ -670,6 +670,47 @@ def test_verify_now_repairs_an_on_but_wrong_colour_straggler(hue_room):
     assert st["verify"]["unlit"] == []
 
 
+def test_verify_now_repairs_a_straggler_to_the_dark_colour_not_the_normal_one(hue_room):
+    """The exact composition bug: repair_stragglers() must be handed the
+    RESOLVED (dark) colour, same as verify_held() above it — repairing an
+    off-target bulb back to the normal ambient_color while a distinct dark
+    colour is actually in effect would immediately re-drift it (a
+    self-inflicted straggler on the very next tick)."""
+    import json
+
+    from spectra.services import ambient
+    from spectra.services.ambient_music_gate import reconcile, verify_now
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    held = _run(reconcile(None))
+    assert held["status"] == "on"
+
+    async def _drift_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"color": {"xy": {"x": 0.4, "y": 0.4}}})
+    _run(_drift_out_of_band())
+
+    result = _run(verify_now())
+
+    assert result["status"] == "verified"
+    assert result["repair"]["repaired"] == ["l1"], "the straggler must be repaired"
+
+    async def _read_back():
+        async with ambient._bridge_client(dev.config) as client:
+            resp = await ambient._hue_get(client, "/clip/v2/resource/light/l1")
+        return resp["data"][0]
+    landed_xy = _run(_read_back())["color"]["xy"]
+
+    dark_xy = ambient._hex_to_xy("#001133")
+    normal_xy = ambient._hex_to_xy("#f5da8c")
+    assert abs(landed_xy["x"] - dark_xy[0]) < 0.01 and abs(landed_xy["y"] - dark_xy[1]) < 0.01, \
+        "the repair must land on the DARK colour, since dark mode is on"
+    assert not (abs(landed_xy["x"] - normal_xy[0]) < 0.01 and abs(landed_xy["y"] - normal_xy[1]) < 0.01), \
+        "must NOT have repaired back to the normal colour — that would re-drift it next tick"
+
+
 def test_verify_now_downgrades_held_when_live_stack_no_longer_active(hue_room, monkeypatch):
     """SPECTRA can stop owning the live stack (handover, release) without
     Ambient's own bookkeeping ever hearing about it directly — the
