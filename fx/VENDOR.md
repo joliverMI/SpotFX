@@ -157,6 +157,99 @@ variables named `ledfx` (the core object handle) are untouched.
     present in the gradient branch just below. Not yet ported back to the
     fork source at `/home/javi/ledfx-src`.
 
+11. `virtuals.py` + `devices/__init__.py`: per-device flush cadence
+    (BEHAVIOUR CHANGE — data/spectra-crystal-colour-lag/report.md, PR
+    fm/spectra-per-device-cadence). `Virtual.refresh_rate` used to be BOTH
+    the render loop's own clock (`thread_function`'s sleep interval) AND
+    the per-device network-flush ceiling (via `Device.update_pixels`'s
+    unconditional `self.flush(frame)` whenever called by the device's
+    `priority_virtual`) — `min(device.max_refresh_rate for device in
+    self._devices)`, so ANY virtual combining a deliberately slow device
+    (a wifi/pixel-count-constrained unit, capped on purpose) with a faster
+    sibling forced the WHOLE virtual, including the faster device, down to
+    the slow one's cadence. Confirmed live and currently active on the
+    `hues` virtual (`dining-hues` 30fps + `hue-lights` 62fps, both Hue) at
+    diagnosis time; not currently live for `crystal` specifically because
+    `Crystal-Mapper` happens to be a single-real-device virtual today — but
+    the mechanism is real, in the vendored render engine, not topology
+    luck, and the Admiral's ruling (`crystal`'s 30fps config stands,
+    unconditionally) means the general case has to be fixed rather than
+    worked around by keeping crystal permanently siloed.
+
+    Fix, in two parts:
+    - `Virtual.refresh_rate` (min) is UNCHANGED — still feeds
+      `Device.refresh_rate`/`priority_virtual` exactly as before, zero
+      regression risk to that reporting path. A NEW `Virtual.render_rate`
+      (max across `self._devices`) drives the render thread's own sleep
+      interval (`thread_function`) and the two transition-frame-count
+      sizings (`set_effect`, `clear_effect`) — the loop now assembles and
+      offers a frame often enough to serve the FASTEST member.
+    - `Device.update_pixels()`'s real `self.flush(frame)` call (the only
+      choke point all three of `Virtual`'s flush paths — simple/complex/
+      shape-resample segments — converge on) is gated by a per-device
+      pacing check against `self.max_refresh_rate` (a new
+      `_last_flush_time` monotonic timestamp, reset in `activate()`): a
+      device only receives a REAL network flush at its own configured
+      rate, however often its priority virtual's loop actually ticks. The
+      device's pixel buffer (`self._pixels`) is still updated every call,
+      so a paced-down flush always sends the latest frame, never a stale
+      one — this is delivery pacing, not staleness.
+
+    Net effect: a virtual's slowest device keeps rendering at exactly its
+    own configured rate (crystal's 30 is untouched — its own siblings-free
+    virtual is a no-op case for this fix, `min([30]) == max([30])`); any
+    faster sibling sharing a virtual with it is no longer capped down —
+    proven headless in `tests/test_per_device_cadence.py` (two dummy
+    devices, 30fps + 62fps, one virtual, real render thread; asserts the
+    fast device's real-flush count is NOT pulled toward the slow one's, and
+    a same-file homogeneous single-device case pins crystal's own actual
+    topology to near-exact parity). Not yet ported back to the fork source
+    at `/home/javi/ledfx-src`.
+
+    **Gate-threshold correction (2026-08-14, same PR, found by a real-room
+    deploy before merge):** the first cut of the pacing gate computed
+    `min_interval = 1.0 / device.max_refresh_rate` — a naive reciprocal.
+    `fps_to_sleep_interval()` (the SAME helper `thread_function` uses to
+    size its own sleep) does NOT return the naive reciprocal — it snaps to
+    the clock's actual achievable tick granularity, which runs slightly
+    FASTER than nominal (e.g. configured 30fps -> an actual ~30.3fps loop
+    period). A naive threshold is therefore slightly LARGER than the loop's
+    own natural tick period even for a homogeneous, single-device virtual
+    this fix should never touch — so the gate rejected roughly every other
+    tick, near-halving real per-device throughput ROOM-WIDE. A live deploy
+    exposed this directly: every WLED unit's own `/json/info` fps counter
+    dropped (crystal 30->~20, every 62fps sibling ->~35-40), not just ones
+    sharing a virtual with crystal — proof the bug wasn't scoped to mixed
+    virtuals. Reproduced headless (`test_fast_device_not_capped_to_slow_
+    siblings_rate` and `test_homogeneous_single_device_virtual_is_
+    unaffected` both failed against the naive-threshold version: 15/30 on
+    the homogeneous case, exactly the ~2x pattern). Fix: `min_interval =
+    fps_to_sleep_interval(device.max_refresh_rate)`, matching the loop's
+    own granularity exactly.
+
+    One residual, disclosed trade-off from this correction: a device that
+    is the SLOWER member of a genuinely mixed-rate virtual can only be
+    serviced at the (faster) loop's own tick boundaries, so if its own rate
+    doesn't evenly divide the loop's tick period, its achieved rate rounds
+    UP to the next available tick rather than landing exactly on its
+    nominal rate — e.g. a 30fps device sharing a virtual with a 62fps one
+    lands around ~21fps, not 30 (never faster than nominal; see the
+    `test_fast_device_not_capped_to_slow_siblings_rate` slow-device bound
+    and comment for the arithmetic). This does not affect crystal (its own
+    virtual has no faster sibling) or any of its 62fps WLED siblings (each
+    homogeneous in its own virtual); today it would only apply to
+    `dining-hues` in the room's `hues` virtual, a Hue device already ruled
+    out of this task's scope by the diagnosis report. Inherent to "one
+    shared render loop paced to per-device delivery," not a bug — the
+    alternative (a loop fast enough to be a common multiple of every
+    member's rate) is computationally unreasonable for arbitrary fps
+    combinations.
+
+    Real-room validation status: a first deploy (pre-correction) showed the
+    naive-threshold regression directly, which is what surfaced this fix;
+    the corrected version has NOT yet been re-validated live end-to-end —
+    see the PR for the pending before/after recheck.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
