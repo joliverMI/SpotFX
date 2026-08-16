@@ -37,6 +37,22 @@ software; do not build the Admiral a settings page"). Covers:
     stand-in for one of his real scenes byte-for-byte untouched. Full
     version of this proof (all four adversarial refusal categories, the
     fabrication hunt against run_turn() itself): tests/test_scene_console.py.
+  - Sonic's overwrite/backup/undo/preview/restore authority (2026-08-15
+    follow-up ask — "edit scenes and overwrite them, back them up ahead
+    of time, an easy undo-last-agent-change button, a preview and
+    check-in, restore the backup if it's not right"), his four structural
+    requirements each proven, not just wired up: a backup taken BEFORE
+    every existing-scene edit and RE-READ FROM DISK to confirm it
+    actually landed (proven by making the write silently no-op and
+    watching the edit refuse); undo_last_scene_change proven to actually
+    restore, checked against scene_store directly, never the undo call's
+    own claim; get_scene_preview proven to be a real diff of two stored
+    snapshots; restoring the permanent "genesis" backup proven to
+    reproduce a real scene's exact original bytes after a chain of bad
+    edits. Full version (the 10-deep ring, undo-of-an-undo, all nine of
+    his real scenes swept, the CLI backend's fabricated-restore-claim
+    re-proof): tests/test_scene_console.py section 9 +
+    tests/test_settings_agent_cli.py section 5c.
 
 Run from repo root: .venv/bin/python scripts/check_settings_console.py
 Isolated: temp files for every store; no network, no LedFX I/O, no audio.
@@ -214,6 +230,69 @@ try:
     raise SystemExit("FAIL: a malformed flare kind (params on a drift_jump) was accepted")
 except scc.SceneOpError as e:
     check("jumps the drift" in str(e), "malformed flare kind rejected with the server's own shape rule")
+
+# ═══ 3c. Sonic's overwrite/backup/undo/preview/restore authority
+# (2026-08-15 follow-up widening) — his four structural requirements,
+# each proven, not just wired up. Full version: tests/test_scene_console.py
+# section 9. ═══════════════════════════════════════════════════════════
+
+original_star = scene_store.get_by_id(his_scene.id).model_dump(mode="json")
+
+r1 = run(scc.apply_scene_setting(his_scene.id, "entry_ramp_ms", 500))
+check("backup_id" in r1 and "preview" in r1, "an edit to an existing scene carries a backup id and a real preview")
+check(scc._load_genesis()[his_scene.id]["scene"]["entry_ramp_ms"] == original_star["entry_ramp_ms"],
+      "genesis captured the ORIGINAL value on the scene's first-ever edit")
+
+# BACKUP VERIFIED, NOT MERELY ATTEMPTED — silently no-op the backup write
+# and confirm the edit is REFUSED (a read-back mismatch, not an exception).
+_real_scene_write = scc._atomic_write_json
+
+
+def _swallow_backup_write(path, data):
+    if path == scfg.SCENE_BACKUPS_FILE:
+        return
+    return _real_scene_write(path, data)
+
+
+scc._atomic_write_json = _swallow_backup_write
+try:
+    run(scc.apply_scene_setting(his_scene.id, "entry_ramp_ms", 999))
+    raise SystemExit("FAIL: an edit proceeded despite an unverifiable backup")
+except scc.SceneOpError as e:
+    check("backup could not be verified" in str(e),
+          "a backup that silently doesn't land refuses the edit, proven by making it fail")
+finally:
+    scc._atomic_write_json = _real_scene_write
+check(scene_store.get_by_id(his_scene.id).entry_ramp_ms == 500,
+      "the scene itself is untouched by the refused edit")
+
+# OVERWRITE — his first genuinely destructive scene operation.
+run(scc.apply_overwrite_scene(his_scene.id, name="STAR (clobbered)",
+                              flare_kinds=[{"name": "Oops", "type": "permanent", "params": {"gain": 1.0}}]))
+check(scene_store.get_by_id(his_scene.id).name == "STAR (clobbered)", "overwrite really lands")
+
+# UNDO — proven to actually restore, verified against stored data, not the call's own claim.
+run(scc.apply_undo_last_scene_change())
+check(scene_store.get_by_id(his_scene.id).name == "STAR" and
+      scene_store.get_by_id(his_scene.id).entry_ramp_ms == 500,
+      "undo_last_scene_change genuinely restores the pre-overwrite scene, read back from storage")
+
+# RESTORE GENESIS — the permanent anchor survives the whole chain of edits above.
+run(scc.apply_restore_scene_backup(his_scene.id, "genesis"))
+check(scene_store.get_by_id(his_scene.id).model_dump(mode="json") == original_star,
+      "restoring 'genesis' reproduces his real scene's exact original state, byte for byte")
+
+# PREVIEW READS STORED DATA, NEVER A NARRATION.
+value_before_this_edit = scene_store.get_by_id(his_scene.id).entry_ramp_ms
+run(scc.apply_scene_setting(his_scene.id, "entry_ramp_ms", 42))
+preview = scc.get_scene_preview(his_scene.id)
+check(preview["preview"] == {"entry_ramp_ms": {"before": value_before_this_edit, "after": 42}},
+      "get_scene_preview is a real diff of stored before/after state")
+
+check("overwrite_scene" in sa.ALL_OPERATIONS and "undo_last_scene_change" in sa.ALL_OPERATIONS
+      and "restore_scene_backup" in sa.ALL_OPERATIONS and "get_scene_preview" in sa.ALL_OPERATIONS
+      and "list_scene_backups" in sa.ALL_OPERATIONS,
+      "all five new operations are discoverable in the merged allowlist")
 
 # ═══ 4. API surface ═════════════════════════════════════════════════════
 

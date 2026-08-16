@@ -181,5 +181,45 @@ async def remove_flare_kind(scene_id: str, name: str) -> dict:
     return await _call("remove_flare_kind", scene_id=scene_id, name=name)
 
 
+@mcp.tool()
+async def overwrite_scene(scene_id: str, name: Optional[str] = None,
+                          labels: Optional[list[str]] = None,
+                          settings: Optional[dict] = None,
+                          flare_kinds: Optional[list[dict]] = None) -> dict:
+    """Wholesale-replace an EXISTING scene's name/labels/settings/
+    flare_kinds in one shot -- always backed up (and the backup verified)
+    before anything is written; refuses if the backup can't be confirmed."""
+    return await _call("overwrite_scene", scene_id=scene_id, name=name, labels=labels,
+                       settings=settings, flare_kinds=flare_kinds)
+
+
+@mcp.tool()
+async def list_scene_backups(scene_id: str) -> dict:
+    """List one scene's available restore points: the last 10 edits plus
+    the permanent pre-Sonic genesis snapshot."""
+    return await _call("list_scene_backups", scene_id=scene_id)
+
+
+@mcp.tool()
+async def get_scene_preview(scene_id: str) -> dict:
+    """What actually changed on one scene since its last backup -- read
+    from the stored scene and its stored backup, never from memory."""
+    return await _call("get_scene_preview", scene_id=scene_id)
+
+
+@mcp.tool()
+async def restore_scene_backup(scene_id: str, backup_id: str) -> dict:
+    """Restore one scene to a specific earlier point -- any entry from
+    list_scene_backups, or "genesis" for the permanent pre-Sonic snapshot."""
+    return await _call("restore_scene_backup", scene_id=scene_id, backup_id=backup_id)
+
+
+@mcp.tool()
+async def undo_last_scene_change() -> dict:
+    """Undo the single most recent scene edit Sonic made, across any
+    scene -- one action, no scene_id needed."""
+    return await _call("undo_last_scene_change")
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

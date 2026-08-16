@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
+import { formatPreview } from '../lib/sonicPreview';
 import { uuid } from '../lib/uid';
 import {
   useSendSettingsMessage, useSettingsLog, useSettingsRegistry,
@@ -83,6 +84,13 @@ export default function SettingsConsolePage() {
       if (result.changes.length > 0) {
         const labels = result.changes.map((c) => c.key ?? c.scene_name ?? c.flare_kind ?? c.op ?? 'something');
         toast(`Changed ${labels.join(', ')}`, 'success');
+        // Sonic is one backend reachable from both pages — a scene edit
+        // made from here still deserves the same real-data preview the
+        // Scenes-page popover shows (scene_console.py's _diff_scenes).
+        const previewLines = result.changes.map(formatPreview).filter((p): p is string => !!p);
+        if (previewLines.length > 0) {
+          setMessages((m) => [...m, { id: uuid(), role: 'preview', text: previewLines.join('\n\n') }]);
+        }
       }
     } catch {
       setMessages((m) => [...m, {

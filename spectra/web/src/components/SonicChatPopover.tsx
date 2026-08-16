@@ -17,14 +17,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToast } from './Toast';
 import HelpLink from '../help/HelpLink';
+import { formatPreview } from '../lib/sonicPreview';
 import { uuid } from '../lib/uid';
-import { useSendSettingsMessage, useTranscribeSettingsAudio } from '../queries';
+import { useSendSettingsMessage, useTranscribeSettingsAudio, useUndoLastSceneChange } from '../queries';
 import type { SettingsChatMessage } from '../types';
 
 export default function SonicChatPopover() {
   const toast = useToast();
   const send = useSendSettingsMessage();
   const transcribe = useTranscribeSettingsAudio();
+  const undoScene = useUndoLastSceneChange();
 
   const [open, setOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -50,6 +52,13 @@ export default function SonicChatPopover() {
       if (result.changes.length > 0) {
         const labels = result.changes.map((c) => c.key ?? c.scene_name ?? c.flare_kind ?? c.op ?? 'something');
         toast(`Changed ${labels.join(', ')}`, 'success');
+        // The preview line is a READ of the saved scene (scene_console.py's
+        // _diff_scenes), not Sonic's own reply text — rendered as its own,
+        // visually distinct message so a check-in never has to trust prose.
+        const previewLines = result.changes.map(formatPreview).filter((p): p is string => !!p);
+        if (previewLines.length > 0) {
+          setMessages((m) => [...m, { id: uuid(), role: 'preview', text: previewLines.join('\n\n') }]);
+        }
       }
     } catch {
       setMessages((m) => [...m, {
@@ -57,6 +66,23 @@ export default function SonicChatPopover() {
         text: "Couldn't reach Sonic — see the toast for why.",
       }]);
       toast('Sonic unavailable — is ANTHROPIC_API_KEY configured?', 'error');
+    }
+  }
+
+  async function handleUndo() {
+    try {
+      // The plain, model-free button — POST /settings-console/scene-undo,
+      // never routed through Sonic's chat loop (see queries.ts).
+      const result = await undoScene.mutateAsync();
+      setMessages((m) => [...m, {
+        id: uuid(), role: 'assistant',
+        text: `Undid the last change to "${result.scene_name ?? 'that scene'}".`,
+      }]);
+      const preview = formatPreview(result);
+      if (preview) setMessages((m) => [...m, { id: uuid(), role: 'preview', text: preview }]);
+      toast('Undid last scene change', 'success');
+    } catch {
+      toast('Nothing to undo', 'info');
     }
   }
 
@@ -128,9 +154,17 @@ export default function SonicChatPopover() {
         >
           <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             Sonic <HelpLink topic="sonic-scenes" />
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
-              flares · scene settings · new scenes
-            </span>
+            <button
+              style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px' }}
+              title="Undo the most recent scene/flare change Sonic made — always available, no chat needed"
+              onClick={() => void handleUndo()}
+              disabled={undoScene.isPending}
+            >
+              ↺ Undo last
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+            flares · scene settings · new scenes · overwrite (backed up)
           </div>
           <div className="settings-console-messages" ref={scrollRef} style={{ flex: 1, minHeight: 0 }}>
             {messages.length === 0 ? (

@@ -397,7 +397,10 @@ export interface UndoResult extends AppliedSettingChange {
 
 export interface SettingsChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  /** 'preview' renders a change's real before/after diff (SonicAppliedChange.preview,
+   * read from stored data) — kept visually distinct from 'assistant' so a
+   * preview is never mistaken for the model's own prose. */
+  role: 'user' | 'assistant' | 'preview';
   text: string;
 }
 

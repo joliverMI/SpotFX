@@ -7,8 +7,17 @@
                                         first — the visible "what changed"
                                         record.
   POST /api/settings-console/undo       revert the most recent not-yet-
-                                        undone change. 409 when there's
-                                        nothing to undo.
+                                        undone SETTINGS change. 409 when
+                                        there's nothing to undo.
+  POST /api/settings-console/scene-undo revert the most recent not-yet-
+                                        undone SCENE/flare change (any
+                                        scene) — his own ask, "an easy to
+                                        undo last agent change button":
+                                        this is that button, hitting
+                                        scene_console.apply_undo_last_
+                                        scene_change() directly, no model
+                                        involved. 409 when there's nothing
+                                        to undo.
   POST /api/settings-console/message    one chat turn: {session_id?, text}
                                         -> {session_id, reply, changes}.
                                         Routes to services/settings_agent.py
@@ -47,7 +56,9 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from spectra import config
-from spectra.services import settings_agent, settings_agent_cli, settings_console, transcription
+from spectra.services import (scene_console, settings_agent, settings_agent_cli,
+                              settings_console, transcription)
+from spectra.services.scene_console import SceneOpError
 from spectra.services.settings_agent import SettingsAgentUnavailable
 from spectra.services.settings_console import SettingChangeError
 from spectra.services.transcription import TranscriptionUnavailable, VocabularyNotHonored
@@ -77,6 +88,19 @@ async def post_undo():
     try:
         return await settings_console.undo_last_change()
     except SettingChangeError as exc:
+        raise HTTPException(409, exc.message) from exc
+
+
+@router.post("/scene-undo")
+async def post_scene_undo():
+    """The plain, model-free "undo last agent change" button his own
+    words asked for — calls scene_console.apply_undo_last_scene_change()
+    directly, exactly the way post_undo() above calls settings_console's
+    own undo, never through Sonic's chat loop. Undo doesn't need a live
+    model: it's a deterministic restore from an already-verified backup."""
+    try:
+        return await scene_console.apply_undo_last_scene_change()
+    except SceneOpError as exc:
         raise HTTPException(409, exc.message) from exc
 
 

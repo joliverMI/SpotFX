@@ -31,6 +31,14 @@ SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"
 # separate from SETTINGS_LOG_FILE so the two domains' audit trails never mix,
 # matching scene_console.py never importing settings_console.py.
 SCENE_AGENT_LOG_FILE = SPECTRA_STORAGE / "scene_agent_log.json"
+# Sonic's backup-before-any-edit mechanism (2026-08-15 widening —
+# overwrite_scene/restore_scene_backup/undo_last_scene_change):
+# SCENE_BACKUPS_FILE is the bounded per-scene ring (last 10 edits);
+# SCENE_GENESIS_FILE is the permanent, never-pruned snapshot of each scene
+# as it stood before Sonic ever touched it. See scene_console.py's module
+# docstring for why both exist and how they're verified, not just written.
+SCENE_BACKUPS_FILE = SPECTRA_STORAGE / "scene_backups.json"
+SCENE_GENESIS_FILE = SPECTRA_STORAGE / "scene_genesis.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
