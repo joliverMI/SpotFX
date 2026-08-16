@@ -51,6 +51,36 @@ its own module-level `_bridge_client` name, so factoring the two through
 one shared client module would silently stop those tests from
 intercepting bridge calls. Both are small and rarely touched; keep them in
 sync by inspection, not by coupling.
+
+Off-write read-back confirmation (2026-08-16, spectra-audit-2xx-proof — a
+2xx-as-proof audit, not a live incident): this module's own `_apply_hue`
+only ever checked `raise_for_status()` — a 2xx from the bridge — before
+counting a light as faded/off. `spectra/services/ambient.py`'s own
+docstring ("Read-back confirmation") already established why that is not
+enough: his bridge returns a clean HTTP 200 with an empty `errors` array
+whether or not the physical bulb (over zigbee, which can silently drop a
+command the bridge already 2xx'd) actually took it — see
+`docs/SPECTRA_SPEC.md` D6. For the ON-hold path that gap was closed in
+`ambient.py`'s `_hold_and_confirm`; this module's own final OFF write —
+the one write in the whole release path that determines whether Home
+Assistant inherits a dark room or a bulb still lit at whatever colour
+SPECTRA last streamed — had no equivalent. `_confirm_off()` below reads
+each light back after the off write (`RELEASE_OFF_SETTLE_MS` wait, then
+GET), retries once (a snap PUT, no ramp — a stubborn bulb should not get
+another 1.5s to maybe land) if any light still reads on, and reports the
+bridge-configured names of any light STILL on after that in
+`fade_and_release_hue()`'s returned `still_on` list rather than folding a
+possible failure into a bare "faded" claim. `release.py`'s
+`_verify_released()` was NOT independently checking individual Hue bulb
+state either — only the process-level ownership/virtuals state — so this
+is the first read-back this specific claim ("the room is dark") has ever
+had; see `release.py`'s own module docstring for how `still_on` now folds
+into `ReleaseResult.verified`/`.problems`. Deliberately NOT the full
+multi-attempt paced hold `ambient.py` uses (`AMBIENT_HOLD_ATTEMPTS=3`,
+spaced retries): this is a one-shot power-off with no colour to keep
+re-asserting, so one retry either lands or it doesn't — a light that's
+still on after that is exactly the case a human needs told about, not
+hammered at.
 """
 from __future__ import annotations
 
@@ -68,9 +98,15 @@ logger = logging.getLogger(__name__)
 # right in this codebase.
 RELEASE_FADE_MS = 1500
 
+# Off-write read-back confirmation pacing (module docstring, "Off-write
+# read-back confirmation"). Deliberately lighter than ambient.py's hold
+# pacing — a one-shot power-off, not a colour held indefinitely.
+RELEASE_OFF_SETTLE_MS = 300      # wait after a write before reading state back
+RELEASE_OFF_RETRY_SPACING_MS = 500  # wait before the one retry attempt
+
 _REST_TIMEOUT = httpx.Timeout(connect=3.0, read=4.0, write=4.0, pool=1.0)
 
-_light_cache: dict[tuple[str, str], list[str]] = {}
+_light_cache: dict[tuple[str, str], list[tuple[str, str]]] = {}
 
 
 def _bridge_client(cfg: dict) -> httpx.AsyncClient:
@@ -93,10 +129,13 @@ async def _hue_put(client: httpx.AsyncClient, endpoint: str, body: dict) -> None
     resp.raise_for_status()
 
 
-async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
-    """Entertainment stream -> owning device -> light resource id, cached
-    per bridge (topology is stable) — same walk as ambient.py's
-    _resolve_lights."""
+async def _resolve_lights_named(client: httpx.AsyncClient, cfg: dict) -> list[tuple[str, str]]:
+    """Entertainment stream -> owning device -> (light resource id, bridge-
+    configured friendly name), cached per bridge (topology is stable) —
+    same walk as ambient.py's own _resolve_lights_named (kept as an
+    independent copy, see module docstring). The name is what
+    `_confirm_off` below needs to report exactly which bulb didn't let go,
+    rather than a bare resource id."""
     cache_key = (cfg["ip_address"], cfg["entertainment_id"])
     if cache_key in _light_cache:
         return _light_cache[cache_key]
@@ -105,10 +144,12 @@ async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
         ent_owner = {e["id"]: e["owner"]["rid"] for e in ent}
         lights = (await _hue_get(client, "/clip/v2/resource/light"))["data"]
         dev_light = {l["owner"]["rid"]: l["id"] for l in lights}
+        light_name = {l["id"]: (l.get("metadata") or {}).get("name") or l["id"]
+                     for l in lights}
         ec = (await _hue_get(
             client, f"/clip/v2/resource/entertainment_configuration/{cfg['entertainment_id']}",
         ))["data"][0]
-        rids: list[str] = []
+        rids: list[tuple[str, str]] = []
         seen: set[str] = set()
         for channel in ec.get("channels", []):
             for member in channel.get("members", []):
@@ -117,7 +158,7 @@ async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
                     lr = dev_light.get(ent_owner.get(svc.get("rid")))
                     if lr and lr not in seen:
                         seen.add(lr)
-                        rids.append(lr)
+                        rids.append((lr, light_name.get(lr, lr)))
                     break
     except Exception:
         logger.exception("release fade: failed to resolve Hue lights for %s",
@@ -125,6 +166,13 @@ async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
         return []
     _light_cache[cache_key] = rids
     return rids
+
+
+async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
+    """Light resource ids only — the dim/off PUTs don't need names, only
+    the read-back confirmation below (which reports failures by name)
+    does."""
+    return [rid for rid, _name in await _resolve_lights_named(client, cfg)]
 
 
 async def _apply_hue(dev: Any, body: dict) -> int:
@@ -173,7 +221,9 @@ async def fade_and_release_hue(host: Any) -> dict:
     this call (release_room() already wraps its caller in _best_effort, but
     a partial run here still needs every OTHER device to get its own
     attempt). Returns {"devices": [...faded ids...], "failed": [...ids that
-    raised before the dim landed...]} for logging/tests."""
+    raised before the dim landed...], "still_on": [...bridge light names
+    that did not confirm off after the read-back + one retry — module
+    docstring, "Off-write read-back confirmation"...]} for logging/tests."""
     hue_devices = _hue_devices(host)
     if not hue_devices:
         return {"devices": [], "failed": []}
@@ -193,12 +243,75 @@ async def fade_and_release_hue(host: Any) -> dict:
     if faded and RELEASE_FADE_MS > 0:
         await asyncio.sleep(RELEASE_FADE_MS / 1000)
 
+    still_on: list[str] = []
     for did in faded:
         try:
             await _apply_hue(hue_devices[did], _OFF_PAYLOAD)
         except Exception:
             logger.exception("release fade: failed to power off %s after fade", did)
+            continue
+        try:
+            still_on.extend(await _confirm_off(hue_devices[did].config))
+        except Exception:
+            logger.exception("release fade: could not confirm %s powered off", did)
 
+    still_on = sorted(set(still_on))
+    if still_on:
+        logger.error(
+            "release fade: %d light(s) NOT confirmed off after release — "
+            "still reading on: %s", len(still_on), still_on)
     logger.warning("release fade: %s faded to off before release (failed: %s)",
                    faded, failed)
-    return {"devices": faded, "failed": failed}
+    return {"devices": faded, "failed": failed, "still_on": still_on}
+
+
+async def _read_still_on(client: httpx.AsyncClient,
+                         named: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Read each (rid, name) back and return the ones still reading on. A
+    read failure counts as still-on — an unreadable light is not a
+    confirmed-off one (same "don't count what you couldn't check" rule
+    ambient.py's own read-back uses)."""
+    still_on: list[tuple[str, str]] = []
+    for rid, name in named:
+        try:
+            state = (await _hue_get(
+                client, f"/clip/v2/resource/light/{rid}"))["data"][0]
+        except Exception:
+            logger.exception("release fade: could not read back %s (%s)", name, rid)
+            still_on.append((rid, name))
+            continue
+        if (state.get("on") or {}).get("on"):
+            still_on.append((rid, name))
+    return still_on
+
+
+async def _confirm_off(cfg: dict) -> list[str]:
+    """Read every light this bridge/entertainment-id covers back after the
+    off write above (module docstring, "Off-write read-back confirmation")
+    and return the friendly names of any still reading on. One paced
+    retry (a snap PUT, no ramp) before giving up on a light — a stubborn
+    bulb should not get another 1.5s to maybe land."""
+    async with _bridge_client(cfg) as client:
+        named = await _resolve_lights_named(client, cfg)
+        if not named:
+            return []
+        if RELEASE_OFF_SETTLE_MS > 0:
+            await asyncio.sleep(RELEASE_OFF_SETTLE_MS / 1000)
+        pending = await _read_still_on(client, named)
+        if not pending:
+            return []
+        logger.warning(
+            "release fade: %d light(s) still reading on after the off "
+            "write, retrying: %s", len(pending), [n for _, n in pending])
+        if RELEASE_OFF_RETRY_SPACING_MS > 0:
+            await asyncio.sleep(RELEASE_OFF_RETRY_SPACING_MS / 1000)
+        for rid, name in pending:
+            try:
+                await _hue_put(client, f"/clip/v2/resource/light/{rid}", _OFF_PAYLOAD)
+            except Exception:
+                logger.exception("release fade: retry off failed for %s (%s)",
+                                 name, rid)
+        if RELEASE_OFF_SETTLE_MS > 0:
+            await asyncio.sleep(RELEASE_OFF_SETTLE_MS / 1000)
+        still_on = await _read_still_on(client, pending)
+        return sorted(name for _, name in still_on)

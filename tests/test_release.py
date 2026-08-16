@@ -333,7 +333,14 @@ class _FakeHost:
 
 
 def _fake_hue_bridge(calls: list):
+    """A light genuinely takes every write it 2xx's — GET reflects whatever
+    the last PUT's `on.on` said, so release_fade.py's own read-back
+    confirms off without needing a retry (that retry path is proven
+    separately in tests/test_release_fade.py against a bridge built to lie
+    about it)."""
     import httpx
+
+    state = {"on": True}
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -346,7 +353,14 @@ def _fake_hue_bridge(calls: list):
             return httpx.Response(200, json={"data": [{"channels": [{"members": [
                 {"service": {"rtype": "entertainment", "rid": "e1"}}]}]}]})
         if path.startswith("/clip/v2/resource/light/"):
-            return httpx.Response(200, json={"data": []})
+            if request.method == "PUT":
+                import json as _json
+                body = _json.loads(request.content or b"{}")
+                if "on" in body:
+                    state["on"] = body["on"]["on"]
+                return httpx.Response(200, json={"data": []})
+            if request.method == "GET":
+                return httpx.Response(200, json={"data": [{"on": {"on": state["on"]}}]})
         raise AssertionError(f"unexpected request {request.method} {path}")
 
     def fake_bridge_client(cfg):
@@ -428,6 +442,39 @@ def test_release_room_fade_is_a_noop_when_spectra_does_not_own_the_live_stack(tm
 
     result = _run(release_svc._fade_hue_before_release())
     assert result == {"devices": [], "failed": []}
+
+
+def test_release_room_reports_unverified_when_a_hue_light_stays_on(tmp_path, monkeypatch):
+    """spectra-audit-2xx-proof (2026-08-16): release_fade.py's own read-back
+    can find a light that never confirmed off after the fade's off write —
+    release_room() must fold that into verified/problems rather than
+    reporting a clean 'released' just because every process-level check
+    (live.active, external LedFX virtuals) passed. Same shape as
+    test_release_room_reports_unverified_when_a_device_lies, one layer
+    lower (the bulb itself, not the LedFX virtual)."""
+    from spectra.services import release as release_svc
+
+    _own_file(tmp_path)
+    _ledfx_unit_stopped(monkeypatch)
+
+    async def fake_fade():
+        return {"devices": ["hue-lights"], "failed": [],
+                "still_on": ["Standing Lamp"]}
+
+    async def fake_devices():
+        pass
+
+    async def fake_ledfx():
+        return []
+
+    monkeypatch.setattr(release_svc, "_fade_hue_before_release", fake_fade)
+    monkeypatch.setattr(release_svc, "_release_spectra_devices", fake_devices)
+    monkeypatch.setattr(release_svc, "_release_ledfx_virtuals", fake_ledfx)
+
+    result = _run(release_svc.release_room("spec: hue light stuck on"))
+    assert result.record.owner == lo.RELEASED   # released stands regardless
+    assert result.verified is False
+    assert any("Standing Lamp" in p for p in result.problems)
 
 
 def test_release_room_addresses_rogue_ledfx_while_record_says_spectra(tmp_path, monkeypatch):

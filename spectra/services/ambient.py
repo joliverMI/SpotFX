@@ -98,14 +98,28 @@ the first place — prevention alongside recovery. `reconcile()`'s "on"
 result can no longer overstate: `lights_set` is now a CONFIRMED count, and
 any light still not holding after retries comes back by its own bridge name
 in `unconfirmed` (status "partial") for a caller to name to the room's
-owner — never silently folded into a bigger "N set" total. Checked but
-deliberately NOT touched in this fix: the release path (services/
-release.py) stops the Hue entertainment stream rather than writing
-individual lights, and already reads real state back
-(`_verify_released()`); the scene-fire path (fx_seam.apply_writes) writes
-virtual effect configs (through the in-process facade or a hard-failing
-HTTP PUT), not one REST call per bulb, so neither carries this exact
-attempted-vs-confirmed gap.
+owner — never silently folded into a bigger "N set" total. Checked at the
+time but NOT actually fixed by this pass, corrected 2026-08-16
+(spectra-audit-2xx-proof): this docstring used to claim the release path
+(services/release.py) "stops the Hue entertainment stream rather than
+writing individual lights, and already reads real state back" — false on
+both counts. `services/release_fade.py`'s `fade_and_release_hue()` DOES
+write individual lights (a dim PUT then an off PUT, direct REST, same
+shape as this module's own writes), and `release.py`'s own
+`_verify_released()` only ever checked process/ownership-level state
+(`live.active`, external LedFX virtuals), never an individual Hue bulb —
+so the release path carried the EXACT SAME attempted-vs-confirmed gap this
+module's own read-back fix closed here, just never closed there. Now
+fixed: `release_fade.py` reads each light back after its own off write
+(see that module's docstring) and `release.py` folds a still-on light into
+`ReleaseResult.verified`/`.problems`. The scene-fire path (fx_seam.
+apply_writes) remains genuinely exempt, unlike the release path was
+wrongly assumed to be: it writes virtual effect configs (through the
+in-process facade or a hard-failing HTTP PUT) to the LOCAL render engine,
+not one REST call per Hue bulb — the actual bulb colour only exists
+downstream of that, driven continuously by fx/devices/hue.py's flush() at
+~30fps over the entertainment stream, so a single dropped frame self-heals
+on the very next one rather than needing its own confirmation.
 
 Burst threshold measurement (2026-08-16, live against his room — measured,
 not reasoned about): a paired report claimed 17 rapid REST writes ~0.12s
