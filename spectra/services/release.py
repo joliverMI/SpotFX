@@ -44,21 +44,23 @@ the full per-class writeup):
            order: spectra/services/release_fade.fade_and_release_hue()
            freezes the entertainment stream, bridge-fades brightness down
            to a resting level over its own `dynamics.duration`, then powers
-           the light off via direct REST — see that module's docstring for
-           the fidelity reasoning (matches legacy's ambient-mode disable
-           FEEL, differs in kind on WHAT it fades toward, since release has
-           no next scene to land on). Runs BEFORE device teardown below,
-           while the stream is still reachable to freeze. Only then does
-           the entertainment/streaming session itself STOP (action:"stop"
-           to the bridge) — already explicit in the vendored driver
-           (fx/devices/hue.py HueDevice.deactivate); release just calls it.
-           Without the fade step, deactivate() alone stops the SESSION but
-           never touches the BULB — Hue holds whatever it last streamed
-           indefinitely, which is exactly the defect this file's PR fixes
-           (all 10 Music Group + 7 Dining/Kitchen bulbs across both bridges
-           found stuck on SPECTRA's last frame, session already closed,
-           nothing blocking Home Assistant but nothing telling the bulb to
-           let go either).
+           the light off via direct REST and READS EACH LIGHT BACK to
+           confirm the off actually landed (2026-08-16 addition — see that
+           module's docstring, "Off-write read-back confirmation") — see
+           that module's docstring for the fidelity reasoning (matches
+           legacy's ambient-mode disable FEEL, differs in kind on WHAT it
+           fades toward, since release has no next scene to land on). Runs
+           BEFORE device teardown below, while the stream is still
+           reachable to freeze. Only then does the entertainment/streaming
+           session itself STOP (action:"stop" to the bridge) — already
+           explicit in the vendored driver (fx/devices/hue.py
+           HueDevice.deactivate); release just calls it. Without the fade
+           step, deactivate() alone stops the SESSION but never touches the
+           BULB — Hue holds whatever it last streamed indefinitely, which
+           is exactly the defect this file's PR fixes (all 10 Music Group +
+           7 Dining/Kitchen bulbs across both bridges found stuck on
+           SPECTRA's last frame, session already closed, nothing blocking
+           Home Assistant but nothing telling the bulb to let go either).
   dummy    deactivated (no I/O; a no-op release, correctly).
   external the released side's active virtuals set inactive via the LedFX
   LedFX    REST API (spectra/services/ledfx_release.py, a direct client —
@@ -81,6 +83,23 @@ lands the record at `released` regardless of what verification finds
 (same fail-safe discipline as above) but returns whether reality was
 confirmed to match, so callers can surface a loud failure instead of
 reporting a clean "released".
+
+That verification was itself incomplete until 2026-08-16
+(spectra-audit-2xx-proof): it confirmed process/ownership-level state
+(nothing SPECTRA-owned still active, no external LedFX virtual still
+active) but never the one thing this button exists to guarantee — that
+the physical Hue bulbs are actually dark. `_fade_hue_before_release()`'s
+own write (`release_fade.fade_and_release_hue`) only checked the bridge's
+2xx, and his bridge 2xx's a write whether or not the zigbee mesh actually
+delivered it (D6, `docs/SPECTRA_SPEC.md`) — so a bulb could 2xx-accept the
+off command and stay lit, and nothing here would have known. `release_fade.
+fade_and_release_hue` now reads each light back after the off write and
+returns any still-on light names in `still_on` (see that module's own
+docstring); `release_room()` folds a non-empty `still_on` into
+`ReleaseResult.problems` and forces `verified = False`, the same
+"released-unverified" (HTTP 207) surface the LedFX-virtuals gap already
+used — a bulb the read-back couldn't confirm off is reported by name, not
+silently absorbed into a bare "released" claim.
 
 The way BACK is not here — it is the normal guarded handover
 (run_handover(SPECTRA, ...)), still gated and staged, still readiness-gated.
@@ -212,12 +231,25 @@ async def release_room(reason: str = "owner panic release") -> ReleaseResult:
     from_world = light_ownership.load().owner
     record = light_ownership.release(reason)
 
+    hue_still_on: list[str] = []
     if from_world != light_ownership.RELEASED:
-        await _best_effort(_fade_hue_before_release, "spectra hue release fade")
+        fade_result = await _best_effort(
+            _fade_hue_before_release, "spectra hue release fade")
+        if fade_result:
+            hue_still_on = fade_result.get("still_on", [])
         await _best_effort(_release_spectra_devices, "spectra live stack")
         await _best_effort(_release_ledfx_virtuals, "external LedFX virtuals")
 
     verified, problems = await _verify_released()
+    if hue_still_on:
+        # A command is not proof (module docstring): the fade's own
+        # read-back found bulbs that didn't confirm off, so this can't be
+        # reported as a clean "released" even though every process-level
+        # check above passed.
+        verified = False
+        problems = problems + [
+            "Hue light(s) not confirmed off after release: "
+            + ", ".join(hue_still_on)]
     if verified:
         logger.warning("release: room released to Home Assistant (was %s): %s",
                        from_world, reason)

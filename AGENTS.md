@@ -1160,7 +1160,14 @@ BOTH a bridge-side dim-to-off fade over direct REST
 holding SPECTRA's last streamed frame indefinitely, since Hue has no
 on-device show to fall back to) and the entertainment session stop
 (already explicit — `fx/devices/hue.py`), the external LedFX service's
-active virtuals are deactivated over its API.
+active virtuals are deactivated over its API. The off write's own 2xx is
+not trusted either (spectra-audit-2xx-proof, 2026-08-16, `docs/
+SPECTRA_SPEC.md` §64): `release_fade.py` reads each light back after the
+off write (one paced retry if still on) and returns any still-on light's
+bridge name in `still_on` — his Hue bridge 2xx's a write whether or not
+the physical bulb took it (D6), the same fact `ambient.py`'s own
+`_hold_and_confirm` was built for, just never applied here until this
+pass.
 Cleanup runs against BOTH worlds on every press regardless of which one the
 record said owned (a rogue writer the record doesn't know about, e.g.
 systemd's `Wants=` resurrecting `ledfx.service` behind its back, is
@@ -1175,11 +1182,13 @@ routing around it also keeps spectra/'s import discipline (nothing under
 `check_process_split.py` §1b. `release_room()` also verifies afterward
 (`_verify_released()`): SPECTRA's stack via `live.active`, the external
 service via the same systemctl-is-active check `handover.py` uses, falling
-back to a virtuals read-back when that unit is still running. It returns a
-`ReleaseResult` (record/verified/problems) — the record always lands
-`released`, but the API reports `result="released-unverified"` (HTTP 207)
-with the specific `problems` when a device couldn't be confirmed dark,
-instead of silently claiming success.
+back to a virtuals read-back when that unit is still running — PLUS, since
+the §64 fix above, any `still_on` light `release_fade.py`'s own read-back
+named. It returns a `ReleaseResult` (record/verified/problems) — the
+record always lands `released`, but the API reports
+`result="released-unverified"` (HTTP 207) with the specific `problems`
+when a device (LedFX virtual or a Hue bulb by name) couldn't be confirmed
+dark, instead of silently claiming success.
 The way back is the SAME guarded handover, still armed- and readiness-gated
 (`run_handover`'s `from_world=="released"` skips the vacuous quiesce step).
 Spec: `tests/test_release.py` (+ `tests/test_release_fade.py` for the Hue

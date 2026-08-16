@@ -17,6 +17,12 @@ The proofs:
      effort, same discipline as spectra/services/release.py and
      spectra/services/ambient.py).
   6. No Hue devices on the host is a clean no-op — no REST calls at all.
+  7. Off-write read-back confirmation (spectra-audit-2xx-proof, 2026-08-16):
+     a 2xx from the bridge is read back, not trusted — a light that
+     genuinely turns off confirms clean; a light whose off write the mesh
+     silently dropped (the bridge still 2xx's it — D6,
+     docs/SPECTRA_SPEC.md) gets one retry and, if still on, is named in
+     `still_on` rather than folded into a bare "faded" claim.
 
 No live Hue bridge, no LedFX, no live_host activation — a fake host/device
 pair plus httpx.MockTransport stand in for live_host.live.host and the
@@ -34,7 +40,15 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _hue_handler(calls: list, fail_light_put: bool = False):
+def _hue_handler(calls: list, fail_light_put: bool = False, stuck_on: bool = False):
+    """A single light, `l1`. PUT actually updates its `on` state (so a
+    genuine off write reads back off) unless `stuck_on` — the bridge still
+    2xx's the write, but the state never moves, simulating a silently
+    dropped zigbee command (D6). `fail_light_put` instead makes the bridge
+    itself reject the write (4xx) — a different, already-handled failure
+    shape (raise_for_status inside _apply_hue)."""
+    state = {"on": True}  # presumed on/streaming before release
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         calls.append(("REST", request.method, path, _body(request)))
@@ -46,9 +60,15 @@ def _hue_handler(calls: list, fail_light_put: bool = False):
             return httpx.Response(200, json={"data": [{"channels": [{"members": [
                 {"service": {"rtype": "entertainment", "rid": "e1"}}]}]}]})
         if path.startswith("/clip/v2/resource/light/"):
-            if fail_light_put:
-                return httpx.Response(400, json={"errors": [{"description": "bad body"}]})
-            return httpx.Response(200, json={"data": []})
+            if request.method == "PUT":
+                if fail_light_put:
+                    return httpx.Response(400, json={"errors": [{"description": "bad body"}]})
+                body = _body(request)
+                if not stuck_on and "on" in body:
+                    state["on"] = body["on"]["on"]
+                return httpx.Response(200, json={"data": []})
+            if request.method == "GET":
+                return httpx.Response(200, json={"data": [{"on": {"on": state["on"]}}]})
         raise AssertionError(f"unexpected request {request.method} {path}")
     return handler
 
@@ -94,6 +114,17 @@ def _clear_light_cache():
     release_fade._light_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _fast_off_confirm_pacing(monkeypatch):
+    """Zero the off-write read-back pacing by default so tests run fast;
+    the dedicated pacing test below overrides both knobs to prove the
+    settle/retry spacing itself (same convention as tests/test_ambient.py's
+    _fast_ambient_pacing)."""
+    from spectra.services import release_fade
+    monkeypatch.setattr(release_fade, "RELEASE_OFF_SETTLE_MS", 0)
+    monkeypatch.setattr(release_fade, "RELEASE_OFF_RETRY_SPACING_MS", 0)
+
+
 @pytest.fixture
 def bridge(monkeypatch):
     from spectra.services import release_fade
@@ -115,6 +146,25 @@ def failing_bridge(monkeypatch):
     from spectra.services import release_fade
     calls: list = []
     handler = _hue_handler(calls, fail_light_put=True)
+
+    def fake_bridge_client(cfg):
+        return httpx.AsyncClient(
+            base_url=f"https://{cfg['ip_address']}",
+            transport=httpx.MockTransport(handler),
+        )
+
+    monkeypatch.setattr(release_fade, "_bridge_client", fake_bridge_client)
+    return calls
+
+
+@pytest.fixture
+def stuck_bridge(monkeypatch):
+    """The bridge 2xx's every write but the light's state never actually
+    moves — the exact D6 shape (a silently dropped zigbee command) the
+    off-write read-back exists to catch."""
+    from spectra.services import release_fade
+    calls: list = []
+    handler = _hue_handler(calls, stuck_on=True)
 
     def fake_bridge_client(cfg):
         return httpx.AsyncClient(
@@ -160,7 +210,7 @@ def test_fade_freezes_before_writing_rest(monkeypatch, bridge):
 
     result = _run(release_fade.fade_and_release_hue(host))
 
-    assert result == {"devices": ["hue-lights"], "failed": []}
+    assert result == {"devices": ["hue-lights"], "failed": [], "still_on": []}
     assert dev.frozen is True
     freeze_at = _first_index(bridge, lambda c: c == ("set_frozen", True))
     put_at = _first_index(bridge, lambda c: c[:2] == ("REST", "PUT"))
@@ -183,8 +233,11 @@ def test_fade_dims_then_powers_off_with_one_shared_sleep(monkeypatch, bridge):
 
     result = _run(release_fade.fade_and_release_hue(host))
 
-    assert result == {"devices": ["a", "b"], "failed": []}
-    assert sleeps == [1.5], "one shared sleep for the whole batch, not one per device"
+    assert result == {"devices": ["a", "b"], "failed": [], "still_on": []}
+    assert sleeps == [1.5], ("one shared sleep for the whole batch, not one per "
+                             "device — the off-confirm pacing is zeroed by the "
+                             "autouse _fast_off_confirm_pacing fixture, so it "
+                             "contributes no extra sleep() calls here")
 
     put_calls = [c for c in bridge if c[:2] == ("REST", "PUT")]
     dim_calls = [c for c in put_calls if c[3].get("dimming")]
@@ -206,6 +259,7 @@ def test_fade_covers_every_hue_device_across_bridges_wled_untouched(monkeypatch,
     result = _run(release_fade.fade_and_release_hue(host))
 
     assert result["devices"] == ["a", "b"]
+    assert result["still_on"] == []
     assert a.frozen is True and b.frozen is True
     put_calls = [c for c in bridge if c[:2] == ("REST", "PUT")]
     assert len(put_calls) == 4  # dim + off per bridge — the wled device untouched
@@ -222,6 +276,7 @@ def test_fade_one_device_failing_does_not_stop_the_other(monkeypatch, bridge):
 
     assert result["devices"] == ["ok"]
     assert result["failed"] == ["broken"]
+    assert result["still_on"] == []
     assert ok.frozen is True
 
 
@@ -238,7 +293,9 @@ def test_fade_no_hue_devices_is_a_clean_noop(bridge):
 def test_fade_rejected_light_write_does_not_raise(monkeypatch, failing_bridge):
     """A non-2xx per-light response (raise_for_status, caught inside
     _apply_hue) must never propagate — best-effort, matching
-    spectra/services/ambient.py's own per-light error handling."""
+    spectra/services/ambient.py's own per-light error handling. The bridge
+    keeps rejecting the write, so the light never actually turns off — the
+    read-back must say so rather than reporting a clean release."""
     from spectra.services import release_fade
     monkeypatch.setattr(release_fade, "RELEASE_FADE_MS", 0)
     dev = FakeHueDevice("10.0.0.1", failing_bridge)
@@ -248,3 +305,79 @@ def test_fade_rejected_light_write_does_not_raise(monkeypatch, failing_bridge):
 
     assert result["devices"] == ["hue-lights"]
     assert result["failed"] == []
+    assert result["still_on"] == ["l1"]
+
+
+# ── off-write read-back confirmation (spectra-audit-2xx-proof) ─────────────
+
+
+def test_fade_confirms_off_with_a_read_back(monkeypatch, bridge):
+    """The fix, happy path: a light that genuinely takes the off write
+    reads back off and is not named in still_on."""
+    from spectra.services import release_fade
+    monkeypatch.setattr(release_fade, "RELEASE_FADE_MS", 0)
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    host = FakeHost({"hue-lights": dev})
+
+    result = _run(release_fade.fade_and_release_hue(host))
+
+    assert result["still_on"] == []
+    get_calls = [c for c in bridge
+                if c[1] == "GET" and c[2].startswith("/clip/v2/resource/light/")]
+    assert get_calls, "the off write must be followed by a read-back GET"
+
+
+def test_fade_reports_a_light_that_silently_dropped_the_off_write(monkeypatch, stuck_bridge):
+    """THE established fact this audit is about: his bridge returns a clean
+    2xx whether or not the physical bulb took the write (D6,
+    docs/SPECTRA_SPEC.md). still_on must name the light, not fold a
+    2xx-but-unconfirmed write into a bare 'faded' claim — the retry must
+    also have been attempted (a second off PUT reached the bridge)."""
+    from spectra.services import release_fade
+    monkeypatch.setattr(release_fade, "RELEASE_FADE_MS", 0)
+    dev = FakeHueDevice("10.0.0.1", stuck_bridge)
+    host = FakeHost({"hue-lights": dev})
+
+    result = _run(release_fade.fade_and_release_hue(host))
+
+    assert result["devices"] == ["hue-lights"]  # the write itself never raised — 2xx throughout
+    assert result["still_on"] == ["l1"]
+    put_calls = [c for c in stuck_bridge
+                if c[1] == "PUT" and c[2].startswith("/clip/v2/resource/light/")]
+    off_puts = [c for c in put_calls if c[3].get("on") == {"on": False}]
+    assert len(off_puts) == 2, "one initial off PUT plus one retry off PUT"
+
+
+def test_confirm_off_settles_then_paces_the_retry(monkeypatch, stuck_bridge):
+    """Pacing proof, same convention as tests/test_ambient.py's dedicated
+    pacing tests: settle before the first read-back, space before the
+    retry, settle again before the final read-back."""
+    from spectra.services import release_fade
+    monkeypatch.setattr(release_fade, "RELEASE_FADE_MS", 0)
+    monkeypatch.setattr(release_fade, "RELEASE_OFF_SETTLE_MS", 300)
+    monkeypatch.setattr(release_fade, "RELEASE_OFF_RETRY_SPACING_MS", 500)
+    sleeps: list = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(release_fade.asyncio, "sleep", fake_sleep)
+    dev = FakeHueDevice("10.0.0.1", stuck_bridge)
+    host = FakeHost({"hue-lights": dev})
+
+    _run(release_fade.fade_and_release_hue(host))
+
+    assert sleeps == [0.3, 0.5, 0.3]
+
+
+def test_fade_no_hue_devices_confirms_nothing(bridge):
+    """No Hue devices — the early no-op return predates the still_on field
+    entirely (nothing to confirm), proven separately from the general
+    no-op test above so a future field addition here is deliberate."""
+    from spectra.services import release_fade
+    host = FakeHost({"strip": FakeWledDevice()})
+
+    result = _run(release_fade.fade_and_release_hue(host))
+
+    assert "still_on" not in result
+    assert bridge == []
