@@ -627,6 +627,28 @@ retire-not-delete). Built:
   room-control section of `scripts/check_spectra.py` +
   `tests/test_room_controls.py` + `tests/test_ambient.py`.
 
+  **The bridge gives ZERO signal on a silent drop** — measured live
+  2026-08-16 (`docs/SPECTRA_SPEC.md` §60): every PUT, dropped or not,
+  returns a clean `HTTP 200`/`{"errors":[]}`, no `429`, no `Retry-After`,
+  no rate-limit header. A retry has nothing to react to but a read-back —
+  don't design one around the response. `AMBIENT_WRITE_STAGGER_MS=300`
+  (raised from 50) is margin inside a confirmed-safe band, not a measured
+  cliff edge — 48 controlled sustained-burst trials across both real
+  bridges independently found no drops from 0.08s–0.60s; a claimed sharp
+  0.12s-fails/0.45s-works cliff in an earlier report did not reproduce and
+  was most likely itself a target-tracking bug in whatever script
+  gathered it (the same mistake this investigation's own first attempt
+  made — always self-check a burst-measurement script against an
+  unambiguously-safe pace before trusting a faster result).
+  `ambient.repair_stragglers()` is the fix for "detects but does not
+  repair": `ambient_music_gate.py`'s periodic verifier now actually
+  re-writes an ON-but-wrong-colour straggler it finds (still never a
+  light that reads OFF right now — checked fresh, immediately before
+  writing). `_color_matches` (on+hue only) vs `_state_matches` (on+hue+
+  brightness) is a deliberate split: the former is what `verify_held()`'s
+  reporting surface uses, so a bulb dimmed out of band no longer reads as
+  a false "unlit" — brightness only gates confirming OUR OWN write.
+
 **Force Scene** — the Admiral's day-one ask, separate from the four-item
 gap-inventory decision above but built on the same room-control surface:
 `RoomControlState.force_scene_enabled`/`force_scene_scene_id`
@@ -1229,6 +1251,24 @@ right (imports `WebSocket` etc. at module level, endpoint nested inside
 the function); copy that shape, not a self-contained "import everything
 inside the helper" one, for any new fake-server test fixture
 (`tests/test_device_preview.py`'s `_fake_ledfx_app()` hit exactly this).
+
+**A mock Hue bridge handler built with `_bridge_client(cfg)` returning a
+FRESH `_hue_handler(calls)` (state closure and all) on every call, instead
+of one handler built once and reused, silently resets the mocked bulb back
+to its off/D65 default on every single `async with _bridge_client(cfg) as
+client:` block.** Code under test (`ambient.py`) opens a new client per
+operation — the hold, an out-of-band write, a later verify/repair — so a
+per-call-fresh handler makes a later check unable to see an earlier
+write's real effect; it just sees a coincidental default instead. Found
+2026-08-16 (`tests/test_ambient_music_gate.py`'s `hue_room` fixture had
+exactly this bug, `spectra-hue-burst-drop-and-false-unlit`): an "off bulb
+stays off" test still passed, by coincidence, because the fresh handler's
+default state IS off; a new "on-but-wrong-colour gets repaired" test
+failed until the fixture built its handler ONCE outside the per-call
+closure, matching `tests/test_ambient.py`'s own correct `bridge` fixture.
+When writing any multi-step live-state test (write, then a later separate
+check), verify the fixture shares ONE handler/state across every
+`_bridge_client()` call the test will make, not one rebuilt per call.
 
 ## LedFX write plane: one gate, and its liveness signal
 

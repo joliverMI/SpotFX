@@ -240,6 +240,45 @@ def test_fade_dim_payload_clamps_and_has_no_colour_target():
     assert body["dynamics"] == {"duration": 1500}
 
 
+# ── _color_matches vs _state_matches: the false-unlit fix ──────────────────
+
+def test_color_matches_ignores_brightness_drift():
+    """The exact live defect: a bulb genuinely on and at the ambient hue,
+    but dimmed to a different brightness (a wall switch, the Hue app, or
+    his own deliberate choice) must still read as showing the ambient
+    colour — _color_matches is the reporting-level check and does not gate
+    on brightness at all."""
+    from spectra.services.ambient import _color_matches, _hex_to_xy
+    target_xy = _hex_to_xy("#f5da8c")
+    x, y = target_xy
+    state = {"on": {"on": True}, "dimming": {"brightness": 40.0},
+            "color": {"xy": {"x": x, "y": y}}}
+    assert _color_matches(state, target_xy) is True
+
+
+def test_color_matches_false_when_off_or_wrong_hue():
+    from spectra.services.ambient import _color_matches, _hex_to_xy
+    target_xy = _hex_to_xy("#f5da8c")
+    off = {"on": {"on": False}, "dimming": {"brightness": 100.0},
+          "color": {"xy": {"x": target_xy[0], "y": target_xy[1]}}}
+    wrong_hue = {"on": {"on": True}, "dimming": {"brightness": 100.0},
+                "color": {"xy": {"x": 0.15, "y": 0.06}}}
+    assert _color_matches(off, target_xy) is False
+    assert _color_matches(wrong_hue, target_xy) is False
+
+
+def test_state_matches_still_gates_on_brightness_for_write_confirmation():
+    """_state_matches (the write-confirmation check _write_and_confirm
+    uses) stays strict — confirming OUR OWN write means confirming the
+    specific brightness we just asked for, unlike the looser reporting
+    check above."""
+    from spectra.services.ambient import _state_matches, _hex_to_xy
+    target_xy = _hex_to_xy("#f5da8c")
+    state = {"on": {"on": True}, "dimming": {"brightness": 40.0},
+            "color": {"xy": {"x": target_xy[0], "y": target_xy[1]}}}
+    assert _state_matches(state, target_xy, 100.0) is False
+
+
 # ── reconcile(): no live stack / no Hue devices ─────────────────────────────
 
 def test_reconcile_dark_when_live_stack_not_active(monkeypatch):
@@ -697,3 +736,121 @@ def test_verify_held_reports_a_light_turned_off_out_of_band_without_writing(monk
                       "unlit": ["l1"]}
     assert all(c[1] != "PUT" for c in bridge[calls_before_verify:]), \
         "verify_held must only ever GET — never write"
+
+
+def test_verify_held_reports_lit_despite_a_dimmed_brightness(monkeypatch, bridge):
+    """THE false-unlit fix: a bulb genuinely on and at the ambient hue, but
+    dimmed to a different brightness out of band, must be reported LIT —
+    not the live defect where a brightness-only drift got reported as
+    "unlit" and eroded trust in the honest-reporting surface."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    held = _run(ambient.reconcile(True, "#f5da8c"))
+    assert held["status"] == "on"
+
+    async def _dim_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"dimming": {"brightness": 40.0}})
+    _run(_dim_out_of_band())
+
+    result = _run(ambient.verify_held("#f5da8c"))
+
+    assert result == {"status": "verified", "lights_lit": 1, "lights_total": 1, "unlit": []}
+
+
+# ── repair_stragglers(): making the retry actually recover ─────────────────
+
+def test_repair_stragglers_rewrites_an_on_but_wrong_colour_light(monkeypatch, bridge):
+    """The exact live defect: verify_held() names an ON-but-wrong-colour
+    straggler, and repair_stragglers() must actually fix it — paced,
+    read-back confirmed — not merely report it again."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    held = _run(ambient.reconcile(True, "#f5da8c"))
+    assert held["status"] == "on"
+
+    async def _drift_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"color": {"xy": {"x": 0.15, "y": 0.06}}})
+    _run(_drift_out_of_band())
+    before = _run(ambient.verify_held("#f5da8c"))
+    assert before["unlit"] == ["l1"]
+
+    result = _run(ambient.repair_stragglers(["l1"], "#f5da8c"))
+
+    assert result == {"repaired": ["l1"], "left_off": [], "unconfirmed": []}
+    after = _run(ambient.verify_held("#f5da8c"))
+    assert after == {"status": "verified", "lights_lit": 1, "lights_total": 1, "unlit": []}
+
+
+def test_repair_stragglers_never_relights_a_light_that_reads_off(monkeypatch, bridge):
+    """A bulb he turned off himself must stay off — repair_stragglers
+    checks fresh, immediately before writing, and issues no PUT at all to
+    a light it finds off right now."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    held = _run(ambient.reconcile(True, "#f5da8c"))
+    assert held["status"] == "on"
+
+    async def _turn_off_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"on": {"on": False}})
+    _run(_turn_off_out_of_band())
+    calls_before_repair = len(bridge)
+
+    result = _run(ambient.repair_stragglers(["l1"], "#f5da8c"))
+
+    assert result == {"repaired": [], "left_off": ["l1"], "unconfirmed": []}
+    assert all(c[1] != "PUT" for c in bridge[calls_before_repair:]), \
+        "an off light must never be written to by repair"
+
+
+def test_repair_stragglers_reports_unconfirmed_when_the_write_keeps_failing(monkeypatch):
+    """A straggler that's genuinely ON but at the wrong colour, and whose
+    every corrective PUT is silently accepted (2xx) without ever actually
+    landing — the exact "detects but does not repair" shape — must come
+    back named as unconfirmed after repair's bounded retries, never
+    silently dropped from the report or falsely claimed fixed."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    calls: list = []
+    state = {"on": {"on": True}, "dimming": {"brightness": 100.0},
+            "color": {"xy": {"x": 0.15, "y": 0.06}}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(("REST", request.method, path))
+        if path == "/clip/v2/resource/entertainment":
+            return httpx.Response(200, json={"data": [{"id": "e0", "owner": {"rid": "d1"}}]})
+        if path == "/clip/v2/resource/light":
+            return httpx.Response(200, json={"data": [{"id": "l1", "owner": {"rid": "d1"},
+                                                        "metadata": {"name": "l1"}}]})
+        if path.startswith("/clip/v2/resource/entertainment_configuration/"):
+            return httpx.Response(200, json={"data": [{"channels": [
+                {"members": [{"service": {"rtype": "entertainment", "rid": "e0"}}]}]}]})
+        if path == "/clip/v2/resource/light/l1":
+            if request.method == "PUT":
+                return httpx.Response(200, json={"data": []})  # accepted, never applied
+            if request.method == "GET":
+                return httpx.Response(200, json={"data": [dict(state, id="l1")]})
+        raise AssertionError(f"unexpected request {request.method} {path}")
+
+    _install_bridge(monkeypatch, handler)
+    dev = FakeHueDevice("10.0.0.1", calls)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    result = _run(ambient.repair_stragglers(["l1"], "#f5da8c"))
+
+    assert result == {"repaired": [], "left_off": [], "unconfirmed": ["l1"]}
