@@ -728,6 +728,26 @@ so the same GET that lies during a streamed scene is correct there. Pick
 the wrong one for the case at hand and you get a confident wrong answer
 either way.
 
+**Even for the correct instrument, a CLIP v2 light GET during an active
+`dynamics`-ramped transition reports the commanded/target state, not a
+live-interpolating frame.** Found live 2026-08-16 room-proving §63
+(Ambient's second colour): polling `GET /clip/v2/resource/light/{id}`
+every 150ms across a `dynamics.duration=1500` colour swap showed a
+strictly binary jump — the OLD xy exactly, for several seconds, then the
+NEW xy exactly from the next sample on, with no intermediate value ever
+observed. The physical bulb almost certainly does fade smoothly (the
+whole point of setting `dynamics.duration` on the PUT), but that
+animation lives on the bulb/zigbee mesh, not in the bridge's REST
+resource model — polling cannot see it. Proving an eased-vs-snapped
+transition therefore has two honest layers, not one: the CODE-level
+guarantee (confirm `dynamics.duration` is actually on the wire, e.g. by
+reading the deployed source) and the STRUCTURAL guarantee (server logs /
+`status()` show a single continuous hold, never a release-then-reacquire
+cycle) are both provable by instrument; the third layer — does it
+actually *look* smooth — needs a person's eyes on the bulb. Don't let a
+binary-jump polling result read as "it snapped;" it means the instrument
+can't see the answer, which is a different finding.
+
 **A write-time confirmation is a snapshot, not a standing guarantee —
 status surfaces need their own independent re-verification.** Found live
 2026-08-15, overnight: `ambient_music_gate.status()` reported
