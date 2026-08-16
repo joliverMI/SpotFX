@@ -14,9 +14,18 @@ Sections:
      `connected` flag) and frames stop arriving; resume() reopens it and
      frames resume. This is "prove the feed stopped, not that the display
      blanked" — the owner's own bar for this feature.
+  5. THE 2026-08-16 CORRECTION — the in-process facade source (his normal
+     S3 operating state, where LedFX is deliberately stopped): ownership-
+     routed source selection (_source_mode), real frames off a genuine
+     fx.headless render thread with no websocket at all, and the SAME
+     genuine-stop pause/auto-pause proofs as section 4 — re-established
+     against this source, not assumed to carry over from it.
 
 No LedFX I/O against anything but the ephemeral loopback server this file
-starts itself; no audio, no real spectra.service/ledfx.service ports.
+starts itself; no audio (fx.headless.silence_audio, via start_headless_host),
+no real spectra.service/ledfx.service ports, and section 5's ownership
+record lives under an isolated tmp path, never this worktree's own
+storage/spectra/ownership.json.
 """
 from __future__ import annotations
 
@@ -24,6 +33,7 @@ import asyncio
 import json
 import socket
 
+import numpy as np
 import pytest
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -506,3 +516,216 @@ def test_favorites_change_while_connected_forces_a_resubscribe():
             await _stop(server, task)
 
     _run(scenario())
+
+
+# ── 5. THE 2026-08-16 CORRECTION — the in-process facade source ──────────
+#
+# The relay used to assume LedFX was always the writer. It isn't: whenever
+# light ownership is "spectra" (his normal S3 operating state), the
+# external LedFX process is deliberately stopped and SPECTRA's own
+# in-process fx/ pipeline drives the devices instead — the original relay
+# just sat on "reconnecting…" forever in that state. These tests build a
+# REAL headless FxHost (fx.headless — a genuine render thread, not a mock)
+# and prove the relay reads live frames off it with no websocket at all,
+# held to the identical pause/genuine-stop bar as the LedFX path above.
+
+from fx import headless as _headless
+from fx import light_ownership as _lo
+from fx.events import Event as _Event, VirtualUpdateEvent as _VirtualUpdateEvent
+
+_ORIGINAL_OWNERSHIP_FILE = _lo.OWNERSHIP_FILE
+
+
+@pytest.fixture
+def _isolated_ownership(tmp_path):
+    """Points fx.light_ownership at a tmp record so tests can set owner
+    without touching this worktree's real storage/spectra/ownership.json —
+    same pattern tests/test_spectra_activation_truth.py already uses."""
+    _lo.OWNERSHIP_FILE = tmp_path / "ownership.json"
+    yield
+    _lo.OWNERSHIP_FILE = _ORIGINAL_OWNERSHIP_FILE
+
+
+@pytest.fixture
+def _restore_live_host():
+    """dp._source_mode() reads spectra.services.live_host.live — a bare
+    module-level singleton (same no-DI-seam shape as dp.relay itself,
+    CLAUDE.md's documented pattern for fire_history/ambient_music_gate).
+    These tests poke live.host directly rather than going through the full
+    activate()/deactivate() handover machinery (irrelevant here — dummy
+    devices need no ActivationGrant, fx/host.py's own docstring), but must
+    still leave it exactly as found for every other test file sharing this
+    process."""
+    from spectra.services.live_host import live
+    yield live
+    live.host = None
+
+
+async def _live_headless_host(tmp_path, *, virtual_id="preview-virtual",
+                              pixel_count=12, rows=3):
+    """A real FxHost with one dummy device/virtual running an actual
+    render thread (fx.headless.start_headless_host + initial_effect —
+    without it the virtual never activates and never fires
+    Event.VIRTUAL_UPDATE at all)."""
+    return await _headless.start_headless_host(
+        str(tmp_path / "fx-live"),
+        device_id=virtual_id, pixel_count=pixel_count, rows=rows,
+        initial_effect={"type": "singleColor", "config": {"color": "#ff0000"}})
+
+
+def test_source_mode_reads_the_ownership_record(tmp_path, _isolated_ownership, _restore_live_host):
+    from spectra.services import device_preview as dp
+    live = _restore_live_host
+
+    assert dp._source_mode() == "ledfx", "missing record — the shipped default is spot-effects owns"
+
+    _lo._save(_lo.OwnershipRecord(owner=_lo.SPECTRA))
+    assert dp._source_mode() == "none", \
+        "spectra owns on paper but her live stack isn't up — nothing to read frames off"
+
+    live.host = object()  # stand-in: only `is not None` (live.active) matters here
+    assert dp._source_mode() == "facade"
+
+    live.host = None
+    _lo._save(_lo.OwnershipRecord(owner=_lo.SPOT_EFFECTS))
+    assert dp._source_mode() == "ledfx"
+
+
+def test_facade_relay_receives_real_frames_with_no_websocket(tmp_path, _isolated_ownership, _restore_live_host):
+    """The core positive proof: a real render thread's real pixels reach
+    the relay via Event.VIRTUAL_UPDATE alone — no upstream socket, no
+    ws_url ever consulted."""
+    from spectra.services import device_preview as dp
+    live = _restore_live_host
+
+    async def scenario():
+        host = await _live_headless_host(tmp_path)
+        live.host = host
+        _lo._save(_lo.OwnershipRecord(owner=_lo.SPECTRA))
+        try:
+            received = []
+
+            async def on_frame(payload):
+                received.append(payload)
+
+            relay = dp.DevicePreviewRelay(
+                favorite_ids=["preview-virtual"], target_fps=100.0, on_frame=on_frame)
+            relay.start()
+            try:
+                await _wait_until(lambda: relay.connected)
+                await _wait_until(lambda: relay.frames_relayed >= 3)
+                assert received, "frames actually reached on_frame, not just the counter"
+                frame = received[0]
+                assert frame["vis_id"] == "preview-virtual"
+                assert frame["shape"] == [3, 4], "rows from the virtual's own config (12 px / 3 rows)"
+                assert len(frame["pixels"]) == 3, "[r-list, g-list, b-list] — same wire shape as the LedFX path"
+                assert len(frame["pixels"][0]) == 12
+            finally:
+                await relay.stop()
+        finally:
+            live.host = None
+            await host.shutdown()
+
+    _run(scenario())
+
+
+def test_facade_pause_removes_the_listener_not_just_a_local_flag(tmp_path, _isolated_ownership, _restore_live_host):
+    """THE KEY PROOF, facade edition: pause must remove the event listener
+    from the live host's own registry (the in-process equivalent of a
+    closed socket), proven by firing a frame DIRECTLY at the host's event
+    bus while paused and showing it never reaches the relay at all — not
+    merely that `connected` reads False."""
+    from spectra.services import device_preview as dp
+    live = _restore_live_host
+
+    async def scenario():
+        host = await _live_headless_host(tmp_path)
+        live.host = host
+        _lo._save(_lo.OwnershipRecord(owner=_lo.SPECTRA))
+        try:
+            relay = dp.DevicePreviewRelay(favorite_ids=["preview-virtual"], target_fps=100.0)
+            relay.start()
+            try:
+                await _wait_until(lambda: relay.connected)
+                await _wait_until(lambda: relay.frames_relayed >= 2)
+                before = len(host.events._listeners.get(_Event.VIRTUAL_UPDATE, []))
+                assert before >= 1, "the relay's own listener is registered on the real host"
+
+                relay.pause()
+                await _wait_until(lambda: relay.connected is False)
+                after = len(host.events._listeners.get(_Event.VIRTUAL_UPDATE, []))
+                assert after == before - 1, \
+                    "the listener itself is gone from the host's registry, not just flagged off"
+
+                frozen_received = relay.frames_received
+                # Fire directly at the real bus — proves the callback is
+                # genuinely unreachable, not merely idle.
+                host.events.fire_event(_VirtualUpdateEvent(
+                    "preview-virtual", np.zeros((12, 3))))
+                await asyncio.sleep(0.2)
+                assert relay.frames_received == frozen_received, \
+                    "paused: a frame fired directly at the bus never reaches the relay"
+
+                relay.resume()
+                await _wait_until(lambda: relay.connected)
+                await _wait_until(lambda: relay.frames_relayed > frozen_received)
+            finally:
+                await relay.stop()
+        finally:
+            live.host = None
+            await host.shutdown()
+
+    _run(scenario())
+
+
+def test_facade_last_viewer_leaving_removes_the_listener_too(tmp_path, _isolated_ownership, _restore_live_host):
+    """OQ-7's hidden-tab auto-pause, re-proven against the facade source:
+    zero viewers must genuinely unsubscribe, never just stop rendering
+    locally, and must never touch the sticky `paused` flag."""
+    from spectra.services import device_preview as dp
+    live = _restore_live_host
+
+    async def scenario():
+        host = await _live_headless_host(tmp_path)
+        live.host = host
+        _lo._save(_lo.OwnershipRecord(owner=_lo.SPECTRA))
+        try:
+            has_viewer = {"v": True}
+            relay = dp.DevicePreviewRelay(
+                favorite_ids=["preview-virtual"], target_fps=100.0,
+                has_viewers=lambda: has_viewer["v"])
+            relay.start()
+            try:
+                await _wait_until(lambda: relay.connected)
+                await _wait_until(lambda: relay.frames_relayed >= 2)
+
+                has_viewer["v"] = False
+                relay.viewers_changed()
+                await _wait_until(lambda: relay.connected is False)
+                assert relay.paused is False, "auto-pause via zero viewers must not touch the sticky flag"
+
+                frozen = relay.frames_relayed
+                await asyncio.sleep(0.2)
+                assert relay.frames_relayed == frozen
+
+                has_viewer["v"] = True
+                relay.viewers_changed()
+                await _wait_until(lambda: relay.connected)
+                await _wait_until(lambda: relay.frames_relayed > frozen)
+            finally:
+                await relay.stop()
+        finally:
+            live.host = None
+            await host.shutdown()
+
+    _run(scenario())
+
+
+def test_status_reports_source(tmp_path, _isolated_ownership, _restore_live_host):
+    from spectra.services import device_preview as dp
+
+    relay = dp.DevicePreviewRelay()
+    assert relay.status()["source"] == "ledfx", "default record — spot-effects owns"
+
+    _lo._save(_lo.OwnershipRecord(owner=_lo.SPECTRA))
+    assert relay.status()["source"] == "none", "spectra owns but her live stack isn't up"

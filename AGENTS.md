@@ -793,27 +793,46 @@ module is one — see `spectra/api/device_preview.py`'s WS endpoint calling
 pause/resume click). Broadcast state on every change of the underlying
 condition, not on the actions that usually cause it.
 
-**Device preview's upstream is the EXTERNAL LedFX process, which the S3
-handover deliberately stops** — found live 2026-08-16, room-proof attempt
-against his real stack. `device_preview.py` relays from `ledfx_ws_url()`
-(`ws://…/api/websocket`, LEDFX_HOST/PORT from `.env`, i.e. the pre-S3
-`ledfx.service`), not from anything in `fx/` — `fx/api/websocket.py`
-(the vendored module that would emit the same `visualisation_update`
-shape) is never mounted in `spectra/app.py`. Once light ownership moves to
-`"spectra"` (confirmed live via `/api/debug/ledfx-health`'s
-`light_ownership`), `ledfx.service` is intentionally stopped and the
-ownership reconciler alarms if it comes back — see the S3 section above.
-With his room in that state (the live default since the handover), the
-strip resolves his real favourite virtuals correctly and sits on
-"reconnecting…" forever: not a relay defect, a genuine missing listener at
-that address (`ss -tlnp` shows nothing on `LEDFX_PORT`;
-`journalctl --user -u ledfx.service` shows its last stop, no restarts
-since). Proving live frames / a genuine pause-drops-the-connection against
-*his real LedFX* requires either a real handover back to the external
-service (out of scope for a routine proof — don't do this to "test" the
-preview) or wiring the preview at a source that reflects the S3-owned
-render path instead. Until one of those happens, this feature has no live
-data source on his actual deployed topology.
+**Device preview is now sourced from whichever world actually owns the
+lights, not always LedFX** (fixed 2026-08-16, PR fm/spectra-preview-facade-
+source, correcting the 2026-08-16 gap found room-proving against his real
+stack — history kept below for why the fix takes this shape).
+`device_preview._source_mode()` reads the SAME light-ownership record
+`spectra/services/fx_seam.py` routes writes by: `owner == "spot-effects"`
+→ `_consume_ledfx` (the original LedFX-websocket relay, unchanged, correct
+whenever the external process really is the writer); `owner == "spectra"`
+→ `_consume_facade` — no websocket at all, a direct in-process
+`fx.events.Event.VIRTUAL_UPDATE` subscription on the live
+`spectra.services.live_host.live.host` (the SAME event the frame-freshness
+tap already listens for, fired by the real render thread after
+assemble+flush — this is the literal pixel buffer being written to the
+device); anything else (handing-over/released/spectra-owns-but-not-yet-
+active) → `"none"`, honestly `connected: false`, nothing to relay. Pause
+and the hidden-tab auto-pause are re-proven against the facade source on
+its own terms (removing the `Event.VIRTUAL_UPDATE` listener from the live
+host's own registry is the in-process equivalent of closing a socket —
+`tests/test_device_preview.py` section 5 fires a frame directly at the
+real bus while paused and proves it never reaches the relay), not assumed
+to carry over from the LedFX proof. Licence position re-examined fresh for
+this source (module docstring): `fx/` is already GPL-3.0-vendored and
+already imported throughout spectra/, so subscribing to its own event bus
+is no new incorporation; what would NOT be safe — and isn't done — is
+porting `ledfx/core.py`'s dropped-from-vendoring throttle/serialize logic,
+so the facade payload encoder is an independent implementation reusing
+this module's own pre-existing throttle bookkeeping instead.
+
+History (found live 2026-08-16, room-proof attempt against his real
+stack, now resolved by the above): the original build always relayed
+`ledfx_ws_url()` (`ws://…/api/websocket`, LEDFX_HOST/PORT from `.env`,
+the pre-S3 `ledfx.service`) regardless of who owned the lights. Once
+ownership moves to `"spectra"` (his live default since the S3 handover),
+`ledfx.service` is intentionally stopped and the ownership reconciler
+alarms if it comes back (see the S3 section above) — so the strip sat on
+"reconnecting…" forever in his normal operating state: not a relay defect,
+a genuine missing listener at that address. Proving live frames / genuine
+pause against the ORIGINAL LedFX-only relay in that state would have
+required either a real handover back to the external service (never do
+this to "test" the preview) or exactly the source correction above.
 
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
 built, room-proof pending); NOT the same feature as the retired per-node

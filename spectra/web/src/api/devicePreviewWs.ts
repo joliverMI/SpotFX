@@ -13,7 +13,8 @@
  * docs/SPECTRA_SPEC.md, services/device_preview.py's docstring): this
  * socket IS the auto-pause signal. A hidden tab closes it deliberately;
  * the server treats a zero-viewer moment as "nobody's watching" and
- * drops its own upstream LedFX connection for real — the same genuine
+ * drops its own live upstream connection for real (whichever source is
+ * active — see DevicePreviewStatus.source in types.ts) — the same genuine
  * stop the sticky Pause button uses, never a display-only imitation. The
  * tab reopens it the instant it's visible again — no click needed. This
  * never calls pause()/resume(): those are his own sticky, persisted
@@ -21,7 +22,7 @@
  * has to remember to undo. `tabHiddenPause` is local knowledge — WE
  * closed this socket on purpose — so DevicePreviewStrip can show a
  * distinct "idle — tab hidden" state instead of the ordinary
- * "reconnecting…" (which means something different: the upstream LedFX
+ * "reconnecting…" (which means something different: the live upstream
  * connection is unexpectedly unreachable). */
 import type { DevicePreviewFrame, DevicePreviewStatus } from '../types';
 
@@ -138,13 +139,17 @@ export function onDevicePreviewTabHiddenPause(fn: TabHiddenPauseListener): () =>
   return () => tabHiddenPauseListeners.delete(fn);
 }
 
-/** Decode LedFX's own VisualisationUpdateEvent pixel payload (report §1,
- * behaviour read from LedFx-Frontend-v2's PixelGraphBase.tsx/hexColor.ts —
- * reimplemented here, not copied; that frontend is AGPL-3.0 and this repo
- * is public). Compressed mode (LedFX's default) is a base64 string of
- * interleaved r,g,b bytes; uncompressed mode is [[r...],[g...],[b...]] —
- * SPECTRA never changes LedFX's own transmission_mode config, so both
- * shapes have to be handled here. */
+/** Decode a device-preview pixel payload (report §1, behaviour read from
+ * LedFx-Frontend-v2's PixelGraphBase.tsx/hexColor.ts — reimplemented here,
+ * not copied; that frontend is AGPL-3.0 and this repo is public).
+ * Compressed mode (LedFX's default) is a base64 string of interleaved
+ * r,g,b bytes; uncompressed mode is [[r...],[g...],[b...]] — SPECTRA never
+ * changes LedFX's own transmission_mode config, so both shapes have to be
+ * handled here. Also the wire shape `spectra/services/device_preview.py`
+ * emits for its OWN in-process facade source (2026-08-16) — deliberately
+ * matched to LedFX's uncompressed list form so this decoder needs no
+ * source-aware branch; that backend encoding is independently written,
+ * not derived from LedFX's own core.py (see that module's docstring). */
 export function decodePixels(pixels: string | number[][]): [number, number, number][] {
   if (typeof pixels === 'string') {
     if (!pixels) return [];

@@ -8,14 +8,23 @@
  * Approved by the owner with one explicit condition: "add a pause button
  * to pause the preview and conserve resources." Pause/resume call the
  * server (spectra/services/device_preview.py), which genuinely drops or
- * reopens the upstream LedFX connection — this component never fakes that
+ * reopens the live upstream connection — this component never fakes that
  * by hiding swatches while a hidden feed keeps running; `connected` here
  * is the server's own honest state, not a local guess, and swatches only
  * ever render live colour while unpaused, not auto-paused, AND connected.
  *
+ * SOURCE IS OWNERSHIP-ROUTED, not always LedFX (2026-08-16 correction):
+ * `status.source` names which world is actually driving the lights right
+ * now — "facade" (SPECTRA's own in-process render pipeline, his normal S3
+ * operating state), "ledfx" (the external LedFX process), or "none"
+ * (nobody currently owns the lights). The swatches themselves don't
+ * branch on it — DevicePreviewFrame's wire shape is identical either way
+ * (types.ts) — but the "reconnecting…" badge's tooltip does, so it never
+ * claims to be reconnecting to LedFX when LedFX was never the source.
+ *
  * HIDDEN-TAB AUTO-PAUSE (OQ-7, decided 2026-08-15): a browser tab going
  * hidden auto-pauses the feed too (api/devicePreviewWs.ts closes its own
- * socket, which genuinely drops the upstream LedFX connection server-side
+ * socket, which genuinely drops the live upstream connection server-side
  * — see that module's docstring), and returning to the tab auto-resumes
  * it with no click needed. This is a SEPARATE, ephemeral mechanism from
  * his own sticky Pause button — never persisted, never the same badge —
@@ -115,19 +124,26 @@ export default function DevicePreviewStrip() {
           paused ? 'badge-gray' : tabHiddenPause ? 'badge-blue' : connected ? 'badge-purple' : 'badge-amber'
         }`}
         title={paused
-          ? 'Paused — you clicked Pause. The connection to LedFX is closed, not just hidden — stays this way until you click Resume.'
+          ? 'Paused — you clicked Pause. The connection is closed, not just hidden — stays this way until you click Resume.'
           : tabHiddenPause
-            ? "Idle — this tab isn't visible, so the connection to LedFX is closed to conserve resources. It reopens on its own the moment you switch back — nothing to click."
+            ? "Idle — this tab isn't visible, so the connection is closed to conserve resources. It reopens on its own the moment you switch back — nothing to click."
             : connected
-              ? "Live — subscribed to LedFX's own visualisation feed"
-              : 'Preview unavailable — reconnecting to LedFX (never restarts or wakes it)'}
+              ? (status?.source === 'facade'
+                  ? "Live — reading SPECTRA's own live render pipeline directly (in-process, no LedFX involved)"
+                  : "Live — subscribed to LedFX's own visualisation feed")
+              : status?.source === 'none'
+                ? "Preview unavailable — SPECTRA doesn't currently own the lights right now (a handover is in progress, or the room's been released), so there's nothing to read frames from. Picks back up on its own once ownership settles."
+                : status?.source === 'facade'
+                  ? 'Preview unavailable — reconnecting to the live render pipeline'
+                  : 'Preview unavailable — reconnecting to LedFX (never restarts or wakes it)'}
       >
-        {paused ? 'paused' : tabHiddenPause ? 'idle — tab hidden' : connected ? 'live' : 'reconnecting…'}
+        {paused ? 'paused' : tabHiddenPause ? 'idle — tab hidden' : connected ? 'live'
+          : status?.source === 'none' ? 'unavailable' : 'reconnecting…'}
       </span>
 
       <button type="button" className="device-preview-btn" disabled={pausePending || favoriteIds.length === 0}
         onClick={togglePause}
-        title={paused ? 'Resume the preview' : 'Pause the preview — drops the LedFX connection to conserve resources'}>
+        title={paused ? 'Resume the preview' : 'Pause the preview — drops the live connection to conserve resources'}>
         {paused ? '▶ Resume' : '⏸ Pause'}
       </button>
 
