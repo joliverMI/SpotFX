@@ -208,6 +208,17 @@ def _isolated_fire_history(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_sonic_usage(tmp_path, monkeypatch):
+    """spectra/services/sonic_usage.py (Sonic's durable per-call token-usage
+    record, review page) is written from inside settings_agent.run_turn /
+    settings_agent_cli.run_turn with no DI seam of its own — same class of
+    risk as fire_history.py above. Autouse so no individual test needs to
+    know this store exists."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "SONIC_USAGE_FILE", tmp_path / "sonic_usage.json")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_ambient_music_gate():
     """spectra/services/ambient_music_gate.py tracks the live Ambient hold
     (_held/_held_color/_last_result/_apply_lock, plus the status-honesty

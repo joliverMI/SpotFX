@@ -1019,6 +1019,26 @@ Spec: `scripts/check_settings_console.py` (both domains) +
 `tests/test_settings_console.py` (settings) + `tests/test_scene_console.py`
 (scene/flare).
 
+## SPECTRA Sonic token-usage record (review page)
+
+`spectra/services/sonic_usage.py` — durable per-call token usage, his ask:
+last query / this day / this week, on the Review page (not settings
+console — that's where he asked). Captured at the runtime response itself
+(`settings_agent.py`'s Anthropic SDK `response.usage`, summed across a
+turn's tool rounds; `settings_agent_cli.py`'s `claude -p` final `result`
+event's own `usage`/`modelUsage`/`total_cost_usd`) — never estimated; a
+call the runtime doesn't report usage for records nothing, no fabricated
+zero. **Day/week are FIXED periods anchored Monday 22:00 America/New_York
+(stdlib `zoneinfo`, DST-aware), NOT rolling 24h/7d** — his own overruling
+ask, because that boundary is presumed aligned to his subscription's own
+quota reset, so the figure reads as "how much is left," not just "how
+much was spent." Bucketed at READ time against stored `wall_ms`
+timestamps (`storage/spectra/sonic_usage.json`), never pre-assigned at
+write time, so a future anchor correction re-buckets history correctly.
+No DI seam (same class as `fire_history.py`) — `tests/conftest.py`'s
+autouse `_isolated_sonic_usage` repoints `config.SONIC_USAGE_FILE`; a new
+script reaching `record()`/`summary()` for real needs the same repoint.
+
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
 Exactly one process owns the lights. The durable record is

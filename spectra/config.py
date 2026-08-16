@@ -27,6 +27,10 @@ FIRE_HISTORY_FILE = SPECTRA_STORAGE / "fire_history.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
 FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"
 SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"
+# Sonic's durable per-call token-usage record (spectra/services/
+# sonic_usage.py) — the review page's "how much has Sonic used" figures.
+# Real reported usage only, never estimated; see that module's docstring.
+SONIC_USAGE_FILE = SPECTRA_STORAGE / "sonic_usage.json"
 # Sonic's scene/flare change log (spectra/services/scene_console.py) — kept
 # separate from SETTINGS_LOG_FILE so the two domains' audit trails never mix,
 # matching scene_console.py never importing settings_console.py.

@@ -61,7 +61,7 @@ import uuid
 from typing import Any, Optional
 
 from spectra import config
-from spectra.services import scene_console, settings_console
+from spectra.services import scene_console, settings_console, sonic_usage
 from spectra.services.sonic_ops import SonicOperation
 
 logger = logging.getLogger(__name__)
@@ -202,6 +202,24 @@ def _trim(history: list[dict]) -> None:
         history.pop(0)
 
 
+def _accumulate_usage(totals: dict, usage) -> None:
+    """Adds one API call's real reported usage (the Anthropic SDK's own
+    `response.usage`) into a turn-level running total. `usage` is absent
+    on some test doubles (never on a real Messages API response) — when
+    so, this call contributes nothing and `totals["usage_reported"]`
+    stays whatever it already was, so a turn with zero real usage data
+    never gets a fabricated all-zero record (see sonic_usage.py's
+    module docstring)."""
+    totals["rounds"] += 1
+    if usage is None:
+        return
+    totals["usage_reported"] = True
+    totals["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+    totals["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+    totals["cache_creation_input_tokens"] += getattr(usage, "cache_creation_input_tokens", 0) or 0
+    totals["cache_read_input_tokens"] += getattr(usage, "cache_read_input_tokens", 0) or 0
+
+
 async def run_turn(session_id: Optional[str], text: str) -> dict:
     """One user message in, through as many tool rounds as the model needs
     (capped at MAX_TOOL_ROUNDS), out with the model's final reply text plus
@@ -214,45 +232,68 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
     history.append({"role": "user", "content": text})
 
     applied: list[dict] = []
-    for _ in range(MAX_TOOL_ROUNDS):
-        response = await client.messages.create(
-            model=config.settings_agent_model(),
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=history,
-        )
-        history.append({"role": "assistant", "content": response.content})
-
-        tool_uses = [b for b in response.content if b.type == "tool_use"]
-        if not tool_uses:
-            reply = "".join(b.text for b in response.content if b.type == "text")
-            _trim(history)
-            return {"session_id": sid, "reply": reply, "changes": applied}
-
-        tool_results = []
-        for tu in tool_uses:
-            result = await _dispatch(tu.name, tu.input)
-            # A "write" result carries a `status` key (applied/rejected);
-            # a "read" result (get_settings, list_scenes, ...) doesn't, so
-            # it's never mistaken for either outcome — this is a property
-            # of the RESULT SHAPE, not the tool name, so it generalizes to
-            # every operation without a per-name special case.
-            is_write_result = "status" in result
-            if is_write_result and result.get("status") == "applied":
-                applied.append(result)
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tu.id,
-                "content": json.dumps(result, default=str),
-                "is_error": is_write_result and result.get("status") != "applied",
-            })
-        history.append({"role": "user", "content": tool_results})
-
-    _trim(history)
-    logger.warning("sonic: hit MAX_TOOL_ROUNDS for session %s", sid)
-    return {
-        "session_id": sid,
-        "reply": "That took more tool calls than expected — try asking for one change at a time.",
-        "changes": applied,
+    usage_totals = {
+        "rounds": 0, "usage_reported": False,
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
     }
+    try:
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = await client.messages.create(
+                model=config.settings_agent_model(),
+                max_tokens=MAX_TOKENS,
+                system=SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=history,
+            )
+            _accumulate_usage(usage_totals, getattr(response, "usage", None))
+            history.append({"role": "assistant", "content": response.content})
+
+            tool_uses = [b for b in response.content if b.type == "tool_use"]
+            if not tool_uses:
+                reply = "".join(b.text for b in response.content if b.type == "text")
+                _trim(history)
+                return {"session_id": sid, "reply": reply, "changes": applied}
+
+            tool_results = []
+            for tu in tool_uses:
+                result = await _dispatch(tu.name, tu.input)
+                # A "write" result carries a `status` key (applied/rejected);
+                # a "read" result (get_settings, list_scenes, ...) doesn't, so
+                # it's never mistaken for either outcome — this is a property
+                # of the RESULT SHAPE, not the tool name, so it generalizes to
+                # every operation without a per-name special case.
+                is_write_result = "status" in result
+                if is_write_result and result.get("status") == "applied":
+                    applied.append(result)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": json.dumps(result, default=str),
+                    "is_error": is_write_result and result.get("status") != "applied",
+                })
+            history.append({"role": "user", "content": tool_results})
+
+        _trim(history)
+        logger.warning("sonic: hit MAX_TOOL_ROUNDS for session %s", sid)
+        return {
+            "session_id": sid,
+            "reply": "That took more tool calls than expected — try asking for one change at a time.",
+            "changes": applied,
+        }
+    finally:
+        # Recorded regardless of how the turn ended (early return, ran out
+        # of rounds, or an exception propagating past this) — real tokens
+        # were spent on every round that reported usage, and that must
+        # survive even a turn that otherwise failed. Nothing is recorded
+        # when no round ever reported real usage (usage_reported stays
+        # False) — see sonic_usage.py's module docstring for why a
+        # fabricated zero-usage entry is worse than no entry.
+        if usage_totals["usage_reported"]:
+            sonic_usage.record(
+                backend="api", model=config.settings_agent_model(),
+                input_tokens=usage_totals["input_tokens"],
+                output_tokens=usage_totals["output_tokens"],
+                cache_creation_input_tokens=usage_totals["cache_creation_input_tokens"],
+                cache_read_input_tokens=usage_totals["cache_read_input_tokens"],
+                session_id=sid, rounds=usage_totals["rounds"])

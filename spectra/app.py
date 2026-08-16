@@ -35,7 +35,7 @@ from spectra.api import engine as engine_api
 from spectra.api import (device_preview, feedback, fire_history,
                          intensity_scale, journey, ownership, registry,
                          room_controls, scenes, sequencer, settings_console,
-                         show_review, triggers)
+                         show_review, sonic_usage, triggers)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -68,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router)
     app.include_router(show_review.router)
     app.include_router(intensity_scale.router)
+    app.include_router(sonic_usage.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):

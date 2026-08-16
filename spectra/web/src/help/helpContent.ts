@@ -922,6 +922,16 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Selecting a note shows its text alongside everything else that happened within ±15s of it — the surrounding show, not just the note in isolation. Prev/Next note steps straight to your other notes in this song without hunting on the lane bar.',
         ],
       },
+      {
+        id: 'sonic-token-usage',
+        title: 'Sonic token usage',
+        keywords: 'sonic tokens usage cost quota subscription api credits day week query last budget',
+        body: [
+          'Three real numbers, at the top of this page: the last Sonic query, this fixed day, and this fixed week. Every figure is captured directly off the model runtime\'s own response for that call — never estimated from word/character counts. A call the runtime genuinely didn\'t report usage for contributes nothing (no fabricated zero); "No Sonic calls recorded yet" means exactly that, not "zero tokens used."',
+          'Day and week are FIXED periods anchored to Monday 10:00 p.m. Eastern (America/New_York, DST-aware) — not a rolling last-24h/last-7d window. That boundary is almost certainly aligned to his subscription\'s own quota reset, so "what this period has used" doubles as a rough read on how much is left before the next reset — the number that matters after a quota exhausted without warning. A rolling window would only ever show how much has been spent, and resets on the clock rather than the quota, which can hide a heavy session that just happened.',
+          'The "subscription"/"API credits" badge on the last query shows which backend answered it — Sonic can run on either (spectra/services/settings_agent.py or settings_agent_cli.py), and both are tracked in the same totals.',
+        ],
+      },
     ],
   },
   {
