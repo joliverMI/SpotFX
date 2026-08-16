@@ -659,6 +659,25 @@ device found off is reported, never re-lit) and
 `spectra/services/ambient_music_gate.py`'s module docstring ("Status
 honesty") for the full mechanism.
 
+**A state that is only announced on user-initiated transitions will
+eventually lie about a transition the user did not initiate.** Found live
+2026-08-15 in the device-preview strip (`spectra/services/
+device_preview.py`): a status push only fired from the explicit
+pause()/resume() API handlers, but the actual LedFX reconnect after
+resume() completes asynchronously — an already-open tab could sit on
+"reconnecting…" forever despite the server being fully live again, because
+nothing told it once the async reconnect landed. Fixed in
+`DevicePreviewRelay._set_connected` (PR #85): every `connected` transition
+broadcasts, not just the ones a human click triggered. This is the same
+shape as the write-time-confirmation gap above (a status that only
+refreshes on the actions that usually cause a change, not on the change
+itself) and is directly relevant to any future auto-triggered transition
+in this codebase (the hidden-tab auto-pause built on top of this same
+module is one — see `spectra/api/device_preview.py`'s WS endpoint calling
+`relay.viewers_changed()` on every connect/disconnect, not just on a
+pause/resume click). Broadcast state on every change of the underlying
+condition, not on the actions that usually cause it.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing

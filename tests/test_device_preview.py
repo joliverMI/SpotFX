@@ -136,6 +136,29 @@ def test_active_event_wants_upstream_only_when_unpaused_and_has_favorites():
     assert not relay._active_event.is_set(), "favourites cleared — nothing to subscribe to"
 
 
+def test_active_event_requires_a_viewer_even_when_unpaused_with_favorites():
+    """OQ-7's demand-driven auto-pause: unpaused + favourites present is
+    NOT enough on its own — a connected downstream viewer is a third,
+    independent requirement, gated so a hidden tab (zero viewers) can
+    genuinely stop the upstream feed without touching the sticky
+    `paused` flag at all."""
+    from spectra.services import device_preview as dp
+
+    has_viewer = {"v": False}
+    relay = dp.DevicePreviewRelay(has_viewers=lambda: has_viewer["v"])
+    relay.set_favorites(["a"])
+    assert not relay._active_event.is_set(), "no viewer yet — must not want upstream"
+
+    has_viewer["v"] = True
+    relay.viewers_changed()
+    assert relay._active_event.is_set(), "a viewer connected — wants upstream"
+
+    has_viewer["v"] = False
+    relay.viewers_changed()
+    assert not relay._active_event.is_set(), "last viewer left — must not want upstream"
+    assert relay.paused is False, "viewer-driven auto-pause never touches the sticky pause flag"
+
+
 def test_handle_frame_throttles_per_vis_id_independently():
     from spectra.services import device_preview as dp
 
@@ -217,6 +240,29 @@ def test_api_favorites_status_pause_resume(tmp_path):
     r = client.post("/api/device-preview/resume")
     assert r.status_code == 200 and r.json()["paused"] is False
     assert dp.relay.paused is False
+
+
+def test_ws_connect_and_disconnect_notify_the_relay_of_viewer_changes():
+    """The /device-preview/ws endpoint IS the hidden-tab auto-pause signal
+    (OQ-7) — connecting/disconnecting it must call relay.viewers_changed()
+    so demand gets re-evaluated, not just fan the frame/status broadcast
+    out. Spied rather than asserting on _active_event here, since the
+    real upstream-drop proof lives in section 4 against a fake server."""
+    from fastapi.testclient import TestClient
+    from spectra.app import create_app
+    from spectra.services import device_preview as dp
+
+    calls = []
+    orig = dp.relay.viewers_changed
+    dp.relay.viewers_changed = lambda: calls.append(True) or orig()
+    try:
+        client = TestClient(create_app())
+        with client.websocket_connect("/api/device-preview/ws") as ws:
+            ws.receive_json()  # the immediate status push on connect
+            assert calls == [True], "connect notifies the relay"
+        assert calls == [True, True], "disconnect notifies the relay too"
+    finally:
+        dp.relay.viewers_changed = orig
 
 
 # ── 4. THE KEY PROOF — pause genuinely drops the upstream socket ─────────
@@ -330,6 +376,62 @@ def test_pause_actually_closes_the_upstream_socket_not_just_the_display():
                 relay.resume()
                 await _wait_until(lambda: relay.connected)
                 assert fake_state["active_connections"] == 1, "resume reopens a real connection"
+                await _wait_until(lambda: relay.frames_relayed > frozen_relayed)
+            finally:
+                await relay.stop()
+        finally:
+            await _stop(server, task)
+
+    _run(scenario())
+
+
+def test_last_viewer_leaving_closes_the_upstream_socket_and_a_viewer_returning_reopens_it():
+    """OQ-7's own bar, held to the same standard as the sticky pause proof
+    above: a hidden tab auto-pausing must be a REAL closed upstream
+    connection at the server (the fake LedFX server's own live-connection
+    count dropping to zero), not a local flag or a display that merely
+    stopped rendering. Drives demand purely via has_viewers()/
+    viewers_changed() — never touches paused/resume — proving auto-pause
+    and the sticky pause are genuinely independent mechanisms."""
+    from spectra.services import device_preview as dp
+
+    async def scenario():
+        app, fake_state = _fake_ledfx_app()
+        port = free_port()
+        server, task = await _serve(app, port)
+        try:
+            has_viewer = {"v": True}
+            relay = dp.DevicePreviewRelay(
+                ws_url=f"ws://127.0.0.1:{port}/api/websocket",
+                favorite_ids=["alpha"], target_fps=100.0,
+                has_viewers=lambda: has_viewer["v"])
+            relay.start()
+            try:
+                await _wait_until(lambda: relay.connected)
+                assert fake_state["active_connections"] == 1
+                await _wait_until(lambda: relay.frames_relayed >= 3)
+
+                # Tab hidden — the frontend closes its downstream socket,
+                # the server notices the last viewer left.
+                has_viewer["v"] = False
+                relay.viewers_changed()
+                await _wait_until(lambda: fake_state["active_connections"] == 0)
+                assert relay.connected is False
+                assert relay.paused is False, \
+                    "auto-pause via zero viewers must not flip the sticky pause flag"
+
+                frozen_relayed = relay.frames_relayed
+                await asyncio.sleep(0.3)
+                assert relay.frames_relayed == frozen_relayed, \
+                    "no viewers: no new frames arrive at all — the feed itself stopped"
+                assert fake_state["active_connections"] == 0
+
+                # Tab visible again — reopens without touching pause/resume.
+                has_viewer["v"] = True
+                relay.viewers_changed()
+                await _wait_until(lambda: relay.connected)
+                assert fake_state["active_connections"] == 1, \
+                    "a viewer returning reopens a real connection"
                 await _wait_until(lambda: relay.frames_relayed > frozen_relayed)
             finally:
                 await relay.stop()

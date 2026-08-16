@@ -429,6 +429,7 @@ input[type='range'] { accent-color: var(--accent); }
 .badge-gray { background: var(--surface2); color: var(--text-muted); }
 .badge-red { background: #3a0e0e; color: var(--danger); }
 .badge-amber { background: #3a2c0e; color: var(--warning); }
+.badge-blue { background: #0e2a3a; color: #6ab0f3; }
 
 .meta-grid {
   display: grid;

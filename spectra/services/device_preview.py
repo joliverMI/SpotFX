@@ -46,6 +46,30 @@ section) — sorted, capped at DEFAULT_FAVORITES_CAP, rather than every raw
 virtual LedFX's config happens to declare (mask/background layers,
 gap-dummy placeholders). Never a legacy read-only decision; the owner can
 always override it with an explicit favourites list.
+
+HIDDEN-TAB AUTO-PAUSE (OQ-7, decided 2026-08-15 — docs/SPECTRA_SPEC.md):
+a SEPARATE, ephemeral mechanism from the sticky pause above, on purpose —
+his own sticky pause() is a deliberate choice he'd have to remember to
+undo, and an automatic one must never look or persist like that (the
+"pause requirement" section of the plan report, restated in the module
+docstring above). Rather than reusing pause()/resume() — which would
+black out every OTHER open tab too, since paused/connected are relay-wide
+state fanned out to every /device-preview/ws client — auto-pause is
+DEMAND-DRIVEN: `_wants_upstream()` also requires at least one connected
+downstream viewer (`has_viewers`, wired to `preview_ws_manager.
+client_count() > 0`). A hidden tab's own frontend closes its own
+downstream WebSocket (spectra/web/src/api/devicePreviewWs.ts); when the
+last viewer disconnects, the relay itself drops the upstream LedFX
+connection — the SAME genuine-stop mechanism pause() uses, not a
+weaker imitation — and a second viewer reconnecting (tab visible again,
+or another tab still open) reopens it. This composes correctly with
+multiple tabs for free: the upstream feed only ever goes quiet when
+NOBODY is watching, never because one tab looked away while another
+didn't, and it never touches the persisted `paused` flag. The frontend's
+own knowledge of "I closed this deliberately" (not a real outage) is what
+drives the distinct "idle — tab hidden" badge; the server has nothing to
+tell it apart from a plain zero-viewer moment because, by definition,
+nobody is there to show a badge to.
 """
 from __future__ import annotations
 
@@ -136,6 +160,7 @@ class DevicePreviewRelay:
         on_frame: Optional[Callable[[dict], Awaitable[None]]] = None,
         on_status_change: Optional[Callable[[], Awaitable[None]]] = None,
         clock: Callable[[], float] = time.monotonic,
+        has_viewers: Callable[[], bool] = lambda: True,
     ) -> None:
         self.ws_url = ws_url or config.ledfx_ws_url()
         self._favorite_ids: list[str] = list(favorite_ids or [])
@@ -145,6 +170,7 @@ class DevicePreviewRelay:
         self._on_frame = on_frame
         self._on_status_change = on_status_change
         self._clock = clock
+        self._has_viewers = has_viewers
 
         self.connected = False
         self.connect_count = 0
@@ -156,7 +182,7 @@ class DevicePreviewRelay:
         self._sync()
 
     def _wants_upstream(self) -> bool:
-        return (not self.paused) and bool(self._favorite_ids)
+        return (not self.paused) and bool(self._favorite_ids) and self._has_viewers()
 
     def _sync(self) -> None:
         if self._wants_upstream():
@@ -167,6 +193,13 @@ class DevicePreviewRelay:
     def set_favorites(self, ids: list[str]) -> None:
         self._favorite_ids = list(ids)
         self._last_relayed_at.clear()
+        self._sync()
+
+    def viewers_changed(self) -> None:
+        """Call whenever a downstream /device-preview/ws client connects or
+        disconnects — re-evaluates demand so the last viewer leaving (a
+        hidden tab closing its own socket) genuinely drops the upstream
+        LedFX connection, and the first viewer coming back reopens it."""
         self._sync()
 
     def pause(self) -> None:
@@ -293,7 +326,9 @@ async def _broadcast_status() -> None:
     await preview_ws_manager.broadcast({"type": "device_preview_status", **relay.status()})
 
 
-relay = DevicePreviewRelay(on_frame=_broadcast_frame, on_status_change=_broadcast_status)
+relay = DevicePreviewRelay(
+    on_frame=_broadcast_frame, on_status_change=_broadcast_status,
+    has_viewers=lambda: preview_ws_manager.client_count() > 0)
 
 
 def init_from_storage() -> None:
