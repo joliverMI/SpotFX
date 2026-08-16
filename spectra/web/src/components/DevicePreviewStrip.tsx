@@ -35,8 +35,38 @@
  *
  * Default view is a compact single swatch per favourite device (LedFX's
  * own per-pixel average — see api/devicePreviewWs.ts's averageRgb);
- * "Expand" reveals the full per-pixel strip, remembered client-side
- * (report §5), same local-first pattern as the feedback queue. */
+ * "Expand" reveals the full per-pixel layout, remembered client-side
+ * (report §5), same local-first pattern as the feedback queue.
+ *
+ * PHONE-FIRST LAYOUT (fixed 2026-08-16, his own report: "the preview
+ * stretches out in a line super far ... I don't see any Matrix for The
+ * Matrix previews"). Every frame already carries `shape: [rows, cols]`
+ * (services/device_preview.py reads it off the real virtual and has since
+ * launch — this was never a payload gap) but this component used to ignore
+ * it and render every device, matrix or strip, as one flat row of
+ * fixed-width pixel spans: fine for a handful of strip pixels, but his
+ * `crystal-mapper` favourite is a real 72x37 matrix (2664 pixels laid out
+ * in ONE row = 2664 * 3px wide), which is exactly the "stretches out in a
+ * line super far" and "I don't see any Matrix" reports. Fix, per his own
+ * stated rule ("a matrix reads as a grid, a strip reads as a line,
+ * expanding grows downward not sideways"):
+ *   - `shape[0] > 1` (more than one row) renders as a CSS grid
+ *     (`device-preview-matrix`, `repeat(cols, 1fr)` columns via a `--cols`/
+ *     `--rows` custom property, `aspect-ratio: cols / rows` so it never
+ *     needs JS measurement) — reads as a grid, grows only as tall as its
+ *     own aspect ratio requires at 100% of the available width.
+ *   - `shape[0] === 1` (an ordinary strip) renders as a single flexible
+ *     line (`device-preview-pixel-strip`) whose pixels use `flex: 1` to
+ *     share exactly 100% of the container width, rather than a fixed
+ *     per-pixel width — a 7-pixel dining room strip and a 2664-pixel strip
+ *     alike stay within the container, never off the side.
+ *   - Expanded devices stack VERTICALLY (`device-preview-chips.expanded`
+ *     switches from a flex row to a flex column) instead of sitting side
+ *     by side, so "expand" genuinely grows the page downward.
+ * Collapsed mode's separate complaint ("it still doesn't quite fit") was
+ * `.device-preview-strip`'s own `white-space: nowrap` with no `flex-wrap`
+ * — the whole label+swatches+badge+buttons row was forced onto one line
+ * that just ran off the right edge of a phone screen. Now wraps. */
 import { useEffect, useState } from 'react';
 import {
   averageRgb, decodePixels, onDevicePreviewFrame, onDevicePreviewStatus,
@@ -96,19 +126,32 @@ export default function DevicePreviewStrip() {
       {favoriteIds.length === 0 ? (
         <span className="device-preview-empty">no devices to preview</span>
       ) : (
-        <div className="device-preview-chips">
+        <div className={`device-preview-chips${expanded ? ' expanded' : ''}`}>
           {favoriteIds.map((id) => {
             const frame = frames[id];
             const triples = live && frame ? decodePixels(frame.pixels) : [];
+            const [rows, cols] = frame?.shape ?? [1, triples.length];
+            const isMatrix = rows > 1;
             return (
-              <div key={id} className="device-preview-device" title={id}>
+              <div key={id} className={`device-preview-device${expanded ? ' expanded' : ''}`} title={id}>
+                {expanded && <span className="device-preview-device-label">{id}</span>}
                 {expanded && triples.length > 0 ? (
-                  <div className="device-preview-pixel-strip">
-                    {triples.map((rgb, i) => (
-                      <span key={i} className="device-preview-pixel"
-                        style={{ backgroundColor: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` }} />
-                    ))}
-                  </div>
+                  isMatrix ? (
+                    <div className="device-preview-matrix"
+                      style={{ '--cols': cols, '--rows': rows } as React.CSSProperties}>
+                      {triples.map((rgb, i) => (
+                        <span key={i} className="device-preview-matrix-cell"
+                          style={{ backgroundColor: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` }} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="device-preview-pixel-strip">
+                      {triples.map((rgb, i) => (
+                        <span key={i} className="device-preview-pixel"
+                          style={{ backgroundColor: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` }} />
+                      ))}
+                    </div>
+                  )
                 ) : (
                   <span className="device-preview-swatch"
                     style={{ backgroundColor: live ? averageRgb(triples) : 'rgb(40,40,40)' }} />
