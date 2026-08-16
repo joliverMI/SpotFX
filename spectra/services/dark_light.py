@@ -57,7 +57,18 @@ half — differs in kind, not a corner cut):
   `repaint_skipped: "music_playing"` in the reconcile result. With no
   music playing (or paused — the room-proof's own condition), there is no
   live driver about to repaint it, so the snapshot restore is the only way
-  back and proceeds as before.
+  back and proceeds as before. bridge.is_playing() is Optional[bool]
+  (shared with ambient_music_gate.py — None means no signal has arrived
+  at all yet, e.g. a fresh bridge before the first broadcast); ONLY a
+  confirmed True skips the repaint (`is bridge.is_playing() is True`,
+  not a truthy check dressed up as one — None is falsy in Python too, so
+  the effect is the same, but the intent is spelled out). Unlike
+  ambient_music_gate's own fail-safe direction (an unknown read carries
+  the existing hold forward, never acts), this repaint has no continuous
+  state to carry forward — it fires once per dark-to-light transition —
+  so an unresolved read defaults to PROCEEDING with the repaint, the
+  choice that guarantees the room visually recovers from dark, rather
+  than to caution.
 
   No settings.display_light_bg_color backfill. Legacy's "light" mode
   additionally backfills settings.display_light_bg_color/_brightness onto
@@ -77,14 +88,32 @@ same as legacy's loop (not skipped outright) so it always lands dark_lock
 False regardless of the room's mode — "keeps its own look regardless."
 
 Orthogonal to Ambient, exactly like legacy (services/ambient_mode.py has
-zero display_mode references, confirmed by grep). Not a coincidence to
-preserve here: while Ambient holds a Hue device, that device's stream is
-FROZEN and driven by direct bridge REST (spectra/services/ambient.py),
-bypassing LedFX/dark_lock entirely — so toggling dark mode has no visible
-effect on a Hue device currently held by Ambient. That is correct layering,
-not a defect: two independent controls, neither aware of the other, same as
-legacy. It only ever shows on devices LedFX is actually rendering (WLED
-etc., or a Hue device with Ambient off).
+zero display_mode references, confirmed by grep) — and, since 2026-08-15,
+composes with Ambient's OWN three settings (ambient_mode: "off"/"always"/
+"auto", spectra/services/ambient_music_gate.py) rather than a boolean.
+Not a coincidence to preserve here: whenever a Hue device is ACTUALLY
+frozen right now — "always" unconditionally, or "auto" while playback
+reads confirmed-not-playing — that device's stream is driven by direct
+bridge REST (spectra/services/ambient.py), bypassing LedFX/dark_lock
+entirely, so toggling dark mode has no visible effect on it. The moment
+that device ISN'T frozen ("off", or "auto" while confirmed playing), it's
+LedFX-rendered like any other virtual and responds to dark_lock normally.
+This module never reads ambient_mode to decide any of this — the
+orthogonality is a property of the write path (a frozen device never
+reaches LedFX's effect config at all), not a rule either feature encodes
+about the other, the same "compose for free by construction" shape
+ambient_music_gate.py's own docstring found for the selection kernel. It
+only ever shows on devices LedFX is actually rendering (WLED etc., or a
+Hue device that isn't currently frozen).
+
+Measurement note (mirrors AGENTS.md's "Reading real Hue bulb state — don't
+trust a raw CLIP light GET during a live entertainment stream" entry):
+this module's own mechanism is LedFX-side — dark_lock + effect config on
+/api/virtuals, read via fx_seam.get_virtuals() — never the Hue CLIP light
+resource, which is Ambient's own instrument for a different subsystem
+(REST-held bulbs, not a streamed scene). Verifying dark/light mode at the
+bridges means reading LedFX's per-virtual state back, not the light
+resource.
 
 Verification is "read real state back," not "trust the POST" (the standing
 lesson of every other partial-write defect this project has fixed — see
@@ -217,7 +246,7 @@ async def _reconcile_impl(enabled: bool, shield_categories: list[str],
     repaint_skipped: Optional[str] = None
     if not enabled and snapshot:
         from spectra.services.engine import bridge
-        if bridge.is_playing():
+        if bridge.is_playing() is True:
             # Music is live right now — the snapshot is a still frame from
             # the moment dark was engaged, already stale. Forcing it back is
             # the same mistake as Ambient holding the room static through a

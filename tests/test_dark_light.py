@@ -162,9 +162,13 @@ def _set_playing(monkeypatch, playing: bool) -> None:
     playing/not-playing state via monkeypatch.setattr ONLY — auto-reverted
     at test teardown regardless of pass/fail, never a raw mutation of the
     shared singleton (the exact class of state leak a real incident traced
-    back to test_ambient.py's own live_host singleton, 2026-08-15)."""
+    back to test_ambient.py's own live_host singleton, 2026-08-15).
+    bridge.is_playing() (spectra/services/bridge.py) returns None (not
+    False) until _last_message_at is set — a fresh/never-fed bridge must
+    also be set here or "confirmed playing" is indistinguishable from
+    "no signal yet"."""
     from spectra.services.engine import bridge
-    monkeypatch.setattr(bridge, "paused", not playing)
+    monkeypatch.setattr(bridge, "_last_message_at", 1000.0)
     monkeypatch.setattr(bridge, "_track",
                         {"is_playing": playing, "spotify_uri": "spotify:track:x"}
                         if playing else None)
@@ -223,11 +227,48 @@ def test_bridge_not_playing_still_repaints_as_before(tmp_path, monkeypatch):
 
         await dark_light.reconcile(True, [], [])
 
-        _set_playing(monkeypatch, False)  # paused=True, no track
+        _set_playing(monkeypatch, False)  # confirmed not-playing, not just unknown
         result = await dark_light.reconcile(False, [], [])
         assert result["restored"] == [VID]
         assert "repaint_skipped" not in result
         assert virtual.active_effect.config["background_color"] == "#00ff00"
+
+        await host.shutdown()
+
+    _run(main())
+
+
+def test_bridge_unknown_playback_still_repaints_not_skips(tmp_path, monkeypatch):
+    """bridge.is_playing() returning None (no signal yet — a fresh bridge,
+    e.g. right after a SPECTRA restart with no broadcast received) must
+    NOT be treated as "confirmed playing": unlike ambient_music_gate's own
+    fail-safe (unknown carries the existing hold forward), this repaint
+    has no continuous state to carry forward, so an unresolved read
+    defaults to proceeding — the room must still visually recover from
+    dark on a fresh process, not silently stay black forever."""
+    from spectra.services import dark_light
+    from spectra.services.engine import bridge
+
+    _own(monkeypatch, tmp_path, "spectra")
+    _categories(monkeypatch, tmp_path, {
+        "c1": {"id": "c1", "name": "Main", "parent_id": None,
+               "virtuals": [VID], "effects": ["concentric"]}})
+
+    async def main():
+        host = await headless.start_headless_host(str(tmp_path / "host"))
+        facade.set_host(host)
+        virtual = host.virtuals.get(VID)
+        headless.attach_effect(host, virtual, "concentric",
+                               {"background_color": "#0000ff", "background_brightness": 1.0})
+
+        await dark_light.reconcile(True, [], [])
+
+        monkeypatch.setattr(bridge, "_last_message_at", None)  # never received a broadcast
+        assert bridge.is_playing() is None
+        result = await dark_light.reconcile(False, [], [])
+        assert result["restored"] == [VID]
+        assert "repaint_skipped" not in result
+        assert virtual.active_effect.config["background_color"] == "#0000ff"
 
         await host.shutdown()
 
