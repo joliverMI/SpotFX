@@ -310,7 +310,11 @@ class ResponseEngine:
         letter) and the changed params jump on the entry's winning
         virtuals. Stepped-effect entries re-roll the variant the FIRE
         selected (keyed by the entry's live effect) — a surge re-rolls
-        dice, it never re-selects the effect."""
+        dice, it never re-selects the effect. STICKY bindings (ValueBinding.
+        sticky, e.g. STAR's edges — decision: OQ-6, docs/SPECTRA_SPEC.md
+        §54) are skipped here on purpose: they still roll fresh at fire time
+        (resolve_scene doesn't check this flag), the initial pick just holds
+        for the rest of that scene's run instead of moving on every flare."""
         ctx = FireContext(intensity, rng=self._rng)
         entry_vids: dict[str, list[str]] = {}
         for vid, state in self.conductor.virtuals.items():
@@ -323,7 +327,8 @@ class ResponseEngine:
             live_effect = self.conductor.virtuals[vids[0]].effect_type
             targets: dict[str, Any] = {}
             for pname, value in dev.params_for_effect(live_effect).items():
-                if isinstance(value, ValueBinding) and value.signal == "random":
+                if (isinstance(value, ValueBinding) and value.signal == "random"
+                        and not value.sticky):
                     meta = device_model.get_param_meta(live_effect, pname)
                     kind, lo, hi = binding_resolver.kind_for_meta(meta)
                     out = binding_resolver.apply_binding(value, ctx, kind, lo, hi)
@@ -331,7 +336,8 @@ class ResponseEngine:
                         targets[pname] = out
             for field in ("brightness", "background_brightness"):
                 value = getattr(dev, field)
-                if isinstance(value, ValueBinding) and value.signal == "random":
+                if (isinstance(value, ValueBinding) and value.signal == "random"
+                        and not value.sticky):
                     out = binding_resolver.apply_binding(
                         value, ctx, binding_resolver.KIND_NUMERIC, 0.0, 1.0)
                     if out is not None:

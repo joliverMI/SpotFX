@@ -856,6 +856,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Five room-wide settings, on purpose, not everything the app has: room brightness, the default scene-entry transition time, ambient mode (off / on during music / auto-return, + colour), and the scene-change tier (transitions only / + analysed / + your triggers). Each one has a declared legal range or set of choices, enforced by the server — an out-of-range or nonsense request is rejected and Sonic explains the legal range instead of guessing.',
           "Force Scene isn't in scope here — it names a scene by id, which fits the room-controls bar's picker better than a spoken request.",
+          'Anything inside a scene itself — a flare, an effect parameter, a scene\'s own shape or edge count — is out of scope too; that lives in the scene/timeline editor. Tested against a real example: asking it not to let a scene\'s flares change an edge count got a plain "I have no tool to touch that," not a made-up yes.',
         ],
       },
       {

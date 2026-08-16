@@ -1464,7 +1464,9 @@ for seed in range(200):
     p = resolved_params("STAR", "radial", 0.5, seed)
     seen_pairs.add((p["star"], p["edges"]))
 check(seen_pairs == {(0.3, 6), (-0.3, 3), (0.0, 5)},
-      "STAR: dice variants land ONLY as the three authored pairs")
+      "STAR: raw seeder output still carries the pre-freeze dice pairs "
+      "(the S1 seeder ports the legacy world verbatim — see the STAR "
+      "edges freeze section below for the migrated, deployed behaviour)")
 
 styles = {inten: resolved_params("Dancers V2", "dancer", inten)["dance_type"]
           for inten in (0.2, 0.5, 0.8)}
@@ -1604,5 +1606,95 @@ def star_strips_effect(inten: float) -> str:
 check(star_strips_effect(0.5) == "melt"
       and star_strips_effect(0.85) == "power",
       "migrated STAR: strips melt on a MID fire, power on a HIGH fire")
+
+# ── the STAR edges freeze (Admiral order, 2026-08-15: "I do not want any ──
+# of the flares in the scene star to change the number of edges.") The new
+# rule check_spectra.py must assert instead of the old dice-variance one
+# above: nothing moves STAR's edge count anymore, not a flare, not a fresh
+# fire. In-memory only, like the strips migration above — never mutates
+# live_scenes_file, which stays the raw S1 seeder output.
+edges_mod = importlib.import_module("scripts.freeze_star_edges")
+edges_store = json.loads(live_scenes_file.read_text())
+star_canonical_original = json.loads(
+    SceneV2(**edges_store[edges_mod.STAR_ID]).model_dump_json())
+star_frozen_raw = edges_mod.with_star_edges_frozen(edges_store[edges_mod.STAR_ID])
+check(star_frozen_raw == edges_mod.with_star_edges_frozen(star_frozen_raw),
+      "STAR edges freeze is idempotent")
+check(edges_mod.with_star_edges_restored(star_frozen_raw) == star_canonical_original,
+      "STAR edges restore is the exact inverse of the freeze")
+star_frozen = SceneV2(**star_frozen_raw)
+matrix_frozen = next(d for d in star_frozen.devices if d.target == "Matrix")
+edges_binding = matrix_frozen.params["edges"]
+check(isinstance(edges_binding, ValueBinding)
+      and edges_binding.sticky is True and edges_binding.dice is None
+      and {s.value for s in edges_binding.steps} == {3.0, 4.0, 5.0, 6.0},
+      "STAR edges fix: still a signal binding (rolls fresh at every fire), "
+      "now sticky (skipped by mid-run re-rolls) and independent (no dice "
+      "correlation with star)")
+check(all("edges" not in k.params for k in star_frozen.flare_kinds),
+      "STAR edges fix: no flare kind (incl. the retired \"Flare patch "
+      "0.7–1\"/\"Drop patch 0.7–1\") still patches edges")
+seen_edges: set[float] = set()
+edges_counts = {v: 0 for v in (3.0, 4.0, 5.0, 6.0)}
+for seed in range(4000):
+    resolved = scene_compiler.resolve_scene(
+        star_frozen, FireContext(0.5, rng=Random(seed)))
+    p = next(d.params for d in resolved.devices if d.effect_type == "radial")
+    seen_edges.add(p["edges"])
+    edges_counts[p["edges"]] += 1
+check(seen_edges == {3.0, 4.0, 5.0, 6.0}
+      and all(abs(n / 4000 - 0.25) < 0.03 for n in edges_counts.values()),
+      f"STAR (migrated): fresh fires roll edges uniformly over 3/4/5/6 "
+      f"({edges_counts})")
+
+
+async def _no_flare_moves_star_edges() -> None:
+    """The actual guarantee, proven on the response engine, not just the
+    data shape: firing EVERY flare/drop band that used to touch edges
+    (including the two retired patches' own top bands) never changes it."""
+    exec4 = RecordingExecutor()
+    cond4 = DriftConductor(executor=exec4, drift_profiles=lambda: {},
+                           curve_profiles=lambda: {},
+                           room_load=lambda: cj.RoomColorState(),
+                           room_save=lambda st: None,
+                           set_position=lambda sid: None)
+    resolved0 = scene_compiler.resolve_scene(
+        star_frozen, FireContext(0.5, rng=Random(1)))
+    fake_writes = [
+        {"virtual_id": f"v-frozen-{i}", "effect_type": dev.effect_type,
+         "config": dict(dev.params), "entry_id": dev.id,
+         "color_mode": dev.color.mode}
+        for i, dev in enumerate(resolved0.devices)]
+    cond4.on_scene_fire(star_frozen, fake_writes)
+    resp4 = ResponseEngine(conductor=cond4, executor=exec4, rng=Random(2),
+                           sequencer_config=lambda: SequencerConfig(),
+                           room_load=lambda: cj.RoomColorState(),
+                           room_save=lambda st: None)
+    matrix_vid = fake_writes[[d.effect_type for d in resolved0.devices]
+                             .index("radial")]["virtual_id"]
+    baseline_edges = cond4.virtuals[matrix_vid].param_baseline.get("edges")
+    star_reroll_seen = False
+    for cls, intensity in (("flare", 0.1), ("flare", 0.5), ("flare", 0.97),
+                           ("drop", 0.97)):
+        await resp4.on_event(cls, intensity)
+        for w in exec4.writes:
+            if w["virtual_id"] == matrix_vid and "edges" in w["params"]:
+                raise SystemExit(
+                    f"FAIL: {cls}@{intensity} moved STAR's edges to "
+                    f"{w['params']['edges']!r} on the response engine")
+            if w["virtual_id"] == matrix_vid and "star" in w["params"]:
+                star_reroll_seen = True
+    check(star_reroll_seen,
+          "STAR (migrated): 'star' still re-rolls on ordinary flares — "
+          "sticky excludes edges specifically, Dice Re-roll otherwise "
+          "unchanged")
+    check(cond4.virtuals[matrix_vid].param_baseline.get("edges", baseline_edges)
+          == baseline_edges,
+          "STAR (migrated): no flare/drop band moves edges on the real "
+          "response engine (flare 0.1/0.5/0.97 + drop 0.97 all fired, "
+          "including both retired patches' own top bands)")
+
+
+asyncio.run(_no_flare_moves_star_edges())
 
 print("\nALL CHECKS PASSED")
