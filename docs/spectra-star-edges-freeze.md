@@ -9,6 +9,36 @@ archaeology exercise.
 
 Scene: **STAR** (`d3aab04c-7e23-4693-bd26-16bad45792a6`), `storage/spectra/scenes.json`.
 
+## Live-proof finding (2026-08-16, 01:33–01:45Z): migration NOT applied to his live room
+
+PR #79 (commit `0608aa8`) merged the code mechanism (`sticky` field,
+`scene_response._reroll` honoring it) and was believed fully deployed. It was not: the PR's
+own commit message says the migration itself (`scripts/freeze_star_edges.py --apply` against
+the live store) had not yet been run, "he was asleep throughout." That step was still missing
+at proof time. Verified live via `GET /spectra/api/scenes/{id}`:
+
+- Matrix device's `edges` binding still reads `"sticky": false`, `"dice": "a"` (shared with
+  `star`, not independent), and the old unequal 3-value step function
+  (`6.0 / 3.0 / 5.0`, fallback `6.0`) — not the new equal 25%-per-value 3/4/5/6 bands this
+  file describes above.
+- `"Flare patch 0.7–1"` and `"Drop patch 0.7–1"` still carry an explicit `edges: 6.0` override
+  in their `params`.
+
+Reproduced live against his room (`POST /spectra/api/scenes/{id}/fire` with `dry_run: false` to
+baseline STAR at `edges=6`, then `POST /spectra/api/engine/event {"class": "flare",
+"intensity": 0.9}`): the response's own `kinds` list showed **"Dice Re-roll" rolling `edges`
+6→5**, immediately followed by **"Flare patch 0.7–1" moving `edges` to `6.0`** — both firing
+mid-run, exactly the behaviour this fix exists to stop. Ten `dry_run` fires at intensity 0.5
+sampled `edges ∈ {3, 5, 6}` only (no `4`), consistent with the old step function, not the new
+uniform one.
+
+**Conclusion: the edge-count rule does not currently hold at his fixtures.** The code is
+correct and merged; the data migration is the missing step. Fix: run
+`scripts/freeze_star_edges.py --apply` against the live `storage/spectra/scenes.json`, then
+re-verify with the same live-fire + flare-event sequence above. Not run during this pass —
+applying a live scene-data migration was judged outside a pure proof task's authority and was
+escalated instead; see the task status log.
+
 ## What changed
 
 **Once a scene run starts, nothing moves its edge count again.** The initial value is a fresh,
