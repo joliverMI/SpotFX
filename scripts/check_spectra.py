@@ -52,6 +52,8 @@ device_model.CATEGORIES_FILE.write_text(json.dumps({
            "virtuals": ["v-m3"], "effects": ["orbits"], "role": None},
     "c3": {"id": "c3", "name": "Strips", "parent_id": None,
            "virtuals": ["v-s1"], "effects": ["power"], "role": "wash"},
+    "c4": {"id": "c4", "name": "Singles", "parent_id": None,
+           "virtuals": ["v-single1"], "effects": ["power"], "role": None},
 }))
 
 from fx import light_ownership
@@ -1646,6 +1648,19 @@ check(seen_edges == {3.0, 4.0, 5.0, 6.0}
       and all(abs(n / 4000 - 0.25) < 0.03 for n in edges_counts.values()),
       f"STAR (migrated): fresh fires roll edges uniformly over 3/4/5/6 "
       f"({edges_counts})")
+
+# ── STAR power/Singles accent must never ride the LedFX schema default ──────
+# (white) or a stale prior value — sparks must always be black. Ported from
+# spot-effects' trigger_engine.py accent-defaults-to-black-on-fire rule
+# (see fx/device_model.accent_param_for + spectra/services/
+# scene_compiler._entry_config); regression: reported live 2026-08-15 as
+# white power-effect sparks on STAR's radio-sourced fires.
+star_power_writes = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(star_frozen, FireContext(0.5, rng=Random(7))))
+star_power_write = next(w for w in star_power_writes if w["effect_type"] == "power")
+check(star_power_write["config"].get("sparks_color") == "#000000",
+      "STAR power/Singles: sparks_color is explicitly forced black on every "
+      "compile, never left to LedFX's own white schema default")
 
 
 async def _no_flare_moves_star_edges() -> None:

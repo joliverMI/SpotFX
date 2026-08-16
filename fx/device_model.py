@@ -195,6 +195,17 @@ def bg_color_blocked(effect_type: str) -> bool:
                 .get("no_background_color"))
 
 
+def accent_param_for(effect_type: str) -> Optional[str]:
+    """Raw param name holding the effect's "third / accent color"
+    (`sparks_color` on power), or None if the effect has no accent slot.
+    Ported from spot-effects' services/morph_aspects.accent_param_for —
+    same registry, same `"accent": true` flag (see config/effect_params.json)."""
+    for name, meta in effect_params(effect_type).items():
+        if meta.get("accent"):
+            return name
+    return None
+
+
 def round_int_params(effect_type: str, config: dict[str, Any]) -> dict[str, Any]:
     """Round integer-typed params so LedFX schema validation never sees a
     float where an int belongs (mirrors the spot-effects client's guard)."""

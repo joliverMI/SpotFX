@@ -96,6 +96,15 @@ def _entry_config(dev: SceneDeviceConfig) -> dict[str, Any]:
         config["brightness"] = dev.brightness
     if dev.background_brightness is not None:
         config["background_brightness"] = dev.background_brightness
+    # An accent-capable effect (sparks_color on power) must never ride on
+    # LedFX's own schema default (white) or a stale value from whatever the
+    # virtual last rendered — ported from spot-effects' trigger_engine.py
+    # accent-defaults-to-black-on-fire rule (services/morph_aspects.
+    # accent_param_for): always write the accent explicitly, black unless
+    # the scene entry itself authored a value for it.
+    accent_param = device_model.accent_param_for(dev.effect_type)
+    if accent_param and accent_param not in config:
+        config[accent_param] = "#000000"
     return config
 
 

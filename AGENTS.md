@@ -367,7 +367,21 @@ with value bindings (+`dice` correlation), intensity-stepped effect
 selection (`effect_steps`: a device entry resolves to a DIFFERENT effect
 at/above ⚡ thresholds, fire-time only, base = fallback — decision:
 star-fold-entry-growth; deploy migration for STAR's strips:
-`scripts/seed_star_strips.py --apply`, NEVER by re-running the v2 seeder),
+`scripts/seed_star_strips.py --apply`, NEVER by re-running the v2 seeder).
+An effect's "accent" param (`sparks_color` on power — `"accent": true` in
+`config/effect_params.json`, looked up via `fx/device_model.
+accent_param_for`) is force-written black by `scene_compiler._entry_config`
+on every compile unless the scene entry itself authored a value — ported
+from spot-effects' `services/trigger_engine.py` accent-defaults-to-black
+rule (`services/morph_aspects.accent_param_for`); the un-ported gap (fixed
+2026-08-15, STAR/Singles/power showed white sparks) is that
+`services/scene_v2_compiler.py`'s own docstring already flags accent as
+NOT YET carried by the fixed colour vocabulary — SPECTRA's descendant
+compiler silently inherited that same gap with nothing downstream to catch
+it, since only `gradient`/`background_color`/`brightness`/
+`background_brightness` were ever written. Any future accent-capable
+effect just needs `"accent": true` on its param in the registry — no
+compiler change required.
 NAMED FLARE KINDS (`FlareKind`: drift-jump / momentary spike-and-return /
 permanent re-baseline; bands select+scale them; ALL legacy response fields —
 flare_bands, param_patch, gain, reroll/colour flags — load unchanged as
