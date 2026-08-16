@@ -1657,13 +1657,37 @@ check(seen_edges == {3.0, 4.0, 5.0, 6.0}
 # spot-effects' trigger_engine.py accent-defaults-to-black-on-fire rule
 # (see fx/device_model.accent_param_for + spectra/services/
 # scene_compiler._entry_config); regression: reported live 2026-08-15 as
-# white power-effect sparks on STAR's radio-sourced fires.
+# white power-effect sparks on STAR — first diagnosed against a "radio"
+# source that doesn't exist in this system; he corrected it to "radial"
+# (real: the Strips category's radial-dummy virtual, promoted to power by
+# effect_steps at fire intensity >= 0.7 — see star_strips_effect(0.85)
+# above). Live-fired STAR on his real room at 2026-08-15, intensity 0.8,
+# dry_run=False (owner=spectra): the actual write delivered to fx_seam for
+# virtual_id "radial-dummy" carried sparks_color=#000000 — confirmed, not
+# inferred, against his literal report.
 star_power_writes = scene_compiler.compile_scene(
     scene_compiler.resolve_scene(star_frozen, FireContext(0.5, rng=Random(7))))
 star_power_write = next(w for w in star_power_writes if w["effect_type"] == "power")
 check(star_power_write["config"].get("sparks_color") == "#000000",
       "STAR power/Singles: sparks_color is explicitly forced black on every "
       "compile, never left to LedFX's own white schema default")
+
+# Mid-intensity above only ever reaches the always-power Singles entry —
+# the Strips entry stays "melt" below the 0.7 threshold, so it never
+# exercises the exact promoted-power path he reported. Re-check at a HIGH
+# intensity, where Strips (his "radial" source) is ALSO power, and assert
+# every power write — not just the first — is forced black.
+star_power_writes_high = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(star_frozen, FireContext(0.8, rng=Random(7))))
+star_power_writes_high_only = [w for w in star_power_writes_high
+                               if w["effect_type"] == "power"]
+check(len(star_power_writes_high_only) >= 2
+      and all(w["config"].get("sparks_color") == "#000000"
+              for w in star_power_writes_high_only),
+      "STAR power at a HIGH fire (Strips promoted to power too, his "
+      "'radial' source): every power write is forced black, including "
+      "the effect_steps-promoted Strips entry, not just the always-power "
+      "Singles entry")
 
 
 async def _no_flare_moves_star_edges() -> None:
