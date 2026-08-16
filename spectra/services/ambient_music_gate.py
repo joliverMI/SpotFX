@@ -76,20 +76,54 @@ resume, matching "when music ends" read literally.
 
 Visibility (the fix's other half, the Admiral's own words: "a control that
 reads as ON while doing nothing is the exact pattern this project has
-spent the week killing"): status() reports which of four MODES is
-currently true — "off" (setting is "off"), "holding" (actually holding
-the room right now — true throughout "always", and only when confirmed
-quiet under "auto"), "yielding" (setting isn't "off", but standing aside
-for music or an unresolved playback read — only reachable under "auto"),
-or "transitioning" (a hold/release is physically in flight) — folded into
-GET /api/engine/status's own "ambient" key so the existing 3s room-bar/
-top-bar poll (spectra/web/src/queries.ts useEngineStatus) shows it live
-with no new endpoint. reconcile()/reconcile_now() themselves keep
+spent the week killing"): status() reports which of five MODES is
+currently true — "off" (setting is "off"), "holding" (every claimed light
+CONFIRMED lit at ambient_color right now — true throughout "always", and
+only when confirmed quiet under "auto"), "partial" (Ambient believes it
+should be holding but the last check found at least one light not lit —
+see "Status honesty" below), "yielding" (setting isn't "off", but standing
+aside for music or an unresolved playback read — only reachable under
+"auto"), or "transitioning" (a hold/release is physically in flight) —
+folded into GET /api/engine/status's own "ambient" key so the existing 3s
+room-bar/top-bar poll (spectra/web/src/queries.ts useEngineStatus) shows it
+live with no new endpoint. reconcile()/reconcile_now() themselves keep
 returning services.ambient.reconcile()'s own {"status": ...} shape (or an
 honest "on"/"off"/"yielding" synthesized when nothing needed to change) —
 the SAME shape spectra/api/room_controls.py's PUT response and
 RoomControlsBar.tsx's ambient_result badge already expect — status() is
 the separate, always-current surface for the room-bar's live indicator.
+
+Status honesty (found live 2026-08-15, overnight, THE defect this section
+exists to prevent): status() used to report `_held` — a bare "did the last
+write succeed" flag — forever, with no re-check. Under "always" mode
+_apply()'s own short-circuit (below) means a genuinely held room never
+gets written to again once desired stops changing, so nothing ever
+re-verified it either; his room sat reporting `held: true,
+lights_set: 17/17` all night while he'd switched every bulb off before
+bed. Two independent things now feed a SEPARATE `_verified_ok` flag,
+kept apart from `_held` (the write-intent bookkeeping `_apply()`'s
+short-circuit still needs) precisely so the PUBLIC `held` in status() can
+be gated on it: (1) a real write's own read-back (services.ambient's
+`_hold_and_confirm`) — immediate, since a write already proves the moment
+it lands; (2) `verify_now()`'s independent periodic recheck (`run_
+supervised()`, VERIFY_TICK_S cadence, started alongside frame_watchdog/
+ownership_reconciler in app.py's lifespan) — a GET-only bridge read-back
+(services.ambient.verify_held(), NEVER a write) that runs regardless of
+whether anything else has changed, so a claimed hold can't go stale for
+longer than that cadence. `held` in status() is `_held AND _verified_ok is
+not False` — a light found not-lit (or the live stack no longer even
+owning the room) downgrades `_verified_ok` to False, which flips the
+PUBLIC `held` false and `mode` to "partial" immediately, even though the
+internal `_held` write-intent flag (and therefore the "don't re-fire an
+identical write" short-circuit) is untouched. status() also reports
+`verified_age_s` (seconds since whichever check — write or periodic — most
+recently ran) and the raw `verify` result whenever there's one to show, so
+a caller can always tell "confirmed 4s ago" from "confirmed 20 minutes
+ago" rather than treating every `result` as equally live. Deliberately
+NOT built: the verifier never WRITES to re-assert a hold it finds broken —
+a bulb he turned off himself must stay off; this module reports reality,
+it does not fight him for control of it (services/ambient.py's own
+module docstring frames the analogous choice on the release path).
 
 Concurrency: _apply_lock serialises this module's own decisions (a burst
 of bridge broadcasts must not fire a burst of redundant Hue reconciles);
@@ -101,11 +135,19 @@ for the several seconds a hold/release can take (engine.py's
 _on_track_uri, called on every bridge broadcast) wraps the call in
 asyncio.create_task instead of awaiting it inline; a caller where blocking
 is expected and desired (a PUT response, startup) awaits it directly.
+verify_now() checks the SAME lock (non-blocking — `lock.locked()`, never
+`async with`) and skips its tick entirely while a write is in flight,
+rather than reading bridge state mid-change: the write's own read-back is
+already a fresher, more authoritative check than anything a concurrent GET
+could add, and blocking on the lock instead would make every "transitioning"
+badge include the periodic verifier's own GET round-trip as if it were part
+of the hold/release itself.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Optional
 
 from spectra.services import ambient
@@ -113,10 +155,23 @@ from spectra.services.room_controls import AmbientMode, load_room_controls
 
 logger = logging.getLogger(__name__)
 
+VERIFY_TICK_S = 30.0   # matches frame_watchdog / ownership_reconciler cadence
+                       # — GET-only, cheap; see "Status honesty" above for why
+                       # this needs its own independent clock at all.
+
 _held = False
 _held_color: Optional[str] = None
 _last_result: dict = {}
 _apply_lock: Optional[asyncio.Lock] = None
+
+# Status-honesty bookkeeping (module docstring). Kept apart from _held/
+# _held_color above: those are write-INTENT (what _apply()'s short-circuit
+# compares "desired" against), these are the most recent CONFIRMATION of
+# physical reality, from either a write's own read-back or an independent
+# periodic verify — never advanced by a short-circuited no-op reconcile.
+_verified_ok: Optional[bool] = None
+_last_verified_ms: Optional[float] = None
+_last_verify: dict = {}
 
 
 def _get_apply_lock() -> asyncio.Lock:
@@ -176,6 +231,33 @@ async def reconcile_now() -> dict:
     return await reconcile(bridge.is_playing())
 
 
+def _record_verify(status_: str, lights_lit: int = 0, lights_total: int = 0,
+                   unlit: Optional[list] = None) -> None:
+    """Stamp a fresh confirmation — from either a real write's own
+    read-back or the independent periodic verifier — into the SAME pair of
+    fields, so status() has one place to read "how stale is what we know"
+    regardless of which path last confirmed it (module docstring, "Status
+    honesty")."""
+    global _verified_ok, _last_verified_ms, _last_verify
+    _last_verified_ms = time.monotonic()
+    if status_ == "verified":
+        _last_verify = {"status": "verified", "lights_lit": lights_lit,
+                        "lights_total": lights_total, "unlit": sorted(unlit or [])}
+        _verified_ok = not unlit
+    else:
+        # "dark" / "no-hue-devices" — nothing physically held, whatever
+        # _held still says.
+        _last_verify = {"status": status_}
+        _verified_ok = False
+
+
+def _clear_verify() -> None:
+    global _verified_ok, _last_verified_ms, _last_verify
+    _verified_ok = None
+    _last_verified_ms = None
+    _last_verify = {}
+
+
 async def _apply(ambient_mode: AmbientMode, desired: bool, color: Optional[str]) -> dict:
     global _held, _held_color, _last_result
     async with _get_apply_lock():
@@ -184,31 +266,117 @@ async def _apply(ambient_mode: AmbientMode, desired: bool, color: Optional[str])
         # comes, and must not re-fire an identical Hue write.
         if desired != _held or (desired and color != _held_color):
             _last_result = await ambient.reconcile(desired, color)
-            if _last_result.get("status") != "failed":
+            status_ = _last_result.get("status")
+            if status_ != "failed":
                 _held = desired
                 _held_color = color if desired else None
+            if desired and status_ in ("on", "partial"):
+                # A write's own read-back (services.ambient's
+                # _hold_and_confirm) IS a fresh confirmation — feed it into
+                # the same status-honesty bookkeeping verify_now() uses,
+                # rather than waiting up to VERIFY_TICK_S for the periodic
+                # check to say what this call already knows.
+                _record_verify("verified", _last_result.get("lights_set", 0),
+                               _last_result.get("lights_total", 0),
+                               _last_result.get("unconfirmed"))
+            elif desired and status_ in ("dark", "no-hue-devices"):
+                # _held above is still set True (the room-control save must
+                # never fail just because there's nothing to drive right
+                # now — services/ambient.py's own docstring) — but nothing
+                # was actually touched, so the PUBLIC `held` in status()
+                # must not read true just because the intent was recorded.
+                # Same defect family as the overnight one, caught here at
+                # write time rather than waiting for the periodic verifier.
+                _record_verify(status_)
+            elif not desired:
+                _clear_verify()
             return _last_result
     if desired:
         return {"status": "on"}
     return {"status": "off"} if ambient_mode == "off" else {"status": "yielding"}
 
 
+async def verify_now() -> dict:
+    """The independent periodic recheck (module docstring, "Status
+    honesty") — GET-only, NEVER a write (services.ambient.verify_held's own
+    docstring). Skips entirely when nothing is currently claimed held
+    (nothing to check) or a write is already in flight (its own read-back
+    is fresher than anything this could add — see the concurrency note in
+    the module docstring). A confirmed miss downgrades `_verified_ok`
+    (status()'s `held`/`mode` react immediately) but never touches `_held`
+    itself — the write-intent short-circuit above is untouched, so a
+    colour/mode change still re-applies exactly as before."""
+    if not _held:
+        return {}
+    lock = _get_apply_lock()
+    if lock.locked():
+        return {}
+    controls = load_room_controls()
+    result = await ambient.verify_held(controls.ambient_color)
+    status_ = result.get("status")
+    if status_ == "verified":
+        unlit = result.get("unlit") or []
+        _record_verify("verified", result.get("lights_lit", 0),
+                       result.get("lights_total", 0), unlit)
+        if unlit:
+            logger.error(
+                "Ambient: verification found %d/%d light(s) no longer at "
+                "the ambient colour — status will report the hold as "
+                "partial, not holding: %s",
+                result.get("lights_total", 0) - len(unlit),
+                result.get("lights_total", 0), unlit)
+    else:
+        # "dark" (SPECTRA no longer owns the live stack) or
+        # "no-hue-devices" — there is nothing left to be holding, whatever
+        # the stale _held flag still says.
+        logger.warning(
+            "Ambient: verification found nothing to hold (%s) — status "
+            "will stop reporting the room as held", status_)
+        _record_verify(status_)
+    return result
+
+
+async def run_supervised() -> None:
+    """Own asyncio task (started alongside frame_watchdog/
+    ownership_reconciler in app.py's lifespan) — same discipline as those:
+    a crashing tick is logged and retried, never lets a claimed hold go
+    unchecked forever just because one tick errored."""
+    while True:
+        try:
+            await verify_now()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Ambient verifier tick crashed (retrying): %r", exc)
+        await asyncio.sleep(VERIFY_TICK_S)
+
+
 def status() -> dict:
     """The room-bar's honest, always-live read of what Ambient is
-    ACTUALLY doing right now — not just what the setting says. Folded
-    into GET /api/engine/status by services/engine.py."""
+    ACTUALLY doing right now — not just what the setting says, and not
+    just what the last WRITE said (module docstring, "Status honesty").
+    Folded into GET /api/engine/status by services/engine.py. `held` is
+    gated on the most recent confirmation (write read-back or periodic
+    verify), not the bare write-intent flag, so it can never keep reading
+    true for a light that's actually off."""
     controls = load_room_controls()
     setting = controls.ambient_mode
     lock = _apply_lock
+    confirmed_held = _held and _verified_ok is not False
     if setting == "off":
         mode = "off"
     elif lock is not None and lock.locked():
         mode = "transitioning"
-    elif _held:
+    elif _held and _verified_ok is False:
+        mode = "partial"
+    elif confirmed_held:
         mode = "holding"
     else:
         mode = "yielding"
-    out = {"setting": setting, "mode": mode, "held": _held}
+    out = {"setting": setting, "mode": mode, "held": confirmed_held}
     if _last_result:
         out["result"] = _last_result
+    if _last_verified_ms is not None:
+        out["verified_age_s"] = round(time.monotonic() - _last_verified_ms, 1)
+        out["verify"] = _last_verify
     return out

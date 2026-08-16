@@ -210,11 +210,14 @@ def _isolated_fire_history(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolated_ambient_music_gate():
     """spectra/services/ambient_music_gate.py tracks the live Ambient hold
-    (_held/_held_color/_last_result/_apply_lock) as bare module globals,
-    same no-DI-seam shape as fire_history above — any test that reaches
-    reconcile_ambient_if_changed / reconcile_now (settings-console tests,
-    room-controls PUT tests) would otherwise leak a held/failed state into
-    the next test. Autouse so no individual test needs to know this exists.
+    (_held/_held_color/_last_result/_apply_lock, plus the status-honesty
+    verify bookkeeping _verified_ok/_last_verified_ms/_last_verify added
+    2026-08-15) as bare module globals, same no-DI-seam shape as
+    fire_history above — any test that reaches reconcile_ambient_if_changed
+    / reconcile_now / verify_now (settings-console tests, room-controls PUT
+    tests, the ambient verifier tests) would otherwise leak a held/failed/
+    verified state into the next test. Autouse so no individual test needs
+    to know this exists.
     """
     from spectra.services import ambient_music_gate as gate
 
@@ -223,6 +226,9 @@ def _isolated_ambient_music_gate():
         gate._held_color = None
         gate._last_result = {}
         gate._apply_lock = None
+        gate._verified_ok = None
+        gate._last_verified_ms = None
+        gate._last_verify = {}
     _reset()
     yield
     _reset()

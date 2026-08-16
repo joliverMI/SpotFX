@@ -303,17 +303,38 @@ export interface AmbientResult {
  * always-live read of what Ambient is ACTUALLY doing, distinct from
  * AmbientResult above (a one-shot save outcome). `setting` is the chosen
  * AmbientMode (what the control says); `mode` is the LIVE reality: "off"
- * (setting is off), "holding" (frozen at ambient_color right now — true
- * throughout "always", and only while confirmed-quiet under "auto"),
- * "yielding" (setting isn't off, but standing aside for music or an
- * unresolved playback read — only reachable under "auto"), "transitioning"
- * (a hold/release is physically in flight). Folded into EngineStatus so
- * the existing 3s poll shows it live with no separate request. */
+ * (setting is off), "holding" (every claimed light CONFIRMED lit at
+ * ambient_color right now — true throughout "always", and only while
+ * confirmed-quiet under "auto"), "partial" (Ambient believes it should be
+ * holding but the last check — write or periodic — found at least one
+ * light not actually lit, or found nothing left to hold at all), "yielding"
+ * (setting isn't off, but standing aside for music or an unresolved
+ * playback read — only reachable under "auto"), "transitioning" (a
+ * hold/release is physically in flight). `held` is gated on that same
+ * confirmation, not a bare write-intent flag — it can never read true for
+ * a light that's actually off (fixed 2026-08-15 after his room sat
+ * reporting `held: true` all night while every bulb was off). `verify` is
+ * the confirmation itself (write read-back or the independent periodic
+ * GET-only recheck — spectra/services/ambient.py's verify_held(), which
+ * never writes); `verified_age_s` is how many seconds old it is — present
+ * whenever there's a confirmation to age, so a caller can always tell
+ * "confirmed 4s ago" from "confirmed 20 minutes ago" instead of treating
+ * every value as equally live. Folded into EngineStatus so the existing 3s
+ * poll shows it live with no separate request. */
+export interface AmbientVerify {
+  status: 'verified' | 'dark' | 'no-hue-devices';
+  lights_lit?: number;
+  lights_total?: number;
+  unlit?: string[];
+}
+
 export interface AmbientGateStatus {
   setting: AmbientMode;
-  mode: 'off' | 'holding' | 'yielding' | 'transitioning';
+  mode: 'off' | 'holding' | 'partial' | 'yielding' | 'transitioning';
   held: boolean;
   result?: AmbientResult;
+  verify?: AmbientVerify;
+  verified_age_s?: number;
 }
 
 export interface RoomControlsSaveResult extends RoomControlState {
