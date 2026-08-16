@@ -227,8 +227,15 @@ class SpotEffectsBridge:
 
     def is_playing(self) -> Optional[bool]:
         """Whether spot-effects currently reports a track actively
-        playing — the single playback signal the Ambient music-precedence
-        gate reads (services/ambient_music_gate.py). Matches every other
+        playing — the single playback signal both the Ambient
+        music-precedence gate (services/ambient_music_gate.py) and
+        dark_light.py's snapshot-restore repaint gate
+        (spectra/services/dark_light.py) read; the latter treats anything
+        short of a confirmed True (False OR None) as "proceed" — it has no
+        continuous hold to carry forward the way Ambient does, so an
+        unresolved read defaults to the action that guarantees the room
+        visually recovers from dark rather than to caution, unlike
+        Ambient's own fail-safe direction below. Matches every other
         feed on this class (track_uri/track_position_ms/intensity): trusts
         the LAST reported state regardless of the current `connected`
         flag, so a momentary reconnect gap doesn't erase a moment-old

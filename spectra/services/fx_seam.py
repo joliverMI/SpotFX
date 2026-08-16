@@ -1,5 +1,9 @@
-"""SPECTRA's ONE write seam — every live write to the lights passes through
-apply_writes(), nothing else in spectra/ performs LedFX I/O.
+"""SPECTRA's ONE write seam — every live write or read of the lights passes
+through this module (apply_writes / get_virtuals / set_virtual_config),
+nothing else in spectra/ performs LedFX I/O (spectra/services/ledfx_release.py
+is the one documented exception, and only for the post-release cleanup path,
+which must reach LedFX even after ownership has already moved to
+"released" — see that module's own docstring).
 
 S3: the transport is routed by the LIGHT OWNERSHIP RECORD
 (fx/light_ownership.py), enforced here — in the write path — not by
@@ -67,6 +71,22 @@ class RoomReleased(RuntimeError):
     lands."""
 
 
+def _require_owner() -> str:
+    """The owner to route THIS call through, or raise the same refusal
+    apply_writes always has — a single place so every new primitive added
+    here (get_virtuals, set_virtual_config, ...) refuses identically rather
+    than re-deriving the branch."""
+    owner = light_ownership.load().owner
+    if owner in (light_ownership.SPECTRA, light_ownership.SPOT_EFFECTS):
+        return owner
+    if owner == light_ownership.RELEASED:
+        raise RoomReleased(
+            "room released to Home Assistant — fires are refused until the "
+            "way-back handover lands")
+    raise HandoverInProgress(
+        "light handover in progress — fires are refused until it lands")
+
+
 async def apply_writes(writes: list[dict], *, transition_ms: int = 0) -> None:
     """Send compiled writes as effect switches over the transport the
     ownership record grants. Raises on the first hard failure — the API
@@ -76,18 +96,51 @@ async def apply_writes(writes: list[dict], *, transition_ms: int = 0) -> None:
     (SceneV2.entry_ramp_ms): writes blend in (hue-arc for colour) instead of
     landing as an instant switch. 0 (the default) is today's unchanged
     instant-jump behaviour."""
-    owner = light_ownership.load().owner
+    owner = _require_owner()
     if owner == light_ownership.SPECTRA:
         await _apply_via_facade(writes, transition_ms)
-    elif owner == light_ownership.SPOT_EFFECTS:
-        await _apply_via_http(writes, transition_ms)
-    elif owner == light_ownership.RELEASED:
-        raise RoomReleased(
-            "room released to Home Assistant — fires are refused until the "
-            "way-back handover lands")
     else:
-        raise HandoverInProgress(
-            "light handover in progress — fires are refused until it lands")
+        await _apply_via_http(writes, transition_ms)
+
+
+async def get_virtuals() -> dict:
+    """GET the live virtuals map ({id: {config, effect: {type, config},
+    ...}}) over the transport the ownership record grants — same routing as
+    apply_writes, for callers that need to READ current state rather than
+    write an effect (spectra/services/dark_light.py: snapshotting a
+    background before locking it, confirming a lock/unlock landed)."""
+    owner = _require_owner()
+    if owner == light_ownership.SPECTRA:
+        from fx import facade
+        resp = await facade.handle("GET", "/api/virtuals")
+        resp.raise_for_status()
+    else:
+        async with httpx.AsyncClient(base_url=config.ledfx_url(),
+                                     timeout=REQUEST_DEADLINE_S) as client:
+            async with _slots:
+                resp = await client.get("/api/virtuals")
+            resp.raise_for_status()
+    return resp.json().get("virtuals", {})
+
+
+async def set_virtual_config(virtual_id: str, patch: dict) -> None:
+    """POST a partial virtual-config merge (e.g. {"dark_lock": bool}) — the
+    device-level config PATCH, distinct from apply_writes' effect PUT — over
+    the transport the ownership record grants. Raises on failure, same
+    contract as apply_writes."""
+    owner = _require_owner()
+    if owner == light_ownership.SPECTRA:
+        from fx import facade
+        resp = await facade.handle(
+            "POST", "/api/virtuals", json={"id": virtual_id, "config": patch})
+        resp.raise_for_status()
+    else:
+        async with httpx.AsyncClient(base_url=config.ledfx_url(),
+                                     timeout=REQUEST_DEADLINE_S) as client:
+            async with _slots:
+                resp = await client.post(
+                    "/api/virtuals", json={"id": virtual_id, "config": patch})
+            resp.raise_for_status()
 
 
 def _body(w: dict, transition_ms: int = 0) -> dict:

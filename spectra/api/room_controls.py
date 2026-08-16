@@ -14,6 +14,10 @@ avoid re-triggering a stream reconnect on every unrelated slider commit)
 and folds the outcome
 into the response as `ambient_result` so the caller can tell a live takeover
 from a state-only save (SPECTRA dark, or no Hue devices in the room).
+dark_mode_enabled/dark_light_shield_* — the legacy global Dark/Light mode
+(services/dark_light.py) — PUT reconciles it the same way (only when it
+actually changed) and folds the outcome into the response as
+`dark_light_result`.
 force_scene_enabled/force_scene_scene_id — the legacy Now Playing Force
 Scene control — redirect every automatic scene pick at scene_sequencer.
 fire_scene_by_id.
@@ -41,4 +45,7 @@ async def put_room_controls(state: RoomControlState):
     ambient_result = await room_controls.reconcile_ambient_if_changed(previous, state)
     if ambient_result is not None:
         response["ambient_result"] = ambient_result
+    dark_light_result = await room_controls.reconcile_dark_light_if_changed(previous, state)
+    if dark_light_result is not None:
+        response["dark_light_result"] = dark_light_result
     return response

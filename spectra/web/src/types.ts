@@ -264,6 +264,13 @@ export type SceneChangeMode = 'transitions' | 'analysed' | 'full';
 export type AmbientMode = 'off' | 'always' | 'auto';
 
 export interface RoomControlState {
+  /** Legacy global Dark/Light display-mode toggle equivalent
+   * (services/display_mode.py + LedFX's dark_lock — see spectra/services/
+   * dark_light.py's docstring for the full fidelity mapping, incl. why
+   * this is a bool where legacy has three states). */
+  dark_mode_enabled: boolean;
+  dark_light_shield_categories: string[];
+  dark_light_shield_virtuals: string[];
   brightness_multiplier: number;
   ambient_mode: AmbientMode;
   ambient_color: string | null;
@@ -275,6 +282,32 @@ export interface RoomControlState {
    * force_scene_scene_id instead. Does not affect manual editor test-fires. */
   force_scene_enabled: boolean;
   force_scene_scene_id: string | null;
+}
+
+/** What actually happened to the room's virtuals on the last dark-mode
+ * change — present on PUT /room-controls's response only when the mode (or,
+ * while dark, a shield-list edit) actually changed
+ * (spectra/api/room_controls.py). "dark"/"light" is a real live push;
+ * "no-devices" means the switch saved but SPECTRA doesn't know of any
+ * virtual to touch; "handover-in-progress"/"released" mean the light
+ * ownership record refused a write right now; "failed" means an
+ * unexpected error reaching LedFX. `locked` is the CONFIRMED (read back
+ * from LedFX, not merely posted) set of virtuals actually holding
+ * dark_lock=true; `unconfirmed` names any virtual whose read-back state
+ * didn't match what was requested. `restored` (light only) lists virtuals
+ * repainted from the pre-dark snapshot — empty when there was nothing to
+ * restore OR when `repaint_skipped: "music_playing"` is present: music was
+ * actively playing, so the stale pre-dark snapshot was deliberately NOT
+ * forced back (dark_lock still cleared) — the room's own live show repaints
+ * it on its next natural fire instead of a frozen look overriding it. */
+export interface DarkLightResult {
+  status: 'dark' | 'light' | 'no-devices' | 'handover-in-progress' | 'released' | 'failed';
+  locked?: string[];
+  shielded?: string[];
+  restored?: string[];
+  repaint_skipped?: 'music_playing';
+  unconfirmed?: string[];
+  error?: string;
 }
 
 /** What actually happened to the room's Hue devices on the last ambient
@@ -340,6 +373,7 @@ export interface AmbientGateStatus {
 export interface RoomControlsSaveResult extends RoomControlState {
   status: 'saved';
   ambient_result?: AmbientResult;
+  dark_light_result?: DarkLightResult;
 }
 
 /** Device-preview strip (data/spectra-device-preview-plan/report.md).
