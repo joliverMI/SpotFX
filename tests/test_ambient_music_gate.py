@@ -441,3 +441,146 @@ def test_status_holding_after_a_successful_hold(hue_room):
     _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
     _run(reconcile(False))
     assert status()["mode"] == "holding"
+
+
+# ── status honesty: verify_now()'s periodic recheck (2026-08-15 overnight
+#    defect — a claimed hold that goes stale must eventually report itself
+#    honestly, not just replay the last write's outcome forever) ───────────
+
+def test_status_carries_verify_age_and_detail_right_after_a_hold(hue_room, monkeypatch):
+    """A write's own read-back IS a fresh confirmation — status() must
+    reflect it immediately, not wait for the next periodic tick."""
+    from spectra.services import ambient_music_gate as gate
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    clock = {"t": 100.0}
+    monkeypatch.setattr(gate.time, "monotonic", lambda: clock["t"])
+
+    result = _run(gate.reconcile(True))
+    assert result["status"] == "on"
+
+    st = gate.status()
+    assert st["verified_age_s"] == 0.0
+    assert st["verify"] == {"status": "verified", "lights_lit": 1,
+                            "lights_total": 1, "unlit": []}
+
+    clock["t"] += 42.0
+    assert gate.status()["verified_age_s"] == 42.0, \
+        "age must grow with real elapsed time, not reset on every status() call"
+
+
+def test_repeated_identical_reconcile_does_not_refresh_verify_age(hue_room, monkeypatch):
+    """_apply()'s own short-circuit (no redundant Hue writes on a repeated
+    identical read) must not masquerade as a fresh confirmation either —
+    the age should reflect the last REAL check, not the last call."""
+    from spectra.services import ambient_music_gate as gate
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    clock = {"t": 100.0}
+    monkeypatch.setattr(gate.time, "monotonic", lambda: clock["t"])
+    _run(gate.reconcile(True))
+
+    clock["t"] += 10.0
+    _run(gate.reconcile(True))   # identical desired -> short-circuits
+
+    assert gate.status()["verified_age_s"] == 10.0
+
+
+def test_verify_now_is_a_noop_when_nothing_is_currently_held():
+    from spectra.services.ambient_music_gate import verify_now, status
+    _save_controls(ambient_mode="off")
+
+    result = _run(verify_now())
+
+    assert result == {}
+    assert status() == {"setting": "off", "mode": "off", "held": False}
+
+
+def test_verify_now_skips_while_a_write_is_in_flight(hue_room):
+    """The verifier must never race a real write — the write's own
+    read-back is already fresher than anything a concurrent GET adds."""
+    from spectra.services.ambient_music_gate import reconcile, verify_now, _get_apply_lock
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _run(reconcile(True))
+
+    async def scenario():
+        lock = _get_apply_lock()
+        await lock.acquire()
+        try:
+            return await verify_now()
+        finally:
+            lock.release()
+
+    assert _run(scenario()) == {}
+
+
+def test_verify_now_downgrades_held_when_a_light_is_found_off(hue_room):
+    """THE proof of the live defect: a bulb turned off out-of-band while
+    Ambient believed it held must flip status()'s `held`/`mode` the next
+    time the periodic verifier runs — via a read-only recheck, never a
+    write of its own."""
+    from spectra.services import ambient
+    from spectra.services.ambient_music_gate import reconcile, verify_now, status
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+
+    held = _run(reconcile(True))
+    assert held["status"] == "on"
+    assert status()["held"] is True
+    assert status()["mode"] == "holding"
+
+    async def _turn_off_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"on": {"on": False}})
+    _run(_turn_off_out_of_band())
+    calls_before_verify = len(calls)
+
+    result = _run(verify_now())
+
+    assert result["status"] == "verified"
+    assert result["unlit"] == ["l1"]
+    st = status()
+    assert st["held"] is False, "held must never stay true for a light that's off"
+    assert st["mode"] == "partial"
+    assert st["verify"]["unlit"] == ["l1"]
+    assert all(c[1] != "PUT" for c in calls[calls_before_verify:]), \
+        "the verifier itself must never write — only the out-of-band turn-off did"
+
+
+def test_verify_now_downgrades_held_when_live_stack_no_longer_active(hue_room, monkeypatch):
+    """SPECTRA can stop owning the live stack (handover, release) without
+    Ambient's own bookkeeping ever hearing about it directly — the
+    verifier must still stop claiming a hold that has nothing behind it."""
+    from spectra.services.ambient_music_gate import reconcile, verify_now, status
+    from spectra.services.live_host import live
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _run(reconcile(True))
+    assert status()["held"] is True
+
+    monkeypatch.setattr(live, "host", None)
+
+    result = _run(verify_now())
+
+    assert result == {"status": "dark"}
+    st = status()
+    assert st["held"] is False
+    assert st["mode"] == "partial"
+
+
+def test_write_time_dark_result_does_not_report_held(monkeypatch):
+    """The same honesty gap, caught at write time rather than waiting for
+    the periodic verifier: a reconcile that lands "dark" (SPECTRA doesn't
+    own the live stack) must not report `held: true` just because the
+    write's own intent bookkeeping records desired=True."""
+    from spectra.services.ambient_music_gate import reconcile, status
+    from spectra.services.live_host import live
+    monkeypatch.setattr(live, "host", None)
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+
+    result = _run(reconcile(True))
+
+    assert result == {"status": "dark"}
+    st = status()
+    assert st["held"] is False
+    assert st["mode"] == "partial"

@@ -152,11 +152,18 @@ async def _standalone_lifespan(app):
     # the check; services/spectra_liveness_reconciler.py is the other half.
     reconciler_task = asyncio.create_task(
         ownership_reconciler.run_supervised(), name="spectra-ownership-reconciler")
+    # Ambient's own status-honesty verifier (2026-08-15 overnight defect —
+    # ambient_music_gate.py's module docstring, "Status honesty"): a
+    # claimed hold otherwise only ever gets re-checked by a state-changing
+    # write, so under "always" mode it can go stale forever once genuinely
+    # held. GET-only, own short cadence, independent of bridge broadcasts.
+    ambient_verify_task = asyncio.create_task(
+        ambient_music_gate.run_supervised(), name="spectra-ambient-verifier")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
-    for task in (watchdog_task, reconciler_task):
+    for task in (watchdog_task, reconciler_task, ambient_verify_task):
         task.cancel()
-    for task in (watchdog_task, reconciler_task):
+    for task in (watchdog_task, reconciler_task, ambient_verify_task):
         try:
             await task
         except asyncio.CancelledError:

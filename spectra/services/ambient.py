@@ -106,6 +106,26 @@ individual lights, and already reads real state back
 virtual effect configs (through the in-process facade or a hard-failing
 HTTP PUT), not one REST call per bulb, so neither carries this exact
 attempted-vs-confirmed gap.
+
+Status-honesty fix (found live 2026-08-15, overnight): the read-back above
+proves a hold at the MOMENT it's written — it says nothing about five
+minutes, or five hours, later. `ambient_music_gate.py`'s own `_apply()`
+short-circuits a repeated identical `desired` (this module's docstring,
+"no redundant Hue writes"), so under "always" mode, once genuinely held,
+NOTHING ever re-touches the bridge again — a `status: on, lights_set:
+17/17` from hours ago just keeps replaying as if live. Live proof: his room
+sat at `held: true` all night while he'd turned every bulb off before bed.
+`verify_held()` below is the fix's read half — GET-only, NEVER a PUT, so
+it's safe to run on a short independent cadence (services/
+ambient_music_gate.py's periodic verifier) without the write-burst zigbee
+congestion `_hold_and_confirm` above guards against; it reuses the light
+cache and `_state_matches` (the SAME on+colour+brightness check the write
+path already trusts) rather than re-deriving a second, looser notion of
+"held." What changed is not the check itself but WHO runs it and HOW
+OFTEN: previously only a state-changing write ever triggered one; now a
+periodic read-only recheck does too, so a claimed hold can't go stale for
+longer than that cadence, and the gate downgrades `held` the moment it
+finds a light that isn't actually lit.
 """
 from __future__ import annotations
 
@@ -369,6 +389,56 @@ async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float]
                     "colour, retrying: %s", len(pending), [n for _, n in pending])
                 await asyncio.sleep(AMBIENT_RETRY_SPACING_MS / 1000)
         return sorted(confirmed.values()), sorted(name for _, name in pending)
+
+
+async def verify_held(color: Optional[str]) -> dict:
+    """Read-only recheck of whatever this module is CURRENTLY claiming to
+    hold — never a PUT, ever (module docstring, "status-honesty fix").
+    Reuses `_resolve_lights_named`'s cache and `_state_matches` (the exact
+    on+colour+brightness test the write path already trusts), so "lit at
+    the ambient colour" means the identical thing whether it was just
+    confirmed by a write or by this independent recheck. Same no-live-
+    stack/no-Hue-devices no-ops as reconcile() — there's nothing to verify
+    either way, and the caller (services/ambient_music_gate.py) treats
+    those the same as "not actually held" rather than as an error."""
+    from spectra.services.live_host import live
+
+    if not live.active or live.host is None:
+        return {"status": "dark"}
+    hue_devices = _hue_devices(live.host)
+    if not hue_devices:
+        return {"status": "no-hue-devices"}
+
+    color_hex = color or "#ffffff"
+    target_xy = _hex_to_xy(color_hex)
+    lit: list[str] = []
+    unlit: list[str] = []
+    for did, dev in sorted(hue_devices.items()):
+        cfg = dev.config
+        try:
+            async with _bridge_client(cfg) as client:
+                for rid, name in await _resolve_lights_named(client, cfg):
+                    try:
+                        state = (await _hue_get(
+                            client, f"/clip/v2/resource/light/{rid}"))["data"][0]
+                    except Exception:
+                        logger.exception(
+                            "Ambient verify: could not read %s (%s) on %s",
+                            name, rid, cfg.get("ip_address"))
+                        unlit.append(name)
+                        continue
+                    if _state_matches(state, target_xy, AMBIENT_BRIGHTNESS_PCT):
+                        lit.append(name)
+                    else:
+                        unlit.append(name)
+        except Exception:
+            logger.exception("Ambient verify: could not reach the bridge for %s", did)
+
+    total = len(lit) + len(unlit)
+    if total == 0:
+        return {"status": "no-hue-devices"}
+    return {"status": "verified", "lights_lit": len(lit), "lights_total": total,
+            "unlit": sorted(unlit)}
 
 
 # ── device discovery ─────────────────────────────────────────────────────────

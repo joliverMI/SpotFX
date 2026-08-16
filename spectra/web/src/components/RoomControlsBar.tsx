@@ -38,18 +38,37 @@ const AMBIENT_MODES: { value: AmbientMode; label: string; title: string }[] = [
  * is the honest "what is Ambient actually doing right now" indicator: the
  * select alone can't say it, because "Auto-return" means "hold only when
  * confirmed quiet" — that diverges from what's actually held whenever
- * music is playing. Under "On during music" this always reads "holding". */
+ * music is playing. Under "On during music" this normally reads "holding";
+ * "partial" is the status-honesty fix (2026-08-15) — Ambient believes it
+ * should be holding but the most recent check (a write's own read-back, or
+ * the independent periodic GET-only recheck) found at least one light not
+ * actually lit, or found nothing left to hold at all. */
 const AMBIENT_MODE_NOTE: Record<string, string> = {
-  holding: 'Ambient is actively holding the room at its colour.',
+  holding: 'Ambient is actively holding the room at its colour — every light confirmed.',
+  partial: "Ambient believes it should be holding, but the last check found at least one "
+    + 'light not actually lit at the ambient colour (or nothing to hold at all) — see the '
+    + 'lights named below.',
   yielding: "Auto-return is standing aside for music (or its playback state is momentarily "
     + 'unknown) — it resumes on its own the instant the room goes quiet.',
   transitioning: 'Ambient is mid hold/release right now.',
 };
 const AMBIENT_MODE_BADGE: Record<string, string> = {
   holding: 'badge-purple',
+  partial: 'badge-red',
   yielding: 'badge-amber',
   transitioning: 'badge-gray',
 };
+
+/** "confirmed 4s ago" vs "confirmed 20m ago" — the honest alternative to a
+ * live re-check on every 3s poll (spectra/services/ambient_music_gate.py's
+ * own docstring: cheap enough to run every VERIFY_TICK_S seconds, not
+ * cheap enough to run on every poll — so the age itself is the signal). */
+function formatVerifyAge(seconds: number): string {
+  if (seconds < 1) return 'just now';
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
+}
 
 const SCENE_CHANGE_MODES: { value: SceneChangeMode; label: string; title: string }[] = [
   { value: 'transitions', label: 'Transitions only',
@@ -130,9 +149,18 @@ export default function RoomControlsBar() {
       {local.ambient_mode !== 'off' && ambientMode && ambientMode.mode !== 'off' && (
         <span
           className={`badge ${AMBIENT_MODE_BADGE[ambientMode.mode]}`}
-          title={AMBIENT_MODE_NOTE[ambientMode.mode]}
+          title={AMBIENT_MODE_NOTE[ambientMode.mode]
+            + (ambientMode.verified_age_s != null
+              ? ` Confirmed ${formatVerifyAge(ambientMode.verified_age_s)}.`
+              : '')
+            + (ambientMode.mode === 'partial' && ambientMode.verify?.unlit?.length
+              ? ` Not lit: ${ambientMode.verify.unlit.join(', ')}.`
+              : '')}
         >
           ambient: {ambientMode.mode}
+          {ambientMode.mode === 'partial' && ambientMode.verify?.status === 'verified'
+            && ` (${ambientMode.verify.lights_lit ?? 0}/${ambientMode.verify.lights_total ?? '?'} lit)`}
+          {ambientMode.verified_age_s != null && ` · ${formatVerifyAge(ambientMode.verified_age_s)}`}
         </span>
       )}
 

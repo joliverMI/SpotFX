@@ -619,6 +619,32 @@ so the same GET that lies during a streamed scene is correct there. Pick
 the wrong one for the case at hand and you get a confident wrong answer
 either way.
 
+**A write-time confirmation is a snapshot, not a standing guarantee —
+status surfaces need their own independent re-verification.** Found live
+2026-08-15, overnight: `ambient_music_gate.status()` reported
+`held: true, mode: "holding"` while every one of his 36 bulbs was
+physically off (he'd turned them off before bed). Cause: `_apply()`
+short-circuits a repeated identical `desired` (deliberate — no redundant
+Hue writes), so under `ambient_mode="always"` a genuinely held room never
+gets written to, and therefore never re-confirmed, again — the write's
+own honest read-back (`_hold_and_confirm`, on+colour+brightness) just kept
+replaying as if live. Fixed by adding a SEPARATE, GET-only periodic task
+(`ambient_music_gate.run_supervised()`, `VERIFY_TICK_S=30`, wired into
+`spectra/app.py`'s lifespan next to `frame_watchdog`/
+`ownership_reconciler`) that re-checks reality on its own clock,
+independent of whatever triggers a write — and a `status()` that reports
+the CONFIRMATION's age (`verified_age_s`) alongside the result, rather
+than only the result, so staleness is visible instead of implicit. The
+general pattern for any future "X believes it's holding state Y" status
+surface in this codebase: a write's read-back proves the moment it was
+taken, not the moment someone reads the status later — either give the
+status its own independent recheck loop, or make the staleness visible
+(report the confirmation's age) rather than presenting a stale claim as
+live. See `spectra/services/ambient.py::verify_held` (never writes — a
+device found off is reported, never re-lit) and
+`spectra/services/ambient_music_gate.py`'s module docstring ("Status
+honesty") for the full mechanism.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing

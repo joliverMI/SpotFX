@@ -636,3 +636,64 @@ def test_ambient_catchup_ms_matches_legacy_ambient_catchup_s_default():
     number this module's release ramp must match, not re-guess."""
     from spectra.services.ambient import AMBIENT_CATCHUP_MS
     assert AMBIENT_CATCHUP_MS == 8000
+
+
+# ── verify_held(): the status-honesty read-only recheck ────────────────────
+
+def test_verify_held_dark_when_live_stack_not_active(monkeypatch):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    monkeypatch.setattr(live, "host", None)
+
+    assert _run(ambient.verify_held("#ffffff")) == {"status": "dark"}
+
+
+def test_verify_held_no_hue_devices(monkeypatch):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    monkeypatch.setattr(live, "host", FakeHost({"strip": FakeWledDevice()}))
+
+    assert _run(ambient.verify_held("#ffffff")) == {"status": "no-hue-devices"}
+
+
+def test_verify_held_reports_fully_lit_after_a_real_hold(monkeypatch, bridge):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    held = _run(ambient.reconcile(True, "#f5da8c"))
+    assert held["status"] == "on"
+
+    result = _run(ambient.verify_held("#f5da8c"))
+
+    assert result == {"status": "verified", "lights_lit": 1, "lights_total": 1, "unlit": []}
+
+
+def test_verify_held_reports_a_light_turned_off_out_of_band_without_writing(monkeypatch, bridge):
+    """The exact live defect this function exists to catch: a bulb turned
+    off by something other than this module (him, a Hue app, a physical
+    switch) must be reported unlit by a read-only recheck — and the
+    recheck itself must never write anything, i.e. never re-light a bulb
+    he turned off."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    held = _run(ambient.reconcile(True, "#f5da8c"))
+    assert held["status"] == "on"
+
+    async def _turn_off_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"on": {"on": False}})
+    _run(_turn_off_out_of_band())
+    calls_before_verify = len(bridge)
+
+    result = _run(ambient.verify_held("#f5da8c"))
+
+    assert result == {"status": "verified", "lights_lit": 0, "lights_total": 1,
+                      "unlit": ["l1"]}
+    assert all(c[1] != "PUT" for c in bridge[calls_before_verify:]), \
+        "verify_held must only ever GET — never write"
