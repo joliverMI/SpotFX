@@ -471,13 +471,52 @@ export interface TranscribeResult {
   vocabulary_honored: boolean | null;
 }
 
-/** Full spot-effects Colour Set card shape (read + the one supported
- * opt-out toggle through the spot-effects API — never modified otherwise). */
+/** One scoped FG/BG colour definition — a Set's own palette entry, or (on a
+ * Group card) a field-level override layered onto whichever member gets
+ * picked. Mirrors spot-effects models/color_set.py's ColorSetEntry; the
+ * index signature carries fields this UI doesn't render (accent_color,
+ * ramp_ms) through unmodified on save — see SpotColorSetCard's own note. */
+export interface SpotColorSetEntry {
+  scope: { virtual_ids: string[]; categories: string[]; roles: string[] };
+  color_kind: 'gradient' | 'solid' | null;
+  color_value: string | null;
+  bg_color: string | null;
+  bg_mode: 'additive' | 'overwrite' | null;
+  brightness: number | null;
+  background_brightness: number | null;
+  [key: string]: unknown;
+}
+
+/** One reference to a Colour Set within a Group, with a selection weight
+ * (weighted mode only). */
+export interface SpotGroupMember {
+  color_set_id: string;
+  weight: number;
+}
+
+/** Full spot-effects Colour Set card shape — a Set (a named palette) or a
+ * Group (a rotating/synced pool of Sets — day-one bar item §10). Read AND
+ * authored (create/edit/delete, both kinds) through the spot-effects API
+ * directly (useSaveColorSet / useDeleteColorSet) — SPECTRA's own backend
+ * only ever reads this storage (spectra/services/color_sets.py), never
+ * writes it, so this type round-trips whatever it received via its index
+ * signature: fields this UI doesn't render (dark_variant/light_variant
+ * mode lanes — owner-retired, §36 — and display_mode) are preserved
+ * unmodified on save rather than silently dropped. */
 export interface SpotColorSetCard {
   id: string;
   name: string;
+  color?: string;
   kind: 'set' | 'group';
+  labels?: string[];
+  entries?: SpotColorSetEntry[];
   scene_v2_opt_out?: boolean;
+  // kind === 'group' only:
+  members?: SpotGroupMember[];
+  mode?: 'cycle' | 'weighted';
+  cycle_behavior?: 'wrap' | 'bounce';
+  exclude_current?: boolean;
+  palette_sync?: boolean;
   [key: string]: unknown;
 }
 

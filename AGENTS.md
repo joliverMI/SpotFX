@@ -70,6 +70,25 @@ colours roll only when the sequencer fires a scene, scene + set land in one
 terminal rung KEEPS the current colours (never forced churn). Rainbow sets:
 neutral ×1.0 wheel factor, never move the room's wheel position.
 
+Colour Set Groups (rotating/synced pools, day-one bar item — was the last
+one not started, `docs/SPECTRA_SPEC.md` §10): `spectra/services/
+color_set_groups.py` resolves a `ColorSetCard` with `kind="group"` to one
+concrete member — cycle (wrap/bounce)/weighted+exclude_current picking,
+Palette Sync anchored on `color_journey`'s own room state (not a parallel
+tracker), the group's own `entries` merged on top as a per-virtual override
+layer — ported from spot-effects' `trigger_engine._select_color_set_member`/
+`_execute_set_color`, minus the retired dark/light mode-lane and scene-
+group-ref machinery (§36/§42, zero real usage). Wired into every EXPLICIT
+colour-set choke point (`scene_sequencer.fire_scene_by_id`, `trigger_engine.
+_default_select_color_set`, `POST /room-color/apply`, the editor's baseline
+endpoint) — deliberately NOT the sequencer/journey's own automatic
+wheel-travel roll (`color_wheel.wheel_positions`), which stays set-only by
+design: a Group has no chromatic wheel position of its own, and no real
+group needs to be reached that way. Authoring UI: `spectra/web/src/
+colorsets/ColorSetsPage.tsx` (`/colorsets`, nav "Colours") — writes go
+straight through spot-effects' existing `/api/color-sets` (already general;
+SPECTRA's own backend only ever reads this storage, same as before).
+
 This top-level copy predates the S3 process split and is genuinely dark/unused
 in his real room today (`storage/sequencer.json` has `enabled: false`) —
 `spectra/models/sequencer.py` + `spectra/services/{selection_kernel,

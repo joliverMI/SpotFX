@@ -5,6 +5,7 @@ import RoomOwnershipBar from './components/RoomOwnershipBar';
 import TopBarStrip from './components/TopBarStrip';
 import { ToastProvider } from './components/Toast';
 import { confirmLeave } from './lib/unsavedGuard';
+import ColorSetsPage from './colorsets/ColorSetsPage';
 import FeedbackPage from './feedback/FeedbackPage';
 import HelpPage from './help/HelpPage';
 import ReviewPage from './review/ReviewPage';
@@ -17,6 +18,7 @@ import DebugPage from './debug/DebugPage';
 
 const PAGE_TITLES: [string, string][] = [
   ['/scenes', 'Scenes'],
+  ['/colorsets', 'Colour Sets'],
   ['/timeline', 'Timeline'],
   ['/feedback', 'Feedback'],
   ['/review', 'Review'],
@@ -49,6 +51,7 @@ function NavBar() {
     }}>
       <span className="logo">◆ SPECTRA</span>
       <Link to="/scenes" className={cls((p) => p === '/' || p.startsWith('/scenes'))}>Scenes</Link>
+      <Link to="/colorsets" className={cls((p) => p.startsWith('/colorsets'))}>Colours</Link>
       <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
       <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
       <Link to="/review" className={cls((p) => p === '/review')}>Review</Link>
@@ -74,6 +77,7 @@ export default function App() {
           <Route path="/" element={<ScenesPage />} />
           <Route path="/scenes" element={<ScenesPage />} />
           <Route path="/scenes/:id" element={<ScenesPage />} />
+          <Route path="/colorsets" element={<ColorSetsPage />} />
           <Route path="/timeline" element={<BuilderPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/review" element={<ReviewPage />} />

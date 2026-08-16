@@ -66,13 +66,15 @@ async def post_baseline(scene_id: str, body: BaselineRequest | None = None):
     if scene is None:
         raise HTTPException(404, "scene not found")
     body = body or BaselineRequest()
-    from spectra.services import color_sets
+    from spectra.services import color_set_groups, color_sets
     color_set = (color_sets.get_by_id(body.color_set_id)
                  if body.color_set_id else None)
+    if color_set is not None:
+        color_set = color_set_groups.resolve_for_fire(color_set)  # §10
     ctx = FireContext(body.intensity)
     resolved = scene_compiler.resolve_scene(scene, ctx)
     writes = scene_compiler.compile_scene(resolved, color_set)
-    engine.on_scene_fired(scene, writes, body.color_set_id)
+    engine.on_scene_fired(scene, writes, color_set.id if color_set else None)
     return {"status": "baselined", "scene_id": scene_id,
             "mechanisms": len(engine.conductor.mechanisms),
             "virtuals": len(writes)}

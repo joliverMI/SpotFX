@@ -54,17 +54,9 @@ def _expand_group_refs(scene: SceneV2) -> SceneV2:
 
 
 def _group_members() -> dict[str, list[str]]:
-    """group id → member set ids, read straight from the raw storage (the
-    read-only projection model doesn't carry members)."""
-    path = config.COLOR_SETS_FILE
-    if not path.exists():
-        return {}
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return {v["id"]: [m.get("color_set_id") for m in v.get("members", [])]
-            for v in raw.values() if v.get("kind") == "group"}
+    """group id → member set ids."""
+    return {c.id: [m.color_set_id for m in c.members]
+            for c in color_sets.list_all() if c.kind == "group"}
 
 
 def group_ids_in_filter(scene: SceneV2) -> list[str]:

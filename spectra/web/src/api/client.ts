@@ -1,7 +1,10 @@
-/** Fetch wrappers. SPECTRA's own API lives under /spectra/api; the two
- * spotfx* helpers reach the spot-effects app's supported surface (colour
- * sets read + the global opt-out toggle) while the apps share an origin —
- * the S2 bridge formalizes that feed. */
+/** Fetch wrappers. SPECTRA's own API lives under /spectra/api; the spotfx*
+ * helpers reach the spot-effects app's own supported surface directly
+ * while the apps share an origin — the S2 bridge formalizes that feed.
+ * Colour Set + Group authoring (day-one bar item §10) goes through these:
+ * spot-effects' /api/color-sets already accepts a full ColorSetCard
+ * (kind="set" or "group") on POST, so SPECTRA's own backend never needs to
+ * write that storage — see spectra/services/color_sets.py's docstring. */
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
@@ -51,3 +54,4 @@ export async function apiPostForm<T = unknown>(path: string, form: FormData): Pr
 
 export const spotfxGet = <T = unknown>(path: string) => call<T>('GET', '/api' + path);
 export const spotfxPost = <T = unknown>(path: string, body?: unknown) => call<T>('POST', '/api' + path, body);
+export const spotfxDel = <T = unknown>(path: string) => call<T>('DELETE', '/api' + path);

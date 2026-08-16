@@ -7,20 +7,22 @@ in the editor).
   PUT /api/room-journey      — replace the room's journey declaration
   GET /api/drift-profiles    — {profile_id: DriftProfile}
   PUT /api/drift-profiles    — replace the library (refs validated)
-  POST /api/room-color/apply — apply a colour set to the room directly
-                               ({"set_id": ...}): it becomes the active
-                               set, the wheel anchors at its position,
-                               colours land on live virtuals, the journey
-                               travels on from there. The supported manual
-                               surface for the owner/fleet (owner defect
-                               fix — a room must never be set-less).
+  POST /api/room-color/apply — apply a colour set (or a Group — §10, picks
+                               one member and merges the group's own
+                               override entries on top) to the room
+                               directly ({"set_id": ...}): it becomes the
+                               active set, the wheel anchors at its
+                               position, colours land on live virtuals, the
+                               journey travels on from there. The supported
+                               manual surface for the owner/fleet (owner
+                               defect fix — a room must never be set-less).
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from spectra.services import color_journey, color_sets, drift_profiles, scene_store
+from spectra.services import color_journey, color_set_groups, drift_profiles, scene_store
 from spectra.services.color_journey import RoomColorState
 from spectra.services.drift_profiles import DriftProfile
 
@@ -33,9 +35,10 @@ class ApplySetRequest(BaseModel):
 
 @router.post("/room-color/apply")
 async def apply_room_color(body: ApplySetRequest):
-    card = color_sets.get_by_id(body.set_id)
-    if card is None or card.kind != "set":
-        raise HTTPException(404, f"colour set '{body.set_id}' not found")
+    try:
+        card = color_set_groups.resolve_ref(body.set_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
     from spectra.services import engine
     return await engine.conductor.apply_set_directly(card)
 
