@@ -274,6 +274,17 @@ export interface RoomControlState {
   brightness_multiplier: number;
   ambient_mode: AmbientMode;
   ambient_color: string | null;
+  /** The SECOND ambient colour, held while dark mode is on (his ruling:
+   * "one color for regular ambient light mode or hybrid mode and then one
+   * color for dark mode"). `null` means "not customized yet" — it defers
+   * to ambient_color (spectra/services/room_controls.py's
+   * effective_ambient_color), so the two stay identical by construction
+   * ("for now make them the same") until he picks a distinct dark colour
+   * with the same colour picker. Toggling dark_mode_enabled while Ambient
+   * is holding re-applies live at whichever colour is now in effect, eased
+   * through Ambient's own existing glide (same mechanism a plain colour
+   * edit already uses) — never a snap. */
+  ambient_color_dark: string | null;
   global_transition_ms: number;
   scene_change_mode: SceneChangeMode;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while

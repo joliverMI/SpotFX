@@ -34,7 +34,26 @@ rather than the only one.
 RoomControlState.ambient_mode is the STANDING PREFERENCE and this module
 never flips it. What this module owns is the LIVE PHYSICAL hold, which
 tracks a second, independent signal — bridge.is_playing() — used only by
-"auto"; "off" and "always" never consult it at all. Every caller that can
+"auto"; "off" and "always" never consult it at all.
+
+Which COLOUR is held is a THIRD, orthogonal input (2026-08-15, his second
+ambient-colour ruling): room_controls.effective_ambient_color() resolves
+ambient_color_dark vs. ambient_color from dark_mode_enabled, and every write
+(_apply, via reconcile()/reconcile_now()), every read-back (verify_now()'s
+own verify_held call), AND verify_now()'s straggler REPAIR write
+(services.ambient.repair_stragglers, 2026-08-16) below goes through that
+one resolver rather than reading ambient_color directly — so a stale
+hard-coded reference here can never verify OR repair against the wrong
+target colour while dark mode is on (a straggler repaired back to the
+normal colour while a distinct dark colour is actually held would be a
+self-inflicted "unlit" on the very next tick). dark_mode_enabled flipping
+while already held reaches this module exactly like a plain colour edit
+does: room_controls.reconcile_ambient_if_changed diffs the RESOLVED colour,
+so a dark toggle that changes what's effectively held triggers the same
+reconcile_now() -> reconcile() -> _apply() path as picking a new colour by
+hand, which is what gives the swap its ease (see _apply()'s own "colour
+changed while holding" branch — the identical mechanism, no separate
+transition code was added for this). Every caller that can
 change either input funnels through reconcile()/reconcile_now() rather
 than calling services.ambient.reconcile() directly, so mode precedence can
 never be bypassed by one path (a human PUT, a bridge broadcast, process
@@ -162,7 +181,7 @@ import time
 from typing import Optional
 
 from spectra.services import ambient
-from spectra.services.room_controls import AmbientMode, load_room_controls
+from spectra.services.room_controls import AmbientMode, effective_ambient_color, load_room_controls
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +247,7 @@ async def reconcile(is_playing: Optional[bool]) -> dict:
     result."""
     controls = load_room_controls()
     desired = _desired_hold(controls.ambient_mode, is_playing, _held)
-    return await _apply(controls.ambient_mode, desired, controls.ambient_color)
+    return await _apply(controls.ambient_mode, desired, effective_ambient_color(controls))
 
 
 async def reconcile_now() -> dict:
@@ -336,13 +355,14 @@ async def verify_now() -> dict:
     if lock.locked():
         return {}
     controls = load_room_controls()
-    result = await ambient.verify_held(controls.ambient_color)
+    target_color = effective_ambient_color(controls)
+    result = await ambient.verify_held(target_color)
     status_ = result.get("status")
     if status_ == "verified":
         unlit = result.get("unlit") or []
         lights_lit = result.get("lights_lit", 0)
         if unlit:
-            repair = await ambient.repair_stragglers(unlit, controls.ambient_color)
+            repair = await ambient.repair_stragglers(unlit, target_color)
             result["repair"] = repair
             if repair["repaired"]:
                 lights_lit += len(repair["repaired"])

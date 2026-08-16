@@ -5,7 +5,9 @@
  * action equivalent, scales every write uniformly at the fx_executor /
  * scene_compiler seams) plus ambient mode/colour (wired:
  * freezes the room's live Hue devices and holds them at the chosen colour
- * over direct bridge REST — spectra/services/ambient.py) and global
+ * over direct bridge REST — spectra/services/ambient.py), a SECOND
+ * ambient colour held instead while Dark mode is on (ambient_color_dark —
+ * defaults identical to the normal colour until authored separately), and global
  * transition pace (state only), the scene-change settings model (three
  * additive ticks — see SCENE_CHANGE_MODES below and
  * spectra/services/room_controls.py), and Force Scene — the legacy Now
@@ -188,7 +190,7 @@ export default function RoomControlsBar() {
         </select>
       </label>
 
-      <label className="room-control" title="Ambient colour">
+      <label className="room-control" title="Ambient colour — normal / hybrid">
         <ColorGradientPicker
           value={local.ambient_color ?? '#ffffff'}
           onChange={(v) => commit({ ...local, ambient_color: v })}
@@ -197,6 +199,23 @@ export default function RoomControlsBar() {
           swatchHeight={28}
           title="Ambient colour — a Hue entertainment stream only ever takes one solid colour"
         />
+      </label>
+
+      {/* His second ambient-colour ruling: dark mode holds a DIFFERENT
+        * colour, authored the same way. Starts identical to the normal
+        * colour (ambient_color_dark null defers to it) until he picks one
+        * here — see RoomControlState.ambient_color_dark in types.ts. */}
+      <label className="room-control" title="Ambient colour — held instead of the one above while Dark mode is on">
+        <ColorGradientPicker
+          value={local.ambient_color_dark ?? local.ambient_color ?? '#ffffff'}
+          onChange={(v) => commit({ ...local, ambient_color_dark: v })}
+          disabled={local.ambient_mode === 'off'}
+          swatchWidth={40}
+          swatchHeight={28}
+          title="Ambient colour for Dark mode — held instead of the normal ambient colour while Dark mode is on; starts the same until you pick one"
+        />
+        <span style={{ fontSize: '0.85em', opacity: 0.75 }}>(dark)</span>
+        <HelpLink topic="ambient-dark-colour" />
       </label>
 
       {local.ambient_mode !== 'off' && ambientMode && ambientMode.mode !== 'off' && (

@@ -58,6 +58,25 @@ legacy picks: decision-legacy-retirement-picks.md):
                           precedence gate), reconciled from
                           api/room_controls.py's PUT handler whenever these
                           fields change.
+  ambient_color_dark      the SECOND ambient colour (2026-08-15, his ruling:
+                          "dark mode during ambient should choose a
+                          different color that I pick so we have one color
+                          for regular ambient light mode or hybrid mode and
+                          then one color for dark mode ... for now make them
+                          the same but let me be able to pick it with the
+                          color picker"). Authored the same way as
+                          ambient_color — the same shipped LedFX colour
+                          picker (PR #59), not a new control. `None` means
+                          "not customized yet" — NOT a static copy of
+                          ambient_color taken at some migration moment, so
+                          the two stay identical by construction ("make them
+                          the same, for now") until he explicitly picks a
+                          different dark colour; see effective_ambient_color
+                          below, the one place this fallback is resolved.
+                          dark_mode_enabled (above) is the only switch
+                          between the two — ambient_mode/_color themselves
+                          don't change meaning, "normal ambient colour"
+                          still covers both his non-dark and hybrid cases.
   global_transition_ms    the legacy ledfx_global_transition action
                           equivalent — the default ramp new scene-entry
                           blends use when a scene doesn't author its own
@@ -156,6 +175,9 @@ class RoomControlState(BaseModel):
     brightness_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
     ambient_mode: AmbientMode = "off"
     ambient_color: Optional[str] = None   # hex; None = no colour authored yet
+    # Second colour, for dark mode (see the module docstring's ambient_color_dark
+    # entry). None = defer to ambient_color, not a frozen copy of it.
+    ambient_color_dark: Optional[str] = None
     # 0 = no room default (today's unchanged instant-jump behaviour for any
     # scene that doesn't author its own entry_ramp_ms). >0 becomes the
     # FALLBACK ramp scene_compiler.fire_scene uses when a scene's own
@@ -165,7 +187,7 @@ class RoomControlState(BaseModel):
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
 
-    @field_validator("ambient_color")
+    @field_validator("ambient_color", "ambient_color_dark")
     @classmethod
     def _validate_hex(cls, v: Optional[str]) -> Optional[str]:
         # Tightened for the settings-console agent (spectra/services/
@@ -198,6 +220,21 @@ def field_choices(name: str) -> Optional[list[str]]:
     """Literal[...] choices declared on a RoomControlState field, or None."""
     args = typing.get_args(RoomControlState.model_fields[name].annotation)
     return list(args) if args and all(isinstance(a, str) for a in args) else None
+
+
+def effective_ambient_color(state: RoomControlState) -> Optional[str]:
+    """The colour Ambient should actually be holding right now — the one
+    seam every ambient write/verify path (services/ambient_music_gate.py)
+    must resolve through, rather than reading ambient_color directly.
+    ambient_color_dark wins while dark mode is on AND he's authored one;
+    otherwise the normal/hybrid colour applies, same as before this field
+    existed. Because ambient_color_dark defaults to None rather than a
+    migration-time copy, this also correctly reports "nothing changed" for
+    a dark_mode_enabled toggle before he's ever picked a dark colour — the
+    two are identical by construction until he diverges them."""
+    if state.dark_mode_enabled and state.ambient_color_dark is not None:
+        return state.ambient_color_dark
+    return state.ambient_color
 
 
 def apply_brightness(params: dict, multiplier: float) -> dict:
@@ -287,10 +324,20 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     that rule has to cover too, not just the automatic one. "always" is
     unconditional by design (mode 2) — the gate still owns the actual
     write, this is just the "did anything change" gate for whether to
-    bother calling it at all."""
+    bother calling it at all.
+
+    Compares effective_ambient_color (above), not the bare ambient_color
+    field, so this one condition also covers: an ambient_color_dark edit
+    while dark mode is on, and dark_mode_enabled itself flipping while
+    ambient is holding — both change what's ACTUALLY held even though
+    ambient_mode/ambient_color themselves didn't move. Editing the field
+    that ISN'T currently in effect (e.g. the normal colour while dark mode
+    is on and a dark colour is already authored) correctly reports no
+    change — nothing live needs to move for that edit."""
     changed = (
         previous.ambient_mode != new_state.ambient_mode
-        or (new_state.ambient_mode != "off" and previous.ambient_color != new_state.ambient_color)
+        or (new_state.ambient_mode != "off"
+            and effective_ambient_color(previous) != effective_ambient_color(new_state))
     )
     if not changed:
         return None
