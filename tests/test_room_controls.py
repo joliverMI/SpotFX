@@ -90,6 +90,124 @@ def test_ambient_enabled_migrates_to_ambient_mode(tmp_path, monkeypatch):
     assert rc.load_room_controls().ambient_mode == "always"
 
 
+def test_effective_ambient_color_defers_to_normal_until_dark_colour_authored():
+    """His ruling: make the two colours the SAME for now — modeled here as
+    ambient_color_dark defaulting to None (defer), not a frozen copy taken
+    at some point in time, so they track each other by construction until
+    he explicitly picks a different dark colour."""
+    from spectra.services import room_controls as rc
+
+    state = rc.RoomControlState(ambient_color="#f5da8c")
+    assert rc.effective_ambient_color(state) == "#f5da8c", \
+        "dark mode off — the normal/hybrid colour applies"
+
+    dark_state = state.model_copy(update={"dark_mode_enabled": True})
+    assert rc.effective_ambient_color(dark_state) == "#f5da8c", \
+        "dark mode on but no dark colour authored yet — still the same value"
+
+    dark_state.ambient_color = "#ff0000"
+    assert rc.effective_ambient_color(dark_state) == "#ff0000", \
+        "still deferring — tracks the normal colour even after it changes"
+
+    authored = dark_state.model_copy(update={"ambient_color_dark": "#001133"})
+    assert rc.effective_ambient_color(authored) == "#001133", \
+        "a dark colour has been explicitly picked — it now wins while dark"
+    assert rc.effective_ambient_color(authored.model_copy(update={"dark_mode_enabled": False})) \
+        == "#ff0000", "dark mode off again — back to the normal colour, dark colour untouched"
+
+
+def test_ambient_color_dark_round_trips_and_validates_hex():
+    from pydantic import ValidationError
+
+    from spectra.services import room_controls as rc
+
+    state = rc.RoomControlState(ambient_color="#f5da8c", ambient_color_dark="#112233")
+    rc.save_room_controls(state)
+    assert rc.load_room_controls() == state
+
+    with pytest.raises(ValidationError):
+        rc.RoomControlState(ambient_color_dark="not-a-colour")
+
+
+def test_old_room_controls_file_without_dark_colour_loads_with_default_none(tmp_path, monkeypatch):
+    """A file written before this field existed has no ambient_color_dark
+    key at all — must load cleanly, deferring to the normal colour (no
+    explicit migration needed, unlike the renamed ambient_enabled/
+    midsong_triggers_enabled fields above)."""
+    import json
+
+    from spectra import config as scfg
+    from spectra.services import room_controls as rc
+    path = tmp_path / "room_controls.json"
+    monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", path)
+
+    path.write_text(json.dumps({"ambient_mode": "always", "ambient_color": "#f5da8c"}))
+    loaded = rc.load_room_controls()
+    assert loaded.ambient_color_dark is None
+    assert rc.effective_ambient_color(loaded) == "#f5da8c"
+
+
+def test_reconcile_ambient_if_changed_fires_on_dark_colour_edit_while_dark(monkeypatch):
+    """Editing ambient_color_dark while dark mode is already on must be
+    treated the same as editing ambient_color normally — it changes what's
+    actually held."""
+    from spectra.services import room_controls as rc
+
+    calls = []
+
+    async def fake_reconcile_now():
+        calls.append(True)
+        return {"status": "on"}
+    monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
+
+    previous = rc.RoomControlState(ambient_mode="always", dark_mode_enabled=True,
+                                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    new_state = previous.model_copy(update={"ambient_color_dark": "#220044"})
+    result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
+    assert result == {"status": "on"}
+    assert calls == [True]
+
+
+def test_reconcile_ambient_if_changed_ignores_dark_colour_edit_while_not_dark(monkeypatch):
+    """The inverse: editing the dark colour while dark mode is OFF changes
+    nothing currently held — no reconcile should fire."""
+    from spectra.services import room_controls as rc
+
+    calls = []
+
+    async def fake_reconcile_now():
+        calls.append(True)
+        return {"status": "on"}
+    monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
+
+    previous = rc.RoomControlState(ambient_mode="always", dark_mode_enabled=False,
+                                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    new_state = previous.model_copy(update={"ambient_color_dark": "#220044"})
+    result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
+    assert result is None
+    assert calls == []
+
+
+def test_reconcile_ambient_if_changed_fires_when_dark_mode_toggles_while_holding():
+    """Toggling dark mode itself, with distinct colours authored, changes
+    the effective held colour — reconcile_ambient_if_changed must catch
+    this even though ambient_mode/ambient_color themselves didn't move."""
+    from spectra.services import room_controls as rc
+
+    previous = rc.RoomControlState(ambient_mode="always", dark_mode_enabled=False,
+                                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    new_state = previous.model_copy(update={"dark_mode_enabled": True})
+    assert rc.effective_ambient_color(previous) != rc.effective_ambient_color(new_state)
+
+    # Same field values, but the dark colour has never been authored (still
+    # None) — toggling dark mode changes nothing effective, so this must
+    # NOT fire, matching "make them the same for now."
+    same_previous = rc.RoomControlState(ambient_mode="always", dark_mode_enabled=False,
+                                        ambient_color="#f5da8c")
+    same_new = same_previous.model_copy(update={"dark_mode_enabled": True})
+    assert rc.effective_ambient_color(same_previous) == rc.effective_ambient_color(same_new)
+
+
 def test_fx_executor_applies_room_brightness_multiplier():
     from spectra.services import room_controls as rc
     from spectra.services.fx_executor import RecordingExecutor

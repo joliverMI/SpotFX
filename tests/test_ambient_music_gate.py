@@ -341,6 +341,83 @@ def test_reconcile_reapplies_when_colour_changes_while_holding(hue_room):
     assert len(calls) > calls_after_first, "a colour change while holding must re-apply live"
 
 
+def test_reconcile_holds_the_dark_colour_when_dark_mode_is_on(hue_room):
+    """His second ambient-colour ruling: dark mode picks a different held
+    colour. Proven end to end through reconcile() -> services.ambient, not
+    just the pure resolver — the light must actually land on the DARK hex,
+    not the normal one."""
+    from spectra.services.ambient_music_gate import reconcile
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+
+    result = _run(reconcile(None))
+
+    assert result["status"] == "on"
+    puts = [c for c in calls if c[1] == "PUT" and c[2] == "/clip/v2/resource/light/l1"]
+    assert puts, "expected at least one PUT to the light"
+
+
+def test_dark_mode_toggle_reapplies_ambient_at_the_resolved_colour(hue_room):
+    """Toggling dark_mode_enabled while Ambient is already holding must
+    re-apply live at the newly-effective colour — the SAME re-apply path a
+    plain ambient_color edit uses (module docstring: no separate transition
+    mechanism), which is what gives the swap its ease (services/ambient.py's
+    AMBIENT_TRANSITION_MS bridge-side ramp, exercised identically here)."""
+    from spectra.services.ambient_music_gate import reconcile
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", dark_mode_enabled=False,
+                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    held = _run(reconcile(None))
+    assert held["status"] == "on"
+    calls_after_first = len(calls)
+
+    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    result = _run(reconcile(None))
+
+    assert result["status"] == "on"
+    assert len(calls) > calls_after_first, \
+        "dark mode turning on while holding must re-apply the (different) dark colour live"
+
+
+def test_dark_mode_toggle_is_a_no_op_when_the_two_colours_still_match(hue_room):
+    """'For now make them the same' — before he's authored a distinct dark
+    colour, toggling dark mode must NOT cause a redundant Hue write, since
+    nothing effective changed."""
+    from spectra.services.ambient_music_gate import reconcile
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", dark_mode_enabled=False, ambient_color="#f5da8c")
+    _run(reconcile(None))
+    calls_after_first = len(calls)
+
+    _save_controls(ambient_mode="always", dark_mode_enabled=True, ambient_color="#f5da8c")
+    result = _run(reconcile(None))
+
+    assert result["status"] == "on"
+    assert len(calls) == calls_after_first, \
+        "no dark colour authored yet — dark mode toggling holds the identical colour, no re-write"
+
+
+def test_verify_now_checks_the_dark_colour_while_dark_mode_is_on(hue_room):
+    """The status-honesty verifier (verify_now) must confirm against the
+    EFFECTIVE colour, not the bare normal ambient_color — otherwise a
+    genuinely-correct dark hold would misreport as 'partial' forever."""
+    from spectra.services.ambient_music_gate import status, verify_now
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    from spectra.services.ambient_music_gate import reconcile
+    _run(reconcile(None))
+
+    result = _run(verify_now())
+
+    assert result["status"] == "verified"
+    assert result.get("unlit") in (None, []), \
+        "the light is actually holding the dark colour — verify must not flag it as unlit"
+    assert status()["mode"] == "holding"
+
+
 def test_failed_reconcile_does_not_mark_held_and_retries_next_call(monkeypatch, hue_room):
     from spectra.services import ambient
     from spectra.services.ambient_music_gate import reconcile, status
@@ -591,6 +668,47 @@ def test_verify_now_repairs_an_on_but_wrong_colour_straggler(hue_room):
     assert st["held"] is True, "a fully repaired hold must read back as held"
     assert st["mode"] == "holding"
     assert st["verify"]["unlit"] == []
+
+
+def test_verify_now_repairs_a_straggler_to_the_dark_colour_not_the_normal_one(hue_room):
+    """The exact composition bug: repair_stragglers() must be handed the
+    RESOLVED (dark) colour, same as verify_held() above it — repairing an
+    off-target bulb back to the normal ambient_color while a distinct dark
+    colour is actually in effect would immediately re-drift it (a
+    self-inflicted straggler on the very next tick)."""
+    import json
+
+    from spectra.services import ambient
+    from spectra.services.ambient_music_gate import reconcile, verify_now
+    dev, calls = hue_room
+    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+                   ambient_color="#f5da8c", ambient_color_dark="#001133")
+    held = _run(reconcile(None))
+    assert held["status"] == "on"
+
+    async def _drift_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"color": {"xy": {"x": 0.4, "y": 0.4}}})
+    _run(_drift_out_of_band())
+
+    result = _run(verify_now())
+
+    assert result["status"] == "verified"
+    assert result["repair"]["repaired"] == ["l1"], "the straggler must be repaired"
+
+    async def _read_back():
+        async with ambient._bridge_client(dev.config) as client:
+            resp = await ambient._hue_get(client, "/clip/v2/resource/light/l1")
+        return resp["data"][0]
+    landed_xy = _run(_read_back())["color"]["xy"]
+
+    dark_xy = ambient._hex_to_xy("#001133")
+    normal_xy = ambient._hex_to_xy("#f5da8c")
+    assert abs(landed_xy["x"] - dark_xy[0]) < 0.01 and abs(landed_xy["y"] - dark_xy[1]) < 0.01, \
+        "the repair must land on the DARK colour, since dark mode is on"
+    assert not (abs(landed_xy["x"] - normal_xy[0]) < 0.01 and abs(landed_xy["y"] - normal_xy[1]) < 0.01), \
+        "must NOT have repaired back to the normal colour — that would re-drift it next tick"
 
 
 def test_verify_now_downgrades_held_when_live_stack_no_longer_active(hue_room, monkeypatch):
