@@ -1659,12 +1659,23 @@ check(seen_edges == {3.0, 4.0, 5.0, 6.0}
 # scene_compiler._entry_config); regression: reported live 2026-08-15 as
 # white power-effect sparks on STAR — first diagnosed against a "radio"
 # source that doesn't exist in this system; he corrected it to "radial"
-# (real: the Strips category's radial-dummy virtual, promoted to power by
-# effect_steps at fire intensity >= 0.7 — see star_strips_effect(0.85)
-# above). Live-fired STAR on his real room at 2026-08-15, intensity 0.8,
-# dry_run=False (owner=spectra): the actual write delivered to fx_seam for
-# virtual_id "radial-dummy" carried sparks_color=#000000 — confirmed, not
-# inferred, against his literal report.
+# (real: the Strips category's radial-dummy AND tv-mapper virtuals, both
+# promoted to power by effect_steps at fire intensity >= 0.7 — see
+# star_strips_effect(0.85) above). Live-fired STAR on his real room at
+# 2026-08-15, intensity 0.8, dry_run=False (owner=spectra): the actual write
+# delivered to fx_seam for virtual_id "radial-dummy" carried
+# sparks_color=#000000 — confirmed, not inferred, against his literal
+# report. CORRECTED 2026-08-16 (docs/SPECTRA_SPEC.md §62): radial-dummy has
+# no IP and no physical light behind it, so that live-room proof could
+# never be what he actually saw — the real fixture is tv-mapper (segments
+# span tv-backlight + both kitchen sconces; see storage/device_categories
+# .json for the real "Strips" membership — this script's own category
+# registry above is a small fake, "v-s1"/"v-single1", so the assertion
+# below proves the MECHANISM (every virtual a category resolves to gets
+# the same forced-black accent) rather than exercising the literal
+# "radial-dummy"/"tv-mapper" ids; that's what the real-room replay in
+# §62 is for). Re-proven against his real, unprompted show_log fires (no
+# synthetic intensity) in the same pass.
 star_power_writes = scene_compiler.compile_scene(
     scene_compiler.resolve_scene(star_frozen, FireContext(0.5, rng=Random(7))))
 star_power_write = next(w for w in star_power_writes if w["effect_type"] == "power")
