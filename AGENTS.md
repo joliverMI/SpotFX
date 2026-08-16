@@ -1340,6 +1340,20 @@ When writing any multi-step live-state test (write, then a later separate
 check), verify the fixture shares ONE handler/state across every
 `_bridge_client()` call the test will make, not one rebuilt per call.
 
+**When a `check_*.py` spec script mutates a module-level constant to speed
+itself up, restore it from a captured `_orig_*` variable, never a
+hardcoded literal.** `scripts/check_spectra.py`'s ambient section captured
+`_orig_confirm_settle`/`_orig_write_stagger`/`_orig_retry_spacing` before
+zeroing them for the run, and restored from those — but
+`AMBIENT_TRANSITION_MS` was restored to a bare `1500` instead, the one
+constant of the four not following the pattern. It happened to be
+harmless only because 1500 was still the real default; extending
+`spectra/services/ambient.py`'s `AMBIENT_TRANSITION_MS` to 3000ms
+(2026-08-16, `docs/SPECTRA_SPEC.md` §63) would have silently left the
+module at the wrong value for the rest of that process's life had this
+not been caught. Capture-then-restore, not hardcode-then-restore, for any
+constant a script mutates.
+
 ## LedFX write plane: one gate, and its liveness signal
 
 Every SpotFX→LedFX HTTP call goes through `api/ledfx_client._request()` —

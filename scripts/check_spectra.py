@@ -1136,6 +1136,7 @@ bridge_calls = []
 hue_dev = _FakeHueDevice("10.0.0.1", bridge_calls)
 _orig_host = live_stack.host
 _orig_bridge_client = ambient._bridge_client
+_orig_transition_ms = ambient.AMBIENT_TRANSITION_MS
 _orig_confirm_settle = ambient.AMBIENT_CONFIRM_SETTLE_MS
 _orig_write_stagger = ambient.AMBIENT_WRITE_STAGGER_MS
 _orig_retry_spacing = ambient.AMBIENT_RETRY_SPACING_MS
@@ -1202,7 +1203,7 @@ try:
 finally:
     live_stack.host = _orig_host
     ambient._bridge_client = _orig_bridge_client
-    ambient.AMBIENT_TRANSITION_MS = 1500
+    ambient.AMBIENT_TRANSITION_MS = _orig_transition_ms
     ambient.AMBIENT_CONFIRM_SETTLE_MS = _orig_confirm_settle
     ambient.AMBIENT_WRITE_STAGGER_MS = _orig_write_stagger
     ambient.AMBIENT_RETRY_SPACING_MS = _orig_retry_spacing

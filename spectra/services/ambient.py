@@ -58,10 +58,13 @@ live look, AMBIENT_CATCHUP_MS) both run over Hue's own bridge-side
 already used, just re-aimed at a live-derived target instead of a fixed
 dim. Only once that lands does set_frozen(False) hand back to the stream,
 so the jump the stream then picks up from is small. Numbers
-(AMBIENT_TRANSITION_MS=1500, AMBIENT_OFF_FADE_PCT=35, AMBIENT_CATCHUP_MS=
-8000) are legacy's own shipped defaults (ambient_transition_s=1.5,
-ambient_fade_brightness=35, ambient_catchup_s=8.0 in config.py) — not
-re-guessed, matched.
+(AMBIENT_OFF_FADE_PCT=35, AMBIENT_CATCHUP_MS=8000) are legacy's own
+shipped defaults (ambient_fade_brightness=35, ambient_catchup_s=8.0 in
+config.py) — not re-guessed, matched. AMBIENT_TRANSITION_MS itself
+started as legacy's own default too (ambient_transition_s=1.5) but is no
+longer that value — see the constant's own comment and
+docs/SPECTRA_SPEC.md §63 for the 2026-08-16 extension to 3000ms and why
+it's recorded as his stated preference, not a proven one.
 
 Light-state REST calls go over a direct httpx.AsyncClient (same pattern as
 spectra/services/ledfx_release.py), not the live HueDevice's own
@@ -228,7 +231,15 @@ logger = logging.getLogger(__name__)
 # room-control the Admiral tunes per song, so these stay constants rather
 # than growing the settings surface.
 AMBIENT_BRIGHTNESS_PCT = 100
-AMBIENT_TRANSITION_MS = 1500
+# 3000, not legacy's 1500 (2026-08-16, docs/SPECTRA_SPEC.md §63): his stated
+# preference, given BEFORE he had actually watched the live 1.5s glide (he
+# later corrected that his "agreement" was courtesy about our description,
+# not an observation) — so this value is unproven, not eyewitness-confirmed;
+# see §63 for the full correction and don't record a future re-test as
+# redundant. Governs both the ON hold's colour ramp and the OFF fade below
+# (the same constant, deliberately — see _write_and_confirm's settle_ms for
+# why raising it doesn't also lengthen a retry, which snaps).
+AMBIENT_TRANSITION_MS = 3000
 AMBIENT_OFF_FADE_PCT = 35
 AMBIENT_CATCHUP_MS = 8000
 
@@ -467,7 +478,24 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
     under sustained load with NO error, no 4xx, no rate-limit header —
     module docstring) carries it. Retries stragglers, spaced apart rather
     than hammered. Retries drop the bridge-side ramp (`dynamics`) — a
-    stubborn light should snap, not take another 1.5s to maybe land.
+    stubborn light should snap, not take another AMBIENT_TRANSITION_MS to
+    maybe land.
+
+    settle_ms below keys off whether THIS write_body actually carries a
+    `dynamics` ramp, not off the attempt index (2026-08-16, extending
+    AMBIENT_TRANSITION_MS to 3000ms surfaced why the two aren't the same
+    thing): a retry's snap write never has one, so it already only ever
+    waits AMBIENT_CONFIRM_SETTLE_MS — unaffected by AMBIENT_TRANSITION_MS
+    either way. But repair_stragglers() below calls in with a `body` that
+    has NO ramp at all (`_light_payload(color_hex)`, no ramp_ms — "a
+    stubborn light should snap" applies to the FIRST repair write too, not
+    just its retries) — under the old `attempt == 0` test, repair's own
+    attempt 0 was waiting the full AMBIENT_TRANSITION_MS before reading
+    back an instant write for no reason, and that wasted wait would have
+    doubled right along with the constant. Keying off the body itself gets
+    every caller the wait it actually needs: the ON-hold's ramped attempt 0
+    still waits out the real glide, repair's un-ramped attempt 0 no longer
+    waits for a glide that was never sent.
     Returns (confirmed light names, still-unconfirmed light names) —
     best-effort per light, but the unconfirmed half must reach the caller,
     never get folded into a bigger "N set" count."""
@@ -483,7 +511,7 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
                                  name, rid, cfg.get("ip_address"))
             if i < len(pending) - 1 and AMBIENT_WRITE_STAGGER_MS > 0:
                 await asyncio.sleep(AMBIENT_WRITE_STAGGER_MS / 1000)
-        settle_ms = (AMBIENT_TRANSITION_MS if attempt == 0 else 0) + AMBIENT_CONFIRM_SETTLE_MS
+        settle_ms = (AMBIENT_TRANSITION_MS if "dynamics" in write_body else 0) + AMBIENT_CONFIRM_SETTLE_MS
         if settle_ms > 0:
             await asyncio.sleep(settle_ms / 1000)
         still_pending: list[tuple[str, str]] = []

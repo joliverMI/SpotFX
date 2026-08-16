@@ -92,10 +92,15 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# The dim-down duration before the final off — matches
+# The dim-down duration before the final off — originally matched
 # spectra/services/ambient.py's own AMBIENT_TRANSITION_MS (legacy's
 # ambient_transition_s), the one fade duration already proven to feel
-# right in this codebase.
+# right in this codebase. The two have since diverged: ambient.py's own
+# constant was extended to 3000ms on 2026-08-16 (his stated preference for
+# the colour-hold glide he watches, docs/SPECTRA_SPEC.md §63) while this
+# one stays at legacy's original 1500ms — a one-shot power-off he isn't
+# judging by eye the same way, out of scope for that change. Revisit only
+# if he asks for this fade specifically.
 RELEASE_FADE_MS = 1500
 
 # Off-write read-back confirmation pacing (module docstring, "Off-write

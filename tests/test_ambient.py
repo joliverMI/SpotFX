@@ -791,6 +791,41 @@ def test_repair_stragglers_rewrites_an_on_but_wrong_colour_light(monkeypatch, br
     assert after == {"status": "verified", "lights_lit": 1, "lights_total": 1, "unlit": []}
 
 
+def test_repair_stragglers_settle_does_not_wait_for_a_ramp_it_never_sent(
+        monkeypatch, bridge, sleep_spy):
+    """repair_stragglers()'s write carries no `dynamics` ramp at all — even
+    on its first attempt (_light_payload(color_hex), no ramp_ms — "a
+    stubborn light should snap" applies there too, not just to retries).
+    Its settle wait must key off the write actually having a ramp, not off
+    being attempt 0, or every repair pass would needlessly wait out a full
+    AMBIENT_TRANSITION_MS for a write that was never ramped — a wasted wait
+    that would silently double every time that constant grows (found
+    2026-08-16 extending it from 1500 to 3000ms)."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    monkeypatch.setattr(ambient, "AMBIENT_TRANSITION_MS", 5000)  # would dominate if miscounted
+    monkeypatch.setattr(ambient, "AMBIENT_CONFIRM_SETTLE_MS", 200)
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    held = _run(ambient.reconcile(True, "#f5da8c"))
+    assert held["status"] == "on"
+
+    async def _drift_out_of_band():
+        async with ambient._bridge_client(dev.config) as client:
+            await ambient._hue_put(client, "/clip/v2/resource/light/l1",
+                                   {"color": {"xy": {"x": 0.15, "y": 0.06}}})
+    _run(_drift_out_of_band())
+    sleep_spy.clear()
+
+    result = _run(ambient.repair_stragglers(["l1"], "#f5da8c"))
+
+    assert result == {"repaired": ["l1"], "left_off": [], "unconfirmed": []}
+    assert sleep_spy == [0.2], (
+        "repair's settle must be AMBIENT_CONFIRM_SETTLE_MS alone — its write "
+        "has no ramp, so AMBIENT_TRANSITION_MS must never be added")
+
+
 def test_repair_stragglers_never_relights_a_light_that_reads_off(monkeypatch, bridge):
     """A bulb he turned off himself must stay off — repair_stragglers
     checks fresh, immediately before writing, and issues no PUT at all to
