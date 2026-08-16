@@ -407,10 +407,8 @@ class TriggerEngine:
         await engine.fire_scene_update_event(intensity)
 
     async def _default_select_color_set(self, set_id: str) -> None:
-        from spectra.services import color_sets, engine
-        card = color_sets.get_by_id(set_id)
-        if card is None or card.kind != "set":
-            raise ValueError(f"colour set '{set_id}' not found")
+        from spectra.services import color_set_groups, engine
+        card = color_set_groups.resolve_ref(set_id)  # §10 — resolves a Group to its picked member
         await engine.conductor.apply_set_directly(card)
 
     async def _default_auto_generate(self, uri: str) -> None:

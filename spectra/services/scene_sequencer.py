@@ -57,7 +57,7 @@ async def fire_scene_by_id(scene_id: str,
     intensity pass through as the caller resolved them, same as legacy's
     "reassert with normal First/Rest." A forced id pointing at a missing
     scene is treated as unset (falls through to the requested scene)."""
-    from spectra.services import color_sets, fire_history, scene_compiler, scene_store
+    from spectra.services import color_set_groups, color_sets, fire_history, scene_compiler, scene_store
     from spectra.services.room_controls import load_room_controls
     controls = load_room_controls()
     if controls.force_scene_enabled and controls.force_scene_scene_id:
@@ -67,6 +67,11 @@ async def fire_scene_by_id(scene_id: str,
     if scene is None:
         raise ValueError(f"scene {scene_id} not found in spectra scenes")
     color_set = color_sets.get_by_id(color_set_id) if color_set_id else None
+    if color_set is not None:
+        # A Group reference resolves to its picked member here (§10) — a
+        # missing/unusable one falls back to the room's active set below,
+        # same as an unknown plain set id already did.
+        color_set = color_set_groups.resolve_for_fire(color_set)
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
                                              color_set=color_set, dry_run=False)
     fire_history.record_fire("scenes", scene_id, {

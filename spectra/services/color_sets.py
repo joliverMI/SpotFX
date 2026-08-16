@@ -1,11 +1,18 @@
 """Read-only Colour Set access for SPECTRA.
 
-Colour sets are spot-effects storage (storage/color_sets.json); SPECTRA
-reads them by the one-directional bridge contract and NEVER writes — the
-global scene opt-out toggle is the single exception, done through the
-spot-effects API by the frontend, not through this module. The model here is
-a projection: just the fields the scene filter, wheel math, and compiler
-consume. Unknown fields in storage are ignored, never round-tripped.
+Colour sets are spot-effects storage (storage/color_sets.json); SPECTRA's
+own backend reads them by the one-directional bridge contract and NEVER
+writes — authoring (create/edit/delete a Set or Group, incl. the global
+scene opt-out toggle) goes through the spot-effects API directly from the
+frontend (its own supported, already-general surface), not through this
+module. The model here is a projection: just the fields the scene filter,
+wheel math, compiler, and (kind=="group") pool resolution consume. Unknown
+fields in storage are ignored, never round-tripped — safe ONLY because
+nothing here ever writes storage back; the frontend's write path talks to
+spot-effects' own unmodified model instead, so nothing an agent doesn't
+render here (dark_variant/light_variant mode lanes, entries' accent_color/
+ramp_ms — all owner-retired or unused by SPECTRA, §36/§42) is ever at risk
+of being silently dropped on save.
 """
 from __future__ import annotations
 
@@ -36,12 +43,33 @@ class ColorSetEntry(BaseModel):
     background_brightness: float | None = None
 
 
+class GroupMember(BaseModel):
+    """One reference to a Color Set within a Group, with a selection weight
+    (weighted mode only)."""
+    color_set_id: str
+    weight:       float = 1.0
+
+
 class ColorSetCard(BaseModel):
     id:      str
     name:    str
+    color:   str = "#FFD700"   # swatch, also the wheel-dot fallback tint
     kind:    Literal["set", "group"] = "set"
+    labels:  list[str] = Field(default_factory=list)
     entries: list[ColorSetEntry] = Field(default_factory=list)
     scene_v2_opt_out: bool = False
+
+    # kind == "group" (day-one bar item §10 — see color_set_groups.py for
+    # the pick/merge logic that actually consumes these): members is the
+    # pool, mode/cycle_behavior/exclude_current pick within it, entries (the
+    # field above) act as a field-level OVERRIDE layer on top of whichever
+    # member gets picked. Defaults mirror legacy's and match every one of
+    # his 8 real authored groups (storage/color_sets.json, 2026-08-15).
+    members:         list[GroupMember] = Field(default_factory=list)
+    mode:            Literal["cycle", "weighted"] = "cycle"
+    cycle_behavior:  Literal["wrap", "bounce"] = "wrap"
+    exclude_current: bool = True
+    palette_sync:    bool = False
 
     model_config = {"extra": "ignore"}
 

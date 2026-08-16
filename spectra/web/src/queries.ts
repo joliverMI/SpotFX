@@ -1,6 +1,6 @@
 /** Data hooks for the SPECTRA app (react-query). */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxGet, spotfxPost } from './api/client';
+import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spotfxPost } from './api/client';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   ColorWheelPosition, DevicePreviewFavorites, DevicePreviewStatus, DriftProfile, EngineStatus,
@@ -79,6 +79,33 @@ export function useToggleSetOptOut() {
     mutationFn: (card: SpotColorSetCard) =>
       spotfxPost('/color-sets', { ...card, scene_v2_opt_out: !card.scene_v2_opt_out }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spot-color-sets'] }),
+  });
+}
+
+/** Create/update a Set or a Group (§10) — spot-effects' own upsert-by-id
+ * POST, the same endpoint useToggleSetOptOut already uses. */
+export function useSaveColorSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (card: SpotColorSetCard) => spotfxPost('/color-sets', card),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spot-color-sets'] }),
+  });
+}
+
+export function useDeleteColorSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => spotfxDel(`/color-sets/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spot-color-sets'] }),
+  });
+}
+
+/** Apply a Set (or a Group — §10, picks one member and merges its own
+ * override entries) to the room right now — the same POST the room-colour
+ * apply surface uses; used here as the authoring page's live test/preview. */
+export function useApplyColorSet() {
+  return useMutation({
+    mutationFn: (setId: string) => apiPost('/room-color/apply', { set_id: setId }),
   });
 }
 

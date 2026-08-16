@@ -69,7 +69,11 @@ export default function SpectraTriggerDialog({
   if (!trigger) return null;
 
   const sceneName = (id: string) => scenes?.find((s) => s.id === id)?.name ?? id;
-  const sets = (colorSets ?? []).filter((c) => c.kind === 'set');
+  // Groups (§10) are a valid colour-set reference here too — the fire
+  // choke point picks a member from the pool at fire time.
+  const setOptions = (colorSets ?? []).map((c) => ({
+    value: c.id, label: c.name, group: c.kind === 'group' ? 'group' : undefined,
+  }));
   const recents = readSticky<RecentAction[]>('recentSpectraActions', []);
 
   const valid =
@@ -167,7 +171,7 @@ export default function SpectraTriggerDialog({
               <span style={{ width: 90, color: 'var(--text-muted)' }}>Colours</span>
               <SearchSelect value={action.color_set_id ?? ''}
                 onChange={(v) => setAction({ ...action, color_set_id: v || null })}
-                options={sets.map((c) => ({ value: c.id, label: c.name }))}
+                options={setOptions}
                 placeholder="— room's active set —" width={260} allowEmpty />
             </label>
           </>
@@ -199,7 +203,7 @@ export default function SpectraTriggerDialog({
             <span style={{ width: 90, color: 'var(--text-muted)' }}>Colours</span>
             <SearchSelect value={action.set_id}
               onChange={(v) => setAction({ ...action, set_id: v })}
-              options={sets.map((c) => ({ value: c.id, label: c.name }))}
+              options={setOptions}
               placeholder="— pick a colour set —" width={260} allowEmpty={false} />
           </label>
         )}

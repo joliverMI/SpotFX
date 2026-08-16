@@ -208,6 +208,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'palette filter accept opt out search wheel rainbow',
         body: [
           'Type in the filter box to narrow the set list live. Accept-all takes every set that hasn\'t opted out globally; unchecking narrows to an explicit list (per-set only — groups expand to their members). The wheel dot shows each set\'s hue position; 🌈 marks rainbow sets (no single position — they never move the room\'s wheel). "Opt out" is GLOBAL (every scene) and asks for confirmation; it is stored on the spot-effects side, the shared colour library.',
+          'To create, edit, or delete a Colour Set or a Group, use the Colours page (nav bar) — see "Colour Sets & Groups page".',
         ],
       },
       {
@@ -301,6 +302,50 @@ export const HELP_SECTIONS: HelpSection[] = [
         id: 'journey-rainbow',
         title: 'Rainbow sets pause the walk',
         body: ['Rainbow and achromatic palettes have no wheel position, so the walk pauses while one is live (the bearing is kept) and resumes when a chromatic set returns. A rainbow set is never a destination — it is everywhere and nowhere on the wheel.'],
+      },
+    ],
+  },
+  {
+    id: 'colorsets-groups',
+    title: 'Colour Sets & Groups page',
+    keywords: 'palette library author create edit delete swatch entries members rotate synced pool',
+    intro:
+      'Create, edit, and delete Colour Sets (named FG/BG palettes) and Groups (rotating/synced pools of Sets), both kinds. Writes go through spot-effects\' own shared colour-set storage — the same library the sequencer, drift conductor, and every scene already read — so an edit here is visible everywhere immediately. Drafts live locally until Save, same convention as the Scenes page.',
+    entries: [
+      {
+        id: 'colorsets-groups-page',
+        title: 'Sets vs Groups, and the toolbar',
+        keywords: 'apply now proof rotation cursor test fire preview',
+        body: [
+          'A Set is a reusable palette: entries scoped to a device/category/role, each with FG colour, BG colour + mode, and brightness — applied wherever the room\'s active Colour Set lands. A Group is an ordered/weighted pool of Sets: firing a Group picks ONE member (see "Palette Sync" and "Group overrides" below) instead of applying a fixed palette.',
+          '▶ Apply to room sends this card straight to the live room the same way the sequencer or a select_color_set trigger would — the honest proof surface: press it on a Group repeatedly and watch which member it names each time (the toast shows the pick). Save first if the card has unsaved edits; Apply always acts on the saved version.',
+        ],
+      },
+      {
+        id: 'colorsets-group-mechanics',
+        title: 'How a Group picks — cycle, bounce, weighted',
+        keywords: 'wrap advance sequential random order',
+        body: [
+          'Cycle (the default): members fire in list order. Wrap loops back to the top; Bounce reverses direction at each end instead of jumping back to the start. A cycling Group never re-fires the member currently showing — reordering members changes the sequence, not just labels.',
+          'Weighted: each member rolls with a chance proportional to its weight. "Exclude current from next roll" (weighted mode only — cycle already never repeats by construction) zeroes the showing member\'s weight for that roll so back-to-back picks favour variety; if that would zero every weight (a group of one), the roll falls back to the raw weights rather than jamming.',
+        ],
+      },
+      {
+        id: 'colorsets-palette-sync',
+        title: 'Palette Sync',
+        keywords: 'anchor hue nearest current room wheel reanchor',
+        body: [
+          'A synced Group starts its pick from wherever the room\'s colour actually is, instead of its own private cycle position: the room\'s current Colour Set when it happens to be a member of this Group, else the member whose hue is nearest the room\'s current wheel position. From that anchor it advances one step by the Group\'s normal cycle/weighted rule. Switching between two synced Groups therefore keeps the room on one colour family instead of jumping cold — the point of the name.',
+          'With Palette Sync off, a Group keeps its own private cursor regardless of what the room is currently showing.',
+        ],
+      },
+      {
+        id: 'colorsets-group-overrides',
+        title: 'Group overrides',
+        keywords: 'layer replace field win merge scope',
+        body: [
+          'A Group\'s own Overrides section is a second, higher-priority layer of entries applied ON TOP of whichever member Set gets picked: any field an override entry sets (colour, BG, brightness…) replaces the member\'s value for the virtuals its scope resolves to; fields it leaves blank keep the member\'s own value. An override entry can also reach virtuals the picked member\'s own entries never touch, so a Group-level clamp (e.g. "always keep Matrix dim") behaves the same no matter which member gets picked.',
+        ],
       },
     ],
   },
