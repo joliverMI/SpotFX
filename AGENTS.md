@@ -95,6 +95,25 @@ still forces a `prompt()`-named profile before any edit and has no
 Detach/Promote; left as-is since that Scenes page is frozen pending SPECTRA
 superseding it.
 
+## A scene's stored data is not proof he authored it
+
+Found 2026-08-15 (`docs/spectra-star-edges-freeze.md`, `docs/SPECTRA_SPEC.md`
+§54): his legacy STAR scene authored `edges` as a bare static `6`; the
+SPECTRA rebuild silently replaced it with a random dice binding plus two
+"patch" flare kinds that exist nowhere in his legacy data — he never asked
+for any of it, and only noticed because his six-pointed star stopped being
+six-pointed. He cannot edit `spectra/models/scene.py`'s storage layer
+himself, so nothing catches this kind of drift but a human noticing the
+room looks wrong.
+
+**The rule this is evidence for: an artifact's presence in his scene data is
+NOT evidence he authored it.** "His own tuning" is a claim that needs
+provenance, not an inference from what's currently stored. Before arguing a
+scene field reflects his intent, check his legacy data (spot-effects'
+pre-rebuild source, not what SPECTRA currently stores) — and never treat
+"migrated from legacy" alone as proof of authorship; it establishes only
+that something is old, not that he put it there.
+
 ## SPECTRA trigger authoring (THE KEYSTONE — mid-song clock)
 
 Binding decision: scene changes are driven by triggers

@@ -64,6 +64,13 @@ class ValueBinding(BaseModel):
     # Correlated randomness: 🎲 bindings sharing a letter share one roll per
     # fire. Only meaningful with signal="random"; None = independent roll.
     dice: Optional[str] = None
+    # STICKY (Admiral order, STAR edges, 2026-08-15): a signal="random"
+    # binding still rolls fresh at every FIRE (resolve_scene is unaffected —
+    # this does not touch that), but is skipped by a "Dice Re-roll" flare
+    # kind's mid-run sweep (scene_response.py::_reroll checks this exactly),
+    # so the fire's initial roll holds for the rest of that scene's run.
+    # Default False keeps every existing binding's behaviour unchanged.
+    sticky: bool = False
 
     @model_validator(mode="after")
     def _sort_steps(self) -> "ValueBinding":
