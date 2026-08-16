@@ -27,6 +27,7 @@ import type { ReviewSession } from '../types';
 import ReviewEntryList from './components/ReviewEntryList';
 import ReviewLaneBar from './components/ReviewLaneBar';
 import ReviewNoteDetail from './components/ReviewNoteDetail';
+import SonicUsageCard from './components/SonicUsageCard';
 
 function fmtSessionLabel(s: ReviewSession): string {
   const when = new Date(s.received_ms);
@@ -93,6 +94,8 @@ export default function ReviewPage() {
 
   return (
     <div>
+      <SonicUsageCard />
+
       <div className="card">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           Review <HelpLink topic="review-page" />

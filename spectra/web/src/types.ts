@@ -877,3 +877,43 @@ export interface IntensityScaleMark {
   manual_min: number;
   manual_max: number;
 }
+
+/** GET /api/sonic-usage — Sonic's REAL reported token usage (spectra/
+ * services/sonic_usage.py), review page. `day`/`week` are fixed periods
+ * anchored Monday 22:00 America/New_York (his own ruling, not rolling
+ * windows) — each period_start_ms is the boundary the sums are since.
+ * last_query is null when Sonic has never completed a turn with reported
+ * usage; cost_usd is null when no recorded call in that slice reported a
+ * cost (the "api" backend never does — see the service module docstring). */
+export interface SonicUsagePeriod {
+  query_count: number;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  cost_usd: number | null;
+  period_start_ms: number;
+}
+
+export interface SonicUsageLastQuery {
+  wall_ms: number;
+  backend: string;
+  model: string;
+  session_id: string | null;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  cost_usd: number | null;
+}
+
+export interface SonicUsageSummary {
+  last_query: SonicUsageLastQuery | null;
+  day: SonicUsagePeriod;
+  week: SonicUsagePeriod;
+  as_of_ms: number;
+  timezone: string;
+  day_boundary_hour_local: number;
+}

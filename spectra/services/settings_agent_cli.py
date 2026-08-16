@@ -114,6 +114,7 @@ from pathlib import Path
 from typing import Optional
 
 from spectra import config
+from spectra.services import sonic_usage
 from spectra.services.settings_agent import SYSTEM_PROMPT, TOOLS, SettingsAgentUnavailable
 
 logger = logging.getLogger(__name__)
@@ -252,6 +253,40 @@ def _verify_tool_manifest(events: list[dict]) -> None:
             f"{MCP_SERVER_NAME!r} connected -- refusing to trust this turn")
 
 
+def _record_usage(events: list[dict]) -> None:
+    """Real reported usage for the whole `-p` call, read off the final
+    `result` event's own `usage`/`modelUsage`/`total_cost_usd` fields
+    (report.md's live re-proof confirmed these are populated on real
+    calls — see this module's fixture inventory) — never estimated. Runs
+    BEFORE _verify_tool_manifest/_parse_transcript's own trust decisions:
+    tokens were genuinely spent even on a turn whose transcript later gets
+    refused, so usage is recorded first and independently. Skipped
+    (nothing recorded) when there's no result event or it carries no
+    `usage` key at all — that is the "runtime didn't report it" case
+    sonic_usage.py's module docstring says never to paper over with a
+    fabricated zero. Never raises — a broken usage record must never
+    break a real chat turn."""
+    final = next((e for e in reversed(events) if e.get("type") == "result"), None)
+    if final is None or "usage" not in final:
+        return
+    usage = final.get("usage") or {}
+    model_usage = final.get("modelUsage") or {}
+    model_name = next(iter(model_usage), None) or config.settings_agent_model()
+    try:
+        sonic_usage.record(
+            backend="cli", model=model_name,
+            input_tokens=usage.get("input_tokens", 0) or 0,
+            output_tokens=usage.get("output_tokens", 0) or 0,
+            cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0) or 0,
+            cache_read_input_tokens=usage.get("cache_read_input_tokens", 0) or 0,
+            cost_usd=final.get("total_cost_usd"),
+            session_id=final.get("session_id"),
+            rounds=final.get("num_turns"),
+        )
+    except Exception:
+        logger.exception("sonic-usage record failed (cli backend)")
+
+
 def _parse_transcript(events: list[dict]) -> dict:
     """Structured-only parse -- see module docstring's "WHY THE MODEL'S
     OWN PROSE IS NEVER TRUSTED" section. `changes` comes exclusively from
@@ -340,4 +375,5 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
     if not isinstance(events, list):
         events = [events]
 
+    _record_usage(events)
     return _parse_transcript(events)

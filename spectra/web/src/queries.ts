@@ -6,8 +6,8 @@ import type {
   ColorWheelPosition, DevicePreviewFavorites, DevicePreviewStatus, DriftProfile, EngineStatus,
   FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark, Registry, ReviewSession,
   ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult, SceneV2,
-  SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange, SpectraTrigger,
-  SpotColorSetCard, TranscribeResult, UndoResult,
+  SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
+  SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
 } from './types';
 
 /* ── scenes ── */
@@ -472,6 +472,20 @@ export function useReviewTimeline(sessionId: string | null, uri: string | null) 
     queryFn: () => apiGet<ReviewTimeline>(
       `/review/timeline?session_id=${enc(sessionId!)}&uri=${enc(uri!)}`),
     enabled: !!sessionId && !!uri,
+  });
+}
+
+/* ── Sonic token usage (review page — spectra/services/sonic_usage.py) ── */
+
+/** GET /api/sonic-usage — last query / this fixed day / this fixed week
+ * (Monday 22:00 America/New_York anchored, not rolling — see the service
+ * module's docstring). Polled: Sonic can be called from other tabs/pages
+ * (Settings, or the Scenes-page chat popover) while this one is open. */
+export function useSonicUsage() {
+  return useQuery({
+    queryKey: ['sonic-usage'],
+    queryFn: () => apiGet<SonicUsageSummary>('/sonic-usage'),
+    refetchInterval: 60_000,
   });
 }
 
