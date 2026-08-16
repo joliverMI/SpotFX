@@ -247,25 +247,25 @@ def test_settings_mcp_server_starts_from_a_clean_cwd(tmp_path):
 
 # ═══ 5. transcript parsing: structured data only, never the model's prose.
 #
-# The Admiral's scene/flare widening (2026-08-15) grew settings_agent.
-# ALL_OPERATIONS (and therefore TOOL_NAMES) from {get_settings, set_setting}
-# to eleven names. The four `cli_transcript_*.json` fixtures below (NOT the
-# `_synthetic_` ones further down) are REAL, historical captures pinned to
-# the tool surface as it existed when this module was FIRST built -- their
-# `system/init.tools` field is exactly the old two-name set, unchanged
-# because it's historical evidence, not something to edit to keep old
-# fixtures passing. Re-running them against the CURRENT, wider TOOL_NAMES
-# therefore now correctly REFUSES every one of them (a stale/narrower-than-
-# expected manifest, the exact failure mode #5 in the module docstring
-# exists to catch) -- this is the widening's own regression proof: the
-# manifest check did not get loosened to keep old fixtures superficially
-# green. Behavioral coverage for the CURRENT surface (a real applied
-# change, a real rejection, a correct manifest with hallucinated prose, an
-# unavailable-tool fabrication) is re-proven below in section 5b against
-# hand-built `_synthetic_` fixtures, since no live CLAUDE_CODE_OAUTH_TOKEN
-# exists tonight to capture new real ones (his room is asleep) -- those
-# fixtures are explicitly labelled synthetic, never claimed as live
-# captures. ════════════════════════════════════════════════════════════
+# TWO widenings have grown settings_agent.ALL_OPERATIONS (and therefore
+# TOOL_NAMES) since this module was first built: 2026-08-15's scene/flare
+# authority ({get_settings, set_setting} -> 11 names) and, the same night,
+# his follow-up overwrite/backup/undo/preview/restore ask (11 -> 16 names).
+# Every `cli_transcript_*.json` fixture NOT prefixed `_synthetic_` is a
+# REAL, historical capture pinned to whichever tool surface existed at
+# capture time — never edited to keep passing, because that would falsify
+# the evidence. Re-run against the CURRENT, wider TOOL_NAMES, every one of
+# them now correctly REFUSES as a stale/narrower-than-expected manifest
+# (failure mode #5 in the module docstring) — the standing regression
+# proof that neither widening loosened the check to keep old fixtures
+# superficially green. Behavioral coverage for the CURRENT (16-tool)
+# surface is re-proven in section 5b (scene/flare, from the first
+# widening — still exercised, since those operations are still live) and
+# 5c (overwrite/backup/undo/preview/restore, from tonight's widening)
+# against hand-built `_synthetic_` fixtures, since no live
+# CLAUDE_CODE_OAUTH_TOKEN exists tonight to capture new real ones (his
+# room is asleep) — those fixtures are explicitly labelled synthetic,
+# never claimed as live captures. ════════════════════════════════════════
 
 def test_old_real_captures_are_now_correctly_refused_as_a_stale_manifest():
     from spectra.services import settings_agent_cli as sac
@@ -273,6 +273,26 @@ def test_old_real_captures_are_now_correctly_refused_as_a_stale_manifest():
 
     for fixture in ("cli_transcript_applied.json", "cli_transcript_rejected.json",
                     "cli_transcript_hallucinated_capabilities_claim.json"):
+        with pytest.raises(SettingsAgentUnavailable, match="tool manifest"):
+            sac._parse_transcript(_load(fixture))
+
+
+def test_first_widenings_synthetic_scene_fixtures_are_now_ALSO_correctly_refused():
+    """The three `cli_transcript_synthetic_scene_*` fixtures built for the
+    FIRST widening (11-tool surface) are themselves now stale against the
+    16-tool surface tonight's overwrite/backup ask added — proving the
+    check keeps catching drift even against fixtures that were themselves
+    synthetic-but-current a few hours ago, not just against the original
+    real captures. (The unavailable-tool fixture from that same widening
+    is unaffected — an empty manifest mismatches any non-empty expected
+    set regardless of how large it grows — see test_parse_transcript_
+    refuses_the_unavailable_tool_fabrication_case_for_scenes below.)"""
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    for fixture in ("cli_transcript_synthetic_scene_applied.json",
+                    "cli_transcript_synthetic_scene_rejected.json",
+                    "cli_transcript_synthetic_scene_correct_manifest_hallucinated_prose.json"):
         with pytest.raises(SettingsAgentUnavailable, match="tool manifest"):
             sac._parse_transcript(_load(fixture))
 
@@ -292,53 +312,9 @@ def test_parse_transcript_refuses_a_live_tool_manifest_mismatch():
         sac._parse_transcript(_load("cli_transcript_manifest_mismatch.json"))
 
 
-# ═══ 5b. behavioral re-proof against the WIDENED scene/flare surface, with
-# SYNTHETIC (hand-built, clearly labelled) fixtures -- see the section-5
-# header comment for why these are synthetic rather than live captures. ══
-
-def test_parse_transcript_extracts_a_real_applied_scene_change():
-    """Proves _parse_transcript's structured-only extraction generalizes
-    to a SCENE operation, not just set_setting -- `changes` comes from the
-    tool_result's own `status` field regardless of which operation name
-    produced it (see _parse_transcript's own docstring: a property of the
-    result SHAPE, not a hardcoded tool-name suffix check anymore)."""
-    from spectra.services import settings_agent_cli as sac
-
-    result = sac._parse_transcript(_load("cli_transcript_synthetic_scene_applied.json"))
-    assert len(result["changes"]) == 1
-    change = result["changes"][0]
-    assert change["status"] == "applied"
-    assert change["op"] == "set_scene_setting"
-    assert change["scene_id"] == "scene-fixture-0001"
-    assert change["new_value"] == 1500
-    assert result["reply"]
-
-
-def test_parse_transcript_a_rejected_scene_change_applies_nothing():
-    from spectra.services import settings_agent_cli as sac
-
-    result = sac._parse_transcript(_load("cli_transcript_synthetic_scene_rejected.json"))
-    assert result["changes"] == [], \
-        "a rejected set_scene_setting tool_result must never be counted as applied"
-    assert "0-20000" in result["reply"] or "legal" in result["reply"].lower()
-
-
-def test_parse_transcript_ignores_hallucinated_scene_capability_claims():
-    """The tool manifest is genuinely correct (all eleven current tools,
-    MCP server connected) and no tool was ever called, yet the model's
-    own final reply text claims a scene and a flare kind were created.
-    This must not be mistaken for anything having been applied --
-    `changes` is built only from real tool_result blocks, of which there
-    are none in this transcript."""
-    from spectra.services import settings_agent_cli as sac
-
-    result = sac._parse_transcript(
-        _load("cli_transcript_synthetic_scene_correct_manifest_hallucinated_prose.json"))
-    assert result["changes"] == []
-    assert "Sunset Drift" in result["reply"], \
-        "the hallucination is real and present in the reply text -- " \
-        "the point is that `changes` doesn't believe it"
-
+# ═══ 5b. the unavailable-tool fabrication case from the FIRST widening —
+# still valid unchanged: an empty manifest ([]) mismatches any non-empty
+# expected TOOL_NAMES regardless of how large it later grows. ═══════════
 
 def test_parse_transcript_refuses_the_unavailable_tool_fabrication_case_for_scenes():
     """THE failure this task was told to hunt explicitly: a tool
@@ -358,6 +334,64 @@ def test_parse_transcript_refuses_the_unavailable_tool_fabrication_case_for_scen
 
     with pytest.raises(SettingsAgentUnavailable, match="tool manifest"):
         sac._parse_transcript(_load("cli_transcript_synthetic_scene_unavailable_tool_fabrication.json"))
+
+
+# ═══ 5c. behavioral re-proof against TONIGHT'S widening — overwrite_scene/
+# restore_scene_backup/undo_last_scene_change/backup verification — the
+# deploy hold's own explicit ask: "a fabricated 'I restored that for you'
+# must be caught against stored data." SYNTHETIC (hand-built, clearly
+# labelled) fixtures at the CURRENT 16-tool manifest. ════════════════════
+
+def test_parse_transcript_extracts_a_real_applied_overwrite():
+    """Proves the structured-only extraction generalizes to
+    overwrite_scene specifically — his first genuinely destructive scene
+    operation — same property as every other operation: `changes` comes
+    from the tool_result's own `status` field, never the reply text."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(_load("cli_transcript_synthetic_overwrite_applied.json"))
+    assert len(result["changes"]) == 1
+    change = result["changes"][0]
+    assert change["status"] == "applied"
+    assert change["op"] == "overwrite_scene"
+    assert change["scene_id"] == "scene-fixture-0002"
+    assert change["backup_id"] == "backup-0001", \
+        "the applied result must carry the backup id the edit was verified against"
+    assert result["reply"]
+
+
+def test_parse_transcript_an_overwrite_refused_for_a_failed_backup_applies_nothing():
+    """The exact adversarial case named by the deploy hold: 'an overwrite
+    attempted while the backup mechanism FAILS must REFUSE' -- proven here
+    at the transcript-parsing layer (the real tool_result the mechanism
+    itself would produce), complementing test_scene_console.py's proof at
+    the mechanism layer directly."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_overwrite_backup_failed_rejected.json"))
+    assert result["changes"] == [], \
+        "a backup-verification rejection must never be counted as applied"
+    assert "back up" in result["reply"].lower() or "backup" in result["reply"].lower()
+
+
+def test_parse_transcript_catches_a_fabricated_restore_claim():
+    """THE deploy hold's other named case, quoted verbatim: 'a fabricated
+    "I restored that for you" must be caught against stored data.' Here
+    the tool manifest is genuinely correct (all 16 current tools, MCP
+    server connected) and no tool was EVER called, yet the model's final
+    reply claims a restore happened. `changes` must stay empty --
+    verifying "the restore really happened" against stored scene data is
+    exactly what test_scene_console.py's own restore/undo tests do at the
+    mechanism layer; this proves the CLI transcript layer can't be talked
+    into believing a restore that never ran."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(_load("cli_transcript_synthetic_restore_hallucinated_prose.json"))
+    assert result["changes"] == []
+    assert "restored" in result["reply"].lower(), \
+        "the fabrication is real and present in the reply text -- " \
+        "the point is that `changes` doesn't believe it"
 
 
 # ═══ 6. live smoke test (skipped: no CLAUDE_CODE_OAUTH_TOKEN here, and ═══

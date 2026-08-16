@@ -703,6 +703,17 @@ kbd {
   align-self: flex-start;
   background: var(--surface2);
 }
+/* A preview/check-in message is a READ of stored data, never the model's
+ * own account of itself — styled distinctly (monospace, dashed border) so
+ * it never visually blends with Sonic's own prose (SonicChatPopover.tsx /
+ * scene_console.py's get_scene_preview). */
+.settings-console-msg-preview {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
 .settings-console-input-row { display: flex; gap: 8px; align-items: center; }
 .settings-console-input-row input[type='text'] { flex: 1; }
 

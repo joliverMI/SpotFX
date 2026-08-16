@@ -6,7 +6,7 @@ import type {
   ColorWheelPosition, DriftProfile, EngineStatus, FeedbackCapture, FeedbackEntry,
   FireResult, Registry, ReviewSession, ReviewTimeline, RoomColorState, RoomControlState,
   RoomControlsSaveResult, SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry,
-  SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
+  SonicAppliedChange, SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
 } from './types';
 
 /* ── scenes ── */
@@ -458,6 +458,18 @@ export function useUndoLastSetting() {
   return useMutation({
     mutationFn: () => apiPost<UndoResult>('/settings-console/undo'),
     onSuccess: () => invalidateSettingsConsole(qc),
+  });
+}
+
+/** POST /settings-console/scene-undo — the plain, model-free "undo last
+ * agent change" button (his own words) for the SCENE domain. Deliberately
+ * NOT routed through Sonic's chat — undo is a deterministic restore from
+ * an already-verified backup, so it needs no live model call. */
+export function useUndoLastSceneChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<SonicAppliedChange>('/settings-console/scene-undo'),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['spectra-scenes'] }); },
   });
 }
 

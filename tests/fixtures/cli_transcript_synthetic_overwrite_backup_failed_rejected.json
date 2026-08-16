@@ -1,0 +1,100 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "cwd": "/tmp/spectra-settings-agent-cli-overwrite-widening/neutral_cwd",
+    "session_id": "synthetic-overwrite-rejected-0001",
+    "tools": [
+      "mcp__settings-console__create_scene",
+      "mcp__settings-console__get_flare_kind",
+      "mcp__settings-console__get_scene_preview",
+      "mcp__settings-console__get_scene_settings",
+      "mcp__settings-console__get_settings",
+      "mcp__settings-console__list_flare_kinds",
+      "mcp__settings-console__list_operations",
+      "mcp__settings-console__list_scene_backups",
+      "mcp__settings-console__list_scenes",
+      "mcp__settings-console__overwrite_scene",
+      "mcp__settings-console__remove_flare_kind",
+      "mcp__settings-console__restore_scene_backup",
+      "mcp__settings-console__set_flare_kind",
+      "mcp__settings-console__set_scene_setting",
+      "mcp__settings-console__set_setting",
+      "mcp__settings-console__undo_last_scene_change"
+    ],
+    "mcp_servers": [
+      { "name": "settings-console", "status": "connected" }
+    ],
+    "model": "claude-sonnet-5",
+    "permissionMode": "default",
+    "apiKeySource": "none",
+    "claude_code_version": "synthetic"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-sonnet-5",
+      "id": "msg_synthetic_overwrite_rej_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_synthetic_overwrite_rej_1",
+          "name": "mcp__settings-console__overwrite_scene",
+          "input": { "scene_id": "scene-fixture-0002", "name": "STAR (hijacked)" }
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "synthetic-overwrite-rejected-0001",
+    "uuid": "uuid-synthetic-overwrite-rej-1a"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_synthetic_overwrite_rej_1",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"status\": \"rejected\", \"reason\": \"backup could not be verified for scene 'scene-fixture-0002' — refusing the edit (nothing was written to the scene)\"}"
+            }
+          ],
+          "is_error": true
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "synthetic-overwrite-rejected-0001",
+    "uuid": "uuid-synthetic-overwrite-rej-1b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-sonnet-5",
+      "id": "msg_synthetic_overwrite_rej_2",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "I couldn't back up that scene before editing it, so nothing was changed — the edit was refused rather than risking your data. Want me to try again?" }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "synthetic-overwrite-rejected-0001",
+    "uuid": "uuid-synthetic-overwrite-rej-2"
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "duration_api_ms": 1000,
+    "num_turns": 2,
+    "stop_reason": "end_turn",
+    "session_id": "synthetic-overwrite-rejected-0001",
+    "result": "I couldn't back up that scene before editing it, so nothing was changed — the edit was refused rather than risking your data. Want me to try again?"
+  }
+]

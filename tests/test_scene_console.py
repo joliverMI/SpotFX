@@ -59,6 +59,8 @@ def _isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "SPECTRA_STORAGE", tmp_path)
     monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
     monkeypatch.setattr(scfg, "SCENE_AGENT_LOG_FILE", tmp_path / "scene_agent_log.json")
+    monkeypatch.setattr(scfg, "SCENE_BACKUPS_FILE", tmp_path / "scene_backups.json")
+    monkeypatch.setattr(scfg, "SCENE_GENESIS_FILE", tmp_path / "scene_genesis.json")
     monkeypatch.setattr(scfg, "SETTINGS_LOG_FILE", tmp_path / "settings_log.json")
     monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", tmp_path / "room_controls.json")
     monkeypatch.setattr(scfg, "COLOR_SETS_FILE", tmp_path / "color_sets.json")
@@ -286,16 +288,18 @@ def test_scene_operations_never_touch_a_scene_they_were_not_targeted_at():
         assert after_snapshot == before_snapshot[sid], f"scene {name!r} ({sid}) was touched"
 
 
-def test_no_delete_or_wholesale_overwrite_operation_exists():
+def test_no_delete_operation_exists_and_no_write_ever_touches_devices():
+    """overwrite_scene is now a real, deliberate operation (his own
+    2026-08-15 follow-up ask) — but there is STILL no way to delete a
+    scene by id, and device/effect editing is STILL out of scope (that
+    boundary wasn't reversed by this widening, only overwrite was)."""
     from spectra.services import scene_console as sc
     from spectra.services import settings_agent as sa
 
-    for forbidden in ("delete_scene", "overwrite_scene", "update_scene", "save_scene", "set_scene"):
+    assert "overwrite_scene" in sc.OPERATIONS, "his ask — this one should exist now"
+    for forbidden in ("delete_scene", "update_scene", "save_scene", "set_scene"):
         assert forbidden not in sc.OPERATIONS
         assert forbidden not in sa.ALL_OPERATIONS
-    # every scene write op's handler signature never accepts a `devices`
-    # argument — device/effect editing is out of scope by construction,
-    # not by convention.
     import inspect
     for name, op in sc.OPERATIONS.items():
         if op.kind == "write":
@@ -474,7 +478,8 @@ def test_run_turn_only_counts_a_change_the_dispatcher_actually_applied(monkeypat
         "the real, structured change actually landed in storage"
 
 
-# ═══ 8. API layer stays generic — no scene-specific endpoint needed ═════
+# ═══ 8. API layer — mostly generic (POST /message serves both domains),
+# plus ONE scene-specific endpoint: the plain, model-free undo button. ═══
 
 def test_api_message_503_without_api_key_mentions_no_operation_leak(monkeypatch):
     from fastapi.testclient import TestClient
@@ -487,3 +492,476 @@ def test_api_message_503_without_api_key_mentions_no_operation_leak(monkeypatch)
     r = client.post("/api/settings-console/message", json={"text": "create a scene called Test"})
     assert r.status_code == 503
     assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
+def test_api_scene_undo_needs_no_model_and_actually_restores():
+    """The button his words asked for: 'an easy to undo last agent change
+    button.' Proves it works with NO ANTHROPIC_API_KEY configured at all
+    (unlike /message) — undo is a deterministic restore, not a chat turn."""
+    from fastapi.testclient import TestClient
+
+    from spectra.app import create_app
+    from spectra.services import scene_store
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(name="Throwaway", entry_ramp_ms=0)
+    scene_store.save(scene)
+
+    client = TestClient(create_app())
+    r = client.post("/api/settings-console/scene-undo")
+    assert r.status_code == 409, "nothing applied yet — nothing to undo"
+
+    r = client.post("/api/scenes", json=SceneV2(
+        **{**scene.model_dump(), "entry_ramp_ms": 1500}).model_dump())
+    assert r.status_code == 200
+    # That was a human PUT through the ordinary scenes API, not a Sonic
+    # edit — it must NOT be undoable via scene-undo (no backup_id).
+    r = client.post("/api/settings-console/scene-undo")
+    assert r.status_code == 409
+
+    from spectra.services import scene_console as sc
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 500))
+
+    r = client.post("/api/settings-console/scene-undo")
+    assert r.status_code == 200
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 1500, \
+        "the scene is genuinely back to its pre-Sonic-edit value, verified via the store"
+
+
+# ═══ 9. overwrite/edit authority (2026-08-15 follow-up): backup-before-
+# any-edit VERIFIED not merely attempted, undo-last-agent-change proven to
+# actually restore, preview/check-in read from stored data, and
+# restore-to-any-point including the permanent genesis snapshot. His own
+# four structural requirements, each proven, not just wired up. ═════════
+
+def _seed_scene(name="Throwaway", **kwargs):
+    from spectra.services import scene_store
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(name=name, **kwargs)
+    scene_store.save(scene)
+    return scene
+
+
+# ── 9a. backup is taken before every existing-scene edit, and VERIFIED ──
+
+def test_backup_is_taken_before_the_edit_and_holds_the_pre_edit_value():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    result = _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+
+    backups = sc._load_backups()[scene.id]
+    assert len(backups) == 1
+    assert backups[0]["id"] == result["backup_id"]
+    assert backups[0]["scene"]["entry_ramp_ms"] == 0, \
+        "the backup holds the value BEFORE the edit, not after"
+
+
+def test_genesis_is_captured_once_on_first_edit_and_never_overwritten():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+    genesis_after_first = sc._load_genesis()[scene.id]
+    assert genesis_after_first["scene"]["entry_ramp_ms"] == 0
+
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 3000))
+    _run(sc.apply_flare_kind(scene.id, name="Boom", type="permanent", params={"gain": 1.0}))
+    genesis_after_more_edits = sc._load_genesis()[scene.id]
+    assert genesis_after_more_edits == genesis_after_first, \
+        "genesis must be written exactly once and never touched again"
+
+
+def test_backup_ring_is_capped_at_ten_oldest_evicted_first():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    for i in range(1, 13):  # 12 edits — well past the cap
+        _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", i * 100))
+
+    ring = sc._load_backups()[scene.id]
+    assert len(ring) == sc.SCENE_BACKUP_RING_SIZE == 10
+    # the oldest two backups (pre-edit values 0 and 100) must be evicted;
+    # the ring's oldest surviving entry is the pre-edit-3 value (200).
+    values = [e["scene"]["entry_ramp_ms"] for e in ring]
+    assert values[0] == 200 and values[-1] == 1100
+    # genesis (value 0, from edit 1) survives the eviction untouched.
+    assert sc._load_genesis()[scene.id]["scene"]["entry_ramp_ms"] == 0
+
+
+def test_backup_verification_failure_refuses_the_edit_and_writes_nothing(monkeypatch):
+    """Proves "verified, not merely attempted": the backup WRITE call is
+    made to silently succeed without actually landing (a no-op standing
+    in for a torn/partial write), and the mechanism must catch this by
+    RE-READING the file and finding the entry absent — not by an
+    exception from the write itself."""
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    real_write = sc._atomic_write_json
+
+    def fake_write(path, data):
+        if path == sc.config.SCENE_BACKUPS_FILE:
+            return  # silently doesn't write — no exception, no evidence, no proof
+        return real_write(path, data)
+
+    monkeypatch.setattr(sc, "_atomic_write_json", fake_write)
+
+    with pytest.raises(sc.SceneOpError, match="backup could not be verified"):
+        _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+
+    from spectra.services import scene_store
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 0, \
+        "the scene itself must be untouched — the write must never reach scene_store.save()"
+
+
+def test_genesis_verification_failure_also_refuses_the_edit(monkeypatch):
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    real_write = sc._atomic_write_json
+
+    def fake_write(path, data):
+        if path == sc.config.SCENE_GENESIS_FILE:
+            return  # ring write succeeds; genesis write silently doesn't
+        return real_write(path, data)
+
+    monkeypatch.setattr(sc, "_atomic_write_json", fake_write)
+
+    with pytest.raises(sc.SceneOpError, match="genesis snapshot could not be verified"):
+        _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+
+    from spectra.services import scene_store
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 0
+
+
+def test_dispatch_overwrite_scene_with_failed_backup_refuses_via_the_real_model_shaped_path(monkeypatch):
+    """The exact adversarial case the deploy hold calls out by name: 'an
+    overwrite attempted while the backup mechanism FAILS must REFUSE' —
+    run through settings_agent._dispatch(), the same entry point a real
+    model's tool_use reaches, not the internal function directly."""
+    from spectra.services import scene_console as sc
+    from spectra.services import settings_agent as sa
+    from spectra.services import scene_store
+
+    scene = _seed_scene(name="STAR", entry_ramp_ms=0)
+    real_write = sc._atomic_write_json
+    calls = {"n": 0}
+
+    def fake_write(path, data):
+        if path == sc.config.SCENE_BACKUPS_FILE:
+            calls["n"] += 1
+            return
+        return real_write(path, data)
+
+    monkeypatch.setattr(sc, "_atomic_write_json", fake_write)
+    result = _run(sa._dispatch("overwrite_scene", {
+        "scene_id": scene.id, "name": "STAR (hijacked)"}))
+
+    assert result["status"] == "rejected"
+    assert "backup could not be verified" in result["reason"]
+    assert calls["n"] >= 1, "the backup write was actually attempted, and still refused"
+    assert scene_store.get_by_id(scene.id).name == "STAR", \
+        "the real model's tool call must land on an untouched scene after refusal"
+
+
+# ── 9b. preview/check-in reads stored data, never the agent's account ───
+
+def test_preview_on_a_write_result_is_computed_from_real_before_after_state():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    result = _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+    assert result["preview"] == {"entry_ramp_ms": {"before": 0, "after": 1500}}
+
+
+def test_get_scene_preview_reads_the_real_backup_and_the_real_current_scene():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(name="Throwaway", entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+
+    preview = sc.get_scene_preview(scene.id)
+    assert preview["has_backup"] is True
+    assert preview["preview"] == {"entry_ramp_ms": {"before": 0, "after": 1500}}
+
+    # Prove it's a REAL read, not cached: edit again with a totally
+    # different value and confirm the preview tracks the NEW backup, not
+    # a stale copy of the first call's answer.
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 9000))
+    preview2 = sc.get_scene_preview(scene.id)
+    assert preview2["preview"] == {"entry_ramp_ms": {"before": 1500, "after": 9000}}
+
+
+def test_get_scene_preview_with_no_backup_yet_is_honest_not_fabricated():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene()
+    preview = sc.get_scene_preview(scene.id)
+    assert preview == {"scene_id": scene.id, "name": scene.name,
+                       "has_backup": False, "preview": {}}
+
+
+def test_preview_is_never_swayed_by_a_fabricated_model_reply(monkeypatch):
+    """The exact failure this project caught tonight on the real model:
+    a confident, specific claim about what changed. Here the model's
+    reply text claims a completely different, much larger change than
+    what the real tool call actually did — get_scene_preview (called
+    independently, exactly as Sonic is instructed to call it before
+    trusting its own account) must report the REAL diff regardless."""
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 500))
+
+    fabricated_claim = ("I changed the entry ramp to 9999ms, the choreography "
+                        "transition to 5000ms, and renamed the scene to 'Epic'.")
+    preview = sc.get_scene_preview(scene.id)
+
+    assert preview["preview"] == {"entry_ramp_ms": {"before": 0, "after": 500}}
+    assert "9999" not in json.dumps(preview)
+    assert "Epic" not in json.dumps(preview)
+    assert fabricated_claim  # the claim exists (as a model might say it); the preview ignores it
+
+
+# ── 9c. undo-last-agent-change: proven to actually restore ──────────────
+
+def test_undo_last_scene_change_actually_restores_verified_against_stored_data():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 1500, "the edit really landed"
+
+    undo_result = _run(sc.apply_undo_last_scene_change())
+
+    # Verify against STORED DATA, not the undo call's own return value.
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 0, \
+        "the scene must genuinely be back to its pre-edit value on disk"
+    assert undo_result["status"] == "applied"
+
+
+def test_undo_marks_the_original_entry_undone_not_deleted():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+    _run(sc.apply_undo_last_scene_change())
+
+    log = sc.load_log()
+    original = next(e for e in log if e["op"] == "set_scene_setting")
+    assert original["undone"] is True
+    undo_entry = next(e for e in log if e["op"] == "restore_scene_backup")
+    assert undo_entry["source"] == "undo"
+
+
+def test_undo_of_an_undo_works_the_ring_retention_reason_he_gave():
+    """His own stated reason for keeping more than one backup: 'an undo
+    of an undo works.' Edit A, edit B, undo (back to after-A), undo again
+    (back to after-B, i.e. re-applying B) — proven against stored data at
+    every step, not assumed from the call succeeding."""
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 100))   # edit A
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 200))   # edit B
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 200
+
+    _run(sc.apply_undo_last_scene_change())  # undo B -> back to A's result
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 100
+
+    _run(sc.apply_undo_last_scene_change())  # undo the undo -> back to B
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 200
+
+
+def test_undo_with_nothing_to_undo_is_rejected():
+    from spectra.services import scene_console as sc
+
+    with pytest.raises(sc.SceneOpError, match="nothing to undo"):
+        _run(sc.apply_undo_last_scene_change())
+
+
+def test_create_scene_is_never_an_undo_candidate():
+    """create_scene carries no backup_id (nothing existed before it to
+    restore), so it must never be the target of undo_last_scene_change —
+    there is still no delete operation, so 'undoing' a create is not
+    something this mechanism can or should attempt."""
+    from spectra.services import scene_console as sc
+
+    _run(sc.apply_create_scene("Freshly created"))
+    with pytest.raises(sc.SceneOpError, match="nothing to undo"):
+        _run(sc.apply_undo_last_scene_change())
+
+
+def test_undo_is_global_across_scenes_targets_the_most_recent_edit_anywhere():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    a = _seed_scene(name="Scene A", entry_ramp_ms=0)
+    b = _seed_scene(name="Scene B", entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(a.id, "entry_ramp_ms", 111))
+    _run(sc.apply_scene_setting(b.id, "entry_ramp_ms", 222))
+
+    result = _run(sc.apply_undo_last_scene_change())
+
+    assert result["scene_id"] == b.id
+    assert scene_store.get_by_id(b.id).entry_ramp_ms == 0, "B's edit (the most recent) was undone"
+    assert scene_store.get_by_id(a.id).entry_ramp_ms == 111, "A's edit is untouched — it wasn't the most recent"
+
+
+# ── 9d. restore_scene_backup: pick-a-point, including permanent genesis ──
+
+def test_restore_to_genesis_returns_a_scene_edited_many_times_to_its_original():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(name="STAR", entry_ramp_ms=0)
+    original_dump = scene_store.get_by_id(scene.id).model_dump(mode="json")
+
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 500))
+    _run(sc.apply_flare_kind(scene.id, name="Boom", type="permanent", params={"gain": 1.0}))
+    _run(sc.apply_overwrite_scene(scene.id, name="STAR (mangled)", settings={"entry_ramp_ms": 9999}))
+    mangled = scene_store.get_by_id(scene.id)
+    assert mangled.name == "STAR (mangled)" and mangled.flare_kinds
+
+    result = _run(sc.apply_restore_scene_backup(scene.id, "genesis"))
+    assert result["status"] == "applied"
+
+    restored = scene_store.get_by_id(scene.id)
+    assert restored.model_dump(mode="json") == original_dump, \
+        "restoring genesis must reproduce the ORIGINAL scene exactly, byte for byte"
+
+
+def test_restore_to_a_specific_ring_entry_not_just_the_most_recent():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 100))
+    r2 = _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 200))
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 300))
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 300
+
+    # r2["backup_id"] is the pre-edit-2 snapshot (value 100) — restoring
+    # it should NOT require stepping back one-at-a-time via undo.
+    _run(sc.apply_restore_scene_backup(scene.id, r2["backup_id"]))
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 100
+
+
+def test_restore_with_unknown_backup_id_is_rejected_with_the_servers_own_text():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene()
+    with pytest.raises(sc.SceneOpError, match="no backup"):
+        _run(sc.apply_restore_scene_backup(scene.id, "not-a-real-backup-id"))
+
+
+def test_restore_is_itself_backed_up_so_it_is_never_a_dead_end():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(entry_ramp_ms=0)
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 500))
+    _run(sc.apply_restore_scene_backup(scene.id, "genesis"))
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 0
+
+    # undo the restore itself — should bring back the 500 state.
+    _run(sc.apply_undo_last_scene_change())
+    assert scene_store.get_by_id(scene.id).entry_ramp_ms == 500
+
+
+# ── 9e. his 9 real, authored scenes stay recoverable under the new
+# genuinely-destructive capability — the anchor, not just the enumeration ─
+
+def test_his_real_scenes_get_a_genesis_anchor_on_first_touch_and_survive_bad_edits():
+    ids = _seed_his_real_scenes()
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    star_id = ids["STAR"]
+    original = scene_store.get_by_id(star_id).model_dump(mode="json")
+
+    # A legitimately destructive overwrite — now possible by design.
+    _run(sc.apply_overwrite_scene(star_id, name="STAR (accidentally clobbered)",
+                                  settings={"entry_ramp_ms": 1}))
+    _run(sc.apply_overwrite_scene(star_id, name="STAR (clobbered again)",
+                                  flare_kinds=[{"name": "Oops", "type": "permanent",
+                                               "params": {"gain": 1.0}}]))
+    clobbered = scene_store.get_by_id(star_id)
+    assert clobbered.name != "STAR"
+
+    restored = _run(sc.apply_restore_scene_backup(star_id, "genesis"))
+    assert restored["status"] == "applied"
+    assert scene_store.get_by_id(star_id).model_dump(mode="json") == original, \
+        "his real scene's exact original state survives any chain of bad edits"
+
+    # And every OTHER real scene remained completely untouched throughout.
+    for name, sid in ids.items():
+        if sid == star_id:
+            continue
+        assert scene_store.get_by_id(sid).name == name
+
+
+# ── 9f. overwrite_scene's own validation, mirroring the other write ops ──
+
+def test_overwrite_scene_rejects_an_unknown_settings_key():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene()
+    with pytest.raises(sc.SceneOpError, match="not a scene setting"):
+        sc._validate_overwrite_scene(scene.id, None, None, {"brightness_multiplier": 0.5}, None)
+
+
+def test_overwrite_scene_rejects_a_blank_name():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene()
+    with pytest.raises(sc.SceneOpError, match="cannot be blanked"):
+        sc._validate_overwrite_scene(scene.id, "   ", None, None, None)
+
+
+def test_overwrite_scene_omitted_fields_are_left_alone():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(name="Keep Me", entry_ramp_ms=42, labels=["a", "b"])
+    _run(sc.apply_overwrite_scene(scene.id, settings={"accept_all_sets": False}))
+
+    after = scene_store.get_by_id(scene.id)
+    assert after.name == "Keep Me", "name wasn't passed — must stay unchanged"
+    assert after.labels == ["a", "b"], "labels weren't passed — must stay unchanged"
+    assert after.entry_ramp_ms == 42, "not in the settings dict — must stay unchanged"
+    assert after.accept_all_sets is False
+
+
+def test_overwrite_scene_replaces_flare_kinds_wholesale_not_merges():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene()
+    _run(sc.apply_flare_kind(scene.id, name="Old", type="permanent", params={"gain": 1.0}))
+    _run(sc.apply_overwrite_scene(scene.id, flare_kinds=[
+        {"name": "New", "type": "permanent", "params": {"gain": 1.0}}]))
+
+    kinds = [k.name for k in scene_store.get_by_id(scene.id).flare_kinds]
+    assert kinds == ["New"], "flare_kinds is a REPLACE, not a merge — 'Old' must be gone"
+
+
+# ── 9g. discovery — the new operations are queryable, per the same
+# one-declaration principle as everything else in this file ─────────────
+
+def test_new_operations_are_discoverable_via_list_operations():
+    from spectra.services import settings_agent as sa
+
+    idx = _run(sa._dispatch("list_operations", {"domain": "scene"}))
+    names = {o["name"] for o in idx["operations"]}
+    for expected in ("overwrite_scene", "list_scene_backups", "get_scene_preview",
+                     "restore_scene_backup", "undo_last_scene_change"):
+        assert expected in names
+
+    detail = _run(sa._dispatch("list_operations", {"name": "overwrite_scene"}))
+    assert "backup" in detail["operation"]["instructions"].lower()

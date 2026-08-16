@@ -674,18 +674,60 @@ colour-set acceptance) reads bounds off `SceneV2`/`PhaseBlend`/
 `PhaseChoreography`/`SceneColorJourney`'s own `Field(ge=,le=)`, same
 discipline as the room registry. Named `FlareKind` create/update/remove
 (upsert by name) and `create_scene` (name + labels only — no device/effect
-authoring, that stays the Initial Set tab) round out the enumerated set;
-device/effect editing is deliberately NOT in scope. **The property that
-protects his authored scenes**: `create_scene` only ever builds a fresh
-`SceneV2(name=...)` — id is the model's own `default_factory=uuid4`, so a
-created scene can never collide with, and therefore never overwrite, an
-existing one, and there is no delete/overwrite-by-id operation declared at
-all. Reachable by chat from `/scenes` too, not just `/settings`: `spectra/
-web/src/components/SonicChatPopover.tsx` is a floating 💬 button + panel
-mounted on `ScenesPage.tsx`, talking to the same `POST /settings-console/
-message` endpoint. Full detail, the four adversarial refusal proofs, and
-the fabrication-hunt re-proof against the widened CLI tool manifest:
-`docs/SPECTRA_SPEC.md` §54, `tests/test_scene_console.py`.
+authoring, that stays the Initial Set tab) round out the original
+enumerated set; device/effect editing is deliberately NOT in scope, still
+true after the widening below. **The property that protects his authored
+scenes**: `create_scene` only ever builds a fresh `SceneV2(name=...)` — id
+is the model's own `default_factory=uuid4`, so a created scene can never
+collide with, and therefore never overwrite, an existing one. Reachable by
+chat from `/scenes` too, not just `/settings`: `spectra/web/src/
+components/SonicChatPopover.tsx` is a floating 💬 button + panel mounted
+on `ScenesPage.tsx`, talking to the same `POST /settings-console/message`
+endpoint. Full detail, the four adversarial refusal proofs, and the
+fabrication-hunt re-proof against the widened CLI tool manifest:
+`docs/SPECTRA_SPEC.md` §55, `tests/test_scene_console.py`.
+
+**Sonic's overwrite/backup/undo/preview/restore authority (same night,
+his follow-up: "edit scenes and overwrite them, back them up ahead of
+time, an easy undo-last-agent-change button, a preview and check-in,
+restore the backup if it's not right")** — the delete/overwrite exclusion
+above is now PARTIALLY reversed, deliberately, with a safety net that
+makes it so: `overwrite_scene` wholesale-replaces an existing scene's
+name/labels/settings/flare_kinds in one shot (still never `devices`).
+Every write that touches an EXISTING scene — `set_scene_setting`,
+`set_flare_kind`, `remove_flare_kind`, `overwrite_scene`,
+`restore_scene_backup` — now runs through `scene_console.
+_write_and_verify_backup()` FIRST: snapshots the scene's pre-edit state,
+writes it to the per-scene backup ring, then RE-READS THE FILE FROM DISK
+to confirm the write actually landed before allowing `scene_store.save()`
+to run — a successful write call alone is never trusted. Retention: the
+last `SCENE_BACKUP_RING_SIZE` (10) edits per scene (oldest evicted first,
+so undo-of-an-undo works), PLUS a permanent, never-pruned genesis snapshot
+per scene captured on its first-ever edit — the anchor his 9 real scenes
+can always return to regardless of how many edits pile up after it.
+`undo_last_scene_change()` (no scene_id — global, most-recent-first,
+mirroring the settings console's own "Undo last") and
+`restore_scene_backup(scene_id, backup_id | "genesis")` are both
+themselves backed-up edits, which is what makes undoing an undo work.
+Every edit's `preview` field, and the standalone `get_scene_preview()`
+read op, are `_diff_scenes()` — a real field-level comparison of two
+STORED SceneV2 snapshots, never the model's own account of what it did;
+the frontend renders this in its own visually distinct message
+(`.settings-console-msg-preview`, both `SonicChatPopover.tsx` and
+`SettingsConsolePage.tsx`) so it can never blend with Sonic's prose. The
+plain, model-free "↺ Undo last" button (`POST /api/settings-console/
+scene-undo`, mirroring `/undo`'s existing settings-only pattern) needs no
+live model call — undo is a deterministic restore from an
+already-verified backup. **Deploy held on this one, by the captain's own
+order**, pending an adversarial proof run against a REAL model (not just
+tests) on the live instance: an out-of-set op, a bad argument, a
+non-scene-setting reach, a shell/restart attempt, the unavailable-tool
+fabrication case specifically, an overwrite refused because its backup
+fails, a fabricated restore claim caught against stored data, and
+`create_scene`'s fresh-id guarantee reconfirmed under the real model.
+Full detail: `docs/SPECTRA_SPEC.md` §56, `tests/test_scene_console.py`
+section 9 (backup/undo/preview/restore), `tests/test_settings_agent_cli.py`
+section 5c (the CLI backend's fabrication guard re-proven a second time).
 
 **Subscription (CLI) backend — built, default OFF, not yet authorised
 against his real account** (`data/spectra-console-subscription-backend/`:
