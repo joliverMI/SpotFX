@@ -401,21 +401,32 @@ export interface DevicePreviewFavorites {
 }
 
 /** GET/POST /api/device-preview/{status,pause,resume} and the WS status
- * push — `connected` is the upstream LedFX visualisation socket, honestly
- * false whenever paused (see services/device_preview.py's module
- * docstring for why this must never lie). */
+ * push — `connected` is the live upstream connection (whichever `source`
+ * names), honestly false whenever paused (see services/device_preview.py's
+ * module docstring for why this must never lie). `source` is
+ * ownership-routed (2026-08-16 correction — the strip used to assume
+ * LedFX was always the writer, which is wrong in his normal S3 operating
+ * state): "facade" reads SPECTRA's own in-process render pipeline (no
+ * LedFX involved at all — his normal state), "ledfx" reads the external
+ * LedFX process's visualisation feed (only when spot-effects owns the
+ * lights), "none" means nobody currently owns the lights (a handover in
+ * flight, or released) so there is nothing to preview. */
 export interface DevicePreviewStatus {
   paused: boolean;
   connected: boolean;
   favorite_virtual_ids: string[];
   target_fps: number;
   frames_relayed: number;
+  source: 'facade' | 'ledfx' | 'none';
 }
 
-/** One relayed frame off /api/device-preview/ws — LedFX's own
- * VisualisationUpdateEvent shape, passed through unchanged (pixels stay
- * base64-or-list exactly as LedFX encoded them; decoded client-side, same
- * division of labour as LedFX's own frontend). */
+/** One relayed frame off /api/device-preview/ws. When `source: "ledfx"`
+ * this is LedFX's own VisualisationUpdateEvent shape passed through
+ * unchanged; when `source: "facade"` it's SPECTRA's own independent
+ * encoding of the same real per-virtual pixel buffer (module docstring,
+ * spectra/services/device_preview.py) — deliberately built to the SAME
+ * wire shape so this type and decodePixels() need no source-aware branch
+ * (pixels stay base64-or-list; decoded client-side either way). */
 export interface DevicePreviewFrame {
   type: 'device_preview_frame';
   vis_id: string;
