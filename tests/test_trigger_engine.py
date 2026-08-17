@@ -513,3 +513,102 @@ def test_generated_trigger_resolves_scene_via_kernel_and_fires_at_its_moment(
             await host.shutdown()
 
     _run(main())
+
+
+# ── proof 8: scene_pool narrows AND biases the kernel draw (2026-08-17) ──
+
+def test_scene_pool_narrows_and_biases_the_kernel_draw(tmp_path, monkeypatch):
+    """models/trigger.py's SCENE POOLS section: a fire_scene action with
+    scene_id=None and a non-empty scene_pool bypasses the sequencer's
+    curve x genre x affinity draw entirely — a pure weighted draw over just
+    the pool's own named scenes. Proof shape: the sequencer config is
+    rigged so the UNCONSTRAINED kernel draw would always pick 'decoy'
+    (flat curve, huge weight) over 'pooled' (curve pinned to 0 — a hard
+    veto in the unconstrained draw) — yet every one of 20 fires with a
+    scene_pool naming only 'pooled' lands on 'pooled', at the trigger's own
+    intensity, through the real production _default_select_scene_from_pool
+    (not an injected fake), same render-pipeline discipline as proof 7."""
+    from spectra import config as scfg
+    from spectra.models.binding import ValueBinding
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.models.sequencer import SelectorEntry, SequencerConfig
+    from spectra.models.trigger import (FireSceneAction, ScenePoolMember,
+                                        SpectraTrigger)
+    from spectra.services import scene_store, sequencer_store
+    from spectra.services.trigger_engine import TriggerEngine
+
+    monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
+    monkeypatch.setattr(scfg, "SEQUENCER_FILE", tmp_path / "sequencer.json")
+
+    _categories_fixture(tmp_path)
+    pooled = SceneV2(name="Pooled", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": ValueBinding(
+            signal="trigger_intensity", out_min=0.5, out_max=2.0)})])
+    decoy = SceneV2(name="Decoy", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 9.99})])
+    scene_store.save(pooled)
+    scene_store.save(decoy)
+    # decoy: flat curve at 1.0, always wins an unconstrained draw.
+    # pooled: curve pinned to 0.0 — a hard veto everywhere in the kernel's
+    # own curve x genre x affinity draw, so any 'pooled' fire under this
+    # config can only have come from the scene_pool override, not the kernel.
+    sequencer_store.save_config(SequencerConfig(entries={
+        decoy.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}]),
+        pooled.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 0.0}]),
+    }))
+
+    trig = SpectraTrigger(timestamp_ms=1000, action=FireSceneAction(
+        scene_id=None, intensity=0.5,
+        scene_pool=[ScenePoolMember(scene_id=pooled.id, weight=3.0)]))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "poolfire")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                from spectra.services.drift_conductor import DriftConductor
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+                conductor = DriftConductor(executor=executor,
+                                           clock=lambda: clock.now, leg_s=20.0)
+                landed = {}
+
+                async def fire_scene(scene_id, color_set_id, intensity):
+                    scene = pooled if scene_id == pooled.id else decoy
+                    from spectra.services import scene_compiler
+                    from spectra.services.binding_resolver import FireContext
+                    ctx = FireContext(intensity, rng=Random(1))
+                    resolved = scene_compiler.resolve_scene(scene, ctx)
+                    writes = scene_compiler.compile_scene(resolved)
+                    conductor.on_scene_fire(scene, writes)
+                    for w in writes:
+                        await executor.jump(w["virtual_id"], w["effect_type"],
+                                            w["config"])
+                    landed[scene_id] = landed.get(scene_id, 0) + 1
+
+                # select_scene_from_pool is left at its production default —
+                # the real kernel primitive, not an injected picker.
+                for i in range(20):
+                    engine = TriggerEngine(list_triggers=lambda uri: [trig],
+                                           fire_scene=fire_scene,
+                                           render_intensity=lambda x: x)
+                    await engine.on_track_state(f"song:pool{i}")
+                    fired = await engine.tick(1000)
+                    assert len(fired) == 1 and fired[0].id == trig.id
+
+                assert landed == {pooled.id: 20}, \
+                    ("every fire landed on the pool's own named scene, " +
+                     f"never the kernel-favoured decoy: {landed}")
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.25), \
+                    "the pool-picked scene still fired using the TRIGGER's " \
+                    "own intensity (0.5 -> 1.25) — scene_pool changes WHICH " \
+                    "scene, never how hard it lands"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())

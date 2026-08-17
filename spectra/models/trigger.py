@@ -57,7 +57,30 @@ source="authored" (generator_key cleared) — the ownership-transfer rule: a
 touched generated trigger becomes the owner's, so regeneration never
 overwrites it.
 
-Executable spec: scripts/check_triggers.py
+SCENE POOLS (2026-08-17, his own ask: "triggers should be able to carry
+some meta data that can say choose from only these scenes and includes
+weights"): a fire_scene action with scene_id=None may additionally carry
+scene_pool, a narrow-and-bias override on top of the sequencer's free
+choice — "only these scenes, weighted like this" rather than "pick from
+everything I've configured." Absent (the default, and every one of his
+20,958 existing fire_scene triggers as of this field's introduction — the
+migration to storage/spectra/triggers.json carried scene_id=None but not
+his legacy hand-built scene_group pools, which this field is the recovery
+path for) means unconstrained: identical behaviour to today,
+_default_select_scene's own curve x genre x affinity draw over every
+configured entry. When present, selection instead runs a PURE weighted
+draw over the pool's own weights only (spectra.services.selection_kernel.
+select_from_scene_pool) — deliberately not curve/genre/affinity-composed,
+mirroring legacy's scene_group_mode="weighted" (storage/events.json,
+"weight" occurs 898 times there) and the already-shipped
+color_set_groups.py weighted branch, not the scene selector's ladder. A
+pool member's scene_id is dropped at fire time if that scene no longer
+exists; an empty-after-filtering or all-non-positive-weight pool picks
+nothing (same "nothing fires this crossing" convention the kernel's own
+terminal rung uses), never silently falls back to the unconstrained draw —
+"only these scenes" stays "only these scenes, if any remain valid."
+
+Executable spec: scripts/check_triggers.py, scripts/check_trigger_scene_pools.py
 """
 from __future__ import annotations
 
@@ -73,6 +96,15 @@ TriggerActionKind = Literal["fire_scene", "fire_response", "select_color_set",
 TriggerSource = Literal["authored", "generated"]
 
 
+class ScenePoolMember(BaseModel):
+    """One scene in a trigger's scene_pool, with its own selection weight
+    (weighted-draw only — see FireSceneAction.scene_pool). weight=0 is a
+    deliberate veto within the pool (keep the scene named, stop it firing),
+    mirroring the kernel's own zero-veto convention elsewhere."""
+    scene_id: str = Field(min_length=1)
+    weight: float = Field(default=1.0, ge=0.0)
+
+
 class FireSceneAction(BaseModel):
     kind: Literal["fire_scene"] = "fire_scene"
     # None = pick at fire time through the sequencer selection kernel (the
@@ -83,6 +115,11 @@ class FireSceneAction(BaseModel):
     # None = the scene fires wearing the room's active colour set (the
     # ordinary case — scene_compiler.fire_scene's own default).
     color_set_id: Optional[str] = None
+    # None (the default — see the module docstring's SCENE POOLS section) =
+    # the sequencer chooses freely among every configured entry. Only
+    # consulted when scene_id is None; a trigger that names scene_id
+    # directly never reads this field.
+    scene_pool: Optional[list[ScenePoolMember]] = None
 
     @field_validator("scene_id")
     @classmethod

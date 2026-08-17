@@ -19,7 +19,11 @@ moment its timestamp is first crossed:
                        instead resolves through the sequencer selection
                        kernel AT FIRE TIME (curve × genre × affinity, using
                        the TRIGGER's own intensity) — see
-                       _default_select_scene below.
+                       _default_select_scene below. scene_pool (models/
+                       trigger.py's SCENE POOLS section), when the action
+                       also carries one, overrides that with a pure
+                       weighted draw over a named subset instead — see
+                       _default_select_scene_from_pool.
   fire_response        engine.fire_response_event — the SAME path the
                        bridge's classified trigger_fired events already
                        drive (phase drive, band selection, pulse release).
@@ -185,6 +189,7 @@ class TriggerEngine:
         select_color_set: Callable[[str], Awaitable[Any]] | None = None,
         fire_scene_update: Callable[[float], Awaitable[Any]] | None = None,
         select_scene: Callable[[float], Optional[str]] | None = None,
+        select_scene_from_pool: Callable[[list], Optional[str]] | None = None,
         scene_change_mode: Callable[[], str] | None = None,
         transition_intensity: Callable[[], float] | None = None,
         render_intensity: Callable[[float], float] | None = None,
@@ -198,6 +203,8 @@ class TriggerEngine:
         self._select_color_set = select_color_set or self._default_select_color_set
         self._fire_scene_update = fire_scene_update or self._default_fire_scene_update
         self._select_scene = select_scene or self._default_select_scene
+        self._select_scene_from_pool = (select_scene_from_pool
+                                        or self._default_select_scene_from_pool)
         self._scene_change_mode = scene_change_mode or self._default_scene_change_mode
         self._transition_intensity = (transition_intensity
                                       or self._default_transition_intensity)
@@ -321,13 +328,22 @@ class TriggerEngine:
             if a.kind == "fire_scene":
                 scene_id = a.scene_id
                 if scene_id is None:
-                    # SELECTION uses the trigger's RAW intensity: the kernel
-                    # already applies its own genre_mult (selection_kernel.py)
-                    # — scaling here too would double-count genre in the pick.
-                    scene_id = self._select_scene(a.intensity)
+                    if a.scene_pool:
+                        # scene_pool present: narrow-and-bias override — a
+                        # pure weighted draw over just this trigger's named
+                        # scenes (see models/trigger.py's SCENE POOLS
+                        # section), bypassing the kernel's curve/genre/
+                        # affinity draw entirely.
+                        scene_id = self._select_scene_from_pool(a.scene_pool)
+                    else:
+                        # SELECTION uses the trigger's RAW intensity: the kernel
+                        # already applies its own genre_mult (selection_kernel.py)
+                        # — scaling here too would double-count genre in the pick.
+                        scene_id = self._select_scene(a.intensity)
                     if scene_id is None:
                         logger.info("trigger %s: kernel picked no scene "
-                                    "(ladder terminated at stay) — nothing fired",
+                                    "(ladder terminated at stay, or scene_pool "
+                                    "had nothing valid to draw) — nothing fired",
                                     trig.id)
                         self.last_fire = {"id": trig.id, "kind": a.kind,
                                           "ok": True, "picked": None}
@@ -393,6 +409,18 @@ class TriggerEngine:
         pick = kernel.select(candidates, intensity=intensity, rng=self._rng,
                              current_id=None, terminal=kernel.TERMINAL_STAY)
         return pick.picked_id
+
+    def _default_select_scene_from_pool(self, pool: list) -> Optional[str]:
+        """A trigger's own scene_pool (models/trigger.py's SCENE POOLS
+        section): a pure weighted draw over the pool's own weights,
+        filtered to scenes that still exist — see
+        selection_kernel.select_from_scene_pool's own docstring for why
+        this deliberately skips curve/genre/affinity composition. None
+        means nothing in the pool is both present and positively
+        weighted."""
+        from spectra.services import scene_store, selection_kernel as kernel
+        existing = {s.id for s in scene_store.list_all()}
+        return kernel.select_from_scene_pool(pool, self._rng, existing_ids=existing)
 
     def _default_scene_change_mode(self) -> str:
         from spectra.services.room_controls import load_room_controls

@@ -1,9 +1,9 @@
 """SPECTRA per-song trigger API — the authoring surface's CRUD.
   GET    /api/triggers?uri=<spotify_uri>       — list, timestamp-sorted
   POST   /api/triggers?uri=<spotify_uri>       — upsert (validates the
-      action's scene_id / set_id reference against SPECTRA's own stores;
-      response actions carry no external reference). Always lands
-      source="authored" — see upsert_trigger's docstring.
+      action's scene_id / set_id / scene_pool member references against
+      SPECTRA's own stores; response actions carry no external reference).
+      Always lands source="authored" — see upsert_trigger's docstring.
   DELETE /api/triggers/{trigger_id}?uri=...
   POST   /api/triggers/generate?uri=<spotify_uri> — front 3's mid-song
       generation pass (spectra.services.midsong_generator), idempotent.
@@ -26,6 +26,10 @@ def _validate_action(trigger: SpectraTrigger) -> None:
             raise HTTPException(422, f"scene '{action.scene_id}' not found")
         if action.color_set_id and color_sets.get_by_id(action.color_set_id) is None:
             raise HTTPException(422, f"colour set '{action.color_set_id}' not found")
+        for member in action.scene_pool or []:
+            if scene_store.get_by_id(member.scene_id) is None:
+                raise HTTPException(
+                    422, f"scene_pool scene '{member.scene_id}' not found")
     elif action.kind == "select_color_set":
         if color_sets.get_by_id(action.set_id) is None:
             raise HTTPException(422, f"colour set '{action.set_id}' not found")

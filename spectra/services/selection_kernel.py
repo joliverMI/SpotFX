@@ -34,7 +34,13 @@ keeps its palette. Rainbow-tagged sets (chromatic span > 180°,
 services/color_wheel.py) take a NEUTRAL ×1.0 wheel factor and are skipped
 by rotation mechanics — they stay eligible through their intensity curves.
 
-Executable spec: scripts/check_sequencer.py
+select_from_scene_pool is a separate, simpler mechanism, not a fourth
+selector flavour of the above: a trigger's own inline scene_pool
+(models.trigger.FireSceneAction.scene_pool) is a pure weighted draw over
+its own weights only, no curve/genre/affinity/ladder — see its own
+docstring and models/trigger.py's SCENE POOLS section.
+
+Executable spec: scripts/check_sequencer.py, scripts/check_trigger_scene_pools.py
 """
 from __future__ import annotations
 
@@ -44,6 +50,7 @@ from random import Random
 
 from spectra.models.sequencer import (AffinityEdge, CurvePoint, CurveProfile,
                                       SelectorEntry)
+from spectra.models.trigger import ScenePoolMember
 
 WHEEL_HALF_TURN_DEG = 180.0
 
@@ -138,6 +145,22 @@ def _draw(scores: dict[str, float], rng: Random) -> str | None:
         return None
     weights = [scores[cid] for cid in ids]
     return rng.choices(ids, weights=weights, k=1)[0]
+
+
+def select_from_scene_pool(pool: list[ScenePoolMember], rng: Random,
+                           existing_ids: set[str] | None = None) -> str | None:
+    """A trigger's own scene_pool (models.trigger.FireSceneAction.scene_pool):
+    a pure weighted-random draw over the pool's own weights only, reusing
+    _draw's zero-veto/positive-finite-score discipline — deliberately NOT
+    curve/genre/affinity-composed, unlike select() above. Mirrors legacy's
+    scene_group_mode="weighted" and the already-shipped color_set_groups.py
+    weighted branch: a self-contained pool, not a scored candidate ladder.
+    existing_ids (when given) drops members whose scene no longer exists
+    before drawing. None means nothing in the pool is both present and
+    positively weighted — nothing fires this crossing."""
+    scores = {m.scene_id: m.weight for m in pool
+             if existing_ids is None or m.scene_id in existing_ids}
+    return _draw(scores, rng)
 
 
 def select(candidates: list[Candidate], *, intensity: float, rng: Random,

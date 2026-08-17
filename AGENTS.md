@@ -267,6 +267,27 @@ byte-identical against spot-effects' own `web/src/builder/` modules, so
 check there first before assuming a root-side frontend module needs
 re-porting.
 
+**Trigger-level scene pools** (2026-08-17, his ask: "triggers should be
+able to carry some meta data that can say choose from only these scenes
+and includes weights"): `FireSceneAction.scene_pool` (`spectra/models/
+trigger.py`, `Optional[list[ScenePoolMember]]`, `ScenePoolMember =
+{scene_id, weight}`), consulted only when `scene_id is None`. Absent
+(every one of his 20,958 real `fire_scene` triggers as of this field's
+introduction — his legacy hand-built scene pools did NOT survive the
+migration to `storage/spectra/triggers.json` and cannot be reconstructed
+from it) means unconstrained — the unchanged `_default_select_scene`
+kernel draw. When present, `selection_kernel.select_from_scene_pool` is a
+PURE weighted draw over the pool's own weights only — deliberately not
+curve/genre/affinity-composed, porting legacy's `scene_group_mode=
+"weighted"` (`storage/events.json`, 898 `"weight"` occurrences) and
+mirroring `color_set_groups.py`'s own weighted branch, not the kernel's
+`select()` ladder. Wired into `trigger_engine.TriggerEngine._fire` ahead
+of the kernel draw. No UI built (data-and-test task by design) — two
+authoring/display shapes proposed but undecided, see `docs/SPECTRA_SPEC.md`
+§67 and OQ-11. Executable spec + real-song demonstration:
+`scripts/check_trigger_scene_pools.py` (reads his live storage read-only,
+`--song-uri` to pick which of his real songs to demonstrate against).
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
