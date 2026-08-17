@@ -1054,6 +1054,49 @@ filesystem, never the network — 127.0.0.1:8010/:8000 reach the same live
 instances from inside any worktree on the host; a verification script that
 defaults to them is a trap, learned live 2026-08-15).
 
+**An authored black `bg_color` on a colour set is LOAD-BEARING in Hybrid
+mode — do not remove it as "redundant" next to a black effect colour.**
+`storage/color_sets.json` has 30 such entries across 22 colour sets (Black
+Hole/Orbit/`Line - *`, `docs/SPECTRA_SPEC.md` §72, `scripts/
+check_redundant_black_backgrounds.py`). His own first instinct, on
+learning Black Hole ignores Light mode, was to strip these as dead data —
+"a redundant black background." **They are not redundant: in Hybrid mode
+they're the only thing that resets a virtual's background to black on
+every fire.** Remove them and a prior non-black background left by an
+earlier write (another colour set's own authored colour, or a Light-mode
+write not yet repainted away) bleeds through the next fire instead of
+being cleared — colour bleed between scenes, proven in the harness below,
+not a hypothetical. His proposed fix was investigated, found unsafe on
+exactly this axis, and NOT applied (no data or code changed) — he has
+since replaced the underlying idea with a different, per-scene
+colour-set preference design instead.
+
+An authored `bg_color` beats Light mode regardless of `bg_mode`, because
+the stomp is gated on the value being truthy, not on additive-vs-overwrite.
+`scene_compiler._apply_set_colors`/
+`_entry_config` writes `config["background_color"]` whenever `entry.bg_color`
+is truthy, and `fx/effects/__init__.py::Effect._apply_config` partial-MERGES
+each write (`self._config = {**self._config, **config}`) — so any entry
+that authors a `bg_color` re-asserts it on every fire and overwrites
+whatever a previous write (e.g. Light mode's forced background) left there;
+an entry that authors nothing never touches the key, so a prior write
+survives. Confirmed empirically against the real vendored pipeline via
+`fx.headless` (no live storage): `scripts/check_black_bg_light_mode_interaction.py`.
+Separately, once `bg_color` actually is black, `Effect._refresh_bg_render_state`'s
+`bg_color_use` gate (`(live_rgb*brightness > 0.5).any() or (target_rgb >
+0.5).any()`) is `False` regardless of `bg_mode` or brightness — additive
+and overwrite black are equally invisible on their OWN turn, but that
+sameness does not carry over to the stomp question above; don't conflate
+"is this a no-op once rendered" with "does this clear a previous write" —
+they're gated by different code paths. Fixing this by deleting the
+redundant black fields from data is not free: in Hybrid/Default mode
+(where nothing else forces a background) it also removes the guarantee
+that these entries reset a virtual's background to black on every fire,
+so a leftover non-black background from an earlier write would persist
+through their next fire instead. `scripts/check_redundant_black_backgrounds.py`
+finds every affected entry (30 across 22 colour sets in his real data, not
+just Black Hole).
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing
