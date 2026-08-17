@@ -207,15 +207,21 @@ export default function RoomControlsBar() {
   };
 
   const modeMeta = DISPLAY_MODES.find((m) => m.value === local.display_mode) ?? DISPLAY_MODES[0];
-  const modeStyle: React.CSSProperties = local.display_mode === 'light'
-    ? {
-      background: local.display_light_bg_color || '#201830',
-      borderColor: local.display_light_bg_color || '#201830',
-      color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.6)',
-    }
+  // No text on this button (his ask, 2026-08-17: "I don't need the mode to
+  // say dark or light I just want the color to make that clear") — fill
+  // colour IS the mode: white=Light, black=Dark, grey=Hybrid, his exact
+  // mapping, not adjusted for taste. A fixed accent border on every state
+  // (not part of the mapping) keeps the button legible as a button against
+  // the bar's own dark-purple background even when the fill is black.
+  // #6b6b74 (not a lighter/neutral-er grey) is deliberate: measured against
+  // white and black it lands at 5.3:1 / 4.0:1 contrast respectively — a
+  // paler grey reads too close to the white state at a glance.
+  const modeFill = local.display_mode === 'light'
+    ? '#ffffff'
     : local.display_mode === 'dark'
-      ? { background: '#000', borderColor: '#3a3a3a', color: '#ddd' }
-      : { background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' };
+      ? '#000000'
+      : '#6b6b74';
+  const modeStyle: React.CSSProperties = { background: modeFill, borderColor: 'var(--accent)' };
   const modeUnconfirmed = darkLightResult
     && ['default', 'dark', 'light'].includes(darkLightResult.status)
     && (darkLightResult.unconfirmed?.length ?? 0) > 0;
@@ -234,7 +240,8 @@ export default function RoomControlsBar() {
     <div className="room-controls-bar">
       <TopBarGroupButton
         className="mode-group-btn"
-        title="Hybrid / Dark / Light — tap to cycle, hold to open the colour/brightness options"
+        title={`Mode: ${modeMeta.label} — tap to cycle, hold to open the colour/brightness options`}
+        ariaLabel={`Display mode: ${modeMeta.label}. Tap to cycle, hold to open options.`}
         style={modeStyle}
         holdToExpand
         onShortPress={cycleMode}
@@ -301,8 +308,6 @@ export default function RoomControlsBar() {
           </>
         )}
       >
-        <span className="top-bar-group-btn-label">Mode</span>
-        <span className="top-bar-group-btn-value">{modeMeta.label}</span>
         {modeUnconfirmed && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-red" title="unconfirmed" />}
       </TopBarGroupButton>
 
