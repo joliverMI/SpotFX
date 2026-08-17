@@ -883,21 +883,59 @@ far... I don't see any Matrix for The Matrix previews"). The backend has
 always emitted the real `shape: [rows, cols]` on every frame — this was a
 frontend-only defect, not a payload gap; check the payload before
 assuming otherwise if this area comes up again. `DevicePreviewStrip.tsx`
-now branches on `shape[0]`: more than one row draws as a CSS grid
-(`device-preview-matrix`, `repeat(cols, 1fr)` via a `--cols`/`--rows`
-custom property + `aspect-ratio`, no JS measurement) so a real matrix
-(his `crystal-mapper` favourite, 72×37) reads as a grid instead of one
-2664-pixel line; exactly one row draws as `device-preview-pixel-strip`
-with `flex: 1` pixels sharing the container's full width rather than a
-fixed per-pixel width, so short strips (his other favourites: 17/10/7
-pixels) read as clean lines regardless of length. Expanded devices stack
-vertically, so expanding always grows the page downward. Collapsed
-mode's separate overflow (`.device-preview-strip` was `white-space:
-nowrap` with no `flex-wrap`) now wraps instead of running off a phone's
-right edge. Verified against a static harness reproducing his real
-favourite shapes at 390×844 and 360×780 (headless Chromium via
-chrome-devtools-axi) — his live `:8010` instance was read-only and
-untouched.
+branches on `shape[0]` (rows > 1 → `device-preview-matrix`, one row →
+`device-preview-pixel-strip`, both sized to the container via
+`aspect-ratio`/`width:100%`, no JS measurement) so a real matrix (his
+`crystal-mapper` favourite, 72×37) reads as a grid and short strips (his
+other favourites: 17/10/7 pixels) read as clean lines regardless of
+length. Expanded devices stack vertically, so expanding always grows the
+page downward. Collapsed mode's separate overflow (`.device-preview-strip`
+was `white-space: nowrap` with no `flex-wrap`) wraps instead of running
+off a phone's right edge.
+
+**Device preview render path is a `<canvas>` painted imperatively, not a
+`<span>`-per-pixel React grid** (fixed 2026-08-17, PR
+fm/spectra-preview-smoothness, his own report: "not anywhere near as
+smooth as ledfx version... ledfx was very good, and should be the
+standard. copy as much as makes sense"). Read LedFX's real frontend first
+(`/home/javi/ledfx-src/frontend/src/components/PixelGraph/*.tsx` — the
+audio-visualiser `VISUALISER_CONTEXT.md` is a different feature, not the
+device-pixel preview) plus `ledfx/core.py`'s `setup_visualisation_events`
+and `ledfx/api/websocket.py`'s dual-path sender: LedFX ships five preview
+render variants and keeps the DOM-per-pixel one only as a slower legacy
+fallback (`variants: 'original'`) behind a settings toggle — `'canvas'`
+(a raw WS callback writing straight to a canvas ref via
+`ctx.putImageData()`, no React state in the hot path) is the shipped
+default. Measured all three layers before touching code, against his
+real shapes (`crystal-mapper` 72×37/2664px + 17/10/7px strips, via an
+offline `fx.headless` render thread): SOURCE ~62fps and TRANSPORT
+~7.66fps (matching `RELAY_TARGET_FPS=8`) were never the bottleneck for
+either device size; RENDER was — a real-React harness reproducing the old
+JSX (2664 `<span>`s inside one shared `frames` state object that
+re-rendered the WHOLE strip on ANY favourite's frame) cost avg 6.5–8.7ms
+on desktop, climbing to avg 43–47ms / max 86–98ms under a phone-class (4x)
+CPU-throttle proxy — a third to most of the 125ms/8fps budget — versus
+0.04–1.2ms for the canvas equivalent in both conditions. Fix:
+`DevicePreviewStrip.tsx` now paints every incoming frame straight into a
+per-device `canvasRefs`/`swatchRefs` ref via `putImageData`
+(`imageSmoothingEnabled=false` + CSS `image-rendering:pixelated`, matching
+LedFX's own default look) — a frame never touches React state, so it
+never triggers a re-render at all, closing the cross-device amplification
+too. Deliberately did NOT carry LedFX's `visualisation_maxlen≈81`
+downsample cap: measured JSON.parse+decode cost for the full 2664-pixel
+payload was <1ms even throttled (no smoothness benefit once canvas
+removes the render cost), and it would conflict with his own prior
+explicit ask two rows up (see immediately above) to actually see the
+matrix shape — a named incompatibility, not a silent gap. Did not change
+`RELAY_TARGET_FPS` (still 8) either, since SOURCE/TRANSPORT measurements
+show it was never the cause. Full measured numbers and reasoning:
+`docs/SPECTRA_SPEC.md` §43.
+
+Verified against a static harness reproducing his real favourite shapes
+at 390×844 and 360×780 (headless Chromium via chrome-devtools-axi), plus
+a live isolated instance (spare port, `fx.headless` multi-virtual host
+built to his real device shapes) for the canvas rewrite specifically —
+his live `:8010` instance was read-only and untouched throughout both.
 
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
 built, room-proof pending for the Light half — see below); NOT the same
