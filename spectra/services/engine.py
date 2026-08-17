@@ -76,9 +76,13 @@ async def fire_response_event(event_class: str, intensity: float) -> None:
     trigger-driven fire_response action is already gated at its own
     crossing by trigger_engine's tick() (it can only be source="authored"),
     so this redundantly-but-harmlessly re-checks that path while being the
-    ONLY gate for the bridge's always-classifying path."""
-    from spectra.services import fire_history
+    ONLY gate for the bridge's always-classifying path. Also gated by a
+    live colour Preview (spectra/services/preview_pause.py) — checked
+    first, ahead of the settings-tier gate."""
+    from spectra.services import fire_history, preview_pause
     from spectra.services.room_controls import load_room_controls
+    if preview_pause.active():
+        return
     if load_room_controls().scene_change_mode != "full":
         return
     await responses.on_event(event_class, intensity)
@@ -103,7 +107,10 @@ async def fire_scene_update_event(intensity: float) -> None:
     reason: an authored trigger's own action, same settings-model rule.
     Never schedules a hold release — on_update only fires permanent kinds,
     which carry immediately and never pend a return."""
+    from spectra.services import preview_pause
     from spectra.services.room_controls import load_room_controls
+    if preview_pause.active():
+        return
     if load_room_controls().scene_change_mode != "full":
         return
     await responses.on_update(intensity)

@@ -10,12 +10,15 @@
  * variants (owner-retired, §36) and the LedFX-import modal (a set-only
  * convenience, not part of this gap). Drafts live locally until Save,
  * matching the Scenes page's own convention. */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
+import { useLongPress } from '../lib/useLongPress';
 import { uuid } from '../lib/uid';
 import {
-  useApplyColorSet, useDeleteColorSet, useGradients, useRegistry, useSaveColorSet,
+  releasePreview, releasePreviewBeacon, startPreview, updatePreview,
+  useDeleteColorSet, useGradients, useRegistry, useSaveColorSet,
   useSpotColorSets, useWheelPositions,
 } from '../queries';
 import type { SpotColorSetCard, SpotColorSetEntry, SpotGroupMember } from '../types';
@@ -30,7 +33,7 @@ const emptyEntry = (): SpotColorSetEntry => ({
 function newCard(kind: 'set' | 'group'): SpotColorSetCard {
   return {
     id: uuid(), name: kind === 'group' ? 'New Group' : 'New Colour Set',
-    color: '#FFD700', kind, labels: [], entries: [],
+    color: '#FFD700', kind, labels: [], entries: [], display_availability: 'default',
     ...(kind === 'group'
       ? { members: [], mode: 'cycle', cycle_behavior: 'wrap', exclude_current: true, palette_sync: false }
       : {}),
@@ -45,11 +48,90 @@ export default function ColorSetsPage() {
   const { data: wheel = {} } = useWheelPositions();
   const saveMut = useSaveColorSet();
   const delMut = useDeleteColorSet();
-  const applyMut = useApplyColorSet();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [drafts, setDrafts] = useState<Record<string, SpotColorSetCard>>({});
+
+  // ── Preview (owner ask 2026-08-17: replaces the old permanent "Apply to
+  // room") — tap: pause 5s, apply, auto-revert. Hold 500ms: pause 60s (or
+  // until released / navigated away), apply, and STAYS. previewingId tracks
+  // which card is live so switching cards mid-preview releases it instead
+  // of leaving a stale preview running against whatever you edit next. ──
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const previewingRef = useRef<string | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewUpdateInFlight = useRef(false);
+  const previewUpdatePending = useRef<SpotColorSetCard | null>(null);
+  useEffect(() => { previewingRef.current = previewingId; }, [previewingId]);
+
+  const clearPreviewTimer = () => {
+    if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
+  };
+
+  const endPreview = async () => {
+    clearPreviewTimer();
+    setPreviewingId(null);
+    try {
+      await releasePreview();
+    } catch (e) {
+      toast(`Preview release failed: ${e}`, 'error');
+    }
+  };
+
+  const startPreviewSession = async (target: SpotColorSetCard, hold: boolean) => {
+    try {
+      const result = await startPreview(target, hold);
+      if (!result.applied) {
+        toast('Nothing live to preview (no device matches this card)', 'error');
+        return;
+      }
+      setPreviewingId(target.id);
+      clearPreviewTimer();
+      previewTimerRef.current = setTimeout(() => setPreviewingId(null), result.expires_in_s * 1000);
+    } catch (e) {
+      toast(`Preview failed: ${e}`, 'error');
+    }
+  };
+
+  // Live-drag updates while previewing: at most one /update in flight —
+  // a drag tick that lands mid-request is coalesced into a single
+  // follow-up call with the latest card, never queued (ColorGradientPicker
+  // already debounces onChange 200ms; this is the second layer that keeps
+  // a fast drag from stacking requests behind a slow one).
+  const pushPreviewUpdate = async (target: SpotColorSetCard) => {
+    if (previewUpdateInFlight.current) { previewUpdatePending.current = target; return; }
+    previewUpdateInFlight.current = true;
+    try {
+      await updatePreview(target);
+    } catch {
+      // best-effort — a dropped drag tick self-corrects on the next one
+    } finally {
+      previewUpdateInFlight.current = false;
+      const pending = previewUpdatePending.current;
+      previewUpdatePending.current = null;
+      if (pending) void pushPreviewUpdate(pending);
+    }
+  };
+
+  // Switching to a different card mid-preview releases it — a preview must
+  // never keep running against a card you've navigated away from.
+  useEffect(() => {
+    if (previewingId && previewingId !== selectedId) void endPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  // Navigating away entirely (route change / tab close) — the release
+  // condition his words named third, easiest to forget. The server-side
+  // auto-revert timer is the backstop if neither of these ever lands.
+  useEffect(() => {
+    const onBeforeUnload = () => { if (previewingRef.current) releasePreviewBeacon(); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      if (previewingRef.current) void releasePreview();
+    };
+  }, []);
 
   const cards = useMemo(() => {
     const merged = serverCards.map((c) => drafts[c.id] ?? c);
@@ -60,6 +142,11 @@ export default function ColorSetsPage() {
 
   const card = cards.find((c) => c.id === selectedId) ?? null;
   const setCard = (next: SpotColorSetCard) => setDrafts((d) => ({ ...d, [next.id]: next }));
+
+  useEffect(() => {
+    if (card && previewingId === card.id) void pushPreviewUpdate(card);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card?.entries]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -112,22 +199,20 @@ export default function ColorSetsPage() {
     setSelectedId(c.id);
   };
 
-  // The actual §10 proof surface: POST /room-color/apply — a Set lands
-  // directly, a Group advances its cursor and applies whichever member it
-  // picked (merged with the group's own overrides). Pressing this
-  // repeatedly on a Group is how "author a group, use it, watch it
-  // rotate" is demonstrated without touching the live room.
-  const apply = async () => {
+  // Preview (owner ask 2026-08-17, replaces the old permanent Apply to
+  // room): previews the DRAFT as edited, unsaved — no save-first step, so
+  // dragging colours around never needs a Save between ticks. Tap: pause
+  // 5s, apply, auto-revert. Hold 500ms: pause up to 60s, apply, stays
+  // until a second press / the timer / navigating away.
+  const previewLongPress = useLongPress(500);
+  const onPreviewTap = () => {
     if (!card) return;
-    if (drafts[card.id]) await save();
-    try {
-      const result = await applyMut.mutateAsync(card.id) as { applied?: string; set_name?: string };
-      const memberNote = card.kind === 'group' && result.applied !== card.id
-        ? ` → picked "${result.set_name ?? result.applied}"` : '';
-      toast(`Applied${memberNote}`, 'success');
-    } catch (e) {
-      toast(`Apply failed: ${e}`, 'error');
-    }
+    if (previewingId === card.id) { void endPreview(); return; }
+    void startPreviewSession(card, false);
+  };
+  const onPreviewHold = () => {
+    if (!card) return;
+    void startPreviewSession(card, true);
   };
 
   return (
@@ -194,11 +279,18 @@ export default function ColorSetsPage() {
               onChange={(e) => setCard({ ...card, name: e.target.value })} />
             <button className="primary" onClick={() => void save()}>Save{drafts[card.id] ? ' •' : ''}</button>
             <button style={{ fontSize: 12 }} onClick={duplicate}>⧉ Duplicate</button>
-            <button style={{ fontSize: 12, borderColor: 'var(--accent)' }}
-              title="Apply this Set (or a Group's next picked member) to the room right now — the same live surface POST /room-color/apply uses"
-              onClick={() => void apply()}>
-              ▶ Apply to room
+            <button
+              style={{ fontSize: 12, borderColor: 'var(--accent)',
+                      color: previewingId === card.id ? 'var(--accent)' : undefined }}
+              title={previewingId === card.id
+                ? 'Previewing live — tap to release now'
+                : 'Tap: preview 5s then revert. Hold ½s: preview until released (60s max) — drag colours below to update it live'}
+              onClick={onPreviewTap}
+              {...previewLongPress(onPreviewHold)}>
+              {previewingId === card.id ? '● Previewing…' : '▶ Preview'}
             </button>
+            <ModeAvailabilityToggle value={card.display_availability ?? 'default'}
+              onChange={(v) => setCard({ ...card, display_availability: v })} />
             <button className="danger" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => void del()}>✕ Delete</button>
           </div>
 

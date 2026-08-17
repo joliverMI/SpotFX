@@ -100,15 +100,6 @@ export function useDeleteColorSet() {
   });
 }
 
-/** Apply a Set (or a Group — §10, picks one member and merges its own
- * override entries) to the room right now — the same POST the room-colour
- * apply surface uses; used here as the authoring page's live test/preview. */
-export function useApplyColorSet() {
-  return useMutation({
-    mutationFn: (setId: string) => apiPost('/room-color/apply', { set_id: setId }),
-  });
-}
-
 /** Gradient library (read-only) for fixed-colour pickers. */
 export function useGradients() {
   return useQuery({
@@ -117,6 +108,43 @@ export function useGradients() {
     staleTime: 60_000,
   });
 }
+
+/* ── room-colour Preview (owner ask 2026-08-17) ──
+ * Plain async functions, not mutations — ColorSetsPage.tsx drives these
+ * directly off its own press/drag/unmount timing, not a click-triggered
+ * mutation lifecycle. */
+
+export interface PreviewStartResult {
+  applied: boolean;
+  virtuals: string[];
+  hold: boolean;
+  expires_in_s: number;
+}
+export interface PreviewUpdateResult { applied: boolean; virtuals: string[]; }
+export interface PreviewReleaseResult { reverted: boolean; }
+
+export const startPreview = (card: SpotColorSetCard, hold: boolean) =>
+  apiPost<PreviewStartResult>('/room-preview/start', { card, hold });
+
+export const updatePreview = (card: SpotColorSetCard) =>
+  apiPost<PreviewUpdateResult>('/room-preview/update', { card });
+
+export const releasePreview = () =>
+  apiPost<PreviewReleaseResult>('/room-preview/release', {});
+
+/** Tab-close/reload release: `fetch` isn't reliably delivered from a
+ * beforeunload handler, so this uses sendBeacon instead — fire-and-forget,
+ * best-effort. The server-side auto-revert timer (5s tap / 60s hold) is
+ * the backstop if even this never lands (a killed process, not just a
+ * closed tab). */
+export const releasePreviewBeacon = (): void => {
+  try {
+    navigator.sendBeacon('/spectra/api/room-preview/release',
+      new Blob(['{}'], { type: 'application/json' }));
+  } catch {
+    // best-effort only
+  }
+};
 
 /* ── sequencer ── */
 

@@ -1188,6 +1188,46 @@ Spec: `scripts/check_settings_console.py` (both domains) +
 `tests/test_settings_console.py` (settings) + `tests/test_scene_console.py`
 (scene/flare).
 
+## SPECTRA per-item mode availability + Colour Set/Group Preview
+
+Two owner asks (2026-08-17), same button row. **Mode availability**:
+`display_availability: "default"|"dark"|"light"` on `SceneV2`
+(`spectra/models/scene.py`) and `ColorSetCard` — gates AUTOMATIC selection
+only (`spectra/services/mode_availability.py`'s pure rule), never a manual
+Fire/Preview/Force Scene. **`ColorSetCard` is defined TWICE** — the root
+`models/color_set.py` (spot-effects' authoring model) and SPECTRA's
+own read-only projection `spectra/services/color_sets.py` (`extra="ignore"`)
+— a field added to one and not the other is silently dropped on every
+SPECTRA-side read; `display_availability` had to be added to both. Don't
+confuse this field with `ColorSetCard.display_mode`, the retired dark/light
+"mode lane" variant-swap field (§36) — same three-value vocabulary,
+unrelated meaning. Enforcement funnels through `scene_sequencer.
+fire_scene_by_id` (the one scene-fire choke point, gates scene + resolved
+colour set, Force Scene exempted) and `color_set_groups.
+resolve_for_fire_mode_gated`/`_mode_available_members` (gates a Group card
+itself before member substitution, then filters the member pool).
+
+**Preview** (`spectra/services/room_preview.py` + `preview_pause.py`,
+`spectra/api/room_preview.py`) replaces the Colour Set/Group editor's old
+permanent "Apply to room": tap pauses SPECTRA's automatic changes 5s while
+applying, then reverts; hold ½s pauses up to 60s and stays until released
+(second press / timer / navigating away — `ColorSetsPage.tsx`'s unmount
+effect + a `beforeunload` `sendBeacon`). Snapshot-and-revert goes straight
+through `fx_seam` (mirrors `dark_light.py`'s own pattern) — NOT through
+`drift_conductor`/the engine executor, since a preview must never touch
+`active_set_id`/wheel position/fire_history. `preview_pause` outranks every
+existing deferral (pause/dinner_party/ambient/force_scene) at `bridge.
+conductor_deferral`/`sequencer_deferral` and `engine.fire_response_event`/
+`fire_scene_update_event`. Live-drag colour edits call `POST /room-preview/
+update` with at most one request in flight (a tick that lands mid-request
+coalesces into one follow-up with the latest state, never queues).
+
+Docs: `docs/SPECTRA_SPEC.md` §67/§68 for the full acceptance-criteria
+writeup. Known gap, not fixed by this work: `ColorSetsPage.tsx`'s outer
+`260px 1fr` grid has no phone-responsive layout (unlike `ScenesPage.tsx`'s
+`useIsPhone()` treatment) — its toolbar is cramped at a real phone width,
+though every control works once reached.
+
 ## SPECTRA Sonic token-usage record (review page)
 
 `spectra/services/sonic_usage.py` — durable per-call token usage, his ask:

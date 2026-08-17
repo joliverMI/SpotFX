@@ -107,11 +107,36 @@ def _palette_sync_anchor(members: list) -> Optional[int]:
     return best
 
 
+def _mode_available_members(group: ColorSetCard) -> list:
+    """Members whose OWN set currently passes mode_availability (owner ask
+    2026-08-17, spectra/services/mode_availability.py) — filtered before
+    cycling/weighting so a light/dark-only member never lands while the
+    room's display_mode excludes it, regardless of how the group itself was
+    reached (explicit apply, trigger action, or a scene's color_set_id). A
+    member whose set id no longer resolves is kept here (unfiltered) — the
+    existing "missing member" handling in resolve_for_fire deals with
+    staleness; this filter only ever removes an otherwise-valid member."""
+    from spectra.services import color_sets, mode_availability
+    from spectra.services.room_controls import load_room_controls
+    room_mode = load_room_controls().display_mode
+    out = []
+    for m in group.members:
+        card = color_sets.get_by_id(m.color_set_id)
+        if card is None or mode_availability.available_in_room_mode(
+                card.display_availability, room_mode):
+            out.append(m)
+    return out
+
+
 def _pick_member(group: ColorSetCard) -> Optional[str]:
     """Pick one member id, advancing (and returning) the group's cursor.
     Mirrors legacy's _select_color_set_member at SPECTRA's fixed advance=1/
-    direction=forward/pick_mode=default (see module docstring)."""
-    members = group.members
+    direction=forward/pick_mode=default (see module docstring). The
+    candidate pool is first narrowed to mode-available members (see
+    _mode_available_members) — an empty pool (every member currently
+    gated out) is the same "no usable member" outcome an empty group
+    already has."""
+    members = _mode_available_members(group)
     if not members:
         return None
     n = len(members)
@@ -206,6 +231,33 @@ def resolve_for_fire(card: ColorSetCard) -> Optional[ColorSetCard]:
         for vid, e in merged.items()
     ]
     return member.model_copy(update={"entries": entries})
+
+
+def resolve_for_fire_mode_gated(card: ColorSetCard,
+                                room_mode: str) -> Optional[ColorSetCard]:
+    """resolve_for_fire, plus mode-availability (owner ask 2026-08-17): the
+    CARD ITSELF (set or group) is checked against room_mode BEFORE any
+    group-member substitution — a group marked light/dark-only is skipped
+    as a whole, not silently resolved to a member — and the RESOLVED card
+    (a member, if it was a group) is checked again, on top of
+    _mode_available_members already filtering the member pool a group
+    picks from. None means "nothing usable/available" — callers already
+    treat resolve_for_fire's None as an unresolved reference and fall back
+    to the room's active set; this is the same fallback, one more reason
+    for it. Automatic choke points only (scene_sequencer.fire_scene_by_id,
+    trigger_engine._default_select_color_set) — manual applies call
+    resolve_ref/resolve_for_fire directly and are never mode-gated."""
+    from spectra.services import mode_availability
+    if not mode_availability.available_in_room_mode(
+            card.display_availability, room_mode):
+        return None
+    resolved = resolve_for_fire(card)
+    if resolved is None:
+        return None
+    if not mode_availability.available_in_room_mode(
+            resolved.display_availability, room_mode):
+        return None
+    return resolved
 
 
 def resolve_ref(set_id: str) -> ColorSetCard:
