@@ -432,7 +432,7 @@ def test_failed_reconcile_does_not_mark_held_and_retries_next_call(monkeypatch, 
     assert first["status"] == "failed"
     assert status()["held"] is False, "a failed reconcile must not be recorded as held"
 
-    async def ok(enabled, color):
+    async def ok(enabled, color, group_ids=None):
         return {"status": "on", "devices": ["hue-lights"], "lights_set": 1, "lights_total": 1}
     monkeypatch.setattr(ambient, "reconcile", ok)
 
@@ -503,7 +503,7 @@ def test_switching_from_always_to_off_releases_regardless_of_playback(hue_room):
 def test_status_off_when_ambient_disabled():
     from spectra.services.ambient_music_gate import status
     _save_controls(ambient_mode="off")
-    assert status() == {"setting": "off", "mode": "off", "held": False}
+    assert status() == {"setting": "off", "mode": "off", "held": False, "groups": []}
 
 
 def test_status_yielding_when_enabled_but_not_held():
@@ -578,7 +578,7 @@ def test_verify_now_is_a_noop_when_nothing_is_currently_held():
     result = _run(verify_now())
 
     assert result == {}
-    assert status() == {"setting": "off", "mode": "off", "held": False}
+    assert status() == {"setting": "off", "mode": "off", "held": False, "groups": []}
 
 
 def test_verify_now_skips_while_a_write_is_in_flight(hue_room):
@@ -748,3 +748,114 @@ def test_write_time_dark_result_does_not_report_held(monkeypatch):
     st = status()
     assert st["held"] is False
     assert st["mode"] == "partial"
+
+
+# ── Hue entertainment-area selection (group_ids) ────────────────────────────
+#
+# services/ambient.py's own tests (test_ambient.py) prove the group-scoped
+# reconcile/verify mechanics; these prove the GATE threads the resolved
+# ambient_hue_group_ids through correctly — a group-selection edit alone
+# (mode/colour unchanged) still triggers a fresh reconcile, and status()
+# reports which group(s) are actually held.
+
+def _two_hue_handler(calls):
+    """Two lights on two devices ('hue-lights' at 10.0.0.1/l1,
+    'dining-hues' at 10.0.0.2/l2), dispatched by request host — the
+    two-group counterpart of _hue_handler above."""
+    lights = {"10.0.0.1": ("d1", "l1"), "10.0.0.2": ("d2", "l2")}
+    states = {rid: {"on": {"on": False}, "dimming": {"brightness": 1.0},
+                    "color": {"xy": {"x": 0.3127, "y": 0.3290}}}
+             for _owner, rid in lights.values()}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        owner, rid = lights[request.url.host]
+        path = request.url.path
+        calls.append(("REST", request.method, path, request.url.host))
+        if path == "/clip/v2/resource/entertainment":
+            return httpx.Response(200, json={"data": [{"id": "e0", "owner": {"rid": owner}}]})
+        if path == "/clip/v2/resource/light":
+            return httpx.Response(200, json={"data": [{"id": rid, "owner": {"rid": owner}}]})
+        if path.startswith("/clip/v2/resource/entertainment_configuration/"):
+            return httpx.Response(200, json={"data": [{"channels": [
+                {"members": [{"service": {"rtype": "entertainment", "rid": "e0"}}]}]}]})
+        if path == f"/clip/v2/resource/light/{rid}":
+            if request.method == "PUT":
+                body = json.loads(request.content)
+                states[rid].update({k: v for k, v in body.items() if k in ("on", "dimming", "color")})
+                return httpx.Response(200, json={"data": []})
+            if request.method == "GET":
+                return httpx.Response(200, json={"data": [dict(states[rid], id=rid)]})
+        raise AssertionError(f"unexpected request {request.method} {path}")
+    return handler
+
+
+@pytest.fixture
+def two_hue_rooms(monkeypatch):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    calls: list = []
+    hl = FakeHueDevice(calls)
+    hl.config = {"ip_address": "10.0.0.1", "entertainment_id": "ent-1", "username": "u"}
+    dh = FakeHueDevice(calls)
+    dh.config = {"ip_address": "10.0.0.2", "entertainment_id": "ent-2", "username": "u"}
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": hl, "dining-hues": dh}))
+
+    handler = _two_hue_handler(calls)
+
+    def fake_bridge_client(cfg):
+        return httpx.AsyncClient(base_url=f"https://{cfg['ip_address']}",
+                                 transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(ambient, "_bridge_client", fake_bridge_client)
+    return hl, dh, calls
+
+
+def test_reconcile_holds_only_the_configured_hue_group(two_hue_rooms):
+    from spectra.services.ambient_music_gate import reconcile, status
+    hl, dh, calls = two_hue_rooms
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c",
+                   ambient_hue_group_ids=["hue-lights"])
+
+    result = _run(reconcile(True))
+
+    assert result["status"] == "on"
+    assert result["devices"] == ["hue-lights"]
+    assert hl.frozen is True
+    assert dh.frozen is None, "dining-hues was never selected — must stay untouched"
+    st = status()
+    assert st["held"] is True
+    assert st["groups"] == ["hue-lights"]
+
+
+def test_group_selection_edit_alone_reconciles_while_still_held(two_hue_rooms):
+    """Mode and colour both stay put — only ambient_hue_group_ids changes —
+    and that alone must still release the deselected group and hold the
+    newly-selected one (module docstring's short-circuit note)."""
+    from spectra.services.ambient_music_gate import reconcile, status
+    hl, dh, calls = two_hue_rooms
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c", ambient_hue_group_ids=[])
+    first = _run(reconcile(True))
+    assert sorted(first["devices"]) == ["dining-hues", "hue-lights"]
+    assert hl.frozen is True and dh.frozen is True
+
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c",
+                   ambient_hue_group_ids=["hue-lights"])
+    second = _run(reconcile(True))
+
+    assert second["devices"] == ["hue-lights"]
+    assert second.get("released") == ["dining-hues"]
+    assert hl.frozen is True
+    assert dh.frozen is False
+    assert status()["groups"] == ["hue-lights"]
+
+
+def test_status_groups_names_every_device_under_the_default_selection(two_hue_rooms):
+    """The default ([] == every live Hue device) is reported honestly too —
+    'groups' names whatever is actually held, default selection included,
+    not just a hand-picked subset."""
+    from spectra.services.ambient_music_gate import reconcile, status
+    hl, dh, calls = two_hue_rooms
+    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+
+    _run(reconcile(True))
+
+    assert sorted(status()["groups"]) == ["dining-hues", "hue-lights"]

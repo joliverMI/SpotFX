@@ -202,6 +202,17 @@ VERIFY_TICK_S = 30.0   # matches frame_watchdog / ownership_reconciler cadence
 
 _held = False
 _held_color: Optional[str] = None
+# The RAW selection input (RoomControlState.ambient_hue_group_ids, possibly
+# []) — write-INTENT, compared for the short-circuit only. NOT what
+# status() reports as "groups": [] here means "every device" (services.
+# ambient's own resolution), not "nothing selected", so reporting this raw
+# value directly would read as an empty hold under the default selection.
+_held_group_ids: frozenset = frozenset()
+# The RESOLVED device ids actually held right now — status()'s "groups" is
+# this, not _held_group_ids above. Sourced from the reconcile result's own
+# "devices" list (services.ambient.reconcile already resolved [] to every
+# live Hue device) rather than re-deriving the resolution here.
+_held_resolved_groups: frozenset = frozenset()
 _last_result: dict = {}
 _apply_lock: Optional[asyncio.Lock] = None
 
@@ -258,7 +269,8 @@ async def reconcile(is_playing: Optional[bool]) -> dict:
     result."""
     controls = load_room_controls()
     desired = _desired_hold(controls.ambient_mode, is_playing, _held)
-    return await _apply(controls.ambient_mode, desired, effective_ambient_color(controls))
+    return await _apply(controls.ambient_mode, desired, effective_ambient_color(controls),
+                        frozenset(controls.ambient_hue_group_ids))
 
 
 async def reconcile_now() -> dict:
@@ -299,18 +311,29 @@ def _clear_verify() -> None:
     _last_verify = {}
 
 
-async def _apply(ambient_mode: AmbientMode, desired: bool, color: Optional[str]) -> dict:
-    global _held, _held_color, _last_result
+async def _apply(ambient_mode: AmbientMode, desired: bool, color: Optional[str],
+                 group_ids: frozenset = frozenset()) -> dict:
+    global _held, _held_color, _held_group_ids, _held_resolved_groups, _last_result
     async with _get_apply_lock():
         # Re-check after acquiring the lock: a caller queued behind an
         # in-flight reconcile may already have what it wants once its turn
-        # comes, and must not re-fire an identical Hue write.
-        if desired != _held or (desired and color != _held_color):
-            _last_result = await ambient.reconcile(desired, color)
+        # comes, and must not re-fire an identical Hue write. group_ids is
+        # part of "what's desired" too — picking a different Hue area (or
+        # adding/dropping one) while already held must reconcile, exactly
+        # like a colour change (module docstring, "Hue entertainment-area
+        # selection" note in services/ambient.py).
+        if (desired != _held or (desired and color != _held_color)
+                or (desired and group_ids != _held_group_ids)):
+            _last_result = await ambient.reconcile(desired, color, group_ids)
             status_ = _last_result.get("status")
             if status_ != "failed":
                 _held = desired
                 _held_color = color if desired else None
+                _held_group_ids = group_ids if desired else frozenset()
+                _held_resolved_groups = (
+                    frozenset(_last_result.get("devices", []))
+                    if desired and status_ in ("on", "partial") else frozenset()
+                )
             if desired and status_ in ("on", "partial"):
                 # A write's own read-back (services.ambient's
                 # _hold_and_confirm) IS a fresh confirmation — feed it into
@@ -367,7 +390,7 @@ async def verify_now() -> dict:
         return {}
     controls = load_room_controls()
     target_color = effective_ambient_color(controls)
-    result = await ambient.verify_held(target_color)
+    result = await ambient.verify_held(target_color, frozenset(controls.ambient_hue_group_ids))
     status_ = result.get("status")
     if status_ == "verified":
         unlit = result.get("unlit") or []
@@ -422,7 +445,10 @@ def status() -> dict:
     Folded into GET /api/engine/status by services/engine.py. `held` is
     gated on the most recent confirmation (write read-back or periodic
     verify), not the bare write-intent flag, so it can never keep reading
-    true for a light that's actually off."""
+    true for a light that's actually off. `groups` names the currently-held
+    device ids (empty when not held, or when the selection is "every live
+    Hue device" — the default) — lets the room bar show WHICH area(s) are
+    actually engaged, not just that something is."""
     controls = load_room_controls()
     setting = controls.ambient_mode
     lock = _apply_lock
@@ -437,7 +463,8 @@ def status() -> dict:
         mode = "holding"
     else:
         mode = "yielding"
-    out = {"setting": setting, "mode": mode, "held": confirmed_held}
+    out = {"setting": setting, "mode": mode, "held": confirmed_held,
+           "groups": sorted(_held_resolved_groups) if _held else []}
     if _last_result:
         out["result"] = _last_result
     if _last_verified_ms is not None:

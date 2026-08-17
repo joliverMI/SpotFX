@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spotfxPost } from './api/client';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
-  ColorWheelPosition, DevicePreviewFavorites, DevicePreviewStatus, DriftProfile, EngineStatus,
-  FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark, Registry, ReviewSession,
-  ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult, SceneV2,
-  SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
+  AmbientHueGroup, ColorWheelPosition, DevicePreviewFavorites, DevicePreviewStatus, DriftProfile,
+  EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark, Registry,
+  ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
+  SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
 } from './types';
 
@@ -284,6 +284,18 @@ export function useSaveRoomControls() {
     mutationFn: (state: RoomControlState) =>
       apiPut<RoomControlsSaveResult>('/room-controls', state),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-room-controls'] }),
+  });
+}
+
+/** The ambient_hue_group_ids picker's data source — every live Hue area
+ * Ambient can be scoped to (spectra/services/ambient.py's list_groups()).
+ * Topology is stable once the room is up, so this doesn't need the 3s
+ * poll useEngineStatus uses. */
+export function useAmbientHueGroups() {
+  return useQuery({
+    queryKey: ['spectra-ambient-hue-groups'],
+    queryFn: () => apiGet<{ groups: AmbientHueGroup[] }>('/room-controls/ambient-groups'),
+    staleTime: 30_000,
   });
 }
 

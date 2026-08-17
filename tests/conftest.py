@@ -221,9 +221,11 @@ def _isolated_sonic_usage(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolated_ambient_music_gate():
     """spectra/services/ambient_music_gate.py tracks the live Ambient hold
-    (_held/_held_color/_last_result/_apply_lock, plus the status-honesty
-    verify bookkeeping _verified_ok/_last_verified_ms/_last_verify added
-    2026-08-15) as bare module globals, same no-DI-seam shape as
+    (_held/_held_color/_last_result/_apply_lock, the status-honesty verify
+    bookkeeping _verified_ok/_last_verified_ms/_last_verify added
+    2026-08-15, and the Hue entertainment-area selection bookkeeping
+    _held_group_ids/_held_resolved_groups added 2026-08-16) as bare module
+    globals, same no-DI-seam shape as
     fire_history above — any test that reaches reconcile_ambient_if_changed
     / reconcile_now / verify_now (settings-console tests, room-controls PUT
     tests, the ambient verifier tests) would otherwise leak a held/failed/
@@ -235,6 +237,8 @@ def _isolated_ambient_music_gate():
     def _reset():
         gate._held = False
         gate._held_color = None
+        gate._held_group_ids = frozenset()
+        gate._held_resolved_groups = frozenset()
         gate._last_result = {}
         gate._apply_lock = None
         gate._verified_ok = None

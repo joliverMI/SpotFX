@@ -178,6 +178,44 @@ legacy picks: decision-legacy-retirement-picks.md):
                           NOT redundant: they differ in whether generated
                           mid-song triggers fire, exactly the old switch's
                           two states.
+  ambient_hue_group_ids   WHICH Hue entertainment areas Ambient reaches —
+                          his own two-bridge room, "hue-lights" (10 bulbs)
+                          vs. "dining-hues" (7), and he asked to choose
+                          between them twice before this was built (the
+                          hold, not a pending decision of his — our
+                          failure). Ported from legacy's own per-group
+                          picker (services/ambient_mode.py's
+                          state.ambient_groups / resolve_groups /
+                          set_groups, exposed via the long-press checkbox
+                          picker on AmbientButton.tsx) rather than invented:
+                          the unit of choice there was one Hue device id per
+                          entertainment group/bridge — exactly what
+                          services/ambient.py's live_host.live.host.devices
+                          (type "hue") already enumerates one entry per, so
+                          no new grouping concept was needed on this side.
+                          `[]` (the default) means EVERY live Hue device —
+                          today's unmodified behaviour, preserved on
+                          purpose so deploying this changes nothing until
+                          he picks a subset (legacy's own `want=None` ==
+                          "all groups" semantics, ported as "empty list").
+                          A non-empty list is the exact set of device ids
+                          Ambient may hold; a group NOT in the list is never
+                          frozen, never written to, and left running its
+                          normal reactive show — the SPECTRA-side gap this
+                          field closes (services/ambient.py's own docstring
+                          used to say plainly "no device-category setting
+                          to resolve a target from"). Unlike legacy, there
+                          is no separate device-CATEGORY layer to pick a
+                          target from first — SPECTRA has no LedFX device
+                          categories, and every live Hue device already
+                          picks itself as one candidate group, so this list
+                          names devices directly. See services/ambient.py's
+                          module docstring ("Hue entertainment-area
+                          selection") for the reconcile-time mechanics
+                          (holding a newly-selected group, releasing one
+                          that falls out of scope while Ambient stays
+                          engaged, and why an out-of-scope-but-never-frozen
+                          device is left untouched rather than "released").
   force_scene_enabled/    the legacy Now Playing "Force Scene" control,
   force_scene_scene_id    ported verbatim (owner direction: reuse the old
                           system's design/behaviour, not reinvent it).
@@ -258,6 +296,11 @@ class RoomControlState(BaseModel):
     # Second colour, for dark mode (see the module docstring's ambient_color_dark
     # entry). None = defer to ambient_color, not a frozen copy of it.
     ambient_color_dark: Optional[str] = None
+    # [] = every live Hue device (today's unmodified default — see the
+    # ambient_hue_group_ids docstring entry above). A non-empty list names
+    # exactly which Hue entertainment areas (device ids from
+    # live_host.live.host.devices) Ambient may hold.
+    ambient_hue_group_ids: list[str] = Field(default_factory=list)
     # 0 = no room default (today's unchanged instant-jump behaviour for any
     # scene that doesn't author its own entry_ramp_ms). >0 becomes the
     # FALLBACK ramp scene_compiler.fire_scene uses when a scene's own
@@ -430,11 +473,20 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     `_hsv_value_pct` — see the class docstring's ambient_brightness_note
     entry), so a same-hue-different-lightness edit (e.g. his cream to a
     darker cream) is ALSO a resolved-colour change and correctly reaches
-    this same condition — no separate brightness comparison needed."""
+    this same condition — no separate brightness comparison needed.
+
+    Also fires on an ambient_hue_group_ids edit while ambient isn't "off" —
+    picking a different Hue area (or adding/dropping one) while Ambient is
+    already engaged must reconcile immediately (release the deselected
+    group, hold the newly-selected one), not wait for a colour/mode edit
+    that happens to touch this same PUT. Compared as sets so a reordered
+    (but otherwise identical) list doesn't trigger a no-op reconcile."""
     changed = (
         previous.ambient_mode != new_state.ambient_mode
-        or (new_state.ambient_mode != "off"
-            and effective_ambient_color(previous) != effective_ambient_color(new_state))
+        or (new_state.ambient_mode != "off" and (
+            effective_ambient_color(previous) != effective_ambient_color(new_state)
+            or set(previous.ambient_hue_group_ids) != set(new_state.ambient_hue_group_ids)
+        ))
     )
     if not changed:
         return None
