@@ -33,9 +33,16 @@ Per event, fed by the bridge with the fire's intensity:
      permanent gains, momentary gains, colour drift-jumps (the legacy
      reroll → patch → gain → colour order, generalized):
        drift_jump/dice      — the scene's 🎲 (signal="random") bindings
-                  re-resolve with fresh dice and JUMP to the new values.
-                  The rolls CARRY. Scale is inert (a roll has no
-                  magnitude — stated).
+                  re-resolve with fresh dice. A re-rolled value the param
+                  registry marks smooth (a genuine continuous numeric —
+                  e.g. STAR's `star`) GLIDES to the new value over
+                  DICE_REROLL_GLIDE_MS instead of snapping (owner report,
+                  2026-08-17: re-rolling every ordinary flare read as a
+                  strobe). Anything not smooth (toggle / string / integer
+                  — e.g. STAR's `edges`, itself already sticky and
+                  excluded above) still JUMPS; it can't be meaningfully
+                  interpolated. The rolls CARRY either way. Scale is
+                  inert (a roll has no magnitude — stated).
        momentary/permanent params — absolute targets, name-broadcast: a
                   key lands on every virtual whose live effect carries the
                   param (shared registry truth). Scale s moves the target
@@ -119,6 +126,15 @@ PULSE_HOLD_S = 0.25      # the spike shows for a couple of frames, then releases
 PULSE_RELEASE_S = 1.5    # glide back to baseline
 GAIN_GLIDE_S = 0.8       # linear/ease_* land over this, then hold (carried)
 SURGE_LOG_LIMIT = 50
+
+# A dice re-roll's own eased landing (registry "smooth": true params only —
+# see _reroll). Live-measured ordinary flare cadence during active music is
+# roughly 0.6-1.2s apart (2026-08-17); this is short enough to still read
+# as a flare accent and comfortably settles before the next re-roll, long
+# enough to erase the visible snap. Not intensity-scaled like the colour
+# jump's ramp — a dice roll carries no magnitude to key a ramp off of
+# (stated above), so one fixed duration for every re-roll.
+DICE_REROLL_GLIDE_MS = 220
 
 # Flare colour-jump RAMP-IN (owner refinement of jump-not-blend, not its
 # reversal): the ramp length scales INVERSELY with the fire's intensity —
@@ -260,7 +276,8 @@ class ResponseEngine:
                    if k.type == "drift_jump" and k.jump == "color_set"]
 
         carry: dict[tuple[str, str], Any] = {}
-        jumps: dict[str, dict[str, Any]] = {}   # vid → params
+        jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
+        glides: dict[str, dict[str, Any]] = {}   # vid → params, eased (dice re-roll only)
         kind_records: list[dict] = []
 
         if dice:   # one fresh roll per fire, however many dice kinds attach
@@ -268,11 +285,23 @@ class ResponseEngine:
             kind_records.append({
                 "name": kind.name, "type": kind.type, "jump": "dice",
                 "scale": scale,
-                "rolled": self._reroll(scene, intensity, jumps, carry)})
+                "rolled": self._reroll(scene, intensity, jumps, glides, carry)})
         for kind, scale in moves:
             kind_records.append({
                 "name": kind.name, "type": kind.type, "scale": scale,
                 "moved": self._move_params(kind, scale, jumps, carry)})
+        # An explicit param-patch kind (moves, above — the legacy
+        # reroll→patch precedence) targeting the same param on the same
+        # event must still win and land instantly; drop any dice-only
+        # glide target a later patch also claims rather than racing it.
+        for vid, patched in jumps.items():
+            for pname in patched:
+                glides.get(vid, {}).pop(pname, None)
+        for vid, params in glides.items():
+            state = self.conductor.virtuals.get(vid)
+            if state is not None and params:
+                await self.executor.glide(
+                    vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
@@ -304,17 +333,29 @@ class ResponseEngine:
     # ── batched actions ──────────────────────────────────────────────────────
 
     def _reroll(self, scene: SceneV2, intensity: float,
-                jumps: dict, carry: dict) -> list[dict]:
+                jumps: dict, glides: dict, carry: dict) -> list[dict]:
         """Fresh dice: every signal="random" binding re-resolves in one new
         FireContext (correlated letters stay correlated — one roll per
-        letter) and the changed params jump on the entry's winning
+        letter) and the changed params land on the entry's winning
         virtuals. Stepped-effect entries re-roll the variant the FIRE
         selected (keyed by the entry's live effect) — a surge re-rolls
         dice, it never re-selects the effect. STICKY bindings (ValueBinding.
         sticky, e.g. STAR's edges — decision: OQ-6, docs/SPECTRA_SPEC.md
         §54) are skipped here on purpose: they still roll fresh at fire time
         (resolve_scene doesn't check this flag), the initial pick just holds
-        for the rest of that scene's run instead of moving on every flare."""
+        for the rest of that scene's run instead of moving on every flare.
+
+        A landed value goes to `glides` (eased, see DICE_REROLL_GLIDE_MS)
+        when the registry marks the param genuinely smooth — a continuous
+        numeric, never a toggle/string/integer that can't be meaningfully
+        interpolated (fx/device_model's `config/effect_params.json`
+        already carries this per param, e.g. star: smooth=true,
+        edges: smooth=false — it just went unread by any jump/glide
+        choice until now). An unregistered param (meta is None) has no
+        smooth verdict and stays in `jumps`, the previously-unconditional
+        behaviour. brightness/background_brightness are always genuine
+        floats and always glide, matching how every other brightness
+        write in this module already lands (_gain, colour jump, release)."""
         ctx = FireContext(intensity, rng=self._rng)
         entry_vids: dict[str, list[str]] = {}
         for vid, state in self.conductor.virtuals.items():
@@ -326,13 +367,19 @@ class ResponseEngine:
                 continue
             live_effect = self.conductor.virtuals[vids[0]].effect_type
             targets: dict[str, Any] = {}
+            eased: dict[str, Any] = {}
             for pname, value in dev.params_for_effect(live_effect).items():
                 if (isinstance(value, ValueBinding) and value.signal == "random"
                         and not value.sticky):
                     meta = device_model.get_param_meta(live_effect, pname)
                     kind, lo, hi = binding_resolver.kind_for_meta(meta)
                     out = binding_resolver.apply_binding(value, ctx, kind, lo, hi)
-                    if out is not None:
+                    if out is None:
+                        continue
+                    if (kind == binding_resolver.KIND_NUMERIC
+                            and meta is not None and meta.get("smooth")):
+                        eased[pname] = out
+                    else:
                         targets[pname] = out
             for field in ("brightness", "background_brightness"):
                 value = getattr(dev, field)
@@ -341,12 +388,16 @@ class ResponseEngine:
                     out = binding_resolver.apply_binding(
                         value, ctx, binding_resolver.KIND_NUMERIC, 0.0, 1.0)
                     if out is not None:
-                        targets[field] = out
+                        eased[field] = out
             for vid in vids:
                 jumps.setdefault(vid, {}).update(targets)
-                for pname, out in targets.items():
+                glides.setdefault(vid, {}).update(eased)
+                for pname, out in {**targets, **eased}.items():
                     carry[(vid, pname)] = out
-            rolled.extend({"param": p, "value": v} for p, v in targets.items())
+            rolled.extend({"param": p, "value": v, "eased": False}
+                          for p, v in targets.items())
+            rolled.extend({"param": p, "value": v, "eased": True}
+                          for p, v in eased.items())
         return rolled
 
     def _carried_value(self, vid: str, state, pname: str,
