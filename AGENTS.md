@@ -1446,7 +1446,49 @@ reading the proxy's `_pass_headers`, not assumed. Regression coverage:
 `tests/test_spa_cache_headers.py` (parametrized over both mounts; proven
 red against the pre-fix code, green after).
 
-## Run / deploy
+## SPECTRA spec, rendered for a phone: `GET /spectra/spec`
+
+He asked for a link three times and got a file path twice. `docs/
+SPECTRA_SPEC.md` is ~150KB of dense, table-heavy markdown — a raw link to
+it is technically a link, practically useless on a phone. `spectra/
+services/spec_viewer.py` renders it server-side (python-markdown,
+`tables`/`fenced_code`/`toc`/`sane_lists` extensions, no caching — reads
+the file fresh every request since the spec is a living document) into a
+phone-first HTML page reusing SPECTRA's own purple-on-black tokens
+(`spectra/web/src/styles/tokens.css`'s values, hand-copied since this is a
+server-rendered page outside the SPA bundle, not a React component).
+Route: `spectra/api/spec.py` (`GET /spec`, deliberately outside `/api` —
+this is a page a human opens in a browser tab, not a JSON endpoint),
+registered in `spectra/app.py::create_app()` before the SPA's catch-all
+static mount so the exact path wins (same precedent `/api/status` and
+every other explicit route already relies on). No new server, no new port:
+`/spectra/*` already reaches this process through spot-effects' reverse
+proxy at `:8000`, the address he actually uses.
+
+**Long tables are the hard part at phone width.** Every rendered `<table>`
+is regex-wrapped in its own `.table-scroll` (`overflow-x: auto`) container
+— the table itself is free to be wider than the viewport, but only that
+container scrolls, never the page (`html`/`body` carry `overflow-x:
+hidden` as a backstop) — same "contain the overflow, don't force content
+narrower than it needs to be" shape as the device-preview strip's own
+phone-matrix fix. Verified at a real 390×844 viewport (chrome-devtools-axi
+via Playwright Chromium): `document.documentElement.scrollWidth ===
+clientWidth` (no page-level horizontal scroll) while a real table's own
+`.table-scroll` measured `scrollWidth` (1107px) well past its container's
+`clientWidth` (349px) — the overflow is contained exactly where intended.
+
+**Verify a route under `/spectra/*` by fetching it THROUGH the reverse
+proxy, not only the standalone SPECTRA port** — the proxy is a real extra
+hop that has silently broken things before (see the cache-header entry
+above). Both mounts answer HTTP 200 for any unknown path by serving the
+SPA's own `index.html` (~460 bytes) — a 200 alone proves nothing; check
+size and content. Proven by running an isolated `main.py` (spot-effects
+proxy) pointed at an isolated `python -m spectra` on spare ports (never the
+live `:8000`/`:8010`): `GET /spectra/spec` returned byte-identical 240,106-byte
+HTML through both the direct SPECTRA port and the proxied port, while `GET
+/spectra/<unknown-path>` on the same proxied mount returned exactly the
+460-byte shell — the two are verifiably different responses, not the same
+200 read twice.
 
 Two user systemd units since the S3 process split: **`spotfx.service`**
 (`.venv/bin/python main.py`, port 8000) and **`spectra.service`**
