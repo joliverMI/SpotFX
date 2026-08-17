@@ -427,6 +427,7 @@ class SceneSequencer:
         from spectra.services.room_controls import load_room_controls
         scene = scene_store.get_by_id(scene_id)
         room_mode = load_room_controls().display_mode
+        preference = getattr(scene, "preferred_color_set_mode", "default") if scene else "default"
         out: dict[str, Optional[float]] = {}
         for card in color_sets.list_all():
             if card.kind != "set":
@@ -435,6 +436,9 @@ class SceneSequencer:
                 continue
             if not mode_availability.available_in_room_mode(
                     card.display_availability, room_mode):
+                continue
+            if not mode_availability.color_set_preferred(
+                    card.display_availability, preference, room_mode):
                 continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out

@@ -133,6 +133,9 @@ export default function SummaryTab({ scene, setScene, goTo }: {
           {scene.accept_all_sets
             ? <span>accepts every set (minus global opt-outs)</span>
             : <span>narrowed to {scene.accepted_set_ids.length} set{scene.accepted_set_ids.length === 1 ? '' : 's'}</span>}
+          {scene.preferred_color_set_mode && scene.preferred_color_set_mode !== 'default' && (
+            <span> · prefers {scene.preferred_color_set_mode}</span>
+          )}
         </Card>
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>

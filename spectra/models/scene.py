@@ -588,6 +588,28 @@ class SceneV2(BaseModel):
     # bypasses this the same way both already bypass pause/dinner_party/
     # ambient deferral.
     display_availability: Literal["default", "dark", "light"] = "default"
+    # Per-scene colour-set PREFERENCE (owner ask, 2026-08-17: "black hole
+    # would prefer dark mode color sets... they don't run light mode color
+    # sets unless the system is set to light mode") — a SECOND axis from
+    # display_availability above, deliberately not the same field/control:
+    # availability decides whether THIS SCENE plays at all in the current
+    # room mode; preference decides WHICH COLOUR SETS it draws from once it
+    # does play. "default" = no preference, unchanged behaviour (every set
+    # accepts_color_set() already allows is eligible, same as before this
+    # field existed). "dark"/"light" narrow the automatic colour-set roll to
+    # sets marked the same way on their OWN display_availability (spectra/
+    # services/color_sets.py) plus every unmarked ("default") set — his own
+    # ask was additive, "you don't have to change any color sets", so a set
+    # nobody has classified yet still plays with a preferring scene; only a
+    # set explicitly marked the OPPOSITE mode is excluded. See
+    # spectra/services/mode_availability.py's color_set_preferred() for the
+    # room-mode-aware resolution (an explicit system Light/Dark always wins
+    # over a scene's preference; the preference is consulted only in
+    # Hybrid) and scene_sequencer._default_eligible_sets for the one
+    # wired choke point (the sequencer's automatic colour-set roll — a
+    # manual apply/preview/test-fire bypasses this the same way it already
+    # bypasses display_availability).
+    preferred_color_set_mode: Literal["default", "dark", "light"] = "default"
 
     @model_validator(mode="before")
     @classmethod

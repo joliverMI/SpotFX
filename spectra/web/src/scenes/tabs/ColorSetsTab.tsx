@@ -5,9 +5,16 @@
  * never drops contents it didn't display. */
 import { useMemo, useState } from 'react';
 import HelpLink from '../../help/HelpLink';
+import ColorSetPreferenceToggle from '../../components/ColorSetPreferenceToggle';
 import { useToast } from '../../components/Toast';
 import { useSpotColorSets, useToggleSetOptOut, useWheelPositions } from '../../queries';
 import type { SceneV2 } from '../../types';
+
+const MARK_ICON: Record<string, string> = { dark: '☾', light: '☀' };
+const MARK_TITLE: Record<string, string> = {
+  dark: 'This set is marked Dark (ColorSetsPage → Colours)',
+  light: 'This set is marked Light (ColorSetsPage → Colours)',
+};
 
 export default function ColorSetsTab({ scene, setScene }: {
   scene: SceneV2;
@@ -70,6 +77,12 @@ export default function ColorSetsTab({ scene, setScene }: {
           onChange={(e) => setScene({ ...scene, accept_all_sets: e.target.checked })} />
         Accept every Colour Set (that hasn't opted out globally)
       </label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 8 }}>
+        <span style={{ color: 'var(--text-muted)' }}>Prefers</span>
+        <ColorSetPreferenceToggle value={scene.preferred_color_set_mode ?? 'default'}
+          onChange={(v) => setScene({ ...scene, preferred_color_set_mode: v })} />
+        <HelpLink topic="scene-colorset-preference" />
+      </div>
       <input type="search" placeholder="Type to filter sets…" value={filter}
         style={{ width: '100%', marginBottom: 6 }}
         onChange={(e) => setFilter(e.target.value)} />
@@ -85,6 +98,9 @@ export default function ColorSetsTab({ scene, setScene }: {
                 title={optedOut ? 'Opted out of all scenes' : undefined}
                 onChange={() => toggleAccepted(c.id)} />
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+              {c.display_availability && MARK_ICON[c.display_availability] && (
+                <span title={MARK_TITLE[c.display_availability]}>{MARK_ICON[c.display_availability]}</span>
+              )}
               {w?.rainbow && <span title={`Rainbow set — hues span ${w.span_deg}°, no single wheel position (never moves the room's wheel)`}>🌈</span>}
               {w && !w.rainbow && w.position_deg != null && (
                 <span title={`Wheel position ${w.position_deg}° (span ${w.span_deg}°, R=${w.resultant})`}

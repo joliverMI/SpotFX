@@ -183,6 +183,17 @@ export interface SceneV2 {
    * while the room is dark. "dark": skipped while the room is light.
    * "default": always available. */
   display_availability: DisplayAvailability;
+  /** Per-scene colour-set PREFERENCE (owner ask 2026-08-17) — a SECOND
+   * axis from display_availability above, not the same control: that field
+   * decides whether THIS SCENE plays at all in the current room mode; this
+   * one decides WHICH COLOUR SETS it draws from once it does play. See
+   * ColorSetPreferenceToggle.tsx. "default" = no preference (unchanged
+   * behaviour). "dark"/"light" narrow the automatic colour-set roll to
+   * sets marked the same way (plus every unmarked set — a preference never
+   * excludes a set nobody has classified yet) UNLESS the room's own
+   * display_mode is explicitly set to the opposite mode, which always
+   * wins over the scene's preference. */
+  preferred_color_set_mode: DisplayAvailability;
 }
 
 export type DisplayAvailability = 'default' | 'dark' | 'light';
@@ -707,6 +718,7 @@ export function newScene(id: string): SceneV2 {
     accept_all_sets: true,
     accepted_set_ids: [],
     display_availability: 'default',
+    preferred_color_set_mode: 'default',
   };
 }
 
