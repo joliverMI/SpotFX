@@ -6,6 +6,12 @@ import { useBuilderStore } from '../store';
 
 const MAX_MS = 10_000;
 
+// Keep in lockstep with components/ModeBar.tsx's SETLIST_SLOTS_ENABLED —
+// per-song Set List "slot" overrides retired 2026-08-17 (docs/SPECTRA_SPEC.md
+// OQ-5/§41). His setlist_triggers data is untouched on disk; this just stops
+// "Commit ALL" from writing shifted timestamps into those slot lists too.
+const SETLIST_SLOTS_ENABLED = false;
+
 export default function ShiftAllControl({
   open,
   setOpen,
@@ -33,7 +39,9 @@ export default function ShiftAllControl({
     st.mutateProfile((p) => {
       if (all) {
         shiftList(p.triggers);
-        for (const list of Object.values(p.setlist_triggers)) shiftList(list);
+        if (SETLIST_SLOTS_ENABLED) {
+          for (const list of Object.values(p.setlist_triggers)) shiftList(list);
+        }
       } else if (slotId) {
         if (!p.setlist_triggers[slotId]) {
           p.setlist_triggers[slotId] = JSON.parse(JSON.stringify(p.triggers));

@@ -288,8 +288,14 @@ async def active_triggers():
     # this branch the Now Playing markers showed default trigger positions
     # while triggers fired at setlist positions, looking like every trigger
     # was "early" (or late) by the position delta.
+    #
+    # Retired 2026-08-17 alongside trigger_engine.py::_user_triggers()'s
+    # SETLIST_SLOTS_ENABLED flag (see that comment) — the engine no longer
+    # ever fires setlist-slot timestamps, so this branch must stay off in
+    # lockstep or the frontend would report a "setlist" source the engine
+    # isn't actually honouring. Re-enable both together.
     sl_id = state.active_setlist_id
-    if (engine._profile and sl_id
+    if (engine.SETLIST_SLOTS_ENABLED and engine._profile and sl_id
             and engine._profile.setlist_triggers.get(sl_id)
             and any(t.enabled for t in engine._profile.setlist_triggers[sl_id])):
         return {
