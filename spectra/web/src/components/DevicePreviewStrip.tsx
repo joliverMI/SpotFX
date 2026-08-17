@@ -86,8 +86,54 @@
  * reconnecting-or-unavailable/amber. The full explanation each state used
  * to carry in the badge's `title` lives on this button's `title` +
  * `aria-label` now instead — nothing lost, just not printed as visible
- * text. */
-import { useEffect, useState } from 'react';
+ * text.
+ *
+ * CANVAS PIXEL PAINT, NOT REACT STATE (2026-08-17, "not anywhere near as
+ * smooth as ledfx" — his report; docs/SPECTRA_SPEC.md's device-preview-
+ * smoothness section carries the measured numbers). The old shape used one
+ * <span> DOM element per pixel inside React state (`setFrames` on every
+ * incoming frame, for EVERY favourite device, coalesced into one shared
+ * object) — for his `crystal-mapper` favourite (72x37 = 2664 pixels) that
+ * meant reconciling 2664 elements on every frame, AND on every OTHER
+ * favourite device's frame too, since one shared `frames` state object
+ * re-renders the whole strip regardless of which device's frame arrived.
+ * Measured: React reconciliation of that grid costs ~30-1000x a single
+ * canvas.putImageData() call for the same frame, and under a phone-class
+ * (4x) CPU-throttle proxy the DOM path climbed to 43-98ms per frame — a
+ * third to most of the entire 125ms budget at the relay's 8fps, BEFORE any
+ * other page activity — while canvas stayed under 1.2ms throttled. LedFX's
+ * own frontend reaches the identical conclusion: it ships FIVE preview
+ * render variants, and the DOM-per-pixel one ('original') is kept only as
+ * a slower legacy fallback behind a settings toggle — 'canvas'
+ * (PixelGraphCanvas.tsx: direct WebSocket subscription callback ->
+ * ctx.putImageData(), no React state in the hot path) is what actually
+ * ships by default.
+ *
+ * Pixel data therefore never touches React state at all: `canvasRefs`/
+ * `swatchRefs` hold direct DOM refs per favourite device, and the single
+ * onDevicePreviewFrame subscription below paints straight into whichever
+ * one is currently mounted (paintDevice) — imperative, exactly LedFX's own
+ * division of labour (structural things like a device's shape go through
+ * React state since they change rarely and drive which CSS layout to use;
+ * per-frame pixel colour never does). `shapes` state exists ONLY to pick
+ * matrix-vs-strip layout and is guarded to skip setState when a device's
+ * shape hasn't actually changed, so it doesn't reintroduce a per-frame
+ * re-render. `latestFrames` remembers each device's last frame so
+ * expanding (mounting a fresh canvas) or the live/paused transition can
+ * repaint immediately instead of waiting for the next tick.
+ *
+ * NOT CARRIED FROM LEDFX: the ~81-total-pixel downsample its backend
+ * applies by default (visualisation_maxlen, ledfx/core.py — see
+ * spectra/services/device_preview.py's module docstring for why that file
+ * doesn't port it either) is deliberately NOT added on the frontend side —
+ * measured JSON.parse + decode cost for crystal-mapper's full 2664-pixel
+ * payload is <1ms even under the same throttle, so it buys no smoothness
+ * once canvas removes the render bottleneck, and it would directly conflict
+ * with his own explicit ask three months earlier ("I don't see any Matrix
+ * for The Matrix previews" — the phone-matrix fix above): downsampling to
+ * ~81 points would make Expand show a blur instead of his actual matrix
+ * shape. Named incompatibility, not a silent omission. */
+import { useEffect, useRef, useState } from 'react';
 import {
   averageRgb, decodePixels, onDevicePreviewFrame, onDevicePreviewStatus,
   onDevicePreviewTabHiddenPause,
@@ -99,22 +145,84 @@ import FavoritesPicker from './FavoritesPicker';
 import { useToast } from './Toast';
 
 const EXPANDED_KEY = 'spectra-device-preview-expanded';
+const DARK_PLACEHOLDER = 'rgb(40,40,40)';
 
 export default function DevicePreviewStrip() {
   const { data: favorites } = useDevicePreviewFavorites();
   const [status, setStatus] = useState<DevicePreviewStatus | null>(null);
-  const [frames, setFrames] = useState<Record<string, DevicePreviewFrame>>({});
+  const [shapes, setShapes] = useState<Record<string, [number, number]>>({});
   const [expanded, setExpanded] = useState(() => localStorage.getItem(EXPANDED_KEY) === '1');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pausePending, setPausePending] = useState(false);
   const [tabHiddenPause, setTabHiddenPause] = useState(false);
   const toast = useToast();
 
+  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
+  const swatchRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const latestFrames = useRef<Record<string, DevicePreviewFrame>>({});
+  const liveRef = useRef(false);
+
   useEffect(() => onDevicePreviewStatus(setStatus), []);
-  useEffect(() => onDevicePreviewFrame((frame) => {
-    setFrames((prev) => ({ ...prev, [frame.vis_id]: frame }));
-  }), []);
   useEffect(() => onDevicePreviewTabHiddenPause(setTabHiddenPause), []);
+
+  /** Imperative paint helpers — never touch React state, so a frame never
+   * costs a re-render (see the module docstring's CANVAS PIXEL PAINT
+   * section). Each reads only ref containers, so it stays correct even
+   * though it's captured once by the frame-subscription effect below. */
+  const paintCanvas = (id: string, triples: [number, number, number][], rows: number, cols: number) => {
+    const canvas = canvasRefs.current[id];
+    if (!canvas) return;
+    if (canvas.width !== cols || canvas.height !== rows) {
+      canvas.width = cols;
+      canvas.height = rows;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    const imageData = ctx.createImageData(cols, rows);
+    for (let i = 0; i < triples.length; i++) {
+      const [r, g, b] = triples[i];
+      imageData.data[i * 4] = r;
+      imageData.data[i * 4 + 1] = g;
+      imageData.data[i * 4 + 2] = b;
+      imageData.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+  };
+  const blankCanvas = (id: string) => {
+    const canvas = canvasRefs.current[id];
+    if (!canvas || !canvas.width || !canvas.height) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = DARK_PLACEHOLDER;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  };
+  const paintSwatch = (id: string, color: string) => {
+    const el = swatchRefs.current[id];
+    if (el) el.style.backgroundColor = color;
+  };
+  const paintDevice = (id: string, frame: DevicePreviewFrame) => {
+    if (!liveRef.current) return;
+    const triples = decodePixels(frame.pixels);
+    const [rows, cols] = frame.shape;
+    paintCanvas(id, triples, rows, cols);
+    paintSwatch(id, averageRgb(triples));
+  };
+
+  // The single per-frame hot path: no setState, so a frame never triggers a
+  // React re-render (or worse, re-renders EVERY favourite device's DOM just
+  // because one of them got a new frame — the exact cross-device
+  // amplification the old shared `frames` state object caused).
+  useEffect(() => onDevicePreviewFrame((frame) => {
+    latestFrames.current[frame.vis_id] = frame;
+    const [rows, cols] = frame.shape;
+    setShapes((prev) => {
+      const existing = prev[frame.vis_id];
+      if (existing && existing[0] === rows && existing[1] === cols) return prev;
+      return { ...prev, [frame.vis_id]: [rows, cols] };
+    });
+    paintDevice(frame.vis_id, frame);
+  }), []);
 
   const toggleExpanded = () => setExpanded((prev) => {
     const next = !prev;
@@ -125,6 +233,18 @@ export default function DevicePreviewStrip() {
   const paused = status?.paused ?? false;
   const connected = status?.connected ?? false;
   const live = !paused && !tabHiddenPause && connected;
+
+  // No new frames arrive once non-live (server-side: upstream genuinely
+  // stops — see services/device_preview.py), so nothing else would ever
+  // blank an already-painted canvas/swatch. liveRef updates first so a
+  // frame racing this effect never slips through and repaints afterward.
+  useEffect(() => {
+    liveRef.current = live;
+    if (!live) {
+      Object.keys(canvasRefs.current).forEach(blankCanvas);
+      Object.keys(swatchRefs.current).forEach((id) => paintSwatch(id, DARK_PLACEHOLDER));
+    }
+  }, [live]);
 
   const togglePause = async () => {
     setPausePending(true);
@@ -170,33 +290,38 @@ export default function DevicePreviewStrip() {
       ) : (
         <div className={`device-preview-chips${expanded ? ' expanded' : ''}`}>
           {favoriteIds.map((id) => {
-            const frame = frames[id];
-            const triples = live && frame ? decodePixels(frame.pixels) : [];
-            const [rows, cols] = frame?.shape ?? [1, triples.length];
+            const [rows, cols] = shapes[id] ?? [1, 1];
             const isMatrix = rows > 1;
             return (
               <div key={id} className={`device-preview-device${expanded ? ' expanded' : ''}`} title={id}>
                 {expanded && <span className="device-preview-device-label">{id}</span>}
-                {expanded && triples.length > 0 ? (
-                  isMatrix ? (
-                    <div className="device-preview-matrix"
-                      style={{ '--cols': cols, '--rows': rows } as React.CSSProperties}>
-                      {triples.map((rgb, i) => (
-                        <span key={i} className="device-preview-matrix-cell"
-                          style={{ backgroundColor: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` }} />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="device-preview-pixel-strip">
-                      {triples.map((rgb, i) => (
-                        <span key={i} className="device-preview-pixel"
-                          style={{ backgroundColor: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` }} />
-                      ))}
-                    </div>
-                  )
+                {expanded ? (
+                  <canvas
+                    ref={(el) => {
+                      canvasRefs.current[id] = el;
+                      if (!el) return;
+                      const frame = latestFrames.current[id];
+                      if (frame && liveRef.current) paintDevice(id, frame);
+                      else blankCanvas(id);
+                    }}
+                    className={isMatrix ? 'device-preview-matrix' : 'device-preview-pixel-strip'}
+                    style={{ '--cols': cols, '--rows': rows } as React.CSSProperties}
+                  />
                 ) : (
-                  <span className="device-preview-swatch"
-                    style={{ backgroundColor: live ? averageRgb(triples) : 'rgb(40,40,40)' }} />
+                  <span
+                    ref={(el) => {
+                      swatchRefs.current[id] = el;
+                      if (!el) return;
+                      const frame = latestFrames.current[id];
+                      if (frame && liveRef.current) {
+                        paintSwatch(id, averageRgb(decodePixels(frame.pixels)));
+                      } else {
+                        paintSwatch(id, DARK_PLACEHOLDER);
+                      }
+                    }}
+                    className="device-preview-swatch"
+                    style={{ backgroundColor: DARK_PLACEHOLDER }}
+                  />
                 )}
               </div>
             );

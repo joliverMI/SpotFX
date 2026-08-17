@@ -320,33 +320,40 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   border: 1px solid var(--border);
   transition: background-color 0.2s linear;
 }
-/* A strip (shape rows === 1) — reads as ONE line. Pixels share the
- * container's width equally (flex: 1, not a fixed per-pixel width), so a
- * 7-pixel dining-room strip and a 900+-pixel strip both stay inside the
- * container instead of running off the side. */
+/* A strip (shape rows === 1) — reads as ONE line, at 100% of the
+ * container's width regardless of pixel count, so a 7-pixel dining-room
+ * strip and a 900+-pixel strip both stay inside the container instead of
+ * running off the side. A single <canvas> (see DevicePreviewStrip.tsx) —
+ * its backing resolution is the real pixel count, CSS stretches it to the
+ * display width, `image-rendering: pixelated` keeps individual LEDs crisp
+ * blocks rather than a browser-smoothed blur. */
 .device-preview-pixel-strip {
-  display: flex;
+  display: block;
   width: 100%;
   height: 22px;
   border-radius: 3px;
   overflow: hidden;
   border: 1px solid var(--border);
+  image-rendering: pixelated;
 }
-.device-preview-pixel { flex: 1 1 0; min-width: 0; height: 100%; }
 /* A matrix (shape rows > 1) — reads as a GRID, at its own aspect ratio, at
  * 100% of the available width; height follows from aspect-ratio, so it
- * grows downward as rows increase, never sideways past the container. */
+ * grows downward as rows increase, never sideways past the container. Also
+ * a single <canvas>, same reasoning as the strip above — this is what
+ * replaced the old one-<span>-per-pixel DOM grid (2026-08-17, choppy
+ * device-preview fix): a 72x37 matrix was 2664 React-reconciled elements
+ * re-rendered on every incoming frame, ~30-1000x more expensive than one
+ * canvas.putImageData() call regardless of pixel count (measured — see
+ * docs/SPECTRA_SPEC.md's device-preview-smoothness section). */
 .device-preview-matrix {
-  display: grid;
-  grid-template-columns: repeat(var(--cols), 1fr);
-  grid-template-rows: repeat(var(--rows), 1fr);
-  aspect-ratio: var(--cols) / var(--rows);
+  display: block;
   width: 100%;
+  aspect-ratio: var(--cols) / var(--rows);
   border-radius: 3px;
   overflow: hidden;
   border: 1px solid var(--border);
+  image-rendering: pixelated;
 }
-.device-preview-matrix-cell { width: 100%; height: 100%; }
 .device-preview-btn { padding: 3px 8px; font-size: 11.5px; }
 .device-preview-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
