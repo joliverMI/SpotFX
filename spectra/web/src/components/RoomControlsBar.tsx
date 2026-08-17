@@ -1,24 +1,41 @@
-/** Compact room-control strip — Dark mode (wired: the legacy global
- * Dark/Light display-mode toggle equivalent, hard-clamps every device's
- * background black via LedFX's dark_lock — spectra/services/dark_light.py)
- * plus brightness multiplier (wired: the legacy Brightness Multiplier
- * action equivalent, scales every write uniformly at the fx_executor /
- * scene_compiler seams) plus ambient mode/colour (wired:
- * freezes the room's live Hue devices and holds them at the chosen colour
- * over direct bridge REST — spectra/services/ambient.py), a SECOND
- * ambient colour held instead while Dark mode is on (ambient_color_dark —
- * defaults identical to the normal colour until authored separately), and global
- * transition pace (state only), the scene-change settings model (three
- * additive ticks — see SCENE_CHANGE_MODES below and
- * spectra/services/room_controls.py), and Force Scene — the legacy Now
- * Playing control ported verbatim (owner direction: reuse the old system's
- * design/behaviour). Mounted once in App.tsx, next to the ownership bar. */
+/** Compact room-control strip — the Hybrid/Dark/Light display-mode control
+ * (wired: legacy's Default/Dark/Light display-mode cycle, all three states
+ * — Hybrid ("default" internally, his word for legacy's Default: defer to
+ * whatever the scene authors) / Dark (hard-clamps every device's
+ * background black via LedFX's dark_lock) / Light (forces the configured
+ * background colour/brightness onto every device, unconditionally, live —
+ * spectra/services/dark_light.py) plus brightness multiplier (wired: the
+ * legacy Brightness Multiplier action equivalent, scales every write
+ * uniformly at the fx_executor / scene_compiler seams) plus ambient
+ * mode/colour (wired: freezes the room's live Hue devices and holds them
+ * at the chosen colour over direct bridge REST — spectra/services/
+ * ambient.py), a SECOND ambient colour held instead while display mode is
+ * Dark (ambient_color_dark — defaults identical to the normal colour until
+ * authored separately), and global transition pace (state only), the
+ * scene-change settings model (three additive ticks — see
+ * SCENE_CHANGE_MODES below and spectra/services/room_controls.py), and
+ * Force Scene — the legacy Now Playing control ported verbatim (owner
+ * direction: reuse the old system's design/behaviour). Mounted once in
+ * App.tsx, next to the ownership bar. */
 import { useEffect, useMemo, useState } from 'react';
 import ColorGradientPicker from './ColorGradientPicker';
 import HelpLink from '../help/HelpLink';
 import { useEngineStatus, useRoomControls, useSaveRoomControls, useScenes } from '../queries';
-import type { AmbientMode, AmbientResult, DarkLightResult, RoomControlState, SceneChangeMode } from '../types';
+import type { AmbientMode, AmbientResult, DarkLightResult, DisplayMode, RoomControlState, SceneChangeMode } from '../types';
 import SearchSelect from './forms/SearchSelect';
+
+/** His three-way display-mode control (spectra/services/dark_light.py).
+ * "default" is his word "hybrid" — labelled that way here per his standing
+ * ruling, kept "default" internally/on the wire. */
+const DISPLAY_MODES: { value: DisplayMode; label: string; title: string }[] = [
+  { value: 'default', label: 'Hybrid',
+    title: 'Nothing forced — each device shows whatever its scene authors.' },
+  { value: 'dark', label: 'Dark',
+    title: "Force every non-shielded device's background black, hard-clamped at LedFX." },
+  { value: 'light', label: 'Light',
+    title: 'Force the colour/brightness below onto every non-shielded device\'s background, live, '
+      + 'right now — works while music is playing, no waiting for a scene change.' },
+];
 
 const AMBIENT_NOTE: Record<string, string> = {
   dark: "SPECTRA isn't driving the lights right now — saved, nothing changed live",
@@ -127,42 +144,64 @@ export default function RoomControlsBar() {
 
   return (
     <div className="room-controls-bar">
-      <label className="room-control"
-        title="Force every device's background black, hard-clamped at LedFX so no write path can relight it. Switching off repaints whatever was showing before.">
-        <input
-          type="checkbox"
-          checked={local.dark_mode_enabled}
-          onChange={(e) => commit({ ...local, dark_mode_enabled: e.target.checked })}
-        />
-        Dark mode
+      <label className="room-control" title="Hybrid / Dark / Light — the room's display mode">
+        Display
+        <select
+          value={local.display_mode}
+          onChange={(e) => commit({ ...local, display_mode: e.target.value as DisplayMode })}
+        >
+          {DISPLAY_MODES.map((m) => (
+            <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
+          ))}
+        </select>
         <HelpLink topic="dark-light-mode" />
       </label>
 
-      {darkLightResult && darkLightResult.status !== 'dark' && darkLightResult.status !== 'light' && (
+      <label className="room-control" title="The colour Light forces onto every non-shielded device's background">
+        <ColorGradientPicker
+          value={local.display_light_bg_color}
+          onChange={(v) => commit({ ...local, display_light_bg_color: v })}
+          swatchWidth={40}
+          swatchHeight={28}
+          title="Light mode background colour"
+        />
+        <input
+          type="range" min={0} max={100} step={1}
+          value={Math.round(local.display_light_bg_brightness * 100)}
+          onChange={(e) => setLocal({ ...local, display_light_bg_brightness: Number(e.target.value) / 100 })}
+          onMouseUp={() => commit(local)}
+          onTouchEnd={() => commit(local)}
+        />
+        <span className="room-control-value">{Math.round(local.display_light_bg_brightness * 100)}%</span>
+        <span style={{ fontSize: '0.85em', opacity: 0.75 }}>(light bg)</span>
+        <HelpLink topic="display-light-mode" />
+      </label>
+
+      {darkLightResult && !['dark', 'light', 'default'].includes(darkLightResult.status) && (
         <span
           className={`badge ${darkLightResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
           title={DARK_LIGHT_NOTE[darkLightResult.status]}
         >
-          dark mode: {darkLightResult.status}
+          display mode: {darkLightResult.status}
         </span>
       )}
 
-      {(darkLightResult?.status === 'dark' || darkLightResult?.status === 'light')
+      {darkLightResult && ['dark', 'light', 'default'].includes(darkLightResult.status)
         && (darkLightResult.unconfirmed?.length ?? 0) > 0 && (
         <span
           className="badge badge-red"
-          title={`Not confirmed at the requested dark_lock state after read-back: ${(darkLightResult.unconfirmed ?? []).join(', ')}`}
+          title={`Not confirmed at the requested state after read-back: ${(darkLightResult.unconfirmed ?? []).join(', ')}`}
         >
-          dark mode: {(darkLightResult.locked ?? []).length} locked — unconfirmed: {(darkLightResult.unconfirmed ?? []).join(', ')}
+          display mode: unconfirmed — {(darkLightResult.unconfirmed ?? []).join(', ')}
         </span>
       )}
 
-      {darkLightResult?.status === 'light' && darkLightResult.repaint_skipped === 'music_playing' && (
+      {darkLightResult?.status === 'default' && darkLightResult.repaint_skipped === 'music_playing' && (
         <span
           className="badge badge-gray"
           title="Music is playing, so the stale pre-dark snapshot was not forced back — the room's own live show repaints it on its next natural fire instead"
         >
-          dark mode: repaint deferred to live show
+          display mode: repaint deferred to live show
         </span>
       )}
 

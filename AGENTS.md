@@ -858,25 +858,44 @@ chrome-devtools-axi) — his live `:8010` instance was read-only and
 untouched.
 
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
-built, room-proof pending); NOT the same feature as the retired per-node
-Light Mode Chooser/§36, which shares only a field name
-(`spectra/web/src/timeline/types.ts`'s per-trigger `display_mode`, still
-unread by any `spectra/*.py`). `RoomControlState.dark_mode_enabled` (room
-bar checkbox) toggles the SAME LedFX-side `dark_lock` clamp legacy's
-`services/display_mode.py` drives — vendored into `fx/` verbatim
-(`fx/virtuals.py`'s CONFIG_SCHEMA, `fx/effects/__init__.py`'s
-`_apply_config` hard clamp), reached over two new ownership-routed
+built, room-proof pending for the Light half — see below); NOT the same
+feature as the retired per-node Light Mode Chooser/§36, which shares only a
+field name (`spectra/web/src/timeline/types.ts`'s per-trigger
+`display_mode`, still unread by any `spectra/*.py`).
+`RoomControlState.display_mode` (`"default" | "dark" | "light"`, room bar
+select) is ALL THREE of legacy's states, matching `services/
+display_mode.py`'s own cycle — a 2026-08-16 rebuild off the original
+`dark_mode_enabled` bool, whose `False` state was found to be a mislabelled
+Default (nothing forced) presented as "Light"; real Light (a configurable,
+forced background) never existed until this rebuild
+(`data/spectra-display-mode-three-state/report.md`). **Migration is
+load-bearing**: `dark_mode_enabled: true` → `"dark"`; `false` → `"default"`,
+**never** `"light"` (the old field was named light but behaved as default —
+mapping false→light would have silently forced a background on deploy).
+"default" is his word "hybrid" (labelled "Hybrid" in the UI, kept
+`"default"` on the wire/internally). Dark toggles the SAME LedFX-side
+`dark_lock` clamp legacy's `services/display_mode.py` drives — vendored
+into `fx/` verbatim (`fx/virtuals.py`'s CONFIG_SCHEMA, `fx/effects/
+__init__.py`'s `_apply_config` hard clamp), reached over ownership-routed
 primitives on `spectra/services/fx_seam.py` (`get_virtuals`/
-`set_virtual_config`, same HTTP-pre-handover/in-process-post-handover
-routing as `apply_writes`). `spectra/services/dark_light.py` is the
-reconcile logic and carries the full fidelity reasoning — read its
-docstring before touching this: a bool (not legacy's three-state
-Default/Dark/Light cycle, since Default only ever meant "defer to a lower
-per-node level" and every such level is retired), and restores from a live
-pre-dark snapshot (captured via `fx_seam.get_virtuals()`, persisted to
-survive a restart, replayed via `fx_seam.apply_writes()`) rather than
+`set_virtual_config`/`apply_writes`, same HTTP-pre-handover/
+in-process-post-handover routing). Light writes `display_light_bg_color`/
+`_brightness` (new `RoomControlState` fields, legacy defaults `#201830`/
+`0.3`) as `background_color`/`background_brightness` onto every
+non-shielded virtual's CURRENT live effect config via `fx_seam.
+get_virtuals()`+`apply_writes()` — running effect type and every other
+param untouched — **unconditionally**, not gated on `bridge.is_playing()`
+(unlike the default-repaint below), because a fresh forced write is
+authoritative the instant it lands and gating it would defeat the point:
+watching it work while music plays. `spectra/services/dark_light.py` is
+the reconcile logic and carries the full fidelity reasoning — read its
+docstring before touching this. Transitioning to `"default"` restores from
+a live pre-dark snapshot (captured via `fx_seam.get_virtuals()`, persisted
+to survive a restart, replayed via `fx_seam.apply_writes()`) rather than
 legacy's "re-fire the last Color Set" (that concept belongs to the same
-retired authoring world). Shielding
+retired authoring world); the snapshot is cleared on every transition away
+from `"dark"` (to `"light"` or `"default"` alike), since Light's own write
+makes it stale. Shielding
 (`dark_light_shield_categories`/`_virtuals`, default `["Singles"]` —
 legacy's own default) is ported verbatim via the shared read-only category
 registry (`fx/device_model.get_virtuals_for_category`). **Composes with
@@ -893,7 +912,7 @@ normally. Dark/light never reads `ambient_mode` to decide this — the
 orthogonality is a property of the write path (a frozen device never
 reaches LedFX's effect config), not a rule either feature encodes about
 the other, the same "compose for free by construction" shape Ambient
-mode 2 found for the selection kernel. The light-transition's OWN repaint
+mode 2 found for the selection kernel. The transition-to-`"default"` repaint
 is ALSO gated on `bridge.is_playing()` (`spectra/services/bridge.py`) —
 while music is actively playing, the stale pre-dark snapshot is
 deliberately not forced back (`dark_lock` still clears;
@@ -901,7 +920,8 @@ deliberately not forced back (`dark_lock` still clears;
 show repaints it instead of a frozen still-frame overriding what's
 currently playing — the same class of mistake `ambient_music_gate.py`'s
 three-mode fix above exists to prevent, reached independently rather than
-by sharing code with it. Measurement note, same lesson as "Reading real
+by sharing code with it. Light's own write is deliberately NOT gated this
+way (see above). Measurement note, same lesson as "Reading real
 Hue bulb state" above: dark/light's own mechanism is LedFX-side
 (`dark_lock` + effect config on `/api/virtuals`), never the Hue CLIP
 light resource — that instrument is for Ambient's own REST-held bulbs, a
@@ -909,9 +929,10 @@ different subsystem; verifying dark/light at the bridges means reading
 LedFX's per-virtual `dark_lock` + effect config back
 (`fx_seam.get_virtuals()`, what `dark_light.py`'s own confirm step and
 `scripts/verify_dark_light_fixtures.py` both do). Spec:
-`tests/test_dark_light.py` (10 tests), incl. a frame-level proof against a
+`tests/test_dark_light.py` (18 tests), incl. frame-level proofs against a
 real headless dummy host (`fx/headless.py`) that the vendored clamp
-actually engages, the restore repaints the exact pre-dark background, and
+actually engages, the Light write forces the configured background live
+even while playing, the restore repaints the exact pre-dark background, and
 the music-aware gate holds both ways. Live-fixture check (read-only,
 GET-only, same pattern as `scripts/verify_release_fixtures.py`):
 `scripts/verify_dark_light_fixtures.py` — `--spectra-url`/`--ledfx-url`

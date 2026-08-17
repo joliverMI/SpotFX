@@ -263,12 +263,28 @@ export type SceneChangeMode = 'transitions' | 'analysed' | 'full';
  * releases the instant music starts, returning on its own when it stops. */
 export type AmbientMode = 'off' | 'always' | 'auto';
 
+/** Legacy's Default/Dark/Light display-mode cycle, all three states
+ * (spectra/services/dark_light.py). "default" is his word "hybrid" — defer
+ * to whatever the scene authors; labelled "Hybrid" in the UI, kept
+ * "default" internally per his standing ruling. Migration note (load
+ * bearing): the old dark_mode_enabled bool mapped true->"dark",
+ * false->"default" — NEVER "light" — see room_controls.py's module
+ * docstring for why. */
+export type DisplayMode = 'default' | 'dark' | 'light';
+
 export interface RoomControlState {
-  /** Legacy global Dark/Light display-mode toggle equivalent
+  /** Legacy global Default/Dark/Light display-mode toggle equivalent
    * (services/display_mode.py + LedFX's dark_lock — see spectra/services/
-   * dark_light.py's docstring for the full fidelity mapping, incl. why
-   * this is a bool where legacy has three states). */
-  dark_mode_enabled: boolean;
+   * dark_light.py's docstring for the full fidelity mapping). */
+  display_mode: DisplayMode;
+  /** Legacy's configurable forced Light background
+   * (settings.display_light_bg_color/_brightness), ported verbatim
+   * (default #201830 @ 0.3) — the colour/brightness "light" forces onto
+   * every non-shielded virtual's background, unconditionally. */
+  display_light_bg_color: string;
+  display_light_bg_brightness: number;
+  /** Applies to BOTH "dark" and "light" — a shielded device keeps its own
+   * authored background in either forced mode. */
   dark_light_shield_categories: string[];
   dark_light_shield_virtuals: string[];
   brightness_multiplier: number;
@@ -280,10 +296,10 @@ export interface RoomControlState {
    * to ambient_color (spectra/services/room_controls.py's
    * effective_ambient_color), so the two stay identical by construction
    * ("for now make them the same") until he picks a distinct dark colour
-   * with the same colour picker. Toggling dark_mode_enabled while Ambient
-   * is holding re-applies live at whichever colour is now in effect, eased
-   * through Ambient's own existing glide (same mechanism a plain colour
-   * edit already uses) — never a snap. */
+   * with the same colour picker. Switching display_mode into/out of "dark"
+   * while Ambient is holding re-applies live at whichever colour is now in
+   * effect, eased through Ambient's own existing glide (same mechanism a
+   * plain colour edit already uses) — never a snap. */
   ambient_color_dark: string | null;
   global_transition_ms: number;
   scene_change_mode: SceneChangeMode;
@@ -295,27 +311,33 @@ export interface RoomControlState {
   force_scene_scene_id: string | null;
 }
 
-/** What actually happened to the room's virtuals on the last dark-mode
+/** What actually happened to the room's virtuals on the last display-mode
  * change — present on PUT /room-controls's response only when the mode (or,
- * while dark, a shield-list edit) actually changed
- * (spectra/api/room_controls.py). "dark"/"light" is a real live push;
- * "no-devices" means the switch saved but SPECTRA doesn't know of any
- * virtual to touch; "handover-in-progress"/"released" mean the light
- * ownership record refused a write right now; "failed" means an
- * unexpected error reaching LedFX. `locked` is the CONFIRMED (read back
- * from LedFX, not merely posted) set of virtuals actually holding
- * dark_lock=true; `unconfirmed` names any virtual whose read-back state
- * didn't match what was requested. `restored` (light only) lists virtuals
+ * while dark/light, a shield-list edit; or, while light, a bg colour/
+ * brightness edit) actually changed (spectra/api/room_controls.py).
+ * "default"/"dark"/"light" is a real live push, named honestly — "default"
+ * is the ACTUAL nothing-forced state (his word "hybrid"; before this
+ * three-state rebuild the off-state was mislabelled "light" while behaving
+ * as this). "no-devices" means the switch saved but SPECTRA doesn't know of
+ * any virtual to touch; "handover-in-progress"/"released" mean the light
+ * ownership record refused a write right now; "failed" means an unexpected
+ * error reaching LedFX. `locked` is the CONFIRMED (read back from LedFX,
+ * not merely posted) set of virtuals actually holding dark_lock=true;
+ * `lit` (light only) is the confirmed set whose background actually landed
+ * at the configured light colour/brightness; `unconfirmed` names any
+ * virtual whose read-back state didn't match what was requested (dark_lock
+ * OR the light background). `restored` (default only) lists virtuals
  * repainted from the pre-dark snapshot — empty when there was nothing to
  * restore OR when `repaint_skipped: "music_playing"` is present: music was
  * actively playing, so the stale pre-dark snapshot was deliberately NOT
  * forced back (dark_lock still cleared) — the room's own live show repaints
  * it on its next natural fire instead of a frozen look overriding it. */
 export interface DarkLightResult {
-  status: 'dark' | 'light' | 'no-devices' | 'handover-in-progress' | 'released' | 'failed';
+  status: 'default' | 'dark' | 'light' | 'no-devices' | 'handover-in-progress' | 'released' | 'failed';
   locked?: string[];
   shielded?: string[];
   restored?: string[];
+  lit?: string[];
   repaint_skipped?: 'music_playing';
   unconfirmed?: string[];
   error?: string;

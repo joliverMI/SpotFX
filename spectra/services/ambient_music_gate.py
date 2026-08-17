@@ -38,20 +38,21 @@ tracks a second, independent signal — bridge.is_playing() — used only by
 
 Which COLOUR is held is a THIRD, orthogonal input (2026-08-15, his second
 ambient-colour ruling): room_controls.effective_ambient_color() resolves
-ambient_color_dark vs. ambient_color from dark_mode_enabled, and every write
-(_apply, via reconcile()/reconcile_now()), every read-back (verify_now()'s
-own verify_held call), AND verify_now()'s straggler REPAIR write
-(services.ambient.repair_stragglers, 2026-08-16) below goes through that
-one resolver rather than reading ambient_color directly — so a stale
+ambient_color_dark vs. ambient_color from display_mode == "dark", and every
+write (_apply, via reconcile()/reconcile_now()), every read-back
+(verify_now()'s own verify_held call), AND verify_now()'s straggler REPAIR
+write (services.ambient.repair_stragglers, 2026-08-16) below goes through
+that one resolver rather than reading ambient_color directly — so a stale
 hard-coded reference here can never verify OR repair against the wrong
 target colour while dark mode is on (a straggler repaired back to the
 normal colour while a distinct dark colour is actually held would be a
-self-inflicted "unlit" on the very next tick). dark_mode_enabled flipping
-while already held reaches this module exactly like a plain colour edit
-does: room_controls.reconcile_ambient_if_changed diffs the RESOLVED colour,
-so a dark toggle that changes what's effectively held triggers the same
-reconcile_now() -> reconcile() -> _apply() path as picking a new colour by
-hand, which is what gives the swap its ease (see _apply()'s own "colour
+self-inflicted "unlit" on the very next tick). display_mode flipping
+into/out of "dark" while already held reaches this module exactly like a
+plain colour edit does: room_controls.reconcile_ambient_if_changed diffs
+the RESOLVED colour, so a dark toggle that changes what's effectively held
+triggers the same reconcile_now() -> reconcile() -> _apply() path as
+picking a new colour by hand, which is what gives the swap its ease
+(see _apply()'s own "colour
 changed while holding" branch — the identical mechanism, no separate
 transition code was added for this).
 

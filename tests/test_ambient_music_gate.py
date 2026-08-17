@@ -348,7 +348,7 @@ def test_reconcile_holds_the_dark_colour_when_dark_mode_is_on(hue_room):
     not the normal one."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+    _save_controls(ambient_mode="always", display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
 
     result = _run(reconcile(None))
@@ -359,20 +359,20 @@ def test_reconcile_holds_the_dark_colour_when_dark_mode_is_on(hue_room):
 
 
 def test_dark_mode_toggle_reapplies_ambient_at_the_resolved_colour(hue_room):
-    """Toggling dark_mode_enabled while Ambient is already holding must
+    """Toggling display_mode into/out of "dark" while Ambient is already holding must
     re-apply live at the newly-effective colour — the SAME re-apply path a
     plain ambient_color edit uses (module docstring: no separate transition
     mechanism), which is what gives the swap its ease (services/ambient.py's
     AMBIENT_TRANSITION_MS bridge-side ramp, exercised identically here)."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", dark_mode_enabled=False,
+    _save_controls(ambient_mode="always", display_mode="default",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     held = _run(reconcile(None))
     assert held["status"] == "on"
     calls_after_first = len(calls)
 
-    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+    _save_controls(ambient_mode="always", display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     result = _run(reconcile(None))
 
@@ -387,11 +387,11 @@ def test_dark_mode_toggle_is_a_no_op_when_the_two_colours_still_match(hue_room):
     nothing effective changed."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", dark_mode_enabled=False, ambient_color="#f5da8c")
+    _save_controls(ambient_mode="always", display_mode="default", ambient_color="#f5da8c")
     _run(reconcile(None))
     calls_after_first = len(calls)
 
-    _save_controls(ambient_mode="always", dark_mode_enabled=True, ambient_color="#f5da8c")
+    _save_controls(ambient_mode="always", display_mode="dark", ambient_color="#f5da8c")
     result = _run(reconcile(None))
 
     assert result["status"] == "on"
@@ -405,7 +405,7 @@ def test_verify_now_checks_the_dark_colour_while_dark_mode_is_on(hue_room):
     genuinely-correct dark hold would misreport as 'partial' forever."""
     from spectra.services.ambient_music_gate import status, verify_now
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+    _save_controls(ambient_mode="always", display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     from spectra.services.ambient_music_gate import reconcile
     _run(reconcile(None))
@@ -681,7 +681,7 @@ def test_verify_now_repairs_a_straggler_to_the_dark_colour_not_the_normal_one(hu
     from spectra.services import ambient
     from spectra.services.ambient_music_gate import reconcile, verify_now
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", dark_mode_enabled=True,
+    _save_controls(ambient_mode="always", display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     held = _run(reconcile(None))
     assert held["status"] == "on"

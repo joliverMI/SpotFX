@@ -19,9 +19,9 @@ his live room, say so explicitly and know that you are doing it; there is
 no "just try it and see" mode.
 
 Makes ZERO writes: every call here is a plain GET regardless of target.
-Trigger the actual dark/light toggle separately (the room bar's "Dark
-mode" checkbox, or
-`curl -X PUT {SPOTFX_URL}/api/room-controls -d '{"dark_mode_enabled": true, ...}'`
+Trigger the actual display-mode switch separately (the room bar's
+Hybrid/Dark/Light select, or
+`curl -X PUT {SPOTFX_URL}/api/room-controls -d '{"display_mode": "dark", ...}'`
 with the rest of the current GET /api/room-controls body) — then run this
 before/after to see the delta independently of whatever the toggle itself
 reported. GET-only is a floor, not a licence: only point this at his real
@@ -31,8 +31,9 @@ Reads, in order:
   1. GET {SPECTRA_URL}/spectra/api/liveness — who currently owns the light
      write plane (spot-effects / spectra / handing-over / released), so the
      rest of this output is read in the right context.
-  2. GET {SPECTRA_URL}/api/room-controls — dark_mode_enabled and the shield
-     lists as SPECTRA's own durable record currently has them.
+  2. GET {SPECTRA_URL}/api/room-controls — display_mode, the light-bg
+     colour/brightness, and the shield lists as SPECTRA's own durable
+     record currently has them.
   3. GET {ledfx_url}/api/virtuals — best-effort, direct to the external
      LedFX service (only reachable pre-handover, while spot-effects owns —
      see fx/light_ownership.py). Per virtual: config.dark_lock and the
@@ -86,7 +87,9 @@ def _report_room_controls(base: str) -> None:
         resp = requests.get(f"{base}/api/room-controls", timeout=TIMEOUT)
         resp.raise_for_status()
         body = resp.json()
-        print(f"  dark_mode_enabled={body.get('dark_mode_enabled')}")
+        print(f"  display_mode={body.get('display_mode')}")
+        print(f"  display_light_bg_color={body.get('display_light_bg_color')}")
+        print(f"  display_light_bg_brightness={body.get('display_light_bg_brightness')}")
         print(f"  dark_light_shield_categories={body.get('dark_light_shield_categories')}")
         print(f"  dark_light_shield_virtuals={body.get('dark_light_shield_virtuals')}")
     except Exception as exc:
