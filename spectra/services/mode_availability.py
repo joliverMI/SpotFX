@@ -36,3 +36,38 @@ def available_in_room_mode(item_availability: str, room_mode: str) -> bool:
     if item_availability == "dark":
         return room_mode != "light"
     return True
+
+
+def color_set_preferred(card_availability: str, scene_preference: str,
+                        room_mode: str) -> bool:
+    """PREFERENCE (owner ask 2026-08-17) — a second, orthogonal axis from
+    the AVAILABILITY function above. Availability decides whether an item
+    plays at all in the current room mode; this decides which of the
+    still-available colour sets a SCENE draws from. Callers must apply both
+    (availability first) — this function only judges preference and says
+    nothing about whether `card_availability` itself passes the room mode.
+
+    The owner's rule, verbatim: a scene preferring dark "doesn't run light
+    mode color sets unless the system is set to light mode" — an explicit
+    system mode always settles the question. Generalised symmetrically (his
+    example only named Light overriding a dark preference, but a scene
+    preferring light under an explicit system Dark can't be left with zero
+    eligible sets either): preference is consulted ONLY while the room is
+    Hybrid (room_mode == "default"). Under an explicit Dark or Light room
+    mode, every set that already passed AVAILABILITY is used as-is,
+    preference or not.
+
+    Within Hybrid: no preference (scene_preference == "default") matches
+    everything — unchanged behaviour, the mechanism is inert until a scene
+    declares one. A declared preference matches every UNMARKED
+    ("default") card — his own ask was additive ("you don't have to
+    change any color sets"), so a set nobody has classified yet still
+    plays — and every card marked the SAME way; it excludes only a card
+    explicitly marked the OPPOSITE mode."""
+    if scene_preference == "default":
+        return True
+    if room_mode != "default":
+        return True
+    if card_availability == "default":
+        return True
+    return card_availability == scene_preference

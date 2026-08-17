@@ -84,6 +84,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'A small toggle on the scene toolbar and on a Colour Set/Group\'s toolbar (next to Preview) — tap to cycle Hybrid → Light → Dark → Hybrid. It stays the SAME WIDTH at every state so it never shifts the row under your thumb.',
           'Hybrid (the default): always available. Light: available while the room\'s Display mode is Light or Hybrid, skipped while it\'s Dark. Dark: available while Dark or Hybrid, skipped while Light.',
           'This gates anything that fires WITHOUT a human pressing a button in the moment — the sequencer\'s own picks, a colour Group\'s member cycling, a generated trigger\'s scene pick, and a hand-authored trigger\'s fire_scene action too (the same central gate every automatic scene-fire funnels through). Only two things bypass it: Force Scene (an explicit standing pin — the pinned scene keeps its declared life, same as it already does for Pause/Dinner Party/Ambient) and a literal button press right now (Fire, Test Fire\'s dry-run API, a Colour Set/Group\'s Preview).',
+          'Not the same control as a scene\'s colour-set PREFERENCE (Colour Sets tab) — this one gates whether the scene plays at all; that one only narrows which colour sets it draws from once it does. See "Colour-set preference", below.',
         ],
       },
       {
@@ -223,6 +224,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'scene-colorset-preference',
+        title: 'Colour-set preference — Any / Prefers Dark / Prefers Light',
+        keywords: 'prefer dark light colour set mode black hole fireworks dancers roll selection',
+        body: [
+          'A SECOND toggle on the Colour Sets tab, separate from Mode availability above — do not confuse the two. Mode availability decides whether THIS SCENE plays at all in the room\'s current Display mode. This one decides WHICH of the scene\'s already-accepted colour sets the automatic roll draws from once the scene does play.',
+          '"Any" (default): no preference — unchanged behaviour. "Prefers Dark"/"Prefers Light": the automatic colour-set roll narrows to sets marked the same way on the Colours page (their own Mode availability toggle) PLUS every unmarked set — you never have to re-mark a set just because a scene now prefers one mode; only a set explicitly marked the opposite mode is skipped.',
+          'The room\'s own explicit Display mode always wins: a scene preferring Dark still runs Light-marked sets if the room itself is explicitly set to Light (and the symmetric case for a Light-preferring scene under an explicit Dark room) — the preference is only consulted while the room is Hybrid. A manual Fire, Test Fire, or a Colour Set/Group Preview bypasses this entirely, same as Mode availability.',
+          'This only narrows a pool that already has marked members in it — it marks no colour sets itself. Until some sets are marked Light or Dark on the Colours page, a scene\'s preference changes nothing it draws from (every set still reads as unmarked/"Any"). Mark sets there first if you want a preference to actually do anything.',
+        ],
+      },
+      {
         id: 'tab-responses',
         title: 'Charges / Lulls / Drops tab',
         keywords: 'charge lull drop event classes bands phase build suspend release',
@@ -332,6 +344,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'A Group is a tiered container: the left list nests every Set under the Group(s) that list it (▾/▸ collapses a group\'s tier). A Set can sit under more than one Group — it then appears under each one, labelled "also in: …" so the other membership is never hidden. A Set that belongs to no Group lists under "Ungrouped" at the bottom. Typing in Search temporarily flattens the list back to a plain filtered result, same as before tiering.',
           'A Group is also still an ordered/weighted pool: firing the Group directly (not any of its member Sets) picks ONE member — see "Rotation" in the Group\'s own editor, and "Palette Sync"/"Group overrides" below.',
           'The toolbar\'s ▶ Preview button and mode-availability toggle work on the DRAFT as edited — see "Preview: tap vs hold" and "Mode availability", below. Neither needs a Save first; Save is only for keeping the edit.',
+          'A Set\'s own Mode availability marking (Hybrid/Light/Dark) does double duty: besides gating whether the set itself is offered automatically, a scene\'s colour-set PREFERENCE (Scenes page, Colour Sets tab) matches against this exact marking. Marking a Set here as Dark or Light is how a preferring scene finds it — see "Colour-set preference".',
         ],
       },
       {

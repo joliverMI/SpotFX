@@ -1367,6 +1367,75 @@ writeup. Known gap, not fixed by this work: `ColorSetsPage.tsx`'s outer
 `useIsPhone()` treatment) — its toolbar is cramped at a real phone width,
 though every control works once reached.
 
+## SPECTRA per-scene colour-set PREFERENCE — a second axis, not the same control as availability
+
+`SceneV2.preferred_color_set_mode` (`"default"|"dark"|"light"`,
+`spectra/models/scene.py`, owner ask 2026-08-17: "black hole would prefer
+dark mode color sets... they don't run light mode color sets unless the
+system is set to light mode"). This is the design `docs/SPECTRA_SPEC.md`
+§72 says superseded his own proposed "remove the redundant black
+backgrounds" data-edit fix — that edit was investigated, found unsafe
+(colour bleed between scenes once a black `bg_color` no longer resets a
+virtual), and retired in favour of this build; his authored colour-set
+data was never touched by either investigation. Deliberately separate from
+`display_availability` above: that field gates whether an item plays AT
+ALL in the current room mode; this one gates WHICH colour sets a scene
+draws from once it does play. Resolution:
+`spectra/services/mode_availability.color_set_preferred(card_availability,
+scene_preference, room_mode)` — no preference matches everything; a
+declared preference matches every set marked the same way plus every
+UNMARKED ("default") set (additive, matching his own "you don't have to
+change any color sets"); it excludes only a set marked the opposite mode.
+**Hybrid vs explicit, generalised from his one stated case**: he named only
+system Light overriding a Dark preference — symmetrized here (explicit
+Dark also overrides a Light preference) so neither direction can strand a
+scene with zero eligible sets — preference is consulted ONLY while the
+room is Hybrid; an explicit Dark or Light room mode uses the
+availability-filtered pool as-is. Wired at the one choke point that
+already applies availability to a colour-set pool,
+`scene_sequencer._default_eligible_sets` — not `drift_conductor`'s
+destination pool or `scene_response.py`'s flare colour-jump pool, neither
+of which apply availability there either (checked, not assumed to be
+covered).
+
+**The fallback that must not go wrong**: his real `color_sets.json` had 0
+of 50 sets carrying any dark/light marking at build time, so on deploy day
+every scene's preference matches nothing marked — the fallback MUST be the
+full unfiltered pool, never empty (an empty pool would go a preferring
+scene dark the instant this ships). `color_set_preferred()` guarantees
+this by treating an unmarked card as matching every preference;
+`tests/test_color_set_preference.py::
+test_preference_never_produces_an_empty_pool_when_nothing_is_marked` proves
+it against a 50-set unmarked library rather than asserting it. No second
+marking system was built — the existing Mode availability toggle on a
+Colour Set (`ColorSetsPage.tsx`) is the one surface that marks a set dark
+or light; `ColorSetsTab.tsx` shows each set's marking read-only so it's
+visible while choosing a scene's preference.
+
+**Editing an existing SceneV2 by script: never round-trip through
+`scene_store.save()`/`model_dump_json()` for a single-field change.**
+Loading a scene through `SceneV2` and writing it back re-serializes EVERY
+field in current canonical form — in particular it runs
+`_migrate_flare_kinds`, the legacy flare-band migration shim, and
+permanently rewrites `param_patch`/`gain`/`reroll_dice`/`color_set_jump`
+into the newer `flare_kinds`/`kinds` shape on every scene it touches, even
+though the model asserts the two are behaviourally equivalent — caught
+(before merge) doing exactly this in `scripts/set_scene_colorset_
+preference.py`'s first draft while setting one unrelated field. The fix,
+and the pattern for any future single-field scene migration script: load
+the RAW JSON dict, use `SceneV2(**raw)` only to READ (validation, name
+matching, diagnostics), and write back by mutating the raw dict's specific
+key directly — `tests/test_set_scene_colorset_preference.py` diffs
+before/after JSON to prove only the intended key ever changes.
+
+Docs: `docs/SPECTRA_SPEC.md` §74. Spec: `tests/test_color_set_preference.py`
++ `tests/test_set_scene_colorset_preference.py`. Migration:
+`scripts/set_scene_colorset_preference.py` (dry-run default, `--apply`,
+backs up the whole store first) sets Black Hole V2 / Black Hole V2 UI /
+Fireworks V2 / Dancers V2 to `"dark"` — not run against live storage by
+this build, an operator/deploy step same as `seed_star_strips.py`'s own
+convention.
+
 ## SPECTRA Sonic token-usage record (review page)
 
 `spectra/services/sonic_usage.py` — durable per-call token usage, his ask:
