@@ -89,6 +89,39 @@ colorsets/ColorSetsPage.tsx` (`/colorsets`, nav "Colours") — writes go
 straight through spot-effects' existing `/api/color-sets` (already general;
 SPECTRA's own backend only ever reads this storage, same as before).
 
+**Groups are now a tiered container in the UI (2026-08-17, PR
+fm/spectra-colour-groups-as-overrides), the RESOLVE mechanism unchanged.**
+His ask, verbatim: "in our color group list let's tier it, so that color
+sets are listed under a color group that contained them. Now what color
+groups are, are just overrides for the values of all the color sets below
+it. this gives me a way to bulk edit groups of color sets." Verified before
+building, not assumed: `resolve_for_fire`'s override overlay was ALREADY a
+live, non-destructive layer (never rewrites a member Set's own stored
+`entries` — confirmed in both this module and legacy's
+`_execute_set_color`), so his "bulk edit" phrase names the EFFECT, not a
+new mechanism to build. **The override has NEVER applied to a Set fired by
+its own id** — in legacy OR here, only when the enclosing Group itself is
+the resolved fire target (`_execute_set_color`'s `if card.kind == "group"`
+gate, unchanged) — broadening that to every direct reference of a member
+Set was considered and rejected: computed against his real 8
+groups/58 cards, doing so would silently change rendered output for 27 of
+28 (group, member) override pairs, with zero precedent in either codebase.
+**Groups also stay real, working pools** — 0 of his ~21k SPECTRA
+triggers/scenes target a Group id today (his "we're not really calling
+color groups like we were in SpotFX" is literally true of SPECTRA, though
+legacy's own `storage/events.json` shows 5 of his 8 groups WERE fired as
+pools back there) — but `SpectraTriggerDialog.tsx`'s "select colour set"
+action still lists Groups, `POST /room-color/apply`/`baseline/{id}` still
+accept a Group id, and ColorSetsPage's own ▶ Preview still resolves one —
+none of that was removed, only visually de-emphasized under a "Rotation"
+heading with an honest note on when it actually fires. **A Set can sit
+under more than one Group** — his real data has 4 that do (First Group ∩
+Blues) — so the tiered list is a many-to-many index (a Set renders under
+every Group listing it, cross-referenced by name), never a strict tree or
+an invented "primary owner." No backend/storage change was needed or made
+— the tiering and the reordered Overrides/Members/Rotation editor are
+UI-only, computed client-side from the already-fetched card list.
+
 This top-level copy predates the S3 process split and is genuinely dark/unused
 in his real room today (`storage/sequencer.json` has `enabled: false`) —
 `spectra/models/sequencer.py` + `spectra/services/{selection_kernel,

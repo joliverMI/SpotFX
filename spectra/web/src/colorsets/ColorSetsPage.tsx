@@ -1,10 +1,24 @@
 /** Colour Sets & Groups — SPECTRA-native authoring (day-one bar item §10,
- * docs/SPECTRA_SPEC.md). A Set is a reusable named palette; a Group is a
- * rotating/synced pool of Sets, picked one at a time (cycle/weighted) when
- * applied — see HelpLink topics below for the mechanics. Writes go through
- * spot-effects' own /api/color-sets (already general — accepts either
- * kind), the same surface the Colour Sets tab's opt-out toggle already
- * uses; SPECTRA's own backend only ever reads this storage.
+ * docs/SPECTRA_SPEC.md). A Set is a reusable named palette. A Group is a
+ * TIERED CONTAINER (owner ask 2026-08-17): the left list nests every Set
+ * under the Group(s) that list it as a member — a Set can sit under more
+ * than one Group (his real data has 4 that do), so this renders as a
+ * many-to-many index, not a strict tree; a Set with no group is listed
+ * under "Ungrouped". A Group's own Overrides section is the bulk-edit
+ * lever for the colour sets nested under it — see "Group overrides" below
+ * for exactly when that layer applies (only when the Group itself is the
+ * resolved fire target — unchanged mechanism, ported verbatim from
+ * spot-effects, see spectra/services/color_set_groups.py's own docstring).
+ * A Group's Rotation settings (cycle/weighted pick, Palette Sync) are the
+ * same pool-picking mechanism as before this rework — unused in his real
+ * SPECTRA data today (0 of his ~21k triggers/scenes target a Group id) but
+ * still a live, reachable capability (SpectraTriggerDialog's "select
+ * colour set" action still lists Groups), so it stays fully intact,
+ * de-emphasized rather than removed. See HelpLink topics below for the
+ * mechanics. Writes go through spot-effects' own /api/color-sets (already
+ * general — accepts either kind), the same surface the Colour Sets tab's
+ * opt-out toggle already uses; SPECTRA's own backend only ever reads this
+ * storage.
  *
  * Deliberately NOT ported from the legacy editor: Dark/Light "mode lane"
  * variants (owner-retired, §36) and the LedFX-import modal (a set-only
@@ -14,6 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
+import useIsPhone from '../lib/useIsPhone';
 import { useLongPress } from '../lib/useLongPress';
 import { uuid } from '../lib/uid';
 import {
@@ -49,7 +64,9 @@ export default function ColorSetsPage() {
   const saveMut = useSaveColorSet();
   const delMut = useDeleteColorSet();
 
+  const isPhone = useIsPhone();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [drafts, setDrafts] = useState<Record<string, SpotColorSetCard>>({});
 
@@ -157,6 +174,33 @@ export default function ColorSetsPage() {
 
   const sets = useMemo(() => cards.filter((c) => c.kind === 'set'), [cards]);
 
+  // ── Tiered list (owner ask 2026-08-17: "in our color group list let's
+  // tier it, so that color sets are listed under a color group that
+  // contained them") — a Set can be a member of more than one Group (his
+  // real data: 4 of them are), so this is a many-to-many index, not a
+  // tree — a Set renders under EVERY Group that lists it, cross-referenced
+  // by name rather than picking one "owning" group nobody asked for. ──
+  const groups = useMemo(() => cards.filter((c) => c.kind === 'group'), [cards]);
+  const setById = useMemo(() => new Map(sets.map((s) => [s.id, s])), [sets]);
+  const groupsOfSet = useMemo(() => {
+    const map = new Map<string, SpotColorSetCard[]>();
+    for (const g of groups) {
+      for (const m of g.members ?? []) {
+        const arr = map.get(m.color_set_id) ?? [];
+        arr.push(g);
+        map.set(m.color_set_id, arr);
+      }
+    }
+    return map;
+  }, [groups]);
+  const ungroupedSets = useMemo(
+    () => sets.filter((s) => !groupsOfSet.has(s.id)),
+    [sets, groupsOfSet],
+  );
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const toggleCollapsed = (id: string) =>
+    setCollapsedGroups((c) => ({ ...c, [id]: !c[id] }));
+
   const save = async (c: SpotColorSetCard | null = card) => {
     if (!c) return;
     try {
@@ -197,7 +241,13 @@ export default function ColorSetsPage() {
     const c = newCard(kind);
     setDrafts((d) => ({ ...d, [c.id]: c }));
     setSelectedId(c.id);
+    setPickerOpen(false);
   };
+
+  // Selecting from the list also closes the phone drawer (a no-op on
+  // desktop, where pickerOpen is never true) — one function so every row
+  // (flat search result, group, nested set, ungrouped set) behaves the same.
+  const selectCard = (id: string) => { setSelectedId(id); setPickerOpen(false); };
 
   // Preview (owner ask 2026-08-17, replaces the old permanent Apply to
   // room): previews the DRAFT as edited, unsaved — no save-first step, so
@@ -215,65 +265,185 @@ export default function ColorSetsPage() {
     void startPreviewSession(card, true);
   };
 
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
-      <div className="card" style={{ minWidth: 0, maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
-        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          Colour Sets & Groups <HelpLink topic="colorsets-groups-page" />
+  // Shared row content (swatch / name / subtitle / wheel dot / kind badge)
+  // for both the flat search list and every tier of the grouped list —
+  // subtitleOverride lets a nested Set row show its other group
+  // memberships instead of its labels.
+  const rowInner = (c: SpotColorSetCard, subtitleOverride?: string) => {
+    const w = wheel[c.id];
+    return (
+      <>
+        <div style={{
+          width: 16, height: 16, borderRadius: 4, border: '1px solid var(--border)',
+          background: c.color || '#888', flexShrink: 0,
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {c.name}
+            {drafts[c.id] && <span title="Unsaved changes" style={{ color: 'var(--accent2)' }}> •</span>}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {subtitleOverride ?? (c.kind === 'group'
+              ? `${c.members?.length ?? 0} colour set${(c.members?.length ?? 0) === 1 ? '' : 's'}`
+              : (c.labels ?? []).join(', '))}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          <button className="primary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => create('set')}>+ Set</button>
-          <button className="primary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => create('group')}>+ Group</button>
-        </div>
-        <div className="field">
-          <input type="text" placeholder="Search…" value={search} style={{ width: '100%' }}
-            onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-          {isLoading && <div className="empty-note" style={{ padding: 10 }}>Loading…</div>}
-          {!isLoading && !visible.length && (
-            <div className="empty-note" style={{ padding: 10 }}>No colour sets yet — create one with + Set / + Group.</div>
-          )}
-          {visible.map((c) => {
-            const w = wheel[c.id];
-            return (
-              <div key={c.id} className={`pane-row${c.id === selectedId ? ' selected' : ''}`}
-                onClick={() => setSelectedId(c.id)}>
-                <div style={{
-                  width: 16, height: 16, borderRadius: 4, border: '1px solid var(--border)',
-                  background: c.color || '#888', flexShrink: 0,
-                }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {c.name}
-                    {drafts[c.id] && <span title="Unsaved changes" style={{ color: 'var(--accent2)' }}> •</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {c.kind === 'group' ? `${c.members?.length ?? 0} member${(c.members?.length ?? 0) === 1 ? '' : 's'}` : (c.labels ?? []).join(', ')}
-                  </div>
-                </div>
-                {c.kind === 'set' && w?.rainbow && <span title="Rainbow — no single wheel position">🌈</span>}
-                {c.kind === 'set' && w && !w.rainbow && w.position_deg != null && (
-                  <span title={`Wheel position ${w.position_deg}°`} style={{
-                    width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
-                    border: '1px solid var(--border)', background: `hsl(${w.position_deg}, 85%, 55%)`,
-                  }} />
-                )}
-                <span style={{
-                  fontSize: 10, padding: '2px 6px', borderRadius: 10, flexShrink: 0,
-                  background: c.kind === 'group' ? 'rgba(156,39,176,0.15)' : 'rgba(33,150,243,0.15)',
-                  color: c.kind === 'group' ? '#ba68c8' : '#64b5f6',
-                }}>
-                  {c.kind}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+        {c.kind === 'set' && w?.rainbow && <span title="Rainbow — no single wheel position">🌈</span>}
+        {c.kind === 'set' && w && !w.rainbow && w.position_deg != null && (
+          <span title={`Wheel position ${w.position_deg}°`} style={{
+            width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
+            border: '1px solid var(--border)', background: `hsl(${w.position_deg}, 85%, 55%)`,
+          }} />
+        )}
+        <span style={{
+          fontSize: 10, padding: '2px 6px', borderRadius: 10, flexShrink: 0,
+          background: c.kind === 'group' ? 'rgba(156,39,176,0.15)' : 'rgba(33,150,243,0.15)',
+          color: c.kind === 'group' ? '#ba68c8' : '#64b5f6',
+        }}>
+          {c.kind}
+        </span>
+      </>
+    );
+  };
+
+  // The tiered list body renders in the desktop pane OR the phone
+  // drawer/page — one place, one behavior (picking closes the drawer when
+  // one is open), same shape as ScenesPage's own phone treatment.
+  const colorSetList = (
+    <>
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        Colour Sets & Groups <HelpLink topic="colorsets-groups-page" />
+        {isPhone && pickerOpen && (
+          <button style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => setPickerOpen(false)}>✕</button>
+        )}
       </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <button className="primary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => create('set')}>+ Set</button>
+        <button className="primary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => create('group')}>+ Group</button>
+      </div>
+      <div className="field">
+        <input type="text" placeholder="Search…" value={search} style={{ width: '100%' }}
+          onChange={(e) => setSearch(e.target.value)} />
+      </div>
+      <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+        {isLoading && <div className="empty-note" style={{ padding: 10 }}>Loading…</div>}
+        {!isLoading && !visible.length && (
+          <div className="empty-note" style={{ padding: 10 }}>No colour sets yet — create one with + Set / + Group.</div>
+        )}
+        {!isLoading && !!visible.length && search.trim() && (
+          // Searching flattens the tiers — matches the pre-tiering list
+          // exactly, so typing a name always finds it regardless of
+          // which group(s) it sits under.
+          visible.map((c) => (
+            <div key={c.id} className={`pane-row${c.id === selectedId ? ' selected' : ''}`}
+              onClick={() => selectCard(c.id)}>
+              {rowInner(c)}
+            </div>
+          ))
+        )}
+        {!isLoading && !!visible.length && !search.trim() && (
+          <>
+            {groups.map((g) => {
+              const collapsed = collapsedGroups[g.id];
+              const memberIds = (g.members ?? []).map((m) => m.color_set_id);
+              return (
+                <div key={g.id}>
+                  <div className={`pane-row${g.id === selectedId ? ' selected' : ''}`}
+                    onClick={() => selectCard(g.id)}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleCollapsed(g.id); }}
+                      title={collapsed ? 'Expand' : 'Collapse'}
+                      aria-label={collapsed ? 'Expand group' : 'Collapse group'}
+                      style={{
+                        background: 'none', border: 'none', padding: 0, width: 14, flexShrink: 0,
+                        cursor: 'pointer', color: 'var(--text-muted)', fontSize: 11,
+                      }}>
+                      {collapsed ? '▸' : '▾'}
+                    </button>
+                    {rowInner(g)}
+                  </div>
+                  {!collapsed && memberIds.map((mid) => {
+                    const m = setById.get(mid);
+                    if (!m) {
+                      return (
+                        <div key={mid} className="empty-note"
+                          style={{ padding: '4px 10px 4px 34px', fontSize: 11 }}>
+                          ⚠ missing set ({mid.slice(0, 8)}…)
+                        </div>
+                      );
+                    }
+                    const otherGroups = (groupsOfSet.get(m.id) ?? [])
+                      .filter((gg) => gg.id !== g.id).map((gg) => gg.name);
+                    return (
+                      <div key={`${g.id}:${m.id}`} className={`pane-row${m.id === selectedId ? ' selected' : ''}`}
+                        style={{ paddingLeft: 30 }} onClick={() => selectCard(m.id)}>
+                        {rowInner(m, otherGroups.length ? `also in: ${otherGroups.join(', ')}` : undefined)}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {groups.length > 0 && ungroupedSets.length > 0 && (
+              <div style={{
+                fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5,
+                color: 'var(--text-muted)', padding: '10px 10px 4px',
+              }}>
+                Ungrouped
+              </div>
+            )}
+            {ungroupedSets.map((s) => (
+              <div key={s.id} className={`pane-row${s.id === selectedId ? ' selected' : ''}`}
+                onClick={() => selectCard(s.id)}>
+                {rowInner(s)}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '260px 1fr',
+                  gap: isPhone ? 10 : 16, alignItems: 'start' }}>
+      {/* ── List: desktop pane, or the whole page on a phone with no
+             selection (the editor owns the width once a card is open) ── */}
+      {(!isPhone || !card) && (
+        <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column',
+                                       maxHeight: isPhone ? 'none' : 'calc(100vh - 80px)' }}>
+          {colorSetList}
+        </div>
+      )}
+
+      {/* ── Phone: compact selector above the editor; opens the drawer ── */}
+      {isPhone && card && (
+        <button onClick={() => setPickerOpen(true)} title="Choose another colour set or group"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                   textAlign: 'left', padding: '10px 12px', background: 'var(--surface)',
+                   border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+          <span style={{ color: 'var(--accent)' }}>☰</span>
+          <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden',
+                         textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {card.name}{drafts[card.id] ? ' •' : ''}
+          </span>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', flex: 'none' }}>
+            colours ▾
+          </span>
+        </button>
+      )}
+      {isPhone && pickerOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'var(--bg)',
+                      padding: 10, display: 'flex', flexDirection: 'column' }}>
+          <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {colorSetList}
+          </div>
+        </div>
+      )}
 
       {card ? (
-        <div className="card" style={{ maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' }}>
+        <div className="card" style={{ maxHeight: isPhone ? 'none' : 'calc(100vh - 80px)',
+                                       overflowY: isPhone ? 'visible' : 'auto' }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <input type="text" value={card.name} style={{ fontSize: 15, fontWeight: 600, width: 220 }}
               onChange={(e) => setCard({ ...card, name: e.target.value })} />
@@ -334,45 +504,27 @@ export default function ColorSetsPage() {
             </>
           ) : (
             <>
-              <div className="card-title" style={{ marginTop: 8 }}>Group Settings <HelpLink topic="colorsets-groups-page" /></div>
-              <div className="field" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 0 }}>
-                  Pick mode
-                  <select value={card.mode ?? 'cycle'}
-                    onChange={(e) => setCard({ ...card, mode: e.target.value as 'cycle' | 'weighted' })}>
-                    <option value="cycle">Cycle (sequential)</option>
-                    <option value="weighted">Weighted random</option>
-                  </select>
-                </label>
-                {(card.mode ?? 'cycle') === 'cycle' && (
-                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 0 }}>
-                    Cycle behaviour
-                    <select value={card.cycle_behavior ?? 'wrap'}
-                      onChange={(e) => setCard({ ...card, cycle_behavior: e.target.value as 'wrap' | 'bounce' })}>
-                      <option value="wrap">Wrap (back to top)</option>
-                      <option value="bounce">Bounce (reverse at ends)</option>
-                    </select>
-                  </label>
-                )}
-                {(card.mode ?? 'cycle') === 'weighted' && (
-                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 0, cursor: 'pointer' }}
-                    title="Weighted mode only — cycle never repeats the showing member by construction">
-                    <input type="checkbox" checked={card.exclude_current !== false}
-                      onChange={(e) => setCard({ ...card, exclude_current: e.target.checked })} />
-                    Exclude current from next roll
-                  </label>
-                )}
-                <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 0, cursor: 'pointer' }}
-                  title="Start picks from the member matching the room's current colour, instead of this group's own private cycle position">
-                  <input type="checkbox" checked={card.palette_sync === true}
-                    onChange={(e) => setCard({ ...card, palette_sync: e.target.checked })} />
-                  Palette Sync
-                  <HelpLink topic="colorsets-palette-sync" />
-                </label>
+              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                Overrides — bulk edit for this group's colour sets <HelpLink topic="colorsets-group-overrides" />
+                <button style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
+                  onClick={() => setCard({ ...card, entries: [...(card.entries ?? []), emptyEntry()] })}>
+                  + Override
+                </button>
               </div>
+              {!(card.entries ?? []).length && (
+                <div className="empty-note" style={{ padding: 6 }}>
+                  No overrides. A field set here wins over the colour sets listed below, for the scoped devices, whenever
+                  this group itself fires; unset fields keep each set's own values.
+                </div>
+              )}
+              {(card.entries ?? []).map((entry, i) => (
+                <EntryRow key={i} entry={entry} registry={registry} gradients={gradients.map((g) => g.value)}
+                  onChange={(e) => setCard({ ...card, entries: (card.entries ?? []).map((x, j) => (j === i ? e : x)) })}
+                  onRemove={() => setCard({ ...card, entries: (card.entries ?? []).filter((_, j) => j !== i) })} />
+              ))}
 
-              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center' }}>
-                Members
+              <div className="card-title" style={{ marginTop: 16, display: 'flex', alignItems: 'center' }}>
+                Colour sets in this group
                 <span style={{ fontWeight: 400, marginLeft: 6, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>
                   ordered for cycle; weighted for random
                 </span>
@@ -382,11 +534,11 @@ export default function ColorSetsPage() {
                     const members: SpotGroupMember[] = [...(card.members ?? []), { color_set_id: sets[0].id, weight: 1 }];
                     setCard({ ...card, members });
                   }}>
-                  + Member
+                  + Add
                 </button>
               </div>
               {!(card.members ?? []).length && (
-                <div className="empty-note" style={{ padding: 6 }}>No members. Add one with + Member.</div>
+                <div className="empty-note" style={{ padding: 6 }}>No colour sets yet. Add one with + Add.</div>
               )}
               {(card.members ?? []).map((m, i) => {
                 const members = card.members ?? [];
@@ -429,26 +581,49 @@ export default function ColorSetsPage() {
                 );
               })}
 
-              <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
-                Overrides <HelpLink topic="colorsets-group-overrides" />
-                <span style={{ fontWeight: 400, marginLeft: 2, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>
-                  replace the picked Set's values per device/category
-                </span>
-                <button style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
-                  onClick={() => setCard({ ...card, entries: [...(card.entries ?? []), emptyEntry()] })}>
-                  + Override
-                </button>
+              <div className="card-title" style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
+                Rotation <HelpLink topic="colorsets-groups-page" />
               </div>
-              {!(card.entries ?? []).length && (
-                <div className="empty-note" style={{ padding: 6 }}>
-                  No overrides. Fields set here win over the picked Set for the scoped devices; unset fields keep the Set's values.
-                </div>
-              )}
-              {(card.entries ?? []).map((entry, i) => (
-                <EntryRow key={i} entry={entry} registry={registry} gradients={gradients.map((g) => g.value)}
-                  onChange={(e) => setCard({ ...card, entries: (card.entries ?? []).map((x, j) => (j === i ? e : x)) })}
-                  onRemove={() => setCard({ ...card, entries: (card.entries ?? []).filter((_, j) => j !== i) })} />
-              ))}
+              <div className="empty-note" style={{ padding: '0 0 8px' }}>
+                Only takes effect when this group itself is fired directly (a trigger's "select colour set" action, ▶
+                Preview here, or the room-colour surface) — picks one colour set from the list above each time. The
+                Overrides above apply on that same occasion.
+              </div>
+              <div className="field" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 0 }}>
+                  Pick mode
+                  <select value={card.mode ?? 'cycle'}
+                    onChange={(e) => setCard({ ...card, mode: e.target.value as 'cycle' | 'weighted' })}>
+                    <option value="cycle">Cycle (sequential)</option>
+                    <option value="weighted">Weighted random</option>
+                  </select>
+                </label>
+                {(card.mode ?? 'cycle') === 'cycle' && (
+                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 0 }}>
+                    Cycle behaviour
+                    <select value={card.cycle_behavior ?? 'wrap'}
+                      onChange={(e) => setCard({ ...card, cycle_behavior: e.target.value as 'wrap' | 'bounce' })}>
+                      <option value="wrap">Wrap (back to top)</option>
+                      <option value="bounce">Bounce (reverse at ends)</option>
+                    </select>
+                  </label>
+                )}
+                {(card.mode ?? 'cycle') === 'weighted' && (
+                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 0, cursor: 'pointer' }}
+                    title="Weighted mode only — cycle never repeats the showing member by construction">
+                    <input type="checkbox" checked={card.exclude_current !== false}
+                      onChange={(e) => setCard({ ...card, exclude_current: e.target.checked })} />
+                    Exclude current from next roll
+                  </label>
+                )}
+                <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 0, cursor: 'pointer' }}
+                  title="Start picks from the member matching the room's current colour, instead of this group's own private cycle position">
+                  <input type="checkbox" checked={card.palette_sync === true}
+                    onChange={(e) => setCard({ ...card, palette_sync: e.target.checked })} />
+                  Palette Sync
+                  <HelpLink topic="colorsets-palette-sync" />
+                </label>
+              </div>
             </>
           )}
         </div>

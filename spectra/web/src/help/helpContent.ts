@@ -319,16 +319,18 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: 'colorsets-groups',
     title: 'Colour Sets & Groups page',
-    keywords: 'palette library author create edit delete swatch entries members rotate synced pool',
+    keywords: 'palette library author create edit delete swatch entries members rotate synced pool tier tiered nested bulk edit',
     intro:
-      'Create, edit, and delete Colour Sets (named FG/BG palettes) and Groups (rotating/synced pools of Sets), both kinds. Writes go through spot-effects\' own shared colour-set storage — the same library the sequencer, drift conductor, and every scene already read — so an edit here is visible everywhere immediately. Drafts live locally until Save, same convention as the Scenes page.',
+      'Create, edit, and delete Colour Sets (named FG/BG palettes) and Groups (tiered containers of Sets, with an override layer that bulk-edits everything nested under them). Writes go through spot-effects\' own shared colour-set storage — the same library the sequencer, drift conductor, and every scene already read — so an edit here is visible everywhere immediately. Drafts live locally until Save, same convention as the Scenes page.',
     entries: [
       {
         id: 'colorsets-groups-page',
-        title: 'Sets vs Groups, and the toolbar',
-        keywords: 'apply now proof rotation cursor test fire preview',
+        title: 'Sets vs Groups, and the tiered list',
+        keywords: 'apply now proof rotation cursor test fire preview tier tiered nested ungrouped bulk edit',
         body: [
-          'A Set is a reusable palette: entries scoped to a device/category/role, each with FG colour, BG colour + mode, and brightness — applied wherever the room\'s active Colour Set lands. A Group is an ordered/weighted pool of Sets: firing a Group picks ONE member (see "Palette Sync" and "Group overrides" below) instead of applying a fixed palette.',
+          'A Set is a reusable palette: entries scoped to a device/category/role, each with FG colour, BG colour + mode, and brightness — applied wherever the room\'s active Colour Set lands.',
+          'A Group is a tiered container: the left list nests every Set under the Group(s) that list it (▾/▸ collapses a group\'s tier). A Set can sit under more than one Group — it then appears under each one, labelled "also in: …" so the other membership is never hidden. A Set that belongs to no Group lists under "Ungrouped" at the bottom. Typing in Search temporarily flattens the list back to a plain filtered result, same as before tiering.',
+          'A Group is also still an ordered/weighted pool: firing the Group directly (not any of its member Sets) picks ONE member — see "Rotation" in the Group\'s own editor, and "Palette Sync"/"Group overrides" below.',
           'The toolbar\'s ▶ Preview button and mode-availability toggle work on the DRAFT as edited — see "Preview: tap vs hold" and "Mode availability", below. Neither needs a Save first; Save is only for keeping the edit.',
         ],
       },
@@ -362,10 +364,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'colorsets-group-overrides',
-        title: 'Group overrides',
-        keywords: 'layer replace field win merge scope',
+        title: 'Group overrides — the bulk-edit lever',
+        keywords: 'layer replace field win merge scope bulk edit apply',
         body: [
-          'A Group\'s own Overrides section is a second, higher-priority layer of entries applied ON TOP of whichever member Set gets picked: any field an override entry sets (colour, BG, brightness…) replaces the member\'s value for the virtuals its scope resolves to; fields it leaves blank keep the member\'s own value. An override entry can also reach virtuals the picked member\'s own entries never touch, so a Group-level clamp (e.g. "always keep Matrix dim") behaves the same no matter which member gets picked.',
+          'A Group\'s own Overrides section is the bulk-edit lever for every colour set nested under it: edit it once here, instead of opening each Set individually, and any field it sets (colour, BG, brightness…) replaces that value for every member — for the virtuals its scope resolves to — the next time the Group fires. Fields left blank keep each member\'s own value. An override entry can also reach virtuals a member\'s own entries never touch, so a Group-level clamp (e.g. "always keep Matrix dim") behaves the same no matter which member gets picked.',
+          'This is a LIVE layer, never a destructive write: overrides are computed fresh at fire time and never rewrite a member Set\'s own stored entries — editing or deleting a Group never touches its members\' own data.',
+          'One honest limit, unchanged from how this has always worked (both here and in the original SpotFX): the override layer applies only when the GROUP itself is the resolved fire target — never automatically to a member Set fired by its own id elsewhere (a scene or trigger that names the Set directly). Firing the Group is what turns the override on.',
         ],
       },
     ],
