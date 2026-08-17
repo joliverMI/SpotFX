@@ -15,6 +15,7 @@ redis<7                   # spotipy dep; redis 7.x has Python 3.14 ABC metaclass
 anthropic>=0.40.0         # SPECTRA settings-console agent (spectra/services/settings_agent.py)
 mcp==2.0.0                # settings-console CLI backend's tool surface (spectra/services/settings_mcp_server.py) -- pinned: MCPServer's API moved between major versions (no mcp.server.fastmcp.FastMCP in 2.x)
 librosa>=0.11.0           # musical feature extraction
+markdown>=3.7             # renders docs/SPECTRA_SPEC.md as a phone-readable page (spectra/services/spec_viewer.py)
 soundfile>=0.13.0         # WAV read/write
 
 # fx/ — vendored LedFX render pipeline (see fx/VENDOR.md)
