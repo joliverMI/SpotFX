@@ -307,16 +307,33 @@ async def websocket_endpoint(ws: WebSocket):
 # ── React SPA (web/dist) ──────────────────────────────────────────────────────
 class SPAStaticFiles(StaticFiles):
     """Serve web/dist with index.html fallback so client-side routes
-    (/app/event/<id>) deep-link correctly."""
+    (/app/event/<id>) deep-link correctly.
+
+    Cache-Control: hashed files under /assets/ are content-addressed (a
+    new build always produces a new filename), so they're safe to cache
+    forever. index.html — and the SPA-fallback response served here for
+    any unknown client route — is what NAMES those hashed files, so it
+    must revalidate on every request; with no Cache-Control at all,
+    browsers apply heuristic caching and can reuse a stale index.html
+    without revalidating, pinning a phone to an old bundle indefinitely
+    even though the new build is deployed and served correctly (see
+    AGENTS.md's "SPA index.html must never be heuristically cached").
+    """
 
     async def get_response(self, path: str, scope):
         from starlette.exceptions import HTTPException as StarletteHTTPException
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as e:
-            if e.status_code == 404:
-                return await super().get_response("index.html", scope)
-            raise
+            if e.status_code != 404:
+                raise
+            response = await super().get_response("index.html", scope)
+            path = "index.html"
+        if path.startswith("assets/"):
+            response.headers["cache-control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["cache-control"] = "no-cache"
+        return response
 
 
 WEB_DIST = Path(__file__).parent / "web" / "dist"
