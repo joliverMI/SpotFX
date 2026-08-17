@@ -965,3 +965,205 @@ def test_new_operations_are_discoverable_via_list_operations():
 
     detail = _run(sa._dispatch("list_operations", {"name": "overwrite_scene"}))
     assert "backup" in detail["operation"]["instructions"].lower()
+
+
+# ═══ 10. parameter discovery (his ask: "visibility into parameters and
+# such and what they do") — generated from the REAL definitions (fx/
+# device_model.py reading the vendored effect schema), never a second
+# hand-written catalogue ═══════════════════════════════════════════════
+
+def _seed_scene_with_devices(name="Throwaway", effect_type="fireworks"):
+    from spectra.models.scene import SceneDeviceConfig
+    return _seed_scene(name, devices=[
+        SceneDeviceConfig(target_kind="all", effect_type=effect_type)])
+
+
+def test_list_scene_params_groups_by_the_scenes_real_effects():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene_with_devices()
+    result = sc.list_scene_params(scene.id)
+    assert result["effects"] == [{"effect_type": "fireworks",
+                                  "params": sorted(result["effects"][0]["params"])}]
+    assert "reverse" in result["effects"][0]["params"]
+    # cheap index only — no per-param detail leaked into the list call
+    assert all(isinstance(p, str) for p in result["effects"][0]["params"])
+
+
+def test_list_scene_params_unknown_scene_rejected():
+    from spectra.services import scene_console as sc
+
+    with pytest.raises(sc.SceneOpError, match="no scene with id"):
+        sc.list_scene_params("nonexistent-id")
+
+
+def test_list_scene_params_empty_for_a_deviceless_scene():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene()  # no devices
+    assert sc.list_scene_params(scene.id)["effects"] == []
+
+
+def test_get_param_info_matches_the_real_vendored_schema_not_a_guess():
+    """The concrete real-world case: his "Reverse Direction" flare kind set
+    reverse=1.0 on a fireworks-carrying scene. get_param_info must describe
+    that exact parameter, in his language, sourced live from fx/effects/
+    fireworks.py's own CONFIG_SCHEMA — never a hand-typed second copy that
+    could go stale."""
+    from spectra.services import scene_console as sc
+
+    info = sc.get_param_info("fireworks", "reverse")
+    assert info["effect_type"] == "fireworks"
+    assert info["name"] == "reverse"
+    assert info["type"] == "toggle"
+    assert "implode" in info["description"].lower()
+
+
+def test_get_param_info_description_cannot_drift_from_a_live_schema_edit():
+    """Proves the description is read LIVE, not baked/cached at import time
+    — the strongest form of "cannot describe a parameter that no longer
+    behaves that way": change the real schema, the catalogue changes too,
+    with nothing else to edit."""
+    import voluptuous as vol
+    from fx import device_model
+    from fx.effects import power
+
+    device_model.refresh()
+    before = device_model.param_descriptions("power")["blur"]
+    assert before == "Amount to blur the effect"
+
+    original_schema = power.PowerAudioEffect.CONFIG_SCHEMA
+    try:
+        power.PowerAudioEffect.CONFIG_SCHEMA = vol.Schema({
+            vol.Optional("blur", description="A completely different description", default=0.0):
+                vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10)),
+        })
+        device_model.refresh()
+        after = device_model.param_descriptions("power")["blur"]
+        assert after == "A completely different description"
+    finally:
+        power.PowerAudioEffect.CONFIG_SCHEMA = original_schema
+        device_model.refresh()
+
+
+def test_get_param_info_unknown_effect_type_rejected_with_known_types():
+    from spectra.services import scene_console as sc
+
+    with pytest.raises(sc.SceneOpError) as exc:
+        sc.get_param_info("not-a-real-effect", "reverse")
+    assert "no such effect type" in str(exc.value)
+    assert "fireworks" in exc.value.detail["known_effect_types"]
+
+
+def test_get_param_info_unknown_param_name_rejected_with_known_params():
+    from spectra.services import scene_console as sc
+
+    with pytest.raises(sc.SceneOpError) as exc:
+        sc.get_param_info("fireworks", "not-a-real-param")
+    assert "has no parameter named" in str(exc.value)
+    assert "reverse" in exc.value.detail["known_params"]
+
+
+def test_dispatch_reaches_both_new_param_operations():
+    from spectra.services import settings_agent as sa
+
+    scene = _seed_scene_with_devices()
+    listed = _run(sa._dispatch("list_scene_params", {"scene_id": scene.id}))
+    assert listed["effects"][0]["effect_type"] == "fireworks"
+
+    info = _run(sa._dispatch("get_param_info", {"effect_type": "fireworks", "name": "reverse"}))
+    assert info["type"] == "toggle"
+
+
+# ═══ 11. the "did it work" line — one deterministic, plain-language
+# summary on every write result, never the model's own account (2026-08-17
+# fix: he watched Sonic dump a raw JSON diff instead of a clear answer) ══
+
+def test_every_write_op_result_carries_a_plain_language_summary():
+    from spectra.services import scene_console as sc
+
+    created = _run(sc.apply_create_scene("Warm Fade"))
+    assert created["summary"] == 'Created scene "Warm Fade".'
+
+    scene = _seed_scene()
+    setting = _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 1500))
+    assert setting["summary"] == 'Set Entry blend to 1500 on "Throwaway".'
+
+    flare = _run(sc.apply_flare_kind(
+        scene.id, name="Reverse Direction", type="momentary",
+        params={"reverse": 1.0}, hold_ms=500))
+    assert flare["summary"] == 'Created flare kind "Reverse Direction" on "Throwaway".'
+
+    flare2 = _run(sc.apply_flare_kind(
+        scene.id, name="Reverse Direction", type="momentary",
+        params={"reverse": 1.0}, hold_ms=750))
+    assert flare2["summary"] == 'Updated flare kind "Reverse Direction" on "Throwaway".'
+
+    removed = _run(sc.apply_remove_flare_kind(scene.id, "Reverse Direction"))
+    assert removed["summary"] == 'Removed flare kind "Reverse Direction" from "Throwaway".'
+
+
+def test_flare_kind_summary_never_contains_the_raw_json_diff():
+    """The literal regression: creating a second flare kind on a scene
+    that already has one diffs the WHOLE flare_kinds list (_diff_scenes'
+    own documented "nested structure -> whole field" behavior) — the
+    summary line must stay a short plain sentence regardless, never grow
+    with however many flare kinds the scene already has."""
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene()
+    _run(sc.apply_flare_kind(scene.id, name="First", type="permanent", params={"gain": 1.2}))
+    _run(sc.apply_flare_kind(scene.id, name="Second", type="permanent", params={"gain": 1.3}))
+    result = _run(sc.apply_flare_kind(scene.id, name="Third", type="permanent", params={"gain": 1.4}))
+
+    assert result["summary"] == 'Created flare kind "Third" on "Throwaway".'
+    assert len(result["summary"]) < 80
+    assert "{" not in result["summary"] and "[" not in result["summary"]
+    # the raw diff is still there for the UI's own dedicated preview
+    # rendering — this test only asserts the SUMMARY line stays short
+    assert len(result["preview"]["flare_kinds"]["after"]) == 3
+
+
+def test_overwrite_and_restore_and_undo_summaries_are_plain_language():
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene()
+    overwritten = _run(sc.apply_overwrite_scene(scene.id, name="Renamed"))
+    assert overwritten["summary"].startswith('Overwrote scene "Renamed" — changed:')
+
+    restored = _run(sc.apply_restore_scene_backup(scene.id, "genesis"))
+    assert restored["summary"] == 'Restored "Throwaway" to its original, pre-Sonic version.'
+
+    _run(sc.apply_scene_setting(scene.id, "entry_ramp_ms", 999))
+    undone = _run(sc.apply_undo_last_scene_change())
+    assert undone["summary"].startswith('Undid the last change to "')
+
+
+def test_rejected_scene_write_has_a_plain_reason_no_summary_needed():
+    """A refusal's own `reason` already IS the plain-language failure
+    statement — no separate `summary` field is needed on that side (see
+    settings_agent.SYSTEM_PROMPT)."""
+    from spectra.services import scene_console as sc
+
+    result = _run(sc._op_set_scene_setting("nonexistent-id", "entry_ramp_ms", 500))
+    assert result["status"] == "rejected"
+    assert result["reason"] == "no scene with id 'nonexistent-id'"
+
+
+def test_run_turn_surfaces_rejections_structurally_not_only_applied(monkeypatch):
+    """His 'if it failed, that says so just as plainly' ask needs a
+    rejected write's real `reason` available the same way an applied
+    write's `summary` is — never only inferred from the model's prose."""
+    from spectra.services import settings_agent as sa
+
+    tool_use = _FakeBlock(
+        "tool_use", id="tu_1", name="set_scene_setting",
+        input={"scene_id": "nonexistent-id", "key": "entry_ramp_ms", "value": 500})
+    first = _FakeResponse([tool_use])
+    second = _FakeResponse([_FakeBlock("text", text="That scene doesn't exist.")])
+    monkeypatch.setattr(sa, "_client", lambda: _FakeClient([first, second]))
+
+    result = _run(sa.run_turn(None, "set entry ramp on a scene that doesn't exist"))
+    assert result["changes"] == []
+    assert len(result["rejected"]) == 1
+    assert "no scene with id" in result["rejected"][0]["reason"]

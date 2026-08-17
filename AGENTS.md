@@ -1207,6 +1207,31 @@ Full detail: `docs/SPECTRA_SPEC.md` §56, `tests/test_scene_console.py`
 section 9 (backup/undo/preview/restore), `tests/test_settings_agent_cli.py`
 section 5c (the CLI backend's fabrication guard re-proven a second time).
 
+**Sonic's parameter discovery + the "did it work" line** (2026-08-17,
+`docs/SPECTRA_SPEC.md` §72): `fx/device_model.py`'s `param_descriptions()`/
+`param_catalogue()` read a param's "what it does" text LIVE off the
+vendored effect's own `CONFIG_SCHEMA` (`cls.schema()`, same MRO-merge
+`scripts/backfill_param_defaults.py` already uses) — never a second
+hand-written copy that could drift from the real schema; type/range/
+default still come from the existing `effect_params()` registry. Two new
+scene-domain `SonicOperation`s (`list_scene_params`/`get_param_info`,
+`spectra/services/scene_console.py`) expose this narrowly (names first,
+one param's full detail per call) — remember `settings_mcp_server.py` is
+hand-maintained (one wrapper per `ALL_OPERATIONS` entry, not generated),
+so a new operation needs a wrapper added there too, and the CLI backend's
+`tests/fixtures/cli_transcript_synthetic_*.json` manifests updated to
+list it or `_verify_tool_manifest` refuses every one of them as stale.
+Separately: every `scene_console.py`/`settings_console.py` write result
+now carries a deterministic `summary` string (and a rejection's own
+`reason` already served that role) — `run_turn()`/`settings_agent_cli.
+_parse_transcript()` collect a `rejected` list alongside `changes` so a
+refusal is structurally available too, not only in the model's prose.
+`spectra/web/src/lib/sonicPreview.ts`'s `fmtValue()` must never
+`JSON.stringify` a raw object/array — a nested field like `flare_kinds`
+diffs wholesale on any edit (`_diff_scenes`'s documented whole-field
+behaviour), so a naive stringify is a real, previously-shipped path for
+dumping a JSON blob into his chat; summarize (count/names) instead.
+
 **Subscription (CLI) backend — built, default OFF, not yet authorised
 against his real account** (`data/spectra-console-subscription-backend/`:
 scout report + the captain's ruling that provisioning an `ANTHROPIC_API_KEY`

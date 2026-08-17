@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToast } from './Toast';
 import HelpLink from '../help/HelpLink';
-import { formatPreview } from '../lib/sonicPreview';
+import { formatAppliedStatus, formatPreview, formatRejectedStatus } from '../lib/sonicPreview';
 import { uuid } from '../lib/uid';
 import { useSendSettingsMessage, useTranscribeSettingsAudio, useUndoLastSceneChange } from '../queries';
 import type { SettingsChatMessage } from '../types';
@@ -49,9 +49,21 @@ export default function SonicChatPopover() {
       const result = await send.mutateAsync({ session_id: sessionId, text: toSend });
       setSessionId(result.session_id);
       setMessages((m) => [...m, { id: uuid(), role: 'assistant', text: result.reply }]);
+      // The definitive "did it work" line — built server-side from real
+      // structured fields (SonicAppliedChange.summary / SonicRejectedChange
+      // .reason), never from the model's own prose, and always shown
+      // regardless of what result.reply says. This is the answer to "I
+      // don't know if it actually completed the task" — one plain
+      // sentence per attempted write, success or failure.
+      const statusLines = [
+        ...result.changes.map((c) => `✓ ${formatAppliedStatus(c)}`),
+        ...(result.rejected ?? []).map((c) => `✗ ${formatRejectedStatus(c)}`),
+      ];
+      if (statusLines.length > 0) {
+        setMessages((m) => [...m, { id: uuid(), role: 'status', text: statusLines.join('\n') }]);
+      }
       if (result.changes.length > 0) {
-        const labels = result.changes.map((c) => c.key ?? c.scene_name ?? c.flare_kind ?? c.op ?? 'something');
-        toast(`Changed ${labels.join(', ')}`, 'success');
+        toast(result.changes.map(formatAppliedStatus).join(' '), 'success');
         // The preview line is a READ of the saved scene (scene_console.py's
         // _diff_scenes), not Sonic's own reply text — rendered as its own,
         // visually distinct message so a check-in never has to trust prose.

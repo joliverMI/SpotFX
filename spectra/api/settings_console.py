@@ -19,7 +19,13 @@
                                         involved. 409 when there's nothing
                                         to undo.
   POST /api/settings-console/message    one chat turn: {session_id?, text}
-                                        -> {session_id, reply, changes}.
+                                        -> {session_id, reply, changes,
+                                        rejected}. `changes`/`rejected` are
+                                        built exclusively from structured
+                                        tool_result payloads (status ==
+                                        "applied" / anything else on a
+                                        write op), never from `reply`'s
+                                        prose.
                                         Routes to services/settings_agent.py
                                         (default, ANTHROPIC_API_KEY) or
                                         services/settings_agent_cli.py

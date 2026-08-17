@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
-import { formatPreview } from '../lib/sonicPreview';
+import { formatAppliedStatus, formatPreview, formatRejectedStatus } from '../lib/sonicPreview';
 import { uuid } from '../lib/uid';
 import {
   useSendSettingsMessage, useSettingsLog, useSettingsRegistry,
@@ -81,9 +81,19 @@ export default function SettingsConsolePage() {
       const result = await send.mutateAsync({ session_id: sessionId, text: toSend });
       setSessionId(result.session_id);
       setMessages((m) => [...m, { id: uuid(), role: 'assistant', text: result.reply }]);
+      // The definitive "did it work" line — built server-side from real
+      // structured fields, never the model's own prose (see
+      // SonicChatPopover.tsx's matching comment for the incident this
+      // answers).
+      const statusLines = [
+        ...result.changes.map((c) => `✓ ${formatAppliedStatus(c)}`),
+        ...(result.rejected ?? []).map((c) => `✗ ${formatRejectedStatus(c)}`),
+      ];
+      if (statusLines.length > 0) {
+        setMessages((m) => [...m, { id: uuid(), role: 'status', text: statusLines.join('\n') }]);
+      }
       if (result.changes.length > 0) {
-        const labels = result.changes.map((c) => c.key ?? c.scene_name ?? c.flare_kind ?? c.op ?? 'something');
-        toast(`Changed ${labels.join(', ')}`, 'success');
+        toast(result.changes.map(formatAppliedStatus).join(' '), 'success');
         // Sonic is one backend reachable from both pages — a scene edit
         // made from here still deserves the same real-data preview the
         // Scenes-page popover shows (scene_console.py's _diff_scenes).

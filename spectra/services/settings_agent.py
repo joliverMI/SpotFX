@@ -80,21 +80,31 @@ SYSTEM_PROMPT = (
     "it again with a specific operation name to get that operation's full "
     "argument shape and how-to notes before using it — those notes live "
     "with each operation and are the authority on how to call it, not "
-    "this paragraph. Every change you attempt is re-validated server-side "
-    "and refused if illegal; when refused, explain why and the legal "
-    "range/choices rather than guessing at a value yourself. Never say a "
-    "change happened unless the tool result actually says so — read the "
-    "tool result, not your own sense of how the conversation went; if a "
-    "tool is unavailable or a call fails, say that plainly instead of "
-    "describing a change that didn't happen. After a scene edit, relay "
-    "the tool result's own `preview` field back to him and ask if it's "
-    "right — that field is read from the saved scene, not your account of "
-    "it, so quote it rather than re-describing it from memory; if he says "
-    "no, offer undo_last_scene_change or restore_scene_backup. He may be "
-    "dictating by voice, so his own product names can arrive garbled ('spot effects' "
-    "voice, so his own product names can arrive garbled ('spot effects' "
-    "means SpotFX) — read intent, don't over-literally match words. Keep "
-    "replies short."
+    "this paragraph. If you're about to set a scene/flare parameter and "
+    "don't already know its exact legal name from this conversation, call "
+    "list_scene_params (then get_param_info for the one you're about to "
+    "use) instead of asking him to supply it or guessing — those tools "
+    "read the real effect definitions, so they're never wrong about what "
+    "exists or what it does. Every change you attempt is re-validated "
+    "server-side and refused if illegal; when refused, explain why and "
+    "the legal range/choices rather than guessing at a value yourself. "
+    "Never say a change happened unless the tool result actually says so "
+    "— read the tool result, not your own sense of how the conversation "
+    "went. EVERY reply, success or failure, ends in ONE short plain-"
+    "language sentence stating whether it worked — a tool's own `summary` "
+    "field (on a write result whose status is \"applied\") or `reason` "
+    "field (on a rejected one) already IS that sentence, written for "
+    "exactly this purpose: say it in your own words or quote it, but "
+    "never leave him to infer the outcome from what you attempted. NEVER "
+    "paste, quote, or describe the shape of a tool result's raw JSON, "
+    "dict, or `preview` diff in your reply — a scene edit's real before/"
+    "after is rendered separately, straight from the saved file, by the "
+    "surface he's using; your job is the one-sentence plain-language "
+    "confirmation, not a data dump. If he asks 'did it work', answer with "
+    "that one sentence, not a copy of what a tool returned. He may be "
+    "dictating by voice, so his own product names can arrive garbled "
+    "('spot effects' means SpotFX) — read intent, don't over-literally "
+    "match words. Keep replies short."
 )
 
 
@@ -232,6 +242,7 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
     history.append({"role": "user", "content": text})
 
     applied: list[dict] = []
+    rejected: list[dict] = []
     usage_totals = {
         "rounds": 0, "usage_reported": False,
         "input_tokens": 0, "output_tokens": 0,
@@ -253,7 +264,7 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
             if not tool_uses:
                 reply = "".join(b.text for b in response.content if b.type == "text")
                 _trim(history)
-                return {"session_id": sid, "reply": reply, "changes": applied}
+                return {"session_id": sid, "reply": reply, "changes": applied, "rejected": rejected}
 
             tool_results = []
             for tu in tool_uses:
@@ -262,10 +273,17 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
                 # a "read" result (get_settings, list_scenes, ...) doesn't, so
                 # it's never mistaken for either outcome — this is a property
                 # of the RESULT SHAPE, not the tool name, so it generalizes to
-                # every operation without a per-name special case.
+                # every operation without a per-name special case. `rejected`
+                # exists for the same reason `applied` does — his "if it
+                # failed, that says so just as plainly" ask needs a failure's
+                # own `reason` surfaced from real structured data too, not
+                # only from whatever the model chooses to say about it.
                 is_write_result = "status" in result
-                if is_write_result and result.get("status") == "applied":
-                    applied.append(result)
+                if is_write_result:
+                    if result.get("status") == "applied":
+                        applied.append(result)
+                    else:
+                        rejected.append(result)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
@@ -280,6 +298,7 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
             "session_id": sid,
             "reply": "That took more tool calls than expected — try asking for one change at a time.",
             "changes": applied,
+            "rejected": rejected,
         }
     finally:
         # Recorded regardless of how the turn ended (early return, ran out

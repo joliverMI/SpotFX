@@ -1007,6 +1007,17 @@ kbd {
   font-family: var(--font-mono, monospace);
   font-size: 12px;
 }
+/* The one-line deterministic "did it work" statement (SonicAppliedChange
+ * .summary / SonicRejectedChange.reason) — solid, high-contrast, and kept
+ * distinct from both the model's own prose (assistant) and a raw diff
+ * (preview) so the answer to "did it work" is never something he has to
+ * infer from either. */
+.settings-console-msg-status {
+  align-self: flex-start;
+  background: var(--accent-muted, var(--surface2));
+  border: 1px solid var(--accent);
+  font-weight: 600;
+}
 .settings-console-input-row { display: flex; gap: 8px; align-items: center; }
 .settings-console-input-row input[type='text'] { flex: 1; }
 

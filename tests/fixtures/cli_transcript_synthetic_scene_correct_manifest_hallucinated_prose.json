@@ -7,10 +7,12 @@
     "tools": [
       "mcp__settings-console__create_scene",
       "mcp__settings-console__get_flare_kind",
+      "mcp__settings-console__get_param_info",
       "mcp__settings-console__get_scene_settings",
       "mcp__settings-console__get_settings",
       "mcp__settings-console__list_flare_kinds",
       "mcp__settings-console__list_operations",
+      "mcp__settings-console__list_scene_params",
       "mcp__settings-console__list_scenes",
       "mcp__settings-console__remove_flare_kind",
       "mcp__settings-console__set_flare_kind",
@@ -18,7 +20,10 @@
       "mcp__settings-console__set_setting"
     ],
     "mcp_servers": [
-      { "name": "settings-console", "status": "connected" }
+      {
+        "name": "settings-console",
+        "status": "connected"
+      }
     ],
     "model": "claude-haiku-4-5",
     "permissionMode": "default",
@@ -35,7 +40,7 @@
       "content": [
         {
           "type": "text",
-          "text": "All set — I created the scene 'Sunset Drift' and added a 'Boom' momentary flare kind with gain 1.5, no tool call needed since I already know the schema."
+          "text": "All set \u2014 I created the scene 'Sunset Drift' and added a 'Boom' momentary flare kind with gain 1.5, no tool call needed since I already know the schema."
         }
       ]
     },
@@ -51,6 +56,6 @@
     "num_turns": 1,
     "stop_reason": "end_turn",
     "session_id": "synthetic-scene-hallucinated-0001",
-    "result": "All set — I created the scene 'Sunset Drift' and added a 'Boom' momentary flare kind with gain 1.5, no tool call needed since I already know the schema."
+    "result": "All set \u2014 I created the scene 'Sunset Drift' and added a 'Boom' momentary flare kind with gain 1.5, no tool call needed since I already know the schema."
   }
 ]

@@ -4,9 +4,15 @@
     "subtype": "init",
     "cwd": "/tmp/spectra-settings-agent-cli-scene-widening/neutral_cwd",
     "session_id": "synthetic-scene-fabrication-0001",
-    "tools": [],
+    "tools": [
+      "mcp__settings-console__get_param_info",
+      "mcp__settings-console__list_scene_params"
+    ],
     "mcp_servers": [
-      { "name": "settings-console", "status": "failed" }
+      {
+        "name": "settings-console",
+        "status": "failed"
+      }
     ],
     "model": "claude-haiku-4-5",
     "permissionMode": "default",
@@ -23,7 +29,7 @@
       "content": [
         {
           "type": "text",
-          "text": "Done — I created a new scene called 'Sunset Drift' and added a 'Boom' flare kind to it with a gain of 1.5, exactly as you asked."
+          "text": "Done \u2014 I created a new scene called 'Sunset Drift' and added a 'Boom' flare kind to it with a gain of 1.5, exactly as you asked."
         }
       ]
     },
@@ -39,6 +45,6 @@
     "num_turns": 1,
     "stop_reason": "end_turn",
     "session_id": "synthetic-scene-fabrication-0001",
-    "result": "Done — I created a new scene called 'Sunset Drift' and added a 'Boom' flare kind to it with a gain of 1.5, exactly as you asked."
+    "result": "Done \u2014 I created a new scene called 'Sunset Drift' and added a 'Boom' flare kind to it with a gain of 1.5, exactly as you asked."
   }
 ]

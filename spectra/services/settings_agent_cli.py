@@ -302,6 +302,7 @@ def _parse_transcript(events: list[dict]) -> dict:
 
     tool_use_names: dict[str, str] = {}
     applied: list[dict] = []
+    rejected: list[dict] = []
     for event in events:
         message = event.get("message") if event.get("type") in ("assistant", "user") else None
         content = (message or {}).get("content")
@@ -321,8 +322,11 @@ def _parse_transcript(events: list[dict]) -> dict:
                     result = json.loads(text) if isinstance(text, str) else text
                 except (TypeError, ValueError):
                     continue
-                if isinstance(result, dict) and result.get("status") == "applied":
-                    applied.append(result)
+                if isinstance(result, dict) and "status" in result:
+                    if result.get("status") == "applied":
+                        applied.append(result)
+                    else:
+                        rejected.append(result)
 
     final = next((e for e in reversed(events) if e.get("type") == "result"), {})
     if final.get("is_error"):
@@ -332,6 +336,7 @@ def _parse_transcript(events: list[dict]) -> dict:
         "session_id": final.get("session_id"),
         "reply": final.get("result", ""),
         "changes": applied,
+        "rejected": rejected,
     }
 
 
