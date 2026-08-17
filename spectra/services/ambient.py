@@ -217,6 +217,65 @@ on-but-wrong-colour straggler it finds, not just name it (see that
 function's own docstring — a bulb found genuinely OFF is still never
 touched). The gate downgrades `held` only once repair has had its shot
 and a straggler is still off-target.
+
+Hue entertainment-area selection (2026-08-16, PR
+fm/spectra-hue-entertainment-areas): he asked twice to choose which Hue
+areas Ambient reaches — his dining room ("dining-hues", 7 bulbs) versus
+his main Hue group ("hue-lights", 10 bulbs) — and it sat unbuilt on a hold
+waiting for a word he was never told he needed to say. Ported from
+legacy's own per-group picker rather than invented from the sentence:
+services/ambient_mode.py held per GROUP (`state.ambient_groups`, a set of
+Hue device ids — one per LedFX Hue device/entertainment config), exposed
+via a long-press checkbox picker on the front-page Ambient button
+(web/src/nowplaying/AmbientButton.tsx, `GET /control/ambient-groups` for
+names + held state, `POST /control/ambient-mode?groups=<id>` per
+checkbox). The unit of choice there is one Hue device id — exactly what
+`_hue_devices()` above already enumerates one entry per (one bridge/
+entertainment config per live Hue device), so SPECTRA needed no new
+grouping concept: `RoomControlState.ambient_hue_group_ids` (room_controls.py)
+names device ids directly, the same ids `reconcile()`'s `devices`/
+`released` lists already report. `[]` (the default) means every live Hue
+device — legacy's own `want=None` == "all groups" semantics, ported as
+"empty list" so deploying this changes nothing until he picks a subset
+(the bar: nobody's room changes when this lands).
+
+One thing legacy had that SPECTRA doesn't: a device-CATEGORY layer above
+the group picker (settings.ambient_target_category, resolved via
+services/device_category_service) that first filters WHICH Hue devices
+are even candidates before the per-group checkboxes appear. SPECTRA has
+no LedFX device-category concept at all (module docstring, "No
+device-category setting to resolve a target from") and every live Hue
+device already IS a candidate group — so this build has no category tier
+to port; `ambient_hue_group_ids` names devices directly, one flat list,
+matching the intent (choose which Hue areas are in play) without
+resurrecting a settings-form layer this surface deliberately avoids.
+
+`reconcile()` now takes an optional `group_ids` (the resolved
+`RoomControlState.ambient_hue_group_ids`, `None`/empty = every live Hue
+device, preserving today's behaviour exactly). `_resolve_group_ids()`
+intersects it against the room's actual live Hue devices, dropping and
+logging any stale id (a group renamed/removed since it was last saved) —
+mirrors legacy's own `want & set(hue_cfgs)` rather than treating an
+unresolvable id as "select nothing." The hold path only touches devices
+IN the resolved target; the release path additionally releases any
+device that's currently FROZEN but has fallen OUT of the target (a group
+he just deselected while Ambient stays engaged) — `_release_devices()`,
+the same fade → catch-up-toward-the-live-look → unfreeze sequence
+`reconcile(False, ...)` already used, now shared. Deliberately gated on
+`dev.frozen` (fx/devices/hue.py's new read-only property, VENDOR.md
+deviation #11) for this one case, unlike the whole-room OFF path below
+(which still unconditionally releases every live Hue device, matching
+its pre-existing behaviour byte for byte): calling `set_frozen(False)` on
+a device that was NEVER frozen triggers `_trigger_reconnect()` — a real
+stream teardown/reconnect on a device that's supposed to be left
+completely alone. Skipping already-unfrozen, out-of-scope devices is what
+makes "genuinely released... genuinely held" (the verification bar) true
+for a device ambient never touched in the first place, not merely for one
+it once held. `verify_held()` and therefore `repair_stragglers()`'s input
+are scoped by the SAME resolved target — an out-of-scope device's bulbs
+are never read back and can never be misreported as an ambient straggler
+(the same false-unlit failure class "False-unlit fix" above already fixed
+once for brightness; scoping avoids reintroducing its shape for scope).
 """
 from __future__ import annotations
 
@@ -711,7 +770,8 @@ async def _repair_stragglers_impl(hue_devices: dict[str, Any], wanted: set[str],
             "unconfirmed": sorted(unconfirmed)}
 
 
-async def verify_held(color: Optional[str]) -> dict:
+async def verify_held(color: Optional[str],
+                      group_ids: Optional[frozenset[str]] = None) -> dict:
     """Read-only recheck of whatever this module is CURRENTLY claiming to
     hold — never a PUT, ever (module docstring, "status-honesty fix").
     Reuses `_resolve_lights_named`'s cache and `_color_matches` (on+hue
@@ -721,12 +781,21 @@ async def verify_held(color: Optional[str]) -> dict:
     Same no-live-stack/no-Hue-devices no-ops as reconcile() — there's
     nothing to verify either way, and the caller (services/
     ambient_music_gate.py) treats those the same as "not actually held"
-    rather than as an error."""
+    rather than as an error.
+
+    `group_ids` (module docstring, "Hue entertainment-area selection")
+    scopes the check to the SAME resolved target reconcile() last held —
+    an out-of-scope device's bulbs are never read back here, so they can
+    never be misreported as an ambient straggler."""
     from spectra.services.live_host import live
 
     if not live.active or live.host is None:
         return {"status": "dark"}
-    hue_devices = _hue_devices(live.host)
+    all_hue_devices = _hue_devices(live.host)
+    if not all_hue_devices:
+        return {"status": "no-hue-devices"}
+    target_ids = _resolve_group_ids(set(all_hue_devices), group_ids)
+    hue_devices = {did: dev for did, dev in all_hue_devices.items() if did in target_ids}
     if not hue_devices:
         return {"status": "no-hue-devices"}
 
@@ -769,6 +838,40 @@ def _hue_devices(host: Any) -> dict[str, Any]:
             if getattr(host.devices.get(did), "type", None) == "hue"}
 
 
+async def list_groups() -> list[dict]:
+    """[{id, name}] for every live Hue entertainment area SPECTRA currently
+    drives — the group picker's data source (module docstring, "Hue
+    entertainment-area selection"), the direct analogue of legacy's
+    services/ambient_mode.resolve_groups(). No cache (unlike legacy, which
+    round-tripped an HTTP call to LedFX) — reading live_host.live.host.devices
+    is a free in-process dict lookup, not worth caching. Empty when SPECTRA
+    doesn't currently own the live stack or the room has no live Hue device
+    — a UI picker with nothing to show, not an error."""
+    from spectra.services.live_host import live
+
+    if not live.active or live.host is None:
+        return []
+    return [{"id": did, "name": getattr(dev, "name", None) or did}
+            for did, dev in sorted(_hue_devices(live.host).items())]
+
+
+def _resolve_group_ids(available: set[str], group_ids: Optional[frozenset[str]]) -> set[str]:
+    """None/empty `group_ids` = every live Hue device — preserves today's
+    default (module docstring). A non-empty selection is intersected
+    against `available`; any id that doesn't resolve (a group renamed or
+    removed since it was last saved) is dropped and logged rather than
+    treated as "select nothing" — mirrors legacy's own
+    `want & set(hue_cfgs)` (services/ambient_mode._set_groups_impl)."""
+    if not group_ids:
+        return set(available)
+    unknown = group_ids - available
+    if unknown:
+        logger.warning(
+            "Ambient: ignoring unknown Hue group id(s) %s (known: %s)",
+            sorted(unknown), sorted(available))
+    return set(group_ids) & available
+
+
 def _live_look(dev: Any) -> Optional[tuple[str, int]]:
     """Best-effort (hex colour, brightness %) snapshot of what this
     device's driving virtual is CURRENTLY rendering, for the release
@@ -801,7 +904,8 @@ def _live_look(dev: Any) -> Optional[tuple[str, int]]:
 
 # ── public entry point ──────────────────────────────────────────────────────
 
-async def reconcile(enabled: bool, color: Optional[str]) -> dict:
+async def reconcile(enabled: bool, color: Optional[str],
+                    group_ids: Optional[frozenset[str]] = None) -> dict:
     """Drive the room's live Hue devices toward `enabled` (held at `color`,
     default white, at the brightness `_hsv_value_pct(color)` derives from
     that same hex — see that function's docstring for why brightness is
@@ -809,68 +913,30 @@ async def reconcile(enabled: bool, color: Optional[str]) -> dict:
     can't overlap and fight each other over a device's stream state.
     No-ops (status "dark") when SPECTRA doesn't currently own the live
     stack — the room-control save must never fail just because there's
-    nothing to drive right now."""
+    nothing to drive right now.
+
+    `group_ids` (module docstring, "Hue entertainment-area selection") is
+    the resolved `RoomControlState.ambient_hue_group_ids` — `None`/empty
+    means every live Hue device, preserving today's behaviour exactly.
+    When `enabled` and a non-empty selection excludes a device that's
+    currently frozen (he deselected a group while Ambient stays engaged),
+    that device is released in the SAME call — see `_release_devices`."""
     async with _get_lock():
-        return await _reconcile_impl(enabled, color)
+        return await _reconcile_impl(enabled, color, group_ids)
 
 
-async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
-    from spectra.services.live_host import live
-
-    if not live.active or live.host is None:
-        logger.warning("Ambient: SPECTRA does not own the live stack — "
-                       "state saved, no lights touched")
-        return {"status": "dark"}
-
-    hue_devices = _hue_devices(live.host)
-    if not hue_devices:
-        logger.warning("Ambient: no live Hue devices in the room")
-        return {"status": "no-hue-devices"}
-
-    touched: list[str] = []
-    if enabled:
-        color_hex = color or "#ffffff"
-        brightness_pct = _hsv_value_pct(color_hex)
-        body = _light_payload(color_hex, AMBIENT_TRANSITION_MS, brightness_pct=brightness_pct)
-        target_xy = _hex_to_xy(color_hex)
-        held: list[str] = []
-        unconfirmed: list[str] = []
-        for did, dev in sorted(hue_devices.items()):
-            try:
-                await dev.set_frozen(True)   # must land before the REST write
-                confirmed_names, straggler_names = await _hold_and_confirm(
-                    dev, body, target_xy, brightness_pct)
-                held.extend(confirmed_names)
-                unconfirmed.extend(straggler_names)
-                touched.append(did)
-            except Exception:
-                logger.exception("Ambient: failed to hold %s at the ambient colour", did)
-        if not touched:
-            # Every Hue device failed — the switch must NOT report success
-            # with nothing held (the exact failure shape this feature exists
-            # to stop reporting: a control that says "on" while the room
-            # didn't change).
-            logger.error("Ambient: ON requested but every Hue device failed "
-                         "— the room is NOT held")
-            return {"status": "failed", "devices": [], "lights_set": 0}
-        lights_set = len(held)
-        lights_total = lights_set + len(unconfirmed)
-        if unconfirmed:
-            # This is the log line the live defect made lie: it must not be
-            # able to say more lights were set than were actually confirmed.
-            logger.error(
-                "Ambient ON: %s held at %s @ %d%%, %d/%d light(s) confirmed — "
-                "still NOT holding it: %s", touched, color_hex, brightness_pct,
-                lights_set, lights_total, unconfirmed)
-            return {"status": "partial", "devices": touched, "lights_set": lights_set,
-                    "lights_total": lights_total, "unconfirmed": unconfirmed}
-        logger.info("Ambient ON: %s held at %s @ %d%%, %d light(s) confirmed",
-                    touched, color_hex, brightness_pct, lights_set)
-        return {"status": "on", "devices": touched, "lights_set": lights_set,
-                "lights_total": lights_total}
-
+async def _release_devices(devices: dict[str, Any]) -> list[str]:
+    """The OFF sequence — bridge-side fade, ease toward each device's live
+    look, then unfreeze (module docstring's release two-phase ramp) —
+    shared by the whole-room OFF path and the group-shrink-while-still-on
+    path in `_reconcile_impl` below. `devices` is exactly the set to
+    release; deciding WHICH devices belong in it is the caller's job (see
+    that function). Best-effort per device. Returns the device ids that
+    confirmed `set_frozen(False)`."""
+    if not devices:
+        return []
     fade = _fade_dim_payload(AMBIENT_OFF_FADE_PCT, AMBIENT_TRANSITION_MS)
-    for did, dev in sorted(hue_devices.items()):
+    for did, dev in sorted(devices.items()):
         try:
             await _apply_hue(dev, fade)
         except Exception:
@@ -884,7 +950,7 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
     # docstring). Best-effort per device; a device with nothing to read
     # (not yet activated) just releases straight from the phase-1 fade.
     caught_up = False
-    for did, dev in sorted(hue_devices.items()):
+    for did, dev in sorted(devices.items()):
         look = _live_look(dev)
         if look is None:
             continue
@@ -898,16 +964,112 @@ async def _reconcile_impl(enabled: bool, color: Optional[str]) -> dict:
     if caught_up and AMBIENT_CATCHUP_MS > 0:
         await asyncio.sleep(AMBIENT_CATCHUP_MS / 1000)
 
-    for did, dev in sorted(hue_devices.items()):
+    released: list[str] = []
+    for did, dev in sorted(devices.items()):
         try:
             await dev.set_frozen(False)  # re-engages the stream; the room's
                                           # live scene resumes on its own
-            touched.append(did)
+            released.append(did)
         except Exception:
             logger.exception("Ambient: failed to release %s", did)
-    if not touched:
+    logger.info("Ambient release: %s released (caught up: %s)", released, caught_up)
+    return released
+
+
+async def _reconcile_impl(enabled: bool, color: Optional[str],
+                          group_ids: Optional[frozenset[str]]) -> dict:
+    from spectra.services.live_host import live
+
+    if not live.active or live.host is None:
+        logger.warning("Ambient: SPECTRA does not own the live stack — "
+                       "state saved, no lights touched")
+        return {"status": "dark"}
+
+    hue_devices = _hue_devices(live.host)
+    if not hue_devices:
+        logger.warning("Ambient: no live Hue devices in the room")
+        return {"status": "no-hue-devices"}
+
+    if enabled:
+        target_ids = _resolve_group_ids(set(hue_devices), group_ids)
+        hold_devices = {did: hue_devices[did] for did in target_ids}
+        # A group he just deselected while Ambient stays engaged: release
+        # it here too — but ONLY if it's actually frozen. An out-of-scope
+        # device ambient never touched must stay untouched (module
+        # docstring — set_frozen(False) on an unfrozen device forces a real
+        # stream reconnect it never needed).
+        shrink_devices = {did: dev for did, dev in hue_devices.items()
+                          if did not in target_ids and getattr(dev, "frozen", False)}
+    else:
+        # Whole-room OFF: unconditional, every live Hue device — unchanged
+        # from before group selection existed, regardless of the current
+        # ambient_hue_group_ids selection (turning Ambient off releases
+        # everyone, not just the currently-selected groups).
+        hold_devices = {}
+        shrink_devices = dict(hue_devices)
+
+    released = await _release_devices(shrink_devices)
+
+    if not hold_devices:
+        if enabled:
+            # A non-empty selection resolved to nothing known (every
+            # selected id is stale) — the same "nothing to hold" shape as
+            # no live Hue devices at all, logged so it's traceable.
+            logger.warning("Ambient: no known Hue group selected — nothing held")
+            result: dict = {"status": "no-hue-devices"}
+            if released:
+                result["released"] = released
+            return result
+        if released:
+            return {"status": "off", "devices": released}
         logger.error("Ambient: OFF requested but every Hue device failed to "
                      "release — the room may still be held on the ambient colour")
         return {"status": "failed", "devices": []}
-    logger.info("Ambient OFF: %s released (caught up: %s)", touched, caught_up)
-    return {"status": "off", "devices": touched}
+
+    color_hex = color or "#ffffff"
+    brightness_pct = _hsv_value_pct(color_hex)
+    body = _light_payload(color_hex, AMBIENT_TRANSITION_MS, brightness_pct=brightness_pct)
+    target_xy = _hex_to_xy(color_hex)
+    touched: list[str] = []
+    held: list[str] = []
+    unconfirmed: list[str] = []
+    for did, dev in sorted(hold_devices.items()):
+        try:
+            await dev.set_frozen(True)   # must land before the REST write
+            confirmed_names, straggler_names = await _hold_and_confirm(
+                dev, body, target_xy, brightness_pct)
+            held.extend(confirmed_names)
+            unconfirmed.extend(straggler_names)
+            touched.append(did)
+        except Exception:
+            logger.exception("Ambient: failed to hold %s at the ambient colour", did)
+    if not touched:
+        # Every targeted Hue device failed — the switch must NOT report
+        # success with nothing held (the exact failure shape this feature
+        # exists to stop reporting: a control that says "on" while the
+        # room didn't change).
+        logger.error("Ambient: ON requested but every Hue device failed "
+                     "— the room is NOT held")
+        result = {"status": "failed", "devices": [], "lights_set": 0}
+        if released:
+            result["released"] = released
+        return result
+    lights_set = len(held)
+    lights_total = lights_set + len(unconfirmed)
+    if unconfirmed:
+        # This is the log line the live defect made lie: it must not be
+        # able to say more lights were set than were actually confirmed.
+        logger.error(
+            "Ambient ON: %s held at %s @ %d%%, %d/%d light(s) confirmed — "
+            "still NOT holding it: %s", touched, color_hex, brightness_pct,
+            lights_set, lights_total, unconfirmed)
+        result = {"status": "partial", "devices": touched, "lights_set": lights_set,
+                "lights_total": lights_total, "unconfirmed": unconfirmed}
+    else:
+        logger.info("Ambient ON: %s held at %s @ %d%%, %d light(s) confirmed",
+                    touched, color_hex, brightness_pct, lights_set)
+        result = {"status": "on", "devices": touched, "lights_set": lights_set,
+                "lights_total": lights_total}
+    if released:
+        result["released"] = released
+    return result

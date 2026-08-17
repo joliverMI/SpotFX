@@ -709,6 +709,27 @@ sat held under `"always"`, and the ease-back release re-measured at
 ~16.9s, unflattened against the §52 baseline. Spec: `tests/test_ambient_music_gate.py`,
 `tests/test_bridge.py`.
 
+**Ambient — Hue entertainment-area selection** (WHICH Hue devices Ambient
+reaches, not just whether it holds — `docs/SPECTRA_SPEC.md` §5, ported
+from legacy's own per-group picker on `web/src/nowplaying/AmbientButton.tsx`
+after he asked twice): `RoomControlState.ambient_hue_group_ids` (`[]` =
+every live Hue device, the unmodified default) is resolved and threaded
+through `ambient.reconcile()`/`verify_held()`/`ambient_music_gate._apply()`
+as an explicit `group_ids` parameter at every call site — a device outside
+the resolved target is either left completely untouched (never frozen) or,
+if it's frozen and just fell out of scope, released via the same
+fade→catch-up→unfreeze sequence, gated on `fx/devices/hue.py`'s new
+read-only `frozen` property (VENDOR.md deviation #11) specifically so an
+already-unfrozen out-of-scope device never eats a spurious
+`set_frozen(False)` stream reconnect. Whole-room OFF stays unconditional,
+ignoring the current selection, unchanged from before this field existed.
+`ambient_music_gate` tracks TWO separate group-id sets — `_held_group_ids`
+(the raw selection input, compared only for the write short-circuit) and
+`_held_resolved_groups` (the actual held device ids, sourced from the
+reconcile result's own `devices` list, what `status()`'s `groups` reports)
+— conflating the two makes `status()` report an empty hold under the
+default `[]` selection even while genuinely holding everything.
+
 **Reading real Hue bulb state — don't trust a raw CLIP light GET during a
 live entertainment stream.** While a Hue entertainment session is
 streaming (any active SPECTRA scene, not just Ambient), `GET

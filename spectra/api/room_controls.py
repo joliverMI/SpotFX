@@ -21,12 +21,20 @@ response as `dark_light_result`.
 force_scene_enabled/force_scene_scene_id — the legacy Now Playing Force
 Scene control — redirect every automatic scene pick at scene_sequencer.
 fire_scene_by_id.
+ambient_hue_group_ids — WHICH Hue entertainment areas Ambient reaches
+(services/ambient.py, "Hue entertainment-area selection"); [] = every
+live Hue device (today's unmodified default).
+
+  GET /room-controls/ambient-groups — {id, name} for every live Hue
+  device the ambient_hue_group_ids picker can choose from (the direct
+  analogue of legacy's GET /control/ambient-groups) — the room bar's
+  group picker's data source.
 """
 from __future__ import annotations
 
 from fastapi import APIRouter
 
-from spectra.services import room_controls
+from spectra.services import ambient, room_controls
 from spectra.services.room_controls import RoomControlState
 
 router = APIRouter(prefix="/api", tags=["spectra-room-controls"])
@@ -35,6 +43,11 @@ router = APIRouter(prefix="/api", tags=["spectra-room-controls"])
 @router.get("/room-controls")
 async def get_room_controls():
     return room_controls.load_room_controls().model_dump()
+
+
+@router.get("/room-controls/ambient-groups")
+async def ambient_groups():
+    return {"groups": await ambient.list_groups()}
 
 
 @router.put("/room-controls")

@@ -18,10 +18,15 @@
  * direction: reuse the old system's design/behaviour). Mounted once in
  * App.tsx, next to the ownership bar. */
 import { useEffect, useMemo, useState } from 'react';
+import AmbientGroupsPicker from './AmbientGroupsPicker';
 import ColorGradientPicker from './ColorGradientPicker';
 import HelpLink from '../help/HelpLink';
-import { useEngineStatus, useRoomControls, useSaveRoomControls, useScenes } from '../queries';
-import type { AmbientMode, AmbientResult, DarkLightResult, DisplayMode, RoomControlState, SceneChangeMode } from '../types';
+import {
+  useAmbientHueGroups, useEngineStatus, useRoomControls, useSaveRoomControls, useScenes,
+} from '../queries';
+import type {
+  AmbientMode, AmbientResult, DarkLightResult, DisplayMode, RoomControlState, SceneChangeMode,
+} from '../types';
 import SearchSelect from './forms/SearchSelect';
 
 /** His three-way display-mode control (spectra/services/dark_light.py).
@@ -115,10 +120,13 @@ export default function RoomControlsBar() {
   const save = useSaveRoomControls();
   const { data: scenes } = useScenes();
   const { data: engineStatus } = useEngineStatus();
+  const { data: hueGroupsData } = useAmbientHueGroups();
   const ambientMode = engineStatus?.ambient;
+  const hueGroups = hueGroupsData?.groups ?? [];
   const [local, setLocal] = useState<RoomControlState | null>(null);
   const [ambientResult, setAmbientResult] = useState<AmbientResult | null>(null);
   const [darkLightResult, setDarkLightResult] = useState<DarkLightResult | null>(null);
+  const [groupsPickerOpen, setGroupsPickerOpen] = useState(false);
   const sceneOptions = useMemo(
     () => (scenes ?? []).map((s) => ({ value: s.id, label: s.name })),
     [scenes],
@@ -257,10 +265,36 @@ export default function RoomControlsBar() {
         <HelpLink topic="ambient-dark-colour" />
       </label>
 
+      <label className="room-control" title="Which Hue entertainment areas Ambient may hold">
+        <button type="button" className="device-preview-btn" onClick={() => setGroupsPickerOpen(true)}>
+          Hue areas
+          {local.ambient_hue_group_ids.length > 0 && hueGroups.length > 0
+            && ` ${local.ambient_hue_group_ids.length}/${hueGroups.length}`}
+        </button>
+        <HelpLink topic="ambient-hue-groups" />
+      </label>
+      {groupsPickerOpen && (
+        <div className="device-preview-picker-overlay" onClick={() => setGroupsPickerOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <AmbientGroupsPicker
+              value={local.ambient_hue_group_ids}
+              onClose={() => setGroupsPickerOpen(false)}
+              onSave={(ids) => {
+                commit({ ...local, ambient_hue_group_ids: ids });
+                setGroupsPickerOpen(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {local.ambient_mode !== 'off' && ambientMode && ambientMode.mode !== 'off' && (
         <span
           className={`badge ${AMBIENT_MODE_BADGE[ambientMode.mode]}`}
           title={AMBIENT_MODE_NOTE[ambientMode.mode]
+            + (ambientMode.groups.length > 0 && ambientMode.groups.length < hueGroups.length
+              ? ` Holding: ${ambientMode.groups.join(', ')}.`
+              : '')
             + (ambientMode.verified_age_s != null
               ? ` Confirmed ${formatVerifyAge(ambientMode.verified_age_s)}.`
               : '')

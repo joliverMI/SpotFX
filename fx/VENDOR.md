@@ -157,6 +157,15 @@ variables named `ledfx` (the core object handle) are untouched.
     present in the gradient branch just below. Not yet ported back to the
     fork source at `/home/javi/ledfx-src`.
 
+11. `devices/hue.py`: new read-only `frozen` property (SpotFX-authored, not
+    fork code) exposing the existing private `_frozen` flag —
+    `spectra/services/ambient.py`'s per-group ambient reconcile (Hue
+    entertainment-area selection, PR fm/spectra-hue-entertainment-areas)
+    needs to tell an already-frozen device from one ambient never touched,
+    to avoid calling `set_frozen(False)` (which reconnects the entertainment
+    stream, `_trigger_reconnect()`) on a device that was never frozen in the
+    first place. No behaviour change — a plain accessor.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

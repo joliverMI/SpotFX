@@ -995,3 +995,151 @@ def test_repair_stragglers_reports_unconfirmed_when_the_write_keeps_failing(monk
     result = _run(ambient.repair_stragglers(["l1"], "#f5da8c"))
 
     assert result == {"repaired": [], "left_off": [], "unconfirmed": ["l1"]}
+
+
+# ── Hue entertainment-area selection (group_ids) ────────────────────────────
+#
+# He has two bridges/groups — "hue-lights" (10 bulbs) and "dining-hues" (7)
+# — and asked twice to choose which are in play. These prove the three
+# properties the task's bar names: (1) the default ([]) still holds every
+# live Hue device, unchanged; (2) a selected group is genuinely held and an
+# unselected one is genuinely released or, if it was never held, left
+# completely alone; (3) verify_held only ever reads back the selected
+# group's own bulbs.
+
+def _multi_device_handler(calls: list, per_ip_lights: dict):
+    """One mock Hue bridge PER device ip — MockTransport dispatches by
+    request.url.host, which differs per FakeHueDevice's configured
+    ip_address, so two devices in one test never share a light namespace."""
+    handlers = {ip: _hue_handler(calls, lights=lights) for ip, lights in per_ip_lights.items()}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return handlers[request.url.host](request)
+    return handler
+
+
+def _two_group_room(monkeypatch):
+    """hue-lights (light 'l-hl') and dining-hues (light 'l-dh') on two
+    separate bridges — the fixture every group-selection test below shares."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    calls: list = []
+    handler = _multi_device_handler(calls, {
+        "10.0.0.1": [{"id": "l-hl", "owner": "d-hl", "name": "Hue Lights Bulb"}],
+        "10.0.0.2": [{"id": "l-dh", "owner": "d-dh", "name": "Dining Hue Bulb"}],
+    })
+    _install_bridge(monkeypatch, handler)
+    hl = FakeHueDevice("10.0.0.1", calls)
+    dh = FakeHueDevice("10.0.0.2", calls)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": hl, "dining-hues": dh}))
+    return hl, dh, calls
+
+
+def test_resolve_group_ids_empty_selection_means_every_device():
+    from spectra.services.ambient import _resolve_group_ids
+    assert _resolve_group_ids({"hue-lights", "dining-hues"}, None) == {"hue-lights", "dining-hues"}
+    assert _resolve_group_ids({"hue-lights", "dining-hues"}, frozenset()) == {"hue-lights", "dining-hues"}
+
+
+def test_resolve_group_ids_drops_unknown_ids_with_a_warning(caplog):
+    from spectra.services.ambient import _resolve_group_ids
+    with caplog.at_level("WARNING"):
+        result = _resolve_group_ids({"hue-lights"}, frozenset({"hue-lights", "stale-id"}))
+    assert result == {"hue-lights"}
+    assert any("stale-id" in r.getMessage() for r in caplog.records)
+
+
+def test_list_groups_dark_when_live_stack_not_active(monkeypatch):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    monkeypatch.setattr(live, "host", None)
+    assert _run(ambient.list_groups()) == []
+
+
+def test_list_groups_returns_every_live_hue_device_by_name(monkeypatch):
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+
+    hl = FakeHueDevice("10.0.0.1", [])
+    hl.name = "Hue Lights"
+    dh = FakeHueDevice("10.0.0.2", [])
+    dh.name = "Dining Hues"
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": hl, "dining-hues": dh}))
+
+    groups = _run(ambient.list_groups())
+
+    assert groups == [{"id": "dining-hues", "name": "Dining Hues"},
+                      {"id": "hue-lights", "name": "Hue Lights"}]
+
+
+def test_reconcile_on_holds_only_the_selected_group_the_other_untouched(monkeypatch):
+    from spectra.services import ambient
+    hl, dh, calls = _two_group_room(monkeypatch)
+
+    result = _run(ambient.reconcile(True, "#ff0000", frozenset({"hue-lights"})))
+
+    assert result["status"] == "on"
+    assert result["devices"] == ["hue-lights"]
+    assert hl.frozen is True
+    assert dh.frozen is None, "an out-of-scope device must never be frozen"
+    dh_calls = [c for c in calls if c[:2] == ("REST", "PUT") and "l-dh" in c[2]]
+    assert dh_calls == [], "an out-of-scope device's bulb must never be written to"
+
+
+def test_reconcile_on_group_shrink_releases_the_deselected_group_keeps_the_other_held(monkeypatch):
+    from spectra.services import ambient
+    hl, dh, calls = _two_group_room(monkeypatch)
+
+    both = _run(ambient.reconcile(True, "#ff0000", None))
+    assert sorted(both["devices"]) == ["dining-hues", "hue-lights"]
+    assert hl.frozen is True and dh.frozen is True
+
+    shrunk = _run(ambient.reconcile(True, "#ff0000", frozenset({"hue-lights"})))
+
+    assert shrunk["status"] == "on"
+    assert shrunk["devices"] == ["hue-lights"]
+    assert shrunk["released"] == ["dining-hues"]
+    assert hl.frozen is True, "the still-selected group must stay held"
+    assert dh.frozen is False, "the deselected group must be genuinely released"
+
+
+def test_reconcile_on_deselected_group_never_held_is_left_completely_alone(monkeypatch):
+    """The property the task's bar names directly: an out-of-scope device
+    that was never frozen in the first place must not be touched AT ALL —
+    no fade write, no catch-up write, no unfreeze/reconnect call — not just
+    'left holding the ambient colour'."""
+    from spectra.services import ambient
+    hl, dh, calls = _two_group_room(monkeypatch)
+
+    _run(ambient.reconcile(True, "#ff0000", frozenset({"hue-lights"})))
+
+    assert dh.frozen is None
+    dh_calls = [c for c in calls if c != ("REST", "GET", "/clip/v2/resource/entertainment")
+               and c != ("REST", "GET", "/clip/v2/resource/light")
+               and "l-dh" in str(c)]
+    assert dh_calls == [], f"dining-hues must never be reached at all: {dh_calls}"
+
+
+def test_reconcile_off_releases_every_device_regardless_of_selection(monkeypatch):
+    """Turning Ambient fully off is whole-room, not scoped by the current
+    group selection — matches pre-selection behaviour byte for byte."""
+    from spectra.services import ambient
+    hl, dh, calls = _two_group_room(monkeypatch)
+    _run(ambient.reconcile(True, "#ff0000", None))
+
+    result = _run(ambient.reconcile(False, None, frozenset({"hue-lights"})))
+
+    assert sorted(result["devices"]) == ["dining-hues", "hue-lights"]
+    assert hl.frozen is False and dh.frozen is False
+
+
+def test_verify_held_scoped_to_selected_group_never_checks_the_other(monkeypatch):
+    from spectra.services import ambient
+    hl, dh, calls = _two_group_room(monkeypatch)
+    _run(ambient.reconcile(True, "#ff0000", frozenset({"hue-lights"})))
+
+    result = _run(ambient.verify_held("#ff0000", frozenset({"hue-lights"})))
+
+    assert result["status"] == "verified"
+    assert result["lights_total"] == 1
+    assert result["unlit"] == [], "dining-hues was never held, so it must never read as unlit"

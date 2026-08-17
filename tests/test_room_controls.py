@@ -316,3 +316,98 @@ def test_force_scene_redirects_every_automatic_pick(monkeypatch):
     _run(fire_scene_by_id(requested.id, intensity=0.7))
     assert fired_ids[-1] == requested.id, \
         "disabled: no redirect even with a scene still picked"
+
+
+def test_ambient_hue_group_ids_defaults_to_empty_meaning_every_device():
+    from spectra.services import room_controls as rc
+    state = rc.RoomControlState()
+    assert state.ambient_hue_group_ids == []
+
+
+def test_reconcile_ambient_if_changed_fires_on_group_selection_edit_while_holding(monkeypatch):
+    """Mode/colour both stay put — only ambient_hue_group_ids changes — and
+    that alone must still reconcile (release the deselected group, hold
+    the newly-selected one)."""
+    from spectra.services import room_controls as rc
+
+    calls = []
+
+    async def fake_reconcile_now():
+        calls.append(True)
+        return {"status": "on"}
+    monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
+
+    previous = rc.RoomControlState(ambient_mode="always", ambient_color="#f5da8c",
+                                   ambient_hue_group_ids=[])
+    new_state = previous.model_copy(update={"ambient_hue_group_ids": ["hue-lights"]})
+    result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
+    assert result == {"status": "on"}
+    assert calls == [True]
+
+
+def test_reconcile_ambient_if_changed_ignores_group_reorder(monkeypatch):
+    """A reordered-but-otherwise-identical selection must not trigger a
+    reconnect churn — compared as sets, not lists."""
+    from spectra.services import room_controls as rc
+
+    calls = []
+
+    async def fake_reconcile_now():
+        calls.append(True)
+        return {"status": "on"}
+    monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
+
+    previous = rc.RoomControlState(ambient_mode="always", ambient_color="#f5da8c",
+                                   ambient_hue_group_ids=["hue-lights", "dining-hues"])
+    new_state = previous.model_copy(update={"ambient_hue_group_ids": ["dining-hues", "hue-lights"]})
+    result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
+    assert result is None
+    assert calls == []
+
+
+def test_reconcile_ambient_if_changed_ignores_group_edit_while_off(monkeypatch):
+    """Editing the selection while ambient_mode is 'off' changes nothing
+    currently held — no reconcile should fire."""
+    from spectra.services import room_controls as rc
+
+    calls = []
+
+    async def fake_reconcile_now():
+        calls.append(True)
+        return {"status": "off"}
+    monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
+
+    previous = rc.RoomControlState(ambient_mode="off", ambient_hue_group_ids=[])
+    new_state = previous.model_copy(update={"ambient_hue_group_ids": ["hue-lights"]})
+    result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
+    assert result is None
+    assert calls == []
+
+
+def test_api_ambient_groups_lists_every_live_hue_device(monkeypatch):
+    """GET /api/room-controls/ambient-groups — the group picker's data
+    source (spectra/api/room_controls.py), the analogue of legacy's
+    GET /control/ambient-groups."""
+    from fastapi.testclient import TestClient
+    from spectra.app import create_app
+    from spectra.services.live_host import live
+
+    class FakeDev:
+        type = "hue"
+
+        def __init__(self, name):
+            self.name = name
+
+    class FakeHost:
+        devices = {"hue-lights": FakeDev("Hue Lights"), "dining-hues": FakeDev("Dining Hues")}
+
+    monkeypatch.setattr(live, "host", FakeHost())
+
+    client = TestClient(create_app())
+    r = client.get("/api/room-controls/ambient-groups")
+
+    assert r.status_code == 200
+    assert r.json() == {"groups": [
+        {"id": "dining-hues", "name": "Dining Hues"},
+        {"id": "hue-lights", "name": "Hue Lights"},
+    ]}

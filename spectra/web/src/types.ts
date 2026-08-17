@@ -301,6 +301,14 @@ export interface RoomControlState {
    * effect, eased through Ambient's own existing glide (same mechanism a
    * plain colour edit already uses) — never a snap. */
   ambient_color_dark: string | null;
+  /** WHICH Hue entertainment areas Ambient reaches (spectra/services/
+   * ambient.py, "Hue entertainment-area selection" — ported from legacy's
+   * own per-group picker on the front-page Ambient button). `[]` (the
+   * default) means every live Hue device — today's unmodified behaviour.
+   * A non-empty list is the exact device ids (see AmbientHueGroup) Ambient
+   * may hold; any other live Hue device is left running its normal show,
+   * never frozen. */
+  ambient_hue_group_ids: string[];
   global_transition_ms: number;
   scene_change_mode: SceneChangeMode;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
@@ -363,6 +371,10 @@ export interface AmbientResult {
   lights_set?: number;
   lights_total?: number;
   unconfirmed?: string[];
+  /** Devices released in the SAME call — present when a Hue area fell out
+   * of ambient_hue_group_ids while Ambient stayed engaged (the group he
+   * just deselected), not on a plain hold or a whole-room OFF. */
+  released?: string[];
 }
 
 /** spectra/services/ambient_music_gate.py's status() — the room's honest,
@@ -398,9 +410,23 @@ export interface AmbientGateStatus {
   setting: AmbientMode;
   mode: 'off' | 'holding' | 'partial' | 'yielding' | 'transitioning';
   held: boolean;
+  /** The RESOLVED device ids currently held — [] when not held, or when
+   * the selection is "every live Hue device" (ambient_hue_group_ids: []),
+   * the default — see spectra/services/ambient_music_gate.py's status(). */
+  groups: string[];
   result?: AmbientResult;
   verify?: AmbientVerify;
   verified_age_s?: number;
+}
+
+/** One entry from GET /api/room-controls/ambient-groups — a live Hue
+ * entertainment area ambient_hue_group_ids can name (spectra/services/
+ * ambient.py's list_groups(), the analogue of legacy's own
+ * resolve_groups()). `id` is the same device id RoomControlState.
+ * ambient_hue_group_ids and AmbientGateStatus.groups use. */
+export interface AmbientHueGroup {
+  id: string;
+  name: string;
 }
 
 export interface RoomControlsSaveResult extends RoomControlState {

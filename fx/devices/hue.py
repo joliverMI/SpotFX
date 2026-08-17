@@ -411,6 +411,15 @@ class HueDevice(NetworkedDevice):
             ssl=True,
         )
 
+    @property
+    def frozen(self) -> bool:
+        """Read-only view of the current freeze state (SpotFX-authored
+        accessor, not a fork API — see fx/VENDOR.md deviation list). Lets a
+        caller (spectra/services/ambient.py's group-scoped reconcile) tell
+        an already-frozen device from one that was never touched, without
+        reaching into the private _frozen attribute directly."""
+        return self._frozen
+
     async def set_frozen(self, frozen: bool) -> None:
         """Freeze/unfreeze this device's output (SpotFX Ambient Mode).
 
