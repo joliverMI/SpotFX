@@ -171,6 +171,21 @@ async def get_flare_kind(scene_id: str, name: str) -> dict:
 
 
 @mcp.tool()
+async def list_scene_params(scene_id: str) -> dict:
+    """List the parameter NAMES available on one scene's devices, grouped
+    by effect -- cheap, names only, no detail."""
+    return await _call("list_scene_params", scene_id=scene_id)
+
+
+@mcp.tool()
+async def get_param_info(effect_type: str, name: str) -> dict:
+    """Full detail for ONE named parameter on ONE effect: what it does,
+    its type, and its legal range -- read live from the real effect
+    definition."""
+    return await _call("get_param_info", effect_type=effect_type, name=name)
+
+
+@mcp.tool()
 async def create_scene(name: str, labels: Optional[list[str]] = None) -> dict:
     """Create a new, empty scene shell with a name -- always a fresh id,
     can never overwrite an existing scene."""

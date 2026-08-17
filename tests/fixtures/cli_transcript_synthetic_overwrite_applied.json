@@ -7,12 +7,14 @@
     "tools": [
       "mcp__settings-console__create_scene",
       "mcp__settings-console__get_flare_kind",
+      "mcp__settings-console__get_param_info",
       "mcp__settings-console__get_scene_preview",
       "mcp__settings-console__get_scene_settings",
       "mcp__settings-console__get_settings",
       "mcp__settings-console__list_flare_kinds",
       "mcp__settings-console__list_operations",
       "mcp__settings-console__list_scene_backups",
+      "mcp__settings-console__list_scene_params",
       "mcp__settings-console__list_scenes",
       "mcp__settings-console__overwrite_scene",
       "mcp__settings-console__remove_flare_kind",
@@ -23,7 +25,10 @@
       "mcp__settings-console__undo_last_scene_change"
     ],
     "mcp_servers": [
-      { "name": "settings-console", "status": "connected" }
+      {
+        "name": "settings-console",
+        "status": "connected"
+      }
     ],
     "model": "claude-sonnet-5",
     "permissionMode": "default",
@@ -42,8 +47,13 @@
           "type": "tool_use",
           "id": "toolu_synthetic_overwrite_1",
           "name": "mcp__settings-console__overwrite_scene",
-          "input": { "scene_id": "scene-fixture-0002", "name": "Warm Fade (revised)",
-                     "settings": { "entry_ramp_ms": 2500 } }
+          "input": {
+            "scene_id": "scene-fixture-0002",
+            "name": "Warm Fade (revised)",
+            "settings": {
+              "entry_ramp_ms": 2500
+            }
+          }
         }
       ]
     },
@@ -80,7 +90,10 @@
       "type": "message",
       "role": "assistant",
       "content": [
-        { "type": "text", "text": "Renamed it to 'Warm Fade (revised)' and set the entry blend to 2.5s. Backed up first — say the word if that's not what you wanted." }
+        {
+          "type": "text",
+          "text": "Renamed it to 'Warm Fade (revised)' and set the entry blend to 2.5s. Backed up first \u2014 say the word if that's not what you wanted."
+        }
       ]
     },
     "parent_tool_use_id": null,
@@ -95,6 +108,6 @@
     "num_turns": 2,
     "stop_reason": "end_turn",
     "session_id": "synthetic-overwrite-applied-0001",
-    "result": "Renamed it to 'Warm Fade (revised)' and set the entry blend to 2.5s. Backed up first — say the word if that's not what you wanted."
+    "result": "Renamed it to 'Warm Fade (revised)' and set the entry blend to 2.5s. Backed up first \u2014 say the word if that's not what you wanted."
   }
 ]

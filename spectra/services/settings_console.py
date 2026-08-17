@@ -238,6 +238,16 @@ def load_log(limit: int = 50) -> list[dict]:
     return list(reversed(_load_log()))[:limit]
 
 
+def _fmt_value(v: Any) -> str:
+    """Mirrors scene_console._fmt_value's vocabulary — one deterministic
+    rendering for both domains' summary lines, never a raw repr."""
+    if v is None:
+        return "unset"
+    if isinstance(v, bool):
+        return "On" if v else "Off"
+    return str(v)
+
+
 async def apply_change(key: str, value: Any, source: str = "agent") -> dict:
     """THE write choke point. Validates (raises SettingChangeError on
     failure, nothing persisted), then writes through room_controls' own
@@ -247,13 +257,16 @@ async def apply_change(key: str, value: Any, source: str = "agent") -> dict:
     room_controls.save_room_controls(candidate)
     ambient_result = await room_controls.reconcile_ambient_if_changed(previous, candidate)
 
+    new_value = getattr(candidate, key)
+    label = SETTINGS_REGISTRY[key].label
     entry = {
         "id": str(uuid.uuid4()),
         "ts_ms": int(time.time() * 1000),
         "op": "set_setting",
         "key": key,
         "old_value": getattr(previous, key),
-        "new_value": getattr(candidate, key),
+        "new_value": new_value,
+        "summary": f"Set {label} to {_fmt_value(new_value)}.",
         "source": source,
         "undone": False,
     }
@@ -330,6 +343,7 @@ async def undo_last_change() -> dict:
         raise SettingChangeError("nothing to undo")
 
     result = await apply_change(target["key"], target["old_value"], source="undo")
+    result["summary"] = f"Undid — {result['summary']}"
 
     log = _load_log()
     for entry in log:

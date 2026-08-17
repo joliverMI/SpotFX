@@ -15,6 +15,8 @@ Paths are module-level so executable specs can point them at temp files.
 """
 from __future__ import annotations
 
+import importlib
+import inspect
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -25,12 +27,20 @@ CATEGORIES_FILE = _REPO_ROOT / "storage" / "device_categories.json"
 
 _registry_cache: tuple[int, dict] | None = None
 _categories_cache: tuple[int, dict] | None = None
+_param_description_cache: dict[str, dict[str, str]] = {}
+
+# Registry effect ids that differ from their fx module name — mirrors
+# scripts/backfill_param_defaults.py's own MODULE_ALIAS (kept as a second,
+# independent copy on purpose: that script is a one-off maintenance tool,
+# this module is imported at request time by both processes).
+_EFFECT_MODULE_ALIAS = {"noise": "noise2d"}
 
 
 def refresh() -> None:
     global _registry_cache, _categories_cache
     _registry_cache = None
     _categories_cache = None
+    _param_description_cache.clear()
 
 
 def _load_cached(path: Path, cache: tuple[int, dict] | None) -> tuple[tuple[int, dict], dict]:
@@ -185,6 +195,69 @@ def effect_params(effect_type: str) -> dict[str, dict]:
 
 def get_param_meta(effect_type: str, param_name: str) -> Optional[dict]:
     return effect_params(effect_type).get(param_name)
+
+
+def _effect_class(effect_type: str):
+    """The vendored fx effect class carrying `effect_type`'s own
+    CONFIG_SCHEMA, or None if the module/class can't be found — same
+    module-resolution technique as scripts/backfill_param_defaults.py's
+    schema_defaults()."""
+    module_name = _EFFECT_MODULE_ALIAS.get(effect_type, effect_type)
+    try:
+        mod = importlib.import_module(f"fx.effects.{module_name}")
+    except ImportError:
+        return None
+    for _, cls in inspect.getmembers(mod, inspect.isclass):
+        if cls.__module__ == mod.__name__ and hasattr(cls, "CONFIG_SCHEMA"):
+            return cls
+    return None
+
+
+def param_descriptions(effect_type: str) -> dict[str, str]:
+    """{param_name: description}, read LIVE off the vendored effect's own
+    CONFIG_SCHEMA (voluptuous `description=` kwarg on each key, merged
+    across the class's full MRO by its own `.schema()` classmethod) — the
+    literal text the effect's author wrote for what a param does. Never a
+    second hand-maintained copy: this is what makes Sonic's parameter
+    catalogue (spectra/services/scene_console.py's get_param_info)
+    incapable of describing a parameter that no longer behaves that way —
+    a vendor update to fx/effects/*.py changes this text for free, with
+    nothing else to edit. Cached per process (`refresh()` clears it,
+    mirroring the registry's own cache — the vendored .py source doesn't
+    change without a redeploy, unlike the file-backed registry)."""
+    if effect_type in _param_description_cache:
+        return _param_description_cache[effect_type]
+    cls = _effect_class(effect_type)
+    out: dict[str, str] = {}
+    if cls is not None:
+        for key in cls.schema().schema:
+            desc = getattr(key, "description", None)
+            if desc and isinstance(desc, str):
+                out[str(key.schema)] = desc
+    _param_description_cache[effect_type] = out
+    return out
+
+
+def param_catalogue(effect_type: str) -> dict[str, dict]:
+    """One effect's full discovery view, param name -> {label, type, min,
+    max, options, default, description}: type/range/default come from the
+    shared registry (config/effect_params.json, the same data every write
+    path already validates against — see effect_params()); description is
+    read live from the vendored schema (param_descriptions(), above).
+    Neither half is hand-typed a second time here."""
+    descriptions = param_descriptions(effect_type)
+    out: dict[str, dict] = {}
+    for name, meta in effect_params(effect_type).items():
+        entry: dict[str, Any] = {
+            "label": meta.get("label", name),
+            "type": meta.get("type"),
+            "description": descriptions.get(name),
+        }
+        for field in ("min", "max", "options", "default", "unit"):
+            if field in meta:
+                entry[field] = meta[field]
+        out[name] = entry
+    return out
 
 
 def bg_color_blocked(effect_type: str) -> bool:

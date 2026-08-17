@@ -124,6 +124,7 @@ from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, ValidationError
 
+from fx import device_model
 from spectra import config
 from spectra.models.scene import (FlareKind, PhaseBlend, PhaseChoreography,
                                   SceneColorJourney, SceneV2)
@@ -489,7 +490,80 @@ def get_flare_kind(scene_id: str, name: str) -> dict:
     return {"scene_id": scene.id, "name": scene.name, "flare_kind": kind.model_dump()}
 
 
+# ═══ scene parameter discovery — his own ask ("visibility into parameters
+# and such and what they do") answered by reading the REAL definitions, not
+# a second hand-written catalogue — see fx/device_model.py's
+# param_descriptions()/param_catalogue() docstrings ═══════════════════════
+
+def _scene_effect_types(scene: SceneV2) -> list[str]:
+    """Every distinct effect type this scene's devices actually run
+    (base + any ⚡ effect-step variants), parent-first, dedup'd — a flare
+    kind's params only do something when they name-match a param on one
+    of these (params/gain are name-broadcast to every virtual whose live
+    effect carries the name, not scoped to a device by target)."""
+    out: list[str] = []
+    for dev in scene.devices:
+        if dev.effect_type and dev.effect_type not in out:
+            out.append(dev.effect_type)
+        for step in dev.effect_steps:
+            if step.effect_type not in out:
+                out.append(step.effect_type)
+    return out
+
+
+def list_scene_params(scene_id: str) -> dict:
+    """Cheap index only — param NAMES grouped by the effect that carries
+    them, never a param's full detail (that's get_param_info, queried one
+    name at a time so a discovery pass never loads the whole manual)."""
+    scene = scene_store.get_by_id(scene_id)
+    if scene is None:
+        raise SceneOpError(f"no scene with id {scene_id!r}")
+    effect_types = _scene_effect_types(scene)
+    return {
+        "scene_id": scene.id, "name": scene.name,
+        "effects": [
+            {"effect_type": et, "params": sorted(device_model.effect_params(et))}
+            for et in effect_types
+        ],
+    }
+
+
+def get_param_info(effect_type: str, name: str) -> dict:
+    """Full detail for exactly ONE named parameter on ONE effect: label,
+    type, legal range/options/default (from the shared effect-parameter
+    registry every write path already validates against) plus what it
+    DOES in plain language, read live from the vendored effect's own
+    schema — never a second, driftable description authored here."""
+    catalogue = device_model.param_catalogue(effect_type)
+    if not catalogue and effect_type not in device_model.effect_types():
+        raise SceneOpError(
+            f"no such effect type: {effect_type!r}",
+            known_effect_types=sorted(device_model.effect_types()))
+    info = catalogue.get(name)
+    if info is None:
+        raise SceneOpError(
+            f"effect {effect_type!r} has no parameter named {name!r}",
+            known_params=sorted(catalogue))
+    return {"effect_type": effect_type, "name": name, **info}
+
+
 # ═══ create_scene — always a fresh id, can never overwrite ═════════════
+
+def _fmt_value(v: Any) -> str:
+    """One deterministic value rendering shared by every summary line
+    below — the same {before} -> {after} vocabulary a human reading the
+    change log would use, never a raw repr of a nested structure (that's
+    exactly the JSON-dump defect this exists to avoid — see
+    settings_agent.SYSTEM_PROMPT and web/src/lib/sonicPreview.ts's own
+    fmtValue for the frontend's matching rule)."""
+    if v is None:
+        return "unset"
+    if isinstance(v, bool):
+        return "On" if v else "Off"
+    if isinstance(v, (list, dict)):
+        return f"{len(v)} item{'s' if len(v) != 1 else ''}"
+    return str(v)
+
 
 def _validate_create_scene(name: str, labels: Optional[list[str]] = None) -> SceneV2:
     name = (name or "").strip()
@@ -507,6 +581,7 @@ async def apply_create_scene(name: str, labels: Optional[list[str]] = None,
     scene_store.save(scene)
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
              "op": "create_scene", "scene_id": scene.id, "scene_name": scene.name,
+             "summary": f'Created scene "{scene.name}".',
              "source": source}
     _append_log(entry)
     return {"status": "applied", **entry}
@@ -540,9 +615,12 @@ async def apply_scene_setting(scene_id: str, key: str, value: Any,
     backup = _write_and_verify_backup(scene_id, previous, op="set_scene_setting")
     scene_store.save(candidate)
     getter, _ = _ACCESSORS[key]
+    new_value = getter(candidate)
+    label = SCENE_SETTINGS_REGISTRY[key].label
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
              "op": "set_scene_setting", "scene_id": scene_id, "scene_name": candidate.name,
-             "key": key, "old_value": getter(previous), "new_value": getter(candidate),
+             "key": key, "old_value": getter(previous), "new_value": new_value,
+             "summary": f'Set {label} to {_fmt_value(new_value)} on "{candidate.name}".',
              "backup_id": backup["id"], "preview": _diff_scenes(previous, candidate),
              "source": source}
     _append_log(entry)
@@ -589,7 +667,10 @@ async def apply_flare_kind(scene_id: str, *, name: str, type: str,  # noqa: A002
     scene_store.save(candidate)
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
              "op": f"flare_kind_{op}", "scene_id": scene_id, "scene_name": candidate.name,
-             "flare_kind": name, "backup_id": backup["id"],
+             "flare_kind": name,
+             "summary": f'{"Created" if op == "created" else "Updated"} flare '
+                        f'kind "{name}" on "{candidate.name}".',
+             "backup_id": backup["id"],
              "preview": _diff_scenes(scene, candidate), "source": source}
     _append_log(entry)
     return {"status": "applied", **entry}
@@ -622,7 +703,9 @@ async def apply_remove_flare_kind(scene_id: str, name: str, source: str = "agent
     scene_store.save(candidate)
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
              "op": "flare_kind_removed", "scene_id": scene_id, "scene_name": candidate.name,
-             "flare_kind": name, "backup_id": backup["id"],
+             "flare_kind": name,
+             "summary": f'Removed flare kind "{name}" from "{candidate.name}".',
+             "backup_id": backup["id"],
              "preview": _diff_scenes(scene, candidate), "source": source}
     _append_log(entry)
     return {"status": "applied", **entry}
@@ -678,9 +761,12 @@ async def apply_overwrite_scene(scene_id: str, name: Optional[str] = None,
     scene, candidate = _validate_overwrite_scene(scene_id, name, labels, settings, flare_kinds)
     backup = _write_and_verify_backup(scene_id, scene, op="overwrite_scene")
     scene_store.save(candidate)
+    preview = _diff_scenes(scene, candidate)
+    changed = ", ".join(sorted(preview)) if preview else "nothing"
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
              "op": "overwrite_scene", "scene_id": scene_id, "scene_name": candidate.name,
-             "backup_id": backup["id"], "preview": _diff_scenes(scene, candidate),
+             "summary": f'Overwrote scene "{candidate.name}" — changed: {changed}.',
+             "backup_id": backup["id"], "preview": preview,
              "source": source}
     _append_log(entry)
     return {"status": "applied", **entry}
@@ -712,8 +798,10 @@ async def apply_restore_scene_backup(scene_id: str, backup_id: str,
     current, restored, target = _validate_restore(scene_id, backup_id)
     backup = _write_and_verify_backup(scene_id, current, op="restore_scene_backup")
     scene_store.save(restored)
+    point = "its original, pre-Sonic version" if backup_id == "genesis" else "an earlier saved version"
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
              "op": "restore_scene_backup", "scene_id": scene_id, "scene_name": restored.name,
+             "summary": f'Restored "{restored.name}" to {point}.',
              "restored_from": backup_id, "backup_id": backup["id"],
              "preview": _diff_scenes(current, restored), "source": source}
     _append_log(entry)
@@ -734,6 +822,7 @@ async def apply_undo_last_scene_change(source: str = "undo") -> dict:
 
     result = await apply_restore_scene_backup(
         target["scene_id"], target["backup_id"], source=source)
+    result["summary"] = f'Undid the last change to "{result.get("scene_name")}".'
 
     log = _load_log()
     for entry in log:
@@ -769,6 +858,20 @@ def _op_list_flare_kinds(scene_id: str) -> dict:
 def _op_get_flare_kind(scene_id: str, name: str) -> dict:
     try:
         return get_flare_kind(scene_id, name)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
+def _op_list_scene_params(scene_id: str) -> dict:
+    try:
+        return list_scene_params(scene_id)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
+def _op_get_param_info(effect_type: str, name: str) -> dict:
+    try:
+        return get_param_info(effect_type, name)
     except SceneOpError as exc:
         return exc.payload()
 
@@ -889,6 +992,46 @@ OPERATIONS: dict[str, SonicOperation] = {
             "properties": {"scene_id": {"type": "string"}, "name": {"type": "string"}},
             "required": ["scene_id", "name"], "additionalProperties": False},
         handler=_op_get_flare_kind),
+    "list_scene_params": SonicOperation(
+        name="list_scene_params", domain="scene", kind="read",
+        summary="List the parameter NAMES available on one scene's "
+                "devices, grouped by effect — cheap, names only, no "
+                "detail. Call this before authoring a flare kind's params "
+                "instead of asking him for a parameter name.",
+        instructions=(
+            "scene_id from list_scenes. Groups by the distinct effect "
+            "types this scene's devices actually run (base effect plus "
+            "any ⚡ effect-step variants) — a flare kind's params are "
+            "broadcast by NAME to every virtual whose live effect carries "
+            "that name, so these are exactly the names worth setting. "
+            "Call get_param_info with one name at a time for what it "
+            "does, its type, and its legal range — never guess a value "
+            "from a bare name, and never dump every param's full detail "
+            "in one call."),
+        input_schema={
+            "type": "object",
+            "properties": {"scene_id": {"type": "string"}},
+            "required": ["scene_id"], "additionalProperties": False},
+        handler=_op_list_scene_params),
+    "get_param_info": SonicOperation(
+        name="get_param_info", domain="scene", kind="read",
+        summary="Full detail for ONE named parameter on ONE effect: what "
+                "it does in plain language, its type, and its legal "
+                "range/options/default — read live from the real effect "
+                "definition, never a hand-written description that could "
+                "go stale.",
+        instructions=(
+            "effect_type + name from list_scene_params. Query one "
+            "parameter at a time, only the one you're about to set — "
+            "don't call this for every param on an effect up front."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "effect_type": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            "required": ["effect_type", "name"], "additionalProperties": False},
+        handler=_op_get_param_info),
     "create_scene": SonicOperation(
         name="create_scene", domain="scene", kind="write",
         summary="Create a new, empty scene shell with a name.",

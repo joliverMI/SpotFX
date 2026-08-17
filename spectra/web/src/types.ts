@@ -551,6 +551,21 @@ export interface SonicAppliedChange {
   flare_kind?: string;
   old_value?: unknown;
   new_value?: unknown;
+  /** One deterministic, plain-language line built server-side from this
+   * op's own structured fields — never the model's account of what it
+   * did (see spectra/services/scene_console.py / settings_console.py).
+   * This is what answers "did it work", not a JSON dump of this object. */
+  summary?: string;
+  [extra: string]: unknown;
+}
+
+/** A write op the server refused — same {status, reason, ...} shape
+ * SceneOpError/SettingChangeError.payload() produce. `reason` is already
+ * a plain-language sentence, exactly like `summary` is on the applied
+ * side — his "if it failed, that says so just as plainly" ask. */
+export interface SonicRejectedChange {
+  status: 'rejected';
+  reason: string;
   [extra: string]: unknown;
 }
 
@@ -558,6 +573,7 @@ export interface SettingsMessageResult {
   session_id: string;
   reply: string;
   changes: SonicAppliedChange[];
+  rejected: SonicRejectedChange[];
 }
 
 export interface UndoResult extends AppliedSettingChange {
@@ -568,8 +584,11 @@ export interface SettingsChatMessage {
   id: string;
   /** 'preview' renders a change's real before/after diff (SonicAppliedChange.preview,
    * read from stored data) — kept visually distinct from 'assistant' so a
-   * preview is never mistaken for the model's own prose. */
-  role: 'user' | 'assistant' | 'preview';
+   * preview is never mistaken for the model's own prose. 'status' is the
+   * one-line deterministic outcome (SonicAppliedChange.summary /
+   * SonicRejectedChange.reason) — always shown regardless of what the
+   * model's own reply says, so the outcome is never only in its prose. */
+  role: 'user' | 'assistant' | 'preview' | 'status';
   text: string;
 }
 

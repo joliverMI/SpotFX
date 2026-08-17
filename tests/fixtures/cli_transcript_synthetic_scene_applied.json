@@ -7,10 +7,12 @@
     "tools": [
       "mcp__settings-console__create_scene",
       "mcp__settings-console__get_flare_kind",
+      "mcp__settings-console__get_param_info",
       "mcp__settings-console__get_scene_settings",
       "mcp__settings-console__get_settings",
       "mcp__settings-console__list_flare_kinds",
       "mcp__settings-console__list_operations",
+      "mcp__settings-console__list_scene_params",
       "mcp__settings-console__list_scenes",
       "mcp__settings-console__remove_flare_kind",
       "mcp__settings-console__set_flare_kind",
@@ -18,7 +20,10 @@
       "mcp__settings-console__set_setting"
     ],
     "mcp_servers": [
-      { "name": "settings-console", "status": "connected" }
+      {
+        "name": "settings-console",
+        "status": "connected"
+      }
     ],
     "model": "claude-sonnet-5",
     "permissionMode": "default",
@@ -37,7 +42,11 @@
           "type": "tool_use",
           "id": "toolu_synthetic_scene_1",
           "name": "mcp__settings-console__set_scene_setting",
-          "input": { "scene_id": "scene-fixture-0001", "key": "entry_ramp_ms", "value": 1500 }
+          "input": {
+            "scene_id": "scene-fixture-0001",
+            "key": "entry_ramp_ms",
+            "value": 1500
+          }
         }
       ]
     },
@@ -74,7 +83,10 @@
       "type": "message",
       "role": "assistant",
       "content": [
-        { "type": "text", "text": "Set the entry blend on Fixture Scene to 1.5s." }
+        {
+          "type": "text",
+          "text": "Set the entry blend on Fixture Scene to 1.5s."
+        }
       ]
     },
     "parent_tool_use_id": null,
