@@ -32,6 +32,10 @@ const PANEL_WIDTH = 320;
 export interface TopBarGroupButtonProps {
   className?: string;
   title?: string;
+  /** Accessible name — needed on any button whose visible content is a
+   * colour/icon alone rather than text (the Mode button, since its fill
+   * carries the mode with no label). Falls back to `title` when omitted. */
+  ariaLabel?: string;
   style?: React.CSSProperties;
   holdToExpand: boolean;
   onShortPress?: () => void;
@@ -41,7 +45,7 @@ export interface TopBarGroupButtonProps {
 }
 
 export default function TopBarGroupButton({
-  className, title, style, holdToExpand, onShortPress, panelTitle, panel, children,
+  className, title, ariaLabel, style, holdToExpand, onShortPress, panelTitle, panel, children,
 }: TopBarGroupButtonProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -104,6 +108,7 @@ export default function TopBarGroupButton({
         type="button"
         className={`top-bar-group-btn${className ? ` ${className}` : ''}`}
         title={title}
+        aria-label={ariaLabel ?? title}
         style={style}
         onClick={handleClick}
         onContextMenu={(e) => e.preventDefault()}

@@ -182,6 +182,15 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * -webkit- prefix) stops the hold from selecting the button's own text —
  * all three are what let a real held finger reach this button's own hold
  * gesture instead of the browser's. */
+/* Fixed, uniform, measured — not eyeballed — height for all three grouped
+ * buttons (2026-08-17, his ask: "make the icons all vertically the same
+ * height... ideally make them shorter than they are now"). box-sizing:
+ * border-box (set globally above) means this `height` is the true outer
+ * box for every one of them regardless of border/padding, so Mode (no
+ * visible content — see RoomControlsBar's own comment on why), Ambient
+ * (one emoji line) and Scenes (a two-line label+value stack) all render at
+ * IDENTICAL height; was ~38-41px (Mode/Scenes) / ~32px (Ambient) before —
+ * push further if 30px still reads tall on his phone. */
 .top-bar-group-btn {
   position: relative;
   display: inline-flex;
@@ -190,13 +199,15 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   justify-content: center;
   gap: 1px;
   min-width: 64px;
-  padding: 5px 12px;
+  height: 30px;
+  padding: 0 12px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface2);
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.1;
   cursor: pointer;
   touch-action: manipulation;
   -webkit-touch-callout: none;
@@ -204,13 +215,14 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   user-select: none;
 }
 .top-bar-group-btn-label {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 500;
   opacity: 0.75;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  line-height: 1.1;
 }
-.top-bar-group-btn-value { font-size: 13px; font-weight: 700; }
+.top-bar-group-btn-value { font-size: 12px; font-weight: 700; line-height: 1.1; }
 .top-bar-group-btn-dot {
   position: absolute;
   top: -3px;
@@ -225,7 +237,16 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .top-bar-group-btn-dot-amber { background: var(--warning); }
 .top-bar-group-btn-dot-gray { background: var(--text-muted); }
 
-.ambient-group-btn { font-size: 20px; padding: 3px 12px; }
+/* Mode's fill IS the mode (white/black/grey, set inline per state in
+ * RoomControlsBar.tsx) — this rule only reserves its width/border so an
+ * empty (no-text) button still reads as a button at rest. Border colour is
+ * always the accent, never part of the white/black/grey mapping, so the
+ * edge stays visible whichever fill is showing (his own requirement: a
+ * black button must not vanish against this bar's dark background, a white
+ * one must not vanish against a light one). */
+.mode-group-btn { border-width: 2px; }
+
+.ambient-group-btn { font-size: 18px; }
 .ambient-group-btn.ambient-group-btn-off { opacity: 0.5; filter: grayscale(1); }
 
 .scenes-group-btn.scenes-group-btn-forced { border-color: var(--accent2); }
