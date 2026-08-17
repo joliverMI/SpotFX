@@ -9,6 +9,7 @@
  * toolbar's intensity slider drives Test Fire (dry-run compile — shows
  * resolved bindings + writes) and the owner's real Fire button. */
 import { useEffect, useMemo, useState } from 'react';
+import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
@@ -275,10 +276,8 @@ export default function ScenesPage() {
                 onChange={(e) => setIntensity(Number(e.target.value))} />
               <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', width: 34 }}>{intensity.toFixed(2)}</span>
             </span>
-            <button style={{ fontSize: 12 }} title="Resolve + compile at the chosen intensity — no device contact"
-              onClick={() => void testFire(true)}>
-              ▶ Test Fire (dry)
-            </button>
+            <ModeAvailabilityToggle value={scene.display_availability ?? 'default'}
+              onChange={(v) => setScene({ ...scene, display_availability: v })} />
             <button style={{ fontSize: 12, borderColor: 'var(--accent)' }}
               title="Really fire this scene through the live LedFX service"
               onClick={() => void testFire(false)}>

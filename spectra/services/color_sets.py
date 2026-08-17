@@ -58,6 +58,11 @@ class ColorSetCard(BaseModel):
     labels:  list[str] = Field(default_factory=list)
     entries: list[ColorSetEntry] = Field(default_factory=list)
     scene_v2_opt_out: bool = False
+    # Per-item mode availability (owner ask 2026-08-17) — see
+    # spectra/services/mode_availability.py. Distinct from the retired
+    # display_mode/dark_variant/light_variant mode-lane fields (§36),
+    # which this projection deliberately still does NOT carry.
+    display_availability: Literal["default", "dark", "light"] = "default"
 
     # kind == "group" (day-one bar item §10 — see color_set_groups.py for
     # the pick/merge logic that actually consumes these): members is the

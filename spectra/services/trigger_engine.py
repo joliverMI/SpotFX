@@ -396,12 +396,16 @@ class TriggerEngine:
         state machine; a mid-song trigger names one moment, not a stream of
         them). picked_id None (the terminal STAY rung, or no configured
         sequencer entries at all) means nothing fires this crossing."""
-        from spectra.services import scene_store, selection_kernel as kernel
+        from spectra.services import mode_availability, scene_store, selection_kernel as kernel
         from spectra.services import sequencer_store
         from spectra.services.engine import bridge
+        from spectra.services.room_controls import load_room_controls
         config = sequencer_store.load_config()
         curves = sequencer_store.load_curves()
-        existing = {s.id for s in scene_store.list_all()}
+        room_mode = load_room_controls().display_mode
+        existing = {s.id for s in scene_store.list_all()
+                   if mode_availability.available_in_room_mode(
+                       s.display_availability, room_mode)}
         candidates = kernel.build_scene_candidates(
             config.entries, curves, config.affinity,
             genre_bucket=bridge.genre_bucket(), prev_id=None,
@@ -466,9 +470,27 @@ class TriggerEngine:
         await engine.fire_scene_update_event(intensity)
 
     async def _default_select_color_set(self, set_id: str) -> None:
-        from spectra.services import color_set_groups, engine
-        card = color_set_groups.resolve_ref(set_id)  # §10 — resolves a Group to its picked member
-        await engine.conductor.apply_set_directly(card)
+        from spectra.services import color_set_groups, color_sets, engine
+        from spectra.services.room_controls import load_room_controls
+        # §10 — a Group reference resolves to its picked member. Fetched
+        # RAW (not via resolve_ref) so mode availability (owner ask
+        # 2026-08-17) can gate the GROUP ITSELF before any member
+        # substitution — resolve_ref's own hard-fail semantics stay for a
+        # genuinely unknown id; a reference that resolves fine but is
+        # currently mode-gated out (the card itself, or every member) is a
+        # quiet skip instead, matching every other automatic pick's
+        # degrade-gracefully posture.
+        card = color_sets.get_by_id(set_id)
+        if card is None:
+            raise ValueError(f"colour set '{set_id}' not found")
+        room_mode = load_room_controls().display_mode
+        gated = color_set_groups.resolve_for_fire_mode_gated(card, room_mode)
+        if gated is None:
+            logger.info("select_color_set trigger: '%s' unusable or "
+                       "unavailable in display_mode=%s — skipped",
+                       card.name, room_mode)
+            return
+        await engine.conductor.apply_set_directly(gated)
 
     async def _default_auto_generate(self, uri: str) -> None:
         # Off the event loop entirely (candidate_moments can rescan

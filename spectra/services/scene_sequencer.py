@@ -60,22 +60,40 @@ async def fire_scene_by_id(scene_id: str,
     pick already funnels through. Only the scene is pinned; color_set_id/
     intensity pass through as the caller resolved them, same as legacy's
     "reassert with normal First/Rest." A forced id pointing at a missing
-    scene is treated as unset (falls through to the requested scene)."""
-    from spectra.services import color_set_groups, color_sets, fire_history, scene_compiler, scene_store
+    scene is treated as unset (falls through to the requested scene).
+
+    Mode availability (spectra/services/mode_availability.py, owner ask
+    2026-08-17) is also gated HERE, once, for both callers: a scene whose
+    own display_availability excludes the room's current display_mode is
+    skipped (result carries skipped="mode_availability") UNLESS Force Scene
+    just pinned it — an explicit pin keeps its declared life, same as it
+    already does for pause/dinner_party/ambient. A resolved colour set/
+    group member failing its own availability check falls back to the
+    room's active set, same as an unresolved/unknown color_set_id already
+    does."""
+    from spectra.services import (color_set_groups, color_sets, fire_history,
+                                  mode_availability, scene_compiler, scene_store)
     from spectra.services.room_controls import load_room_controls
     controls = load_room_controls()
+    forced = False
     if controls.force_scene_enabled and controls.force_scene_scene_id:
         if scene_store.get_by_id(controls.force_scene_scene_id) is not None:
             scene_id = controls.force_scene_scene_id
+            forced = True
     scene = scene_store.get_by_id(scene_id)
     if scene is None:
         raise ValueError(f"scene {scene_id} not found in spectra scenes")
+    if not forced and not mode_availability.available_in_room_mode(
+            getattr(scene, "display_availability", "default"), controls.display_mode):
+        return {"skipped": "mode_availability", "scene_id": scene_id,
+               "scene_name": scene.name}
     color_set = color_sets.get_by_id(color_set_id) if color_set_id else None
     if color_set is not None:
         # A Group reference resolves to its picked member here (§10) — a
-        # missing/unusable one falls back to the room's active set below,
-        # same as an unknown plain set id already did.
-        color_set = color_set_groups.resolve_for_fire(color_set)
+        # missing/unusable/mode-unavailable one falls back to the room's
+        # active set below, same as an unknown plain set id already did.
+        color_set = color_set_groups.resolve_for_fire_mode_gated(
+            color_set, controls.display_mode)
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
                                              color_set=color_set, dry_run=False)
     fire_history.record_fire("scenes", scene_id, {
@@ -141,6 +159,7 @@ class SceneSequencer:
         color_set_name: Callable[[str], str] | None = None,
         wheel_get: Callable[[], Optional[float]] | None = None,
         wheel_set: Callable[[Optional[float]], None] | None = None,
+        scene_mode_available: Callable[[str], bool] | None = None,
     ) -> None:
         self._rng = rng or Random()
         self._fire = fire or self._default_fire
@@ -159,6 +178,7 @@ class SceneSequencer:
         # Shared room-colour truth (the design's named change).
         self._wheel_get = wheel_get or self._default_wheel_get
         self._wheel_set = wheel_set or self._default_wheel_set
+        self._scene_mode_available = scene_mode_available or self._default_scene_mode_available
 
         self.transition_source = TransitionSource()
         self.transition_source.bind(self._on_change_moment)
@@ -246,10 +266,17 @@ class SceneSequencer:
                            "and are skipped: %s", len(missing), sorted(missing))
         intensity = self._intensity()
         genre_bucket = self._genre_bucket()
+        # Mode availability (owner ask 2026-08-17): a scene marked light/
+        # dark-only is dropped from the candidate pool, not just vetoed at
+        # fire time, so the ladder's fallback rungs see a truthful pool
+        # instead of wasting a pick on something fire_scene_by_id would
+        # skip anyway.
+        available = {sid for sid in existing
+                    if self._scene_mode_available(sid)}
         candidates = kernel.build_scene_candidates(
             config.entries, curves, config.affinity,
             genre_bucket=genre_bucket, prev_id=self._active_id,
-            restrict_ids=existing)
+            restrict_ids=available)
         pick = kernel.select(candidates, intensity=intensity,
                              rng=self._rng, current_id=self._active_id,
                              terminal=kernel.TERMINAL_STAY)
@@ -396,16 +423,30 @@ class SceneSequencer:
         await fire_scene_by_id(scene_id, color_set_id, intensity)
 
     def _default_eligible_sets(self, scene_id: str) -> dict[str, Optional[float]]:
-        from spectra.services import color_sets, color_wheel, scene_store
+        from spectra.services import color_sets, color_wheel, mode_availability, scene_store
+        from spectra.services.room_controls import load_room_controls
         scene = scene_store.get_by_id(scene_id)
+        room_mode = load_room_controls().display_mode
         out: dict[str, Optional[float]] = {}
         for card in color_sets.list_all():
             if card.kind != "set":
                 continue
             if scene is not None and not scene.accepts_color_set(card):
                 continue
+            if not mode_availability.available_in_room_mode(
+                    card.display_availability, room_mode):
+                continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out
+
+    def _default_scene_mode_available(self, scene_id: str) -> bool:
+        from spectra.services import mode_availability, scene_store
+        from spectra.services.room_controls import load_room_controls
+        scene = scene_store.get_by_id(scene_id)
+        if scene is None:
+            return True
+        return mode_availability.available_in_room_mode(
+            scene.display_availability, load_room_controls().display_mode)
 
     def _default_color_set_name(self, set_id: str) -> str:
         from spectra.services import color_sets

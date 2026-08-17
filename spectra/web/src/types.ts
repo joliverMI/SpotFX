@@ -178,7 +178,14 @@ export interface SceneV2 {
   entry_ramp_ms: number;
   accept_all_sets: boolean;
   accepted_set_ids: string[];
+  /** Per-scene mode availability (owner ask 2026-08-17) — see
+   * ModeAvailabilityToggle.tsx. "light": skipped by automatic selection
+   * while the room is dark. "dark": skipped while the room is light.
+   * "default": always available. */
+  display_availability: DisplayAvailability;
 }
+
+export type DisplayAvailability = 'default' | 'dark' | 'light';
 
 export interface ColorWheelPosition {
   set_id: string;
@@ -621,6 +628,11 @@ export interface SpotColorSetCard {
   cycle_behavior?: 'wrap' | 'bounce';
   exclude_current?: boolean;
   palette_sync?: boolean;
+  /** Per-item mode availability (owner ask 2026-08-17) — see
+   * ModeAvailabilityToggle.tsx. Applies to both Sets and Groups (same
+   * card, kind differentiates) — distinct from the retired display_mode
+   * mode-lane field this card also round-trips unmodified. */
+  display_availability?: DisplayAvailability;
   [key: string]: unknown;
 }
 
@@ -675,6 +687,7 @@ export function newScene(id: string): SceneV2 {
     entry_ramp_ms: 0,
     accept_all_sets: true,
     accepted_set_ids: [],
+    display_availability: 'default',
   };
 }
 

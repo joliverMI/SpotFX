@@ -275,8 +275,13 @@ class SpotEffectsBridge:
         return intensity_scale.song_scaling_factor(uri, self.track_genres())
 
     def conductor_deferral(self) -> Optional[str]:
-        """Pause / Dinner Party / Ambient hold drift; Force Scene does NOT
-        (a pinned scene keeps its declared life)."""
+        """Preview / Pause / Dinner Party / Ambient hold drift; Force Scene
+        does NOT (a pinned scene keeps its declared life). A colour Preview
+        (spectra/services/preview_pause.py) outranks all three — see that
+        module's docstring."""
+        from spectra.services import preview_pause
+        if preview_pause.active():
+            return "preview"
         if self.paused:
             return "paused"
         if self.dinner_party:
@@ -286,6 +291,9 @@ class SpotEffectsBridge:
         return None
 
     def sequencer_deferral(self) -> Optional[str]:
+        from spectra.services import preview_pause
+        if preview_pause.active():
+            return "preview"
         if self.force_scene:
             return "force_scene"
         return self.conductor_deferral()

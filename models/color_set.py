@@ -74,6 +74,18 @@ class ColorSetCard(BaseModel):
     # set_color action) left the mode at "default".
     display_mode: Literal["default", "dark", "light"] = "default"
 
+    # SPECTRA per-item mode AVAILABILITY (distinct from display_mode above,
+    # which is the legacy dark/light "variant lane" — this is a plain
+    # on/off eligibility gate, owner ask 2026-08-17): "light" is available
+    # while the room's global display_mode is light or default/hybrid,
+    # skipped while dark; "dark" is available while dark or default/hybrid,
+    # skipped while light; "default" is always available. Consulted only
+    # by SPECTRA's own automatic selection paths (spectra/services/
+    # mode_availability.py) — a manual apply/preview/test-fire always goes
+    # through regardless, same "explicit human action bypasses automatic
+    # gating" convention as Force Scene.
+    display_availability: Literal["default", "dark", "light"] = "default"
+
     # kind == "set": the palette itself.
     # kind == "group": optional overrides — any field set here replaces the
     # picked member Set's value for the virtuals the entry's scope resolves to.

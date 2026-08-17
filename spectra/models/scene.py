@@ -577,6 +577,17 @@ class SceneV2(BaseModel):
     # False narrows to accepted_set_ids.
     accept_all_sets:  bool = True
     accepted_set_ids: list[str] = Field(default_factory=list)
+    # Per-scene mode AVAILABILITY (owner ask, 2026-08-17): "light" is
+    # eligible while the room's global display_mode is light or
+    # default/hybrid, skipped while dark; "dark" is eligible while dark or
+    # default/hybrid, skipped while light; "default" is always eligible.
+    # Consulted only by automatic selection (scene_sequencer's own roll,
+    # trigger_engine's generated-trigger scene pick, and as a hard gate at
+    # scene_sequencer.fire_scene_by_id — see spectra/services/
+    # mode_availability.py). A Force Scene pin, or a manual test-fire,
+    # bypasses this the same way both already bypass pause/dinner_party/
+    # ambient deferral.
+    display_availability: Literal["default", "dark", "light"] = "default"
 
     @model_validator(mode="before")
     @classmethod

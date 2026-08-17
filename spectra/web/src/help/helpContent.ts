@@ -68,11 +68,22 @@ export const HELP_SECTIONS: HelpSection[] = [
     entries: [
       {
         id: 'editor-toolbar',
-        title: 'Toolbar: Save, Duplicate, Test Fire, Fire, Delete',
+        title: 'Toolbar: Save, Duplicate, mode availability, Fire, Delete',
         keywords: 'test fire dry run real fire intensity slider no confirm consent',
         body: [
-          'The intensity slider picks the axis value a fire resolves against, so ⚡ scenes can be previewed anywhere on the axis. Test Fire compiles at that intensity WITHOUT touching devices and shows the resolved bindings, dice rolls, and per-virtual writes. Fire (live) sends the same writes to LedFX — it exists for the owner; use Test Fire for checking work.',
+          'The intensity slider picks the axis value a fire resolves against, so ⚡ scenes can be previewed anywhere on the axis. Fire sends the compiled writes to LedFX live — it exists for the owner.',
           'Firing asks for NO confirmation — the press is the consent; it fires the single scene you chose and are looking at. This is a deliberate asymmetry: the global colour-set opt-out (Colour Sets tab) DOES confirm, because that one silently changes every scene in the house.',
+          'The old "Test Fire (dry)" button was retired in favour of the mode-availability toggle in the same slot — see "Mode availability", below. Its dry-run compile is still reachable: POST /api/scenes/{id}/fire with dry_run=true, the surface agents already use directly.',
+        ],
+      },
+      {
+        id: 'mode-availability',
+        title: 'Mode availability — Hybrid / Light / Dark toggle',
+        keywords: 'display availability light dark hybrid skip automatic gate scene color set group toggle',
+        body: [
+          'A small toggle on the scene toolbar and on a Colour Set/Group\'s toolbar (next to Preview) — tap to cycle Hybrid → Light → Dark → Hybrid. It stays the SAME WIDTH at every state so it never shifts the row under your thumb.',
+          'Hybrid (the default): always available. Light: available while the room\'s Display mode is Light or Hybrid, skipped while it\'s Dark. Dark: available while Dark or Hybrid, skipped while Light.',
+          'This gates anything that fires WITHOUT a human pressing a button in the moment — the sequencer\'s own picks, a colour Group\'s member cycling, a generated trigger\'s scene pick, and a hand-authored trigger\'s fire_scene action too (the same central gate every automatic scene-fire funnels through). Only two things bypass it: Force Scene (an explicit standing pin — the pinned scene keeps its declared life, same as it already does for Pause/Dinner Party/Ambient) and a literal button press right now (Fire, Test Fire\'s dry-run API, a Colour Set/Group\'s Preview).',
         ],
       },
       {
@@ -318,7 +329,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'apply now proof rotation cursor test fire preview',
         body: [
           'A Set is a reusable palette: entries scoped to a device/category/role, each with FG colour, BG colour + mode, and brightness — applied wherever the room\'s active Colour Set lands. A Group is an ordered/weighted pool of Sets: firing a Group picks ONE member (see "Palette Sync" and "Group overrides" below) instead of applying a fixed palette.',
-          '▶ Apply to room sends this card straight to the live room the same way the sequencer or a select_color_set trigger would — the honest proof surface: press it on a Group repeatedly and watch which member it names each time (the toast shows the pick). Save first if the card has unsaved edits; Apply always acts on the saved version.',
+          'The toolbar\'s ▶ Preview button and mode-availability toggle work on the DRAFT as edited — see "Preview: tap vs hold" and "Mode availability", below. Neither needs a Save first; Save is only for keeping the edit.',
+        ],
+      },
+      {
+        id: 'colorsets-preview',
+        title: 'Preview: tap vs hold',
+        keywords: 'apply to room preview tap hold press revert pause live drag temporary',
+        body: [
+          'Preview replaced the old permanent "Apply to room" — every apply here is temporary and reverts. TAP: pauses SPECTRA\'s own automatic scene/response/set changes for 5 seconds, applies this card\'s colours to the room, then reverts to EXACTLY what was live the instant you tapped. HOLD (½ second): pauses for up to 60 seconds and STAYS applied — release it early with a second tap, wait out the timer, or just navigate away (leaving the page releases it too).',
+          'While previewing, drag any colour on the card (FG, BG, an override entry) and the room updates live — the preview keeps running, the pause timer keeps counting from when you started, nothing restarts or drops.',
+          'The revert always restores the room\'s TRUE pre-preview state, read live the instant Preview started — never a guess. His show keeps running underneath a tap or a released hold exactly as if nothing happened.',
         ],
       },
       {

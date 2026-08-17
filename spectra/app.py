@@ -34,8 +34,8 @@ from spectra import config
 from spectra.api import engine as engine_api
 from spectra.api import (device_preview, feedback, fire_history,
                          intensity_scale, journey, ownership, registry,
-                         room_controls, scenes, sequencer, settings_console,
-                         show_review, sonic_usage, triggers)
+                         room_controls, room_preview, scenes, sequencer,
+                         settings_console, show_review, sonic_usage, triggers)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(sequencer.router)
     app.include_router(registry.router)
     app.include_router(journey.router)
+    app.include_router(room_preview.router)
     app.include_router(engine_api.router)
     app.include_router(ownership.router)
     app.include_router(room_controls.router)
