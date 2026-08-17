@@ -1,26 +1,40 @@
-/** Compact room-control strip — the Hybrid/Dark/Light display-mode control
- * (wired: legacy's Default/Dark/Light display-mode cycle, all three states
- * — Hybrid ("default" internally, his word for legacy's Default: defer to
- * whatever the scene authors) / Dark (hard-clamps every device's
- * background black via LedFX's dark_lock) / Light (forces the configured
- * background colour/brightness onto every device, unconditionally, live —
- * spectra/services/dark_light.py) plus brightness multiplier (wired: the
- * legacy Brightness Multiplier action equivalent, scales every write
- * uniformly at the fx_executor / scene_compiler seams) plus ambient
- * mode/colour (wired: freezes the room's live Hue devices and holds them
- * at the chosen colour over direct bridge REST — spectra/services/
- * ambient.py), a SECOND ambient colour held instead while display mode is
- * Dark (ambient_color_dark — defaults identical to the normal colour until
- * authored separately), and global transition pace (state only), the
- * scene-change settings model (three additive ticks — see
- * SCENE_CHANGE_MODES below and spectra/services/room_controls.py), and
- * Force Scene — the legacy Now Playing control ported verbatim (owner
- * direction: reuse the old system's design/behaviour). Mounted once in
- * App.tsx, next to the ownership bar. */
-import { useEffect, useMemo, useState } from 'react';
+/** Compact room-control strip — three press-and-hold grouped buttons
+ * (his ask, 2026-08-17: "group items that are related... make it just a
+ * single button that is pressed and held to expand vertically down with
+ * the additional options") plus the room-wide brightness dimmer, which
+ * he didn't name as belonging to any group and stays a standalone slider.
+ *
+ * - **Mode** — the Hybrid/Dark/Light display-mode control
+ *   (spectra/services/dark_light.py) plus its Light-mode colour/
+ *   brightness. Short press CYCLES the three modes; the button is
+ *   COLOURED by whichever mode is current (Light even shows the actual
+ *   configured colour, since that's the whole point of the mode). Hold
+ *   expands to the colour picker + brightness slider.
+ * - **Ambient** — a light-bulb icon (spectra/services/ambient_music_gate.py).
+ *   Short press toggles it on/off (remembers the last non-off setting so
+ *   toggling back "on" restores it, rather than one fixed choice). Hold
+ *   expands to the three-setting select, both authored colours, the Hue
+ *   entertainment-area picker (AmbientGroupsPicker, embedded directly —
+ *   no separate modal), and the live status.
+ * - **Scenes** — scene-change tier, Force Scene, AND the global
+ *   transition pace bundled in (his own ask: "bundle transitions into
+ *   scenes"). A press just opens the panel — no cycle behaviour, by his
+ *   own stated reason ("it don't want it to cycle anything").
+ *
+ * THE ONE-SECOND APPLY DELAY (Mode only, his words: "don't apply change
+ * for 1s to avoid spam") is deliberately NOT a debounce on the button —
+ * that would make every tap feel sluggish, the opposite of the ask. The
+ * button's own display updates synchronously on every tap (`setLocal`);
+ * only the actual PUT is delayed and re-armed on each further tap
+ * (`useDebouncedApply`, trailing-edge), so a burst of cycling applies
+ * exactly once, for whichever mode was landed on last, after taps stop
+ * for a full second. See useDebouncedApply's own docstring. */
+import { useEffect, useMemo, useRef, useState } from 'react';
 import AmbientGroupsPicker from './AmbientGroupsPicker';
 import ColorGradientPicker from './ColorGradientPicker';
+import TopBarGroupButton from './TopBarGroupButton';
 import HelpLink from '../help/HelpLink';
+import { useDebouncedApply } from '../lib/useDebouncedApply';
 import {
   useAmbientHueGroups, useEngineStatus, useRoomControls, useSaveRoomControls, useScenes,
 } from '../queries';
@@ -31,7 +45,8 @@ import SearchSelect from './forms/SearchSelect';
 
 /** His three-way display-mode control (spectra/services/dark_light.py).
  * "default" is his word "hybrid" — labelled that way here per his standing
- * ruling, kept "default" internally/on the wire. */
+ * ruling, kept "default" internally/on the wire. Cycle order (short press
+ * on the Mode button walks this array, wrapping): Hybrid -> Dark -> Light. */
 const DISPLAY_MODES: { value: DisplayMode; label: string; title: string }[] = [
   { value: 'default', label: 'Hybrid',
     title: 'Nothing forced — each device shows whatever its scene authors.' },
@@ -85,6 +100,12 @@ const AMBIENT_MODE_BADGE: Record<string, string> = {
   yielding: 'badge-amber',
   transitioning: 'badge-gray',
 };
+const AMBIENT_MODE_DOT: Record<string, string> = {
+  holding: 'top-bar-group-btn-dot-purple',
+  partial: 'top-bar-group-btn-dot-red',
+  yielding: 'top-bar-group-btn-dot-amber',
+  transitioning: 'top-bar-group-btn-dot-gray',
+};
 
 /** "confirmed 4s ago" vs "confirmed 20m ago" — the honest alternative to a
  * live re-check on every 3s poll (spectra/services/ambient_music_gate.py's
@@ -121,26 +142,31 @@ export default function RoomControlsBar() {
   const { data: scenes } = useScenes();
   const { data: engineStatus } = useEngineStatus();
   const { data: hueGroupsData } = useAmbientHueGroups();
-  const ambientMode = engineStatus?.ambient;
+  const ambientLive = engineStatus?.ambient;
   const hueGroups = hueGroupsData?.groups ?? [];
   const [local, setLocal] = useState<RoomControlState | null>(null);
   const [ambientResult, setAmbientResult] = useState<AmbientResult | null>(null);
   const [darkLightResult, setDarkLightResult] = useState<DarkLightResult | null>(null);
-  const [groupsPickerOpen, setGroupsPickerOpen] = useState(false);
+  const [hueGroupsResetKey, setHueGroupsResetKey] = useState(0);
+  const localRef = useRef<RoomControlState | null>(null);
+  const lastOnAmbientModeRef = useRef<AmbientMode>('auto');
+
+  useEffect(() => { localRef.current = local; }, [local]);
+  useEffect(() => {
+    if (local && local.ambient_mode !== 'off') lastOnAmbientModeRef.current = local.ambient_mode;
+  }, [local?.ambient_mode]);
+
   const sceneOptions = useMemo(
     () => (scenes ?? []).map((s) => ({ value: s.id, label: s.name })),
     [scenes],
   );
 
-  // Adopt server state unless a local edit is in flight (avoid clobbering
-  // a slider drag with a stale refetch).
-  useEffect(() => {
-    if (data && !save.isPending) setLocal(data);
-  }, [data, save.isPending]);
-
-  if (!local) return null;
-
-  const commit = (next: RoomControlState) => {
+  // Hoisted function declaration (not a `const`) so it's fully defined
+  // for every render's closures — including modeApply's callback below,
+  // which is created before local's null-check and must never reference
+  // an uninitialized binding if that callback ever fires from a stale
+  // render.
+  function commit(next: RoomControlState) {
     setLocal(next);
     save.mutate(next, {
       onSuccess: (res) => {
@@ -148,70 +174,293 @@ export default function RoomControlsBar() {
         setDarkLightResult(res.dark_light_result ?? null);
       },
     });
+  }
+
+  const modeApply = useDebouncedApply<DisplayMode>((mode) => {
+    if (!localRef.current) return;
+    commit({ ...localRef.current, display_mode: mode });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, 1000);
+
+  // Adopt server state unless a local edit is in flight — a mode cycle's
+  // debounced apply hasn't landed on the server yet also counts as "in
+  // flight": without this, a background refetch mid-cycle (react-query's
+  // window-focus refetch, say) would silently snap the button back to the
+  // old mode before the 1s delay even fires, which is exactly the
+  // "sluggish/unresponsive" feel the delay was built to avoid.
+  useEffect(() => {
+    if (data && !save.isPending && !modeApply.isPending()) setLocal(data);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, save.isPending]);
+
+  if (!local) return null;
+
+  const cycleMode = () => {
+    const idx = DISPLAY_MODES.findIndex((m) => m.value === local.display_mode);
+    const nextMode = DISPLAY_MODES[(idx + 1) % DISPLAY_MODES.length].value;
+    setLocal({ ...local, display_mode: nextMode });
+    modeApply.schedule(nextMode);
   };
+  const pickMode = (mode: DisplayMode) => {
+    setLocal({ ...local, display_mode: mode });
+    modeApply.schedule(mode);
+  };
+
+  const modeMeta = DISPLAY_MODES.find((m) => m.value === local.display_mode) ?? DISPLAY_MODES[0];
+  const modeStyle: React.CSSProperties = local.display_mode === 'light'
+    ? {
+      background: local.display_light_bg_color || '#201830',
+      borderColor: local.display_light_bg_color || '#201830',
+      color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+    }
+    : local.display_mode === 'dark'
+      ? { background: '#000', borderColor: '#3a3a3a', color: '#ddd' }
+      : { background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' };
+  const modeUnconfirmed = darkLightResult
+    && ['default', 'dark', 'light'].includes(darkLightResult.status)
+    && (darkLightResult.unconfirmed?.length ?? 0) > 0;
+
+  const toggleAmbient = () => {
+    commit({
+      ...local,
+      ambient_mode: local.ambient_mode === 'off' ? lastOnAmbientModeRef.current : 'off',
+    });
+  };
+  const ambientDotClass = local.ambient_mode !== 'off' && ambientLive && ambientLive.mode !== 'off'
+    ? AMBIENT_MODE_DOT[ambientLive.mode]
+    : null;
 
   return (
     <div className="room-controls-bar">
-      <label className="room-control" title="Hybrid / Dark / Light — the room's display mode">
-        Display
-        <select
-          value={local.display_mode}
-          onChange={(e) => commit({ ...local, display_mode: e.target.value as DisplayMode })}
-        >
-          {DISPLAY_MODES.map((m) => (
-            <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
-          ))}
-        </select>
-        <HelpLink topic="dark-light-mode" />
-      </label>
+      <TopBarGroupButton
+        className="mode-group-btn"
+        title="Hybrid / Dark / Light — tap to cycle, hold to open the colour/brightness options"
+        style={modeStyle}
+        holdToExpand
+        onShortPress={cycleMode}
+        panelTitle={<>Mode <HelpLink topic="dark-light-mode" /></>}
+        panel={(
+          <>
+            <div className="top-bar-group-field">
+              <label>Mode</label>
+              <select
+                value={local.display_mode}
+                onChange={(e) => pickMode(e.target.value as DisplayMode)}
+              >
+                {DISPLAY_MODES.map((m) => (
+                  <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="top-bar-group-field">
+              <label>Light bg</label>
+              <ColorGradientPicker
+                value={local.display_light_bg_color}
+                onChange={(v) => commit({ ...local, display_light_bg_color: v })}
+                swatchWidth={40}
+                swatchHeight={28}
+                title="Light mode background colour"
+              />
+              <HelpLink topic="display-light-mode" />
+            </div>
+            <div className="top-bar-group-field">
+              <label>Brightness</label>
+              <input
+                type="range" min={0} max={100} step={1}
+                value={Math.round(local.display_light_bg_brightness * 100)}
+                onChange={(e) => setLocal({ ...local, display_light_bg_brightness: Number(e.target.value) / 100 })}
+                onMouseUp={() => commit(local)}
+                onTouchEnd={() => commit(local)}
+              />
+              <span className="room-control-value">{Math.round(local.display_light_bg_brightness * 100)}%</span>
+            </div>
+            {darkLightResult && !['dark', 'light', 'default'].includes(darkLightResult.status) && (
+              <span
+                className={`badge ${darkLightResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
+                title={DARK_LIGHT_NOTE[darkLightResult.status]}
+              >
+                display mode: {darkLightResult.status}
+              </span>
+            )}
+            {modeUnconfirmed && (
+              <span
+                className="badge badge-red"
+                title={`Not confirmed at the requested state after read-back: ${(darkLightResult!.unconfirmed ?? []).join(', ')}`}
+              >
+                unconfirmed — {(darkLightResult!.unconfirmed ?? []).join(', ')}
+              </span>
+            )}
+            {darkLightResult?.status === 'default' && darkLightResult.repaint_skipped === 'music_playing' && (
+              <span
+                className="badge badge-gray"
+                title="Music is playing, so the stale pre-dark snapshot was not forced back — the room's own live show repaints it on its next natural fire instead"
+              >
+                repaint deferred to live show
+              </span>
+            )}
+          </>
+        )}
+      >
+        <span className="top-bar-group-btn-label">Mode</span>
+        <span className="top-bar-group-btn-value">{modeMeta.label}</span>
+        {modeUnconfirmed && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-red" title="unconfirmed" />}
+      </TopBarGroupButton>
 
-      <label className="room-control" title="The colour Light forces onto every non-shielded device's background">
-        <ColorGradientPicker
-          value={local.display_light_bg_color}
-          onChange={(v) => commit({ ...local, display_light_bg_color: v })}
-          swatchWidth={40}
-          swatchHeight={28}
-          title="Light mode background colour"
-        />
-        <input
-          type="range" min={0} max={100} step={1}
-          value={Math.round(local.display_light_bg_brightness * 100)}
-          onChange={(e) => setLocal({ ...local, display_light_bg_brightness: Number(e.target.value) / 100 })}
-          onMouseUp={() => commit(local)}
-          onTouchEnd={() => commit(local)}
-        />
-        <span className="room-control-value">{Math.round(local.display_light_bg_brightness * 100)}%</span>
-        <span style={{ fontSize: '0.85em', opacity: 0.75 }}>(light bg)</span>
-        <HelpLink topic="display-light-mode" />
-      </label>
+      <TopBarGroupButton
+        className={`ambient-group-btn${local.ambient_mode === 'off' ? ' ambient-group-btn-off' : ''}`}
+        title={local.ambient_mode === 'off' ? 'Ambient is off — tap to turn on, hold for options' : 'Ambient is on — tap to turn off, hold for options'}
+        holdToExpand
+        onShortPress={toggleAmbient}
+        panelTitle="Ambient"
+        panel={(
+          <>
+            <div className="top-bar-group-field">
+              <label>Setting</label>
+              <select
+                value={local.ambient_mode}
+                onChange={(e) => commit({ ...local, ambient_mode: e.target.value as AmbientMode })}
+              >
+                {AMBIENT_MODES.map((m) => (
+                  <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="top-bar-group-field">
+              <label>Colour</label>
+              <ColorGradientPicker
+                value={local.ambient_color ?? '#ffffff'}
+                onChange={(v) => commit({ ...local, ambient_color: v })}
+                disabled={local.ambient_mode === 'off'}
+                swatchWidth={40}
+                swatchHeight={28}
+                title="Ambient colour — a Hue entertainment stream only ever takes one solid colour"
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>normal/hybrid</span>
+            </div>
+            <div className="top-bar-group-field">
+              <label>Colour (dark)</label>
+              <ColorGradientPicker
+                value={local.ambient_color_dark ?? local.ambient_color ?? '#ffffff'}
+                onChange={(v) => commit({ ...local, ambient_color_dark: v })}
+                disabled={local.ambient_mode === 'off'}
+                swatchWidth={40}
+                swatchHeight={28}
+                title="Ambient colour for Dark mode — held instead of the normal ambient colour while Dark mode is on; starts the same until you pick one"
+              />
+              <HelpLink topic="ambient-dark-colour" />
+            </div>
+            <div className="top-bar-group-field" style={{ alignItems: 'flex-start' }}>
+              <AmbientGroupsPicker
+                key={hueGroupsResetKey}
+                value={local.ambient_hue_group_ids}
+                onClose={() => setHueGroupsResetKey((k) => k + 1)}
+                onSave={(ids) => {
+                  commit({ ...local, ambient_hue_group_ids: ids });
+                  setHueGroupsResetKey((k) => k + 1);
+                }}
+              />
+            </div>
+            {local.ambient_mode !== 'off' && ambientLive && ambientLive.mode !== 'off' && (
+              <span
+                className={`badge ${AMBIENT_MODE_BADGE[ambientLive.mode]}`}
+                title={AMBIENT_MODE_NOTE[ambientLive.mode]
+                  + (ambientLive.groups.length > 0 && ambientLive.groups.length < hueGroups.length
+                    ? ` Holding: ${ambientLive.groups.join(', ')}.`
+                    : '')
+                  + (ambientLive.verified_age_s != null
+                    ? ` Confirmed ${formatVerifyAge(ambientLive.verified_age_s)}.`
+                    : '')
+                  + (ambientLive.mode === 'partial' && ambientLive.verify?.unlit?.length
+                    ? ` Not lit: ${ambientLive.verify.unlit.join(', ')}.`
+                    : '')}
+              >
+                ambient: {ambientLive.mode}
+                {ambientLive.mode === 'partial' && ambientLive.verify?.status === 'verified'
+                  && ` (${ambientLive.verify.lights_lit ?? 0}/${ambientLive.verify.lights_total ?? '?'} lit)`}
+                {ambientLive.verified_age_s != null && ` · ${formatVerifyAge(ambientLive.verified_age_s)}`}
+              </span>
+            )}
+            {ambientResult && !['on', 'off', 'yielding'].includes(ambientResult.status) && (
+              <span
+                className={`badge ${ambientResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
+                title={AMBIENT_NOTE[ambientResult.status]}
+              >
+                ambient: {ambientResult.status}
+              </span>
+            )}
+            {ambientResult?.status === 'partial' && (
+              <span
+                className="badge badge-red"
+                title={`Held at ${ambientResult.lights_set ?? 0}/${ambientResult.lights_total ?? '?'} — `
+                  + `still showing the old colour: ${(ambientResult.unconfirmed ?? []).join(', ')}. `
+                  + 'Read back from the bridge after bounded, spaced retries — not just what was sent.'}
+              >
+                ambient: {ambientResult.lights_set ?? 0}/{ambientResult.lights_total ?? '?'} held —{' '}
+                {(ambientResult.unconfirmed ?? []).join(', ')}
+              </span>
+            )}
+          </>
+        )}
+      >
+        💡
+        {ambientDotClass && <span className={`top-bar-group-btn-dot ${ambientDotClass}`} title={ambientLive?.mode} />}
+      </TopBarGroupButton>
 
-      {darkLightResult && !['dark', 'light', 'default'].includes(darkLightResult.status) && (
-        <span
-          className={`badge ${darkLightResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
-          title={DARK_LIGHT_NOTE[darkLightResult.status]}
-        >
-          display mode: {darkLightResult.status}
+      <TopBarGroupButton
+        className={`scenes-group-btn${local.force_scene_enabled ? ' scenes-group-btn-forced' : ''}`}
+        title="Scene changes, Force Scene, transition pace — tap to open"
+        holdToExpand={false}
+        panelTitle="Scenes"
+        panel={(
+          <>
+            <div className="top-bar-group-field">
+              <label>Transition</label>
+              <input
+                type="number" min={0} max={20000} step={100}
+                value={local.global_transition_ms}
+                onChange={(e) => setLocal({ ...local, global_transition_ms: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
+            </div>
+            <div className="top-bar-group-field">
+              <label>Scene changes</label>
+              <select
+                value={local.scene_change_mode}
+                onChange={(e) => commit({ ...local, scene_change_mode: e.target.value as SceneChangeMode })}
+              >
+                {SCENE_CHANGE_MODES.map((m) => (
+                  <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={local.force_scene_enabled}
+                  onChange={(e) => commit({ ...local, force_scene_enabled: e.target.checked })}
+                />
+                Force Scene
+              </label>
+              <HelpLink topic="force-scene" />
+            </div>
+            {local.force_scene_enabled && (
+              <div className="top-bar-group-field">
+                <SearchSelect value={local.force_scene_scene_id ?? ''} options={sceneOptions} width={180}
+                  placeholder="— pick scene —" allowEmpty={false}
+                  onChange={(v) => commit({ ...local, force_scene_scene_id: v })} />
+              </div>
+            )}
+          </>
+        )}
+      >
+        <span className="top-bar-group-btn-label">Scenes</span>
+        <span className="top-bar-group-btn-value">
+          {SCENE_CHANGE_MODES.find((m) => m.value === local.scene_change_mode)?.label ?? local.scene_change_mode}
         </span>
-      )}
-
-      {darkLightResult && ['dark', 'light', 'default'].includes(darkLightResult.status)
-        && (darkLightResult.unconfirmed?.length ?? 0) > 0 && (
-        <span
-          className="badge badge-red"
-          title={`Not confirmed at the requested state after read-back: ${(darkLightResult.unconfirmed ?? []).join(', ')}`}
-        >
-          display mode: unconfirmed — {(darkLightResult.unconfirmed ?? []).join(', ')}
-        </span>
-      )}
-
-      {darkLightResult?.status === 'default' && darkLightResult.repaint_skipped === 'music_playing' && (
-        <span
-          className="badge badge-gray"
-          title="Music is playing, so the stale pre-dark snapshot was not forced back — the room's own live show repaints it on its next natural fire instead"
-        >
-          display mode: repaint deferred to live show
-        </span>
-      )}
+        {local.force_scene_enabled && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-purple" title="Force Scene is on" />}
+      </TopBarGroupButton>
 
       <label className="room-control" title="Dims/undims the whole room uniformly">
         Brightness
@@ -224,152 +473,6 @@ export default function RoomControlsBar() {
         />
         <span className="room-control-value">{Math.round(local.brightness_multiplier * 100)}%</span>
       </label>
-
-      <label className="room-control" title="Ambient">
-        Ambient
-        <select
-          value={local.ambient_mode}
-          onChange={(e) => commit({ ...local, ambient_mode: e.target.value as AmbientMode })}
-        >
-          {AMBIENT_MODES.map((m) => (
-            <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
-          ))}
-        </select>
-      </label>
-
-      <label className="room-control" title="Ambient colour — normal / hybrid">
-        <ColorGradientPicker
-          value={local.ambient_color ?? '#ffffff'}
-          onChange={(v) => commit({ ...local, ambient_color: v })}
-          disabled={local.ambient_mode === 'off'}
-          swatchWidth={40}
-          swatchHeight={28}
-          title="Ambient colour — a Hue entertainment stream only ever takes one solid colour"
-        />
-      </label>
-
-      {/* His second ambient-colour ruling: dark mode holds a DIFFERENT
-        * colour, authored the same way. Starts identical to the normal
-        * colour (ambient_color_dark null defers to it) until he picks one
-        * here — see RoomControlState.ambient_color_dark in types.ts. */}
-      <label className="room-control" title="Ambient colour — held instead of the one above while Dark mode is on">
-        <ColorGradientPicker
-          value={local.ambient_color_dark ?? local.ambient_color ?? '#ffffff'}
-          onChange={(v) => commit({ ...local, ambient_color_dark: v })}
-          disabled={local.ambient_mode === 'off'}
-          swatchWidth={40}
-          swatchHeight={28}
-          title="Ambient colour for Dark mode — held instead of the normal ambient colour while Dark mode is on; starts the same until you pick one"
-        />
-        <span style={{ fontSize: '0.85em', opacity: 0.75 }}>(dark)</span>
-        <HelpLink topic="ambient-dark-colour" />
-      </label>
-
-      <label className="room-control" title="Which Hue entertainment areas Ambient may hold">
-        <button type="button" className="device-preview-btn" onClick={() => setGroupsPickerOpen(true)}>
-          Hue areas
-          {local.ambient_hue_group_ids.length > 0 && hueGroups.length > 0
-            && ` ${local.ambient_hue_group_ids.length}/${hueGroups.length}`}
-        </button>
-        <HelpLink topic="ambient-hue-groups" />
-      </label>
-      {groupsPickerOpen && (
-        <div className="device-preview-picker-overlay" onClick={() => setGroupsPickerOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()}>
-            <AmbientGroupsPicker
-              value={local.ambient_hue_group_ids}
-              onClose={() => setGroupsPickerOpen(false)}
-              onSave={(ids) => {
-                commit({ ...local, ambient_hue_group_ids: ids });
-                setGroupsPickerOpen(false);
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {local.ambient_mode !== 'off' && ambientMode && ambientMode.mode !== 'off' && (
-        <span
-          className={`badge ${AMBIENT_MODE_BADGE[ambientMode.mode]}`}
-          title={AMBIENT_MODE_NOTE[ambientMode.mode]
-            + (ambientMode.groups.length > 0 && ambientMode.groups.length < hueGroups.length
-              ? ` Holding: ${ambientMode.groups.join(', ')}.`
-              : '')
-            + (ambientMode.verified_age_s != null
-              ? ` Confirmed ${formatVerifyAge(ambientMode.verified_age_s)}.`
-              : '')
-            + (ambientMode.mode === 'partial' && ambientMode.verify?.unlit?.length
-              ? ` Not lit: ${ambientMode.verify.unlit.join(', ')}.`
-              : '')}
-        >
-          ambient: {ambientMode.mode}
-          {ambientMode.mode === 'partial' && ambientMode.verify?.status === 'verified'
-            && ` (${ambientMode.verify.lights_lit ?? 0}/${ambientMode.verify.lights_total ?? '?'} lit)`}
-          {ambientMode.verified_age_s != null && ` · ${formatVerifyAge(ambientMode.verified_age_s)}`}
-        </span>
-      )}
-
-      {ambientResult && !['on', 'off', 'yielding'].includes(ambientResult.status) && (
-        <span
-          className={`badge ${ambientResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
-          title={AMBIENT_NOTE[ambientResult.status]}
-        >
-          ambient: {ambientResult.status}
-        </span>
-      )}
-
-      {ambientResult?.status === 'partial' && (
-        <span
-          className="badge badge-red"
-          title={`Held at ${ambientResult.lights_set ?? 0}/${ambientResult.lights_total ?? '?'} — `
-            + `still showing the old colour: ${(ambientResult.unconfirmed ?? []).join(', ')}. `
-            + 'Read back from the bridge after bounded, spaced retries — not just what was sent.'}
-        >
-          ambient: {ambientResult.lights_set ?? 0}/{ambientResult.lights_total ?? '?'} held —{' '}
-          {(ambientResult.unconfirmed ?? []).join(', ')}
-        </span>
-      )}
-
-      <label className="room-control" title="Default scene-entry blend when a scene doesn't set its own">
-        Transition
-        <input
-          type="number" min={0} max={20000} step={100}
-          value={local.global_transition_ms}
-          onChange={(e) => setLocal({ ...local, global_transition_ms: Number(e.target.value) })}
-          onBlur={() => commit(local)}
-        />
-        ms
-      </label>
-
-      <label className="room-control" title="What drives scene changes">
-        Scene changes
-        <select
-          value={local.scene_change_mode}
-          onChange={(e) => commit({ ...local, scene_change_mode: e.target.value as SceneChangeMode })}
-        >
-          {SCENE_CHANGE_MODES.map((m) => (
-            <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
-          ))}
-        </select>
-      </label>
-
-      <label className="room-control"
-        title="Hold one scene: whenever a new scene would be picked, reassert the forced scene instead">
-        <input
-          type="checkbox"
-          checked={local.force_scene_enabled}
-          onChange={(e) => commit({ ...local, force_scene_enabled: e.target.checked })}
-        />
-        Force Scene
-      </label>
-      {local.force_scene_enabled && (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <SearchSelect value={local.force_scene_scene_id ?? ''} options={sceneOptions} width={160}
-            placeholder="— pick scene —" allowEmpty={false}
-            onChange={(v) => commit({ ...local, force_scene_scene_id: v })} />
-          <HelpLink topic="force-scene" />
-        </span>
-      )}
 
       <HelpLink topic="room-controls-bar" />
     </div>

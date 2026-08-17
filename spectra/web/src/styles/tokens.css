@@ -172,6 +172,101 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .room-control input[type="number"] { width: 64px; }
 .room-control-value { min-width: 32px; color: var(--text); }
 
+/* The three grouped press-and-hold buttons (Mode / Ambient / Scenes,
+ * TopBarGroupButton.tsx) — Mode/Ambient short-press act directly (cycle
+ * mode / toggle ambient), Scenes short-press only opens its panel. Touch
+ * safety trio on the button itself: `touch-action: manipulation` skips
+ * the browser's ~300ms double-tap-zoom wait and stops pinch/pan gestures
+ * from hijacking the hold; `-webkit-touch-callout: none` suppresses
+ * iOS's press-and-hold callout/magnifier; `user-select: none` (+
+ * -webkit- prefix) stops the hold from selecting the button's own text —
+ * all three are what let a real held finger reach this button's own hold
+ * gesture instead of the browser's. */
+.top-bar-group-btn {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 64px;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.top-bar-group-btn-label {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.top-bar-group-btn-value { font-size: 13px; font-weight: 700; }
+.top-bar-group-btn-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--surface);
+}
+.top-bar-group-btn-dot-red { background: var(--danger); }
+.top-bar-group-btn-dot-purple { background: var(--accent); }
+.top-bar-group-btn-dot-amber { background: var(--warning); }
+.top-bar-group-btn-dot-gray { background: var(--text-muted); }
+
+.ambient-group-btn { font-size: 20px; padding: 3px 12px; }
+.ambient-group-btn.ambient-group-btn-off { opacity: 0.5; filter: grayscale(1); }
+
+.scenes-group-btn.scenes-group-btn-forced { border-color: var(--accent2); }
+
+/* The panel a hold (Mode/Ambient) or a tap (Scenes) expands into — always
+ * `position: fixed` below the trigger (TopBarGroupButton computes top/
+ * left off the trigger's own rect, clamped so it never runs past the
+ * right edge), portalled to <body> so no ancestor can clip or reposition
+ * it. Growing downward only, never sideways off a phone's edge, is the
+ * same rule the device-preview strip's own phone-matrix fix already
+ * established. */
+.top-bar-group-panel {
+  position: fixed;
+  z-index: 2000;
+  width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+.top-bar-group-panel-title { font-weight: 600; font-size: 13px; color: var(--text); }
+.top-bar-group-field { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-muted); }
+.top-bar-group-field label { min-width: 78px; flex: none; }
+.top-bar-group-field select,
+.top-bar-group-field input[type="number"] { flex: 1; min-width: 0; }
+.top-bar-group-field input[type="range"] { flex: 1; min-width: 60px; }
+/* AmbientGroupsPicker (device-preview-picker's own card chrome) is
+ * embedded directly in the Ambient panel now, not its own modal overlay
+ * — drop its border/shadow/padding so it doesn't nest a card inside a
+ * card. */
+.top-bar-group-panel .device-preview-picker {
+  border: none; box-shadow: none; padding: 0; max-height: none; width: 100%;
+}
+
 /* The shared top-bar strip (TopBarStrip.tsx) — first occupant is the
  * live energy readout; a future device-preview strip mounts here too.
  * Its own thin row so it never competes with room-controls-bar's
