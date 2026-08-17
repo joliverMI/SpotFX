@@ -8,6 +8,14 @@ import { useSticky } from '../../lib/useSticky';
 import { useBuilderStore } from '../store';
 import { useProfilesList, useSetlists } from '../queries';
 
+// Per-song Set List "slot" trigger override authoring retired 2026-08-17 on
+// the Admiral's word — "don't delete the data but yes, retire that function
+// for now" (docs/SPECTRA_SPEC.md OQ-5/§41). His setlist_triggers data is
+// untouched on disk; this flag just stops the slot picker from being
+// offered (and stops a stale sticky slot selection from reactivating on
+// load). Flip back to true to restore, no other changes needed here.
+const SETLIST_SLOTS_ENABLED = false;
+
 export default function ModeBar() {
   const track = useBuilderStore((s) => s.track);
   const manualUri = useBuilderStore((s) => s.manualUri);
@@ -31,7 +39,7 @@ export default function ModeBar() {
   // Sticky global slot; the store is the live copy the rest of the page reads.
   const [stickySlot, setStickySlot] = useSticky('setlistSlot', '');
   useEffect(() => {
-    setSlot(stickySlot);
+    if (SETLIST_SLOTS_ENABLED) setSlot(stickySlot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stickySlot]);
 
@@ -111,23 +119,27 @@ export default function ModeBar() {
         {profile?.verified ? '✓ Verified' : 'Verified'}
       </button>
 
-      <span style={{ width: 1, height: 20, background: 'var(--border)' }} />
-      <select
-        value={slotId}
-        onChange={(e) => setStickySlot(e.target.value)}
-        title={slotHasOverride
-          ? 'This slot has its own trigger list'
-          : slotId ? 'Slot shows Default until first edit (then copies it)' : 'Editing the Default trigger list'}
-        style={{ fontSize: 12, maxWidth: 150,
-                 borderColor: slotHasOverride ? 'var(--accent)' : undefined }}
-      >
-        <option value="">Default</option>
-        {(setlists ?? []).map((sl) => (
-          <option key={sl.id} value={sl.id}>
-            {sl.name}{profile?.setlist_triggers[sl.id] ? ' •' : ''}
-          </option>
-        ))}
-      </select>
+      {SETLIST_SLOTS_ENABLED && (
+        <>
+          <span style={{ width: 1, height: 20, background: 'var(--border)' }} />
+          <select
+            value={slotId}
+            onChange={(e) => setStickySlot(e.target.value)}
+            title={slotHasOverride
+              ? 'This slot has its own trigger list'
+              : slotId ? 'Slot shows Default until first edit (then copies it)' : 'Editing the Default trigger list'}
+            style={{ fontSize: 12, maxWidth: 150,
+                     borderColor: slotHasOverride ? 'var(--accent)' : undefined }}
+          >
+            <option value="">Default</option>
+            {(setlists ?? []).map((sl) => (
+              <option key={sl.id} value={sl.id}>
+                {sl.name}{profile?.setlist_triggers[sl.id] ? ' •' : ''}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
 
       <span style={{ flex: 1 }} />
       <span style={{ minWidth: 0, textAlign: 'right' }}>

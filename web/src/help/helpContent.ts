@@ -1083,7 +1083,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Set Lists',
     keywords: 'playlist spotify context slots',
     intro:
-      'A Set List tracks a Spotify playlist (by context URI) and customizes behavior while it plays. It also gives each song an alternate trigger list ("slot") editable in the Builder — the slot shows Default until its first edit, then copies it.',
+      'A Set List tracks a Spotify playlist (by context URI) and customizes behavior while it plays. It used to also give each song an alternate trigger list ("slot") editable in the Builder — that per-song slot feature is retired for now (data untouched, picker hidden); every Set List just plays the song\'s Default triggers.',
     entries: [
       {
         id: 'setlists-behavior',

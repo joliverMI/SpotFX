@@ -8,6 +8,12 @@ import { uuid } from '../../lib/uid';
 import { useBuilderStore } from '../store';
 import type { MusicTrigger, Setlist } from '../types';
 
+// Keep in lockstep with components/ModeBar.tsx's SETLIST_SLOTS_ENABLED —
+// per-song Set List "slot" overrides retired 2026-08-17 (docs/SPECTRA_SPEC.md
+// OQ-5/§41). His setlist_triggers data is untouched on disk; this just stops
+// slot lists from being offered as an import source.
+const SETLIST_SLOTS_ENABLED = false;
+
 interface AnalyzeResp {
   triggers?: { timestamp_ms: number; event_id: string; intensity?: number | null }[];
   training_profile?: string;
@@ -69,9 +75,9 @@ export default function ImportDialog({
   // Slots that actually hold a list, minus the one being edited.
   const sources = [
     { id: '', name: 'Default', has: !!profile?.triggers.length },
-    ...setlists.map((sl) => ({
+    ...(SETLIST_SLOTS_ENABLED ? setlists.map((sl) => ({
       id: sl.id, name: sl.name, has: !!profile?.setlist_triggers[sl.id]?.length,
-    })),
+    })) : []),
   ].filter((s) => s.has && s.id !== slotId);
   const sel = sources.some((s) => s.id === copyFrom) ? copyFrom : sources[0]?.id ?? '';
 

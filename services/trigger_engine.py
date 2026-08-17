@@ -742,13 +742,23 @@ class TriggerEngine:
                 # _triggerless_triggers unchanged; next song won't use Dinner Party
                 # because state.dinner_party_mode is already False
 
+    # Per-song Set List "slot" trigger override (SongProfile.setlist_triggers)
+    # retired 2026-08-17 on the Admiral's word — "don't delete the data but
+    # yes, retire that function for now" (docs/SPECTRA_SPEC.md OQ-5/§41).
+    # His data is untouched on disk; this resolution branch is disabled, not
+    # removed. To bring it back: restore the two lines below (git revert this
+    # commit, or copy them back verbatim), and re-enable the mirrored branch
+    # in routers/control.py::active_triggers().
+    SETLIST_SLOTS_ENABLED = False
+
     def _user_triggers(self) -> list[MusicTrigger]:
         """User-defined triggers, picking the active Set List override if any."""
         if not self._profile:
             return []
-        sl_id = state.active_setlist_id
-        if sl_id and self._profile.setlist_triggers.get(sl_id):
-            return self._profile.setlist_triggers[sl_id]
+        if self.SETLIST_SLOTS_ENABLED:
+            sl_id = state.active_setlist_id
+            if sl_id and self._profile.setlist_triggers.get(sl_id):
+                return self._profile.setlist_triggers[sl_id]
         return self._profile.triggers
 
     def _get_active_triggers(self) -> list[MusicTrigger]:
