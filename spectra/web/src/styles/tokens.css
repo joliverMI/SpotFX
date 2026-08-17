@@ -236,13 +236,23 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   padding: 2px 4px;
   font-variant-numeric: tabular-nums;
 }
+/* The draggable slider sits next to the number field so a drag gets you
+ * close and the number field still lands the exact value — a slider alone
+ * can't reliably hit one specific percent, and this factor drives how loud
+ * the room gets. */
+.intensity-mark-slider {
+  width: 100px;
+}
+@media (max-width: 720px) {
+  /* Bigger thumb on touch so a finger can grab and hold it accurately,
+   * not just a mouse pointer. */
+  .intensity-mark-slider { width: 84px; height: 24px; }
+}
 
 /* Device-preview strip (DevicePreviewStrip.tsx) — the top-bar strip's
  * second occupant. A compact swatch per favourite device by default;
- * "Expand" swaps the swatch for a small per-pixel strip. Pause/resume are
- * deliberately plain buttons, not a switch, so the current action always
- * reads as a verb ("Pause"/"Resume") rather than a state a glance could
- * misread. */
+ * "Expand" swaps the swatch for a small per-pixel strip. No text label:
+ * he knows what he's looking at. */
 .device-preview-strip {
   display: flex;
   align-items: center;
@@ -251,8 +261,32 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   flex-wrap: wrap;
   max-width: 100%;
 }
-.device-preview-label { font-weight: 600; }
 .device-preview-empty { font-style: italic; }
+/* The single icon-only control that IS the status indicator (2026-08-16,
+ * his own ask — see the component's module docstring). Colour + glyph both
+ * carry the state so it survives colourblindness and a glance alike: live
+ * (purple/⏸), his own pause (gray/▶), automatic hidden-tab idle (blue/⏾),
+ * reconnecting-or-unavailable (amber/↻). 30px square keeps it a comfortable
+ * touch target on a phone without the button ever needing a text label. */
+.device-preview-status-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.device-preview-status-purple { background: #2a1444; color: var(--accent); }
+.device-preview-status-gray { background: var(--surface2); color: var(--text-muted); }
+.device-preview-status-blue { background: #0e2a3a; color: #6ab0f3; }
+.device-preview-status-amber { background: #3a2c0e; color: var(--warning); }
+.device-preview-status-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .device-preview-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
 /* Expanded: devices stack vertically ("expand grows downward, not
  * sideways" — his own rule) instead of sitting side by side. */
