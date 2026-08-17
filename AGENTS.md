@@ -894,7 +894,7 @@ was `white-space: nowrap` with no `flex-wrap`) wraps instead of running
 off a phone's right edge.
 
 **Device preview render path is a `<canvas>` painted imperatively, not a
-`<span>`-per-pixel React grid** (fixed 2026-08-17, PR
+`<span>`-per-pixel React grid** (fixed 2026-08-17, PR #115
 fm/spectra-preview-smoothness, his own report: "not anywhere near as
 smooth as ledfx version... ledfx was very good, and should be the
 standard. copy as much as makes sense"). Read LedFX's real frontend first
