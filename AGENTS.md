@@ -533,7 +533,17 @@ the colour journey (room-level walk, per-scene OVERRIDE with custody
 semantics — `spectra/services/color_journey.py` docstring is the binding
 statement). Storage: `storage/spectra/` (own scenes/sequencer/drift/room
 files; seeder `scripts/seed_spectra_from_v2.py --apply`, idempotent, reads
-spot-effects storage READ-ONLY). Executable spec:
+spot-effects storage READ-ONLY). **A worktree's own `storage/spectra/*.json`
+is gitignored and untracked — it is whatever was copied in when the
+worktree was created, not proof of current live scene/room state** (found
+2026-08-17: a stale Aug-13 copy of `scenes.json` in a task worktree made an
+already-shipped fix look regressed). The worktree isolates the filesystem,
+not the network — read `GET /spectra/api/scenes`/`.../engine/status` on the
+live `:8010` process for ground truth, or copy fresh read-only from the
+live app dir's `storage/spectra/` (never `storage/scenes_v2.json` — that
+one is the S1 seeder's own built-in-fixture offline path, not a live
+snapshot to copy in) before trusting a local snapshot for anything dated.
+Executable spec:
 `.venv/bin/python scripts/check_spectra.py`. Frontend: `spectra/web/`
 (own vite app — `cd spectra/web && npx vite build`), help content in
 `spectra/web/src/help/helpContent.ts` (same keep-it-current rule as the
@@ -573,7 +583,22 @@ jump via the shipped selector with an intensity-scaled ramp-in (gentle
 jumps CARRY — baselines move; momentary kinds return exactly to the
 carried-now baseline; charge/lull/drop ALSO drive
 the vendored phase machinery band-or-no-band — per-family grammar in
-`docs/SPECTRA_RESPONSES.md`), read-only bridge
+`docs/SPECTRA_RESPONSES.md`. A dice re-roll (`_reroll`, the "Dice
+Re-roll" kind) lands via `executor.glide(..., DICE_REROLL_GLIDE_MS=220)`
+when the re-rolled param is registry `"smooth": true` (a genuine
+continuous numeric — STAR's `star`), else `executor.jump()` as before
+(toggle/string/integer, e.g. STAR's `edges` — can't be meaningfully
+interpolated); an explicit param-patch kind on the same event still wins
+over a same-event dice re-roll and still jumps (unchanged precedence).
+Fixed 2026-08-17: his STAR scene re-rolls `star` on every ordinary flare
+(its flare bands carry Dice Re-roll end to end), measured live at
+~0.6–1.2s apart, each landing as an instant jump — read as a strobe, not
+a defect in `star`'s own binding. `config/effect_params.json`'s per-param
+`"smooth"` flag existed before this and was previously dead metadata
+(grep-confirmed unread anywhere in `spectra/`/`fx/` Python) — it is now
+load-bearing for this one gate; check it before assuming a param's
+smoothness is unhandled elsewhere. Full writeup: `docs/SPECTRA_SPEC.md`
+§75), read-only bridge
 (`bridge.py` — WS client on spot-effects' /ws + `analysis_reader.py`;
 classification: charge/lull/drop stay themselves, scene-family event
 types are observations, everything else is a flare). Every glide/jump

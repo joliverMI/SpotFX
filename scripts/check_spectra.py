@@ -656,7 +656,8 @@ check(res.devices[0].params["spin"] == 0.55,
 
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
-from spectra.services.scene_response import ResponseEngine, select_band
+from spectra.services.scene_response import (DICE_REROLL_GLIDE_MS,
+                                              ResponseEngine, select_band)
 from spectra.services import color_journey as cj
 
 # ── band selection: [min, max), top band inclusive at exactly 1.0 ────────────
@@ -757,10 +758,20 @@ check(record["result"] == "applied"
       "flare at 0.3 lands in its band and executes its auto-named kinds")
 pairs = {(0.3, 6), (-0.3, 3), (0.0, 5)}
 jumps = [w for w in exec2.writes if w["kind"] == "jump"]
-reroll_jump = next(w for w in jumps if "star" in w["params"])
-check((reroll_jump["params"]["star"], reroll_jump["params"]["edges"]) in pairs,
-      "re-roll: 🎲 star/edges jump as an AUTHORED pair (fresh dice)")
-check(all("spin" not in w["params"] for w in jumps),
+glides0 = [w for w in exec2.writes if w["kind"] == "glide"]
+reroll_jump = next(w for w in jumps if "edges" in w["params"])
+reroll_glide = next(w for w in glides0 if "star" in w["params"])
+check((reroll_glide["params"]["star"], reroll_jump["params"]["edges"]) in pairs,
+      "re-roll: 🎲 star/edges land as an AUTHORED pair (fresh dice) — "
+      "star (registry smooth=true) eases, edges (smooth=false) still "
+      "jumps as before")
+check(reroll_glide["duration_ms"] == DICE_REROLL_GLIDE_MS,
+      "the smoothed re-roll actually glides over DICE_REROLL_GLIDE_MS, "
+      "not an instant jump relabeled")
+check("star" not in reroll_jump["params"]
+      and "edges" not in reroll_glide["params"],
+      "each re-rolled param lands on exactly one of jump/glide, never both")
+check(all("spin" not in w["params"] for w in jumps + glides0),
       "re-roll leaves ⚡ (non-random) bindings alone")
 patch_jumps = [w for w in jumps if "twist" in w["params"]]
 check({w["virtual_id"] for w in patch_jumps} == {"v-m1", "v-m2", "v-m3"}
@@ -923,11 +934,17 @@ check(cond4.mechanisms == [],
       "drift on a base-only param sits out while the step variant holds "
       "(stated, never a glide the live effect can't carry)")
 asyncio.run(resp4.on_event("flare", 0.9))
-jumps4 = [w for w in exec4.writes if w["kind"] == "jump"]
-check(any("blur" in w["params"] for w in jumps4)
-      and all("reactivity" not in w["params"] for w in jumps4),
+# blur (power) and reactivity (melt) are both registry smooth=true, so a
+# re-roll of either eases rather than jumps (DICE_REROLL_GLIDE_MS) — check
+# across both write kinds; "did it land" is what this proof is about.
+moved4 = [w for w in exec4.writes if w["kind"] in ("jump", "glide")]
+check(any("blur" in w["params"] for w in moved4)
+      and all("reactivity" not in w["params"] for w in moved4),
       "re-roll follows the SELECTED variant's 🎲 params, never another "
       "variant's — a surge re-rolls dice, it never re-selects the effect")
+check(any(w["kind"] == "glide" and "blur" in w["params"]
+          and w["duration_ms"] == DICE_REROLL_GLIDE_MS for w in moved4),
+      "blur (registry smooth=true) eases on re-roll, not an instant jump")
 lo_writes = scene_compiler.compile_scene(
     scene_compiler.resolve_scene(stepped, FireContext(0.3, rng=Random(1))))
 cond4.on_scene_fire(stepped, lo_writes)
@@ -937,9 +954,9 @@ check(cond4.virtuals["v-s1"].effect_type == "melt"
       "mechanism seeds again")
 exec4.writes.clear()
 asyncio.run(resp4.on_event("flare", 0.3))
-jumps4 = [w for w in exec4.writes if w["kind"] == "jump"]
-check(any("reactivity" in w["params"] for w in jumps4)
-      and all("blur" not in w["params"] for w in jumps4),
+moved4 = [w for w in exec4.writes if w["kind"] in ("jump", "glide")]
+check(any("reactivity" in w["params"] for w in moved4)
+      and all("blur" not in w["params"] for w in moved4),
       "after the re-select the re-roll follows the base variant again")
 
 # ── OVERRIDE BLEND equivalent (spectra-kept-equivalents, live-storage study:
@@ -1728,16 +1745,24 @@ async def _no_flare_moves_star_edges() -> None:
                              .index("radial")]["virtual_id"]
     baseline_edges = cond4.virtuals[matrix_vid].param_baseline.get("edges")
     star_reroll_seen = False
+    # (event, write-kind) for every star write on the matrix virtual — low/
+    # mid bands have no explicit star patch (pure dice re-roll: must ease);
+    # the 0.7-1 bands' "Flare/Drop patch 0.7-1" kinds explicitly pin star
+    # to 0.0 (the legacy reroll->patch precedence: the patch still wins and
+    # still jumps, unchanged by the smoothing fix below).
+    star_writes: list[tuple[str, float, str]] = []
     for cls, intensity in (("flare", 0.1), ("flare", 0.5), ("flare", 0.97),
                            ("drop", 0.97)):
+        before = len(exec4.writes)
         await resp4.on_event(cls, intensity)
-        for w in exec4.writes:
+        for w in list(exec4.writes)[before:]:
             if w["virtual_id"] == matrix_vid and "edges" in w["params"]:
                 raise SystemExit(
                     f"FAIL: {cls}@{intensity} moved STAR's edges to "
                     f"{w['params']['edges']!r} on the response engine")
             if w["virtual_id"] == matrix_vid and "star" in w["params"]:
                 star_reroll_seen = True
+                star_writes.append((cls, intensity, w["kind"]))
     check(star_reroll_seen,
           "STAR (migrated): 'star' still re-rolls on ordinary flares — "
           "sticky excludes edges specifically, Dice Re-roll otherwise "
@@ -1747,6 +1772,16 @@ async def _no_flare_moves_star_edges() -> None:
           "STAR (migrated): no flare/drop band moves edges on the real "
           "response engine (flare 0.1/0.5/0.97 + drop 0.97 all fired, "
           "including both retired patches' own top bands)")
+    low_mid = [k for cls, i, k in star_writes if i in (0.1, 0.5)]
+    check(low_mid and all(k == "glide" for k in low_mid),
+          "STAR (2026-08-17 smoothing fix): a pure dice re-roll of 'star' "
+          "(no band patch overrides it at these intensities) eases via "
+          "executor.glide, never snaps via executor.jump")
+    top = [k for cls, i, k in star_writes if i == 0.97]
+    check(top and all(k == "jump" for k in top),
+          "the 0.7-1 bands' explicit 'star: 0.0' patch still wins over the "
+          "dice re-roll and still lands as an instant jump — unchanged by "
+          "the smoothing fix, which only touches PURE dice re-rolls")
 
 
 asyncio.run(_no_flare_moves_star_edges())
