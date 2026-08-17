@@ -39,16 +39,33 @@ from spectra.api import (device_preview, feedback, fire_history,
 
 
 class SPAStaticFiles(StaticFiles):
-    """Serve the SPECTRA SPA with index.html fallback for client routes."""
+    """Serve the SPECTRA SPA with index.html fallback for client routes.
+
+    Cache-Control: hashed files under /assets/ are content-addressed (a
+    new build always produces a new filename), so they're safe to cache
+    forever. index.html — and the SPA-fallback response served here for
+    any unknown client route — is what NAMES those hashed files, so it
+    must revalidate on every request; with no Cache-Control at all,
+    browsers apply heuristic caching and can reuse a stale index.html
+    without revalidating, pinning a phone to an old bundle indefinitely
+    even though the new build is deployed and served correctly (see
+    AGENTS.md's "SPA index.html must never be heuristically cached").
+    """
 
     async def get_response(self, path: str, scope):
         from starlette.exceptions import HTTPException as StarletteHTTPException
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as e:
-            if e.status_code == 404:
-                return await super().get_response("index.html", scope)
-            raise
+            if e.status_code != 404:
+                raise
+            response = await super().get_response("index.html", scope)
+            path = "index.html"
+        if path.startswith("assets/"):
+            response.headers["cache-control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["cache-control"] = "no-cache"
+        return response
 
 
 def create_app() -> FastAPI:

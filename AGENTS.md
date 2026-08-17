@@ -1355,6 +1355,36 @@ a later wiring stage. The Hue-DTLS / DDP single-sender exclusivity with the
 running LedFX service is resolved by the S3 ownership gate: the facade
 reaches live hardware only through the handover (see the S3 section above).
 
+## SPA `index.html` must revalidate every request — checking the server is not checking what the browser fetches
+
+Found 2026-08-17: both SPA mounts (`main.py`'s `/app`, `spectra/app.py`'s
+`/spectra` — each has its own `SPAStaticFiles(StaticFiles)` subclass, not
+shared) served `index.html` with `last-modified`/`etag` but **no
+Cache-Control at all**. With no Cache-Control, browsers apply heuristic
+caching and can reuse a stale `index.html` for a while without
+revalidating — and a stale `index.html` names the OLD content-hashed
+bundle filename. His phone kept showing old behaviour on a page reported
+finished, while `curl`ing the served bundle proved the new code WAS built
+and deployed correctly. **The check itself was aimed one step short: proving
+what the server serves is not proving what a given browser will fetch** —
+a client sitting on a cached `index.html` never even asks whether it
+changed. Verifying a frontend deploy landed for the person looking at it
+needs the response's `Cache-Control` header checked, not just the bundle's
+content.
+
+Fix, both `SPAStaticFiles.get_response` overrides: `index.html` (and the
+SPA-fallback response served for any unknown client route) →
+`Cache-Control: no-cache` (revalidate every time via etag — not "never
+store"); hashed files under `/assets/` → `Cache-Control: public,
+max-age=31536000, immutable` (content-hashed, so a new build always
+produces a new filename — safe to cache forever). `services/
+spectra_proxy.py` passes all non-hop-by-hop response headers through
+unchanged, so a header set on the SPECTRA process (`:8010`) reaches
+clients through the spot-effects proxy (`:8000`) verbatim — confirmed by
+reading the proxy's `_pass_headers`, not assumed. Regression coverage:
+`tests/test_spa_cache_headers.py` (parametrized over both mounts; proven
+red against the pre-fix code, green after).
+
 ## Run / deploy
 
 Two user systemd units since the S3 process split: **`spotfx.service`**
