@@ -53,7 +53,17 @@ so a dark toggle that changes what's effectively held triggers the same
 reconcile_now() -> reconcile() -> _apply() path as picking a new colour by
 hand, which is what gives the swap its ease (see _apply()'s own "colour
 changed while holding" branch — the identical mechanism, no separate
-transition code was added for this). Every caller that can
+transition code was added for this).
+
+Brightness (2026-08-16, found live — see room_controls.py's
+ambient_brightness_note docstring entry for the full defect and the
+Admiral's ruling on the fix) is DERIVED from whichever colour is resolved
+above (services.ambient's `_hsv_value_pct`), not a fourth independent
+input — his own words: "I want the brightness of the color that I choose
+for both ambient modes to be applied to the lights." So a same-hue-
+different-lightness edit (e.g. his cream to a darker cream) is already
+covered by the existing colour-changed branch (`_held_color` above) —
+no separate brightness bookkeeping was needed. Every caller that can
 change either input funnels through reconcile()/reconcile_now() rather
 than calling services.ambient.reconcile() directly, so mode precedence can
 never be bypassed by one path (a human PUT, a bridge broadcast, process

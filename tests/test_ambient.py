@@ -232,12 +232,87 @@ def test_light_payload_no_ramp_omits_dynamics():
     assert "dynamics" not in body
 
 
+# ── brightness DERIVED from the picked colour (HSV Value) ──────────────────
+# The Admiral's 2026-08-16 ruling on this fix: "I want the brightness of
+# the color that I choose for both ambient modes to be applied to the
+# lights." Legacy (services/ambient_mode.py) never derived brightness from
+# colour at all — settings.ambient_brightness was a wholly separate,
+# independently-authored slider — so this is a SPECTRA-specific behaviour
+# his ruling asked for, not a legacy port (see room_controls.py's
+# ambient_brightness_note docstring entry for that history).
+
+def test_hsv_value_pct_is_the_max_channel():
+    from spectra.services.ambient import _hsv_value_pct
+    assert _hsv_value_pct("#ffffff") == 100
+    assert _hsv_value_pct("#f5da8c") == 96   # his cream
+    assert _hsv_value_pct("#8b7e53") == 55   # his darker cream
+
+
+def test_hsv_value_pct_saturated_colour_stays_full_value():
+    """The reason HSV Value was chosen over relative luminance: a fully
+    saturated colour must not read as dim just because that hue is
+    intrinsically dark under luminance — the bridge's own xy chromaticity
+    (_hex_to_xy) already carries the hue; a brightness measure that ALSO
+    discounts for it double-counts and would leave an authored vivid blue
+    reading as an almost-off bulb (relative luminance computes #0000ff at
+    ~7%) — the exact "fights the picker" failure this fix exists to
+    prevent."""
+    from spectra.services.ambient import _hsv_value_pct
+    assert _hsv_value_pct("#0000ff") == 100
+
+
+def test_hsv_value_pct_invalid_hex_falls_back_to_full():
+    from spectra.services.ambient import _hsv_value_pct
+    assert _hsv_value_pct("not-a-colour") == 100
+
+
+def test_light_payload_derives_brightness_from_colour_by_default():
+    """Same hue (cream), two different lightnesses — the exact case the
+    original room proof never exercised (it only ever swapped hue, to a
+    deep blue). This is the regression the defect fix targets directly:
+    a darker shade of the same colour must produce a LOWER brightness in
+    the payload sent to the bridge, with no brightness_pct passed in."""
+    from spectra.services.ambient import _light_payload
+    cream = _light_payload("#f5da8c")
+    darker_cream = _light_payload("#8b7e53")
+    assert cream["dimming"]["brightness"] == 96.0
+    assert darker_cream["dimming"]["brightness"] == 55.0
+    assert darker_cream["dimming"]["brightness"] < cream["dimming"]["brightness"]
+    # same hue family is still reflected in a close-but-not-identical xy —
+    # this proves the two payloads differ in BRIGHTNESS, not just colour.
+    assert cream["color"]["xy"] != darker_cream["color"]["xy"]
+
+
+def test_light_payload_explicit_brightness_pct_overrides_derivation():
+    """The one caller with a brightness of its own — the release catch-up
+    ramp, which targets the live rendered frame's colour AND brightness
+    together (_live_look), not an authored ambient hex — must still be
+    able to override the derived value."""
+    from spectra.services.ambient import _light_payload
+    body = _light_payload("#f5da8c", brightness_pct=42)
+    assert body["dimming"]["brightness"] == 42.0
+
+
 def test_fade_dim_payload_clamps_and_has_no_colour_target():
     from spectra.services.ambient import _fade_dim_payload
     body = _fade_dim_payload(200, 1500)
     assert body["dimming"]["brightness"] == 100.0
     assert "color" not in body
     assert body["dynamics"] == {"duration": 1500}
+
+
+def test_fade_dim_payload_always_uses_the_off_fade_constant_not_derivation():
+    """The OFF/fade path (AMBIENT_OFF_FADE_PCT) carries no colour target at
+    all — see the assertion above — so there is nothing for _hsv_value_pct
+    to derive FROM; _fade_dim_payload only ever takes an explicit
+    brightness_pct, unaffected by the ON-path's colour-derived brightness
+    fix. Proven here at the constant's own default (AMBIENT_OFF_FADE_PCT,
+    legacy's ambient_fade_brightness=35) so a regression that accidentally
+    routed this path through colour derivation would be caught."""
+    from spectra.services.ambient import AMBIENT_OFF_FADE_PCT, _fade_dim_payload
+    body = _fade_dim_payload(AMBIENT_OFF_FADE_PCT, 1500)
+    assert body["dimming"]["brightness"] == float(AMBIENT_OFF_FADE_PCT)
+    assert "color" not in body
 
 
 # ── _color_matches vs _state_matches: the false-unlit fix ──────────────────
@@ -300,6 +375,37 @@ def test_reconcile_no_hue_devices(monkeypatch):
 
 
 # ── reconcile(): enable ─────────────────────────────────────────────────────
+
+def test_reconcile_on_same_hue_different_lightness_confirms_different_brightness(
+        monkeypatch, bridge):
+    """The proof shape the original room-proof was missing: it only ever
+    swapped to a large hue change (a deep blue), so a brightness that
+    stayed hard-coded at 100 regardless of the colour never showed up.
+    Here the SAME hue (his cream) is held at two different lightnesses,
+    and the physical (mocked) bulb is READ BACK independently afterward —
+    not merely asked for the lower value, but CONFIRMED at it. Before this
+    fix, _hold_and_confirm always confirmed against a hard-coded 100%, so
+    a regression back to that constant would make this test fail: the
+    write-confirm loop would keep retrying against the wrong target."""
+    from spectra.services import ambient
+    from spectra.services.live_host import live
+    dev = FakeHueDevice("10.0.0.1", bridge)
+    monkeypatch.setattr(live, "host", FakeHost({"hue-lights": dev}))
+
+    bright = _run(ambient.reconcile(True, "#f5da8c"))
+    assert bright["status"] == "on"
+
+    dim = _run(ambient.reconcile(True, "#8b7e53"))
+    assert dim["status"] == "on"
+
+    async def _read_back():
+        async with ambient._bridge_client(dev.config) as client:
+            return await ambient._hue_get(client, "/clip/v2/resource/light/l1")
+
+    state = _run(_read_back())["data"][0]
+    assert state["dimming"]["brightness"] == 55.0, \
+        "the physical bulb must be confirmed at the DARKER cream's derived brightness"
+
 
 def test_reconcile_on_freezes_before_writing_rest(monkeypatch, bridge):
     from spectra.services import ambient

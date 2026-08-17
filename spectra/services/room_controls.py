@@ -58,6 +58,43 @@ legacy picks: decision-legacy-retirement-picks.md):
                           precedence gate), reconciled from
                           api/room_controls.py's PUT handler whenever these
                           fields change.
+  ambient_brightness_note Brightness is DERIVED from whichever hex is in
+                          effect (ambient_color or ambient_color_dark, via
+                          effective_ambient_color below) — not a stored
+                          field. Found live 2026-08-16: SPECTRA's own
+                          ambient.py hard-coded full brightness
+                          (AMBIENT_BRIGHTNESS_PCT=100) regardless of the hex,
+                          because the bridge's xy chromaticity discards
+                          luminance entirely (a darker shade of the same hue
+                          is a ~0.01 xy shift — invisible on a real bulb),
+                          so a "darker" colour could never dim anything, and
+                          the read-back couldn't catch it either (it
+                          confirmed against the same constant it had just
+                          written). Legacy (services/ambient_mode.py) never
+                          derived brightness from colour either — it kept a
+                          wholly separate settings.ambient_brightness slider
+                          — but the Admiral's own ruling on this fix
+                          (2026-08-16, corr on spectra-ambient-brightness-
+                          lost) overrides that for SPECTRA: "I want the
+                          brightness of the color that I choose for both
+                          ambient modes to be applied to the lights."
+                          Derivation is HSV Value (the max RGB channel, his
+                          own choice after comparing HSV Value/relative
+                          luminance/CIE L*): relative luminance was rejected
+                          because it double-counts a hue's intrinsic
+                          dimness on top of the bulb's own chromaticity
+                          render (a saturated blue computes to ~7% —
+                          authoring a vivid colour and getting a bulb that's
+                          effectively off is the exact "fights the picker"
+                          failure this fix exists to prevent), and HSV Value
+                          keeps his everyday cream ambient at ~96% (an
+                          imperceptible ~4% dimmer than today) rather than
+                          luminance's ~71% (a ~29% drop he never asked for
+                          and would notice). See spectra/services/ambient.py
+                          `_hsv_value_pct` for the implementation — the same
+                          measure `_live_look`'s release catch-up ramp
+                          already used for its own brightness proxy
+                          (max(r,g,b)/255), so this is one formula, not two.
   ambient_color_dark      the SECOND ambient colour (2026-08-15, his ruling:
                           "dark mode during ambient should choose a
                           different color that I pick so we have one color
@@ -333,7 +370,12 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     ambient_mode/ambient_color themselves didn't move. Editing the field
     that ISN'T currently in effect (e.g. the normal colour while dark mode
     is on and a dark colour is already authored) correctly reports no
-    change — nothing live needs to move for that edit."""
+    change — nothing live needs to move for that edit. Since 2026-08-16,
+    brightness is DERIVED from this same resolved hex (services.ambient's
+    `_hsv_value_pct` — see the class docstring's ambient_brightness_note
+    entry), so a same-hue-different-lightness edit (e.g. his cream to a
+    darker cream) is ALSO a resolved-colour change and correctly reaches
+    this same condition — no separate brightness comparison needed."""
     changed = (
         previous.ambient_mode != new_state.ambient_mode
         or (new_state.ambient_mode != "off"
