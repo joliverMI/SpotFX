@@ -23,7 +23,7 @@ export default function IntensityMarkControl() {
   if (!uri || !mark) {
     return (
       <div className="intensity-mark" title="No song playing — nothing to mark">
-        <span className="intensity-mark-label">🎚 Mark</span>
+        <span className="intensity-mark-label">Mark</span>
         <span className="intensity-mark-value">—</span>
       </div>
     );
@@ -32,16 +32,29 @@ export default function IntensityMarkControl() {
   const isMarked = mark.mark != null;
   const effectivePct = Math.round(mark.effective_factor * 100);
   const autoPct = Math.round(mark.auto_factor * 100);
+  const minPct = Math.round(mark.manual_min * 100);
+  const maxPct = Math.round(mark.manual_max * 100);
 
   if (editing) {
+    const parsed = parseFloat(draft);
+    const sliderPct = Number.isNaN(parsed) ? minPct : Math.max(minPct, Math.min(maxPct, parsed));
     return (
       <div className="intensity-mark intensity-mark-editing">
-        <span className="intensity-mark-label">🎚 Mark</span>
+        <span className="intensity-mark-label">Mark</span>
+        <input
+          type="range"
+          className="intensity-mark-slider"
+          step={1}
+          min={minPct}
+          max={maxPct}
+          value={sliderPct}
+          onChange={(e) => setDraft(e.target.value)}
+        />
         <input
           type="number"
-          step={5}
-          min={Math.round(mark.manual_min * 100)}
-          max={Math.round(mark.manual_max * 100)}
+          step={1}
+          min={minPct}
+          max={maxPct}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           autoFocus
@@ -68,7 +81,7 @@ export default function IntensityMarkControl() {
         ? `Manually marked at ${Math.round((mark.mark as number) * 100)}% — the automatic 75% ceiling doesn't apply to this song. Automatic would be ${autoPct}%.`
         : `Automatic scale: ${autoPct}% (genre + bass, capped at a 75% delivered intensity). Mark this track to push it higher.`}
     >
-      <span className="intensity-mark-label">🎚 Mark</span>
+      <span className="intensity-mark-label">Mark</span>
       <span className="intensity-mark-value">{effectivePct}%</span>
       <button
         className="intensity-mark-edit-btn"

@@ -66,7 +66,27 @@
  * Collapsed mode's separate complaint ("it still doesn't quite fit") was
  * `.device-preview-strip`'s own `white-space: nowrap` with no `flex-wrap`
  * — the whole label+swatches+badge+buttons row was forced onto one line
- * that just ran off the right edge of a phone screen. Now wraps. */
+ * that just ran off the right edge of a phone screen. Now wraps.
+ *
+ * NO "PREVIEW" LABEL, ONE ICON-ONLY STATUS/PAUSE CONTROL (2026-08-16, his
+ * own words: "it doesn't need to say the word preview I know what it is
+ * ... we don't need a button for pause and resume and also an indicator
+ * for if it's paused or running or reconnecting. make the button the
+ * indicator ... don't put text use icons"). The separate label span, the
+ * standalone paused/running/reconnecting badge, and the Pause/Resume text
+ * button collapse into ONE `device-preview-status-btn`: its icon+colour
+ * pairing IS the current state, and clicking it is still the same
+ * pause/resume toggle. The four states the badge used to carry stay
+ * distinguishable at a glance, unchanged in substance — his own manual
+ * Pause is a DIFFERENT icon+colour than the automatic hidden-tab pause,
+ * on purpose, because collapsing that distinction was never part of the
+ * ask (module docstring above, HIDDEN-TAB AUTO-PAUSE): ⏸ live/purple
+ * (click pauses), ▶ his own pause/gray (click resumes), ⏾ auto idle —
+ * tab hidden/blue (click still pauses manually, same as before), ↻
+ * reconnecting-or-unavailable/amber. The full explanation each state used
+ * to carry in the badge's `title` lives on this button's `title` +
+ * `aria-label` now instead — nothing lost, just not printed as visible
+ * text. */
 import { useEffect, useState } from 'react';
 import {
   averageRgb, decodePixels, onDevicePreviewFrame, onDevicePreviewStatus,
@@ -111,7 +131,7 @@ export default function DevicePreviewStrip() {
     try {
       await (paused ? resumeDevicePreview() : pauseDevicePreview());
     } catch (err) {
-      toast(`Couldn't ${paused ? 'resume' : 'pause'} the preview: ${(err as Error).message}`, 'error');
+      toast(`Couldn't ${paused ? 'resume' : 'pause'}: ${(err as Error).message}`, 'error');
     } finally {
       setPausePending(false);
     }
@@ -119,12 +139,34 @@ export default function DevicePreviewStrip() {
 
   const favoriteIds = favorites?.effective_virtual_ids ?? [];
 
+  const state: 'paused' | 'idle' | 'live' | 'reconnecting' = paused
+    ? 'paused' : tabHiddenPause ? 'idle' : connected ? 'live' : 'reconnecting';
+  const stateIcon = { paused: '▶', idle: '⏾', live: '⏸', reconnecting: '↻' }[state];
+  const stateClass = {
+    paused: 'device-preview-status-gray',
+    idle: 'device-preview-status-blue',
+    live: 'device-preview-status-purple',
+    reconnecting: 'device-preview-status-amber',
+  }[state];
+  const stateTitle = {
+    paused: 'Paused — you clicked this. Stays this way until you click again to resume.',
+    idle: "Idle — this tab isn't visible, so the connection is closed to conserve resources. It reopens on its own the moment you switch back. Clicking now pauses it manually — it'll stay paused even after you switch back.",
+    live: (status?.source === 'facade'
+      ? "Live — reading SPECTRA's own live render pipeline directly (in-process, no LedFX involved). Click to pause."
+      : "Live — subscribed to LedFX's own visualisation feed. Click to pause."),
+    reconnecting: (status?.source === 'none'
+      ? "Unavailable — SPECTRA doesn't currently own the lights right now (a handover is in progress, or the room's been released). Picks back up on its own once ownership settles."
+      : status?.source === 'facade'
+        ? 'Reconnecting to the live render pipeline.'
+        : 'Reconnecting to LedFX (never restarts or wakes it).'),
+  }[state];
+  const stateLabel = { paused: 'Paused, click to resume', idle: 'Idle, tab hidden, click to pause',
+    live: 'Live, click to pause', reconnecting: 'Reconnecting' }[state];
+
   return (
     <div className="device-preview-strip">
-      <span className="device-preview-label">Preview</span>
-
       {favoriteIds.length === 0 ? (
-        <span className="device-preview-empty">no devices to preview</span>
+        <span className="device-preview-empty">no favourite devices</span>
       ) : (
         <div className={`device-preview-chips${expanded ? ' expanded' : ''}`}>
           {favoriteIds.map((id) => {
@@ -162,32 +204,10 @@ export default function DevicePreviewStrip() {
         </div>
       )}
 
-      <span
-        className={`badge ${
-          paused ? 'badge-gray' : tabHiddenPause ? 'badge-blue' : connected ? 'badge-purple' : 'badge-amber'
-        }`}
-        title={paused
-          ? 'Paused — you clicked Pause. The connection is closed, not just hidden — stays this way until you click Resume.'
-          : tabHiddenPause
-            ? "Idle — this tab isn't visible, so the connection is closed to conserve resources. It reopens on its own the moment you switch back — nothing to click."
-            : connected
-              ? (status?.source === 'facade'
-                  ? "Live — reading SPECTRA's own live render pipeline directly (in-process, no LedFX involved)"
-                  : "Live — subscribed to LedFX's own visualisation feed")
-              : status?.source === 'none'
-                ? "Preview unavailable — SPECTRA doesn't currently own the lights right now (a handover is in progress, or the room's been released), so there's nothing to read frames from. Picks back up on its own once ownership settles."
-                : status?.source === 'facade'
-                  ? 'Preview unavailable — reconnecting to the live render pipeline'
-                  : 'Preview unavailable — reconnecting to LedFX (never restarts or wakes it)'}
-      >
-        {paused ? 'paused' : tabHiddenPause ? 'idle — tab hidden' : connected ? 'live'
-          : status?.source === 'none' ? 'unavailable' : 'reconnecting…'}
-      </span>
-
-      <button type="button" className="device-preview-btn" disabled={pausePending || favoriteIds.length === 0}
-        onClick={togglePause}
-        title={paused ? 'Resume the preview' : 'Pause the preview — drops the live connection to conserve resources'}>
-        {paused ? '▶ Resume' : '⏸ Pause'}
+      <button type="button" className={`device-preview-status-btn ${stateClass}`}
+        disabled={pausePending || favoriteIds.length === 0}
+        onClick={togglePause} aria-label={stateLabel} title={stateTitle}>
+        {stateIcon}
       </button>
 
       {favoriteIds.length > 0 && (
