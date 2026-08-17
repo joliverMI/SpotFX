@@ -13,7 +13,7 @@ credentials) is REQUIRED, so pointing this at his real bridges is something
 you had to type, not something that happened by omission.
 
 Makes ZERO writes: every call is a plain GET, via ambient._hue_get, never
-ambient._hue_put. Trigger the actual dark_mode_enabled/ambient_color_dark
+ambient._hue_put. Trigger the actual display_mode/ambient_color_dark
 change separately (PUT /api/room-controls) — run this before/after to see
 the delta independently of whatever the PUT itself reported.
 

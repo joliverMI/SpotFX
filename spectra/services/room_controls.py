@@ -2,16 +2,45 @@
 don't belong to any one scene (spectra-kept-equivalents, the owner's KEPT
 legacy picks: decision-legacy-retirement-picks.md):
 
-  dark_mode_enabled        the legacy global Dark/Light display-mode toggle
-  dark_light_shield_       equivalent (services/display_mode.py in legacy;
-  categories/_virtuals     day-one bar item, SPECTRA_SPEC.md §9 — NOT the
-                          retired per-node Light Mode Chooser, §36). Full
-                          reasoning, incl. why this is a bool where legacy
-                          has three states, lives in spectra/services/
+  display_mode              the legacy global Default/Dark/Light display-mode
+  display_light_bg_color/   toggle equivalent (services/display_mode.py in
+  _brightness                legacy; day-one bar item, SPECTRA_SPEC.md §9 —
+  dark_light_shield_         NOT the retired per-node Light Mode Chooser,
+  categories/_virtuals       §36). THREE states, matching legacy exactly
+                          (2026-08-16 rebuild — see the "three-state
+                          rebuild" note below for why the original two-state
+                          bool was a mislabel, not a smaller-but-honest
+                          version). "default" is his word "hybrid" (defer to
+                          whatever the scene authors — the closest
+                          structural match to legacy's own Default, per his
+                          standing ruling: use "default" internally, label
+                          it "Hybrid" in the UI). Full reasoning for Dark and
+                          the shielding mechanism lives in spectra/services/
                           dark_light.py's module docstring — read that
                           before touching this. Reconciled the same way
                           ambient is: reconcile_dark_light_if_changed below,
                           called from the PUT /api/room-controls handler.
+
+    THREE-STATE REBUILD, MIGRATION IS LOAD-BEARING (2026-08-16): the
+    original build collapsed legacy's three states into a bool
+    (dark_mode_enabled) by mapping False to legacy's Default semantics
+    ("nothing forced, whatever's authored shows") while calling it "Light"
+    in the code, the API status field, and the help text — legacy's actual
+    Light (a configurable, always-on, immediately-repainted forced
+    background) was never built. A scout investigation
+    (data/spectra-display-mode-three-state/report.md) established this is
+    divergent, not a subset — see dark_light.py's docstring for the fixed
+    Light mechanism. The migration this field replaced it with is the part
+    that can hurt him, so it is spelled out here rather than left for a
+    future agent to re-derive:
+      dark_mode_enabled: true  -> display_mode: "dark"
+      dark_mode_enabled: false -> display_mode: "default", NEVER "light".
+    The field WAS called light and BEHAVED as default; mapping false->light
+    would have silently changed what his room does on deploy. false->default
+    preserves his current behaviour exactly — nobody's room changes when
+    this migration runs. Light is a new third option he can choose, never
+    something he is moved into. See load_room_controls's migration block
+    below for the code.
   brightness_multiplier  the legacy Brightness Multiplier action equivalent
                           (models.music_event.BrightnessAction) — dims/undims
                           the WHOLE room uniformly, applied at the write
@@ -110,10 +139,11 @@ legacy picks: decision-legacy-retirement-picks.md):
                           the same, for now") until he explicitly picks a
                           different dark colour; see effective_ambient_color
                           below, the one place this fallback is resolved.
-                          dark_mode_enabled (above) is the only switch
+                          display_mode == "dark" (above) is the only switch
                           between the two — ambient_mode/_color themselves
                           don't change meaning, "normal ambient colour"
-                          still covers both his non-dark and hybrid cases.
+                          still covers both his non-dark ("default"/hybrid)
+                          and "light" cases.
   global_transition_ms    the legacy ledfx_global_transition action
                           equivalent — the default ramp new scene-entry
                           blends use when a scene doesn't author its own
@@ -198,15 +228,28 @@ from spectra import config
 
 SceneChangeMode = Literal["transitions", "analysed", "full"]
 AmbientMode = Literal["off", "always", "auto"]
+DisplayMode = Literal["default", "dark", "light"]
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class RoomControlState(BaseModel):
-    dark_mode_enabled: bool = False
+    # "default" is his word "hybrid" — defer to whatever the scene authors
+    # (legacy's own Default semantics; labelled "Hybrid" in the UI, kept
+    # "default" internally per his standing ruling). See the module
+    # docstring's "THREE-STATE REBUILD" note for the load-bearing migration
+    # off the old dark_mode_enabled bool.
+    display_mode: DisplayMode = "default"
+    # Legacy's configurable forced Light background (services.trigger_engine
+    # settings.display_light_bg_color/_brightness) — defaults ported
+    # verbatim. See dark_light.py's docstring for the write mechanism.
+    display_light_bg_color: str = "#201830"
+    display_light_bg_brightness: float = Field(default=0.3, ge=0.0, le=1.0)
     # Category/virtual exemptions — legacy's default shielded category
     # (config.py's display_shield_categories) is ["Singles"]; matched here
-    # for exact fidelity, not re-guessed.
+    # for exact fidelity, not re-guessed. Applies to BOTH Dark and Light —
+    # a shielded device keeps its own authored background in either mode,
+    # exactly as legacy.
     dark_light_shield_categories: list[str] = Field(default_factory=lambda: ["Singles"])
     dark_light_shield_virtuals: list[str] = Field(default_factory=list)
     brightness_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -224,7 +267,7 @@ class RoomControlState(BaseModel):
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
 
-    @field_validator("ambient_color", "ambient_color_dark")
+    @field_validator("ambient_color", "ambient_color_dark", "display_light_bg_color")
     @classmethod
     def _validate_hex(cls, v: Optional[str]) -> Optional[str]:
         # Tightened for the settings-console agent (spectra/services/
@@ -263,13 +306,13 @@ def effective_ambient_color(state: RoomControlState) -> Optional[str]:
     """The colour Ambient should actually be holding right now — the one
     seam every ambient write/verify path (services/ambient_music_gate.py)
     must resolve through, rather than reading ambient_color directly.
-    ambient_color_dark wins while dark mode is on AND he's authored one;
-    otherwise the normal/hybrid colour applies, same as before this field
-    existed. Because ambient_color_dark defaults to None rather than a
+    ambient_color_dark wins while display_mode == "dark" AND he's authored
+    one; otherwise the normal/hybrid colour applies, same as before this
+    field existed. Because ambient_color_dark defaults to None rather than a
     migration-time copy, this also correctly reports "nothing changed" for
-    a dark_mode_enabled toggle before he's ever picked a dark colour — the
-    two are identical by construction until he diverges them."""
-    if state.dark_mode_enabled and state.ambient_color_dark is not None:
+    a display_mode flip into/out of "dark" before he's ever picked a dark
+    colour — the two are identical by construction until he diverges them."""
+    if state.display_mode == "dark" and state.ambient_color_dark is not None:
         return state.ambient_color_dark
     return state.ambient_color
 
@@ -320,6 +363,18 @@ def load_room_controls() -> RoomControlState:
             raw["ambient_mode"] = "auto" if raw.pop("ambient_enabled") else "off"
         else:
             raw.pop("ambient_enabled", None)
+        # One-way migration from the retired dark_mode_enabled bool (the
+        # original two-state build) to the three-state display_mode — LOAD
+        # BEARING, see the module docstring's "THREE-STATE REBUILD" note.
+        # true -> "dark" (unchanged meaning). false -> "default", NEVER
+        # "light": the old field was named "light" but behaved as legacy's
+        # Default (nothing forced), so false->default is what preserves his
+        # room's current behaviour exactly. Mapping false->light would
+        # silently turn on a forced background nobody asked for.
+        if "display_mode" not in raw and "dark_mode_enabled" in raw:
+            raw["display_mode"] = "dark" if raw.pop("dark_mode_enabled") else "default"
+        else:
+            raw.pop("dark_mode_enabled", None)
         try:
             return RoomControlState(**raw)
         except Exception:
@@ -389,23 +444,32 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
 
 async def reconcile_dark_light_if_changed(previous: RoomControlState,
                                           new_state: RoomControlState) -> Optional[dict]:
-    """The dark_lock-sync half of a room-controls save — same one-choke-point
-    shape as reconcile_ambient_if_changed above, so a human PUT and the
-    settings-console agent's apply path can never diverge. Also re-reconciles
-    on a shield-list edit while already dark (mirrors legacy's services/
-    display_mode.resync(), called when display_shield_* settings change) —
-    a newly (un)shielded virtual should react immediately, not wait for the
-    next full toggle. Returns None (no live effect, nothing to report) when
-    neither condition holds."""
+    """The dark_lock/light-bg-sync half of a room-controls save — same
+    one-choke-point shape as reconcile_ambient_if_changed above, so a human
+    PUT and the settings-console agent's apply path can never diverge. Also
+    re-reconciles on a shield-list edit while already dark OR light (mirrors
+    legacy's services/display_mode.resync(), called when display_shield_*
+    settings change) — a newly (un)shielded virtual should react
+    immediately, not wait for the next full toggle. A light-bg colour/
+    brightness edit while already in "light" is likewise a live-effecting
+    change (Light is a forced, unconditional write — the whole point is
+    that it's watchable the instant it's edited, not just on entry).
+    Returns None (no live effect, nothing to report) when nothing here
+    changed."""
     changed = (
-        previous.dark_mode_enabled != new_state.dark_mode_enabled
-        or (new_state.dark_mode_enabled and (
+        previous.display_mode != new_state.display_mode
+        or (new_state.display_mode in ("dark", "light") and (
             previous.dark_light_shield_categories != new_state.dark_light_shield_categories
             or previous.dark_light_shield_virtuals != new_state.dark_light_shield_virtuals))
+        or (new_state.display_mode == "light" and (
+            previous.display_light_bg_color != new_state.display_light_bg_color
+            or previous.display_light_bg_brightness != new_state.display_light_bg_brightness))
     )
     if not changed:
         return None
     from spectra.services import dark_light
-    return await dark_light.reconcile(new_state.dark_mode_enabled,
+    return await dark_light.reconcile(new_state.display_mode,
                                       new_state.dark_light_shield_categories,
-                                      new_state.dark_light_shield_virtuals)
+                                      new_state.dark_light_shield_virtuals,
+                                      new_state.display_light_bg_color,
+                                      new_state.display_light_bg_brightness)

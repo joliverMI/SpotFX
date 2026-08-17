@@ -14,10 +14,10 @@ avoid re-triggering a stream reconnect on every unrelated slider commit)
 and folds the outcome
 into the response as `ambient_result` so the caller can tell a live takeover
 from a state-only save (SPECTRA dark, or no Hue devices in the room).
-dark_mode_enabled/dark_light_shield_* — the legacy global Dark/Light mode
-(services/dark_light.py) — PUT reconciles it the same way (only when it
-actually changed) and folds the outcome into the response as
-`dark_light_result`.
+display_mode/display_light_bg_*/dark_light_shield_* — the legacy global
+Default/Dark/Light mode (services/dark_light.py) — PUT reconciles it the
+same way (only when it actually changed) and folds the outcome into the
+response as `dark_light_result`.
 force_scene_enabled/force_scene_scene_id — the legacy Now Playing Force
 Scene control — redirect every automatic scene pick at scene_sequencer.
 fire_scene_by_id.
