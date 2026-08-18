@@ -12,10 +12,15 @@ beats and LedFX interpolates between them.
 
 ## The hex matrix (crystal-mapper) — authoring rules
 
-- Canvas is **72×37**, but only 976 of 2664 cells are real LEDs, in a hex
-  lattice (every other column, alternating parity per row). Its profile is in
-  `storage/device_profiles/crystal-mapper.json` (re-extract with
-  `python3 -m tools.gifsmith profile crystal-mapper`).
+For the full geometry (real shape/dimensions, coordinate mapping, which
+regions are dark and why, common mistakes) see the `crystal-hex-grid` skill
+— load it before reasoning about this device beyond the asset-authoring
+rules below. Short version: canvas is **72×37**, but only 976 of 2664 cells
+are real LEDs, forming a hexagon (not a uniform checkerboard) — the real
+column parity alternates per row AND the real span per row narrows toward
+the top/bottom. Profile: `storage/device_profiles/crystal-mapper.json`
+(re-extract with `python3 -m tools.gifsmith profile crystal-mapper`).
+
 - **Strokes must be ≥ 2 px wide** or they vanish on half the rows.
 - **Author masters in white on black** — color is applied at runtime by the
   keybeat2d `tint` param (a local LedFX patch). Keep `--color '#ffffff'`.

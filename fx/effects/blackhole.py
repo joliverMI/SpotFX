@@ -30,6 +30,23 @@ DROP_RESET_S = 0.5       # post-burst ease of the horizon back to baseline
 PHASE_BURST_N = 24       # blobs in the drop explosion
 CHARGE_HALO_LEAD = 1.4   # halo (capture ring) growth vs the black disc
 
+# infall-mode (`reverse=False`) spawn annulus, in the same normalized-r units
+# as radius_scale (r=1 sits at the panel's own rectangular edge). This used
+# to be a fixed (0.90, 1.05) — right at/past the rim, i.e. the rectangle's
+# corners. That is invisible-on-arrival on any matrix virtual whose real
+# light doesn't fill its whole addressable rectangle: e.g. a hex-lattice
+# crystal panel is a flat 50% real-pixel density out to r<=0.85, falling to
+# ~20% by r=1.0 and 0% past r=1.2 (measured against
+# storage/device_profiles/crystal-mapper.json — see
+# scripts/check_blackhole_hex_spawn.py). Pulling the annulus in to
+# [0.70, 0.85] keeps every spawn inside that flat, fully-populated interior —
+# visible immediately, not after several frames of falling — while leaving
+# radius_scale/sx/sy (the effect's overall panel-filling scale) untouched, so
+# the fall from spawn down to the horizon/center still spans nearly the whole
+# panel exactly as before.
+SPAWN_ANNULUS_MIN = 0.70
+SPAWN_ANNULUS_MAX = 0.85
+
 
 class Blackhole2d(Twod, GradientEffect):
     NAME = "Blackhole"
@@ -790,9 +807,13 @@ class Blackhole2d(Twod, GradientEffect):
             )
             self.p_r[s] = rng.uniform(inner, inner + 0.06, count)
         else:
-            # Wide annulus (past the rim too) so simultaneous spawns don't
-            # form a dense ring at one radius.
-            self.p_r[s] = rng.uniform(0.90, 1.05, count)
+            # Annulus pulled in from the rim (see SPAWN_ANNULUS_* above) so
+            # simultaneous spawns scatter across a band instead of forming a
+            # dense ring at one radius, while staying inside a matrix
+            # virtual's actually-lit area.
+            self.p_r[s] = rng.uniform(
+                SPAWN_ANNULUS_MIN, SPAWN_ANNULUS_MAX, count
+            )
         self.p_theta[s] = rng.uniform(0.0, 2 * np.pi, count)
         self.p_age[s] = 0.0
         self.p_cap[s] = -1.0

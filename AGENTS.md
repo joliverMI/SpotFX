@@ -1649,6 +1649,24 @@ a later wiring stage. The Hue-DTLS / DDP single-sender exclusivity with the
 running LedFX service is resolved by the S3 ownership gate: the facade
 reaches live hardware only through the handover (see the S3 section above).
 
+## `crystal-mapper` (the hex Matrix virtual) — read the skill before touching it
+
+Load `.claude/skills/crystal-hex-grid/SKILL.md` before changing any effect
+targeting the Matrix category (`config/effect_params.json`
+`categories.Matrix.effects` — 11 of them, not just Blackhole), before
+writing anything that reads `storage/device_profiles/`, or before trusting
+any coverage/brightness/"is this visible" measurement on that virtual. Short
+version: only 976 of the addressable 72x37=2664 cells are real light
+(36.6%), forming a hexagon — real-cell density is a flat 50% out to
+`r<=0.85` (normalized radius, r=1 = the panel's own rectangular edge) and a
+hard 0% past `r≈1.2`, a cliff, not a gradient. The effect-layer render
+pipeline (`fx/effects/twod.py`) has zero awareness of this — `r_width`/
+`r_height` are always the full rectangle. Found and fixed 2026-08-17
+(`fx/effects/blackhole.py`'s infall spawn annulus landed almost entirely on
+the dead corner band — `fx/VENDOR.md` deviation #12, `docs/SPECTRA_SPEC.md`
+§76) after repeated prior agent confusion about this device's geometry; the
+skill exists so that doesn't happen again.
+
 ## SPA `index.html` must revalidate every request — checking the server is not checking what the browser fetches
 
 Found 2026-08-17: both SPA mounts (`main.py`'s `/app`, `spectra/app.py`'s
