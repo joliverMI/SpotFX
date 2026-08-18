@@ -260,6 +260,24 @@ def resolve_for_fire_mode_gated(card: ColorSetCard,
     return resolved
 
 
+def group_ids_by_set() -> dict[str, list[str]]:
+    """Reverse index: colour-set id → every Group card id that lists it as a
+    member. Used only by the likelihood-curve selector (selection_kernel.
+    build_color_set_candidates' group_ids_by_set param) to find which
+    groups' curves should multiply onto a set's own score — a different
+    concern from resolve_for_fire's pick-a-member resolution above, but the
+    same underlying membership data, so both read spectra.services.color_sets
+    rather than each keeping a private copy."""
+    from spectra.services import color_sets
+    out: dict[str, list[str]] = {}
+    for card in color_sets.list_all():
+        if card.kind != "group":
+            continue
+        for member in card.members:
+            out.setdefault(member.color_set_id, []).append(card.id)
+    return out
+
+
 def resolve_ref(set_id: str) -> ColorSetCard:
     """Look up set_id and resolve it to a concrete 'set' card — raises
     ValueError (unknown id / unusable group) for callers that want a hard

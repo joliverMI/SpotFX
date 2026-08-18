@@ -2,7 +2,7 @@
  * Dark/enabled state, deferrals, active scene + dwell in songs, next change
  * source, last pick with factor breakdown, and the room's colour state. */
 import HelpLink from '../help/HelpLink';
-import { useSequencerStatus } from '../queries';
+import { useSequencerStatus, useSpotColorSets } from '../queries';
 import type { SceneV2 } from '../types';
 
 const DEFER_LABEL: Record<string, string> = {
@@ -14,8 +14,10 @@ const DEFER_LABEL: Record<string, string> = {
 
 export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) {
   const { data: st } = useSequencerStatus();
+  const { data: colorCards = [] } = useSpotColorSets();
   if (!st) return null;
   const sceneName = (id: string) => scenes.find((s) => s.id === id)?.name ?? id;
+  const colorName = (id: string) => colorCards.find((c) => c.id === id)?.name ?? id;
 
   return (
     <div className="card" style={{
@@ -89,6 +91,41 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
                         <td style={{ textAlign: 'center' }}>×{f.genre}</td>
                         <td style={{ textAlign: 'center' }}>×{f.affinity}</td>
                         <td style={{ textAlign: 'center' }}>{f.score.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </details>
+          )}
+          {st.color.last_pick && (
+            <details style={st.last_pick ? undefined : { marginLeft: 'auto' }}
+              title="Curve × genre × wheel-travel × group — 'group' is the resolved product of every enclosing Colour Group's own curve (1.0 = in no group, or every enclosing group is flat)">
+              <summary style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>
+                last colour pick: {st.color.last_pick.picked_name ?? st.color.last_pick.rung}
+                {' '}· rung {st.color.last_pick.rung}
+              </summary>
+              <table style={{ fontSize: 11, marginTop: 4 }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)' }}>
+                    <th style={{ textAlign: 'left', paddingRight: 10 }}>candidate</th>
+                    <th style={{ paddingRight: 10 }}>curve</th>
+                    <th style={{ paddingRight: 10 }}>genre</th>
+                    <th style={{ paddingRight: 10 }}>wheel</th>
+                    <th style={{ paddingRight: 10 }}>group</th>
+                    <th>score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(st.color.last_pick.factors)
+                    .sort(([, a], [, b]) => b.score - a.score)
+                    .map(([id, f]) => (
+                      <tr key={id} style={id === st.color.last_pick!.picked_id ? { fontWeight: 600 } : undefined}>
+                        <td style={{ paddingRight: 10 }}>{colorName(id)}</td>
+                        <td style={{ textAlign: 'center' }}>{f.curve.toFixed(2)}</td>
+                        <td style={{ textAlign: 'center' }}>×{f.genre}</td>
+                        <td style={{ textAlign: 'center' }}>×{f.wheel.toFixed(2)}</td>
+                        <td style={{ textAlign: 'center' }}>×{f.group.toFixed(2)}</td>
+                        <td style={{ textAlign: 'center' }}>{f.score.toFixed(3)}</td>
                       </tr>
                     ))}
                 </tbody>

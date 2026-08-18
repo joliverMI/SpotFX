@@ -160,6 +160,7 @@ class SceneSequencer:
         wheel_get: Callable[[], Optional[float]] | None = None,
         wheel_set: Callable[[Optional[float]], None] | None = None,
         scene_mode_available: Callable[[str], bool] | None = None,
+        group_ids_by_set: Callable[[], dict[str, list[str]]] | None = None,
     ) -> None:
         self._rng = rng or Random()
         self._fire = fire or self._default_fire
@@ -179,6 +180,10 @@ class SceneSequencer:
         self._wheel_get = wheel_get or self._default_wheel_get
         self._wheel_set = wheel_set or self._default_wheel_set
         self._scene_mode_available = scene_mode_available or self._default_scene_mode_available
+        # set_id → every Colour Group card id that lists it as a member —
+        # the reverse lookup the group-curve multiplicand needs (kernel
+        # stays pure; this is the one place colour-set storage is read for it).
+        self._group_ids_by_set = group_ids_by_set or self._default_group_ids_by_set
 
         self.transition_source = TransitionSource()
         self.transition_source.bind(self._on_change_moment)
@@ -352,7 +357,8 @@ class SceneSequencer:
         candidates = kernel.build_color_set_candidates(
             config.color_set_entries, curves,
             genre_bucket=genre_bucket, room_deg=self._wheel_get(),
-            set_positions=eligible, wheel_points=wheel_points)
+            set_positions=eligible, wheel_points=wheel_points,
+            group_ids_by_set=self._group_ids_by_set())
         pick = kernel.select_color_set(candidates, intensity=intensity,
                                        rng=self._rng,
                                        current_id=self._active_color_set_id)
@@ -442,6 +448,10 @@ class SceneSequencer:
                 continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out
+
+    def _default_group_ids_by_set(self) -> dict[str, list[str]]:
+        from spectra.services import color_set_groups
+        return color_set_groups.group_ids_by_set()
 
     def _default_scene_mode_available(self, scene_id: str) -> bool:
         from spectra.services import mode_availability, scene_store

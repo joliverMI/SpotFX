@@ -193,7 +193,18 @@ export interface SequencerStatus {
     active_set_id: string | null;
     active_set_name: string | null;
     wheel_position_deg: number | null;
-    last_pick: Record<string, unknown> | null;
+    last_pick: {
+      picked_id: string | null;
+      picked_name: string | null;
+      kept_set_id: string | null;
+      rung: string;
+      /** curve/genre/wheel/group/score per candidate at the FULL rung —
+       * "group" is the resolved product of every enclosing Colour Group's
+       * own curve (1.0 when the set is in no group / every enclosing
+       * group defaulted to flat) — the observability the compounding
+       * multiply needs so a starved set is explainable, not a mystery. */
+      factors: Record<string, { curve: number; genre: number; wheel: number; group: number; score: number }>;
+    } | null;
   };
 }
 
@@ -236,12 +247,16 @@ export function useSaveCurves() {
 }
 
 /** Curve-attachment mutation: round-trips the STORED config and rewrites
- * only entries[sceneId]'s curve fields — relationships stay agent-owned. */
-export function useAttachCurve() {
+ * only field[entryId]'s curve fields — relationships stay agent-owned.
+ * field defaults to 'entries' (the scene selector, original behaviour);
+ * pass 'color_set_entries' to attach a curve to a colour SET or GROUP card
+ * instead — same dict, same reuse the owner asked for (a Group's curve is
+ * just another entry here, keyed by the Group's own card id). */
+export function useAttachCurve(field: 'entries' | 'color_set_entries' = 'entries') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
-      sceneId: string;
+      entryId: string;
       attachment:
         | { kind: 'none' }
         | { kind: 'flat' }
@@ -249,9 +264,10 @@ export function useAttachCurve() {
         | { kind: 'inline'; points: CurvePoint[] };
     }) => {
       const config = await apiGet<SequencerConfig>('/sequencer/config');
-      const { [args.sceneId]: existing, ...rest } = config.entries;
+      const map = config[field];
+      const { [args.entryId]: existing, ...rest } = map;
       if (args.attachment.kind === 'none') {
-        return apiPut('/sequencer/config', { ...config, entries: rest });
+        return apiPut('/sequencer/config', { ...config, [field]: rest });
       }
       const entry: SelectorEntry = existing ?? {
         curve_ref: null, inline_points: null, genre_mult: {}, dwell_weight: 1.0,
@@ -264,7 +280,7 @@ export function useAttachCurve() {
             : { curve_ref: null, inline_points: null };
       return apiPut('/sequencer/config', {
         ...config,
-        entries: { ...rest, [args.sceneId]: { ...entry, ...curve } },
+        [field]: { ...rest, [args.entryId]: { ...entry, ...curve } },
       });
     },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-seq-config'] }),

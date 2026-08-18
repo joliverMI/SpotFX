@@ -22,17 +22,54 @@ positive, finite score; a pathological curve height like inf falls through
 to uniform rather than poisoning the draw).
 
 The colour-set selector is the kernel's third flavour (decision 3, wired
-last): score = curve(intensity) × genre × WHEEL-TRAVEL, where wheel travel
-is a likelihood curve over the angular distance (0–180°) the pick would
-move the room's current wheel position. Its ladder is its own:
+last): score = curve(intensity) × genre × WHEEL-TRAVEL × GROUP, where wheel
+travel is a likelihood curve over the angular distance (0–180°) the pick
+would move the room's current wheel position, and GROUP is described next.
+Its ladder is its own:
 
-    full → drop wheel-travel → drop genre → uniform among curve-eligible
-         → terminal KEEP the current colours (no change)
+    full → drop group curves → drop wheel-travel → drop genre
+         → uniform among curve-eligible → terminal KEEP the current colours
 
 Colours are never forced to churn: when nothing else is eligible the room
 keeps its palette. Rainbow-tagged sets (chromatic span > 180°,
 services/color_wheel.py) take a NEUTRAL ×1.0 wheel factor and are skipped
 by rotation mechanics — they stay eligible through their intensity curves.
+
+**Colour Group likelihood curves** (owner ask, 2026-08-17: "Groups can also
+have likelihood curves, default is flat one, but these don't overwrite they
+multiply with the child likelihood curve"). No new storage shape: a Group
+is a ColorSetCard like a Set, so a Group's curve lives in the SAME
+`SequencerConfig.color_set_entries` dict, keyed by the GROUP's own card id
+— nothing distinguishes a group's entry from a set's entry structurally,
+same reuse the owner asked for. A Group is never itself a candidate in this
+selector (color_wheel.wheel_positions/`_default_eligible_sets` still filter
+to kind=="set" — a Group has no wheel position of its own, unchanged); its
+curve instead multiplies onto every member SET's own score, resolved via
+`Candidate.group_points` (one resolved curve per enclosing group, built by
+the caller's own reverse "which groups contain this set" lookup — the
+kernel stays pure and never queries colour-set storage itself).
+
+A set under MORE THAN ONE group (real data: 4 of the Admiral's sets sit
+under both "First Group" and "Blues") CHAINS every enclosing group's curve
+by further multiplication, not "one wins" — the same multiplicative
+philosophy as curve × genre × wheel, extended, not special-cased. A group
+with NO entry in `color_set_entries` resolves through the same
+`resolve_curve` default every other missing entry already gets: flat 1.0,
+an exact float identity under multiplication (see group_curve_mult).
+
+Compounding is real and undocumented magnitudes could starve a set
+silently, so two things keep it honest rather than adding a hidden floor
+or clamp (a clamp would quietly distort an authored curve's real shape):
+(1) the ladder gets its own "drop group curves" rung — a set only zeroed
+out by an enclosing group's curve at this intensity is NOT permanently
+vetoed, it recovers the moment every other candidate is equally exhausted,
+the same recoverability wheel-travel and genre already have; only the
+SET'S OWN curve hitting zero is a true, ladder-proof veto, unchanged from
+before groups existed. (2) `Pick.factors` carries the resolved `group`
+multiplier per candidate at the FULL rung (alongside curve/genre/wheel/
+score) so a silently-starved set is visible in the same status-strip/
+sequencer_pick observability surface that already explains every other
+pick — never a mystery a human has to guess at.
 
 select_from_scene_pool is a separate, simpler mechanism, not a fourth
 selector flavour of the above: a trigger's own inline scene_pool
@@ -66,6 +103,7 @@ RUNG_NO_GENRE = "no_genre"
 RUNG_READMIT_CURRENT = "readmit_current"
 RUNG_UNIFORM = "uniform"
 RUNG_NO_WHEEL = "no_wheel_travel"   # colour ladder only
+RUNG_NO_GROUP = "no_group_curve"    # colour ladder only, dropped before wheel
 
 
 def curve_eval(points: list[CurvePoint], x: float) -> float:
@@ -110,17 +148,35 @@ def compose(curve_y: float, genre_mult: float, affinity_mult: float) -> float:
     return curve_y * genre_mult * affinity_mult
 
 
+def group_curve_mult(group_points: list[list[CurvePoint]], x: float) -> float:
+    """The colour-set selector's fourth multiplicand: the product of every
+    enclosing group's own curve height at x. Empty list (a set in no group,
+    or every enclosing group's entry resolved to flat) is the identity 1.0 —
+    multiplying by it must leave the set's own score EXACTLY unchanged, not
+    approximately, so ungrouped/default-group sets never quietly drift.
+    A set under N groups CHAINS all N heights by further multiplication —
+    see module docstring for why chaining, not "one wins", is the rule."""
+    result = 1.0
+    for points in group_points:
+        result *= curve_eval(points, x)
+    return result
+
+
 @dataclass(frozen=True)
 class Candidate:
     """One drawable thing, factors already resolved for this moment.
-    affinity_mult is the scene selector's third factor; wheel_mult the
-    colour-set selector's — each flavour reads its own and leaves the
-    other at the neutral 1.0 default."""
+    affinity_mult is the scene selector's third factor; wheel_mult and
+    group_points the colour-set selector's — each flavour reads its own and
+    leaves the others at their neutral defaults. group_points is a list of
+    already-resolved curves (one per enclosing Colour Group), evaluated and
+    chained by group_curve_mult at draw time — resolving WHICH groups a set
+    belongs to is the caller's job (kernel stays pure, no colour-set I/O)."""
     id: str
     points: list[CurvePoint]
     genre_mult: float = 1.0
     affinity_mult: float = 1.0
     wheel_mult: float = 1.0
+    group_points: list[list[CurvePoint]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -214,21 +270,24 @@ def select_flare(candidates: list[Candidate], *, intensity: float,
 
 def select_color_set(candidates: list[Candidate], *, intensity: float,
                      rng: Random, current_id: str | None = None) -> Pick:
-    """Colour-set selector (decision 3): curve × genre × wheel-travel over a
-    weighted draw, with the colour ladder — drop wheel-travel → drop genre →
-    uniform among curve-eligible → terminal KEEP the current colours.
+    """Colour-set selector (decision 3, +group curves): curve × genre ×
+    wheel-travel × group over a weighted draw, with the colour ladder —
+    drop group curves → drop wheel-travel → drop genre → uniform among
+    curve-eligible → terminal KEEP the current colours.
 
     The current set is excluded from every rung (all live colour groups run
     exclude_current today); there is no re-admit rung because the terminal
     already keeps the room's palette — picked_id None with rung
     TERMINAL_KEEP means "change nothing", never "go dark"."""
     curve_y = {c.id: curve_eval(c.points, intensity) for c in candidates}
+    group_y = {c.id: group_curve_mult(c.group_points, intensity) for c in candidates}
     factors = {
         c.id: {
             "curve": curve_y[c.id],
             "genre": c.genre_mult,
             "wheel": c.wheel_mult,
-            "score": compose(curve_y[c.id], c.genre_mult, c.wheel_mult),
+            "group": group_y[c.id],
+            "score": compose(curve_y[c.id], c.genre_mult, c.wheel_mult) * group_y[c.id],
         }
         for c in candidates
     }
@@ -236,6 +295,9 @@ def select_color_set(candidates: list[Candidate], *, intensity: float,
 
     rungs: list[tuple[str, dict[str, float]]] = [
         (RUNG_FULL,
+         {c.id: compose(curve_y[c.id], c.genre_mult, c.wheel_mult) * group_y[c.id]
+          for c in others}),
+        (RUNG_NO_GROUP,
          {c.id: compose(curve_y[c.id], c.genre_mult, c.wheel_mult) for c in others}),
         (RUNG_NO_WHEEL,
          {c.id: compose(curve_y[c.id], c.genre_mult, 1.0) for c in others}),
@@ -320,8 +382,10 @@ def build_color_set_candidates(entries: dict[str, SelectorEntry],
                                genre_bucket: str | None,
                                room_deg: float | None,
                                set_positions: dict[str, float | None],
-                               wheel_points: list[CurvePoint]) -> list[Candidate]:
-    """Colour-set-selector candidates with all three factors resolved.
+                               wheel_points: list[CurvePoint],
+                               group_ids_by_set: dict[str, list[str]] | None = None
+                               ) -> list[Candidate]:
+    """Colour-set-selector candidates with all four factors resolved.
 
     set_positions is the eligibility gate AND the geometry: only entries
     keyed there become candidates (the caller has already applied the
@@ -329,7 +393,18 @@ def build_color_set_candidates(entries: dict[str, SelectorEntry],
     the set's wheel position — None for rainbow/achromatic sets, which
     makes wheel_travel_mult neutral ×1.0 (the binding rainbow exemption).
     room_deg None (no chromatic set has fired yet) is neutral for everyone.
+
+    group_ids_by_set (when given) maps a set id to every Colour Group that
+    lists it as a member — the caller's own reverse lookup over colour-set
+    storage (the kernel never reads that storage itself). Each named group
+    id is resolved against the SAME `entries` dict a set's own curve comes
+    from (a group's curve lives there too, keyed by the group's own card
+    id) via resolve_curve, so a group with no entry is the same flat-1.0
+    default every other missing entry already gets. Missing/None resolves
+    to no groups — every existing caller that doesn't pass it is unaffected.
     """
+    group_ids_by_set = group_ids_by_set or {}
+    flat_entry = SelectorEntry()
     return [
         Candidate(
             id=eid,
@@ -337,6 +412,8 @@ def build_color_set_candidates(entries: dict[str, SelectorEntry],
             genre_mult=genre_multiplier(entry, genre_bucket),
             wheel_mult=wheel_travel_mult(wheel_points, room_deg,
                                          set_positions[eid]),
+            group_points=[resolve_curve(entries.get(gid, flat_entry), curves)
+                          for gid in group_ids_by_set.get(eid, [])],
         )
         for eid, entry in entries.items()
         if eid in set_positions

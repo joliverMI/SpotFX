@@ -1461,6 +1461,38 @@ Fireworks V2 / Dancers V2 to `"dark"` — not run against live storage by
 this build, an operator/deploy step same as `seed_star_strips.py`'s own
 convention.
 
+## SPECTRA colour-set / colour-group likelihood curves
+
+His ask: colour Sets get a likelihood curve reusing the scene sequencer's
+own structure; Groups get one too, default flat, that MULTIPLIES onto a
+member Set's own curve rather than overwriting it. Sets already had this —
+`SequencerConfig.color_set_entries` (`spectra/models/sequencer.py`) is
+keyed generically by any `ColorSetCard` id and was already read by
+`selection_kernel.select_color_set` (curve × genre × wheel-travel) — so a
+Group's curve needed no new storage shape: it lives in the SAME dict, keyed
+by the Group's own id. A Group never becomes its own selector candidate
+(still `kind=="set"`-only, unchanged from §10); its curve instead
+multiplies onto every member Set's score as a fourth factor
+(`selection_kernel.group_curve_mult`, `Candidate.group_points`), resolved
+via the reverse lookup `spectra/services/color_set_groups.
+group_ids_by_set()`. A Set under more than one group (real data: 4 sets
+under both "First Group" and "Blues") CHAINS every enclosing group's curve
+by further multiplication — never "one wins". Flat/no entry is an exact
+float `1.0` identity. The colour ladder gained its own rung,
+`RUNG_NO_GROUP` (dropped before wheel-travel, before genre) so a set zeroed
+only by an enclosing group's curve recovers the same way a wheel/genre veto
+already did — only a set's OWN curve hitting zero stays ladder-proof.
+`Pick.factors` carries the resolved `group` multiplier per candidate,
+surfaced in `SequencerStatusStrip.tsx`'s "last colour pick" breakdown, so a
+starved set is explainable by looking, not a silent mystery. The curve
+tile-grid/window/Detach/Save-as-named-curve editor
+(`SequencingTab.tsx`'s original inline implementation) was extracted
+verbatim into `spectra/web/src/components/CurveAttachmentEditor.tsx` and is
+now mounted on both a Set's and a Group's card in `ColorSetsPage.tsx`
+("Likelihood" section) — same component, same safety rule, not a parallel
+editor. Full detail: `docs/SPECTRA_SPEC.md` §76. Spec:
+`tests/test_color_set_group_curves.py`.
+
 ## SPECTRA Sonic token-usage record (review page)
 
 `spectra/services/sonic_usage.py` — durable per-call token usage, his ask:
