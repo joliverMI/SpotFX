@@ -9,6 +9,7 @@
  * toolbar's intensity slider drives Test Fire (dry-run compile — shows
  * resolved bindings + writes) and the owner's real Fire button. */
 import { useEffect, useMemo, useState } from 'react';
+import DisabledToggle from '../components/DisabledToggle';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
@@ -198,9 +199,17 @@ export default function ScenesPage() {
             <div key={s.id} className={`pane-row${s.id === selectedId ? ' selected' : ''}`}
               onClick={() => { setSelectedId(s.id); setFireResult(null); setPickerOpen(false); }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>
-                  {s.name}
-                  {drafts[s.id] && <span title="Unsaved changes" style={{ color: 'var(--accent2)' }}> •</span>}
+                <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.name}
+                    {drafts[s.id] && <span title="Unsaved changes" style={{ color: 'var(--accent2)' }}> •</span>}
+                  </span>
+                  {s.disabled && (
+                    <span className="badge badge-red" style={{ flexShrink: 0 }}
+                      title="Disabled — never fires automatically; Force Scene / Fire still work">
+                      ⛔ disabled
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                   {s.devices.length} entr{s.devices.length === 1 ? 'y' : 'ies'}
@@ -242,6 +251,9 @@ export default function ScenesPage() {
                          textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {scene.name}{drafts[scene.id] ? ' •' : ''}
           </span>
+          {scene.disabled && (
+            <span className="badge badge-red" style={{ flexShrink: 0 }}>⛔ disabled</span>
+          )}
           <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', flex: 'none' }}>
             scenes ▾
           </span>
@@ -278,6 +290,8 @@ export default function ScenesPage() {
             </span>
             <ModeAvailabilityToggle value={scene.display_availability ?? 'default'}
               onChange={(v) => setScene({ ...scene, display_availability: v })} />
+            <DisabledToggle value={scene.disabled ?? false}
+              onChange={(v) => setScene({ ...scene, disabled: v })} />
             <button style={{ fontSize: 12, borderColor: 'var(--accent)' }}
               title="Really fire this scene through the live LedFX service"
               onClick={() => void testFire(false)}>

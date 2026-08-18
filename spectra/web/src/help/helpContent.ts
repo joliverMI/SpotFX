@@ -84,7 +84,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'A small toggle on the scene toolbar and on a Colour Set/Group\'s toolbar (next to Preview) — tap to cycle Hybrid → Light → Dark → Hybrid. It stays the SAME WIDTH at every state so it never shifts the row under your thumb.',
           'Hybrid (the default): always available. Light: available while the room\'s Display mode is Light or Hybrid, skipped while it\'s Dark. Dark: available while Dark or Hybrid, skipped while Light.',
           'This gates anything that fires WITHOUT a human pressing a button in the moment — the sequencer\'s own picks, a colour Group\'s member cycling, a generated trigger\'s scene pick, and a hand-authored trigger\'s fire_scene action too (the same central gate every automatic scene-fire funnels through). Only two things bypass it: Force Scene (an explicit standing pin — the pinned scene keeps its declared life, same as it already does for Pause/Dinner Party/Ambient) and a literal button press right now (Fire, Test Fire\'s dry-run API, a Colour Set/Group\'s Preview).',
-          'Not the same control as a scene\'s colour-set PREFERENCE (Colour Sets tab) — this one gates whether the scene plays at all; that one only narrows which colour sets it draws from once it does. See "Colour-set preference", below.',
+          'Not the same control as a scene\'s colour-set PREFERENCE (Colour Sets tab) — this one gates whether the scene plays at all; that one only narrows which colour sets it draws from once it does. See "Colour-set preference", below. Also not the same as the separate Disable toggle right next to it — Disable is the stronger statement ("don\'t use this scene, period," any room mode), where this one only narrows which room mode a scene plays in. See "Disable", below.',
+        ],
+      },
+      {
+        id: 'scene-disable',
+        title: 'Disable — temporarily take a scene out of rotation',
+        keywords: 'disable enable toggle off pause temporarily stop scene never fires skip skipped',
+        body: [
+          'A second toggle on the scene toolbar, next to Mode availability — tap to flip Disabled ⇄ Enabled. Nothing is deleted or lost; it\'s reversible any time, and there\'s no timer — it stays off until you turn it back on.',
+          'A disabled scene never fires automatically: it\'s dropped from the sequencer\'s own rolls, a generated trigger\'s scene draw, and a hand-authored trigger\'s fire_scene action, the same central gate Mode availability already funnels through — REGARDLESS of the room\'s current display mode. Disabled is the stronger statement: "don\'t use this scene, period," where Mode availability only narrows which room mode it plays in. A scene that\'s both disabled and mode-gated reports "disabled" as the reason, not "mode availability."',
+          'Two things still work on a disabled scene, deliberately: a manual Fire/test-fire from this editor (you pressed the button, you mean it — same bypass Mode availability already has), and Force Scene. Pinning a disabled scene is contradictory input, so it\'s honoured, not silently refused or silently allowed — the room bar\'s Force Scene badge says "⚠ overriding disabled scene" when this happens.',
+          'The scene list, and the phone header once a scene is open, both show a red "⛔ disabled" badge — a disabled scene that stops showing up should never look indistinguishable from a broken one.',
         ],
       },
       {
@@ -597,6 +608,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'If nothing happens, look for the badge under the picker — it always says why: "fired" names the scene that just activated; "not fired" means nothing was pinned yet, or the pinned scene no longer exists.',
           'It does NOT touch a manual Fire from the Scenes page editor — that\'s an explicit single fire, not the system picking a scene, so it always fires exactly the scene you pressed Fire on.',
           'Turn Force Scene off to let the sequencer/triggers pick freely again — nothing about the scene you were holding is changed or deleted, it just stops being reasserted.',
+          'Pinning a scene you\'ve marked Disabled (see "Disable" on the Scenes page) still fires it — you pressed the button, you mean it — but the badge adds a second line, "⚠ overriding disabled scene," so the contradiction is visible instead of silent.',
         ],
       },
     ],

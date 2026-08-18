@@ -271,6 +271,16 @@ while an already-enabled pin stays put. A refusal (nothing pinned, or the
 pinned id doesn't resolve to a real scene) is returned as a stated reason,
 never a silent no-op — the silence is what read as broken in the first
 place.
+
+FORCE SCENE OVERRIDING A DISABLED SCENE IS NAMED, NOT SILENT (owner ask
+2026-08-18, temporary scene disable — SceneV2.disabled). Pinning a scene
+he's marked disabled is contradictory input from him in the moment — the
+pin still wins (he pressed it, he means it, same as Force Scene already
+overrides display_availability), but `fire_scene_by_id` marks the result
+`overrode_disabled=True` and this function forwards it as
+`force_scene_result.overrode_disabled` so the badge can say so, rather
+than either silently refusing the pin or silently pretending the scene
+was never disabled.
 """
 from __future__ import annotations
 
@@ -599,5 +609,13 @@ async def reconcile_force_scene_if_changed(previous: RoomControlState,
         return {"status": "skipped", "reason": fire_result["skipped"],
                 "scene_id": new_state.force_scene_scene_id,
                 "scene_name": fire_result.get("scene_name")}
-    return {"status": "fired", "scene_id": new_state.force_scene_scene_id,
-            "scene_name": scene.name}
+    result = {"status": "fired", "scene_id": new_state.force_scene_scene_id,
+              "scene_name": scene.name}
+    if fire_result.get("overrode_disabled"):
+        # The pin landed on a scene marked SceneV2.disabled — contradictory
+        # input from him (he disabled it, then pinned it anyway), so the
+        # pin is honoured (he pressed it, he means it) but the override is
+        # NAMED rather than silently applied, same "always state a reason"
+        # discipline as the skipped/error branches above.
+        result["overrode_disabled"] = True
+    return result

@@ -405,7 +405,8 @@ class TriggerEngine:
         room_mode = load_room_controls().display_mode
         existing = {s.id for s in scene_store.list_all()
                    if mode_availability.available_in_room_mode(
-                       s.display_availability, room_mode)}
+                       s.display_availability, room_mode)
+                   and not getattr(s, "disabled", False)}
         candidates = kernel.build_scene_candidates(
             config.entries, curves, config.affinity,
             genre_bucket=bridge.genre_bucket(), prev_id=None,
