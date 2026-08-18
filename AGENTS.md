@@ -1748,7 +1748,18 @@ pipeline (`fx/effects/twod.py`) has zero awareness of this — `r_width`/
 (`fx/effects/blackhole.py`'s infall spawn annulus landed almost entirely on
 the dead corner band — `fx/VENDOR.md` deviation #12, `docs/SPECTRA_SPEC.md`
 §76) after repeated prior agent confusion about this device's geometry; the
-skill exists so that doesn't happen again.
+skill exists so that doesn't happen again. **The boundary is
+direction-dependent, not a single radius** — its distance from center is
+~0.87 normalized-r at a flat edge's own midpoint-normal vs. ~1.13 at a
+corner vertex, so a scalar spawn radius can only coincide with the true
+edge at a handful of angles (found the hard way 2026-08-18, same §76: a
+hit-rate-maximizing scalar annulus read as spawning "several pixels" inside
+the visible edge everywhere except the tight end of that range).
+`fx/effects/blackhole.py`'s `HEX_SPAWN_VERTS`/`_hex_spawn_edge_radius`
+compute the boundary per spawn angle instead — see the skill's own new
+section for the derivation and why a hexagon's inradius is NOT "tangent at
+the edge and outside near the corners" (it's inside the polygon everywhere
+but the 6 tangent points, by definition).
 
 ## SPA `index.html` must revalidate every request — checking the server is not checking what the browser fetches
 

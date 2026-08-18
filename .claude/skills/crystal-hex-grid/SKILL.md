@@ -26,8 +26,12 @@ description: >
 Matrix category), or before trusting any measurement made against its full
 addressable rectangle.** This was written after fixing a real bug
 (fm/spectra-blackhole-hex-spawn, 2026-08-17: Blackhole's spawn radius put
-new blobs almost entirely on dead cells) — the surprises below are what
-actually went wrong while doing that, not a spec written in advance.
+new blobs almost entirely on dead cells) and extended after a follow-up bug
+in the SAME fix (fm/spectra-blackhole-spawn-at-edge, 2026-08-18: the
+hit-rate-maximizing spawn ring from the first fix pulled blobs too far
+inside the visible silhouette — see "The boundary is direction-dependent"
+below) — the surprises below are what actually went wrong while doing this
+work, not a spec written in advance.
 
 ## The one fact everything else follows from
 
@@ -106,15 +110,82 @@ vertical axis) and falls off sharply outside it, reaching exactly 0% by
 r≈1.2. There is no code anywhere that computes this boundary for you at
 runtime — it only exists as measured data against the stored profile.
 
+## The boundary is direction-dependent — there is no single "the edge" radius
+
+The density table above answers "how far out is dark", collapsed across all
+directions. That collapse hides the actual shape: **the true boundary's
+distance from center depends on which way you look.** Measured directly off
+`crystal-mapper.json`'s real-cell extents (`fx/effects/blackhole.py`'s
+`HEX_SPAWN_VERTS`, six vertices in the same normalized `(gx, gy)` space
+`do_once()` projects into):
+
+| direction                          | boundary distance (normalized r) |
+|-------------------------------------|-----------------------------------|
+| tightest — a flat edge's own midpoint-normal | ≈ **0.87** |
+| loosest — a corner vertex            | ≈ **1.13** |
+
+That's a ~30% swing. **Any single scalar radius is therefore wrong almost
+everywhere it's used** — it can coincide with the true boundary at a handful
+of angles at best, and will sit either well inside it (most directions, if
+you pick a number near the tight end) or well outside it (most directions,
+if you pick a number near the loose end). This is exactly how the original
+spawn-annulus bug happened, and exactly how the fix that followed it
+(pulling the annulus in to maximize hit-rate) overshot: `r≈0.85` sits right
+at the tight end, so it's a strong hit-rate number and *also* still deep
+inside the silhouette at every angle that isn't near the tight directions —
+"hit rate" and "sits at the boundary" are different objectives that only
+agree at the tightest point.
+
+**If a task needs something to sit at, or just outside, the visible edge in
+every direction it can fire — not maximize how often it lands on a lit
+pixel — the fix has to compute the boundary per angle, not pick a scalar.**
+`_hex_spawn_edge_radius(theta)` in `fx/effects/blackhole.py` does this: it's
+the convex hexagon's own support function (for each direction, the nearest
+of the 6 measured edge-lines actually facing that direction), evaluated in
+closed form — no lookup table, no runtime device-profile read. It's checked
+against the boundary measured directly off the device profile (max real-cell
+radius per 5° angular bin) to within ±0.06 normalized-r — lattice/
+quantization noise, not formula error — by
+`scripts/check_blackhole_hex_spawn.py`.
+
+**The inradius is not "tangent to the edge and outside near the corners" —
+it is *inside* the polygon everywhere except at the tangent points.** It is
+tempting to reach for "hexagon inradius" (apothem — perpendicular distance
+from center to an edge, ≈0.866× the circumradius for a *regular* hexagon)
+as a single number that's "tangent to the edge." A circle at that radius
+*is* tangent to each edge, but only at that edge's own midpoint — everywhere
+else, including toward every corner, the true boundary is *farther out*
+(up to the circumradius at the vertices themselves), so the inradius circle
+sits strictly inside the polygon there, never outside it. This is basic
+convex geometry (the incircle of any convex polygon is, by definition,
+contained in the polygon), and it's also empirically visible above: the
+"tightest" boundary distance (≈0.87, the inradius-like quantity for this
+irregular hex) is barely past the already-too-far-in 0.70–0.85 annulus — an
+inradius scalar would not meaningfully fix a "spawns too far inside" report,
+because it's still a single scalar with the same failure mode as any other:
+correct at a few angles, wrong (here, still too far in) everywhere else. If
+a task or a request describes wanting a "tangent to the edge" radius that's
+supposed to poke outside near the corners, that description is internally
+inconsistent — either it means "sits inside at the tangent points, further
+inside elsewhere" (the true behavior of an inradius scalar), or it actually
+means the per-angle boundary-following fix above, not a single number at
+all. This exact confusion showed up live once already (a request insisting
+on an inradius scalar with the "pokes outside near corners" justification,
+fm/spectra-blackhole-spawn-at-edge, 2026-08-18) — check the polygon
+geometry yourself (`scripts/check_blackhole_hex_spawn.py` or the reference
+ray-cast in `tests/test_blackhole_spawn_radius.py`) before trusting a claim
+shaped like this again, whatever its source.
+
 ## What this means for anything that spawns, travels, or measures coverage
 
 1. **Spawning or placing something at/near `r≈1` (the rectangle's rim) will
    land on a dead cell most of the time.** This was the actual bug: Black
    Hole's infall-mode spawn annulus was `(0.90, 1.05)` — a 26% real-pixel
    hit rate. Pulling it to `(0.70, 0.85)` (inside the flat 50% interior)
-   raised that to 50%, without changing anything else about the effect —
-   see `fx/effects/blackhole.py`'s `SPAWN_ANNULUS_MIN/MAX` and
-   `fx/VENDOR.md` deviation #12 for the fix and its reasoning.
+   raised that to 50%. But that fix optimized the wrong objective — see the
+   next section — and was superseded by a direction-dependent boundary in
+   `fx/effects/blackhole.py`'s `HEX_SPAWN_VERTS`/`_hex_spawn_edge_radius`;
+   `fx/VENDOR.md` deviation #12 has the full history.
 2. **A coverage or brightness measurement taken over the full rectangle is
    wrong by roughly a factor of 2664/976 ≈ 2.73** on this device — "40% of
    the panel is lit" measured against all 2,664 cells means something
@@ -179,8 +250,10 @@ grid = [mask[r*cols:(r+1)*cols] for r in range(rows)]
 ```
 
 Or run `.venv/bin/python scripts/check_blackhole_hex_spawn.py` (read-only,
-never writes) for the full density-by-radius table plus a live comparison
-of the old vs. new Blackhole spawn annulus against this exact data.
+never writes) for the full density-by-radius table, the closed-form
+per-angle boundary formula checked against the measured boundary, and a
+comparison across all three historical Blackhole spawn mechanisms against
+this exact data.
 
 ## Related
 
@@ -190,5 +263,8 @@ of the old vs. new Blackhole spawn annulus against this exact data.
   tuning a procedural effect.
 - `tools/gifsmith/device_profiles.py` — the extractor + `rle_to_mask`/
   `profile_mask` helpers this skill's numbers came from.
-- `fx/VENDOR.md` deviation #12 — the Blackhole spawn-annulus fix this skill
-  documents the reasoning behind.
+- `fx/VENDOR.md` deviation #12 — the Blackhole spawn-boundary fix (both
+  rounds) this skill documents the reasoning behind.
+- `fx/effects/blackhole.py`'s `HEX_SPAWN_VERTS`/`_hex_spawn_edge_radius` —
+  the per-angle boundary formula itself, and its own long comment, for the
+  full derivation.

@@ -1,4 +1,5 @@
 import logging
+import math
 
 import numpy as np
 import voluptuous as vol
@@ -30,22 +31,111 @@ DROP_RESET_S = 0.5       # post-burst ease of the horizon back to baseline
 PHASE_BURST_N = 24       # blobs in the drop explosion
 CHARGE_HALO_LEAD = 1.4   # halo (capture ring) growth vs the black disc
 
-# infall-mode (`reverse=False`) spawn annulus, in the same normalized-r units
-# as radius_scale (r=1 sits at the panel's own rectangular edge). This used
-# to be a fixed (0.90, 1.05) — right at/past the rim, i.e. the rectangle's
-# corners. That is invisible-on-arrival on any matrix virtual whose real
-# light doesn't fill its whole addressable rectangle: e.g. a hex-lattice
-# crystal panel is a flat 50% real-pixel density out to r<=0.85, falling to
-# ~20% by r=1.0 and 0% past r=1.2 (measured against
-# storage/device_profiles/crystal-mapper.json — see
-# scripts/check_blackhole_hex_spawn.py). Pulling the annulus in to
-# [0.70, 0.85] keeps every spawn inside that flat, fully-populated interior —
-# visible immediately, not after several frames of falling — while leaving
-# radius_scale/sx/sy (the effect's overall panel-filling scale) untouched, so
-# the fall from spawn down to the horizon/center still spans nearly the whole
-# panel exactly as before.
-SPAWN_ANNULUS_MIN = 0.70
-SPAWN_ANNULUS_MAX = 0.85
+# infall-mode (`reverse=False`) spawn boundary, in the same normalized-r
+# units as radius_scale (r=1 sits at the panel's own rectangular edge).
+#
+# History: fixed (0.90, 1.05) — right at/past the rim — spawned almost
+# entirely in dead corner gap on a hex-lattice matrix virtual (invisible
+# until a blob had fallen most of the way to the horizon). Pulling that in
+# to SPAWN_ANNULUS_MIN/MAX = (0.70, 0.85) maximized real-pixel hit rate
+# (scripts/check_blackhole_hex_spawn.py), but overshot: his live report,
+# 2026-08-18, was that blobs now spawn "several pixels" inside the visible
+# edge instead of arriving from it. Those two fixes were optimizing
+# different things — hit rate pulls inward, "arrives from the boundary"
+# does not — and hit rate was never the actual ask.
+#
+# The boundary itself is NOT a circle, so a single scalar can't hit it
+# everywhere. crystal-mapper's real-light silhouette is a hexagon inscribed
+# in its addressable rectangle (.claude/skills/crystal-hex-grid/SKILL.md) —
+# its distance from center genuinely depends on direction: ~0.87
+# normalized-r at a flat edge's own midpoint-normal, ~1.13 at a corner
+# vertex, a ~30% swing. Picking one number near the tight end (the
+# silhouette's own inradius-like minimum, ~0.87) leaves spawns deep inside
+# the silhouette at every other angle — numerically almost the same range
+# the too-far-in 0.70-0.85 annulus already covered, so it would barely move
+# the ring. Picking one number near the loose end (~1.13, the corners)
+# overshoots the flat-edge directions by ~30% into dead gap the rest of the
+# way around. A circle tangent to a convex hexagon's edges at their
+# midpoints (radius = the hexagon's inradius) sits INSIDE the hexagon
+# everywhere else, by definition — it can't poke outside toward the
+# corners, that direction is exactly where a fixed-radius circle falls
+# furthest short of a convex boundary. There is no scalar that is "tangent
+# to the edge" in more than the 6 directions where it happens to coincide;
+# the fix has to follow the boundary's own shape.
+#
+# HEX_SPAWN_VERTS are that boundary's true vertices, measured off the real
+# device profile (storage/device_profiles/crystal-mapper.json — the same
+# row/column real-cell extents scripts/check_blackhole_hex_spawn.py already
+# reads), in the same normalized (gx, gy) space Blackhole2d projects into
+# (gx=(x-cx)/sx, gy=(y-cy)/sy — see do_once). `_hex_spawn_edge_radius(theta)`
+# evaluates the polygon's own support function — for each direction, the
+# closest of the 6 edge-lines that direction can reach — to get the exact
+# per-direction boundary distance as a closed form, not a lookup table, so
+# it costs nothing extra per spawn. Verified against the boundary measured
+# directly off the device profile (max real-cell radius per 5-degree
+# angular bin) to within +/-0.06 normalized-r — lattice/quantization noise,
+# not formula error (scripts/check_blackhole_hex_spawn.py).
+#
+# SPAWN_EDGE_MARGIN_MIN/MAX then push OUT from that true per-direction
+# boundary by a further 0.02-0.12 — "just outside... or right in line with
+# the edge" (his words), a band relative to the local edge rather than an
+# absolute annulus. This is a WORSE real-pixel hit rate than the
+# maximize-hit-rate 0.70-0.85 annulus by design, reported alongside this
+# comment's own PR rather than silently regressed: a spawn a hair past the
+# true boundary starts dark and lights up the instant it falls back across
+# its own local edge, which is the arriving-from-outside look he asked for,
+# not a defect to tune back in.
+HEX_SPAWN_VERTS = (
+    (-0.5211, -1.0000),
+    (0.4366, -1.0000),
+    (1.0000, 0.0000),
+    (0.4366, 1.0000),
+    (-0.5211, 1.0000),
+    (-1.0000, 0.0000),
+)
+SPAWN_EDGE_MARGIN_MIN = 0.02
+SPAWN_EDGE_MARGIN_MAX = 0.12
+
+
+def _hex_spawn_faces():
+    """Precompute each HEX_SPAWN_VERTS edge as an outward unit normal (nx,
+    ny) plus its perpendicular distance `d` from the origin (center) —
+    the support-function form used by `_hex_spawn_edge_radius`."""
+    faces = []
+    count = len(HEX_SPAWN_VERTS)
+    for i in range(count):
+        x1, y1 = HEX_SPAWN_VERTS[i]
+        x2, y2 = HEX_SPAWN_VERTS[(i + 1) % count]
+        nx, ny = y2 - y1, -(x2 - x1)
+        norm = math.hypot(nx, ny)
+        nx, ny = nx / norm, ny / norm
+        d = nx * x1 + ny * y1
+        if d < 0:
+            nx, ny, d = -nx, -ny, -d
+        faces.append((nx, ny, d))
+    return faces
+
+
+_HEX_FACES = _hex_spawn_faces()
+_HEX_FACE_NX = np.array([f[0] for f in _HEX_FACES], dtype=np.float32)
+_HEX_FACE_NY = np.array([f[1] for f in _HEX_FACES], dtype=np.float32)
+_HEX_FACE_D = np.array([f[2] for f in _HEX_FACES], dtype=np.float32)
+
+
+def _hex_spawn_edge_radius(theta):
+    """Distance from center to the measured crystal-mapper hex silhouette
+    along each angle in `theta` (radians, any shape) — the convex-polygon
+    support function: the boundary in a given direction is the nearest of
+    the 6 edge-lines actually facing that direction."""
+    ux = np.cos(theta)
+    uy = np.sin(theta)
+    denom = (
+        _HEX_FACE_NX[:, None] * ux[None, :]
+        + _HEX_FACE_NY[:, None] * uy[None, :]
+    )
+    safe_denom = np.where(denom > 1e-6, denom, 1.0)
+    r = np.where(denom > 1e-6, _HEX_FACE_D[:, None] / safe_denom, np.inf)
+    return r.min(axis=0).astype(np.float32)
 
 
 class Blackhole2d(Twod, GradientEffect):
@@ -798,6 +888,9 @@ class Blackhole2d(Twod, GradientEffect):
             return
         s = slice(self.n, self.n + count)
         rng = self._rng
+        # theta drawn first (both branches want it) — infall mode needs it
+        # to look up the boundary at each particle's own spawn direction.
+        theta = rng.uniform(0.0, 2 * np.pi, count).astype(np.float32)
         if self.reverse:
             # With an event horizon, eruptions come from the horizon ring.
             inner = (
@@ -807,14 +900,14 @@ class Blackhole2d(Twod, GradientEffect):
             )
             self.p_r[s] = rng.uniform(inner, inner + 0.06, count)
         else:
-            # Annulus pulled in from the rim (see SPAWN_ANNULUS_* above) so
-            # simultaneous spawns scatter across a band instead of forming a
-            # dense ring at one radius, while staying inside a matrix
-            # virtual's actually-lit area.
-            self.p_r[s] = rng.uniform(
-                SPAWN_ANNULUS_MIN, SPAWN_ANNULUS_MAX, count
-            )
-        self.p_theta[s] = rng.uniform(0.0, 2 * np.pi, count)
+            # Just past the true per-direction hex boundary (see
+            # HEX_SPAWN_VERTS above) — evaluated per particle since the
+            # boundary itself depends on theta, not a single annulus.
+            edge_r = _hex_spawn_edge_radius(theta)
+            self.p_r[s] = edge_r + rng.uniform(
+                SPAWN_EDGE_MARGIN_MIN, SPAWN_EDGE_MARGIN_MAX, count
+            ).astype(np.float32)
+        self.p_theta[s] = theta
         self.p_age[s] = 0.0
         self.p_cap[s] = -1.0
         self.p_out[s] = 0.0
