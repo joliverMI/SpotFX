@@ -166,29 +166,55 @@ variables named `ledfx` (the core object handle) are untouched.
     stream, `_trigger_reconnect()`) on a device that was never frozen in the
     first place. No behaviour change — a plain accessor.
 
-12. `effects/blackhole.py`: the infall-mode (`reverse=False`) spawn annulus
-    (BEHAVIOUR CHANGE — PR fm/spectra-blackhole-hex-spawn) moved from a fixed
-    `(0.90, 1.05)` to new module constants `SPAWN_ANNULUS_MIN/MAX = (0.70,
-    0.85)`, in the same normalized-r units as `radius_scale` (r=1 = the
-    panel's own rectangular edge). The effect has no knowledge of which
-    addressable cells are real light vs a gap-mapped dummy device — it
-    spawns purely in (r, theta) space and lets fx/virtuals.py's segment
-    routing decide per pixel. On a hex-lattice matrix virtual (his real
-    `crystal-mapper`: 72x37 addressable, only 976/2664 = 36.6% real —
+12. `effects/blackhole.py`: the infall-mode (`reverse=False`) spawn location
+    (BEHAVIOUR CHANGE, two rounds).
+
+    Round 1 (PR fm/spectra-blackhole-hex-spawn, 2026-08-17): moved from a
+    fixed `(0.90, 1.05)` to a fixed `SPAWN_ANNULUS_MIN/MAX = (0.70, 0.85)`,
+    in the same normalized-r units as `radius_scale` (r=1 = the panel's own
+    rectangular edge). The effect has no knowledge of which addressable
+    cells are real light vs a gap-mapped dummy device — it spawns purely in
+    (r, theta) space and lets fx/virtuals.py's segment routing decide per
+    pixel. On a hex-lattice matrix virtual (his real `crystal-mapper`:
+    72x37 addressable, only 976/2664 = 36.6% real —
     `storage/device_profiles/crystal-mapper.json`) real-pixel density is a
     flat 50% out to r<=0.85 and collapses to ~20% by r=1.0, 0% past r=1.2 —
     the old annulus spawned almost entirely in that near-zero-density corner
     band, so a fresh blob was invisible until it had fallen most of the way
-    to the horizon. `radius_scale`/`sx`/`sy` (the effect's overall
+    to the horizon.
+
+    Round 2 (PR fm/spectra-blackhole-spawn-at-edge, 2026-08-18): the round-1
+    fix maximized real-pixel hit rate, which is a different objective from
+    what he actually asked for — his live report was that blobs now spawn
+    "several pixels" inside the visible edge instead of arriving from it.
+    The hex silhouette's distance from center genuinely depends on
+    direction (~0.87 normalized-r at a flat edge's own midpoint-normal,
+    ~1.13 at a corner vertex — see `.claude/skills/crystal-hex-grid/
+    SKILL.md`), so no single scalar can sit "at the boundary" in more than a
+    few directions. `SPAWN_ANNULUS_MIN/MAX` are retired; the infall branch
+    now computes the boundary per spawn angle via `HEX_SPAWN_VERTS` (the
+    silhouette's true vertices, measured off the same device profile) and
+    `_hex_spawn_edge_radius(theta)` (a closed-form convex-polygon support
+    function, checked against the boundary measured directly off the
+    profile to within ±0.06 normalized-r), then adds a small outward margin
+    (`SPAWN_EDGE_MARGIN_MIN/MAX = 0.02-0.12`). Real-pixel hit rate for this
+    mechanism (~5%) is LOWER than round 1's (~50%) by design — a spawn just
+    past the true boundary starts dark and lights up the instant it falls
+    back across its own local edge on the next inbound step, which is the
+    arriving-from-outside look he asked for.
+
+    Both rounds leave `radius_scale`/`sx`/`sy` (the effect's overall
     panel-filling scale, and the fall/travel distance from spawn to
-    horizon/center) are untouched — only where blobs *start* moved, not how
+    horizon/center) untouched — only where blobs *start* moved, not how
     much of the panel the effect uses. Evidence:
-    `scripts/check_blackhole_hex_spawn.py` (real-density-by-radius against
-    the live device profile); frame-level proof:
+    `scripts/check_blackhole_hex_spawn.py` (real-density-by-radius, the
+    per-angle formula checked against the device profile, and all three
+    historical mechanisms' hit rates); frame-level proof:
     `tests/test_blackhole_spawn_radius.py`. Not yet ported back to the fork
-    source at `/home/javi/ledfx-src` — pulling the annulus in is arguably
-    still the wrong default for a genuinely full-rectangle matrix virtual,
-    which SpotFX doesn't have one of today; revisit if one is ever added.
+    source at `/home/javi/ledfx-src` — this whole mechanism is tuned
+    specifically against `crystal-mapper`'s measured hex silhouette and has
+    no meaning for a genuinely full-rectangle matrix virtual, which SpotFX
+    doesn't have one of today; revisit if one is ever added.
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
