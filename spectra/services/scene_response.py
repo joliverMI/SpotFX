@@ -48,12 +48,21 @@ Per event, fed by the bridge with the fire's intensity:
                   param (shared registry truth). Scale s moves the target
                   to baseline + (declared − baseline)·s against the
                   carried-now baseline, clamped to the param's registry
-                  range; ×1 lands the declared value verbatim. PERMANENT
-                  carries — the landed value is the new baseline drift
-                  resumes from. MOMENTARY schedules a return: the release
-                  glides back to the baseline AS CARRIED AT FLUSH TIME (a
-                  creep's current wander position, or the tracked param
-                  baseline) — the spike never moves the baseline.
+                  range; ×1 lands the declared value verbatim. Landing
+                  respects the SAME registry smooth gate as a dice re-roll
+                  (fixed 2026-08-17, _move_params): a registry-smooth
+                  param glides over DICE_REROLL_GLIDE_MS, anything else
+                  still jumps — a patch on a smooth param used to always
+                  jump regardless, e.g. STAR's "Flare patch 0.7–1" setting
+                  `star` (smooth=true) to 0.0 every high-intensity flare.
+                  PERMANENT carries — the landed value is the new baseline
+                  drift resumes from. MOMENTARY schedules a return: the
+                  release glides back to the baseline AS CARRIED AT FLUSH
+                  TIME (a creep's current wander position, or the tracked
+                  param baseline) — the spike never moves the baseline;
+                  the release itself was already an unconditional glide
+                  (flush_releases, PULSE_RELEASE_S) before this fix and is
+                  unaffected by it.
        momentary/permanent gain — the brightness envelope around the
                   carried baseline at effective gain 1 + (gain − 1)·s:
                   MOMENTARY spikes to baseline×effective and glides back
@@ -277,7 +286,7 @@ class ResponseEngine:
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
-        glides: dict[str, dict[str, Any]] = {}   # vid → params, eased (dice re-roll only)
+        glides: dict[str, dict[str, Any]] = {}   # vid → params, eased (registry smooth params — dice re-rolls and explicit patches alike)
         kind_records: list[dict] = []
 
         if dice:   # one fresh roll per fire, however many dice kinds attach
@@ -289,11 +298,18 @@ class ResponseEngine:
         for kind, scale in moves:
             kind_records.append({
                 "name": kind.name, "type": kind.type, "scale": scale,
-                "moved": self._move_params(kind, scale, jumps, carry)})
+                "moved": self._move_params(kind, scale, jumps, glides, carry)})
         # An explicit param-patch kind (moves, above — the legacy
         # reroll→patch precedence) targeting the same param on the same
-        # event must still win and land instantly; drop any dice-only
-        # glide target a later patch also claims rather than racing it.
+        # event must still win over a dice re-roll: since _move_params now
+        # sorts into jumps/glides by the same smooth verdict dice used for
+        # that param, the patch's dict.update() naturally overwrites dice's
+        # value in whichever dict both land in (no cross-dict race is
+        # possible — smooth is a static per-param registry lookup, so dice
+        # and a patch on the same param always agree which dict it's in).
+        # This cleanup is now a defensive no-op kept for exactly the case
+        # that invariant breaks: any pname that landed in jumps can't also
+        # be a live glide target.
         for vid, patched in jumps.items():
             for pname in patched:
                 glides.get(vid, {}).pop(pname, None)
@@ -490,13 +506,41 @@ class ResponseEngine:
         return out
 
     def _move_params(self, kind: FlareKind, scale: float,
-                     jumps: dict, carry: dict) -> list[dict]:
+                     jumps: dict, glides: dict, carry: dict) -> list[dict]:
         """The band-driven path (on_event): collects this kind's moves into
-        the shared `jumps` dict so every kind in one surge lands in a
-        single instant PUT per virtual (unchanged behaviour)."""
+        the shared `jumps`/`glides` dicts, split by the SAME registry
+        smooth gate _reroll already applies to dice re-rolls (fixed
+        2026-08-17: an explicit param-patch kind targeting a registry-smooth
+        param — e.g. STAR's "Flare patch 0.7–1" setting `star` to 0.0 — was
+        landing an instant jump unconditionally; the smooth gate only ever
+        covered dice re-rolls, not this path, so `star` kept snapping on
+        every flare in that band even after the dice-reroll fix, exactly as
+        scripts/check_spectra.py's own "unchanged by the smoothing fix"
+        assertion documented). A non-smooth target on the same kind (e.g.
+        the same patch's `spin`) still jumps — the split is per-param, not
+        per-kind. Because a param's smooth verdict is a static registry
+        lookup, dice and a patch targeting the SAME param always agree on
+        which dict it lands in — precedence (patch overrides dice) falls
+        out of plain dict.update() ordering (moves execute after dice),
+        with no risk of a value landing in both."""
         landed: list[dict] = []
         for vid, moves in self._compute_param_moves(kind, scale, carry).items():
-            jumps.setdefault(vid, {}).update(moves)
+            state = self.conductor.virtuals.get(vid)
+            instant: dict[str, Any] = {}
+            eased: dict[str, Any] = {}
+            for pname, value in moves.items():
+                meta = (device_model.get_param_meta(state.effect_type, pname)
+                        if state is not None else None)
+                mkind, _lo, _hi = binding_resolver.kind_for_meta(meta)
+                if mkind == binding_resolver.KIND_NUMERIC and meta is not None \
+                        and meta.get("smooth"):
+                    eased[pname] = value
+                else:
+                    instant[pname] = value
+            if instant:
+                jumps.setdefault(vid, {}).update(instant)
+            if eased:
+                glides.setdefault(vid, {}).update(eased)
             landed.append({"virtual_id": vid, "params": moves})
         return landed
 

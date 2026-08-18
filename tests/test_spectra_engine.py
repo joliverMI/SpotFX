@@ -181,9 +181,17 @@ def test_drift_trajectories_on_the_harness(tmp_path):
 
 # ── proof 2: a surge jump lands next frame and carries into the drift ────────
 
-def test_surge_jump_lands_next_frame_and_carries(tmp_path):
+def test_surge_patch_eases_and_carries(tmp_path):
+    """gradient_scale is registry smooth=true (config/effect_params.json) —
+    since the 2026-08-17 follow-up fix (scene_response._move_params), an
+    explicit param-patch kind on a smooth param eases over
+    DICE_REROLL_GLIDE_MS instead of landing as a 1ms jump. Renamed from
+    test_surge_jump_lands_next_frame_and_carries, which this test used to
+    be before that fix — the CARRY/reflect-off-the-bound proof is
+    unaffected by jump vs glide, only the landing mechanics changed."""
     from spectra.models.scene import (DriftRef, DriftSpec, FlareBand,
                                       ResponseSpec, SceneDeviceConfig, SceneV2)
+    from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
     _categories_fixture(tmp_path)
     scene = SceneV2(name="Surging", devices=[SceneDeviceConfig(
         target_kind="virtual", target=VID, effect_type="concentric",
@@ -207,8 +215,12 @@ def test_surge_jump_lands_next_frame_and_carries(tmp_path):
 
                 record = await responder.on_event("drop", 0.9)
                 assert record["result"] == "applied"
-                # The 1 ms tween lands on the NEXT render frame — the jump.
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                glide = [w for w in executor.writes if w["kind"] == "glide"][-1]
+                assert glide["params"]["gradient_scale"] == pytest.approx(1.8)
+                assert glide["duration_ms"] == DICE_REROLL_GLIDE_MS
+                # render past the glide's own duration for it to land
+                frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
+                headless.render_frames(virtual, frames, clock=clock, dt=1 / 60)
                 assert effect._config["gradient_scale"] == pytest.approx(1.8)
 
                 # CARRY: the wander resumes from the surged point and the
@@ -717,9 +729,17 @@ def test_effect_selection_on_the_harness(tmp_path, monkeypatch):
 # PERMANENT lands become the baseline drift carries from.
 
 def test_flare_kinds_semantics_on_the_harness(tmp_path):
+    """gradient_scale/power_multiplier/brightness are all registry
+    smooth=true on concentric, so every kind's landing below eases over
+    DICE_REROLL_GLIDE_MS (2026-08-17 follow-up fix) rather than jumping —
+    each post-fire assertion renders past that duration before reading
+    effect._config; state-only assertions (param_baseline, mechanism
+    position, executor.writes contents) are synchronous and unaffected."""
     from spectra.models.scene import (DriftRef, DriftSpec, FlareBand,
                                       FlareKind, ResponseSpec,
                                       SceneDeviceConfig, SceneV2)
+    from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
+    glide_frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
     _categories_fixture(tmp_path)
     scene = SceneV2(
         name="Kinds",
@@ -760,7 +780,7 @@ def test_flare_kinds_semantics_on_the_harness(tmp_path):
                 record = await responder.on_event("flare", 0.5)
                 assert record["result"] == "applied"
                 assert [k["name"] for k in record["kinds"]] == ["Anchor"]
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
                 assert effect._config["power_multiplier"] == pytest.approx(0.8)
                 mech = conductor.mechanisms[0]
                 assert mech.position == pytest.approx(0.8)
@@ -777,7 +797,7 @@ def test_flare_kinds_semantics_on_the_harness(tmp_path):
                 record = await responder.on_event("flare", 0.9)
                 assert {k["name"] for k in record["kinds"]} \
                     == {"Slam", "Nudge"}
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
                 assert effect._config["gradient_scale"] \
                     == pytest.approx(1.0 + (1.8 - 1.0) * 1.3)   # 2.04
                 assert effect._config["brightness"] \
@@ -818,9 +838,16 @@ def test_flare_kinds_semantics_on_the_harness(tmp_path):
 # a creep that kept wandering DURING the hold.
 
 def test_momentary_target_expressions_and_chosen_hold_on_the_harness(tmp_path):
+    """gradient_scale/power_multiplier are registry smooth=true on
+    concentric, so Dip/Flash's spikes ease over DICE_REROLL_GLIDE_MS
+    (2026-08-17 follow-up fix) rather than jumping — render past that
+    before reading effect._config; the hold-group/carry mechanics below
+    read conductor/executor state directly and are unaffected."""
     from spectra.models.scene import (DriftRef, DriftSpec, FlareBand,
                                       FlareKind, ResponseSpec,
                                       SceneDeviceConfig, SceneV2)
+    from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
+    glide_frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
     _categories_fixture(tmp_path)
     scene = SceneV2(
         name="Targets",
@@ -878,7 +905,7 @@ def test_momentary_target_expressions_and_chosen_hold_on_the_harness(tmp_path):
                 assert dip_target == pytest.approx(0.9 - 0.15)
                 assert 1.4 <= flash_target <= 1.6
 
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
                 assert effect._config["power_multiplier"] == pytest.approx(dip_target)
                 assert effect._config["gradient_scale"] == pytest.approx(flash_target)
 
