@@ -783,6 +783,21 @@ concept, so legacy's group-member-rotation half has nothing to port to.
 Spec: the Force Scene section of `scripts/check_spectra.py` +
 `tests/test_room_controls.py::test_force_scene_redirects_every_automatic_pick`.
 
+**The redirect above is passive — it only fires when something else was
+already about to pick a scene, and enabling Force Scene also sets
+`bridge.sequencer_deferral()` to defer the sequencer's own rolls; on a
+song with no triggers/analysis, nothing was ever going to fire, so the
+pin sat there doing nothing and looked broken (his live report,
+2026-08-18).** `room_controls.reconcile_force_scene_if_changed`
+(same one-choke-point PUT-triggered shape as `reconcile_ambient_if_changed`/
+`reconcile_dark_light_if_changed`, called from `PUT /api/room-controls`)
+fires the pin immediately on the edit that enables it or repins a
+different scene while already enabled — never on an unrelated field
+re-save with the pin unchanged. Always returns a stated
+fired/skipped/error reason (`force_scene_result` in the PUT response,
+`ForceSceneResult` in `types.ts`, surfaced as a badge in
+`RoomControlsBar.tsx`) — never a silent no-op.
+
 **Ambient's mode precedence gate** — three settings, in the Admiral's own
 language (`RoomControlState.ambient_mode: "off"|"always"|"auto"`,
 `spectra/services/ambient_music_gate.py`, UI a `RoomControlsBar.tsx`

@@ -250,6 +250,27 @@ ambient_mode/_color here are Ambient's alone.
 
 Storage: storage/spectra/room_controls.json — same atomic tmp+replace
 discipline as color_journey.py's room_color.json.
+
+FORCE SCENE IS PASSIVE BY CONSTRUCTION — IT MUST ALSO ACT (fixed
+2026-08-18, his live report: "I'm trying to test black hole in light
+mode... using [Force Scene] to do it and nothing is happening... there's
+a song playing with no Triggers on it"). `fire_scene_by_id`'s redirect
+only fires when SOMETHING ELSE was already about to pick a scene — and
+enabling Force Scene also sets `bridge.sequencer_deferral()` to
+"force_scene", stopping the sequencer's own rolls. On a song with no
+triggers and no analysis, nothing was ever going to fire, so the redirect
+never got a chance to run: the control looked dead, but the mechanism was
+working exactly as ported — it was just never given an occasion to act.
+`reconcile_force_scene_if_changed` below closes that gap the same way
+`reconcile_ambient_if_changed`/`reconcile_dark_light_if_changed` already
+do for their own controls: called from the PUT /api/room-controls handler
+after the new state is saved, it fires the pinned scene IMMEDIATELY the
+instant enabling the pin (or repinning a different scene while already
+enabled) is the edit that changed — never on an unrelated field re-save
+while an already-enabled pin stays put. A refusal (nothing pinned, or the
+pinned id doesn't resolve to a real scene) is returned as a stated reason,
+never a silent no-op — the silence is what read as broken in the first
+place.
 """
 from __future__ import annotations
 
@@ -525,3 +546,58 @@ async def reconcile_dark_light_if_changed(previous: RoomControlState,
                                       new_state.dark_light_shield_virtuals,
                                       new_state.display_light_bg_color,
                                       new_state.display_light_bg_brightness)
+
+
+async def reconcile_force_scene_if_changed(previous: RoomControlState,
+                                            new_state: RoomControlState) -> Optional[dict]:
+    """Force Scene's ACTIVE half of a room-controls save — same
+    one-choke-point PUT-triggered shape as reconcile_ambient_if_changed/
+    reconcile_dark_light_if_changed above. See the module docstring's
+    "FORCE SCENE IS PASSIVE BY CONSTRUCTION" entry for why this exists:
+    fire_scene_by_id's redirect only fires on a pick something else was
+    already about to make, and enabling the pin also defers the
+    sequencer — so a song with no triggers never gave the redirect an
+    occasion to run. This fires the pinned scene directly, right here,
+    the instant the pin's OWN edit is what changed.
+
+    Fires only on: force_scene_enabled flipping False -> True, or
+    force_scene_scene_id changing while already enabled. Re-saving an
+    unrelated field while an already-enabled, unchanged pin stays put
+    must NOT re-fire — same "only on an actual edit" discipline as the
+    other two reconciles, and the same reason a scene shouldn't jump
+    every time he nudges the brightness slider.
+
+    Always returns a dict naming what happened — fired, or skipped/error
+    with a stated reason — never None-on-refusal the way "nothing to
+    reconcile" is signalled elsewhere, because a Force Scene edit is
+    always an explicit act that deserves a visible outcome; None here
+    means only "this edit wasn't a pin change at all."""
+    became_enabled = new_state.force_scene_enabled and not previous.force_scene_enabled
+    repinned_while_enabled = (
+        new_state.force_scene_enabled and previous.force_scene_enabled
+        and new_state.force_scene_scene_id != previous.force_scene_scene_id
+    )
+    if not (became_enabled or repinned_while_enabled):
+        return None
+    if not new_state.force_scene_scene_id:
+        return {"status": "skipped", "reason": "no scene pinned"}
+    from spectra.services import scene_store
+    scene = scene_store.get_by_id(new_state.force_scene_scene_id)
+    if scene is None:
+        return {"status": "skipped", "reason": "pinned scene not found"}
+    from spectra.services.engine import bridge
+    from spectra.services.scene_sequencer import fire_scene_by_id
+    intensity = bridge.intensity()
+    if intensity is None:
+        intensity = 0.5
+    try:
+        fire_result = await fire_scene_by_id(new_state.force_scene_scene_id,
+                                             intensity=intensity)
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc)}
+    if fire_result.get("skipped"):
+        return {"status": "skipped", "reason": fire_result["skipped"],
+                "scene_id": new_state.force_scene_scene_id,
+                "scene_name": fire_result.get("scene_name")}
+    return {"status": "fired", "scene_id": new_state.force_scene_scene_id,
+            "scene_name": scene.name}

@@ -591,9 +591,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'force-scene',
         title: 'Force Scene — hold one scene',
-        keywords: 'force scene hold pin lock stuck stay same scene forever pick redirect reassert',
+        keywords: 'force scene hold pin lock stuck stay same scene forever pick redirect reassert immediate now activate',
         body: [
-          'Ported from the legacy Now Playing "Force Scene" control, same behaviour: turn it on and pick a scene, and every scene the room would otherwise pick automatically — a sequencer roll, a trigger firing, or the automatic change on a song transition — fires that scene instead. It\'s a redirect, not a pause: the room keeps changing on the usual cadence, it just always lands on the scene you pinned, at the intensity/colours that pick would normally have used.',
+          'Turning it on (or picking a different scene while it\'s already on) fires that scene IMMEDIATELY — you don\'t have to wait for a song transition or a trigger to land. On top of that, it also holds: every scene the room would otherwise pick automatically from then on — a sequencer roll, a trigger firing, or the automatic change on a song transition — fires the pinned scene instead, at the intensity/colours that pick would normally have used.',
+          'If nothing happens, look for the badge under the picker — it always says why: "fired" names the scene that just activated; "not fired" means nothing was pinned yet, or the pinned scene no longer exists.',
           'It does NOT touch a manual Fire from the Scenes page editor — that\'s an explicit single fire, not the system picking a scene, so it always fires exactly the scene you pressed Fire on.',
           'Turn Force Scene off to let the sequencer/triggers pick freely again — nothing about the scene you were holding is changed or deleted, it just stops being reasserted.',
         ],

@@ -447,10 +447,31 @@ export interface AmbientHueGroup {
   name: string;
 }
 
+/** What happened to Force Scene's pin on the last room-controls save
+ * (spectra/services/room_controls.py's reconcile_force_scene_if_changed) —
+ * present on PUT /room-controls's response only when the edit was a pin
+ * change (enabling it, or repinning a different scene while already
+ * enabled). fire_scene_by_id's own redirect is passive — it only fires
+ * when something else was already about to pick a scene, so on a song
+ * with no triggers the pin could sit there doing nothing. This is the fix:
+ * the pinned scene fires directly on the pinning edit. "fired" is a real
+ * immediate activation; "skipped" means nothing was pinned yet, or the
+ * pinned id doesn't resolve to a real scene — always named, never a
+ * silent no-op; "error" means the fire itself raised. Re-saving an
+ * unrelated field with the pin unchanged reports nothing (no key on the
+ * response at all) — it wasn't a pin edit. */
+export interface ForceSceneResult {
+  status: 'fired' | 'skipped' | 'error';
+  scene_id?: string;
+  scene_name?: string;
+  reason?: string;
+}
+
 export interface RoomControlsSaveResult extends RoomControlState {
   status: 'saved';
   ambient_result?: AmbientResult;
   dark_light_result?: DarkLightResult;
+  force_scene_result?: ForceSceneResult;
 }
 
 /** Device-preview strip (data/spectra-device-preview-plan/report.md).
