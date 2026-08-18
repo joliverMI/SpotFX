@@ -773,10 +773,16 @@ check("star" not in reroll_jump["params"]
       "each re-rolled param lands on exactly one of jump/glide, never both")
 check(all("spin" not in w["params"] for w in jumps + glides0),
       "re-roll leaves ⚡ (non-random) bindings alone")
-patch_jumps = [w for w in jumps if "twist" in w["params"]]
-check({w["virtual_id"] for w in patch_jumps} == {"v-m1", "v-m2", "v-m3"}
-      and all(w["params"]["twist"] == 0.9 for w in patch_jumps),
-      "patch broadcast: 'twist' lands on every virtual whose effect has it")
+patch_glides = [w for w in glides0 if "twist" in w["params"]]
+check({w["virtual_id"] for w in patch_glides} == {"v-m1", "v-m2", "v-m3"}
+      and all(w["params"]["twist"] == 0.9 for w in patch_glides)
+      and all(w["duration_ms"] == DICE_REROLL_GLIDE_MS for w in patch_glides),
+      "patch broadcast: 'twist' (registry smooth=true) lands on every "
+      "virtual whose effect has it, eased over DICE_REROLL_GLIDE_MS — "
+      "2026-08-17 fix: an explicit param-patch kind on a smooth param now "
+      "glides same as a dice re-roll would, never an instant jump")
+check(all("twist" not in w["params"] for w in jumps),
+      "'twist' never also lands as an instant jump alongside its glide")
 pulse_jumps = [w for w in jumps if set(w["params"]) == {"brightness"}]
 check(len(pulse_jumps) == 3 and all(w["params"]["brightness"] == 1.0
                                     for w in pulse_jumps),
@@ -862,11 +868,12 @@ check(abs(conductor2.virtuals["v-m1"].brightness_baseline - held * 0.5) < 1e-6,
 record = asyncio.run(responder.on_event("drop", 0.9))
 check(record["phase"]["ramp_ms"] == 400,
       "drop stays short — it's the snap (400 ms ramp)")
-drop_jump = [w for w in exec2.writes if w["kind"] == "jump"
-             and "spin" in w["params"]][-1]
-check(drop_jump["params"]["spin"] == 1.0
+drop_glide = [w for w in exec2.writes if w["kind"] == "glide"
+              and "spin" in w["params"]][-1]
+check(drop_glide["params"]["spin"] == 1.0
       and not any("ghost_param" in w["params"] for w in exec2.writes),
-      "drop patch lands 'spin'; a key no effect carries lands nowhere")
+      "drop patch lands 'spin' (registry smooth=true since 2026-08-17) as "
+      "a glide; a key no effect carries lands nowhere")
 record = asyncio.run(responder.on_event("drop", 0.3))
 check(record["result"] == "phase_only",
       "drop below its band: the ARC still runs (the original fired the "
@@ -1300,11 +1307,13 @@ check(set(by_kind) == {"Slam", "Colour Roll"}
       "the band SELECTS its named kinds and states their ×1.3 scale")
 tw_hi = float(device_model.get_param_meta("radial", "twist")["max"])
 expected_twist = min(tw_hi, 0.25 + (0.9 - 0.25) * 1.3)
-twist_jump = [w for w in exec2.writes if w["kind"] == "jump"
-              and "twist" in w["params"]][0]
-check(abs(twist_jump["params"]["twist"] - expected_twist) < 1e-9,
+twist_spike = [w for w in exec2.writes if w["kind"] == "glide"
+               and "twist" in w["params"]][0]
+check(abs(twist_spike["params"]["twist"] - expected_twist) < 1e-9
+      and twist_spike["duration_ms"] == DICE_REROLL_GLIDE_MS,
       f"scale ×1.3 moves the spike PAST the declared value along the "
-      f"baseline excursion, registry-clamped ({expected_twist:g})")
+      f"baseline excursion, registry-clamped ({expected_twist:g}); twist "
+      f"is registry smooth=true so the spike itself eases in, not a jump")
 peak = max(0.0, min(1.0, 0.65 * (1.0 + 0.5 * 1.3)))
 check(by_kind["Slam"]["gain_envelope"][0]["peak"] == round(peak, 4),
       "gain scales by excursion: 1 + (gain − 1)·1.3, clamped at full")
@@ -1325,6 +1334,82 @@ check(back["params"]["twist"] == 0.25
       and back["params"]["brightness"] == 0.9,
       "the release returns the spike to the baseline AS CARRIED NOW — "
       "twist to its own, brightness to the colour roll's landing")
+
+# ── STAR's two reverse flares (owner ask 2026-08-17): permanent + 500ms
+# momentary, both targeting `spin` (radial's own signed direction+speed
+# param — spin_sign is inert under SPECTRA, see config/effect_params.json's
+# own note). Proven here against the SAME synthetic radial fixture
+# (resp_base's device shape), not live storage — scripts/
+# add_star_reverse_flares.py carries the identical kind shapes.
+reverse_direction_kind = {
+    "name": "Reverse Direction", "type": "permanent", "jump": None,
+    "params": {"spin": {"mode": "absolute", "value": -0.55}}, "gain": 1.0,
+    "hold_ms": None,
+}
+reverse_momentary_kind = {
+    "name": "Reverse Momentarily (500ms)", "type": "momentary", "jump": None,
+    "params": {"spin": {"mode": "absolute", "value": -0.55}}, "gain": 1.0,
+    "hold_ms": 500,
+}
+check(FlareKind(**reverse_direction_kind).jump is None
+      and FlareKind(**reverse_momentary_kind).jump is None,
+      "neither reverse kind carries a jump field — structurally cannot "
+      "re-roll STAR's dice-bound star/edges (FlareKind._shape forbids "
+      "jump on a non-drift_jump kind)")
+
+rev = SceneV2(**{**{k: v for k, v in resp_base.items()
+                    if k not in ("responses", "id", "flare_kinds")},
+                 "flare_kinds": [reverse_momentary_kind, reverse_direction_kind],
+                 "responses": {"flare": {"bands": [
+                     {"intensity_min": 0.0, "intensity_max": 0.5,
+                      "kinds": {"Reverse Momentarily (500ms)": 1.0}},
+                     {"intensity_min": 0.5, "intensity_max": 1.0,
+                      "kinds": {"Reverse Direction": 1.0}},
+                 ]}}})
+rev_writes = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(rev, FireContext(0.5, rng=Random(3))))
+conductor2.on_scene_fire(rev, rev_writes)
+spin_before = conductor2.virtuals["v-m1"].param_baseline.get("spin")
+
+exec2.writes.clear()
+rec_mom = asyncio.run(responder.on_event("flare", 0.3))
+check({k["name"] for k in rec_mom["kinds"]} == {"Reverse Momentarily (500ms)"},
+      "Reverse Momentarily (500ms) is the only kind attached at 0.3")
+mom_spike = [w for w in exec2.writes if "spin" in w["params"]]
+check(len(mom_spike) == 3 and all(w["kind"] == "glide" for w in mom_spike)
+      and all(w["params"]["spin"] == -0.55 for w in mom_spike)
+      and all(w["duration_ms"] == DICE_REROLL_GLIDE_MS for w in mom_spike),
+      "the 500ms reverse EASES to -0.55 (spin retagged smooth=true "
+      "2026-08-17) — a jump here would be the exact snap this scene's "
+      "fix was for")
+check(conductor2.virtuals["v-m1"].param_baseline.get("spin") == spin_before,
+      "MOMENTARY reverse never moves spin's baseline")
+check(all("star" not in w["params"] and "edges" not in w["params"]
+          for w in exec2.writes),
+      "the momentary reverse touches only spin — no star/edges write of "
+      "any kind lands, so it cannot reintroduce the dice-reroll snap")
+asyncio.run(responder.flush_releases())
+mom_release = [w for w in exec2.writes if w["kind"] == "glide"
+              and "spin" in w["params"]][-1]
+check(mom_release["params"]["spin"] == spin_before,
+      "the 500ms reverse RELEASES back to spin's carried baseline, "
+      "unchanged since the spike never carried")
+
+exec2.writes.clear()
+rec_perm = asyncio.run(responder.on_event("flare", 0.7))
+check({k["name"] for k in rec_perm["kinds"]} == {"Reverse Direction"},
+      "Reverse Direction is the only kind attached at 0.7")
+perm_writes = [w for w in exec2.writes if "spin" in w["params"]]
+check(len(perm_writes) == 3 and all(w["kind"] == "glide" for w in perm_writes)
+      and all(w["params"]["spin"] == -0.55 for w in perm_writes),
+      "Reverse Direction EASES spin to -0.55, same smooth gate as the "
+      "500ms kind")
+check(conductor2.virtuals["v-m1"].param_baseline.get("spin") == -0.55,
+      "Reverse Direction CARRIES — -0.55 becomes spin's new baseline, "
+      "matching the model's own permanent-kind contract")
+check(all("star" not in w["params"] and "edges" not in w["params"]
+          for w in exec2.writes),
+      "Reverse Direction touches only spin too")
 
 # ── the bridge: classification, feeds, deferral split, RAW section energy ────
 from spectra.services import analysis_reader
@@ -1543,7 +1628,7 @@ for name in SEVEN:
                        for d in sc.devices)}
     landed = {}
     for w in exec3.writes:
-        if w["kind"] == "jump":
+        if w["kind"] in ("jump", "glide"):   # smooth params glide since 2026-08-17
             landed.update(w["params"])
     check(rec["result"] == "applied" and expected
           and all(landed.get(k) == v for k, v in expected.items()),
@@ -1745,12 +1830,19 @@ async def _no_flare_moves_star_edges() -> None:
                              .index("radial")]["virtual_id"]
     baseline_edges = cond4.virtuals[matrix_vid].param_baseline.get("edges")
     star_reroll_seen = False
-    # (event, write-kind) for every star write on the matrix virtual — low/
-    # mid bands have no explicit star patch (pure dice re-roll: must ease);
-    # the 0.7-1 bands' "Flare/Drop patch 0.7-1" kinds explicitly pin star
-    # to 0.0 (the legacy reroll->patch precedence: the patch still wins and
-    # still jumps, unchanged by the smoothing fix below).
+    # (event, write-kind) for every star/spin write on the matrix virtual —
+    # low/mid bands have no explicit star patch (pure dice re-roll: must
+    # ease); the 0.7-1 bands' "Flare/Drop patch 0.7-1" kinds explicitly pin
+    # star to 0.0 AND spin to 0.55. Historically the patch still won over
+    # the dice re-roll's glide and landed as an instant jump regardless of
+    # star's own smooth=true tag — the "unchanged by the smoothing fix"
+    # limitation that fix's own spec explicitly called out (the smoothing
+    # only touched PURE dice re-rolls, _reroll, never a patch's own
+    # ParamTarget write via _move_params). Fixed 2026-08-17 (this same
+    # pass, scene_response._move_params): a patch on a registry-smooth
+    # param now eases too, closing the door this test used to prove open.
     star_writes: list[tuple[str, float, str]] = []
+    spin_writes: list[tuple[str, float, str]] = []
     for cls, intensity in (("flare", 0.1), ("flare", 0.5), ("flare", 0.97),
                            ("drop", 0.97)):
         before = len(exec4.writes)
@@ -1763,6 +1855,8 @@ async def _no_flare_moves_star_edges() -> None:
             if w["virtual_id"] == matrix_vid and "star" in w["params"]:
                 star_reroll_seen = True
                 star_writes.append((cls, intensity, w["kind"]))
+            if w["virtual_id"] == matrix_vid and "spin" in w["params"]:
+                spin_writes.append((cls, intensity, w["kind"]))
     check(star_reroll_seen,
           "STAR (migrated): 'star' still re-rolls on ordinary flares — "
           "sticky excludes edges specifically, Dice Re-roll otherwise "
@@ -1778,10 +1872,17 @@ async def _no_flare_moves_star_edges() -> None:
           "(no band patch overrides it at these intensities) eases via "
           "executor.glide, never snaps via executor.jump")
     top = [k for cls, i, k in star_writes if i == 0.97]
-    check(top and all(k == "jump" for k in top),
-          "the 0.7-1 bands' explicit 'star: 0.0' patch still wins over the "
-          "dice re-roll and still lands as an instant jump — unchanged by "
-          "the smoothing fix, which only touches PURE dice re-rolls")
+    check(top and all(k == "glide" for k in top),
+          "STAR (2026-08-17 follow-up fix): the 0.7-1 bands' explicit "
+          "'star: 0.0' patch still wins over the dice re-roll's OWN value, "
+          "but now also eases — closing the door the first smoothing fix "
+          "left open (it only touched pure dice re-rolls, not an explicit "
+          "ParamTarget patch on the same registry-smooth param)")
+    top_spin = [k for cls, i, k in spin_writes if i == 0.97]
+    check(top_spin and all(k == "glide" for k in top_spin),
+          "STAR (2026-08-17, spin retagged smooth=true): the same 0.7-1 "
+          "patch's 'spin: 0.55' also eases now, not just 'star' — one "
+          "gate, every registry-smooth param it touches")
 
 
 asyncio.run(_no_flare_moves_star_edges())

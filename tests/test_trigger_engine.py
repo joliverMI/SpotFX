@@ -201,7 +201,12 @@ def test_trigger_fires_response_action_on_the_real_pipeline(tmp_path):
 
                 fired = await engine.tick(2000)
                 assert len(fired) == 1
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                # gradient_scale is registry smooth=true (concentric) — the
+                # patch eases over DICE_REROLL_GLIDE_MS since the 2026-08-17
+                # follow-up fix (scene_response._move_params), not a jump.
+                from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
+                glide_frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
                 assert effect._config["gradient_scale"] == pytest.approx(1.8), \
                     "fire_response reached the real response engine — the " \
                     "drop band's patch landed on the crossing tick, exactly " \

@@ -588,17 +588,53 @@ Re-roll" kind) lands via `executor.glide(..., DICE_REROLL_GLIDE_MS=220)`
 when the re-rolled param is registry `"smooth": true` (a genuine
 continuous numeric — STAR's `star`), else `executor.jump()` as before
 (toggle/string/integer, e.g. STAR's `edges` — can't be meaningfully
-interpolated); an explicit param-patch kind on the same event still wins
-over a same-event dice re-roll and still jumps (unchanged precedence).
-Fixed 2026-08-17: his STAR scene re-rolls `star` on every ordinary flare
-(its flare bands carry Dice Re-roll end to end), measured live at
-~0.6–1.2s apart, each landing as an instant jump — read as a strobe, not
-a defect in `star`'s own binding. `config/effect_params.json`'s per-param
+interpolated); an explicit param-patch kind (a permanent/momentary
+`FlareKind`'s own `params`, executed via `_move_params`/
+`_compute_param_moves`) on the same event still wins over a same-event
+dice re-roll, and — since a 2026-08-17 follow-up fix — glides too when
+its target is registry-smooth, not an unconditional jump; the two paths
+share one smooth-gate now, so precedence (patch wins) falls out of plain
+dict-update ordering rather than an explicit jump/glide split. Fixed
+2026-08-17: his STAR scene re-rolls `star` on every ordinary flare (its
+flare bands carry Dice Re-roll end to end), measured live at ~0.6–1.2s
+apart, each landing as an instant jump — read as a strobe, not a defect
+in `star`'s own binding. `config/effect_params.json`'s per-param
 `"smooth"` flag existed before this and was previously dead metadata
 (grep-confirmed unread anywhere in `spectra/`/`fx/` Python) — it is now
-load-bearing for this one gate; check it before assuming a param's
-smoothness is unhandled elsewhere. Full writeup: `docs/SPECTRA_SPEC.md`
-§75), read-only bridge
+load-bearing for BOTH gates (`_reroll`'s dice glide and `_move_params`'s
+patch glide, added in the follow-up below); check it before assuming a
+param's smoothness is unhandled elsewhere. **Follow-up, same STAR scene,
+2026-08-17**: he reported it "still snaps" after the fix above — real,
+because `_move_params` never checked `smooth` at all, so STAR's own
+"Flare/Drop patch 0.7–1" kinds (permanent, pin `star` to `0.0` on every
+high-intensity flare) kept jumping regardless of the tag; `check_spectra.py`'s
+own prior assertion had documented this exact gap as "unchanged by the
+smoothing fix" rather than missing it. Fixed by extending the same
+smooth-gate into `_move_params`. Radial's `spin` (direction+speed,
+signed, `[-1,1]` in the real vendored `CONFIG_SCHEMA` though the registry
+still declares `[0,1]`) was separately retagged `smooth: true` in the
+same pass — verified from source (`fx/utils.py::nonlinear_log` is
+continuous through a sign change), not from his ask alone, and provably
+inert against `_reroll` since no live scene binds `spin` via
+`signal="random"`. **`spin_sign` ("Flip", `maps_to: spin`,
+`sign_control: true`) is INERT under SPECTRA** — that translation exists
+only in legacy `services/morph_compiler.py::_sign_control_patch`, never
+ported to `spectra/`/`fx/`, and `fx/effects/radial.py`'s real schema has
+no `spin_sign` key at all (voluptuous `extra=ALLOW_EXTRA` lets a write to
+it land as an inert, unread key) — to reverse direction under SPECTRA,
+target `spin` itself with a signed value, never `spin_sign`; see
+`config/effect_params.json`'s own note on both params. Two new named
+kinds on STAR built the same pass, declared but not band-attached
+(matching Fireworks V2's own "Reverse Direction" precedent — a human
+attaches via the Scenes page's band-strip chip, not an agent):
+"Reverse Direction" (permanent, `spin → -0.55`) and "Reverse Momentarily
+(500ms)" (momentary, `hold_ms: 500`, same target) — `-0.55` matches his
+own already-authored spin-patch magnitude, negated. Migration:
+`scripts/add_star_reverse_flares.py` (dry-run default, `--apply`,
+idempotent, goes through `scene_console.apply_flare_kind` — Sonic's own
+write path, backed up automatically — not a raw-JSON patch, since adding
+a FlareKind is exactly what that function is for). Full writeup:
+`docs/SPECTRA_SPEC.md` §78), read-only bridge
 (`bridge.py` — WS client on spot-effects' /ws + `analysis_reader.py`;
 classification: charge/lull/drop stay themselves, scene-family event
 types are observations, everything else is a flare). Every glide/jump
