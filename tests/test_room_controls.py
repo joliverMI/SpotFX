@@ -318,6 +318,161 @@ def test_force_scene_redirects_every_automatic_pick(monkeypatch):
         "disabled: no redirect even with a scene still picked"
 
 
+def test_reconcile_force_scene_if_changed_fires_immediately_on_enable(monkeypatch):
+    """fire_scene_by_id's redirect is passive — it only fires when
+    something else was already about to pick a scene. Enabling Force
+    Scene also defers the sequencer, so on a song with no triggers
+    nothing was ever going to fire and the redirect never got a chance
+    to run (his live report, 2026-08-18). reconcile_force_scene_if_changed
+    must fire the pinned scene directly, right here, on the edit that
+    enables the pin."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_compiler, scene_store
+
+    held = SceneV2(name="Black Hole V2")
+    scene_store.save(held)
+
+    fired = []
+
+    async def fake_fire_scene(scene, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None):
+        fired.append((scene.id, intensity))
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+                "resolved_bindings": {}, "dice_rolls": {}}
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+
+    previous = rc.RoomControlState(force_scene_enabled=False)
+    new_state = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=held.id)
+    rc.save_room_controls(new_state)
+    result = _run(rc.reconcile_force_scene_if_changed(previous, new_state))
+
+    assert fired == [(held.id, 0.5)], "pinned scene fired immediately, neutral intensity (no bridge)"
+    assert result == {"status": "fired", "scene_id": held.id, "scene_name": "Black Hole V2"}
+
+
+def test_reconcile_force_scene_if_changed_fires_immediately_on_repin(monkeypatch):
+    """Repinning to a different scene while already enabled is the same
+    kind of edit as enabling it — it must also fire right away, not wait
+    for the next automatic pick."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_compiler, scene_store
+
+    first = SceneV2(name="Orbits V2")
+    second = SceneV2(name="Black Hole V2")
+    scene_store.save(first)
+    scene_store.save(second)
+
+    fired = []
+
+    async def fake_fire_scene(scene, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None):
+        fired.append(scene.id)
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+                "resolved_bindings": {}, "dice_rolls": {}}
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+
+    previous = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=first.id)
+    new_state = previous.model_copy(update={"force_scene_scene_id": second.id})
+    rc.save_room_controls(new_state)
+    result = _run(rc.reconcile_force_scene_if_changed(previous, new_state))
+
+    assert fired == [second.id]
+    assert result["status"] == "fired"
+
+
+def test_reconcile_force_scene_if_changed_ignores_unrelated_edit_while_pin_unchanged(monkeypatch):
+    """Re-saving an unrelated field (e.g. the brightness slider) while an
+    already-enabled pin stays the same scene must NOT re-fire — a scene
+    shouldn't jump every time he touches a different control."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_compiler, scene_store
+
+    held = SceneV2(name="Held")
+    scene_store.save(held)
+
+    fired = []
+
+    async def fake_fire_scene(scene, **kwargs):
+        fired.append(scene.id)
+        return {"dry_run": False, "intensity": 0.5, "writes": [],
+                "resolved_bindings": {}, "dice_rolls": {}}
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+
+    previous = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=held.id,
+                                   brightness_multiplier=1.0)
+    new_state = previous.model_copy(update={"brightness_multiplier": 0.5})
+    result = _run(rc.reconcile_force_scene_if_changed(previous, new_state))
+
+    assert fired == []
+    assert result is None
+
+
+def test_reconcile_force_scene_if_changed_ignores_disable():
+    """Disabling Force Scene is a release, not a pin edit — nothing should
+    fire on the way out."""
+    from spectra.services import room_controls as rc
+
+    previous = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id="x")
+    new_state = previous.model_copy(update={"force_scene_enabled": False})
+    result = _run(rc.reconcile_force_scene_if_changed(previous, new_state))
+    assert result is None
+
+
+def test_reconcile_force_scene_if_changed_reports_reason_when_nothing_pinned():
+    """Enabling with no scene picked yet must say so, not silently do
+    nothing — silence is exactly what read as broken in his live report."""
+    from spectra.services import room_controls as rc
+
+    previous = rc.RoomControlState(force_scene_enabled=False)
+    new_state = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=None)
+    result = _run(rc.reconcile_force_scene_if_changed(previous, new_state))
+    assert result == {"status": "skipped", "reason": "no scene pinned"}
+
+
+def test_reconcile_force_scene_if_changed_reports_reason_when_pinned_scene_missing():
+    """A pinned id that doesn't resolve to a real scene must also report a
+    reason rather than silently no-op-ing."""
+    from spectra.services import room_controls as rc
+
+    previous = rc.RoomControlState(force_scene_enabled=False)
+    new_state = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id="does-not-exist")
+    result = _run(rc.reconcile_force_scene_if_changed(previous, new_state))
+    assert result == {"status": "skipped", "reason": "pinned scene not found"}
+
+
+def test_reconcile_force_scene_if_changed_uses_bridge_intensity_when_available(monkeypatch):
+    """When the bridge has a live intensity reading, the immediate fire
+    should use it (matching what an automatic pick would have used) rather
+    than always falling back to neutral 0.5."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_compiler, scene_store
+    from spectra.services.engine import bridge
+
+    held = SceneV2(name="Held")
+    scene_store.save(held)
+
+    captured = {}
+
+    async def fake_fire_scene(scene, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None):
+        captured["intensity"] = intensity
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+                "resolved_bindings": {}, "dice_rolls": {}}
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+    monkeypatch.setattr(bridge, "intensity", lambda: 0.83)
+
+    previous = rc.RoomControlState(force_scene_enabled=False)
+    new_state = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=held.id)
+    rc.save_room_controls(new_state)
+    _run(rc.reconcile_force_scene_if_changed(previous, new_state))
+
+    assert captured["intensity"] == 0.83
+
+
 def test_ambient_hue_group_ids_defaults_to_empty_meaning_every_device():
     from spectra.services import room_controls as rc
     state = rc.RoomControlState()

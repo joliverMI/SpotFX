@@ -20,7 +20,10 @@ same way (only when it actually changed) and folds the outcome into the
 response as `dark_light_result`.
 force_scene_enabled/force_scene_scene_id — the legacy Now Playing Force
 Scene control — redirect every automatic scene pick at scene_sequencer.
-fire_scene_by_id.
+fire_scene_by_id, AND (2026-08-18) fire the pinned scene immediately on
+the edit that pins/repins it (room_controls.reconcile_force_scene_if_changed)
+— see that function's own docstring for why the redirect alone isn't
+enough. Folded into the response as `force_scene_result`.
 ambient_hue_group_ids — WHICH Hue entertainment areas Ambient reaches
 (services/ambient.py, "Hue entertainment-area selection"); [] = every
 live Hue device (today's unmodified default).
@@ -61,4 +64,7 @@ async def put_room_controls(state: RoomControlState):
     dark_light_result = await room_controls.reconcile_dark_light_if_changed(previous, state)
     if dark_light_result is not None:
         response["dark_light_result"] = dark_light_result
+    force_scene_result = await room_controls.reconcile_force_scene_if_changed(previous, state)
+    if force_scene_result is not None:
+        response["force_scene_result"] = force_scene_result
     return response

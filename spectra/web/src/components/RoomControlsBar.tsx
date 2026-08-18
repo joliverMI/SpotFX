@@ -39,7 +39,8 @@ import {
   useAmbientHueGroups, useEngineStatus, useRoomControls, useSaveRoomControls, useScenes,
 } from '../queries';
 import type {
-  AmbientMode, AmbientResult, DarkLightResult, DisplayMode, RoomControlState, SceneChangeMode,
+  AmbientMode, AmbientResult, DarkLightResult, DisplayMode, ForceSceneResult, RoomControlState,
+  SceneChangeMode,
 } from '../types';
 import SearchSelect from './forms/SearchSelect';
 
@@ -147,6 +148,7 @@ export default function RoomControlsBar() {
   const [local, setLocal] = useState<RoomControlState | null>(null);
   const [ambientResult, setAmbientResult] = useState<AmbientResult | null>(null);
   const [darkLightResult, setDarkLightResult] = useState<DarkLightResult | null>(null);
+  const [forceSceneResult, setForceSceneResult] = useState<ForceSceneResult | null>(null);
   const [hueGroupsResetKey, setHueGroupsResetKey] = useState(0);
   const localRef = useRef<RoomControlState | null>(null);
   const lastOnAmbientModeRef = useRef<AmbientMode>('auto');
@@ -172,6 +174,7 @@ export default function RoomControlsBar() {
       onSuccess: (res) => {
         setAmbientResult(res.ambient_result ?? null);
         setDarkLightResult(res.dark_light_result ?? null);
+        setForceSceneResult(res.force_scene_result ?? null);
       },
     });
   }
@@ -456,6 +459,21 @@ export default function RoomControlsBar() {
                   placeholder="— pick scene —" allowEmpty={false}
                   onChange={(v) => commit({ ...local, force_scene_scene_id: v })} />
               </div>
+            )}
+            {forceSceneResult?.status === 'fired' && (
+              <span className="badge badge-gray" title="Fired immediately on this pin — not waiting for the next automatic pick">
+                fired: {forceSceneResult.scene_name ?? forceSceneResult.scene_id}
+              </span>
+            )}
+            {forceSceneResult?.status === 'skipped' && (
+              <span className="badge badge-red" title="Force Scene did not fire — nothing was activated">
+                not fired: {forceSceneResult.reason}
+              </span>
+            )}
+            {forceSceneResult?.status === 'error' && (
+              <span className="badge badge-red" title={forceSceneResult.reason}>
+                fire failed: {forceSceneResult.reason}
+              </span>
             )}
           </>
         )}

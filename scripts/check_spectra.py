@@ -1273,6 +1273,37 @@ try:
     asyncio.run(fire_scene_by_id(fs_requested.id, intensity=0.6))
     check(fs_fired[-1] == fs_requested.id,
           "Force Scene disabled: no redirect")
+
+    # 2026-08-18 fix: the redirect above is passive — it only fires when
+    # something else was already about to pick a scene. Enabling never
+    # DID that on its own, so on a song with no triggers (his live
+    # report) nothing ever fired. reconcile_force_scene_if_changed must
+    # fire the pin immediately, right on the enabling edit.
+    fs_prev = rc.RoomControlState(force_scene_enabled=False)
+    fs_next = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=fs_held.id)
+    rc.save_room_controls(fs_next)
+    fs_result = asyncio.run(rc.reconcile_force_scene_if_changed(fs_prev, fs_next))
+    check(fs_fired[-1] == fs_held.id and fs_result == {
+        "status": "fired", "scene_id": fs_held.id, "scene_name": fs_held.name},
+        "Force Scene: enabling the pin fires it immediately, not just on the "
+        "next automatic pick — his own report was silence, not a wrong scene")
+
+    fs_no_pin_prev = rc.RoomControlState(force_scene_enabled=False)
+    fs_no_pin_next = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=None)
+    fs_no_pin_result = asyncio.run(rc.reconcile_force_scene_if_changed(fs_no_pin_prev, fs_no_pin_next))
+    check(fs_no_pin_result == {"status": "skipped", "reason": "no scene pinned"},
+          "Force Scene: enabling with nothing pinned states the reason instead "
+          "of silently doing nothing")
+
+    fs_unrelated_prev = rc.RoomControlState(force_scene_enabled=True,
+                                            force_scene_scene_id=fs_held.id)
+    fs_unrelated_next = fs_unrelated_prev.model_copy(update={"brightness_multiplier": 0.4})
+    fs_fired_before_unrelated = len(fs_fired)
+    fs_unrelated_result = asyncio.run(
+        rc.reconcile_force_scene_if_changed(fs_unrelated_prev, fs_unrelated_next))
+    check(fs_unrelated_result is None and len(fs_fired) == fs_fired_before_unrelated,
+          "Force Scene: an unrelated field re-save with the pin unchanged "
+          "does not re-fire")
 finally:
     scene_compiler.fire_scene = _orig_fire_scene
 rc.save_room_controls(rc.RoomControlState())   # reset for later sections
