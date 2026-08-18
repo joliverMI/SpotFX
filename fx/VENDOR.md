@@ -166,6 +166,30 @@ variables named `ledfx` (the core object handle) are untouched.
     stream, `_trigger_reconnect()`) on a device that was never frozen in the
     first place. No behaviour change — a plain accessor.
 
+12. `effects/blackhole.py`: the infall-mode (`reverse=False`) spawn annulus
+    (BEHAVIOUR CHANGE — PR fm/spectra-blackhole-hex-spawn) moved from a fixed
+    `(0.90, 1.05)` to new module constants `SPAWN_ANNULUS_MIN/MAX = (0.70,
+    0.85)`, in the same normalized-r units as `radius_scale` (r=1 = the
+    panel's own rectangular edge). The effect has no knowledge of which
+    addressable cells are real light vs a gap-mapped dummy device — it
+    spawns purely in (r, theta) space and lets fx/virtuals.py's segment
+    routing decide per pixel. On a hex-lattice matrix virtual (his real
+    `crystal-mapper`: 72x37 addressable, only 976/2664 = 36.6% real —
+    `storage/device_profiles/crystal-mapper.json`) real-pixel density is a
+    flat 50% out to r<=0.85 and collapses to ~20% by r=1.0, 0% past r=1.2 —
+    the old annulus spawned almost entirely in that near-zero-density corner
+    band, so a fresh blob was invisible until it had fallen most of the way
+    to the horizon. `radius_scale`/`sx`/`sy` (the effect's overall
+    panel-filling scale, and the fall/travel distance from spawn to
+    horizon/center) are untouched — only where blobs *start* moved, not how
+    much of the panel the effect uses. Evidence:
+    `scripts/check_blackhole_hex_spawn.py` (real-density-by-radius against
+    the live device profile); frame-level proof:
+    `tests/test_blackhole_spawn_radius.py`. Not yet ported back to the fork
+    source at `/home/javi/ledfx-src` — pulling the annulus in is arguably
+    still the wrong default for a genuinely full-rectangle matrix virtual,
+    which SpotFX doesn't have one of today; revisit if one is ever added.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
