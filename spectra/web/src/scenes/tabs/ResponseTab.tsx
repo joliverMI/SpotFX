@@ -1,15 +1,26 @@
 /** Response tabs — Flares (one class) and Charges/Lulls/Drops (three).
  * The item-8 doctrine: the scene DECLARES named flare kinds (readable
- * cards below — their content is agent-adjustable, no settings forms);
- * the band strip stays the graphical piece, and each band SELECTS AND
- * SCALES kinds: click a kind chip on a band row to attach/detach it,
- * set its ×scale inline, or drag the strip's handle to scale the whole
- * band. */
+ * cards below — tap/double-click one to rename, delete, or copy it; type/
+ * params/gain/hold stay agent-adjustable, no settings forms); the band
+ * strip stays the graphical piece, and each band SELECTS AND SCALES kinds
+ * via a small vertical LANE RACK — drag a kind card into a lane to attach
+ * it there (2 lanes by default, up to 4), drag between lanes to reorder,
+ * ✕ to detach. A lane is a POSITION in the band's own kinds dict, not a
+ * new stored concept — see flareKindOps.ts's header for why that position
+ * is load-bearing (same-param precedence in scene_response.py's fixed
+ * execution order). Copy/Paste ports a kind's own declaration to any other
+ * scene (never a live link — see lib/flareClipboard.ts). */
+import { useRef, useState } from 'react';
 import BandStrip from '../../components/BandStrip';
+import FlareLaneRack from '../../components/FlareLaneRack';
 import HelpLink from '../../help/HelpLink';
-import { NumberInput } from '../../components/inputs';
+import { useToast } from '../../components/Toast';
+import { readFlareClipboard } from '../../lib/flareClipboard';
 import type { FlareKind, ResponseClass, ResponseSpec, SceneV2 } from '../../types';
 import { emptyBand, emptyResponse } from '../../types';
+import FlareKindEditDialog from './FlareKindEditDialog';
+import { deleteFlareKind, moveKindToLane, pasteKind, renameFlareKind } from './flareKindOps';
+import type { LaneRef } from './flareKindOps';
 
 const CLASS_TITLES: Record<ResponseClass, string> = {
   flare: 'Flares', charge: 'Charges', lull: 'Lulls', drop: 'Drops',
@@ -61,13 +72,30 @@ const TYPE_HINT: Record<string, string> = {
   permanent: 'Lands and BECOMES the new baseline drift carries from. Same target expressions as momentary (absolute / offset / random), just never released.',
 };
 
+interface DragState {
+  name: string;
+  source: { cls: ResponseClass; bandIdx: number } | null;
+  x: number;
+  y: number;
+  over: LaneRef | null;
+}
+
 export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
   scene: SceneV2;
   setScene: (s: SceneV2) => void;
   classes: ResponseClass[];
   helpTopic: string;
 }) {
+  const toast = useToast();
   const kinds = scene.flare_kinds ?? [];
+  const kindsByName = Object.fromEntries(kinds.map((k) => [k.name, k]));
+
+  const [editingKind, setEditingKind] = useState<FlareKind | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const [laneExtra, setLaneExtra] = useState<Record<string, number>>({});
+
+  const clipboard = readFlareClipboard();
 
   const setSpec = (cls: ResponseClass, spec: ResponseSpec | null, extraKinds?: FlareKind[]) => {
     const responses = { ...scene.responses };
@@ -112,24 +140,92 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
     });
   };
 
+  // ── drag: a card (palette or an occupied lane) tracks the pointer across
+  // the WHOLE page — any band's rack, in any class section below, is a
+  // valid drop target — and drops via document.elementFromPoint hit-testing
+  // against each lane's data attributes (FlareLaneRack.tsx). An unmoved
+  // release is a TAP: opens the edit box, the same one double-click opens,
+  // so this also covers touch where a real double-tap is unreliable. ──
+  const startDrag = (name: string, source: { cls: ResponseClass; bandIdx: number } | null) =>
+    (e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.stopPropagation();
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let moved = false;
+      const initial: DragState = { name, source, x: startX, y: startY, over: null };
+      dragRef.current = initial;
+      setDrag(initial);
+
+      const move = (ev: PointerEvent) => {
+        if (!moved && (Math.abs(ev.clientX - startX) > 5 || Math.abs(ev.clientY - startY) > 5)) moved = true;
+        const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        const laneEl = el?.closest('[data-lane]') as HTMLElement | null;
+        const over: LaneRef | null = laneEl ? {
+          cls: laneEl.dataset.cls as ResponseClass,
+          bandIdx: Number(laneEl.dataset.band),
+          laneIdx: Number(laneEl.dataset.laneIdx),
+        } : null;
+        const next = { ...initial, x: ev.clientX, y: ev.clientY, over };
+        dragRef.current = next;
+        setDrag(next);
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        const final = dragRef.current;
+        dragRef.current = null;
+        setDrag(null);
+        if (!final) return;
+        if (moved) {
+          if (final.over) setScene(moveKindToLane(scene, final.name, final.over, final.source));
+        } else {
+          const k = kindsByName[final.name];
+          if (k) setEditingKind(k);
+        }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+
+  const doPaste = () => {
+    if (!clipboard) return;
+    const before = new Set(kinds.map((k) => k.name));
+    const next = pasteKind(scene, clipboard.kind);
+    setScene(next);
+    const pastedName = next.flare_kinds.find((k) => !before.has(k.name))!.name;
+    toast(`Pasted "${pastedName}" from "${clipboard.sourceSceneName}" — drag it into a lane to use it`, 'success');
+  };
+
   return (
     <div>
       <div style={{ marginBottom: 18 }}>
-        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           Flare kinds <HelpLink topic="flare-kinds" />
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
-            declared once, shared by every class below — tell the agent to add or retune one
+            tap/double-click a kind to rename, delete, or copy — drag it into a lane below to attach it
           </span>
+          {clipboard && (
+            <button style={{ fontSize: 11, padding: '2px 8px', marginLeft: 'auto' }}
+              title={`Paste "${clipboard.kind.name}" (copied from "${clipboard.sourceSceneName}") as a new kind on this scene`}
+              onClick={doPaste}>
+              📋 Paste "{clipboard.kind.name}"
+            </button>
+          )}
         </div>
         {kinds.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            No kinds declared yet — adding a Flares response seeds the two drift-jumps, or tell the agent what this scene should do when the music hits.
+            No kinds declared yet — adding a Flares response seeds the two drift-jumps, tell the agent what this scene should do when the music hits, or paste a kind copied from another scene.
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {kinds.map((k) => (
-            <div key={k.name} className="card" style={{ padding: '6px 10px', maxWidth: 260 }}
-              title={`${TYPE_HINT[k.type]}\nAgent-adjustable — tell the agent to change it.`}>
+            <div key={k.name} className="card"
+              onPointerDown={startDrag(k.name, null)}
+              style={{ padding: '6px 10px', maxWidth: 260, cursor: 'grab', userSelect: 'none',
+                       touchAction: 'none', opacity: drag?.name === k.name ? 0.4 : 1 }}
+              title={`${TYPE_HINT[k.type]}\nTap to rename/delete/copy. Drag onto a lane to attach. Type/params/gain/hold are agent-adjustable.`}>
               <div style={{ fontSize: 12, fontWeight: 600 }}>
                 {kindIcon(k)} {k.name}
                 <span className="chip" style={{ marginLeft: 6 }}>{kindTypeLabel(k)}</span>
@@ -188,42 +284,69 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                 {[...spec.bands]
                   .map((b, i) => ({ b, i }))
                   .sort((a, z) => a.b.intensity_min - z.b.intensity_min)
-                  .map(({ b, i }) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, padding: '3px 0' }}>
-                      <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                        [{b.intensity_min.toFixed(2)}–{b.intensity_max.toFixed(2)})
-                      </span>
-                      {kinds.length === 0 && (
-                        <span style={{ color: 'var(--text-muted)' }}>no kinds to attach</span>
-                      )}
-                      {kinds.map((k) => {
-                        const attached = (b.kinds ?? {})[k.name] !== undefined;
-                        return (
-                          <span key={k.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <button
-                              style={{ fontSize: 11, padding: '2px 8px', opacity: attached ? 1 : 0.55,
-                                borderColor: attached ? 'var(--accent)' : undefined }}
-                              title={attached ? `${k.name} fires in this band — click to detach` : `attach ${k.name} to this band`}
-                              onClick={() => setBandKind(cls, i, k.name, attached ? null : 1)}>
-                              {kindIcon(k)} {k.name}
-                            </button>
-                            {attached && (
-                              <>
-                                <span style={{ color: 'var(--text-muted)' }}>×</span>
-                                <NumberInput value={b.kinds[k.name]} min={0} step={0.1} width={56}
-                                  onChange={(v) => setBandKind(cls, i, k.name, v ?? 1)} />
-                              </>
-                            )}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  ))}
+                  .map(({ b, i }) => {
+                    const laneKey = `${cls}:${i}`;
+                    const attachedCount = Object.keys(b.kinds ?? {}).length;
+                    const visibleLanes = Math.max(2 + (laneExtra[laneKey] ?? 0), attachedCount);
+                    const canAddLane = visibleLanes < 4;
+                    const overLaneIdx = drag?.over && drag.over.cls === cls && drag.over.bandIdx === i
+                      ? drag.over.laneIdx : null;
+                    return (
+                      <div key={i} style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4,
+                                      fontVariantNumeric: 'tabular-nums' }}>
+                          [{b.intensity_min.toFixed(2)}–{b.intensity_max.toFixed(2)})
+                        </div>
+                        {kinds.length === 0 ? (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>no kinds declared yet</div>
+                        ) : (
+                          <FlareLaneRack cls={cls} bandIdx={i} band={b}
+                            visibleLanes={visibleLanes} canAddLane={canAddLane}
+                            kindsByName={kindsByName}
+                            draggingName={drag?.name ?? null}
+                            overLaneIdx={overLaneIdx}
+                            onAddLane={() => setLaneExtra((m) => ({
+                              ...m, [laneKey]: Math.min(2, (m[laneKey] ?? 0) + 1),
+                            }))}
+                            onStartDrag={startDrag}
+                            onDetach={(name) => setBandKind(cls, i, name, null)}
+                            onSetScale={(name, v) => setBandKind(cls, i, name, v)}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
               </>
             )}
           </div>
         );
       })}
+
+      {editingKind && (
+        <FlareKindEditDialog
+          scene={scene}
+          sceneName={scene.name}
+          kind={editingKind}
+          onClose={() => setEditingKind(null)}
+          onRename={(newName) => {
+            if (newName !== editingKind.name && kinds.some((k) => k.name === newName)) {
+              return `Another kind is already named "${newName}"`;
+            }
+            setScene(renameFlareKind(scene, editingKind.name, newName));
+            return null;
+          }}
+          onDelete={() => setScene(deleteFlareKind(scene, editingKind.name))}
+        />
+      )}
+
+      {drag && (
+        <div style={{ position: 'fixed', left: drag.x + 14, top: drag.y + 10, zIndex: 200,
+                      pointerEvents: 'none', background: 'var(--accent)', color: '#14061f',
+                      fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 5,
+                      boxShadow: '0 2px 10px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}>
+          {kindsByName[drag.name] ? kindIcon(kindsByName[drag.name]) : ''} {drag.name}
+        </div>
+      )}
     </div>
   );
 }
