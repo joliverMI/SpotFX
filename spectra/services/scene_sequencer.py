@@ -62,6 +62,18 @@ async def fire_scene_by_id(scene_id: str,
     "reassert with normal First/Rest." A forced id pointing at a missing
     scene is treated as unset (falls through to the requested scene).
 
+    Temporary disable (SceneV2.disabled, owner ask 2026-08-18) is gated
+    HERE FIRST, ahead of mode availability below — it is the stronger,
+    more explicit statement ("don't use this scene, period" vs. "not in
+    this room mode"), so a scene that is both disabled and mode-gated
+    reports skipped="disabled", not "mode_availability". Same bypass as
+    availability: Force Scene pinning it keeps its declared life. But a
+    pin that lands on a disabled scene is contradictory input from him —
+    honour the pin (he pressed it, he means it) but NAME the override:
+    the result carries overrode_disabled=True rather than silently
+    proceeding, so room_controls.reconcile_force_scene_if_changed can
+    surface it on the Force Scene badge.
+
     Mode availability (spectra/services/mode_availability.py, owner ask
     2026-08-17) is also gated HERE, once, for both callers: a scene whose
     own display_availability excludes the room's current display_mode is
@@ -83,6 +95,10 @@ async def fire_scene_by_id(scene_id: str,
     scene = scene_store.get_by_id(scene_id)
     if scene is None:
         raise ValueError(f"scene {scene_id} not found in spectra scenes")
+    overrode_disabled = forced and getattr(scene, "disabled", False)
+    if not forced and getattr(scene, "disabled", False):
+        return {"skipped": "disabled", "scene_id": scene_id,
+               "scene_name": scene.name}
     if not forced and not mode_availability.available_in_room_mode(
             getattr(scene, "display_availability", "default"), controls.display_mode):
         return {"skipped": "mode_availability", "scene_id": scene_id,
@@ -96,6 +112,8 @@ async def fire_scene_by_id(scene_id: str,
             color_set, controls.display_mode)
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
                                              color_set=color_set, dry_run=False)
+    if overrode_disabled:
+        result["overrode_disabled"] = True
     fire_history.record_fire("scenes", scene_id, {
         "scene_name": getattr(scene, "name", scene_id),
         "color_set_id": color_set_id,
@@ -160,6 +178,7 @@ class SceneSequencer:
         wheel_get: Callable[[], Optional[float]] | None = None,
         wheel_set: Callable[[Optional[float]], None] | None = None,
         scene_mode_available: Callable[[str], bool] | None = None,
+        scene_enabled: Callable[[str], bool] | None = None,
         group_ids_by_set: Callable[[], dict[str, list[str]]] | None = None,
     ) -> None:
         self._rng = rng or Random()
@@ -180,6 +199,10 @@ class SceneSequencer:
         self._wheel_get = wheel_get or self._default_wheel_get
         self._wheel_set = wheel_set or self._default_wheel_set
         self._scene_mode_available = scene_mode_available or self._default_scene_mode_available
+        # Temporary disable (owner ask 2026-08-18) — a SEPARATE gate from
+        # mode availability above (see SceneV2.disabled's own docstring for
+        # why they're kept distinct rather than folded together).
+        self._scene_enabled = scene_enabled or self._default_scene_enabled
         # set_id → every Colour Group card id that lists it as a member —
         # the reverse lookup the group-curve multiplicand needs (kernel
         # stays pure; this is the one place colour-set storage is read for it).
@@ -271,13 +294,14 @@ class SceneSequencer:
                            "and are skipped: %s", len(missing), sorted(missing))
         intensity = self._intensity()
         genre_bucket = self._genre_bucket()
-        # Mode availability (owner ask 2026-08-17): a scene marked light/
-        # dark-only is dropped from the candidate pool, not just vetoed at
-        # fire time, so the ladder's fallback rungs see a truthful pool
-        # instead of wasting a pick on something fire_scene_by_id would
-        # skip anyway.
+        # Mode availability (owner ask 2026-08-17) and temporary disable
+        # (owner ask 2026-08-18): a scene marked light/dark-only, or
+        # disabled outright, is dropped from the candidate pool, not just
+        # vetoed at fire time, so the ladder's fallback rungs see a
+        # truthful pool instead of wasting a pick on something
+        # fire_scene_by_id would skip anyway.
         available = {sid for sid in existing
-                    if self._scene_mode_available(sid)}
+                    if self._scene_mode_available(sid) and self._scene_enabled(sid)}
         candidates = kernel.build_scene_candidates(
             config.entries, curves, config.affinity,
             genre_bucket=genre_bucket, prev_id=self._active_id,
@@ -461,6 +485,13 @@ class SceneSequencer:
             return True
         return mode_availability.available_in_room_mode(
             scene.display_availability, load_room_controls().display_mode)
+
+    def _default_scene_enabled(self, scene_id: str) -> bool:
+        from spectra.services import scene_store
+        scene = scene_store.get_by_id(scene_id)
+        if scene is None:
+            return True
+        return not getattr(scene, "disabled", False)
 
     def _default_color_set_name(self, set_id: str) -> str:
         from spectra.services import color_sets

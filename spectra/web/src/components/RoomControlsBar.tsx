@@ -159,7 +159,7 @@ export default function RoomControlsBar() {
   }, [local?.ambient_mode]);
 
   const sceneOptions = useMemo(
-    () => (scenes ?? []).map((s) => ({ value: s.id, label: s.name })),
+    () => (scenes ?? []).map((s) => ({ value: s.id, label: s.disabled ? `⛔ ${s.name}` : s.name })),
     [scenes],
   );
 
@@ -463,6 +463,12 @@ export default function RoomControlsBar() {
             {forceSceneResult?.status === 'fired' && (
               <span className="badge badge-gray" title="Fired immediately on this pin — not waiting for the next automatic pick">
                 fired: {forceSceneResult.scene_name ?? forceSceneResult.scene_id}
+              </span>
+            )}
+            {forceSceneResult?.status === 'fired' && forceSceneResult.overrode_disabled && (
+              <span className="badge badge-red"
+                title="This scene is marked Disabled on the Scenes page — the pin still fired it, since you pressed the button, but it won't be picked automatically again while disabled">
+                ⚠ overriding disabled scene
               </span>
             )}
             {forceSceneResult?.status === 'skipped' && (

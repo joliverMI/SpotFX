@@ -798,6 +798,30 @@ fired/skipped/error reason (`force_scene_result` in the PUT response,
 `ForceSceneResult` in `types.ts`, surfaced as a badge in
 `RoomControlsBar.tsx`) — never a silent no-op.
 
+**Temporary scene disable** (2026-08-18, his ask: "add an ability to
+disable a scene temporarily") — `SceneV2.disabled: bool` (default False),
+a manual reversible toggle, no timer/expiry. STRONGER than mode
+availability above (checked first, wins the reported reason when both
+apply) — gated at the same three choke points: `scene_sequencer.
+fire_scene_by_id` (the hard gate; `skipped="disabled"`), `SceneSequencer.
+_roll`'s candidate pool (new `_scene_enabled`/`_default_scene_enabled`,
+kept separate from `_scene_mode_available` rather than folded in),
+and `trigger_engine._default_select_scene`'s generated-trigger draw. A
+manual Fire/test-fire bypasses it, same as it already bypasses mode
+availability. Force Scene still fires a disabled pinned scene (an
+explicit press always wins) but NAMES the contradiction rather than
+applying it silently: `fire_scene_by_id` returns `overrode_disabled=True`,
+threaded through `reconcile_force_scene_if_changed` into
+`force_scene_result.overrode_disabled`, surfaced as a second badge ("⚠
+overriding disabled scene") on `RoomControlsBar.tsx`. Visible everywhere a
+scene's status is shown, not just a detail panel: a red "⛔ disabled"
+badge on the scene-list row and the phone header's compact selector
+(`ScenesPage.tsx`), a `DisabledToggle.tsx` toolbar control next to Mode
+availability, and the disabled marker on Force Scene's own scene picker.
+Deliberately did NOT extend the same naming treatment to Force Scene's
+pre-existing SILENT bypass of mode availability (§9/§31 above) — a
+different, already-shipped behaviour this task wasn't asked to touch.
+
 **Ambient's mode precedence gate** — three settings, in the Admiral's own
 language (`RoomControlState.ambient_mode: "off"|"always"|"auto"`,
 `spectra/services/ambient_music_gate.py`, UI a `RoomControlsBar.tsx`

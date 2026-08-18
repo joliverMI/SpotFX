@@ -194,6 +194,16 @@ export interface SceneV2 {
    * display_mode is explicitly set to the opposite mode, which always
    * wins over the scene's preference. */
   preferred_color_set_mode: DisplayAvailability;
+  /** Temporary disable (owner ask 2026-08-18) — see DisabledToggle.tsx.
+   * A manual, reversible toggle, not a timer: false (default) is unchanged
+   * behaviour. Stronger than display_availability above — a disabled scene
+   * is dropped from every automatic pick (sequencer roll, generated-trigger
+   * draw, the fire_scene_by_id hard gate) regardless of room mode. Force
+   * Scene and a manual Fire/test-fire both still work on a disabled scene
+   * (an explicit press always wins) — see ForceSceneResult.overrode_disabled
+   * for how Force Scene names that override rather than applying it
+   * silently. */
+  disabled: boolean;
 }
 
 export type DisplayAvailability = 'default' | 'dark' | 'light';
@@ -465,6 +475,10 @@ export interface ForceSceneResult {
   scene_id?: string;
   scene_name?: string;
   reason?: string;
+  /** True only when status is 'fired' AND the pinned scene is marked
+   * SceneV2.disabled — the pin still wins (an explicit press always does),
+   * but this names the contradiction instead of applying it silently. */
+  overrode_disabled?: boolean;
 }
 
 export interface RoomControlsSaveResult extends RoomControlState {
@@ -740,6 +754,7 @@ export function newScene(id: string): SceneV2 {
     accepted_set_ids: [],
     display_availability: 'default',
     preferred_color_set_mode: 'default',
+    disabled: false,
   };
 }
 

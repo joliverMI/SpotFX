@@ -610,6 +610,25 @@ class SceneV2(BaseModel):
     # manual apply/preview/test-fire bypasses this the same way it already
     # bypasses display_availability).
     preferred_color_set_mode: Literal["default", "dark", "light"] = "default"
+    # Temporary disable (owner ask, 2026-08-18: "add an ability to disable a
+    # scene temporarily"): a manual, reversible toggle — NOT a timer/expiry,
+    # he flips it back on when he wants the scene back. False = every
+    # existing scene loads unaffected. STRONGER than display_availability
+    # above: disabled means "don't use this scene, period," where
+    # availability only narrows which room mode it plays in — so disabled is
+    # checked first and wins regardless of the current display_mode. Gated
+    # at the same choke points as display_availability (scene_sequencer's
+    # own roll, trigger_engine's generated-trigger scene pick, and the hard
+    # gate at scene_sequencer.fire_scene_by_id) so a disabled scene is
+    # dropped from automatic candidate pools, not just vetoed after being
+    # picked. A Force Scene pin, or a manual test-fire/Fire press, bypasses
+    # this the same way both already bypass display_availability — an
+    # explicit human action in the moment always wins — but a pin that
+    # overrides a disabled scene is contradictory input worth naming: see
+    # scene_sequencer.fire_scene_by_id's own docstring and
+    # room_controls.reconcile_force_scene_if_changed's overrode_disabled
+    # flag.
+    disabled: bool = False
 
     @model_validator(mode="before")
     @classmethod
