@@ -25,6 +25,7 @@
  * convenience, not part of this gap). Drafts live locally until Save,
  * matching the Scenes page's own convention. */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import CurveAttachmentEditor from '../components/CurveAttachmentEditor';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
@@ -33,8 +34,9 @@ import { useLongPress } from '../lib/useLongPress';
 import { uuid } from '../lib/uid';
 import {
   releasePreview, releasePreviewBeacon, startPreview, updatePreview,
-  useDeleteColorSet, useGradients, useRegistry, useSaveColorSet,
-  useSpotColorSets, useWheelPositions,
+  useDeleteColorSet, useGradients, useIntensityHistogram, useRegistry,
+  useSaveColorSet, useSequencerConfig, useSequencerCurves, useSpotColorSets,
+  useWheelPositions,
 } from '../queries';
 import type { SpotColorSetCard, SpotColorSetEntry, SpotGroupMember } from '../types';
 import EntryRow from './EntryRow';
@@ -63,6 +65,11 @@ export default function ColorSetsPage() {
   const { data: wheel = {} } = useWheelPositions();
   const saveMut = useSaveColorSet();
   const delMut = useDeleteColorSet();
+  // Likelihood curves (owner ask 2026-08-17: sets already had this
+  // structure; groups now share it too — see CurveAttachmentEditor).
+  const { data: seqCurves = {} } = useSequencerCurves();
+  const { data: seqConfig } = useSequencerConfig();
+  const { data: seqHist } = useIntensityHistogram();
 
   const isPhone = useIsPhone();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -193,6 +200,8 @@ export default function ColorSetsPage() {
     }
     return map;
   }, [groups]);
+  const cardById = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
+  const labelForCard = (cardId: string) => cardById.get(cardId)?.name ?? cardId;
   const ungroupedSets = useMemo(
     () => sets.filter((s) => !groupsOfSet.has(s.id)),
     [sets, groupsOfSet],
@@ -480,6 +489,30 @@ export default function ColorSetsPage() {
                 })} />
             </div>
           </div>
+
+          <div className="card-title" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+            Likelihood <HelpLink topic="colorsets-likelihood-curves" />
+          </div>
+          <CurveAttachmentEditor
+            id={card.id}
+            entries={seqConfig?.color_set_entries ?? {}}
+            curves={seqCurves}
+            histogram={seqHist?.counts}
+            attachField="color_set_entries"
+            labelForEntry={labelForCard}
+            noneNote={card.kind === 'group'
+              ? 'No curve — this group never biases its member sets’ own likelihood (a pure ×1.0 pass-through).'
+              : 'Not sequenced — this colour set is never drawn by the automatic wheel-travel roll.'}
+            flatNote={card.kind === 'group'
+              ? 'Flat 1.0 — the same as no curve: multiplies onto every member set’s own score without changing it.'
+              : 'Eligible everywhere at weight 1.0. Pick a named profile (or an inline one-off) to shape it over intensity.'}
+            footer={card.kind === 'group' && (
+              <div className="empty-note" style={{ padding: '6px 0 0', fontSize: 11 }}>
+                Multiplies onto each member set’s own curve — never overwrites it. A set under more than
+                one group multiplies every enclosing group’s curve together.
+              </div>
+            )}
+          />
 
           {card.kind === 'set' ? (
             <>

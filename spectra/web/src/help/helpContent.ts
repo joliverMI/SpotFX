@@ -385,6 +385,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'One honest limit, unchanged from how this has always worked (both here and in the original SpotFX): the override layer applies only when the GROUP itself is the resolved fire target — never automatically to a member Set fired by its own id elsewhere (a scene or trigger that names the Set directly). Firing the Group is what turns the override on.',
         ],
       },
+      {
+        id: 'colorsets-likelihood-curves',
+        title: 'Likelihood — Colour Sets and Groups',
+        keywords: 'curve likelihood weight sequencer roll wheel travel multiply group chain compound flat identity',
+        body: [
+          'Every Set and Group card carries a Likelihood section — the SAME curve editor the Scenes page\'s Sequencing tab uses (see "Sequencing tab" for the full tile grid / curve window / Detach / Save-as-named-curve mechanics; it is literally the same component, so the safety rule there — dragging a point is a local draft until you explicitly Detach or Save as named — applies here identically). This only affects the automatic wheel-travel colour roll; a manual Fire, Test Fire, or Preview always bypasses it.',
+          'A Set\'s curve shapes how likely the automatic roll is to pick it at the room\'s current intensity — unchanged from before Groups got their own curve.',
+          'A Group\'s curve MULTIPLIES onto every member Set\'s own score — it never overwrites it. No curve (or an explicit Flat 1.0) is a true ×1.0 identity, so an unmarked Group changes nothing. A Set sitting under more than one Group (the list view already shows this with "also in: …") gets EVERY enclosing Group\'s curve multiplied in together — they chain, none of them "wins" alone.',
+          'Multiplying several curves together can compound toward a small number — a Set can go from rarely-picked to practically never without its own curve ever changing. Only an exact zero (a Set\'s own curve, or every remaining factor) is a hard veto that blocks a pick outright; a small-but-nonzero score is never silently skipped — it is just very unlikely relative to its peers. The Sequencer status strip\'s "last colour pick" breakdown (Scenes page) always lists curve/genre/wheel/group/score per candidate, so a Set that stopped showing up is explainable by looking there, not a mystery.',
+        ],
+      },
     ],
   },
   {

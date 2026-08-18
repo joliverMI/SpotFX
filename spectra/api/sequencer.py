@@ -141,12 +141,14 @@ async def simulate(req: SimulateRequest):
     elif req.kind == "color_set":
         wheel_profile = (curves.get(config.wheel_travel_curve)
                          if config.wheel_travel_curve else None)
+        from spectra.services import color_set_groups
         candidates = kernel.build_color_set_candidates(
             config.color_set_entries, curves,
             genre_bucket=req.genre_bucket, room_deg=req.room_position_deg,
             set_positions=_color_set_positions(),
             wheel_points=(wheel_profile.points if wheel_profile
-                          else [CurvePoint(x=0.0, y=1.0)]))
+                          else [CurvePoint(x=0.0, y=1.0)]),
+            group_ids_by_set=color_set_groups.group_ids_by_set())
     else:
         candidates = kernel.build_scene_candidates(
             config.entries, curves, config.affinity,

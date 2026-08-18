@@ -24,11 +24,27 @@ data/spectra-sequencing-design/report.md Parts 2–4).
     no dwell and the selector never reads it.
   - color_set_entries + wheel_travel_curve: the colour-set selector — the
     kernel's third flavour, wired LAST (decision 3). score = curve(intensity)
-    × genre × wheel-travel, where wheel travel is itself a named curve
-    profile over angular distance (0–180° → x 0–1). No dwell: colours change
-    with scenes, not on their own clock, and the selector never reads
-    dwell_weight. Rainbow-tagged sets (services/color_wheel.py) take a
-    neutral ×1.0 wheel factor and never move the room's wheel position.
+    × genre × wheel-travel × group, where wheel travel is itself a named
+    curve profile over angular distance (0–180° → x 0–1) and "group" is
+    described next. No dwell: colours change with scenes, not on their own
+    clock, and the selector never reads dwell_weight. Rainbow-tagged sets
+    (services/color_wheel.py) take a neutral ×1.0 wheel factor and never
+    move the room's wheel position.
+  - Colour Group likelihood curves (owner ask 2026-08-17): reuse, not a new
+    shape — a Group's curve is just another entry in this SAME
+    color_set_entries dict, keyed by the GROUP's own ColorSetCard id
+    (structurally indistinguishable from a Set's entry; only which kind of
+    card the key names differs). A Group never becomes its own candidate
+    here (it has no wheel position), but its curve MULTIPLIES onto every
+    member Set's own score — services/selection_kernel.py's
+    Candidate.group_points/group_curve_mult, resolved via services/
+    color_set_groups.group_ids_by_set's reverse "which groups contain this
+    set" lookup. A set in more than one group chains every enclosing
+    group's curve (further multiplication, never "one wins" — his real data
+    has 4 sets under both "First Group" and "Blues"). No entry for a group
+    = flat 1.0, the exact multiplicative identity. genre_mult/dwell_weight
+    on a GROUP's entry are unread — same precedent as flare_entries never
+    reading dwell_weight.
 
 Executable spec: scripts/check_sequencer.py
 """
