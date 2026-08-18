@@ -634,7 +634,27 @@ own already-authored spin-patch magnitude, negated. Migration:
 idempotent, goes through `scene_console.apply_flare_kind` — Sonic's own
 write path, backed up automatically — not a raw-JSON patch, since adding
 a FlareKind is exactly what that function is for). Full writeup:
-`docs/SPECTRA_SPEC.md` §78), read-only bridge
+`docs/SPECTRA_SPEC.md` §78. **"The Scenes page's band-strip chip" above is
+now the LANE RACK** (`spectra/web/src/components/FlareLaneRack.tsx`, §81,
+PR fm/spectra-flare-lanes-and-edit): a band attaches kinds by drag, not a
+click-toggle chip row. A lane is a POSITION in `FlareBand.kinds` (dict,
+name→scale) — not a new stored concept — so lane order IS the dict's own
+insertion order, which the engine already reads as a tie-break when two
+same-type kinds (e.g. two permanent param moves) target the same param:
+the later one in that order wins (`scene_response.py`'s fixed
+dice→permanent→momentary→gain→colour execution order, generalized — see
+that module's own docstring before assuming "combine" means additive; dice
+re-rolls and colour jumps are each a SINGLETON pick per fire regardless of
+how many are attached, only param moves/gains actually compose). Rename/
+delete/copy got a direct edit box (`FlareKindEditDialog.tsx`, tap or
+double-click) — deliberately narrower than the no-settings-forms rule
+above, since those three are identity ops on the kind's NAME, not its
+type/params/gain/hold (still agent-only). A flare kind is scoped to ONE
+scene's `flare_kinds` list — no cross-scene id — so paste
+(`lib/flareClipboard.ts`) is a genuine PORT (a fresh, deduped-by-name
+entry, never attached to a band), not a live link back to the original.
+Full writeup, including the intensity-bucket-management proposal (options,
+not built): `docs/SPECTRA_SPEC.md` §81, OQ-13.), read-only bridge
 (`bridge.py` — WS client on spot-effects' /ws + `analysis_reader.py`;
 classification: charge/lull/drop stay themselves, scene-family event
 types are observations, everything else is a flare). Every glide/jump
