@@ -389,6 +389,24 @@ or repurpose it; don't conflate the two. Spec: `docs/SPECTRA_SPEC.md` §82.
 Tests: `tests/test_lead_time_alignment.py`, `tests/test_trigger_engine.py`
 (frame-level proofs 9/10), `scripts/check_triggers.py` §8.
 
+**The hue-arc blend this transition timing rides on has a real, PINNED
+desaturation defect from an achromatic endpoint** (`docs/SPECTRA_SPEC.md`
+§83, his report 2026-08-19: "goes from black to a gray or a white and then
+changes color"). `fx/effects/__init__.py::hue_tween_fields` — requested as
+`transition_blend="hue"` by every real scene fire (`fx_seam`/`fx_executor`
+both hardcode it whenever `transition_ms>0`, which his real
+`global_transition_ms==0` never prevents, since `scene_compiler.fire_scene`'s
+`or`-chain fallback treats falsy `0` as unset) — adopts the far end's hue
+immediately for an achromatic (black, at minimum) endpoint but then
+interpolates SATURATION and VALUE as independent linear scalars from 0,
+i.e. `sat(t) = t × target_sat`. A plain RGB scale-up (`mix_colors`) from
+the SAME black start does not do this (scaling a vector leaves its
+saturation ratio unchanged) — the "careful" path this replaced was already
+saturation-safe from black; the hue-path's own achromatic handling is what
+introduces the dip it was built to prevent. Real numbers, his real data:
+`scripts/check_hue_blend_achromatic_desaturation.py`. Not yet fixed —
+investigation only, his own decision on how/whether to fix it.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
