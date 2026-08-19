@@ -99,14 +99,29 @@ building, not assumed: `resolve_for_fire`'s override overlay was ALREADY a
 live, non-destructive layer (never rewrites a member Set's own stored
 `entries` — confirmed in both this module and legacy's
 `_execute_set_color`), so his "bulk edit" phrase names the EFFECT, not a
-new mechanism to build. **The override has NEVER applied to a Set fired by
-its own id** — in legacy OR here, only when the enclosing Group itself is
-the resolved fire target (`_execute_set_color`'s `if card.kind == "group"`
-gate, unchanged) — broadening that to every direct reference of a member
-Set was considered and rejected: computed against his real 8
-groups/58 cards, doing so would silently change rendered output for 27 of
-28 (group, member) override pairs, with zero precedent in either codebase.
-**Groups also stay real, working pools** — 0 of his ~21k SPECTRA
+new mechanism to build. At the time, **the override had NEVER applied to a
+Set fired by its own id** — in legacy OR here, only when the enclosing
+Group itself was the resolved fire target — broadening that to every
+direct reference of a member Set was considered and rejected as invented
+behaviour, computed against his real data to silently change rendered
+output for 27 of 28 (group, member) override pairs.
+
+**He has since asked for exactly that broadening (2026-08-19, PR
+fm/spectra-group-overrides-on-direct-call), and it is now built**: "[the
+overrides] need to apply when the colour set is called. It still needs to
+use the overrides from its parent group." `resolve_for_fire` on a `"set"`
+card now chains every enclosing Group's override entries (via
+`group_ids_by_set`'s reverse index) onto the Set's own — a Set in no
+overriding Group is unaffected. A Set under >1 Group (his real data: 4
+under both First Group and Blues) chains ALL of them, deterministic
+ascending-by-name order, alphabetically-last wins a field conflict — never
+picks one Group and discards the rest (would invent the exact
+single-owner concept the tiering above rejected). Re-measured two days
+later against live data: still 27 of 28 pairs change output — the 28th is
+a stale member id in `Lines` that no longer exists, not a "no difference"
+case. See `docs/SPECTRA_SPEC.md` §10's own dated note for the full
+consequence writeup and `tests/test_color_set_groups.py` for the
+multi-group chaining proofs. **Groups also stay real, working pools** — 0 of his ~21k SPECTRA
 triggers/scenes target a Group id today (his "we're not really calling
 color groups like we were in SpotFX" is literally true of SPECTRA, though
 legacy's own `storage/events.json` shows 5 of his 8 groups WERE fired as

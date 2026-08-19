@@ -68,9 +68,11 @@ def status() -> dict:
 
 
 async def _resolve(card: ColorSetCard):
+    # A "group" card picks a member; a "set" card now also wears its own
+    # enclosing groups' overrides (2026-08-19 broadening) — both handled by
+    # resolve_for_fire itself, so Preview shows exactly what a real fire
+    # would render for either kind.
     from spectra.services import color_set_groups
-    if card.kind != "group":
-        return card
     return color_set_groups.resolve_for_fire(card)
 
 
