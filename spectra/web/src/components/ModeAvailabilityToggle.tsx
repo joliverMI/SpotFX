@@ -4,8 +4,13 @@
  *
  * HARD REQUIREMENT (his words): the toggle must not change size as it
  * cycles — a fixed pixel width is reserved for the longest label
- * ("Hybrid") so the row never reflows under his thumb. */
+ * ("Hybrid") so the row never reflows under his thumb. Built via the
+ * shared fixedSizeToggleStyle.ts (see DisabledToggle.tsx, which sits on
+ * the same row and shipped without the `white-space: nowrap` this needs
+ * to actually hold — this toggle's short labels just never happened to
+ * wrap). */
 import type { DisplayAvailability } from '../types';
+import { fixedSizeToggleStyle } from './fixedSizeToggleStyle';
 
 const ORDER: DisplayAvailability[] = ['default', 'light', 'dark'];
 const LABEL: Record<DisplayAvailability, string> = { default: 'Hybrid', light: 'Light', dark: 'Dark' };
@@ -31,7 +36,7 @@ export default function ModeAvailabilityToggle({ value, onChange }: {
     <button
       type="button"
       style={{
-        fontSize: 12, width: TOGGLE_WIDTH, flexShrink: 0, textAlign: 'center',
+        ...fixedSizeToggleStyle(TOGGLE_WIDTH),
         color: COLOR[v], borderColor: v === 'default' ? undefined : 'var(--accent)',
       }}
       title={TITLE[v]}

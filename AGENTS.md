@@ -891,6 +891,23 @@ scene's status is shown, not just a detail panel: a red "⛔ disabled"
 badge on the scene-list row and the phone header's compact selector
 (`ScenesPage.tsx`), a `DisabledToggle.tsx` toolbar control next to Mode
 availability, and the disabled marker on Force Scene's own scene picker.
+
+Fixed 2026-08-19 (his report: "the enable/disable button gets taller and it
+makes the entire row look bad"): `DisabledToggle.tsx` shipped with a fixed
+pixel WIDTH but no `white-space: nowrap`, so the bold "⛔ Disabled" label
+wrapped onto a second line at that width, growing the button (and the
+toolbar row it sits in) 17px taller only while disabled.
+`ModeAvailabilityToggle.tsx` — same row, one control over — was built with
+the identical hard requirement ("must not change size as it cycles") and
+had the identical gap, just never triggered because its own labels
+("Hybrid"/"Light"/"Dark") happen to be short enough not to wrap. Both now
+build their `style` via the shared `fixedSizeToggleStyle.ts` (fixed width +
+`white-space: nowrap`), so this is closed for both, not patched once per
+control. Measured via a real render of both toggles at 390×844 (isolated
+instance, no live storage touched): fixed, an enabled-at-load scene and a
+disabled-at-load scene render pixel-identical toolbar rows (88×31 toggle,
+321×154 row); pre-fix, the disabled-at-load scene's toggle/row measured
+88×48 / 321×171.
 Deliberately did NOT extend the same naming treatment to Force Scene's
 pre-existing SILENT bypass of mode availability (§9/§31 above) — a
 different, already-shipped behaviour this task wasn't asked to touch.
