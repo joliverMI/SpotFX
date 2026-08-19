@@ -1992,6 +1992,24 @@ HTML through both the direct SPECTRA port and the proxied port, while `GET
 460-byte shell — the two are verifiably different responses, not the same
 200 read twice.
 
+**Never `pkill -f "python -m spectra"` (or any bare-argv pattern match) to stop
+your own isolated preview instance — it also matches his REAL live
+`spectra.service`, which runs the identical argv from a different
+interpreter path, and `pkill -f` can't tell them apart.** Found live
+2026-08-19: an isolated instance spun up for a phone screenshot
+(`SPECTRA_STORAGE_DIR`/`SPECTRA_PORT` repointed to a spare port, exactly the
+established pattern below) was stopped with `pkill -f "python -m spectra"`,
+which also SIGTERM'd his live `spectra.service` (`/home/javi/SpotFX/.venv/...`,
+not the agent's worktree venv) — systemd restarted it within about a second
+(`Restart=` in the unit), but the restart's own resume logic re-activated the
+live stack, reconnected the Hue entertainment streams, and fired a real scene
+as a side effect: a real, visible, un-undoable room glitch, not a no-op. Kill
+your own isolated instance by the exact PID your own `Popen`/background-job
+call returned (or `pkill -f` a pattern that includes your unique spare port
+or an env marker only your instance sets, e.g. `SPECTRA_STORAGE_DIR=<your
+temp path>`), never by the bare module invocation string alone — it is not
+unique to your process in this environment.
+
 Two user systemd units since the S3 process split: **`spotfx.service`**
 (`.venv/bin/python main.py`, port 8000) and **`spectra.service`**
 (`.venv/bin/python -m spectra`, port 8010; reference units + one-pass
