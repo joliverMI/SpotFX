@@ -7,8 +7,16 @@
  * manual Fire/test-fire still work on a disabled scene, same as they
  * already bypass mode availability.
  *
- * Same fixed-width discipline as ModeAvailabilityToggle.tsx: the row must
- * not reflow under a thumb on a phone. */
+ * Same fixed-size discipline as ModeAvailabilityToggle.tsx (see
+ * fixedSizeToggleStyle.ts) — the row must not reflow under a thumb on a
+ * phone. Found 2026-08-19: a fixed WIDTH alone isn't enough — without
+ * `white-space: nowrap`, the bold "⛔ Disabled" label wrapped onto a second
+ * line at 88px and grew the button (and the whole toolbar row) taller.
+ * ModeAvailabilityToggle only escaped this by accident (its labels are
+ * short enough not to wrap) — the shared helper is what actually closes it
+ * for both. */
+import { fixedSizeToggleStyle } from './fixedSizeToggleStyle';
+
 const TOGGLE_WIDTH = 88;
 
 export default function DisabledToggle({ value, onChange }: {
@@ -19,7 +27,7 @@ export default function DisabledToggle({ value, onChange }: {
     <button
       type="button"
       style={{
-        fontSize: 12, width: TOGGLE_WIDTH, flexShrink: 0, textAlign: 'center',
+        ...fixedSizeToggleStyle(TOGGLE_WIDTH),
         color: value ? 'var(--danger)' : 'var(--text-muted)',
         borderColor: value ? 'var(--danger)' : undefined,
         fontWeight: value ? 600 : undefined,
