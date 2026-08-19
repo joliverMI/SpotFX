@@ -338,6 +338,13 @@ export interface RoomControlState {
    * never frozen. */
   ambient_hue_group_ids: string[];
   global_transition_ms: number;
+  /** Intensity-scaled scene-entry crossfade bounds (2026-08-19) — the new
+   * DEFAULT fallback scene_compiler.fire_scene uses when a scene has no
+   * entry_ramp_ms of its own AND global_transition_ms is 0 (an explicit
+   * flat override still wins). Linear between the two: _gentle at
+   * intensity 0.0, _hard at intensity 1.0. */
+  scene_transition_ms_gentle: number;
+  scene_transition_ms_hard: number;
   scene_change_mode: SceneChangeMode;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically

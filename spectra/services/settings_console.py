@@ -104,7 +104,9 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
     else:
         kind = "float"
     unit = {"brightness_multiplier": "fraction 0.0-1.0",
-            "global_transition_ms": "ms"}.get(key)
+            "global_transition_ms": "ms",
+            "scene_transition_ms_gentle": "ms",
+            "scene_transition_ms_hard": "ms"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -119,9 +121,24 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "Uniform room brightness multiplier, as a fraction from 0.0 (dark) "
         "to 1.0 (full) — convert a spoken percentage yourself (50% -> 0.5)."),
     "global_transition_ms": _spec(
-        "global_transition_ms", "Transition",
-        "Default scene-entry blend time in milliseconds, used when a scene "
-        "doesn't author its own — convert spoken seconds to ms (2s -> 2000)."),
+        "global_transition_ms", "Transition (manual override)",
+        "A FLAT scene-entry blend time in milliseconds that overrides the "
+        "intensity-scaled default below when set above 0 — used when a "
+        "scene doesn't author its own entry ramp. Leave at 0 to let "
+        "scene_transition_ms_gentle/_hard scale it by intensity instead. "
+        "Convert spoken seconds to ms (2s -> 2000)."),
+    "scene_transition_ms_gentle": _spec(
+        "scene_transition_ms_gentle", "Transition at low intensity",
+        "Scene-entry crossfade time in milliseconds used at intensity 0.0 "
+        "(the gentle end) — the DEFAULT fallback when a scene has no "
+        "entry ramp of its own and global_transition_ms is 0. Linearly "
+        "scaled toward scene_transition_ms_hard as intensity rises toward "
+        "1.0. Convert spoken seconds to ms."),
+    "scene_transition_ms_hard": _spec(
+        "scene_transition_ms_hard", "Transition at high intensity",
+        "Scene-entry crossfade time in milliseconds used at intensity 1.0 "
+        "(the hard end) — see scene_transition_ms_gentle. Convert spoken "
+        "seconds to ms."),
     "ambient_mode": _spec(
         "ambient_mode", "Ambient",
         "Ambient mode for the room's live Hue devices, one of three: "

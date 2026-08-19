@@ -196,6 +196,37 @@ def select_band(bands: list[FlareBand], intensity: float) -> Optional[FlareBand]
     return None
 
 
+def momentary_switch_would_glide(scene: SceneV2, event_class: ResponseClass,
+                                 intensity: float, virtuals: dict) -> bool:
+    """Read-only peek for trigger_engine's lead-time alignment (his ask: a
+    momentary flare's FIRST SWITCH must FINISH on the trigger, then the
+    hold, then the flip back after). True iff firing this response class at
+    this intensity would land at least one MOMENTARY kind's param on a
+    registry-smooth target — i.e. _move_params would put it in `glides` (a
+    DICE_REROLL_GLIDE_MS ease) rather than `jumps` (instant, already
+    finishes at fire time with no lead needed). Mirrors _move_params' own
+    smooth gate exactly, without executing any write or rolling any dice.
+    A momentary GAIN's spike is always an instant jump (see _gain) and
+    never needs this — only param moves can glide."""
+    spec = scene.responses.get(event_class)
+    band = select_band(spec.bands, intensity) if spec else None
+    if band is None:
+        return False
+    declared = {k.name: k for k in scene.flare_kinds}
+    for name in band.kinds:
+        kind = declared.get(name)
+        if kind is None or kind.type != "momentary" or not kind.params:
+            continue
+        for pname in kind.params:
+            for state in virtuals.values():
+                meta = device_model.get_param_meta(state.effect_type, pname)
+                mkind, _lo, _hi = binding_resolver.kind_for_meta(meta)
+                if (mkind == binding_resolver.KIND_NUMERIC and meta is not None
+                        and meta.get("smooth")):
+                    return True
+    return False
+
+
 class ResponseEngine:
     def __init__(
         self, *,

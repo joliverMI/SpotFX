@@ -904,4 +904,132 @@ check(trigger_store.list_for_song(NO_ANALYSIS_AUTO_URI) == [],
       "auto-generate path too — generate_for_song's clean zero-moment "
       "no-op is preserved, never a fabricated trigger")
 
+# ═══ 8. lead-time alignment (his ask, 2026-08-19) ════════════════════════
+# "This is how it worked in the old SpotFX" — services/transition_phases.py
+# + trigger_engine.py's transition_lead_ms/_entry_transition_lead_ms,
+# ported near-verbatim (spectra/services/transition_phases.py) plus the one
+# deliberate generalization (0.5 midpoint fallback for an ordinary,
+# unregistered crossfade) his ask adds on top. Two anchors, proven
+# separately: a scene transition lands its MID-POINT (or a registered
+# phased effect's own payoff fraction) on the trigger; a momentary flare's
+# FIRST SWITCH lands its END on the trigger.
+
+from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
+                                  ResponseSpec)
+from spectra.models.trigger import FireResponseAction
+from spectra.services import transition_phases
+
+check(transition_phases.anchor_frac("blackhole", "radial") == 0.45,
+      "the ported registry keeps legacy's exact anchor for a registered "
+      "phased effect pair (fx/effects/particle_handoff.py's BLOOM_START)")
+check(transition_phases.anchor_frac("concentric", "radial") == 0.0,
+      "an unregistered pair's OWN anchor_frac stays legacy's 0.0 — the "
+      "0.5 generalization lives in the caller, not the ported registry")
+check(transition_phases.lead_ms("blackhole", "radial", 1000) == 450,
+      "lead_ms = anchor_frac x crossfade_ms for a registered pair")
+
+# seed "v-m1"'s LIVE effect as blackhole (a real prior fire, the same
+# on_scene_fire re-baseline every other production choke point uses).
+prior_scene = SceneV2(name="Prior Blackhole", devices=[
+    SceneDeviceConfig(target_kind="virtual", target="v-m1", effect_type="blackhole")])
+spectra_engine.responses.conductor.on_scene_fire(prior_scene, [
+    {"virtual_id": "v-m1", "effect_type": "blackhole", "config": {},
+     "entry_id": prior_scene.devices[0].id, "color_mode": "fixed"}])
+
+# a fire_scene trigger switching v-m1 blackhole -> radial (a REGISTERED
+# phased pair) with an explicit entry_ramp_ms: lead = 0.45 x 1000 = 450ms.
+phased_scene = SceneV2(name="Phased Bloom", entry_ramp_ms=1000, devices=[
+    SceneDeviceConfig(target_kind="virtual", target="v-m1", effect_type="radial")])
+scene_store.save(phased_scene)
+lead = prod_engine._scene_transition_lead_ms(
+    FireSceneAction(scene_id=phased_scene.id, intensity=0.5))
+check(lead == 450,
+      "a fire_scene trigger switching onto a registered phased pair "
+      "computes the SAME lead the ported registry declares — the payoff, "
+      "not the switch, lands on the trigger")
+
+# same switch target, but the LIVE effect is something with no registered
+# pair against radial ("concentric") — falls back to the 0.5 midpoint.
+spectra_engine.responses.conductor.virtuals["v-m1"].effect_type = "concentric"
+lead_default = prod_engine._scene_transition_lead_ms(
+    FireSceneAction(scene_id=phased_scene.id, intensity=0.5))
+check(lead_default == 500,
+      "an ordinary (unregistered) crossfade falls back to the 0.5 "
+      "midpoint his ask adds on top of legacy's registry-only behaviour")
+
+# an UNRESOLVED scene pick (scene_id=None) yields NO lead — conservative,
+# matching legacy's own unresolved-random-branch rule.
+lead_unresolved = prod_engine._scene_transition_lead_ms(
+    FireSceneAction(scene_id=None, intensity=0.5))
+check(lead_unresolved == 0,
+      "an unresolved scene pick (kernel/pool decide at fire time) gets no "
+      "lead rather than a guess")
+
+# a momentary flare's first switch: a param move onto a registry-smooth
+# target (concentric's gradient_scale, same param test_trigger_engine.py's
+# own proof uses) glides over DICE_REROLL_GLIDE_MS — the lead equals that
+# fixed duration so the glide FINISHES on the trigger.
+from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
+
+flare_scene = SceneV2(
+    name="Momentary Flare",
+    devices=[SceneDeviceConfig(target_kind="virtual", target="v-m1",
+                               effect_type="concentric")],
+    flare_kinds=[FlareKind(name="Pulse", type="momentary",
+                           params={"gradient_scale": ParamTarget(
+                               mode="absolute", value=1.8)})],
+    responses={"flare": ResponseSpec(bands=[
+        FlareBand(intensity_min=0.4, intensity_max=1.0, kinds={"Pulse": 1.0})])})
+spectra_engine.responses.conductor.on_scene_fire(flare_scene, [
+    {"virtual_id": "v-m1", "effect_type": "concentric",
+     "config": {"gradient_scale": 1.0}, "entry_id": flare_scene.devices[0].id,
+     "color_mode": "fixed"}])
+# raw 1.0 -> render intensity 0.6 (intensity_scale's HEADROOM_RESERVE=0.6,
+# neutral song scaling factor with no live track) — inside the band above.
+lead_flare = prod_engine._response_switch_lead_ms(
+    FireResponseAction(event_class="flare", intensity=1.0))
+check(lead_flare == DICE_REROLL_GLIDE_MS,
+      "a momentary flare landing on a registry-smooth param computes lead "
+      "= DICE_REROLL_GLIDE_MS — the switch's glide finishes exactly on "
+      "the trigger, then the hold, then the flip-back after")
+
+# raw 0.1 -> render intensity 0.06, below the band's own floor — no band
+# selected at all, so nothing here would start early anyway.
+lead_flare_none = prod_engine._response_switch_lead_ms(
+    FireResponseAction(event_class="flare", intensity=0.1))
+check(lead_flare_none == 0,
+      "an intensity that selects no band (or a kind with nothing to "
+      "glide) gets no lead — nothing here would start early anyway")
+
+# end-to-end through tick(): the phased-pair trigger actually fires EARLY,
+# before its own nominal timestamp. A FRESH engine with an injected FAKE
+# fire_scene (recording only, no I/O) but the REAL lead_ms default — this
+# offline spec must never make a live dry_run=False fire attempt (see
+# section 5's own note above), so the crossing/lead logic is proven
+# end-to-end without ever reaching fx_seam.apply_writes.
+spectra_engine.responses.conductor.virtuals["v-m1"].effect_type = "blackhole"
+lead_calls: list = []
+
+
+async def _recording_fire_scene(scene_id, color_set_id, intensity):
+    lead_calls.append(scene_id)
+
+
+lead_song = "spotify:track:lead-song"
+lead_engine = TriggerEngine(
+    list_triggers=lambda uri: [SpectraTrigger(
+        timestamp_ms=5000,
+        action=FireSceneAction(scene_id=phased_scene.id, intensity=0.5))]
+    if uri == lead_song else [],
+    fire_scene=_recording_fire_scene)   # lead_ms left at its real default
+asyncio.run(lead_engine.on_track_state(lead_song))
+
+not_yet = asyncio.run(lead_engine.tick(4549))
+check(not_yet == [], "nothing fires one ms before the computed lead boundary")
+
+fired_early = asyncio.run(lead_engine.tick(4550))   # 5000 - 450 = the lead boundary
+check(len(fired_early) == 1 and lead_calls == [phased_scene.id],
+      "the trigger fired 450ms EARLY (tick 4550), exactly the registered "
+      "phased pair's anchor x crossfade — never at the nominal 5000ms")
+
 print("\nALL CHECKS PASSED")

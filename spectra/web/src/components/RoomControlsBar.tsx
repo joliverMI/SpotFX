@@ -429,6 +429,29 @@ export default function RoomControlsBar() {
                 onChange={(e) => setLocal({ ...local, global_transition_ms: Number(e.target.value) })}
                 onBlur={() => commit(local)}
               />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms (0 = use the two below)</span>
+            </div>
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                Transition @ low intensity
+                <HelpLink topic="intensity-scaled-transitions" />
+              </label>
+              <input
+                type="number" min={0} max={20000} step={50}
+                value={local.scene_transition_ms_gentle}
+                onChange={(e) => setLocal({ ...local, scene_transition_ms_gentle: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
+            </div>
+            <div className="top-bar-group-field">
+              <label>Transition @ high intensity</label>
+              <input
+                type="number" min={0} max={20000} step={50}
+                value={local.scene_transition_ms_hard}
+                onChange={(e) => setLocal({ ...local, scene_transition_ms_hard: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
               <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
             </div>
             <div className="top-bar-group-field">

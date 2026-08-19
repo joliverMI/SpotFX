@@ -145,9 +145,49 @@ legacy picks: decision-legacy-retirement-picks.md):
                           still covers both his non-dark ("default"/hybrid)
                           and "light" cases.
   global_transition_ms    the legacy ledfx_global_transition action
-                          equivalent — the default ramp new scene-entry
-                          blends use when a scene doesn't author its own
-                          entry_ramp_ms (SceneV2.entry_ramp_ms == 0).
+                          equivalent — a flat MANUAL override ramp new
+                          scene-entry blends use when a scene doesn't
+                          author its own entry_ramp_ms (SceneV2.
+                          entry_ramp_ms == 0). Superseded as the DEFAULT
+                          fallback by scene_transition_ms_gentle/_hard
+                          below (2026-08-19) but still wins when he's
+                          explicitly set it nonzero — see that pair's own
+                          docstring for the full fallback chain.
+  scene_transition_ms_    intensity-scaled scene-entry crossfade bounds
+  gentle/_hard            (2026-08-19, his ask: two settings he named
+                          "max scene transition time"/"min scene
+                          transition time", 200ms and 300ms — scale
+                          transition time by intensity, linearly). His
+                          named numbers are INVERTED from what "max"/"min"
+                          would suggest (200 < 300) — the physically
+                          sensible reading, and the one this builds,
+                          is low intensity gets the LONGER transition,
+                          high intensity the SHORTER one. Named here by
+                          what they represent instead of by his ambiguous
+                          "max"/"min" labels (avoiding a field literally
+                          named "max" holding the smaller number), matching
+                          the SAME gentle/hard naming spectra/services/
+                          scene_response.py already uses for every other
+                          intensity-scaled ramp in this codebase
+                          (COLOR_JUMP_RAMP_MS_GENTLE/_HARD,
+                          UPDATE_RAMP_MS_GENTLE/_HARD — this is the fourth
+                          instance of the same shape, not a new one):
+                            scene_transition_ms_gentle  300ms @ intensity 0.0
+                            scene_transition_ms_hard    200ms @ intensity 1.0
+                          Both are plain settings (Sonic-editable via
+                          settings_console.SETTINGS_REGISTRY, same as
+                          global_transition_ms), swappable without a code
+                          change either way he ultimately confirms.
+                          scene_transition_ms() below is the shared linear
+                          interpolation (same shape as scene_response.
+                          _intensity_scaled_ramp_ms) — consulted by
+                          scene_compiler.fire_scene as the new DEFAULT
+                          fallback (global_transition_ms, when nonzero,
+                          still wins — an explicit flat override he set in
+                          the past keeps meaning exactly what it always
+                          did) and, read-only, by trigger_engine's lead-time
+                          peek so the predicted duration matches the one
+                          the fire will actually use.
   scene_change_mode  the Admiral's binding settings model (decision-
                           mid-song-model.md + its 2026-08-14 framing
                           correction + the settings-model brief,
@@ -337,6 +377,11 @@ class RoomControlState(BaseModel):
     # FALLBACK ramp scene_compiler.fire_scene uses when a scene's own
     # entry_ramp_ms is 0 — the legacy ledfx_global_transition equivalent.
     global_transition_ms: int = Field(default=0, ge=0, le=20000)
+    # intensity 0.0 / 1.0 crossfade bounds — see the module docstring's
+    # "scene_transition_ms_gentle/_hard" entry for the naming/inversion
+    # reasoning behind his 200ms/300ms.
+    scene_transition_ms_gentle: int = Field(default=300, ge=0, le=20000)
+    scene_transition_ms_hard: int = Field(default=200, ge=0, le=20000)
     scene_change_mode: SceneChangeMode = "full"
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
@@ -389,6 +434,22 @@ def effective_ambient_color(state: RoomControlState) -> Optional[str]:
     if state.display_mode == "dark" and state.ambient_color_dark is not None:
         return state.ambient_color_dark
     return state.ambient_color
+
+
+def scene_transition_ms(state: RoomControlState, intensity: float) -> int:
+    """Linear interpolation between the gentle (intensity 0.0) and hard
+    (intensity 1.0) crossfade bounds — same shape as scene_response.
+    _intensity_scaled_ramp_ms, duplicated rather than imported to avoid a
+    room_controls -> scene_response import (scene_response already reaches
+    into room-level state indirectly via the engine singleton; this module
+    stays a leaf). Clamped so an out-of-[0,1] intensity (shouldn't happen —
+    SpectraTrigger.action.intensity is itself bounded — but a caller
+    computing render_intensity could theoretically drift) never
+    extrapolates past either bound."""
+    frac = max(0.0, min(1.0, intensity))
+    return int(round(state.scene_transition_ms_gentle
+                     + (state.scene_transition_ms_hard
+                        - state.scene_transition_ms_gentle) * frac))
 
 
 def apply_brightness(params: dict, multiplier: float) -> dict:

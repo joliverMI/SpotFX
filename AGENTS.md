@@ -321,6 +321,59 @@ authoring/display shapes proposed but undecided, see `docs/SPECTRA_SPEC.md`
 `scripts/check_trigger_scene_pools.py` (reads his live storage read-only,
 `--song-uri` to pick which of his real songs to demonstrate against).
 
+## SPECTRA transition-timing alignment (intensity-scaled duration + fire-early lead)
+
+`spectra/services/transition_phases.py` is a near-verbatim port of legacy
+`services/transition_phases.py` (fx/'s vendored particle-effect
+choreography is the same fork, same `BLOOM_START`/`PACMAN_MORPH_START =
+0.45`) — a registry of effect-pair `anchor_frac`s plus `lead_ms()`. One
+deliberate departure from legacy, kept OUT of the ported module and
+applied by the caller instead: legacy's own `anchor_frac()` returns 0.0
+(no lead) for an unregistered pair; his ask generalizes that to a plain
+0.5 MID-POINT fallback for every other scene transition — see
+`trigger_engine._scene_transition_lead_ms`'s own docstring for why that
+split keeps the port byte-diffable against legacy.
+
+Two new `RoomControlState` fields, `scene_transition_ms_gentle`
+(300ms @ intensity 0.0) / `_hard` (200ms @ intensity 1.0) — his named
+"max"/"min" 200/300 are backwards for magnitude, so they're named for what
+they represent instead (same shape as `scene_response.py`'s pre-existing
+`COLOR_JUMP_RAMP_MS_GENTLE`/`_HARD`). `room_controls.scene_transition_ms()`
+linearly interpolates between them; `scene_compiler.fire_scene` consults it
+as a NEW third tier under `scene.entry_ramp_ms` and `room.
+global_transition_ms` (an explicit flat override still wins over the new
+default when he's set one) — applies to EVERY scene fire, not just
+trigger-driven ones, since it lives inside `fire_scene` itself. Both
+settings are in `settings_console.SETTINGS_REGISTRY` (Sonic-editable) and
+have their own numeric fields in `RoomControlsBar.tsx`'s Scenes panel.
+
+`trigger_engine.TriggerEngine.tick()` fires a stored trigger up to
+`lead_ms` EARLY (`fire_at = trig.timestamp_ms - lead_ms`) so a transition's
+anchor point — a scene's mid-point (or a registered phased pair's own
+0.45), a momentary flare's FIRST SWITCH completing (fixed
+`DICE_REROLL_GLIDE_MS`, only when the switch actually glides — a
+non-smooth param or a momentary gain's spike is always an instant jump and
+needs no lead) — lands on the trigger instead of starting there. The
+crossing check always ALSO checks the trigger's own unshifted timestamp as
+a safety net: `lead_ms` is recomputed fresh every tick from LIVE state (a
+registry match against whatever effect is currently on the target
+virtual), so it is not guaranteed monotonic tick-to-tick — don't remove
+that OR clause when touching this code, it's what keeps a trigger from
+silently never firing if an earlier tick's early-fire window gets missed.
+Conservative like legacy: an unresolved scene pick (`scene_id=None` — the
+kernel/pool decides at fire time) gets NO lead. Scoped to stored-trigger
+fires only — NOT the automatic transition fire (no forward notice of a
+song change) and NOT the sequencer's own dwell-driven rolls (no trigger
+timestamp to land on).
+
+Deliberately NOT touched: `SceneV2.choreography` (`PhaseChoreography` —
+`enabled`/`transition_ms`/`anchor_frac` default 0.45/`transition_mode`) is
+a SEPARATE, still-unwired per-scene field predating this build (see
+`docs/SPECTRA_SPEC.md` §28's own note) — this feature does not reach into
+or repurpose it; don't conflate the two. Spec: `docs/SPECTRA_SPEC.md` §82.
+Tests: `tests/test_lead_time_alignment.py`, `tests/test_trigger_engine.py`
+(frame-level proofs 9/10), `scripts/check_triggers.py` §8.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
