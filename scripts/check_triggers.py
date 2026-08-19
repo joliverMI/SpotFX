@@ -329,7 +329,14 @@ def fake_select_scene(intensity):
 
 engine7 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
                         fire_scene=fake_fire_scene, select_scene=fake_select_scene,
-                        render_intensity=lambda x: x)
+                        render_intensity=lambda x: x,
+                        # LOOKAHEAD (section 9 below) would otherwise pin
+                        # "kernel-picked-scene" early, find it isn't a real
+                        # scene at fire time (correctly — a fake id backed
+                        # by no real scene_store entry), and degrade to a
+                        # second select_scene draw — bypass it here so this
+                        # stays a pure proof of the plain fire-time path.
+                        lead_ms=lambda t: 0)
 asyncio.run(engine7.on_track_state("kernel"))
 fired7 = asyncio.run(engine7.tick(100))
 check(len(fired7) == 1 and select_calls == [0.42]
@@ -1031,5 +1038,98 @@ fired_early = asyncio.run(lead_engine.tick(4550))   # 5000 - 450 = the lead boun
 check(len(fired_early) == 1 and lead_calls == [phased_scene.id],
       "the trigger fired 450ms EARLY (tick 4550), exactly the registered "
       "phased pair's anchor x crossfade — never at the nominal 5000ms")
+
+# ═══ 9. LOOKAHEAD: early scene-pick commitment for scene_id=None triggers
+#    (his ask, 2026-08-19, same day as section 8 — see trigger_engine.py's
+#    own LOOKAHEAD module-docstring section) ══════════════════════════════
+# "0 of 22,013 fire_scene triggers ever resolve a scene_id" — the plain
+# rule proven above (lead_unresolved == 0) never engages for him at all.
+# This proves the production _pin_for/_pin_still_valid reach the REAL
+# kernel, scene_store, and room_controls, end to end through tick() — the
+# "exactly one draw, total, reused verbatim, and it's what actually
+# renders" proof (with a deterministic injected selector, and a frame-
+# level device proof) lives in tests/test_lead_time_alignment.py and
+# proof 11 of tests/test_trigger_engine.py; this section is the "the real
+# wiring reaches it" counterpart, matching section 7's own convention.
+from spectra.services.trigger_engine import LOOKAHEAD_HORIZON_MS
+
+check(LOOKAHEAD_HORIZON_MS == transition_phases.MAX_LEAD_MS,
+      "the lookahead horizon reuses transition_phases.MAX_LEAD_MS — the "
+      "worst-case lead this feature (or the plain resolved-id rule above "
+      "it) can ever compute, not a second, disconnected constant")
+
+# a real scene + a real sequencer config with exactly one positive
+# candidate, so the REAL kernel draw is deterministic. v-m1's live effect
+# is pinned to something unregistered against "radial" (not whatever an
+# earlier section left it as) so the lead below exercises the plain 0.5
+# midpoint fallback deliberately, not by accident of section ordering.
+spectra_engine.responses.conductor.virtuals["v-m1"].effect_type = "concentric"
+lookahead_scene = SceneV2(name="Lookahead Pick", entry_ramp_ms=1000, devices=[
+    SceneDeviceConfig(target_kind="category", target="Matrix", effect_type="radial")])
+scene_store.save(lookahead_scene)
+sequencer_store.save_config(SequencerConfig(entries={
+    lookahead_scene.id: SelectorEntry(inline_points=[{"x": 0.0, "y": 1.0}])}))
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))
+
+lookahead_fires: list = []
+
+
+async def _recording_fire_scene_2(scene_id, color_set_id, intensity):
+    lookahead_fires.append(scene_id)
+
+
+lookahead_song = "spotify:track:lookahead-song"
+lookahead_trigger = SpectraTrigger(
+    timestamp_ms=6000, action=FireSceneAction(scene_id=None, intensity=0.5))
+lookahead_engine = TriggerEngine(
+    list_triggers=lambda uri: [lookahead_trigger] if uri == lookahead_song else [],
+    fire_scene=_recording_fire_scene_2)   # select_scene/lead_ms left at their real defaults
+asyncio.run(lookahead_engine.on_track_state(lookahead_song))
+
+asyncio.run(lookahead_engine.tick(500))
+check(lookahead_engine._pins == {},
+      "well outside the lookahead horizon, nothing is resolved yet")
+
+# step ticks at TICK_S's own 200ms cadence (tick()'s crossing/horizon check
+# reads the PREVIOUS tick's position, so a single big jump can land one
+# step short of the guard — step through it the way services/engine.py's
+# poll loop actually drives tick(), same as the pytest-level proofs).
+for _pos in range(600, 1401, 200):
+    asyncio.run(lookahead_engine.tick(_pos))
+check(any(p is not None and p.scene_id == lookahead_scene.id
+         for p in lookahead_engine._pins.values()),
+      "the production _pin_for reached the REAL sequencer_store config + "
+      "selection_kernel.select — the sole configured, existing scene was "
+      "committed early, not left for fire time")
+
+# entry_ramp_ms=1000, no phased pair registered for whatever's live on
+# v-m1 (unrelated to this scene's own target category) falls back to the
+# 0.5 midpoint -> lead=500 -> fires at 5500, not the nominal 6000.
+not_yet_lookahead = asyncio.run(lookahead_engine.tick(5499))
+check(not_yet_lookahead == [], "nothing fires yet, one ms before the lead boundary")
+fired_lookahead = asyncio.run(lookahead_engine.tick(5500))
+check(len(fired_lookahead) == 1 and lookahead_fires == [lookahead_scene.id],
+      "the unresolved trigger fired 500ms EARLY (tick 5500 of a nominal "
+      "6000) using the scene committed at horizon entry — LOOKAHEAD "
+      "reaches the real production choke point end to end")
+
+# the misprediction guarantee itself, against the REAL scene_store/
+# room_controls (not an injected fake): a pin made while the scene was
+# legitimate, checked again after the world moved out from under it.
+misprediction_trigger = SpectraTrigger(
+    timestamp_ms=9000, action=FireSceneAction(scene_id=None, intensity=0.5))
+pin = prod_engine._pin_for(misprediction_trigger)
+check(pin is not None and pin.scene_id == lookahead_scene.id,
+      "a fresh trigger pins the same real, currently-legitimate scene")
+lookahead_scene.disabled = True
+scene_store.save(lookahead_scene)
+check(prod_engine._pin_still_valid(pin) is False,
+      "disabling the pinned scene after the fact invalidates it — "
+      "against real scene_store state, not a fake")
+lookahead_scene.disabled = False
+scene_store.save(lookahead_scene)
+check(prod_engine._pin_still_valid(pin) is True,
+      "re-enabling it makes the SAME pin valid again — the pin's identity "
+      "(which scene) never depended on the disabled flag's fluctuation")
 
 print("\nALL CHECKS PASSED")

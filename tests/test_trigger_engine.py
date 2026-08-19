@@ -788,3 +788,154 @@ def test_trigger_lead_fires_momentary_flare_early_so_its_switch_finishes_on_the_
             await host.shutdown()
 
     _run(main())
+
+
+# ── proof 11: LOOKAHEAD — an unresolved fire_scene trigger's early-pinned
+#    pick is what actually renders, reused verbatim; an invalidated pin
+#    never renders, the room gets a fresh, correct fire instead (his ask,
+#    2026-08-19 — "what happens when what actually fires is not what was
+#    predicted" — see trigger_engine.py's own LOOKAHEAD section) ──────────
+
+def test_trigger_lookahead_reuses_pinned_pick_never_rendering_a_wrong_or_stale_scene(
+    tmp_path, monkeypatch,
+):
+    """First half: a trigger with scene_id=None (his real data: every one)
+    gets pinned once, well before it fires, and the SAME pick is what
+    actually lands on the device — the kernel is drawn from exactly once
+    for the whole approach, proving there's no second draw to disagree
+    with the first. Second half: a pin that stops being legitimate
+    (disabled) before its trigger crosses never renders — a fresh, correct
+    pick does instead. This is the frame-level version of the misprediction
+    guarantee; the unit-level proof (many more edge cases: mode
+    availability, Force Scene, rewind, song change) lives in
+    tests/test_lead_time_alignment.py."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.models.trigger import FireSceneAction, SpectraTrigger
+    from spectra import config as scfg
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_store
+    from spectra.services.trigger_engine import LOOKAHEAD_HORIZON_MS, TriggerEngine
+
+    storage = tmp_path / "spectra-storage"
+    monkeypatch.setattr(scfg, "SPECTRA_STORAGE", storage)
+    monkeypatch.setattr(scfg, "SCENES_FILE", storage / "scenes.json")
+    monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", storage / "room_controls.json")
+    # Detach the lead computation from the real spectra.services.engine
+    # singleton — this proof cares about WHICH scene renders and how many
+    # times the kernel was drawn from, not the exact lead value (that's
+    # proof 9's job, and it's the identical function either way).
+    monkeypatch.setattr(TriggerEngine, "_live_virtuals", staticmethod(lambda: {}))
+    rc.save_room_controls(rc.RoomControlState(
+        global_transition_ms=0, scene_transition_ms_gentle=0,
+        scene_transition_ms_hard=0))
+
+    _categories_fixture(tmp_path)
+    scene_a = SceneV2(name="Pinned Pick", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 1.5})])
+    scene_b = SceneV2(name="Fresh Fallback", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 3.0})])
+    scene_store.save(scene_a)
+    scene_store.save(scene_b)
+    scenes_by_id = {scene_a.id: scene_a, scene_b.id: scene_b}
+
+    async def main():
+        host, virtual = await _host(tmp_path, "lookahead")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                from spectra.services import scene_compiler
+                from spectra.services.binding_resolver import FireContext
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+
+                async def _land(scene_id):
+                    scene = scenes_by_id[scene_id]
+                    ctx = FireContext(0.5, rng=Random(1))
+                    resolved = scene_compiler.resolve_scene(scene, ctx)
+                    writes = scene_compiler.compile_scene(resolved)
+                    for w in writes:
+                        await executor.jump(w["virtual_id"], w["effect_type"], w["config"])
+
+                # ── first half: the pin is what renders, drawn once ──────
+                draw_calls: list = []
+                landed: list = []
+
+                def select_scene(intensity):
+                    draw_calls.append(intensity)
+                    return scene_a.id
+
+                async def fire_scene(scene_id, color_set_id, intensity):
+                    landed.append(scene_id)
+                    await _land(scene_id)
+
+                trig = SpectraTrigger(timestamp_ms=6000, action=FireSceneAction(
+                    scene_id=None, intensity=0.5))
+                engine = TriggerEngine(list_triggers=lambda uri: [trig],
+                                       fire_scene=fire_scene,
+                                       select_scene=select_scene,
+                                       render_intensity=lambda x: x)
+                await engine.on_track_state("song:lookahead")
+
+                horizon_entry = 6000 - LOOKAHEAD_HORIZON_MS
+                for pos in range(0, 6001, 200):
+                    if pos < horizon_entry:
+                        assert draw_calls == [], \
+                            f"nothing resolved yet at {pos}, still outside the horizon"
+                    await engine.tick(pos)
+                assert len(draw_calls) == 1, \
+                    "the kernel was drawn from exactly once across the " \
+                    "trigger's whole approach — the fire never redraws"
+                assert landed == [scene_a.id]
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.5), \
+                    "the FIRST (and only) committed pick is what actually " \
+                    "rendered on the device"
+
+                # ── second half: an invalidated pin never renders ────────
+                draw_calls2: list = []
+                landed2: list = []
+                picks = [scene_a.id, scene_b.id]
+
+                def select_scene_2(intensity):
+                    draw_calls2.append(intensity)
+                    return picks[len(draw_calls2) - 1]
+
+                async def fire_scene_2(scene_id, color_set_id, intensity):
+                    landed2.append(scene_id)
+                    await _land(scene_id)
+
+                trig2 = SpectraTrigger(timestamp_ms=6000, action=FireSceneAction(
+                    scene_id=None, intensity=0.5))
+                engine2 = TriggerEngine(list_triggers=lambda uri: [trig2],
+                                        fire_scene=fire_scene_2,
+                                        select_scene=select_scene_2,
+                                        render_intensity=lambda x: x)
+                await engine2.on_track_state("song:lookahead-invalidated")
+                for pos in range(0, horizon_entry + 401, 200):
+                    await engine2.tick(pos)
+                assert len(draw_calls2) == 1
+                assert engine2._pins[trig2.id].scene_id == scene_a.id, \
+                    "the same pick got pinned again for the new trigger"
+
+                # the world moves: the pinned scene becomes illegitimate to
+                # fire before trig2 ever crosses.
+                scene_a.disabled = True
+                scene_store.save(scene_a)
+
+                fired2 = await engine2.tick(6000)
+                assert len(fired2) == 1 and landed2 == [scene_b.id], \
+                    "never the disabled, stale pick — a fresh draw supplied " \
+                    "the correct fallback"
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(3.0), \
+                    "the room actually rendered the fresh fallback (B), " \
+                    "never the disabled stale pick (A) — the misprediction " \
+                    "guarantee, proven on the real device, not just asserted"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())

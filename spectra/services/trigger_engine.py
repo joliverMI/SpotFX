@@ -156,16 +156,60 @@ effect's own payoff fraction — services/transition_phases.py) on the
 trigger; a momentary flare's FIRST SWITCH lands its END (the full
 DICE_REROLL_GLIDE_MS) on the trigger, so the switch finishes, THEN the
 hold, THEN the flip-back after the trigger mark. Both peeks are read-only
-and conservative: an unresolved scene pick (scene_id=None) or a fire with
-nothing to glide yields lead=0, same "no lead rather than a wrong one"
-rule legacy used for an unresolved random branch. tick()'s crossing check
-always ALSO checks the trigger's own unshifted timestamp as a safety net
-(fire_at is recomputed from live state every tick, so it isn't guaranteed
-monotonic) — a trigger fires by its nominal moment at the latest either
-way. Scene-entry crossfade DURATION itself is intensity-scaled separately
-(room_controls.scene_transition_ms, consulted by scene_compiler.fire_scene
-for every scene fire, not just trigger-driven ones — his other ask, two
-Inspector settings scaling transition time by intensity, linearly).
+and conservative: a fire with nothing to glide yields lead=0. tick()'s
+crossing check always ALSO checks the trigger's own unshifted timestamp as
+a safety net (fire_at is recomputed from live state every tick, so it
+isn't guaranteed monotonic) — a trigger fires by its nominal moment at the
+latest either way. Scene-entry crossfade DURATION itself is
+intensity-scaled separately (room_controls.scene_transition_ms, consulted
+by scene_compiler.fire_scene for every scene fire, not just trigger-driven
+ones — his other ask, two Inspector settings scaling transition time by
+intensity, linearly).
+
+LOOKAHEAD (his ask, 2026-08-19, same day as the alignment above — "his
+triggers never name their scene in advance, peek the upcoming trigger
+within a bounded horizon, resolve what that fire will actually do, and
+move the start moment so the midpoint still lands on the mark"): the
+plain rule above yields lead=0 for an unresolved fire_scene (scene_id=
+None) — his own words, "no lead rather than a wrong one" — because the
+scene isn't chosen until fire time. Correlated against his real data: 0 of
+22,013 fire_scene triggers ever carry a resolved scene_id, so that rule
+never engaged for him at all — measured live, 100 real fires landed at or
+after their stored timestamp, up to 3,144ms late, zero early.
+LOOKAHEAD_HORIZON_MS (module-level constant, reusing transition_phases.
+MAX_LEAD_MS — see its own docstring for why that's the justified number,
+not an arbitrary one) is how far ahead TriggerEngine._pin_for commits to a
+real kernel/pool draw for such a trigger. It is NOT a second, independent
+prediction sitting alongside the real fire-time decision: it IS the
+decision, made once, moved earlier, and reused verbatim — _fire() never
+draws again for a trigger it already pinned. The risk his ask names
+explicitly — "what happens when what actually fires is not what was
+predicted" — can therefore only come from the pinned scene stopping being
+legitimate to fire between the pin and the fire (disabled, mode-gated,
+Force Scene redirected elsewhere); TriggerEngine._pin_still_valid checks
+exactly that, narrowly, and throwing the pin away degrades to today's
+exact behaviour: a fresh draw at nominal time, zero lead, late but never
+wrong. See _pin_for's own docstring for the full mechanism.
+
+PROVING THIS RATHER THAN ASSERTING IT: the underlying scene-entry ramp
+this all rides (scene_compiler.fire_scene's transition_ms write) has no
+live instrument today that observes it AT the moment of a real fire —
+rendered frame averages sample too coarsely to catch a switching instant,
+and executor.recent_writes (fx_executor.py) never records a scene fire's
+own writes, only glide/jump calls made directly through it. Everything
+above is proven at the unit level (a real scene/room/kernel, no LedFX I/O
+— scripts/check_triggers.py) and at the frame level with an INJECTED lead
+(tests/test_trigger_engine.py, matching proofs 9/10's own established
+convention) — both prove the MECHANISM correctly reuses one committed pick
+and degrades correctly when it's invalidated. Neither proves the visual
+claim ("the midpoint really lands on the beat") against a live fire,
+because nothing in this codebase can observe a live scene-entry ramp yet.
+Building that observation would mean extending fire_history.py's already-
+hooked choke points (scene_sequencer.fire_scene_by_id) to timestamp the
+fx_seam.apply_writes call itself, then correlating that timestamp against
+the trigger's own stored timestamp_ms on a real song — a small, bounded
+addition (one new timestamped record per scene fire, no new choke point),
+named here as a real, uncosted follow-up rather than silently assumed.
 
 Executable spec: scripts/check_triggers.py (fake position feed, injected
 fires — no live storage, no LedFX I/O, no audio).
@@ -176,6 +220,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
@@ -185,6 +230,43 @@ from spectra.services import transition_phases, trigger_store
 logger = logging.getLogger(__name__)
 
 TICK_S = 0.2
+
+# LOOKAHEAD HORIZON (his ask, 2026-08-19 — "peek the upcoming trigger within
+# a bounded horizon... five seconds or something, whatever works"; the
+# number and its justification are ours to pick). Reuses transition_phases.
+# MAX_LEAD_MS rather than a second, disconnected constant: no lead this
+# feature (or the plain resolved-scene_id rule above it) can ever compute
+# exceeds that cap, so a horizon shorter than it would arrive too late to
+# cover the worst case, and a horizon longer than it buys nothing (no lead
+# could use the extra notice) while only widening the window a pinned
+# pick's validity (disabled/mode/force-scene — see TriggerEngine._pin_
+# still_valid) could drift before fire. MAX_LEAD_MS is therefore both
+# necessary and sufficient for this horizon, not a separately-tuned number.
+LOOKAHEAD_HORIZON_MS = transition_phases.MAX_LEAD_MS
+
+
+@dataclass
+class _PinnedPick:
+    """One trigger's early-resolved fire_scene pick (LOOKAHEAD, 2026-08-19).
+    Committed ONCE, the moment the trigger enters LOOKAHEAD_HORIZON_MS, and
+    reused VERBATIM at fire time — never re-drawn. That's the feature's
+    actual safety property: there is no second draw to diverge from a first
+    one, so "predicted vs. actual" can't disagree on WHICH scene fires (see
+    TriggerEngine._pin_for's docstring). The residual risk his ask calls out
+    — the world moving between commit and fire — is handled by
+    TriggerEngine._pin_still_valid checking this pick is still legitimate
+    right before it's used, not by drawing again."""
+    scene_id: str
+    lead_ms: int
+    # Snapshot of Force Scene at commit time, timing-quality only: a force-
+    # scene change never risks firing the WRONG scene (scene_sequencer.
+    # fire_scene_by_id always applies the CURRENT redirect to whatever id
+    # it's handed, pin or fresh draw alike) — but the stored lead_ms was
+    # computed against THIS target's crossfade profile, and a changed
+    # redirect would make that number describe the wrong transition. Same
+    # "no lead rather than a wrong one" caution as everywhere else in this
+    # module, applied to timing quality rather than content.
+    force_scene: tuple[bool, Optional[str]]
 
 # Serializes the file-writing body of concurrent auto-generations for
 # DIFFERENT songs (trigger_store's read-modify-write cycle isn't itself
@@ -240,6 +322,12 @@ class TriggerEngine:
         self._generating: set[str] = set()
         self._rng = rng or Random()
 
+        # LOOKAHEAD (2026-08-19): trigger_id -> _PinnedPick, or trigger_id ->
+        # None for "already attempted once, the draw came back empty" (the
+        # STAY rung / an empty scene_pool) — a bare-None cache entry so that
+        # negative result is never retried either. See _pin_for.
+        self._pins: dict[str, Optional[_PinnedPick]] = {}
+
         self._uri: Optional[str] = None
         self._last_position_ms: Optional[int] = None
         # Separate from _uri/_last_position_ms: mirrors
@@ -260,6 +348,10 @@ class TriggerEngine:
         if uri != self._uri:
             self._uri = uri
             self._last_position_ms = None
+            # A new song's trigger list is unrelated to the old one's — any
+            # LOOKAHEAD pin from the previous song is dead weight, never a
+            # reusable commitment (see _pin_for).
+            self._pins.clear()
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -322,6 +414,12 @@ class TriggerEngine:
         last = self._last_position_ms
         self._last_position_ms = position_ms
         if position_ms < last:
+            # A rewind can re-approach an already-pinned trigger with a now-
+            # stale commitment — arbitrary time may have passed off-screen
+            # (room state can drift any amount during a scrub). Drop every
+            # LOOKAHEAD pin rather than trust one across a rewind; a fresh
+            # horizon entry re-pins cleanly on the next approach.
+            self._pins.clear()
             return []  # rewind/seek back: silently rearmed via the line above
         mode = self._scene_change_mode()
         fired: list[SpectraTrigger] = []
@@ -337,10 +435,13 @@ class TriggerEngine:
             # switch lands exactly on the trigger's timestamp instead of
             # starting there. Only bother computing it within striking
             # distance (cheap: most of a song's triggers sit far from
-            # `position_ms` on any given tick) — transition_phases.
-            # MAX_LEAD_MS both caps the computed lead and bounds this gate.
+            # `position_ms` on any given tick) — LOOKAHEAD_HORIZON_MS both
+            # caps the computed lead and bounds this gate; for an unresolved
+            # fire_scene trigger it's ALSO the moment _lead_ms's own
+            # _pin_for commits its one-shot early pick (see that module-
+            # level constant's docstring).
             fire_at = trig.timestamp_ms
-            if 0 <= trig.timestamp_ms - last <= transition_phases.MAX_LEAD_MS:
+            if 0 <= trig.timestamp_ms - last <= LOOKAHEAD_HORIZON_MS:
                 lead = self._lead_ms(trig)
                 if lead > 0:
                     fire_at = trig.timestamp_ms - lead
@@ -377,7 +478,17 @@ class TriggerEngine:
             if a.kind == "fire_scene":
                 scene_id = a.scene_id
                 if scene_id is None:
-                    if a.scene_pool:
+                    # LOOKAHEAD (2026-08-19): reuse the pick already
+                    # committed at horizon entry, if it's still valid — the
+                    # fire never draws a second time when one is available
+                    # (see _pin_for's docstring for why that, not the lead
+                    # timing, is the actual safety property). No usable pin
+                    # (never pinned, or invalidated since) falls through to
+                    # exactly today's fresh, one-shot draw.
+                    pin = self._pins.pop(trig.id, None)
+                    if pin is not None and self._pin_still_valid(pin):
+                        scene_id = pin.scene_id
+                    elif a.scene_pool:
                         # scene_pool present: narrow-and-bias override — a
                         # pure weighted draw over just this trigger's named
                         # scenes (see models/trigger.py's SCENE POOLS
@@ -565,39 +676,55 @@ class TriggerEngine:
         0, unchanged."""
         a = trig.action
         if a.kind == "fire_scene":
-            return self._scene_transition_lead_ms(a)
+            if a.scene_id is not None:
+                return self._scene_transition_lead_ms(a)
+            # LOOKAHEAD (2026-08-19): a.scene_id is None on every one of his
+            # 22,013 real fire_scene triggers — the plain rule above never
+            # engages for him at all, because it deliberately refuses to
+            # guess an unresolved pick. _pin_for resolves that pick EARLY
+            # instead (once, cached, reused verbatim at fire — see its own
+            # docstring) so the lead can be computed from a real target.
+            pin = self._pin_for(trig)
+            return pin.lead_ms if pin is not None else 0
         if a.kind == "fire_response":
             return self._response_switch_lead_ms(a)
         return 0
 
     def _scene_transition_lead_ms(self, a) -> int:
-        """A fire_scene action's lead: anchor_frac x crossfade_ms, so a
+        """A fire_scene action's lead when scene_id is already known
+        (hand-picked, or committed early by LOOKAHEAD — see
+        _scene_transition_lead_ms_for): anchor_frac x crossfade_ms, so a
         registered phased effect's own payoff (services/transition_phases)
         or — the generalization his ask adds on top of legacy's own
         registry-only behaviour, see that module's docstring — the plain
         0.5 MID-POINT of an ordinary crossfade lands on the trigger.
 
         Conservative like legacy's own _entry_transition_lead_ms: an
-        UNRESOLVED scene pick (scene_id=None — the kernel or a scene_pool
-        decides at fire time, not now) yields NO lead rather than a guess,
-        mirroring legacy's own "unresolved random branch" rule. Peeks
-        Force Scene's redirect (room_controls) so the lead matches whatever
-        will actually fire, same as legacy's own plan-time member peeking
-        for scene_group redirects."""
+        UNRESOLVED pick (scene_id=None) yields NO lead rather than a guess,
+        mirroring legacy's own "unresolved random branch" rule — LOOKAHEAD
+        (_pin_for) is what turns that guess into a real, early-committed
+        resolution before this function ever runs."""
         if a.scene_id is None:
             return 0
+        return self._scene_transition_lead_ms_for(a.scene_id, a.intensity)
+
+    def _scene_transition_lead_ms_for(self, scene_id: str, raw_intensity: float) -> int:
+        """The lead computation itself, given a KNOWN scene_id — shared by
+        the resolved-scene_id path above and LOOKAHEAD's early pin (below).
+        Peeks Force Scene's redirect (room_controls) so the lead matches
+        whatever will actually fire, same as legacy's own plan-time member
+        peeking for scene_group redirects."""
         from spectra.services import room_controls, scene_compiler, scene_store
         from spectra.services.binding_resolver import FireContext
 
         controls = room_controls.load_room_controls()
-        scene_id = a.scene_id
         if controls.force_scene_enabled and controls.force_scene_scene_id:
             if scene_store.get_by_id(controls.force_scene_scene_id) is not None:
                 scene_id = controls.force_scene_scene_id
         scene = scene_store.get_by_id(scene_id)
         if scene is None:
             return 0
-        intensity = self._render_intensity(a.intensity)
+        intensity = self._render_intensity(raw_intensity)
         crossfade_ms = (scene.entry_ramp_ms or controls.global_transition_ms
                         or room_controls.scene_transition_ms(controls, intensity))
         if crossfade_ms <= 0:
@@ -618,6 +745,81 @@ class TriggerEngine:
         if anchor == 0.0:
             anchor = 0.5
         return min(round(anchor * crossfade_ms), transition_phases.MAX_LEAD_MS)
+
+    # ── LOOKAHEAD: early scene-pick commitment (his ask, 2026-08-19) ────────
+    #
+    # The danger his ask names explicitly: a lookahead is a PREDICTION of a
+    # decision that today only happens at fire time, and a prediction can be
+    # wrong. The design below does not actually predict anything — it moves
+    # the DECISION itself earlier, once, and never repeats it. _pin_for
+    # draws a real pick from the SAME kernel/pool functions _fire() would
+    # otherwise call, the FIRST time (and only the first time) a trigger
+    # comes within LOOKAHEAD_HORIZON_MS; that pick is cached and _fire()
+    # reuses it VERBATIM — there is no second draw for it to disagree with.
+    # The only way this could still show the wrong scene is if the picked
+    # scene stops being legitimate to fire between the pin and the fire (it
+    # gets disabled, the room leaves its display_mode, Force Scene points
+    # elsewhere) — _pin_still_valid checks exactly that, narrowly, right
+    # before the pin is used for either the lead calculation or the fire
+    # itself. Failing that check throws the pin away and falls through to
+    # today's exact behaviour: a fresh, real draw at (or after) the
+    # trigger's own nominal timestamp, with zero lead — late, never wrong.
+
+    def _pin_for(self, trig: SpectraTrigger) -> Optional[_PinnedPick]:
+        """The trigger's committed early pick — resolved ONCE, right now,
+        the first time this is called for a given trigger id, then cached
+        (positively or negatively — see __init__) and never re-drawn.
+        Called every tick a trigger sits inside LOOKAHEAD_HORIZON_MS
+        (tick()'s own MAX_LEAD_MS guard, reused as the horizon — see that
+        constant's docstring); every call after the first is a cheap cache
+        read plus _pin_still_valid's narrow revalidation, not a new draw."""
+        if trig.id in self._pins:
+            pin = self._pins[trig.id]
+            return pin if (pin is not None and self._pin_still_valid(pin)) else None
+        a = trig.action
+        if a.kind != "fire_scene" or a.scene_id is not None:
+            return None  # not LOOKAHEAD-eligible; nothing to cache
+        scene_id = (self._select_scene_from_pool(a.scene_pool) if a.scene_pool
+                   else self._select_scene(a.intensity))
+        if scene_id is None:
+            # Ladder terminated at stay, or an empty/all-vetoed pool: a
+            # real, deliberate "nothing" — cache it so this is never
+            # retried (retrying a probabilistic draw until it stops saying
+            # "nothing" would silently raise how often this trigger fires
+            # at all, compared to today's single draw). _fire() still gets
+            # its own single fresh draw at the nominal time, unaffected.
+            self._pins[trig.id] = None
+            return None
+        from spectra.services import room_controls
+        controls = room_controls.load_room_controls()
+        pin = _PinnedPick(
+            scene_id=scene_id,
+            lead_ms=self._scene_transition_lead_ms_for(scene_id, a.intensity),
+            force_scene=(controls.force_scene_enabled, controls.force_scene_scene_id),
+        )
+        self._pins[trig.id] = pin
+        return pin if self._pin_still_valid(pin) else None
+
+    def _pin_still_valid(self, pin: _PinnedPick) -> bool:
+        """Cheap, narrow revalidation — NOT a re-draw (see _pin_for). Mirrors
+        exactly what scene_sequencer.fire_scene_by_id itself would gate on
+        for this scene_id (disabled, mode availability) plus the Force
+        Scene timing-quality check (_PinnedPick.force_scene's own
+        docstring). Any of these failing means the world moved since the
+        pin was made — LOOKAHEAD gets out of the way entirely (0 lead,
+        _fire() re-resolves fresh) rather than firing, or timing, a stale
+        pick."""
+        from spectra.services import mode_availability, room_controls, scene_store
+        scene = scene_store.get_by_id(pin.scene_id)
+        if scene is None or getattr(scene, "disabled", False):
+            return False
+        controls = room_controls.load_room_controls()
+        if not mode_availability.available_in_room_mode(
+                getattr(scene, "display_availability", "default"), controls.display_mode):
+            return False
+        if (controls.force_scene_enabled, controls.force_scene_scene_id) != pin.force_scene:
+            return False
+        return True
 
     def _response_switch_lead_ms(self, a) -> int:
         """A fire_response action's lead for the momentary-flare alignment
