@@ -35,9 +35,13 @@ export default function FlareLaneRack({
 }) {
   const occupants = Object.keys(band.kinds ?? {});
   const lanes = Array.from({ length: visibleLanes }, (_, i) => occupants[i] ?? null);
+  const LANE_HEIGHT = 124;
 
   return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+    <div style={{
+      display: 'flex', gap: 6, alignItems: 'flex-start', flexWrap: 'nowrap',
+      overflowX: 'auto', paddingBottom: 2, WebkitOverflowScrolling: 'touch',
+    }}>
       {lanes.map((occupant, laneIdx) => {
         const kind = occupant ? kindsByName[occupant] : null;
         const hovered = overLaneIdx === laneIdx;
@@ -45,15 +49,17 @@ export default function FlareLaneRack({
           <div key={laneIdx}
             data-lane data-cls={cls} data-band={bandIdx} data-lane-idx={laneIdx}
             style={{
-              width: 108, minHeight: 54, borderRadius: 6, padding: '4px 6px',
+              width: 108, minHeight: LANE_HEIGHT, flexShrink: 0, borderRadius: 8, padding: '6px 7px',
               border: `1.5px ${kind ? 'solid' : 'dashed'} ${hovered ? 'var(--accent)' : (kind ? 'var(--border)' : 'var(--text-muted)')}`,
               background: hovered ? 'rgba(168,85,247,0.12)' : (kind ? 'var(--surface2)' : 'transparent'),
               opacity: kind && draggingName === kind.name ? 0.35 : 1,
-              display: 'flex', flexDirection: 'column', gap: 2, touchAction: 'none',
+              display: 'flex', flexDirection: 'column', gap: 6, touchAction: 'none',
             }}>
-            <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>lane {laneIdx + 1}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+              lane {laneIdx + 1}
+            </div>
             {kind ? (
-              <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, justifyContent: 'space-between' }}>
                 <div
                   onPointerDown={onStartDrag(kind.name, { cls, bandIdx })}
                   style={{ fontSize: 11, fontWeight: 600, cursor: 'grab', userSelect: 'none' }}
@@ -68,7 +74,7 @@ export default function FlareLaneRack({
                     title="Detach from this band"
                     onClick={() => onDetach(kind.name)}>✕</button>
                 </div>
-              </>
+              </div>
             ) : (
               <div style={{ fontSize: 10, color: 'var(--text-muted)', flex: 1,
                             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -79,7 +85,7 @@ export default function FlareLaneRack({
         );
       })}
       {canAddLane && (
-        <button style={{ fontSize: 16, width: 28, height: 54, padding: 0, alignSelf: 'stretch' }}
+        <button style={{ fontSize: 16, width: 28, height: LANE_HEIGHT, padding: 0, flexShrink: 0, alignSelf: 'flex-start' }}
           title="Add another lane to this band (up to 4)"
           onClick={onAddLane}>
           +
