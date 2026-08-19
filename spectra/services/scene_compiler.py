@@ -25,6 +25,14 @@ fire_scene() is the API entry: dry_run=True (default) stops at the seam —
 no LedFX I/O, writes + resolution report returned for display. The real
 fire goes through fx_seam.apply_writes (HTTP to the external LedFX service
 until S3 hands SPECTRA the lights in-process through the same seam).
+
+fire_scene's own entry_ramp_ms fallback chain (2026-08-19): the scene's own
+entry_ramp_ms wins when authored; else room.global_transition_ms when he's
+explicitly set a flat manual override; else the NEW default,
+room_controls.scene_transition_ms(room, intensity) — an intensity-scaled
+crossfade between two Inspector settings (his ask: scale transition time by
+intensity, linearly). See room_controls.py's own docstring for the
+gentle/hard naming and the settings themselves.
 """
 from __future__ import annotations
 
@@ -217,9 +225,11 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     to the seam — a test-fire at a chosen intensity IS the honest window
     into what that intensity selects. With no explicit color_set the scene
     wears the room's active set. Live writes carry scene.entry_ramp_ms as
-    the OVERRIDE BLEND entry-ramp equivalent (0 = instant, unchanged);
-    when a scene doesn't author its own, the room's global_transition_ms
-    (the ledfx_global_transition equivalent) is the fallback ramp."""
+    the OVERRIDE BLEND entry-ramp equivalent (0 = instant, unchanged); when
+    a scene doesn't author its own, the room's global_transition_ms (the
+    ledfx_global_transition equivalent) wins if he's set it explicitly,
+    else the intensity-scaled scene_transition_ms(room, intensity) is the
+    fallback ramp — see the module docstring's fallback-chain note."""
     if color_set is None:
         color_set = room_active_set()
     ctx = FireContext(intensity, rng=rng)
@@ -237,7 +247,8 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         live_writes = writes if multiplier == 1.0 else [
             {**w, "config": room_controls.apply_brightness(w["config"], multiplier)}
             for w in writes]
-        entry_ramp_ms = scene.entry_ramp_ms or room.global_transition_ms
+        entry_ramp_ms = (scene.entry_ramp_ms or room.global_transition_ms
+                        or room_controls.scene_transition_ms(room, intensity))
         await fx_seam.apply_writes(live_writes, transition_ms=entry_ramp_ms)
         logger.info("SPECTRA scene '%s' fired at intensity %.2f: %d virtual "
                     "writes%s", scene.name, intensity, len(writes),

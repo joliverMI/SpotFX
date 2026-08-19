@@ -62,6 +62,7 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
 
     assert set(sc.SETTINGS_REGISTRY) == {
         "brightness_multiplier", "global_transition_ms",
+        "scene_transition_ms_gentle", "scene_transition_ms_hard",
         "ambient_mode", "ambient_color", "scene_change_mode",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring

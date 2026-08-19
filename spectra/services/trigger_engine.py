@@ -135,13 +135,37 @@ generations for DIFFERENT songs, so two songs starting close together can't
 interleave their trigger_store read-modify-write cycles.
 
 Edge-triggered: a trigger fires once, on the first tick whose
-(last_position, position] window crosses its timestamp. A URI change (a
-NEW song, or the bridge dropping to None and reconnecting) rearms: the
-next tick anchors last_position at position-1, so a trigger sitting
-exactly AT that position still fires, while nothing further back is
-backfired — a mid-song process restart doesn't replay the whole song's
-history. A backward seek (rewind/scrub) rearms the same way, silently, on
-the tick it's detected — approaching the same moment again fires it again.
+(last_position, position] window crosses its timestamp — or, since
+2026-08-19 (see LEAD-TIME ALIGNMENT below), its timestamp minus a computed
+lead. A URI change (a NEW song, or the bridge dropping to None and
+reconnecting) rearms: the next tick anchors last_position at position-1, so
+a trigger sitting exactly AT that position still fires, while nothing
+further back is backfired — a mid-song process restart doesn't replay the
+whole song's history. A backward seek (rewind/scrub) rearms the same way,
+silently, on the tick it's detected — approaching the same moment again
+fires it again.
+
+LEAD-TIME ALIGNMENT (his ask, 2026-08-19 — "this is how it worked in the
+old SpotFX, use it as reference," legacy's services/transition_phases.py +
+trigger_engine.py's transition_lead_ms/_entry_transition_lead_ms): a scene
+transition should LAND on the trigger, not start there — the switch fires
+`anchor_frac x crossfade_ms` EARLY. Two anchors, deliberately different
+(_scene_transition_lead_ms / _response_switch_lead_ms below): a scene
+transition lands its MID-POINT (0.5 fallback, or a registered phased
+effect's own payoff fraction — services/transition_phases.py) on the
+trigger; a momentary flare's FIRST SWITCH lands its END (the full
+DICE_REROLL_GLIDE_MS) on the trigger, so the switch finishes, THEN the
+hold, THEN the flip-back after the trigger mark. Both peeks are read-only
+and conservative: an unresolved scene pick (scene_id=None) or a fire with
+nothing to glide yields lead=0, same "no lead rather than a wrong one"
+rule legacy used for an unresolved random branch. tick()'s crossing check
+always ALSO checks the trigger's own unshifted timestamp as a safety net
+(fire_at is recomputed from live state every tick, so it isn't guaranteed
+monotonic) — a trigger fires by its nominal moment at the latest either
+way. Scene-entry crossfade DURATION itself is intensity-scaled separately
+(room_controls.scene_transition_ms, consulted by scene_compiler.fire_scene
+for every scene fire, not just trigger-driven ones — his other ask, two
+Inspector settings scaling transition time by intensity, linearly).
 
 Executable spec: scripts/check_triggers.py (fake position feed, injected
 fires — no live storage, no LedFX I/O, no audio).
@@ -156,7 +180,7 @@ from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.trigger import SpectraTrigger
-from spectra.services import trigger_store
+from spectra.services import transition_phases, trigger_store
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +219,7 @@ class TriggerEngine:
         render_intensity: Callable[[float], float] | None = None,
         sequencer_enabled: Callable[[], bool] | None = None,
         auto_generate: Callable[[str], Awaitable[Any]] | None = None,
+        lead_ms: Callable[[SpectraTrigger], int] | None = None,
         rng: Random | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
@@ -211,6 +236,7 @@ class TriggerEngine:
         self._render_intensity = render_intensity or self._default_render_intensity
         self._sequencer_enabled = sequencer_enabled or self._default_sequencer_enabled
         self._auto_generate = auto_generate or self._default_auto_generate
+        self._lead_ms = lead_ms or self._default_lead_ms
         self._generating: set[str] = set()
         self._rng = rng or Random()
 
@@ -304,7 +330,30 @@ class TriggerEngine:
                 continue
             if not self._trigger_allowed(trig, mode):
                 continue
-            if last < trig.timestamp_ms <= position_ms:
+            # TRANSITION/FLARE LEAD-TIME ALIGNMENT (his ask, 2026-08-19):
+            # fire up to lead_ms EARLY so a scene transition's mid-point (or
+            # a registered phased effect's own payoff — see
+            # services/transition_phases.py) or a momentary flare's first
+            # switch lands exactly on the trigger's timestamp instead of
+            # starting there. Only bother computing it within striking
+            # distance (cheap: most of a song's triggers sit far from
+            # `position_ms` on any given tick) — transition_phases.
+            # MAX_LEAD_MS both caps the computed lead and bounds this gate.
+            fire_at = trig.timestamp_ms
+            if 0 <= trig.timestamp_ms - last <= transition_phases.MAX_LEAD_MS:
+                lead = self._lead_ms(trig)
+                if lead > 0:
+                    fire_at = trig.timestamp_ms - lead
+            # The OR is a safety net, not an optimization: fire_at is
+            # recomputed fresh every tick from live state (the registry
+            # match against whatever effect is CURRENTLY live on a target
+            # virtual), so it isn't guaranteed monotonic tick to tick — a
+            # trigger must still fire by its own nominal timestamp even if
+            # an earlier tick's early-fire window was missed for any
+            # reason. trig.timestamp_ms itself never drifts, so this clause
+            # alone reproduces today's exact pre-lead behaviour.
+            if (last < fire_at <= position_ms
+                    or last < trig.timestamp_ms <= position_ms):
                 await self._fire(trig)
                 fired.append(trig)
         return fired
@@ -505,6 +554,99 @@ class TriggerEngine:
         if result.get("added"):
             logger.info("auto-generate: seeded %d mid-song trigger(s) for %s "
                         "(no timeline visit)", result["added"], uri)
+
+    # ── lead-time alignment (his ask, 2026-08-19) ─────────────────────────
+
+    def _default_lead_ms(self, trig: SpectraTrigger) -> int:
+        """How many ms EARLY to fire this trigger so its transition/switch
+        lands on the trigger's own timestamp instead of starting there.
+        Dispatches by action kind; every other kind (select_color_set,
+        fire_scene_update) is an instant apply with nothing to land early —
+        0, unchanged."""
+        a = trig.action
+        if a.kind == "fire_scene":
+            return self._scene_transition_lead_ms(a)
+        if a.kind == "fire_response":
+            return self._response_switch_lead_ms(a)
+        return 0
+
+    def _scene_transition_lead_ms(self, a) -> int:
+        """A fire_scene action's lead: anchor_frac x crossfade_ms, so a
+        registered phased effect's own payoff (services/transition_phases)
+        or — the generalization his ask adds on top of legacy's own
+        registry-only behaviour, see that module's docstring — the plain
+        0.5 MID-POINT of an ordinary crossfade lands on the trigger.
+
+        Conservative like legacy's own _entry_transition_lead_ms: an
+        UNRESOLVED scene pick (scene_id=None — the kernel or a scene_pool
+        decides at fire time, not now) yields NO lead rather than a guess,
+        mirroring legacy's own "unresolved random branch" rule. Peeks
+        Force Scene's redirect (room_controls) so the lead matches whatever
+        will actually fire, same as legacy's own plan-time member peeking
+        for scene_group redirects."""
+        if a.scene_id is None:
+            return 0
+        from spectra.services import room_controls, scene_compiler, scene_store
+        from spectra.services.binding_resolver import FireContext
+
+        controls = room_controls.load_room_controls()
+        scene_id = a.scene_id
+        if controls.force_scene_enabled and controls.force_scene_scene_id:
+            if scene_store.get_by_id(controls.force_scene_scene_id) is not None:
+                scene_id = controls.force_scene_scene_id
+        scene = scene_store.get_by_id(scene_id)
+        if scene is None:
+            return 0
+        intensity = self._render_intensity(a.intensity)
+        crossfade_ms = (scene.entry_ramp_ms or controls.global_transition_ms
+                        or room_controls.scene_transition_ms(controls, intensity))
+        if crossfade_ms <= 0:
+            return 0
+        resolved = scene_compiler.resolve_scene(scene, FireContext(intensity, rng=self._rng))
+        writes = scene_compiler.compile_scene(resolved, color_set=None)
+        virtuals = self._live_virtuals()
+        # Multiple matching switches take the max anchor (legacy's own
+        # rule: the dominant transition lands on the trigger, shorter ones
+        # bloom a hair early). 0.0 (nothing registered on any write) falls
+        # back to the 0.5 midpoint — the one behaviour this build adds on
+        # top of the ported registry itself.
+        anchor = 0.0
+        for w in writes:
+            cur = virtuals.get(w["virtual_id"])
+            cur_type = cur.effect_type if cur is not None else None
+            anchor = max(anchor, transition_phases.anchor_frac(cur_type, w["effect_type"]))
+        if anchor == 0.0:
+            anchor = 0.5
+        return min(round(anchor * crossfade_ms), transition_phases.MAX_LEAD_MS)
+
+    def _response_switch_lead_ms(self, a) -> int:
+        """A fire_response action's lead for the momentary-flare alignment
+        (his words: 'the first switch must finish on the trigger, then the
+        hold, then the flip back after the trigger mark'): only a MOMENTARY
+        kind's param move that lands on a registry-smooth target actually
+        takes time to switch (scene_response.DICE_REROLL_GLIDE_MS) — an
+        instant jump (non-smooth param, or a momentary gain's spike, always
+        a jump) already finishes at fire time with zero lead needed."""
+        from spectra.services.scene_response import (DICE_REROLL_GLIDE_MS,
+                                                      momentary_switch_would_glide)
+        scene = self._active_scene()
+        if scene is None:
+            return 0
+        intensity = self._render_intensity(a.intensity)
+        virtuals = self._live_virtuals()
+        if momentary_switch_would_glide(scene, a.event_class, intensity, virtuals):
+            return DICE_REROLL_GLIDE_MS
+        return 0
+
+    @staticmethod
+    def _live_virtuals() -> dict:
+        from spectra.services import engine
+        return engine.responses.conductor.virtuals
+
+    @staticmethod
+    def _active_scene():
+        from spectra.services import engine
+        return engine.responses.conductor.scene
 
 
 trigger_engine = TriggerEngine()

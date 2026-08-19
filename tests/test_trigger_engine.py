@@ -617,3 +617,174 @@ def test_scene_pool_narrows_and_biases_the_kernel_draw(tmp_path, monkeypatch):
             await host.shutdown()
 
     _run(main())
+
+
+# ── proof 9: LEAD-TIME ALIGNMENT (his ask, 2026-08-19) — a scene transition
+#    fires EARLY so its MID-POINT, not its start, lands on the trigger ──────
+
+def test_trigger_lead_fires_scene_transition_early_so_it_lands_mid_flight_on_the_beat(
+    tmp_path,
+):
+    """His ask: 'the mid-transition animation arrives at the same instant
+    as the trigger, which means the transition starts early... for
+    transitions without such a mid-point, use halfway through the
+    transition.' lead_ms is injected here as the 0.5 fallback x the
+    scene's own crossfade (services/trigger_engine.py's real
+    _scene_transition_lead_ms computes this identical value against real
+    scene/room state — proven at the unit level in scripts/
+    check_triggers.py; this proof is the frame-level payoff: the glide is
+    demonstrably IN FLIGHT, not landed, at the trigger's own timestamp,
+    landing only crossfade_ms/2 AFTER it — never at the switch instant."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.models.trigger import FireSceneAction, SpectraTrigger
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    CROSSFADE_MS = 1000
+    LEAD_MS = 500   # the 0.5 midpoint fallback x CROSSFADE_MS
+    scene = SceneV2(name="Ordinary Crossfade", entry_ramp_ms=CROSSFADE_MS,
+                    devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 2.0})])
+    trig = SpectraTrigger(timestamp_ms=5000, action=FireSceneAction(
+        scene_id=scene.id, intensity=0.5))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "midpoint")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+
+                async def fire_scene(scene_id, color_set_id, intensity):
+                    await executor.glide(VID, "concentric",
+                                         {"gradient_scale": 2.0}, CROSSFADE_MS)
+
+                engine = TriggerEngine(list_triggers=lambda uri: [trig],
+                                       fire_scene=fire_scene,
+                                       lead_ms=lambda t: LEAD_MS,
+                                       render_intensity=lambda x: x)
+                await engine.on_track_state("song:midpoint")
+
+                lead_position = 5000 - LEAD_MS
+                await engine.tick(lead_position - 1)
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0), \
+                    "nothing fires before the computed lead boundary"
+
+                fired = await engine.tick(lead_position)
+                assert len(fired) == 1
+                # the crossfade's own half — landing exactly at the
+                # trigger's timestamp if the glide started right on time
+                headless.render_frames(virtual, 30, clock=clock, dt=1 / 60)
+                mid = effect._config["gradient_scale"]
+                assert 1.0 < mid < 2.0, \
+                    "at the trigger's own timestamp the crossfade is IN " \
+                    f"FLIGHT, not landed (got {mid})"
+
+                # the remaining half — the crossfade only finishes AFTER
+                # the trigger mark, never at it
+                headless.render_frames(virtual, 30, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(2.0, abs=0.02), \
+                    "the crossfade completes crossfade_ms/2 AFTER the " \
+                    "trigger — the mid-point landed ON the trigger, not " \
+                    "the finish"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── proof 10: a momentary flare's FIRST SWITCH finishes on the trigger,
+#    then the hold, then the flip-back after the trigger mark ───────────────
+
+def test_trigger_lead_fires_momentary_flare_early_so_its_switch_finishes_on_the_beat(
+    tmp_path,
+):
+    """His ask: 'the first switch must finish on the trigger, then the
+    hold, then the flip back after the trigger mark.' A different anchor
+    from proof 9's scene mid-point — the switch's glide (registry-smooth
+    param, DICE_REROLL_GLIDE_MS) LANDS at the trigger, not halfway through
+    it. lead_ms is injected as that fixed constant here (the real
+    _response_switch_lead_ms computes it identically against real scene/
+    band/kind state — unit-proven in scripts/check_triggers.py)."""
+    from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
+                                      ResponseSpec, SceneDeviceConfig, SceneV2)
+    from spectra.models.trigger import FireResponseAction, SpectraTrigger
+    from spectra.services.scene_response import (DICE_REROLL_GLIDE_MS,
+                                                  PULSE_HOLD_S)
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Momentary Switch", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 1.0})],
+        flare_kinds=[FlareKind(name="Pulse", type="momentary",
+                               params={"gradient_scale": ParamTarget(
+                                   mode="absolute", value=1.8)})],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.7, intensity_max=1.0, kinds={"Pulse": 1.0})])})
+    trig = SpectraTrigger(timestamp_ms=2000,
+                          action=FireResponseAction(event_class="flare", intensity=0.9))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "momentary-lead")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                executor, conductor, responder, _ = _conductor_and_responder(clock)
+                writes = [{"virtual_id": VID, "effect_type": "concentric",
+                          "config": {"gradient_scale": 1.0},
+                          "entry_id": scene.devices[0].id, "color_mode": "set"}]
+                conductor.on_scene_fire(scene, writes)
+
+                engine = TriggerEngine(list_triggers=lambda uri: [trig],
+                                       fire_response=responder.on_event,
+                                       lead_ms=lambda t: DICE_REROLL_GLIDE_MS,
+                                       render_intensity=lambda x: x)
+                await engine.on_track_state("song:momentary-lead")
+
+                lead_position = 2000 - DICE_REROLL_GLIDE_MS
+                await engine.tick(lead_position - 1)
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0), \
+                    "nothing fires before the lead boundary"
+
+                fired = await engine.tick(lead_position)
+                assert len(fired) == 1
+                # the switch's own glide duration — it should have JUST
+                # landed, exactly on the trigger's own moment
+                glide_frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.8, abs=0.02), \
+                    "the switch's glide finished on the trigger's own " \
+                    "moment — fired DICE_REROLL_GLIDE_MS early, took " \
+                    "exactly that long to land"
+
+                # the hold: still at peak partway through PULSE_HOLD_S,
+                # well AFTER the trigger mark
+                headless.render_frames(virtual, int(PULSE_HOLD_S * 60 * 0.5),
+                                       clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.8), \
+                    "holds at peak after the trigger, before the release"
+
+                # production schedules flush_releases(hold_s) after the
+                # CHOSEN HOLD (services/engine.py); the spec's own
+                # convention (scene_response's module docstring) is to
+                # call it directly for determinism.
+                headless.render_frames(virtual, int(PULSE_HOLD_S * 60 * 0.5) + 2,
+                                       clock=clock, dt=1 / 60)
+                await responder.flush_releases()
+                headless.render_frames(virtual, 200, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0, abs=0.02), \
+                    "the flip-back lands well AFTER the trigger mark, " \
+                    "back at the carried baseline"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
