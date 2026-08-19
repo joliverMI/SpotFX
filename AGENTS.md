@@ -1683,12 +1683,22 @@ already did — only a set's OWN curve hitting zero stays ladder-proof.
 `Pick.factors` carries the resolved `group` multiplier per candidate,
 surfaced in `SequencerStatusStrip.tsx`'s "last colour pick" breakdown, so a
 starved set is explainable by looking, not a silent mystery. The curve
-tile-grid/window/Detach/Save-as-named-curve editor
+preview-button/picker/window/Detach/Revert/Save-as-named-curve editor
 (`SequencingTab.tsx`'s original inline implementation) was extracted
 verbatim into `spectra/web/src/components/CurveAttachmentEditor.tsx` and is
 now mounted on both a Set's and a Group's card in `ColorSetsPage.tsx`
 ("Likelihood" section) — same component, same safety rule, not a parallel
-editor. Full detail: `docs/SPECTRA_SPEC.md` §76. Spec:
+editor. **Reworked 2026-08-19** (card reopened, his words: no
+expanded/collapsed selector sitting in the window — a button showing a
+live `CurveThumbnail` of the curve in effect, pressing it opens the picker
+— and an edit is an immediate one-off, "the status change IS the apply",
+no separate Apply step): every edit (drag/add/remove point) writes
+straight to the entry's own `inline_points` on the first touch, coalesced
+like `ColorSetsPage`'s own live-drag preview updates, and is structurally
+incapable of touching a shared `curves[id]` — only the explicit "Save as
+named curve…" can, gated behind its overwrite warning as before. "↺ Revert
+to original" undoes an edit session back to exactly what was attached
+before it started. Full detail: `docs/SPECTRA_SPEC.md` §65/§76. Spec:
 `tests/test_color_set_group_curves.py`.
 
 ## SPECTRA Sonic token-usage record (review page)

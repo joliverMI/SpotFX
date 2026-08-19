@@ -12,10 +12,15 @@ function CurveThumbnail({
   points,
   width = 96,
   height = 48,
+  style,
 }: {
   points: CurvePoint[];
   width?: number;
   height?: number;
+  /** Merged onto the svg's own style — e.g. `maxWidth: '100%'` to shrink a
+   * larger design-size thumbnail (the trigger-button use in
+   * CurveAttachmentEditor) to fit a narrow phone width without cropping. */
+  style?: React.CSSProperties;
 }) {
   const plotW = width - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
@@ -30,7 +35,7 @@ function CurveThumbnail({
     : '';
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', ...style }}>
       <line x1={px(0)} y1={py(1)} x2={px(1)} y2={py(1)}
         stroke="var(--border)" strokeWidth={0.5} strokeDasharray="3 2" />
       <line x1={px(0)} y1={PAD.top + plotH} x2={px(1)} y2={PAD.top + plotH}
