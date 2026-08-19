@@ -42,6 +42,44 @@ same intent, already-persisted SPECTRA mechanism.
 Cursor state (which member a cycling/bouncing group is currently on) is
 IN-MEMORY ONLY, per group id, exactly like legacy's _color_cursor* dicts —
 it resets on process restart; nothing here persists it.
+
+**Direct-set override broadening (2026-08-19, his explicit ask)**: until
+this date, a Set fired by its own id passed through `resolve_for_fire`
+unchanged — the override-entries overlay only ever applied when the
+enclosing GROUP itself was the resolved fire target. PR #117's own body
+named this gap and rejected fixing it as invented behaviour with no
+precedent, computed against his real data to change rendered output for
+27 of 28 (group, member) override pairs at the time. He has since asked
+for exactly that broadening: "[the overrides] need to apply when the
+colour set is called. It still needs to use the overrides from its
+parent group." `resolve_for_fire` on a "set" card now looks up every
+enclosing Group (`group_ids_by_set`'s reverse index) that carries its own
+non-empty `entries` and overlays them onto the set's own entries — same
+`_overlay` merge, same "group wins per field per virtual" rule the
+group-fire path already used for a picked member.
+
+**Multi-group precedence** (his real data: 4 sets sit under both "First
+Group" and "Blues"): every enclosing group with override entries is
+chained, never just one — picking a single "owning" group would invent a
+primary-owner concept PR #117's own tiered list explicitly rejected ("a
+many-to-many index, not an invented single-owner tree"), and it would
+contradict the "never one wins" precedent §76's likelihood-curve chaining
+already established for this exact "Set in >1 Group" shape. Order is
+deterministic — ascending by group name (case-insensitive), tie-broken
+by id — with each group's overlay applied in that order, so the
+alphabetically-LAST enclosing group wins a field/virtual conflict, same
+"later layer wins" rule as everywhere else in this module. A group with
+empty `entries` (no override authored) contributes nothing and is
+dropped before ordering, so today's data (Blues has no entries; its 4
+shared members' actual overrides all come from First Group regardless of
+order) renders identically under any tie-break policy — the order only
+starts to matter the day he authors conflicting override fields on two
+groups sharing a member. A Set in no group, or only in groups with no
+entries, returns unchanged (identity) — the common case (most of his 58
+sets are ungrouped or in override-less groups) must stay a cheap no-op.
+
+This is a LIVE OVERLAY at pick time only, exactly like the group-fire
+path — it never rewrites the Set's own stored `entries`.
 """
 from __future__ import annotations
 
@@ -195,19 +233,56 @@ def _overlay(entries: list[ColorSetEntry], merged: dict[str, ColorSetEntry]) -> 
                     setattr(tgt, f, v)
 
 
-def resolve_for_fire(card: ColorSetCard) -> Optional[ColorSetCard]:
-    """A "set" card passes through unchanged. A "group" card picks a member
-    (advancing its cursor) and returns a synthetic card carrying the
-    MEMBER's own id/name — so wheel position / room active_set_id / a
-    future Palette Sync anchor check all resolve against the real stored
-    member, exactly like legacy's `state.last_color_set_id` — with entries
-    = the member's palette overlaid by the group's own override entries
-    (group wins per field, per virtual; entries covering virtuals the
-    member doesn't apply to still land). None = the group has no usable
-    member (empty, or every member id is stale/not-a-set) — callers fall
-    back exactly the way an unresolved plain set id already does."""
-    if card.kind != "group":
+def _entries_from_merge(merged: dict[str, ColorSetEntry]) -> list[ColorSetEntry]:
+    return [
+        ColorSetEntry(scope=SetScope(virtual_ids=[vid]),
+                      **e.model_dump(exclude={"scope"}))
+        for vid, e in merged.items()
+    ]
+
+
+def _enclosing_groups_with_overrides(set_id: str) -> list:
+    """Every Group card that lists set_id as a member AND carries its own
+    override entries, in the deterministic order resolve_for_fire chains
+    them (see module docstring's "Multi-group precedence" section) — a
+    group with no entries is dropped here since chaining it is a no-op."""
+    from spectra.services import color_sets
+    ids = set(group_ids_by_set().get(set_id, []))
+    if not ids:
+        return []
+    groups = [c for c in color_sets.list_all() if c.id in ids and c.entries]
+    groups.sort(key=lambda g: (g.name.casefold(), g.id))
+    return groups
+
+
+def _resolve_set_fire(card: ColorSetCard) -> ColorSetCard:
+    """A Set fired by its own id wears every enclosing Group's own override
+    entries too (2026-08-19 broadening — see module docstring). Identity
+    passthrough when nothing applies, matching the group-fire path's own
+    "no overrides, return unmodified" convention."""
+    groups = _enclosing_groups_with_overrides(card.id)
+    if not groups:
         return card
+    merged: dict[str, ColorSetEntry] = {}
+    _overlay(card.entries, merged)
+    for group in groups:
+        _overlay(group.entries, merged)
+    if not merged:
+        return card
+    return card.model_copy(update={"entries": _entries_from_merge(merged)})
+
+
+def _resolve_group_fire(card: ColorSetCard) -> Optional[ColorSetCard]:
+    """Picks a member (advancing the group's cursor) and returns a synthetic
+    card carrying the MEMBER's own id/name — so wheel position / room
+    active_set_id / a future Palette Sync anchor check all resolve against
+    the real stored member, exactly like legacy's `state.last_color_set_id`
+    — with entries = the member's palette overlaid by the group's own
+    override entries (group wins per field, per virtual; entries covering
+    virtuals the member doesn't apply to still land). None = the group has
+    no usable member (empty, or every member id is stale/not-a-set) —
+    callers fall back exactly the way an unresolved plain set id already
+    does."""
     from spectra.services import color_sets
     chosen_id = _pick_member(card)
     if not chosen_id:
@@ -225,12 +300,19 @@ def resolve_for_fire(card: ColorSetCard) -> Optional[ColorSetCard]:
     _overlay(card.entries, merged)
     if not merged:
         return member
-    entries = [
-        ColorSetEntry(scope=SetScope(virtual_ids=[vid]),
-                      **e.model_dump(exclude={"scope"}))
-        for vid, e in merged.items()
-    ]
-    return member.model_copy(update={"entries": entries})
+    return member.model_copy(update={"entries": _entries_from_merge(merged)})
+
+
+def resolve_for_fire(card: ColorSetCard) -> Optional[ColorSetCard]:
+    """A "group" card picks a member and overlays the group's own override
+    entries onto it (see _resolve_group_fire). A "set" card overlays every
+    enclosing group's override entries onto its own (see _resolve_set_fire,
+    2026-08-19 broadening) — a set in no overriding group returns
+    unchanged. None only ever comes from the group branch (no usable
+    member); a direct set call always resolves to a card."""
+    if card.kind == "group":
+        return _resolve_group_fire(card)
+    return _resolve_set_fire(card)
 
 
 def resolve_for_fire_mode_gated(card: ColorSetCard,

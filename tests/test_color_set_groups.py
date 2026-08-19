@@ -272,3 +272,95 @@ def test_no_group_overrides_returns_the_member_unmodified():
     _write_cards(member, group)
     resolved = csg.resolve_for_fire(group)
     assert resolved == member   # re-fetched from storage, not the same object — content match
+
+
+# ── direct-set-call broadening (2026-08-19) ──────────────────────────────────
+
+def test_direct_set_call_now_wears_its_enclosing_groups_override():
+    member = _set("m1", entries=[
+        ColorSetEntry(scope=SetScope(categories=["Singles"]),
+                      color_kind="solid", color_value="#ff0000", brightness=0.5),
+    ])
+    group = _group("g1", ["m1"], palette_sync=False, entries=[
+        ColorSetEntry(scope=SetScope(categories=["Singles"]), brightness=0.9),
+    ])
+    _write_cards(member, group)
+    resolved = csg.resolve_for_fire(member)   # fired by its OWN id, not the group's
+    assert resolved.id == "m1"
+    by_vid = {e.scope.virtual_ids[0]: e for e in resolved.entries}
+    assert by_vid["v1"].color_value == "#ff0000"   # kept from the set's own entry
+    assert by_vid["v1"].brightness == 0.9          # enclosing group's override wins
+
+
+def test_direct_set_call_with_no_enclosing_group_passes_through_unchanged():
+    member = _set("m1", entries=[ColorSetEntry(color_value="#ff0000")])
+    _write_cards(member)
+    assert csg.resolve_for_fire(member) is member
+
+
+def test_direct_set_call_in_a_group_with_no_override_entries_passes_through_unchanged():
+    member = _set("m1", entries=[ColorSetEntry(color_value="#ff0000")])
+    group = _group("g1", ["m1"], palette_sync=False)   # no entries authored
+    _write_cards(member, group)
+    assert csg.resolve_for_fire(member) is member
+
+
+def test_direct_set_call_overrides_reach_virtuals_the_set_does_not_cover():
+    member = _set("m1", entries=[
+        ColorSetEntry(scope=SetScope(categories=["Singles"]), color_value="#ff0000"),
+    ])
+    group = _group("g1", ["m1"], palette_sync=False, entries=[
+        ColorSetEntry(scope=SetScope(categories=["Matrix"]), background_brightness=0.2),
+    ])
+    _write_cards(member, group)
+    resolved = csg.resolve_for_fire(member)
+    by_vid = {e.scope.virtual_ids[0]: e for e in resolved.entries}
+    assert by_vid["v2"].background_brightness == 0.2
+    assert by_vid["v1"].color_value == "#ff0000"
+
+
+def test_direct_set_call_does_not_mutate_stored_entries():
+    """Non-destructive: the storage-level card the group override is layered
+    onto must never itself change (a live overlay at pick time only)."""
+    member = _set("m1", entries=[ColorSetEntry(color_value="#ff0000")])
+    group = _group("g1", ["m1"], palette_sync=False, entries=[
+        ColorSetEntry(brightness=0.9),
+    ])
+    _write_cards(member, group)
+    csg.resolve_for_fire(member)
+    from spectra.services import color_sets
+    reloaded = color_sets.get_by_id("m1")
+    assert reloaded.entries == member.entries   # storage untouched
+
+
+def test_direct_set_call_multi_group_chains_with_alphabetically_last_winning():
+    """A Set in >1 Group (his real data: 4 sets under both First Group and
+    Blues) chains every enclosing group with override entries — never
+    picks one and discards the rest. Deterministic order is ascending by
+    group name; the alphabetically-last group wins a field conflict."""
+    member = _set("m1", entries=[ColorSetEntry(color_value="#ff0000", brightness=0.1)])
+    group_a = _group("Alpha Group", ["m1"], palette_sync=False,
+                     entries=[ColorSetEntry(brightness=0.5)])
+    group_z = _group("Zeta Group", ["m1"], palette_sync=False,
+                     entries=[ColorSetEntry(brightness=0.9)])
+    _write_cards(member, group_a, group_z)
+    resolved = csg.resolve_for_fire(member)
+    by_vid = {e.scope.virtual_ids[0]: e for e in resolved.entries}
+    assert by_vid["v1"].brightness == 0.9          # Zeta (alphabetically last) wins
+    assert by_vid["v1"].color_value == "#ff0000"   # untouched field survives from the set
+
+
+def test_direct_set_call_multi_group_non_conflicting_fields_both_land():
+    """Chaining, not "one wins": a field only one enclosing group touches
+    still lands even when a different group wins a different field."""
+    member = _set("m1", entries=[ColorSetEntry(color_value="#ff0000")])
+    group_a = _group("Alpha Group", ["m1"], palette_sync=False,
+                     entries=[ColorSetEntry(brightness=0.5)])
+    group_z = _group("Zeta Group", ["m1"], palette_sync=False,
+                     entries=[ColorSetEntry(background_brightness=0.2)])
+    _write_cards(member, group_a, group_z)
+    resolved = csg.resolve_for_fire(member)
+    by_vid = {e.scope.virtual_ids[0]: e for e in resolved.entries}
+    assert by_vid["v1"].brightness == 0.5             # Alpha's override survives
+    assert by_vid["v1"].background_brightness == 0.2  # Zeta's override also lands
+    assert by_vid["v1"].color_value == "#ff0000"       # the set's own field survives

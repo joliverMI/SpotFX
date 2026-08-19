@@ -387,6 +387,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Preview replaced the old permanent "Apply to room" — every apply here is temporary and reverts. TAP: pauses SPECTRA\'s own automatic scene/response/set changes for 5 seconds, applies this card\'s colours to the room, then reverts to EXACTLY what was live the instant you tapped. HOLD (½ second): pauses for up to 60 seconds and STAYS applied — release it early with a second tap, wait out the timer, or just navigate away (leaving the page releases it too).',
           'While previewing, drag any colour on the card (FG, BG, an override entry) and the room updates live — the preview keeps running, the pause timer keeps counting from when you started, nothing restarts or drops.',
           'The revert always restores the room\'s TRUE pre-preview state, read live the instant Preview started — never a guess. His show keeps running underneath a tap or a released hold exactly as if nothing happened.',
+          'Previewing a plain Set shows exactly what firing it for real will render — including any enclosing Group\'s override, same as "Group overrides" below.',
         ],
       },
       {
@@ -410,11 +411,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'colorsets-group-overrides',
         title: 'Group overrides — the bulk-edit lever',
-        keywords: 'layer replace field win merge scope bulk edit apply',
+        keywords: 'layer replace field win merge scope bulk edit apply direct fire multi group precedence chain',
         body: [
-          'A Group\'s own Overrides section is the bulk-edit lever for every colour set nested under it: edit it once here, instead of opening each Set individually, and any field it sets (colour, BG, brightness…) replaces that value for every member — for the virtuals its scope resolves to — the next time the Group fires. Fields left blank keep each member\'s own value. An override entry can also reach virtuals a member\'s own entries never touch, so a Group-level clamp (e.g. "always keep Matrix dim") behaves the same no matter which member gets picked.',
-          'This is a LIVE layer, never a destructive write: overrides are computed fresh at fire time and never rewrite a member Set\'s own stored entries — editing or deleting a Group never touches its members\' own data.',
-          'One honest limit, unchanged from how this has always worked (both here and in the original SpotFX): the override layer applies only when the GROUP itself is the resolved fire target — never automatically to a member Set fired by its own id elsewhere (a scene or trigger that names the Set directly). Firing the Group is what turns the override on.',
+          'A Group\'s own Overrides section is the bulk-edit lever for every colour set nested under it: edit it once here, instead of opening each Set individually, and any field it sets (colour, BG, brightness…) replaces that value for every member — for the virtuals its scope resolves to. Fields left blank keep each member\'s own value. An override entry can also reach virtuals a member\'s own entries never touch, so a Group-level clamp (e.g. "always keep Matrix dim") behaves the same no matter which member gets picked.',
+          'This is a LIVE layer, never a destructive write: overrides are computed fresh at fire/preview time and never rewrite a member Set\'s own stored entries — editing or deleting a Group never touches its members\' own data.',
+          '2026-08-19: the override now applies whenever a member Set fires, not only when the enclosing Group is the resolved fire target — a scene or trigger that names the Set directly wears its Group\'s override too, same as firing the Group itself. (Before this date it applied only on a Group fire; if something here reads stale, that\'s the behaviour it changed from.)',
+          'A Set sitting under more than one Group (the list view shows this with "also in: …") gets EVERY enclosing Group\'s override chained on top of its own entries, in ascending alphabetical order by Group name — never just one Group "winning" and the rest ignored. A field two Groups both set resolves to the alphabetically-LAST Group\'s value; fields only one Group touches land regardless of the other. A Group with no override entries authored contributes nothing to the chain.',
         ],
       },
       {
