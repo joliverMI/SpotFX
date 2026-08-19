@@ -376,10 +376,32 @@ virtual), so it is not guaranteed monotonic tick-to-tick — don't remove
 that OR clause when touching this code, it's what keeps a trigger from
 silently never firing if an earlier tick's early-fire window gets missed.
 Conservative like legacy: an unresolved scene pick (`scene_id=None` — the
-kernel/pool decides at fire time) gets NO lead. Scoped to stored-trigger
-fires only — NOT the automatic transition fire (no forward notice of a
-song change) and NOT the sequencer's own dwell-driven rolls (no trigger
-timestamp to land on).
+kernel/pool decides at fire time) got NO lead under the plain rule above —
+**dead on arrival for him: 0 of his 22,013 `fire_scene` triggers ever
+resolve a `scene_id`.** LOOKAHEAD (2026-08-19, PR fm/spectra-trigger-
+lookahead-lead) fixes this by moving the DECISION earlier instead of
+predicting it: `TriggerEngine._pin_for` draws the scene from the same
+kernel/pool functions `_fire()` would otherwise call, once, the first time
+a trigger enters `LOOKAHEAD_HORIZON_MS` (named constant, = `transition_
+phases.MAX_LEAD_MS` — no lead this feature can ever need exceeds that
+cap, so it's both necessary and sufficient, not a second tuned number).
+That pick is cached (`_PinnedPick`) and `_fire()` reuses it VERBATIM —
+there is no second draw to disagree with the first, so a mispredicted
+scene is structurally impossible, not just unlikely. The one real risk —
+the world moving between commit and fire — is caught by `_pin_still_
+valid` (mirrors `fire_scene_by_id`'s own disabled/mode-availability gate,
+plus a Force Scene check that's timing-quality only, since `fire_scene_
+by_id` always applies the current redirect regardless of which id it's
+handed): any of those failing throws the pin away and falls through to
+exactly today's behaviour — a fresh draw at the trigger's own nominal
+timestamp, zero lead, late but never wrong. A rewind or song change clears
+every pin outright. Scoped to stored-trigger fires only — NOT the
+automatic transition fire (no forward notice of a song change) and NOT
+the sequencer's own dwell-driven rolls (no trigger timestamp to land on).
+No live instrument yet proves a real scene-entry ramp lands where
+predicted at an actual fire (rendered frame averages and `executor.
+recent_writes` are both blind to it) — see `docs/SPECTRA_SPEC.md` §84 for
+what building that would take.
 
 Deliberately NOT touched: `SceneV2.choreography` (`PhaseChoreography` —
 `enabled`/`transition_ms`/`anchor_frac` default 0.45/`transition_mode`) is
