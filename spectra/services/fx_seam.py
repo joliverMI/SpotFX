@@ -170,16 +170,49 @@ async def _apply_via_http(writes: list[dict], transition_ms: int = 0) -> None:
                 config.ledfx_url())
 
 
+# Base Effect.CONFIG_SCHEMA fields (fx/effects/__init__.py:359-409) that are
+# valid on ANY effect type — unlike an effect-specific param, which
+# genuinely shouldn't leak across a type switch.
+_CARRY_FORWARD_KEYS = ("background_brightness", "brightness")
+
+
+async def _current_effect(facade, virtual_id: str) -> dict | None:
+    """Read-only GET of virtual_id's currently-active effect
+    ({"config": ..., "name": ..., "type": ...}), or None if unknown (bad id,
+    no host, or nothing active yet)."""
+    resp = await facade.handle("GET", f"/api/virtuals/{virtual_id}")
+    if resp.status_code != 200:
+        return None
+    return resp.json().get(virtual_id, {}).get("effect") or None
+
+
 async def _is_type_switch(facade, virtual_id: str, effect_type: str) -> bool:
     """True if virtual_id is NOT currently running effect_type (read-only
     GET, no write-plane effect). Unknown (GET fails — bad id, no host) reads
     as False so the write still goes out as a single PUT and the PUT itself
     reports the real error, unchanged from today."""
-    resp = await facade.handle("GET", f"/api/virtuals/{virtual_id}")
-    if resp.status_code != 200:
-        return False
-    current = resp.json().get(virtual_id, {}).get("effect", {}).get("type")
-    return current is not None and current != effect_type
+    current = await _current_effect(facade, virtual_id)
+    current_type = (current or {}).get("type")
+    return current_type is not None and current_type != effect_type
+
+
+def _carry_forward_brightness(config: dict, current_effect: dict | None) -> dict:
+    """A genuine effect-type switch builds a FRESH effect instance
+    (fx/effects/__init__.py:_apply_config's `self._config != {}` branch) —
+    any base CONFIG_SCHEMA field the outgoing write doesn't set falls back
+    to LedFX's schema default (1.0), not whatever the room was actually
+    showing a moment before. 28 of his 50 real colour sets never author
+    `background_brightness` for crystal-mapper, so this was a real, visible
+    full-brightness flash on every one of them
+    (data/spectra-transition-brightness-flash/report.md). Carry the
+    previous effect's value forward instead — no prior effect
+    (current_effect is None, e.g. process start before any fire has ever
+    touched this virtual) has nothing to carry, so today's implicit default
+    is correct there."""
+    prev_config = (current_effect or {}).get("config") or {}
+    carried = {k: prev_config[k] for k in _CARRY_FORWARD_KEYS
+              if k not in config and k in prev_config}
+    return {**config, **carried} if carried else config
 
 
 async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
@@ -187,13 +220,16 @@ async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
     from fx import facade
     for w in writes:
         vid = w["virtual_id"]
-        if transition_ms > 0 and await _is_type_switch(
-                facade, vid, w["effect_type"]):
+        current = await _current_effect(facade, vid) if transition_ms > 0 else None
+        current_type = (current or {}).get("type")
+        if transition_ms > 0 and current_type is not None \
+                and current_type != w["effect_type"]:
             # fx/facade.py's stale-tween-PUT guard (447-461) silently drops
             # a combined type-switch+transition PUT — a blend only makes
             # sense between two states of the SAME effect. Land the switch
             # instantly first; the write already carries the full target
             # config, so there is nothing left to tween.
+            w = {**w, "config": _carry_forward_brightness(w["config"], current)}
             resp = await facade.handle(
                 "PUT", f"/api/virtuals/{vid}/effects", json=_body(w, 0))
             _type_switches_landed += 1

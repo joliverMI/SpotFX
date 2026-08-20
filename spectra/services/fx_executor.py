@@ -32,6 +32,22 @@ JUMP_MS = 1            # a 1 ms tween lands next frame == an instant jump
 HUE_BLEND = "hue"      # colours travel the wheel, never through grey
 WRITE_LOG_LIMIT = 400  # bounded observability, oldest legs fall off
 
+# Base Effect.CONFIG_SCHEMA fields (fx/effects/__init__.py:359-409) that are
+# valid on ANY effect type — mirrors fx_seam._CARRY_FORWARD_KEYS.
+_CARRY_FORWARD_KEYS = ("background_brightness", "brightness")
+
+
+def _carry_forward_brightness(params: dict, current_effect: dict | None) -> dict:
+    """Mirrors fx_seam._carry_forward_brightness — see that function's
+    docstring for the mechanism. Applied here too because an engine
+    glide/jump landing on a genuine type mismatch (some earlier write
+    landed wrong; see _put's own comment) builds the same fresh instance
+    and is subject to the identical schema-default flash."""
+    prev_config = (current_effect or {}).get("config") or {}
+    carried = {k: prev_config[k] for k in _CARRY_FORWARD_KEYS
+              if k not in params and k in prev_config}
+    return {**params, **carried} if carried else params
+
 
 class ExecutorWrite(dict):
     """One recorded call. Plain dict subclass so status endpoints serialize
@@ -99,8 +115,11 @@ class FacadeExecutor(RecordingExecutor):
     async def _put(self, virtual_id: str, effect_type: str,
                    params: dict[str, Any], duration_ms: int) -> None:
         from fx import facade
-        if duration_ms > 0 and await self._is_type_switch(
-                facade, virtual_id, effect_type):
+        current = (await self._current_effect(facade, virtual_id)
+                   if duration_ms > 0 else None)
+        current_type = (current or {}).get("type")
+        if duration_ms > 0 and current_type is not None \
+                and current_type != effect_type:
             # fx/facade.py's stale-tween-PUT guard (447-461) silently drops
             # a combined type-switch+transition PUT — a blend only makes
             # sense between two states of the SAME effect. Land the switch
@@ -109,7 +128,10 @@ class FacadeExecutor(RecordingExecutor):
             # meant to tune an ALREADY-active effect's params, so a genuine
             # type mismatch here means some earlier write already landed
             # wrong; any unspecified params fall back to the new effect's
-            # own schema defaults, and self-correct on the next write).
+            # own schema defaults, and self-correct on the next write —
+            # EXCEPT background_brightness/brightness, carried forward from
+            # the current effect instead, same as fx_seam's scene-fire path).
+            params = _carry_forward_brightness(params, current)
             resp = await facade.handle(
                 "PUT", f"/api/virtuals/{virtual_id}/effects",
                 json={"type": effect_type, "config": dict(params)})
@@ -122,16 +144,15 @@ class FacadeExecutor(RecordingExecutor):
         resp.raise_for_status()
 
     @staticmethod
-    async def _is_type_switch(facade, virtual_id: str, effect_type: str) -> bool:
-        """Mirrors fx_seam._is_type_switch — read-only GET, no write-plane
-        effect. Unknown (GET fails) reads as False so the write still goes
+    async def _current_effect(facade, virtual_id: str) -> dict | None:
+        """Mirrors fx_seam._current_effect — read-only GET, no write-plane
+        effect. Unknown (GET fails) reads as None so the write still goes
         out as a single PUT and reports the real error, unchanged from
         today."""
         resp = await facade.handle("GET", f"/api/virtuals/{virtual_id}")
         if resp.status_code != 200:
-            return False
-        current = resp.json().get(virtual_id, {}).get("effect", {}).get("type")
-        return current is not None and current != effect_type
+            return None
+        return resp.json().get(virtual_id, {}).get("effect") or None
 
     async def glide(self, virtual_id: str, effect_type: str,
                     params: dict[str, Any], duration_ms: int) -> None:
