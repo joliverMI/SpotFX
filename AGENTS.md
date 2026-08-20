@@ -1342,6 +1342,30 @@ through their next fire instead. `scripts/check_redundant_black_backgrounds.py`
 finds every affected entry (30 across 22 colour sets in his real data, not
 just Black Hole).
 
+**A sparse/black-canvas Matrix effect can opt out of `background_color`
+writes entirely** — `config/effect_params.json`'s per-effect
+`no_background_color` flag (`fx.device_model.bg_color_blocked()`, checked
+by every colour-set-driven write path: `scene_compiler.py` ×2,
+`drift_conductor.py`, `scene_response.py`) makes those paths skip writing
+a fired set's `bg_color` onto that effect's config at all, regardless of
+which set fires. Already set on `radial` ("a non-black background washes
+the panel") and `pacman`; also set on `squiggles` (§85) after a real
+headless render proved a bright authored background floods ~100% of its
+frame (both effects paint thin/sparse content onto a canvas that starts
+as `np.zeros(...)`, unlike the denser particle effects that read their
+own `self._bg_color`/pre-filled `self.matrix`, e.g. `blackhole.py`). If a
+Matrix scene's colour-set accept list looks suspiciously narrow, check
+this flag before assuming the narrowing is arbitrary or before widening
+it — verify from the effect's real render output (`fx.headless`), not
+from set metadata. §85 is the worked example of why this matters: a plain
+"widen the accept list" would have forced a choice between reaching more
+sets and staying legible; blocking the write instead removes that choice
+entirely — every set becomes reachable AND Squiggles stays legible on all
+of them. `pacman` carries the identical byte-for-byte accept list and
+would trivially take the same fix, but that scene wasn't part of the ask
+that produced §85 — deliberately left alone as his call, not tidied in
+passing.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing
