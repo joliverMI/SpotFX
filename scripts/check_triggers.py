@@ -366,6 +366,74 @@ check(gap_calls == [("lull", 0.5, None)],
       "the last trigger in a song has no next trigger to stretch toward "
       "— gap_ms is honestly None, not a fabricated distance to song end")
 
+# ═══ #148's "triggers_only" mode changes WHICH triggers count as "next" —
+# the gap must reach past a mode-gated-out candidate, exactly the way
+# tick() itself would never fire it ══════════════════════════════════════
+gap_calls.clear()
+song["gap_triggers_only"] = [
+    SpectraTrigger(timestamp_ms=1000, source="authored",
+                  action=FireResponseAction(event_class="lull", intensity=0.5)),
+    SpectraTrigger(timestamp_ms=1400, source="generated",
+                  action=FireSceneAction(scene_id="s")),
+    SpectraTrigger(timestamp_ms=2200, source="authored",
+                  action=FireResponseAction(event_class="drop", intensity=1.0)),
+]
+engine_to_gap = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                              fire_scene=fake_fire_scene,
+                              fire_response=gap_recording_fire_response,
+                              render_intensity=lambda x: x,
+                              scene_change_mode=lambda: "triggers_only")
+asyncio.run(engine_to_gap.on_track_state("gap_triggers_only"))
+asyncio.run(engine_to_gap.tick(0))
+asyncio.run(engine_to_gap.tick(1000))
+check(gap_calls == [("lull", 0.5, 1200)],
+      "triggers_only, on a song with an authored trigger of its own: the "
+      "generated trigger at 1400ms is mode-gated out (only his own "
+      "triggers fire for this song), so the gap reaches past it to the "
+      "next AUTHORED trigger at 2200ms (2200-1000=1200ms), never the "
+      "false-short 400ms a raw-mode read would have given")
+
+# the SAME trigger list, contrasted under "full" — the generated trigger
+# DOES count there, proving the gated-out set genuinely differs by mode
+# (not just that this one case happens to come out right)
+gap_calls.clear()
+engine_full_gap = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                                fire_scene=fake_fire_scene,
+                                fire_response=gap_recording_fire_response,
+                                render_intensity=lambda x: x,
+                                scene_change_mode=lambda: "full")
+asyncio.run(engine_full_gap.on_track_state("gap_triggers_only"))
+asyncio.run(engine_full_gap.tick(0))
+asyncio.run(engine_full_gap.tick(1000))
+check(gap_calls == [("lull", 0.5, 400)],
+      "the identical trigger list under 'full': the generated trigger at "
+      "1400ms DOES count as next (400ms) — the same song's gap genuinely "
+      "differs by mode, confirming the gate isn't a no-op in this proof")
+
+# triggers_only's PER-SONG FALLBACK (a song with NO authored trigger of
+# its own falls back to "analysed" — _effective_mode_for_song): proven
+# directly against the method, since a live fire_response trigger is
+# always source=="authored" in practice and can't exercise this branch
+# through _fire() itself (the song it fires on trivially has an authored
+# trigger — itself). This closes the mechanism's OTHER branch rather than
+# leaving it implicit.
+song["gap_fallback"] = [
+    SpectraTrigger(timestamp_ms=1000, source="generated",
+                  action=FireSceneAction(scene_id="s")),
+    SpectraTrigger(timestamp_ms=1600, source="generated",
+                  action=FireSceneAction(scene_id="s2")),
+]
+engine_fallback = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                                scene_change_mode=lambda: "triggers_only")
+asyncio.run(engine_fallback.on_track_state("gap_fallback"))
+probe_trig = SpectraTrigger(timestamp_ms=1000, source="authored",
+                            action=FireResponseAction(event_class="lull"))
+check(engine_fallback._next_trigger_gap_ms(probe_trig) == 600,
+      "triggers_only on a song with NO authored trigger of its own falls "
+      "back to 'analysed' for gap purposes too — the generated trigger at "
+      "1600ms counts as next (600ms), never gated out by the raw "
+      "'triggers_only' setting alone")
+
 # an action that raises is logged and recorded, never crashes the tick
 song["boom"] = [_mk(0, kind="fire_scene")]
 

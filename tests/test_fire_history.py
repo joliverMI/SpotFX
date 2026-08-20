@@ -269,7 +269,7 @@ def test_response_event_triggers_only_trigger_path_records(monkeypatch):
     monkeypatch.setattr("spectra.services.room_controls.load_room_controls",
                         lambda: RoomControlState(scene_change_mode="triggers_only"))
 
-    async def fake_on_event(event_class, intensity):
+    async def fake_on_event(event_class, intensity, gap_ms=None):
         return None
 
     monkeypatch.setattr(engine.responses, "on_event", fake_on_event)

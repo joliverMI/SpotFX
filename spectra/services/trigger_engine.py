@@ -647,18 +647,24 @@ class TriggerEngine:
         port until 2026-08-20 — see scene_response.py's own OVERRIDE BLEND
         note for the full incident writeup): milliseconds from this trigger
         to the next trigger THIS SONG WILL ACTUALLY FIRE, honoring the same
-        settings-model gate tick() itself applies (_trigger_allowed) — a
-        trigger the current scene_change_mode won't fire is not a real
-        "next moment" to stretch a ramp toward. None means there's nothing
-        to stretch to: no next trigger is enabled/allowed for this song (this
-        is the last one), or no song is loaded at all — the caller
-        (scene_response._phase_ramp_ms) falls back to a documented flat
-        default in that case, never a guess."""
+        settings-model gate tick() itself applies. Resolves the PER-SONG
+        EFFECTIVE mode exactly as tick() does (_effective_mode_for_song
+        against this song's own trigger list, not the raw stored setting)
+        before calling _trigger_allowed — load-bearing since "triggers_only"
+        (#148): a trigger the effective mode won't actually fire is not a
+        real "next moment" to stretch a ramp toward, and under
+        "triggers_only" that set differs from the raw mode's own on a song
+        with no authored trigger of its own (falls back to "analysed").
+        None means there's nothing to stretch to: no next trigger is
+        enabled/allowed for this song (this is the last one), or no song is
+        loaded at all — the caller (scene_response._phase_ramp_ms) falls
+        back to a documented flat default in that case, never a guess."""
         if self._uri is None:
             return None
-        mode = self._scene_change_mode()
+        triggers = self._list_triggers(self._uri)
+        mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
         nxt = min(
-            (t.timestamp_ms for t in self._list_triggers(self._uri)
+            (t.timestamp_ms for t in triggers
              if t.enabled and t.id != trig.id
              and t.timestamp_ms > trig.timestamp_ms
              and self._trigger_allowed(t, mode)),

@@ -337,9 +337,15 @@ only 313 (37%) have any authored one — the fallback is the COMMON path
 (540 songs, 63%), not an edge case; of those 313, median 29 authored
 triggers and only 4 songs with 1-5, so the "only his" half rarely leaves a
 real gap. Deliberately NOT touched by this build: `scene_response.py`'s
-fixed 2500ms lull ramp not scaling with the lull — a separate, already
-authorised piece of work; bundling the two would let a fault in one hold
-up the other.
+charge/lull ramp not scaling with the actual gap — a separate,
+independently authorised piece of work (fixed 2026-08-20,
+`fm/spectra-lull-ramp-does-not-scale`, see the Override Blend entry
+below); bundling the two would have let a fault in one hold up the
+other. That fix's own gap computation (`TriggerEngine.
+_next_trigger_gap_ms`) resolves the SAME per-song effective mode this
+mode introduces (`_effective_mode_for_song`) before deciding what counts
+as "next" — a trigger `"triggers_only"` mode-gates out must not count as
+the next moment to stretch a ramp toward either.
 
 `_fire_transition` DEFERS UNCONDITIONALLY when `scene_sequencer`'s own dark
 switch (`sequencer.json`'s `config.enabled`, separate from
