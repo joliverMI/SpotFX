@@ -47,7 +47,22 @@ export default function DriftGradientBar() {
     // Seed (or clear) the editing draft whenever the active gradient
     // changes underneath us — a fresh copy, never a live binding to the
     // library entry, so unsaved edits can't leak into other viewers.
-    setDraft(activeProfile ? { ...activeProfile } : null);
+    //
+    // Guarded on the CURRENT draft's own id, not just re-run on every
+    // activeId/activeProfile change: startNew() sets a brand-new,
+    // not-yet-saved draft and only THEN activates its id (the comment on
+    // startNew explains why — "not yet in the library, Save inserts it").
+    // That activation round-trips through room-controls (PUT + refetch),
+    // which fires this effect while profiles[activeId] is still
+    // undefined — an unguarded reseed nulled the draft the instant the
+    // PUT resolved, closing the editor out from under him before he could
+    // touch it (his report: "the dialog closes automatically, I can not
+    // do anything"). A draft already showing this exact id is always the
+    // freshest copy (created here, or previously seeded from
+    // activeProfile) — never re-derive over it.
+    setDraft((prev) => (prev?.id === activeId
+      ? prev
+      : (activeProfile ? { ...activeProfile } : null)));
   }, [activeId, activeProfile]);
 
   const setActive = async (id: string | null) => {
