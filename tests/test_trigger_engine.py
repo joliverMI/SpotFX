@@ -1044,3 +1044,91 @@ def test_trigger_lookahead_reuses_pinned_pick_never_rendering_a_wrong_or_stale_s
             await host.shutdown()
 
     _run(main())
+
+
+# ── proof 12: a DROP anchors its START to the mark — the exact opposite of
+#    proof 10's momentary flare (his ruling, 2026-08-20, settled after Black
+#    Hole was tried and withdrawn as a drop-timing reference — data/
+#    drops-still-fire-early-star-does-not-explode/) ──────────────────────────
+
+def test_trigger_fires_drop_with_zero_lead_so_its_switch_starts_on_the_beat_not_before(
+    tmp_path,
+):
+    """Same band/kind SHAPE as proof 10 (a momentary kind moving a
+    registry-smooth param) — the only thing that differs is event_class:
+    "drop" instead of "flare". Proof 10 fires DICE_REROLL_GLIDE_MS early so
+    the switch's glide LANDS on the trigger. This proof fires with ZERO
+    lead, so the SAME glide is still IN FLIGHT right at the trigger's own
+    moment — the switch STARTS there, it doesn't finish there. lead_ms=0 is
+    injected here (matching proof 9/10's own convention) because the real
+    lead computation reaches the production engine singleton via
+    _live_virtuals/_active_scene; that zero is unit-proven against the real
+    _response_switch_lead_ms in scripts/check_triggers.py — this proof's
+    job is only to show what zero lead actually does to the render."""
+    from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
+                                      ResponseSpec, SceneDeviceConfig, SceneV2)
+    from spectra.models.trigger import FireResponseAction, SpectraTrigger
+    from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Drop Anchor", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 1.0})],
+        flare_kinds=[FlareKind(name="Burst", type="momentary",
+                               params={"gradient_scale": ParamTarget(
+                                   mode="absolute", value=1.8)})],
+        responses={"drop": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.7, intensity_max=1.0, kinds={"Burst": 1.0})])})
+    trig = SpectraTrigger(timestamp_ms=2000,
+                          action=FireResponseAction(event_class="drop", intensity=0.9))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "drop-anchor")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 1.0})
+                executor, conductor, responder, _ = _conductor_and_responder(clock)
+                writes = [{"virtual_id": VID, "effect_type": "concentric",
+                          "config": {"gradient_scale": 1.0},
+                          "entry_id": scene.devices[0].id, "color_mode": "set"}]
+                conductor.on_scene_fire(scene, writes)
+
+                engine = TriggerEngine(list_triggers=lambda uri: [trig],
+                                       fire_response=responder.on_event,
+                                       lead_ms=lambda t: 0,
+                                       render_intensity=lambda x: x)
+                await engine.on_track_state("song:drop-anchor")
+
+                await engine.tick(1999)
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.0), \
+                    "nothing fires before the trigger's own timestamp — " \
+                    "there is no early lead to fire on"
+
+                fired = await engine.tick(2000)
+                assert len(fired) == 1
+                # right at the trigger's own moment: the switch has only
+                # just STARTED — the opposite of proof 10, where the same
+                # glide duration lands FINISHED here because it fired early
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                just_started = effect._config["gradient_scale"]
+                assert 1.0 <= just_started < 1.2, \
+                    "the switch is only just beginning at the trigger " \
+                    f"mark, not already landed (got {just_started})"
+
+                # it finishes DICE_REROLL_GLIDE_MS AFTER the mark, never at
+                # or before it — the explosion begins on the trigger, it
+                # doesn't arrive pre-finished
+                glide_frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.8, abs=0.02), \
+                    "the switch lands DICE_REROLL_GLIDE_MS AFTER the " \
+                    "trigger mark — the drop's start, not its finish, is " \
+                    "what's anchored to the beat"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
