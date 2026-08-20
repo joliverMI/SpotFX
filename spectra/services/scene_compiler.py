@@ -207,12 +207,32 @@ def room_active_set() -> Optional[ColorSetCard]:
     without an explicit set compiles with THIS — the owner's sets, never
     effect-default LedFX wheel colours (owner defect fix, part c). None
     only while the room is genuinely set-less, which the conductor's
-    bootstrap makes a transient state."""
-    from spectra.services import color_journey, color_sets
+    bootstrap makes a transient state.
+
+    THE TERMINAL FALLBACK, so only the OVERLAY resolves here, never the
+    mode gate: every other automatic choke point that fails its own
+    resolve_for_fire_mode_gated check (an explicit color_set_id, a
+    resolved group member) degrades BY FALLING BACK TO THIS FUNCTION —
+    see fire_scene_by_id's own docstring ("falls back to the room's
+    active set, same as an unresolved/unknown color_set_id already
+    does"). Re-applying the mode gate here would turn that fallback into
+    a dead end (None, no colour at all) instead of the room's own actual
+    set. active_set_id is always a concrete "set" id, never a group's —
+    every writer of this field (apply_set_directly, the sequencer/
+    response-engine colour picks) already resolves through
+    color_set_groups first — so resolve_for_fire's group branch never
+    triggers here; this is always the set-branch chain-every-enclosing-
+    group overlay (found missing 2026-08-19: every trigger-driven fire
+    goes through this exact fallback, since none of his 22,013 fire_scene
+    triggers carry an explicit color_set_id)."""
+    from spectra.services import color_journey, color_set_groups, color_sets
     set_id = color_journey.load_room().active_set_id
     if set_id is None:
         return None
-    return color_sets.get_by_id(set_id)
+    card = color_sets.get_by_id(set_id)
+    if card is None:
+        return None
+    return color_set_groups.resolve_for_fire(card)
 
 
 async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,

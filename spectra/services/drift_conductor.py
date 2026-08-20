@@ -576,7 +576,16 @@ class DriftConductor:
                                        rng=self._rng, current_id=None)
         if pick.picked_id is None:
             return None
-        result = await self.apply_set_directly(pool[pick.picked_id][0])
+        # Found missing 2026-08-19 (same audit as scene_compiler.
+        # room_active_set): _destination_pool's cards are RAW (from
+        # _set_cards(), no overlay) — apply_set_directly's other two
+        # callers (POST /room-color/apply, the select_color_set trigger
+        # action) both resolve through color_set_groups before calling
+        # it; the bootstrap picked its own destination pool's card
+        # directly and skipped that resolution.
+        from spectra.services import color_set_groups
+        chosen = color_set_groups.resolve_for_fire(pool[pick.picked_id][0])
+        result = await self.apply_set_directly(chosen)
         result["rung"] = pick.rung
         logger.info("room colour bootstrap: first set '%s' selected and "
                     "applied", result["set_name"])

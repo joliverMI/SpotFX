@@ -869,8 +869,17 @@ class ResponseEngine:
 
     @staticmethod
     def _default_set_card(set_id: str):
-        from spectra.services import color_sets
-        return color_sets.get_by_id(set_id)
+        """Found missing 2026-08-19 (same audit as scene_compiler.
+        room_active_set): the flare colour jump picked from
+        _default_eligible_sets (kind="set" only, never a group id) and
+        rendered the RAW card — no enclosing group's override entries.
+        resolve_for_fire's set-branch chains them, matching every other
+        rendering choke point."""
+        from spectra.services import color_set_groups, color_sets
+        card = color_sets.get_by_id(set_id)
+        if card is None:
+            return None
+        return color_set_groups.resolve_for_fire(card)
 
     @staticmethod
     async def _no_broadcast(payload: dict) -> None:
