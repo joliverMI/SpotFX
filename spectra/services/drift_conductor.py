@@ -129,9 +129,12 @@ class VirtualState:
         self.gradient: str | None = config.get("gradient")
         self.background_color: str | None = config.get("background_color")
         self.brightness_baseline: float = float(config.get("brightness", 1.0))
-        self.param_baseline: dict[str, float] = {
-            k: float(v) for k, v in config.items()
-            if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        # A toggle param's baseline (e.g. `reverse`) is kept as a real bool,
+        # not coerced to float — a momentary flare on a toggle param needs
+        # its true/false baseline back verbatim (scene_response._carried_value).
+        self.param_baseline: dict[str, float | bool] = {
+            k: (v if isinstance(v, bool) else float(v))
+            for k, v in config.items() if isinstance(v, (int, float))}
 
 
 def _registry_range(effect_type: str, param: str) -> Optional[tuple[float, float]]:
@@ -362,7 +365,9 @@ class DriftConductor:
             state = self.virtuals.get(vid)
             if state is None:
                 continue
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if isinstance(value, bool):
+                state.param_baseline[param] = value
+            elif isinstance(value, (int, float)):
                 state.param_baseline[param] = float(value)
             if param == "brightness" and isinstance(value, (int, float)):
                 state.brightness_baseline = float(value)
