@@ -1805,6 +1805,103 @@ to original" undoes an edit session back to exactly what was attached
 before it started. Full detail: `docs/SPECTRA_SPEC.md` §65/§76. Spec:
 `tests/test_color_set_group_curves.py`.
 
+## SPECTRA two-dimensional drift gradient + Rainbow select
+
+Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/
+HIS-VERBATIM-WORDS.md`). Two independent features, one PR.
+
+**The 2D drift gradient**: `spectra/models/gradient2d.py` (`GradientProfile`:
+`top`/`bottom`, each the SAME "#rrggbb or linear-gradient(...)" string every
+colour value in this app already uses — his ask "very similar to the
+current gradient picker, just make it a square" is literal: each edge
+reuses `ColorGradientPicker` verbatim, `GradientEditor2D.tsx` just stacks
+two of them with a square bilinear preview between; `x_mode: "loop"|
+"bounce"`, pure `sample()`/`advance_x()` — no spot-effects import, local
+reimplementation of the stop-parsing grammar `spectra/services/
+color_rotate.py` already established the precedent for). Stored/picked
+exactly like a sequencer curve profile (`spectra/services/
+gradient2d_store.py`, `storage/spectra/gradients2d.json`,
+`GET/PUT /api/gradients2d`) — **not** via `CurveAttachmentEditor.tsx`: a
+gradient has exactly ONE room-level attachment point
+(`RoomControlState.active_gradient_id`), not a per-entry map, so the
+one-off/shared-profile machinery that shape needs doesn't apply; editing is
+a local draft with two explicit buttons, "Save" (overwrites its own id) and
+"Save as new…" (forks a fresh id) — his literal "save as new or overwrite"
+wording, not a detach/revert dance. UI: `DriftGradientBar.tsx`, mounted in
+`RoomControlsBar.tsx`'s top-bar group-button row.
+
+X is time, Y is intensity, vertices only at top (y=1) and bottom (y=0),
+linear between — explicitly **not** rotation (he pre-empted the
+misreading himself). Wired into `drift_conductor.py`'s `tick()`: an active
+gradient **replaces** the wheel-based colour journey for that leg (held
+exactly like a live rainbow palette already holds it — a different colour
+source has taken over), never runs alongside it. X advances a fixed
+fraction of `RoomControlState.gradient_x_period_s` every leg, looping or
+bouncing per the gradient's own `x_mode`; Y drifts toward a target
+(`RoomControlState.gradient_y_slew_s` paces it) rather than snapping.
+**The "ahead of arrival" problem, his proposal, adopted as-is** (asked to
+propose, said "if this is a good starting place, just go with it"): the Y
+target changes only on a trigger firing or an analysed song transition
+firing, not continuously every leg — `DriftConductor.on_intensity_event()`
+re-anchors the target to the live intensity at that moment;
+`trigger_engine.py`'s `_fire()`/`_fire_transition()` call it via a
+constructor injectable (`intensity_event`) whose **default is a safe
+no-op**, deliberately NOT a lazy import of the production `engine.conductor`
+singleton the way `fire_scene`/`fire_response` are — those are the subject
+of every trigger_engine test and always explicitly stubbed; this one small
+side call is easy to forget to stub, so its own default costs nothing when
+forgotten. Production wiring is one explicit line in `services/engine.py`
+(`trigger_engine._intensity_event = conductor.on_intensity_event`), the
+same place that module already owns constructing the `conductor`/
+`responses` singletons. Flares are UNCHANGED — a flare colour jump
+(`scene_response.py`) still writes `state.gradient`/`background_color`
+directly via `apply_color_set`'s instant jump; the next gradient leg's own
+ABSOLUTE `(x, y)` sample (not a delta) simply overwrites it on its own
+20s-leg schedule, the same way the wheel journey's rotation already gets
+overwritten-then-resumed around a flare jump.
+
+**Any new test/script that calls `DriftConductor.tick()`
+must pass `room_controls=`/`gradient_profiles=` explicitly (or isolate
+`scfg.ROOM_CONTROLS_FILE`/`GRADIENT2D_FILE` under its own temp
+`SPECTRA_STORAGE`)** — `tick()` now reads `room_controls().active_gradient_id`
+on every leg to decide the branch above, so an unstubbed default silently
+touches real storage (`spectra/services/drift_conductor.py`'s own
+`_default_room_controls`/`_default_gradient_profiles` lazy-import the real
+stores, matching every other `_default_*` injectable in that file). Found
+this while adding the feature: `test_spectra_engine.py`'s shared `_engine()`
+helper had to gain `gradient_profiles=lambda: {}` +
+`room_controls=lambda: rc.RoomControlState(...)` for exactly this reason —
+copy that shape, don't rediscover the gap.
+
+**Rainbow select**: `models/color_set.py` `ColorSetCard.is_rainbow`
+(mirrored in `spectra/services/color_sets.py`'s read-only projection — the
+usual "defined twice" trap) is **ENUMERATED, never inferred from name** —
+his own instruction, since several of his other sets have colourful names
+and are not rainbows. Exactly five cards are marked: Hype 1, Hype 2,
+Hype 3, the Hype group, Black Hole Rainbow —
+`scripts/mark_rainbow_color_sets.py` (dry-run default, `--apply`, raw-dict
+patch + backup, matches `set_scene_colorset_preference.py`'s convention;
+not run against live storage by this build). `RoomControlState.
+rainbow_select_limit` (default 0.9, his words) — above it, automatic
+colour-set selection is restricted to `is_rainbow=True` cards only; at or
+below it, to `is_rainbow=False` ("single") cards only — a clean exclusive
+partition (`spectra/services/rainbow_select.eligible()`), never both, never
+neither. Wired into `scene_sequencer._default_eligible_sets` — the SAME one
+automatic-selection choke point `mode_availability`/`color_set_preferred`
+already reach, following that established precedent — deliberately NOT
+`drift_conductor`'s destination pool or `scene_response`'s flare colour-jump
+pool (neither of those apply the other two gates either; same documented
+scope boundary, not an oversight). A Group card is never itself a selector
+candidate here (unchanged, pre-existing), so a Group's own `is_rainbow`
+mark has no effect on this gate — it exists for completeness/authoring
+symmetry only. UI: `RainbowToggle.tsx` on `ColorSetsPage.tsx`, next to
+`ModeAvailabilityToggle`; the limit lives in `DriftGradientBar.tsx`'s panel.
+
+Neither feature is deployed against his live room by this build — land and
+verify only. Specs: `tests/test_gradient2d.py`,
+`tests/test_drift_conductor_gradient.py`, `tests/test_rainbow_select.py`,
+`tests/test_gradient_retarget_hook.py`, `tests/test_mark_rainbow_color_sets.py`.
+
 ## SPECTRA Sonic token-usage record (review page)
 
 `spectra/services/sonic_usage.py` — durable per-call token usage, his ask:

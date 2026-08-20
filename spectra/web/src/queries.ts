@@ -246,6 +246,38 @@ export function useSaveCurves() {
   });
 }
 
+/* ── two-dimensional drift gradient (owner ask 2026-08-20) ── */
+
+/** One saved 2D drift gradient — top/bottom are each the SAME "#rrggbb
+ * solid or linear-gradient(...)" string every colour value in this app
+ * already uses, so each edge reuses ColorGradientPicker verbatim (his ask:
+ * "the UI should be very similar to the current gradient picker, just
+ * make it a square"). x_mode is "part of the setting stored with the
+ * gradient": bounce or loop along the x (time) axis. */
+export interface DriftGradientProfile {
+  id: string;
+  name: string;
+  top: string;
+  bottom: string;
+  x_mode: 'loop' | 'bounce';
+}
+
+export function useGradient2dProfiles() {
+  return useQuery({
+    queryKey: ['spectra-gradient2d'],
+    queryFn: () => apiGet<Record<string, DriftGradientProfile>>('/gradients2d'),
+  });
+}
+
+export function useSaveGradient2dProfiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (profiles: Record<string, DriftGradientProfile>) =>
+      apiPut('/gradients2d', profiles),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-gradient2d'] }),
+  });
+}
+
 /** Curve-attachment mutation: round-trips the STORED config and rewrites
  * only field[entryId]'s curve fields — relationships stay agent-owned.
  * field defaults to 'entries' (the scene selector, original behaviour);

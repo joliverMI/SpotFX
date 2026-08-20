@@ -106,6 +106,22 @@ class RoomColorState(BaseModel):
     active_set_id: Optional[str] = None
     destination: Optional[JourneyDestination] = None  # runtime bearing
 
+    # The two-dimensional drift gradient's own runtime position (owner ask
+    # 2026-08-20) — an INDEPENDENT mechanism from the wheel journey above,
+    # kept in this same room-state store only because it's the established
+    # "per-room colour runtime state" file, not because it shares any of the
+    # wheel/destination semantics above. See drift_conductor.py's
+    # "gradient drift" docstring section for the full mechanism.
+    # RoomControlState.active_gradient_id (settings, not runtime) says WHICH
+    # saved GradientProfile is live, if any; these four fields are that
+    # gradient's live (x, y) position — x = time phase 0..1 (loops/bounces
+    # per the profile's own x_mode), y = the intensity-driven position 0..1,
+    # which DRIFTS toward gradient_target_y rather than snapping to it.
+    gradient_x: float = 0.0
+    gradient_x_direction: int = 1   # bounce direction; loop ignores it
+    gradient_y: float = 0.5
+    gradient_target_y: float = 0.5
+
 
 class EffectiveJourney(BaseModel):
     """Who steers while a given scene shows, and their reference pace."""

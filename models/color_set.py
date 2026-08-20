@@ -110,3 +110,13 @@ class ColorSetCard(BaseModel):
     # every SceneV2's pool, overriding any scene's own accept list. The legacy
     # scene/set-color path ignores this flag.
     scene_v2_opt_out: bool = False
+
+    # SPECTRA Rainbow select (owner ask 2026-08-20): "rainbow" vs "single"
+    # (default) — ENUMERATED, never inferred from name or from the wheel's
+    # own chromatic-span rainbow heuristic (services/color_wheel.py). His
+    # own current rainbow set is exactly: the three Hype sets, the Hype
+    # group, and Black Hole Rainbow — see scripts/mark_rainbow_color_sets.py.
+    # Consulted by spectra/services/rainbow_select.py: above the room's
+    # rainbow_select_limit, only is_rainbow=True cards are eligible; at or
+    # below it, only is_rainbow=False ("single") cards are.
+    is_rainbow: bool = False

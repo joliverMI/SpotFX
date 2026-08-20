@@ -453,11 +453,15 @@ class SceneSequencer:
         await fire_scene_by_id(scene_id, color_set_id, intensity)
 
     def _default_eligible_sets(self, scene_id: str) -> dict[str, Optional[float]]:
-        from spectra.services import color_sets, color_wheel, mode_availability, scene_store
+        from spectra.services import (color_sets, color_wheel,
+                                      mode_availability, rainbow_select,
+                                      scene_store)
         from spectra.services.room_controls import load_room_controls
         scene = scene_store.get_by_id(scene_id)
-        room_mode = load_room_controls().display_mode
+        room = load_room_controls()
+        room_mode = room.display_mode
         preference = getattr(scene, "preferred_color_set_mode", "default") if scene else "default"
+        intensity = self._intensity()
         out: dict[str, Optional[float]] = {}
         for card in color_sets.list_all():
             if card.kind != "set":
@@ -469,6 +473,9 @@ class SceneSequencer:
                 continue
             if not mode_availability.color_set_preferred(
                     card.display_availability, preference, room_mode):
+                continue
+            if not rainbow_select.eligible(card.is_rainbow, intensity,
+                                           room.rainbow_select_limit):
                 continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out

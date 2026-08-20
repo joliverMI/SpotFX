@@ -27,6 +27,35 @@ Mechanisms per leg:
            reselects; the wheel + bearing persist to shared room state
            every leg, so custody transfers never move the position.
 
+  gradient drift — the two-dimensional drift gradient (owner ask
+           2026-08-20, spectra/models/gradient2d.py): OFF by default
+           (room_controls.RoomControlState.active_gradient_id is None,
+           today's journey behaviour is entirely unchanged). When a
+           gradient is active it REPLACES the colour journey above for
+           set-mode virtuals — the journey is held (no wheel travel, no
+           destination picked) for exactly the same reason a live rainbow
+           palette already holds it: a different colour source has taken
+           over. X (time) advances a fixed fraction of the gradient's
+           0..1 span every leg (room_controls.gradient_x_period_s is the
+           full-span duration), looping or bouncing per the gradient's own
+           x_mode. Y (intensity) does NOT track live intensity every leg —
+           it DRIFTS toward a target (room_controls.gradient_y_slew_s is
+           roughly how long that drift takes) that only changes on
+           on_intensity_event(), called from trigger_engine.py at exactly
+           the two moments his own proposal named: a trigger firing, or an
+           analysed (song) transition firing. This is his answer to "the
+           next colour is chosen well ahead of when it reaches there, since
+           we drift to it": don't re-target continuously (chasing every
+           tick's momentary fluctuation), retarget on the same discrete
+           moments the rest of this app already treats as "the intensity
+           changed." Flares are UNCHANGED by any of this — a flare colour
+           jump (scene_response.py) still writes state.gradient/
+           background_color directly via apply_color_set's instant jump;
+           the next gradient leg (its OWN absolute (x,y) sample, not a
+           delta) simply overwrites it on its own schedule, same as the
+           wheel journey's rotation already gets overwritten-then-resumed
+           around a flare jump today.
+
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a creep or follow
 spec is authored PARAM-AGNOSTIC (a named profile is reused across effects —
 decision-4) so it can carry bounds that make sense for one param and are
@@ -71,6 +100,7 @@ import time
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
+from spectra.models import gradient2d
 from spectra.models.scene import DriftSpec, SceneV2
 from spectra.models.sequencer import CurvePoint, SelectorEntry
 from spectra.services import color_journey, color_rotate
@@ -211,6 +241,8 @@ class DriftConductor:
         set_cards: Callable[[], list] | None = None,
         sequencer_config: Callable[[], Any] | None = None,
         genre_bucket: Callable[[], Optional[str]] | None = None,
+        gradient_profiles: Callable[[], dict] | None = None,
+        room_controls: Callable[[], Any] | None = None,
         rng: Random | None = None,
     ) -> None:
         self.executor = executor
@@ -228,6 +260,9 @@ class DriftConductor:
         self._sequencer_config = sequencer_config \
             or self._default_sequencer_config
         self._genre_bucket = genre_bucket or (lambda: None)
+        self._gradient_profiles = gradient_profiles \
+            or self._default_gradient_profiles
+        self._room_controls = room_controls or self._default_room_controls
         self._rng = rng or Random()
 
         self.scene: SceneV2 | None = None
@@ -356,7 +391,19 @@ class DriftConductor:
             bootstrap = await self._bootstrap_room_color(
                 color_journey.active_journey(self._room_load(), self.scene))
 
-        journey_rec = self._journey_leg(batches, leg_ms, legs)
+        active_gradient_id = self._room_controls().active_gradient_id
+        if active_gradient_id is not None:
+            # An active gradient REPLACES the wheel journey for set-mode
+            # virtuals — held exactly like a live rainbow palette holds it
+            # (a different colour source has taken over; see the module
+            # docstring's "gradient drift" section).
+            journey_rec = {"custody": "room", "paused": True,
+                          "held_for": "gradient_drift"}
+            gradient_rec = self._gradient_leg(active_gradient_id, batches,
+                                              leg_ms, legs)
+        else:
+            journey_rec = self._journey_leg(batches, leg_ms, legs)
+            gradient_rec = {"active": False}
         if bootstrap is not None:
             journey_rec["bootstrap"] = bootstrap
 
@@ -384,7 +431,8 @@ class DriftConductor:
                 continue
             await self.executor.glide(vid, state.effect_type, params, duration)
 
-        record = {"at": self._clock(), "journey": journey_rec, "legs": legs,
+        record = {"at": self._clock(), "journey": journey_rec,
+                  "gradient": gradient_rec, "legs": legs,
                   "intensity": round(intensity, 4)}
         self._last_leg = record
         await self._broadcast({"type": "drift_leg", **record})
@@ -675,6 +723,73 @@ class DriftConductor:
             update={"wheel_position_deg": new_deg, "destination": dest}))
         return rec
 
+    # ── the two-dimensional drift gradient ───────────────────────────────────
+
+    def on_intensity_event(self) -> None:
+        """A trigger fired, or an analysed (song) transition fired — his own
+        adopted proposal for the gradient's Y-axis "chosen well ahead of
+        when it reaches there" problem: re-anchor the Y TARGET to the
+        current live intensity right now, rather than re-targeting every
+        leg (which would just chase each tick's momentary fluctuation) or
+        never re-targeting at all (which would leave Y stuck at whatever it
+        started at). Y then drifts toward this target over subsequent legs,
+        same shape as every other mechanism here — it does not jump.
+        Called from trigger_engine.py's _fire()/_fire_transition(); a no-op
+        while no gradient is active (still cheap: one small file write)."""
+        intensity = self._intensity()
+        if intensity is None:
+            intensity = NEUTRAL_INTENSITY
+        room = self._room_load()
+        self._room_save(room.model_copy(
+            update={"gradient_target_y": max(0.0, min(1.0, intensity))}))
+
+    def _gradient_leg(self, gradient_id: str, batches: dict, leg_ms: int,
+                      legs: list[dict]) -> dict:
+        """One leg of the 2D drift gradient: advance X (time) a fixed
+        fraction of its span, drift Y toward its last-set target, sample the
+        gradient at the resulting (x, y), and land that colour on every
+        set-mode virtual's gradient/background_color — whichever of those
+        two params the virtual already carries (same "only touch what's
+        already there" rule _journey_leg's palette rotation follows)."""
+        profile = self._gradient_profiles().get(gradient_id)
+        if profile is None:
+            logger.warning("active_gradient_id '%s' names no saved gradient "
+                           "— gradient drift holds", gradient_id)
+            return {"active": False, "missing": gradient_id}
+        room_controls = self._room_controls()
+        room = self._room_load()
+        x_delta = self.leg_s / max(room_controls.gradient_x_period_s, 1e-6)
+        new_x, new_dir = gradient2d.advance_x(
+            room.gradient_x, room.gradient_x_direction, x_delta, profile.x_mode)
+        y_step = min(1.0, self.leg_s / max(room_controls.gradient_y_slew_s, 1e-6))
+        new_y = room.gradient_y + (room.gradient_target_y - room.gradient_y) * y_step
+        color = gradient2d.sample(profile.top, profile.bottom, new_x, new_y)
+        rec: dict[str, Any] = {
+            "active": True, "gradient_id": profile.id, "gradient_name": profile.name,
+            "x": round(new_x, 4), "y": round(new_y, 4),
+            "target_y": round(room.gradient_target_y, 4), "color": color,
+        }
+        if color is not None:
+            for vid, state in self.virtuals.items():
+                if not state.set_mode:
+                    continue
+                params: dict[str, Any] = {}
+                if state.gradient:
+                    state.gradient = color
+                    params["gradient"] = color
+                if state.background_color:
+                    state.background_color = color
+                    params["background_color"] = color
+                if params:
+                    batches.setdefault((vid, leg_ms), {}).update(params)
+                    legs.append({"virtual_id": vid, "param": "gradient2d",
+                                 "kind": "gradient", "target": color,
+                                 "duration_ms": leg_ms})
+        self._room_save(room.model_copy(update={
+            "gradient_x": new_x, "gradient_x_direction": new_dir,
+            "gradient_y": new_y}))
+        return rec
+
     # ── supervised production loop ───────────────────────────────────────────
 
     async def run(self) -> None:
@@ -711,6 +826,11 @@ class DriftConductor:
                     room.destination, room.wheel_position_deg),
             },
             "mechanisms": [m.as_status() for m in self.mechanisms],
+            "gradient": {
+                "active_gradient_id": self._room_controls().active_gradient_id,
+                "x": room.gradient_x, "y": room.gradient_y,
+                "target_y": room.gradient_target_y,
+            },
             "last_leg": self._last_leg,
             "last_rebaseline": self._last_rebaseline,
         }
@@ -726,6 +846,16 @@ class DriftConductor:
     def _default_curve_profiles() -> dict:
         from spectra.services import sequencer_store
         return sequencer_store.load_curves()
+
+    @staticmethod
+    def _default_gradient_profiles() -> dict:
+        from spectra.services import gradient2d_store
+        return gradient2d_store.load_all()
+
+    @staticmethod
+    def _default_room_controls():
+        from spectra.services.room_controls import load_room_controls
+        return load_room_controls()
 
     @staticmethod
     def _default_set_position(set_id: str) -> Optional[float]:

@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CurveAttachmentEditor from '../components/CurveAttachmentEditor';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
+import RainbowToggle from '../components/RainbowToggle';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import useIsPhone from '../lib/useIsPhone';
@@ -51,6 +52,7 @@ function newCard(kind: 'set' | 'group'): SpotColorSetCard {
   return {
     id: uuid(), name: kind === 'group' ? 'New Group' : 'New Colour Set',
     color: '#FFD700', kind, labels: [], entries: [], display_availability: 'default',
+    is_rainbow: false,
     ...(kind === 'group'
       ? { members: [], mode: 'cycle', cycle_behavior: 'wrap', exclude_current: true, palette_sync: false }
       : {}),
@@ -470,6 +472,8 @@ export default function ColorSetsPage() {
             </button>
             <ModeAvailabilityToggle value={card.display_availability ?? 'default'}
               onChange={(v) => setCard({ ...card, display_availability: v })} />
+            <RainbowToggle value={card.is_rainbow ?? false}
+              onChange={(v) => setCard({ ...card, is_rainbow: v })} />
             <button className="danger" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => void del()}>✕ Delete</button>
           </div>
 

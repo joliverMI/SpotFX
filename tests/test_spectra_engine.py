@@ -103,6 +103,9 @@ def _engine(clock, *, intensity=1.0, room=None, set_positions=None,
         set_position=lambda sid: positions.get(sid),
         set_cards=lambda: cards,
         sequencer_config=lambda: seq_config,
+        gradient_profiles=lambda: {},
+        room_controls=lambda: rc.RoomControlState(
+            brightness_multiplier=brightness_multiplier),
         rng=Random(11))
     responder = ResponseEngine(
         conductor=conductor, executor=executor, rng=Random(7),

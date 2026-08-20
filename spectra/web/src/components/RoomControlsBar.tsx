@@ -32,6 +32,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import AmbientGroupsPicker from './AmbientGroupsPicker';
 import ColorGradientPicker from './ColorGradientPicker';
+import DriftGradientBar from './DriftGradientBar';
 import TopBarGroupButton from './TopBarGroupButton';
 import HelpLink from '../help/HelpLink';
 import { useDebouncedApply } from '../lib/useDebouncedApply';
@@ -513,6 +514,8 @@ export default function RoomControlsBar() {
         </span>
         {local.force_scene_enabled && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-purple" title="Force Scene is on" />}
       </TopBarGroupButton>
+
+      <DriftGradientBar />
 
       <label className="room-control" title="Dims/undims the whole room uniformly">
         Brightness

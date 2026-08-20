@@ -352,6 +352,18 @@ export interface RoomControlState {
    * force_scene_scene_id instead. Does not affect manual editor test-fires. */
   force_scene_enabled: boolean;
   force_scene_scene_id: string | null;
+  /** Rainbow select (spectra/services/rainbow_select.py, owner ask
+   * 2026-08-20): above this intensity, colour-set selection is restricted
+   * to rainbow-marked cards only; at or below it, to single cards only.
+   * Default 0.9 (his words). */
+  rainbow_select_limit: number;
+  /** The two-dimensional drift gradient (spectra/models/gradient2d.py,
+   * spectra/services/drift_conductor.py "gradient drift") — null (default)
+   * means off, the wheel-based colour journey drives the room's colour
+   * exactly as before this feature. See DriftGradientBar.tsx. */
+  active_gradient_id: string | null;
+  gradient_x_period_s: number;
+  gradient_y_slew_s: number;
 }
 
 /** What actually happened to the room's virtuals on the last display-mode
@@ -705,6 +717,10 @@ export interface SpotColorSetCard {
    * card, kind differentiates) — distinct from the retired display_mode
    * mode-lane field this card also round-trips unmodified. */
   display_availability?: DisplayAvailability;
+  /** Rainbow select (owner ask 2026-08-20, spectra/services/
+   * rainbow_select.py) — ENUMERATED, never inferred from name. See
+   * RainbowToggle.tsx. Applies to both Sets and Groups. */
+  is_rainbow?: boolean;
   [key: string]: unknown;
 }
 

@@ -76,6 +76,13 @@ class ColorSetCard(BaseModel):
     exclude_current: bool = True
     palette_sync:    bool = False
 
+    # Rainbow select (owner ask 2026-08-20) — see models/color_set.py's
+    # ColorSetCard.is_rainbow docstring. ColorSetCard is defined TWICE
+    # (that one, and this read-only projection); a field added to one and
+    # not the other is silently dropped on every SPECTRA-side read
+    # (AGENTS.md) — mirrored here for exactly that reason.
+    is_rainbow: bool = False
+
     model_config = {"extra": "ignore"}
 
 
