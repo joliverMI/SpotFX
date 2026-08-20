@@ -27,7 +27,7 @@ CHARGE_SPAWN_X = 5.0   # extra spawn-rate multiplier at full charge (1 + X*p)
 CHARGE_SHRINK = 0.6    # burst particle-count reduction at full charge
 CHARGE_SLOW = 0.55     # burst speed reduction at full charge
 CHARGE_SHORT = 0.4     # burst life reduction at full charge
-LULL_ROCKETS = 3       # slow rockets crossing the dark panel
+LULL_ROCKETS = 6       # slow rockets crossing the dark panel
 LULL_FLIGHT_S = 4.0    # rocket flight fallback when no lull ramp arrives
 LULL_ROCKET_FADE = 0.75  # brightness lost over the rocket flight
 DROP_SETTLE_S = 0.9    # payoff settle time before phase auto-reset
@@ -610,7 +610,7 @@ class Fireworks2d(Twod, GradientEffect):
         rng = self._rng
         ang = rng.uniform(0.0, 2 * np.pi, k)
         start_r = float(getattr(self, "r_max", 1.3)) - 0.05
-        end_r = rng.uniform(0.18, 0.38, k)
+        end_r = rng.uniform(0.36, 0.76, k)  # ~2x his prior 0.18-0.38 past center
         end_ang = ang + np.pi + rng.uniform(-0.5, 0.5, k)
         sx_ = (start_r * np.cos(ang)).astype(np.float32)
         sy_ = (start_r * np.sin(ang)).astype(np.float32)
