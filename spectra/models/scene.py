@@ -288,13 +288,31 @@ class FlareKind(BaseModel):
     hold_ms (momentary only; None = PULSE_HOLD_S, today's fixed 250 ms) is
     the CHOSEN HOLD before the release glide starts — the release itself is
     unchanged: it always glides to the baseline AS CARRIED AT RELEASE TIME,
-    a creep's wander included (scene_response.flush_releases)."""
+    a creep's wander included (scene_response.flush_releases).
+    trigger_offset_ms (owner ask, the flare scrubbing-preview timeline,
+    data/timeline-preview-scrub-flares-and-drop-sequences — "help edit
+    where the trigger should land with respect to the effect") is an
+    AUTHORED reference point, tuned by dragging the preview's trigger-
+    alignment marker: how far, in ms, the moment this kind should be
+    considered "triggered" sits from its own computed animation start
+    (spectra/services/flare_preview.py — positive = the trigger lands
+    AFTER the animation visibly starts; negative = before, i.e. the effect
+    would need to fire early for its start to land on the trigger).
+    Default 0 = coincident, matching every kind that predates this field.
+    DESCRIPTIVE ONLY today — no fire path reads it; the real, LIVE
+    schedule-lead computation is trigger_engine.py's own lookahead-lead
+    system, a different mechanism entirely (a scheduled song trigger, not
+    an isolated kind preview). This field is where his own tuning
+    conclusion from watching the preview lives so it survives past the
+    preview session; wiring it into a live fire path is future work, not
+    assumed here."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
     hold_ms: Optional[int] = Field(default=None, ge=0, le=60_000)
+    trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)
 
     @model_validator(mode="before")
     @classmethod

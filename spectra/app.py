@@ -33,9 +33,9 @@ from fastapi.staticfiles import StaticFiles
 from spectra import config
 from spectra.api import engine as engine_api
 from spectra.api import (device_preview, feedback, fire_history,
-                         gradient2d, intensity_scale, journey, ownership,
-                         registry, room_controls, room_preview, scenes,
-                         sequencer, settings_console, show_review,
+                         flare_preview, gradient2d, intensity_scale, journey,
+                         ownership, registry, room_controls, room_preview,
+                         scenes, sequencer, settings_console, show_review,
                          sonic_usage, spec, triggers)
 
 
@@ -77,6 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(registry.router)
     app.include_router(journey.router)
     app.include_router(room_preview.router)
+    app.include_router(flare_preview.router)
     app.include_router(engine_api.router)
     app.include_router(ownership.router)
     app.include_router(room_controls.router)

@@ -187,6 +187,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'flare-preview-timeline',
+        title: 'Scrubbing preview — ▶ Preview on a flare kind card',
+        keywords: 'preview timeline scrub playhead trigger mark animation start end drag loop pause extend evolution starts early gap offset lead',
+        body: [
+          'Tap ▶ Preview on any flare kind card to open its scrubbing timeline: a ruler that plays across and loops, showing exactly what this one kind would do if it fired right now, in isolation from any band. Play/Pause, then drag the playhead anywhere on the ruler to freeze-frame the effect mid-animation. Extend widens the ruler without changing anything already on it. The intensity slider at the top recomputes the timeline at a different fire strength.',
+          'TWO KINDS OF MARKER, and they are not the same thing. The orange line labelled "trigger" is where you place the moment this kind is considered fired — drag it anywhere on the ruler. The two lighter lines labelled "start" and "end" (with the shaded band between them) are computed, not editable: they show exactly when the kind\'s own writes begin moving a light and when the whole thing has settled back — read straight off the real timing this kind will actually run (how long a glide takes to land, how long a momentary spike holds before it releases, how long the release itself takes). The text under the ruler states the gap between them in milliseconds — this is the number that answers "does the light actually start changing when I think it does:" if the trigger line and the start line aren\'t on top of each other, that gap is real and now visible, not something you have to guess at from watching the room.',
+          'DRAGGING THE TRIGGER LINE EDITS THE SCENE, it does not just move something around inside the preview. It writes this kind\'s own trigger_offset_ms — how far you\'ve decided the trigger should sit from where the animation actually starts — the same as typing into any other field on this scene: the change lives in the draft immediately and the page\'s own Save button is what makes it permanent, same as everywhere else in this editor. Closing the preview without Saving the scene discards it exactly like any other unsaved edit.',
+          'This is preview-only computation — nothing here touches a real light or the trigger engine\'s own live schedule; it\'s the same dark, hardware-free execution model the response engine always runs, just driven once by hand instead of by the music. Opening it automatically pauses the trigger engine for as long as the preview stays open (closing it, or navigating away, un-pauses).',
+          'Flares only, today — his own sequencing: charges, lulls, drops, and scene-to-scene transitions get this same treatment next, once he\'s used this version and said what needs to change.',
+        ],
+      },
+      {
         id: 'tab-flares',
         title: 'Flares tab — the band strip',
         keywords: 'flare bands kind scale response intensity strip attach chip',

@@ -19,7 +19,10 @@ import { readFlareClipboard } from '../../lib/flareClipboard';
 import type { FlareKind, ResponseClass, ResponseSpec, SceneV2 } from '../../types';
 import { emptyBand, emptyResponse } from '../../types';
 import FlareKindEditDialog from './FlareKindEditDialog';
-import { deleteFlareKind, moveKindToLane, pasteKind, renameFlareKind } from './flareKindOps';
+import FlarePreviewOverlay from './FlarePreviewOverlay';
+import {
+  deleteFlareKind, moveKindToLane, pasteKind, renameFlareKind, setKindTriggerOffset,
+} from './flareKindOps';
 import type { LaneRef } from './flareKindOps';
 
 const CLASS_TITLES: Record<ResponseClass, string> = {
@@ -91,6 +94,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
   const kindsByName = Object.fromEntries(kinds.map((k) => [k.name, k]));
 
   const [editingKind, setEditingKind] = useState<FlareKind | null>(null);
+  const [previewingKind, setPreviewingKind] = useState<FlareKind | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [laneExtra, setLaneExtra] = useState<Record<string, number>>({});
@@ -115,7 +119,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
     if (cls === 'flare') {
       for (const [name, jump] of [['Dice Re-roll', 'dice'], ['Colour Jump', 'color_set']] as const) {
         if (!kinds.some((k) => k.name === name)) {
-          missing.push({ name, type: 'drift_jump', jump, params: {}, gain: 1, hold_ms: null });
+          missing.push({ name, type: 'drift_jump', jump, params: {}, gain: 1, hold_ms: null, trigger_offset_ms: 0 });
         }
         attach[name] = 1;
       }
@@ -226,7 +230,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
               style={{ padding: '6px 10px', maxWidth: 260, cursor: 'grab', userSelect: 'none',
                        touchAction: 'none', opacity: drag?.name === k.name ? 0.4 : 1 }}
               title={`${TYPE_HINT[k.type]}\nTap to rename/delete/copy. Drag onto a lane to attach. Type/params/gain/hold are agent-adjustable.`}>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center' }}>
                 {kindIcon(k)} {k.name}
                 <span className="chip" style={{ marginLeft: 6 }}>{kindTypeLabel(k)}</span>
                 {scene.update_kind === k.name && (
@@ -234,6 +238,12 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                     ⚓ UPDATE
                   </span>
                 )}
+                <button style={{ marginLeft: 'auto', fontSize: 11, padding: '1px 6px' }}
+                  title="Open the scrubbing preview timeline for this kind"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); setPreviewingKind(k); }}>
+                  ▶ Preview
+                </button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{kindContent(k)}</div>
             </div>
@@ -336,6 +346,15 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
             return null;
           }}
           onDelete={() => setScene(deleteFlareKind(scene, editingKind.name))}
+        />
+      )}
+
+      {previewingKind && (
+        <FlarePreviewOverlay
+          sceneId={scene.id}
+          kind={kindsByName[previewingKind.name] ?? previewingKind}
+          onClose={() => setPreviewingKind(null)}
+          onTriggerOffsetChange={(ms) => setScene(setKindTriggerOffset(scene, previewingKind.name, ms))}
         />
       )}
 
