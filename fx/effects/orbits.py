@@ -31,13 +31,20 @@ CHARGE_PEAK_N = 10   # population grows to this, then sheds to 1
 CHARGE_PEAK_AT = 0.45  # progress fraction where the shed begins
 LULL_FALL_S = 3.0    # fall-to-center fallback when no lull ramp arrives
 DROP_FLY_S = 0.4     # seconds the payoff blobs take to fly back out
-DROP_SETTLE_S = 2.4  # drop boost decay / phase auto-reset horizon
+DROP_SETTLE_S = 4.2  # drop boost decay / phase auto-reset horizon — raised
+                      # in tandem with DROP_EJECTA_SPEED (see below) so the
+                      # slower ejecta aren't cut off by the fade timer before
+                      # they clear the panel
 DROP_BOOST = 2.5     # extra orbit speed at the drop instant
 # The drop explodes 3× the configured population from the center; the
 # surplus two thirds are ballistic ejecta that fly fully off-panel before
 # the boost window ends — only one third settles into orbits.
 DROP_EJECTA_X = 2        # ejecta per kept blob (3× total spawn)
-DROP_EJECTA_SPEED = (0.9, 1.6)  # radii/s — clears the panel well inside DROP_SETTLE_S
+# radii/s — tuned so the ejecta's own panel-clearing flight (not this fade
+# horizon) averages ~3.0s at his real scene's fallback particle_count=3,
+# his ask (data/spectra-orbits-blob-persistence/HIS-DECISION.md), up from
+# the ~1.4-1.6s the previous (0.9, 1.6) speed produced
+DROP_EJECTA_SPEED = (0.49, 0.87)
 
 # Every per-particle SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
