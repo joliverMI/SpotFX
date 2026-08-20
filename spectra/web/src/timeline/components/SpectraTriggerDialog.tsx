@@ -12,7 +12,7 @@ import { readSticky, writeSticky } from '../../lib/useSticky';
 import { useDeleteSpectraTrigger, useSaveSpectraTrigger, useScenes, useSpotColorSets } from '../../queries';
 import { RESPONSE_CLASSES } from '../../types';
 import type { ResponseClass, SpectraTrigger, TriggerAction, TriggerActionKind } from '../../types';
-import { actionSummary } from './SpectraTriggerBar';
+import { actionSummary, RESPONSE_CLASS_COLOR } from './SpectraTriggerBar';
 
 const KIND_LABEL: Record<TriggerActionKind, string> = {
   fire_scene: 'Fire Scene', fire_response: 'Fire Response', select_color_set: 'Select Colours',
@@ -181,6 +181,7 @@ export default function SpectraTriggerDialog({
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}
             title="Which response class fires — the same phase drive and band selection a bridge-classified charge/lull/drop/flare already drives.">
             <span style={{ width: 90, color: 'var(--text-muted)' }}>Class</span>
+            <span className="color-dot" style={{ background: RESPONSE_CLASS_COLOR[action.event_class] }} />
             <select value={action.event_class}
               onChange={(e) => setAction({ ...action, event_class: e.target.value as ResponseClass })}
               style={{ width: 140 }}>

@@ -961,6 +961,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         kbd: false,
       },
       {
+        id: 'spectra-trigger-colours',
+        title: 'Marker colours',
+        keywords: 'color colour code charge lull drop flare regular violet amber teal red blue pink gold',
+        body: [
+          'Each marker on the trigger bar is coloured by what it fires: violet for Fire scene, teal for Select colour set, red for Fire update. A Fire response marker is coloured by its own class instead of one flat amber — a plain flare stays amber (the "regular" trigger colour), while Charge (gold), Lull (sky blue), and Drop (magenta) each get their own colour so they read apart from a flare and from each other at a glance while a sequence is running. The edit dialog\'s Class picker shows the same colour next to its dropdown.',
+        ],
+      },
+      {
         id: 'spectra-trigger-sync',
         title: 'When a trigger actually fires (xcorr sync)',
         keywords: 'xcorr sync shape offset lag audio latency effective position timing',
