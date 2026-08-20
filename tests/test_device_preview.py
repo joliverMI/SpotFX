@@ -733,3 +733,158 @@ def test_status_reports_source(tmp_path, _isolated_ownership, _restore_live_host
 
     _lo._save(_lo.OwnershipRecord(owner=_lo.SPECTRA))
     assert relay.status()["source"] == "none", "spectra owns but her live stack isn't up"
+
+
+# ── 6. PREVIEW FRAME DELIVERY — the LedFX-ported single-slot mailbox ─────
+# data/preview-skips-under-fast-motion/: his second "LedFX was better"
+# report, after the payload-size fix (PR #143) didn't touch it. Proves the
+# two properties device_preview.py's module docstring ports from
+# ledfx/api/websocket.py's WebsocketConnection.send()/_sender(): a slow
+# connection never sees concurrent sends and never gets handed a backlog
+# (latest-value-wins coalescing), and a genuinely dead connection gets a
+# real close() instead of the old broadcast()-timeout path's silent,
+# unrecoverable strand (removed from the fan-out list, socket left open,
+# the browser's onclose — its only reconnect trigger — never fires).
+
+class _FakeSlowWebSocket:
+    """Minimal duck-typed stand-in for FastAPI's WebSocket, exposing only
+    what _PreviewFrameSender touches. Records delivery order/overlap and
+    can inject a fixed send delay or a scripted failure to stand in for a
+    congested/dead remote link without a real socket."""
+
+    def __init__(self, delay_s: float = 0.0, fail_after: Optional[int] = None):
+        self.delay_s = delay_s
+        self.fail_after = fail_after
+        self.sent: list[dict] = []
+        self.closed = False
+        self.overlap_detected = False
+        self._busy = False
+        self._send_count = 0
+
+    async def send_json(self, payload):
+        if self._busy:
+            self.overlap_detected = True
+        self._busy = True
+        try:
+            self._send_count += 1
+            if self.fail_after is not None and self._send_count > self.fail_after:
+                raise ConnectionResetError("simulated dead connection")
+            await asyncio.sleep(self.delay_s)
+            self.sent.append(payload)
+        finally:
+            self._busy = False
+
+    async def close(self):
+        self.closed = True
+
+
+def test_frame_sender_never_overlaps_sends_and_coalesces_stale_frames():
+    """The core LedFX-ported guarantee: a connection whose send is slower
+    than the frame interval never sees two sends mid-flight at once, and
+    only ever delivers the LATEST frame per vis_id — stale ones are
+    dropped, not queued, so a slow client's backlog can never grow."""
+    from spectra.services import device_preview as dp
+
+    async def scenario():
+        ws = _FakeSlowWebSocket(delay_s=0.05)
+        sender = dp._PreviewFrameSender(ws)
+        sender.start()
+        try:
+            for i in range(20):
+                sender.submit({"type": "device_preview_frame", "vis_id": "v", "seq": i})
+                await asyncio.sleep(0.005)
+            await asyncio.sleep(0.3)
+        finally:
+            await sender.stop()
+
+        assert not ws.overlap_detected, "two frames were mid-write on the same socket at once"
+        assert 0 < len(ws.sent) <= 12, "a slow connection must shed stale frames, not queue all 20"
+        assert ws.sent[-1]["seq"] == 19, "the LAST frame submitted must be the last one sent"
+        assert sender.dropped_frames > 0, "coalescing must actually have discarded something"
+
+    _run(scenario())
+
+
+def test_frame_sender_closes_the_socket_on_genuine_failure():
+    """A truly broken connection must get a REAL close() — the fix for the
+    old broadcast()-timeout path silently removing a client from the
+    fan-out list without ever closing its socket, leaving the browser's
+    onclose (its only reconnect trigger) permanently unfired."""
+    from spectra.services import device_preview as dp
+
+    async def scenario():
+        ws = _FakeSlowWebSocket(fail_after=0)
+        sender = dp._PreviewFrameSender(ws)
+        sender.start()
+        try:
+            sender.submit({"type": "device_preview_frame", "vis_id": "v", "seq": 0})
+            await _wait_until(lambda: ws.closed, timeout=2.0)
+        finally:
+            await sender.stop()
+
+        assert ws.closed, "a genuinely dead connection must be closed for real, not silently dropped"
+
+    _run(scenario())
+
+
+def test_frame_sender_does_not_evict_a_merely_slow_connection():
+    """The false-eviction bug: the old SEND_DEADLINE_S=0.25s broadcast
+    timeout tore down a connection whose send simply took longer than
+    that — ordinary on a real remote link, nothing actually wrong.
+    FRAME_SEND_TIMEOUT_S is generous specifically so this can't recur."""
+    from spectra.services import device_preview as dp
+
+    async def scenario():
+        ws = _FakeSlowWebSocket(delay_s=0.4)  # past the OLD 0.25s deadline
+        sender = dp._PreviewFrameSender(ws)
+        sender.start()
+        try:
+            sender.submit({"type": "device_preview_frame", "vis_id": "v", "seq": 0})
+            await _wait_until(lambda: len(ws.sent) == 1, timeout=2.0)
+        finally:
+            await sender.stop()
+
+        assert not ws.closed, "a slow-but-succeeding send must not evict the client"
+        assert ws.sent == [{"type": "device_preview_frame", "vis_id": "v", "seq": 0}]
+
+    _run(scenario())
+
+
+def test_preview_frame_hub_connect_disconnect_wires_one_sender_per_client():
+    from spectra.services import device_preview as dp
+
+    async def scenario():
+        hub = dp.PreviewFrameHub()
+        ws_a, ws_b = _FakeSlowWebSocket(), _FakeSlowWebSocket()
+        hub.connect(ws_a)
+        hub.connect(ws_b)
+        assert hub.client_count() == 2
+
+        hub.submit({"type": "device_preview_frame", "vis_id": "v", "seq": 1})
+        await _wait_until(lambda: ws_a.sent and ws_b.sent)
+        assert ws_a.sent[0]["seq"] == 1
+        assert ws_b.sent[0]["seq"] == 1
+
+        await hub.disconnect(ws_a)
+        assert hub.client_count() == 1
+        await hub.disconnect(ws_b)
+        assert hub.client_count() == 0
+
+    _run(scenario())
+
+
+def test_ws_endpoint_wires_frame_hub_alongside_status_manager():
+    """API-level proof that /device-preview/ws registers (and tears down)
+    a frame_hub sender in step with preview_ws_manager, not just the
+    status-broadcast list — otherwise frames would silently stop reaching
+    a connected tab even though its status socket looked fine."""
+    from fastapi.testclient import TestClient
+    from spectra.app import create_app
+    from spectra.services import device_preview as dp
+
+    client = TestClient(create_app())
+    assert dp.frame_hub.client_count() == 0
+    with client.websocket_connect("/api/device-preview/ws") as ws:
+        ws.receive_json()  # the immediate status push on connect
+        assert dp.frame_hub.client_count() == 1
+    assert dp.frame_hub.client_count() == 0
