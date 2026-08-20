@@ -8,11 +8,19 @@ data/spectra-sequencing-design/report.md Parts 2–4).
     ≡ a scalar weight.
   - Curve ownership (decision 4): NAMED profiles referenced by entries via
     curve_ref, with inline_points as the one-off escape hatch.
-  - dwell_weight: relative float > 0, default 1.0, dimensionless — weight 2
-    holds twice as long as weight 1, whatever the base pace is. In the
-    shipped transition-only mode the unit is SONGS (decision 5).
+  - dwell_weight (RETIRED 2026-08-20, data/plan-make-dwell-meaningful-
+    under-the-rea-4p73/{report,HIS-DECISION}.md): dwell was built on the
+    wrong reading of "song transition" (between songs, not within a song —
+    his correction) and gated only the sequencer's own song-transition
+    roll, which meant it did nothing on the mid-song trigger path he
+    actually uses. Superseded by SceneV2.dwell_curve (spectra/models/
+    scene.py) — a per-scene MINIMUM HOLD TIME curve over intensity,
+    seconds not songs, gated at the shared choke point scene_sequencer.
+    fire_scene_by_id — see spectra/services/dwell.py for the mechanism.
   - AffinityEdge: explicit from/to/mult, directional by construction.
-    Self-pairs are rejected: the diagonal IS dwell_weight (report Part 3).
+    Self-pairs are rejected: the diagonal is dwell's job, not a sampled
+    outcome (report Part 3) — now SceneV2.dwell_curve/spectra/services/
+    dwell.py, not the retired dwell_weight field.
   - change_mode (decision 5): shipped default is "transition" — song
     transitions are the only change moments; NO timer runs. "timed"/"both"
     are stored for a later owner-approved clock but the engine refuses to
@@ -20,14 +28,13 @@ data/spectra-sequencing-design/report.md Parts 2–4).
   - enabled: the sequencer's own dark switch, default OFF. Nothing fires
     until the agent flips it via PUT /api/sequencer/config.
   - flare_entries: the flare selector's entries (decision 3) — curve × genre
-    only; dwell_weight is carried by the shared entry shape but flares have
-    no dwell and the selector never reads it.
+    only; no dwell concept ever applied to flares.
   - color_set_entries + wheel_travel_curve: the colour-set selector — the
     kernel's third flavour, wired LAST (decision 3). score = curve(intensity)
     × genre × wheel-travel × group, where wheel travel is itself a named
     curve profile over angular distance (0–180° → x 0–1) and "group" is
     described next. No dwell: colours change with scenes, not on their own
-    clock, and the selector never reads dwell_weight. Rainbow-tagged sets
+    clock. Rainbow-tagged sets
     (services/color_wheel.py) take a neutral ×1.0 wheel factor and never
     move the room's wheel position.
   - Colour Group likelihood curves (owner ask 2026-08-17): reuse, not a new
@@ -90,11 +97,6 @@ class SelectorEntry(BaseModel):
     # Genre bucket (training-profile name) → multiplier; adjusted by telling
     # the agent, never by a settings form. 0 is a hard veto for that genre.
     genre_mult:   dict[str, float] = Field(default_factory=dict)
-    # Relative dwell: weight 2 holds twice as long as weight 1. Dimensionless;
-    # no absolute per-scene seconds anywhere. Songs in transition mode;
-    # fractional weights resolve probabilistically at adoption time
-    # (selection_kernel.resolve_dwell_songs). Unread for flare entries.
-    dwell_weight: float = Field(default=1.0, gt=0.0)
 
     @model_validator(mode="after")
     def _validate(self) -> "SelectorEntry":
@@ -119,7 +121,8 @@ class AffinityEdge(BaseModel):
     def _no_self_pair(self) -> "AffinityEdge":
         if self.from_id == self.to_id:
             raise ValueError(
-                "self-affinity is not stored — the diagonal IS dwell_weight")
+                "self-affinity is not stored — staying is dwell's job "
+                "(SceneV2.dwell_curve), not a sampled affinity outcome")
         return self
 
 

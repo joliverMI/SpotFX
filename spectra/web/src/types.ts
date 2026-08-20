@@ -1,4 +1,5 @@
 /** TS mirrors for spectra/models — the grown scene model. */
+import type { CurvePoint } from './components/CurveEditor';
 import { uuid } from './lib/uid';
 
 export type SignalName =
@@ -159,6 +160,15 @@ export interface PhaseChoreography {
 // (spectra/services/scene_response.py's _phase_ramp_ms) — no scene field,
 // no knob to hand-tune, see that module's own OVERRIDE BLEND note.
 
+/** A pointer to a curve — the same two-way shape a sequencer SelectorEntry's
+ * curve half uses, minus genre_mult/the retired dwell_weight. Exactly one of
+ * curve_ref/inline_points may be set; both null means "no override" — the
+ * caller supplies its own default (16s/4s for SceneV2.dwell_curve). */
+export interface CurveAttachment {
+  curve_ref: string | null;
+  inline_points: CurvePoint[] | null;
+}
+
 export interface SceneV2 {
   id: string;
   name: string;
@@ -205,7 +215,20 @@ export interface SceneV2 {
    * for how Force Scene names that override rather than applying it
    * silently. */
   disabled: boolean;
+  /** Minimum dwell (owner ask 2026-08-20) — a curve over intensity (seconds,
+   * not a likelihood), reusing CurveAttachmentEditor. null = his exact
+   * default: 16s @ intensity 0, 4s @ intensity 1, linear. Gated entirely at
+   * fire_scene_by_id — see DWELL_CURVE_DEFAULT and dwell.py's docstring. */
+  dwell_curve: CurveAttachment | null;
 }
+
+/** His exact default dwell curve (spectra/services/dwell.py's
+ * DEFAULT_DWELL_CURVE) — used only to render a live preview thumbnail when
+ * a scene has no dwell_curve of its own; never written unless he edits it. */
+export const DWELL_CURVE_DEFAULT: CurvePoint[] = [
+  { x: 0, y: 16 },
+  { x: 1, y: 4 },
+];
 
 export type DisplayAvailability = 'default' | 'dark' | 'light';
 
@@ -505,6 +528,11 @@ export interface ForceSceneResult {
    * SceneV2.disabled — the pin still wins (an explicit press always does),
    * but this names the contradiction instead of applying it silently. */
   overrode_disabled?: boolean;
+  /** True only when status is 'fired' AND the currently-active scene
+   * hadn't cleared its own minimum dwell yet (spectra/services/dwell.py) —
+   * same pattern as overrode_disabled: the pin still wins, named not
+   * silent. */
+  overrode_dwell?: boolean;
 }
 
 export interface RoomControlsSaveResult extends RoomControlState {
@@ -784,6 +812,7 @@ export function newScene(id: string): SceneV2 {
     display_availability: 'default',
     preferred_color_set_mode: 'default',
     disabled: false,
+    dwell_curve: null,
   };
 }
 
@@ -1008,7 +1037,7 @@ export const newFeedbackEntry = (capture: {
 /** Stage 3 review view (GET /api/review/sessions, GET /api/review/timeline)
  * — see spectra/services/show_reconstruction.py for the merge rule this
  * mirrors. A session is one sent feedback batch. */
-export type FireHistoryBucket = 'scenes' | 'responses' | 'color_sets' | 'triggers';
+export type FireHistoryBucket = 'scenes' | 'responses' | 'color_sets' | 'triggers' | 'deferred';
 
 export interface ReviewSession {
   session_id: string;

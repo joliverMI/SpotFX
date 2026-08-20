@@ -121,6 +121,7 @@ function SaveCurveDialog({
 export default function CurveAttachmentEditor({
   id, entries, curves, histogram, attachField, labelForEntry,
   title = 'Likelihood curve', noneNote, flatNote, footer,
+  defaultPoints, noneLabel,
 }: {
   /** The SequencerConfig entry key this editor targets — a scene id, or a
    * colour Set/Group card id. */
@@ -131,7 +132,7 @@ export default function CurveAttachmentEditor({
   entries: Record<string, SelectorEntry>;
   curves: Record<string, CurveProfile>;
   histogram?: number[];
-  attachField: 'entries' | 'color_set_entries';
+  attachField: 'entries' | 'color_set_entries' | 'dwell_curve';
   /** Turns another entry's key into a human label for the "used by X" text. */
   labelForEntry: (entryId: string) => string;
   title?: string;
@@ -140,6 +141,16 @@ export default function CurveAttachmentEditor({
   /** Optional content rendered below the curve tile grid, e.g. a
    * relationships/read-only block specific to the caller's domain. */
   footer?: React.ReactNode;
+  /** The curve actually in effect when nothing is attached (entry
+   * undefined) — e.g. SceneV2.dwell_curve's 16s/4s default. Callers that
+   * omit this keep the original "nothing to preview" behaviour (an em-dash
+   * tile, a flat-1.0 button preview): a per-scene minimum ALWAYS means
+   * something even unset, so its caller passes this to preview the real
+   * default instead of a misleading flat line. */
+  defaultPoints?: CurvePoint[];
+  /** Overrides the "— not sequenced —" label/tile text for callers where
+   * "none" means "use the default" rather than "not applied at all". */
+  noneLabel?: string;
 }) {
   const toast = useToast();
   const attachMut = useAttachCurve(attachField);
@@ -182,7 +193,8 @@ export default function CurveAttachmentEditor({
     originalAttachmentRef.current = null;
   }, [id]);
 
-  const points = draft ?? (profile ? profile.points : entry?.inline_points ?? FLAT);
+  const points = draft ?? (profile ? profile.points : entry?.inline_points
+    ?? (attachment === 'none' ? defaultPoints ?? FLAT : FLAT));
 
   const usedBy = (profileId: string) =>
     Object.entries(entries)
@@ -194,7 +206,7 @@ export default function CurveAttachmentEditor({
       .map(([eid]) => labelForEntry(eid));
 
   const tiles: { value: string; label: string; points: CurvePoint[] | null; badge?: string }[] = [
-    { value: 'none', label: '— not sequenced —', points: null },
+    { value: 'none', label: noneLabel ?? '— not sequenced —', points: defaultPoints ?? null },
     { value: 'flat', label: 'Flat 1.0 (no curve)', points: FLAT },
     ...Object.values(curves)
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -336,7 +348,7 @@ export default function CurveAttachmentEditor({
   const attachmentLabel = profile ? profile.name
     : attachment === 'inline' ? 'Inline one-off'
     : attachment === 'flat' ? 'Flat 1.0 (no curve)'
-    : '— not sequenced —';
+    : noneLabel ?? '— not sequenced —';
   const statusLine = oneOffNow
     ? 'One-off — this item only. Nothing shared is affected.'
     : profile

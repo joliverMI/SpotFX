@@ -208,6 +208,23 @@ def _isolated_fire_history(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_dwell():
+    """spectra/services/dwell.py (minimum dwell, 2026-08-20) tracks the
+    active scene's own latched entry time/seconds as bare module globals —
+    same no-DI-seam shape as _isolated_ambient_music_gate above, and fed
+    from the same no-DI-seam choke point _isolated_fire_history exists
+    for (scene_sequencer.fire_scene_by_id). Any test that fires a scene
+    for real would otherwise leak a latched dwell window into the next
+    test — a later fire in a DIFFERENT test can get silently deferred by
+    a still-running "minimum hold" from a fire the previous test made.
+    Autouse so no individual test needs to know this store exists."""
+    from spectra.services import dwell
+    dwell.reset()
+    yield
+    dwell.reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_sonic_usage(tmp_path, monkeypatch):
     """spectra/services/sonic_usage.py (Sonic's durable per-call token-usage
     record, review page) is written from inside settings_agent.run_turn /

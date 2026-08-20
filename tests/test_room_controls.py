@@ -280,7 +280,7 @@ def test_force_scene_redirects_every_automatic_pick(monkeypatch):
     action both go through this same function, so one interception covers
     both."""
     from spectra.models.scene import SceneV2
-    from spectra.services import room_controls as rc
+    from spectra.services import dwell, room_controls as rc
     from spectra.services import scene_compiler, scene_store
     from spectra.services.scene_sequencer import fire_scene_by_id
 
@@ -299,18 +299,24 @@ def test_force_scene_redirects_every_automatic_pick(monkeypatch):
 
     monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
 
+    # This test is about Force Scene's redirect, not the (unrelated)
+    # minimum-dwell gate the previous fire in each step would otherwise
+    # leave active on the NEXT scene requested — dwell.reset() between
+    # steps keeps each one an independent probe of the redirect logic.
     rc.save_room_controls(rc.RoomControlState(
         force_scene_enabled=True, force_scene_scene_id=held.id))
     _run(fire_scene_by_id(requested.id, intensity=0.7))
     assert fired_ids[-1] == held.id, \
         "enabled: the pinned scene fires instead of the one requested"
 
+    dwell.reset()
     rc.save_room_controls(rc.RoomControlState(
         force_scene_enabled=True, force_scene_scene_id="does-not-exist"))
     _run(fire_scene_by_id(requested.id, intensity=0.7))
     assert fired_ids[-1] == requested.id, \
         "a pinned id pointing at a missing scene is treated as unset"
 
+    dwell.reset()
     rc.save_room_controls(rc.RoomControlState(
         force_scene_enabled=False, force_scene_scene_id=held.id))
     _run(fire_scene_by_id(requested.id, intensity=0.7))

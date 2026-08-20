@@ -507,6 +507,12 @@ export default function RoomControlsBar() {
                 ⚠ overriding disabled scene
               </span>
             )}
+            {forceSceneResult?.status === 'fired' && forceSceneResult.overrode_dwell && (
+              <span className="badge badge-red"
+                title="The previously-active scene hadn't cleared its own minimum dwell yet — the pin fired anyway, since you pressed the button">
+                ⚠ overriding minimum dwell
+              </span>
+            )}
             {forceSceneResult?.status === 'skipped' && (
               <span className="badge badge-red" title="Force Scene did not fire — nothing was activated">
                 not fired: {forceSceneResult.reason}

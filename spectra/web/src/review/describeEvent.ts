@@ -8,6 +8,7 @@ const BUCKET_LABEL: Record<ReviewEventItem['bucket'], string> = {
   responses: 'Response',
   color_sets: 'Colour set',
   triggers: 'Trigger',
+  deferred: 'Deferred (dwell)',
 };
 
 export const BUCKET_COLOR: Record<ReviewEventItem['bucket'], string> = {
@@ -15,6 +16,7 @@ export const BUCKET_COLOR: Record<ReviewEventItem['bucket'], string> = {
   responses: '#f59e0b',
   color_sets: '#14b8a6',
   triggers: '#60a5fa',
+  deferred: '#94a3b8',
 };
 
 export function describeEvent(item: ReviewEventItem): string {
@@ -38,6 +40,12 @@ export function describeEvent(item: ReviewEventItem): string {
       const kind = (d.action_kind as string | undefined) ?? item.key;
       const source = d.source as string | undefined;
       return `Trigger fired: ${kind}${source ? ` (${source})` : ''}`;
+    }
+    case 'deferred': {
+      const name = (d.scene_name as string | undefined) ?? item.key;
+      const remaining = d.remaining_dwell_s as number | undefined;
+      const result = d.update_result as string | undefined;
+      return `Held (minimum dwell): ${name}${remaining != null ? `, ${remaining.toFixed(1)}s left` : ''}${result ? ` — update: ${result}` : ''}`;
     }
     default:
       return `${BUCKET_LABEL[item.bucket] ?? item.bucket}: ${item.key}`;

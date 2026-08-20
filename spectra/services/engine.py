@@ -133,27 +133,44 @@ async def _release_after_hold(hold_s: float) -> None:
     await responses.flush_releases(hold_s)
 
 
-async def fire_scene_update_event(intensity: float) -> None:
+async def fire_scene_update_event(intensity: float) -> Optional[dict]:
     """The UPDATE choke point (data/spectra-trigger-migration-scoping
     RULING.md): a SPECTRA-native fire_scene_update trigger
     (spectra.services.trigger_engine) calls this — there is no legacy
     bridge-classified equivalent (update_scene/reset_scene never went
     through the bridge's flare/charge/lull/drop classification either),
     so unlike fire_response_event above there's only ever the one
-    (trigger-driven, necessarily authored) caller — no via_trigger split
-    needed. Gated at "full" OR "triggers_only", same reasoning as
-    fire_response_event's via_trigger=True path: this only ever reaches
-    here on a song trigger_engine._effective_mode_for_song has already
-    confirmed carries an authored trigger of its own. Never schedules a
-    hold release — on_update only fires permanent kinds, which carry
-    immediately and never pend a return."""
+    (trigger-driven, necessarily authored) caller from THAT path — no
+    via_trigger split needed for it. Gated at "full" OR "triggers_only",
+    same reasoning as fire_response_event's via_trigger=True path: a
+    fire_scene_update trigger action only ever reaches here on a song
+    trigger_engine._effective_mode_for_song has already confirmed carries
+    an authored trigger of its own. Never schedules a hold release —
+    on_update only fires permanent kinds, which carry immediately and
+    never pend a return.
+
+    A SECOND caller as of the dwell rebuild (2026-08-20,
+    spectra.services.scene_sequencer.fire_scene_by_id's dwell gate,
+    spectra/services/dwell.py): a scene-change request deferred by an
+    active minimum dwell fires the current scene's own update effect
+    INSTEAD of switching — this is the confirmed "Update effect" his dwell
+    card meant. This caller is NOT limited to "full" OR "triggers_only" by
+    anything of its own — the dwell gate itself already applies
+    uniformly regardless of scene_change_mode (his own decision C) — it
+    just happens to reach the SAME tier check below as the trigger-driven
+    caller; on a tighter tier (e.g. "analysed"/"transitions") the update
+    simply doesn't run and the deferral still degrades to fire_scene_by_id's
+    own recorded hold, never raises. Returns the on_update() record (None
+    on an early gate-out above) so a caller that needs to know what
+    happened — dwell's own fire_history "deferred" record — can log it;
+    the trigger-driven caller still discards it, unchanged."""
     from spectra.services import preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
-        return
+        return None
     if load_room_controls().scene_change_mode not in ("full", "triggers_only"):
-        return
-    await responses.on_update(intensity)
+        return None
+    return await responses.on_update(intensity)
 
 
 _last_track_uri: str | None = None

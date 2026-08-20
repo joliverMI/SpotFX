@@ -420,17 +420,6 @@ def build_color_set_candidates(entries: dict[str, SelectorEntry],
     ]
 
 
-def resolve_dwell_songs(dwell_weight: float, rng: Random) -> int:
-    """Dwell target in SONGS for transition mode (decision 5): base is one
-    song, so weight 2 holds ~2 songs. Fractional weights resolve
-    probabilistically at adoption time — 1.5 holds one song half the time,
-    two the other half — so the MEAN hold stays exactly proportional to the
-    weight (report Part 3)."""
-    whole = math.floor(dwell_weight)
-    frac = dwell_weight - whole
-    return whole + (1 if rng.random() < frac else 0)
-
-
 def wheel_travel_deg(from_deg: float | None, to_deg: float | None) -> float | None:
     """Shortest arc between two wheel positions, 0–180°.
 

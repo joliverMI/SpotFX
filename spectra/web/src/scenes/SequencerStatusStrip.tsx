@@ -1,6 +1,8 @@
 /** Sequencer status strip — Scenes-page header, pure display (as shipped).
- * Dark/enabled state, deferrals, active scene + dwell in songs, next change
- * source, last pick with factor breakdown, and the room's colour state. */
+ * Dark/enabled state, deferrals, active scene + minimum dwell remaining
+ * (spectra/services/dwell.py, process-global — not just this sequencer's
+ * own rolls), next change source, last pick with factor breakdown, and the
+ * room's colour state. */
 import HelpLink from '../help/HelpLink';
 import { useSequencerStatus, useSpotColorSets } from '../queries';
 import type { SceneV2 } from '../types';
@@ -38,10 +40,12 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
           <span title="Scene the sequencer last placed">
             {st.active_scene_name ?? '— no scene yet —'}
           </span>
-          {st.dwell && (
+          {st.dwell.remaining_s != null && (
             <span style={{ color: 'var(--text-muted)' }}
-              title={`dwell weight ${st.dwell.weight} — target ${st.dwell.target_songs} song(s) this stay`}>
-              dwell {Math.min(st.dwell.served_songs, st.dwell.target_songs)}/{st.dwell.target_songs} songs
+              title={`Minimum dwell: ${st.dwell.dwell_seconds}s latched for "${st.dwell.active_scene_name ?? st.dwell.active_scene_id}" — an automatic scene change requested before this clears does an update effect instead`}>
+              min dwell {st.dwell.remaining_s > 0
+                ? `${st.dwell.remaining_s.toFixed(1)}s left`
+                : 'cleared'}
             </span>
           )}
           <span style={{ color: 'var(--text-muted)' }}

@@ -154,7 +154,6 @@ export interface SelectorEntry {
   curve_ref: string | null;
   inline_points: CurvePoint[] | null;
   genre_mult: Record<string, number>;
-  dwell_weight: number;
 }
 
 export interface AffinityEdge { from_id: string; to_id: string; mult: number; }
@@ -178,7 +177,16 @@ export interface SequencerStatus {
   bridge_connected: boolean;
   active_scene_id: string | null;
   active_scene_name: string | null;
-  dwell: { served_songs: number; target_songs: number; weight: number } | null;
+  /** Minimum dwell (spectra/services/dwell.py, 2026-08-20) — process-global,
+   * fed by EVERY real fire, not just this sequencer's own rolls. null
+   * fields mean nothing is tracked yet (cold start, or a restart with no
+   * fire since). */
+  dwell: {
+    active_scene_id: string | null;
+    active_scene_name: string | null;
+    dwell_seconds: number | null;
+    remaining_s: number | null;
+  };
   last_pick: {
     picked_id: string | null;
     picked_name: string | null;
@@ -283,8 +291,18 @@ export function useSaveGradient2dProfiles() {
  * field defaults to 'entries' (the scene selector, original behaviour);
  * pass 'color_set_entries' to attach a curve to a colour SET or GROUP card
  * instead — same dict, same reuse the owner asked for (a Group's curve is
- * just another entry here, keyed by the Group's own card id). */
-export function useAttachCurve(field: 'entries' | 'color_set_entries' = 'entries') {
+ * just another entry here, keyed by the Group's own card id).
+ *
+ * 'dwell_curve' (2026-08-20, minimum dwell) is a THIRD, structurally
+ * different path: not a SequencerConfig dict entry at all, but a single
+ * nullable field directly on the SceneV2 named by entryId — round-trips
+ * /scenes instead. 'none' here means "no override — his default 16s/4s
+ * curve" (dwell_curve: null), never "not sequenced" (a per-scene minimum
+ * always means something); 'flat' means an explicit flat 1.0-SECOND
+ * minimum, authored as an inline one-point curve rather than the sentinel
+ * null the default uses, so it stays a real, editable, distinct choice
+ * from "no override" once picked. */
+export function useAttachCurve(field: 'entries' | 'color_set_entries' | 'dwell_curve' = 'entries') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
@@ -295,6 +313,17 @@ export function useAttachCurve(field: 'entries' | 'color_set_entries' = 'entries
         | { kind: 'profile'; profileId: string }
         | { kind: 'inline'; points: CurvePoint[] };
     }) => {
+      if (field === 'dwell_curve') {
+        const scenes = await apiGet<SceneV2[]>('/scenes');
+        const scene = scenes.find((s) => s.id === args.entryId);
+        if (!scene) throw new Error(`scene ${args.entryId} not found`);
+        const dwell_curve =
+          args.attachment.kind === 'none' ? null
+          : args.attachment.kind === 'flat' ? { curve_ref: null, inline_points: [{ x: 0, y: 1 }] }
+          : args.attachment.kind === 'profile' ? { curve_ref: args.attachment.profileId, inline_points: null }
+          : { curve_ref: null, inline_points: args.attachment.points };
+        return apiPost('/scenes', { ...scene, dwell_curve });
+      }
       const config = await apiGet<SequencerConfig>('/sequencer/config');
       const map = config[field];
       const { [args.entryId]: existing, ...rest } = map;
@@ -302,7 +331,7 @@ export function useAttachCurve(field: 'entries' | 'color_set_entries' = 'entries
         return apiPut('/sequencer/config', { ...config, [field]: rest });
       }
       const entry: SelectorEntry = existing ?? {
-        curve_ref: null, inline_points: null, genre_mult: {}, dwell_weight: 1.0,
+        curve_ref: null, inline_points: null, genre_mult: {},
       };
       const curve =
         args.attachment.kind === 'profile'
@@ -315,7 +344,9 @@ export function useAttachCurve(field: 'entries' | 'color_set_entries' = 'entries
         [field]: { ...rest, [args.entryId]: { ...entry, ...curve } },
       });
     },
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-seq-config'] }),
+    onSuccess: () => void qc.invalidateQueries({
+      queryKey: field === 'dwell_curve' ? ['spectra-scenes'] : ['spectra-seq-config'],
+    }),
   });
 }
 

@@ -111,10 +111,15 @@ def test_fire_scene_by_id_skips_light_only_scene_while_dark():
 
 
 def test_fire_scene_by_id_fires_light_only_scene_while_light_or_hybrid():
+    from spectra.services import dwell
     from spectra.services.scene_sequencer import fire_scene_by_id
     scene_store.save(_scene("s1", display_availability="light"))
     for mode in ("light", "default"):
         _room_mode(mode)
+        # Each iteration re-fires the SAME scene id — reset the unrelated
+        # minimum-dwell gate between them so this stays a pure mode-
+        # availability probe, not a dwell one.
+        dwell.reset()
         result = _run(fire_scene_by_id("s1"))
         assert "skipped" not in result, mode
 
