@@ -11,6 +11,14 @@
    gradient-kind prior stores current_curve instead — retargeting the same
    param key from a gradient to a colour/numeric value mid-tween raised
    KeyError, dropping the whole bridge event (scene_response.py._color_jump).
+3. The brightness-coverage flash (data/spectra-transition-brightness-flash/
+   report.md): a genuine effect-type switch builds a fresh effect instance,
+   which takes LedFX's schema default (1.0, full) for any base
+   background_brightness/brightness field the write doesn't set — visible
+   and real, since 28/50 (56%) of his real colour sets never author
+   background_brightness for crystal-mapper. Both write seams now carry the
+   previous effect's value forward on a type switch when the outgoing write
+   doesn't set it.
 
 Offline/hermetic throughout: isolated tmp_path dummy host, no live
 storage/network.
@@ -106,6 +114,120 @@ def test_fx_seam_apply_writes_lands_a_real_type_switch(tmp_path):
             await host.shutdown()
 
     _run(main())
+
+
+def test_fx_seam_carries_forward_missing_brightness_on_type_switch(tmp_path):
+    """A colour set that never authored background_brightness/brightness for
+    this virtual (28/50 and 27/50 of his real sets, respectively) must not
+    flash to LedFX's schema default (1.0) on a type switch — it must show
+    whatever the room was actually displaying a moment before."""
+    from fx import facade
+    from spectra.services import fx_seam
+
+    async def main():
+        host = await _fresh_host(
+            tmp_path, "seam-carry", effect_type="power",
+            config={"gradient": "#000080", "background_color": "#000000",
+                    "background_brightness": 0.05, "brightness": 0.42})
+        facade.set_host(host)
+        virtual = host.virtuals.get(headless.DEFAULT_VIRTUAL_ID)
+        lo.OWNERSHIP_FILE = tmp_path / "ownership.json"
+        lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
+        try:
+            # Genuinely visible authored colour, no brightness fields — the
+            # exact shape of an under-covered real colour set.
+            await fx_seam.apply_writes(
+                [{"virtual_id": headless.DEFAULT_VIRTUAL_ID,
+                  "effect_type": "blackhole",
+                  "config": {"background_color": "#ff9940",
+                             "background_mode": "overwrite"}}],
+                transition_ms=300)
+            cfg = virtual.active_effect.config
+            assert virtual.active_effect.type == "blackhole"
+            assert cfg["background_color"] == "#ff9940"
+            assert cfg["background_brightness"] == 0.05, \
+                "expected the carried value, not the schema default 1.0"
+            assert cfg["brightness"] == 0.42, \
+                "expected the carried value, not the schema default 1.0"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_fx_seam_does_not_override_an_authored_brightness(tmp_path):
+    """A colour set entry that DOES author background_brightness/brightness
+    must win outright — carry-forward only fills a gap, it never overrides
+    an explicit value."""
+    from fx import facade
+    from spectra.services import fx_seam
+
+    async def main():
+        host = await _fresh_host(
+            tmp_path, "seam-no-override", effect_type="power",
+            config={"gradient": "#000080", "background_brightness": 0.05,
+                    "brightness": 0.42})
+        facade.set_host(host)
+        virtual = host.virtuals.get(headless.DEFAULT_VIRTUAL_ID)
+        lo.OWNERSHIP_FILE = tmp_path / "ownership.json"
+        lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
+        try:
+            await fx_seam.apply_writes(
+                [{"virtual_id": headless.DEFAULT_VIRTUAL_ID,
+                  "effect_type": "blackhole",
+                  "config": {"background_color": "#ff9940",
+                             "background_brightness": 0.9, "brightness": 0.8}}],
+                transition_ms=300)
+            cfg = virtual.active_effect.config
+            assert cfg["background_brightness"] == 0.9
+            assert cfg["brightness"] == 0.8
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_facade_executor_carries_forward_missing_brightness_on_type_switch(tmp_path):
+    """The engine-side glide/jump path (drift legs, flare colour jumps) gets
+    the identical carry-forward fix — firstmate's live catch (report 2e) was
+    very likely this copy, not the scene-fire one."""
+    from fx import facade
+    from spectra.services.fx_executor import FacadeExecutor
+
+    async def main():
+        host = await _fresh_host(
+            tmp_path, "executor-carry", effect_type="power",
+            config={"gradient": "#000080", "background_color": "#000000",
+                    "background_brightness": 0.05, "brightness": 0.42})
+        facade.set_host(host)
+        virtual = host.virtuals.get(headless.DEFAULT_VIRTUAL_ID)
+        try:
+            await FacadeExecutor().glide(
+                headless.DEFAULT_VIRTUAL_ID, "blackhole",
+                {"background_color": "#ff9940"}, 400)
+            cfg = virtual.active_effect.config
+            assert virtual.active_effect.type == "blackhole"
+            assert cfg["background_brightness"] == 0.05
+            assert cfg["brightness"] == 0.42
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_carry_forward_with_no_prior_effect_is_a_no_op():
+    """Bootstrap (no prior effect on this virtual, e.g. process start before
+    any fire has ever touched it): nothing to carry, so the write must pass
+    through byte-identical and LedFX's implicit schema default stays correct
+    — proven at both write seams, which duplicate this helper independently."""
+    from spectra.services import fx_executor, fx_seam
+
+    original = {"background_color": "#ff9940", "background_mode": "overwrite"}
+    assert fx_seam._carry_forward_brightness(dict(original), None) == original
+    assert fx_executor._carry_forward_brightness(dict(original), None) == original
 
 
 def test_gradient_to_color_retarget_does_not_raise_keyerror(tmp_path):

@@ -449,6 +449,40 @@ function, still open as its own backlog item. `fx/VENDOR.md` deviation
 #13. Real numbers, before/after: `scripts/check_hue_blend_achromatic_
 desaturation.py`, `tests/test_hue_tween_achromatic_saturation.py`.
 
+**A genuine effect-type switch also had a real brightness-coverage gap —
+FIXED** (`data/spectra-transition-brightness-flash/report.md`, PR
+fm/spectra-brightness-carry-forward, his authorisation: "do it and ride it
+with the squiggles deploy"). A type switch builds a FRESH effect instance
+(`fx/effects/__init__.py::_apply_config`'s `self._config != {}` branch), so
+any base `Effect.CONFIG_SCHEMA` field the outgoing write doesn't set (valid
+on any effect type, unlike an effect-specific param) fell back to LedFX's
+schema default (`1.0`, full) instead of whatever was actually showing —
+real and visible, since 28/50 of his real colour sets never author
+`background_brightness` for `crystal-mapper` (27/50 never author
+`brightness`), confirmed both offline and live in his room (1216ms/2936ms
+at full). Fixed by carrying the previous effect's value forward instead of
+a fixed default or fallback — no data-authoring judgment needed, closes the
+gap for every under-covered set and any future one at once. Both write
+seams already did the GET to detect a type switch and threw the response
+away; `fx_seam._current_effect`/`_carry_forward_brightness` and
+`fx_executor.FacadeExecutor._current_effect`/module-level
+`_carry_forward_brightness` (independent, mirrored copies — the two
+modules deliberately don't share code, see fx_executor.py's own docstring)
+now reuse that same GET to fill in `background_brightness`/`brightness`
+only when the outgoing write doesn't already set them; an authored value
+always still wins outright. Bootstrap (no prior effect on that virtual,
+e.g. process start before any fire has ever touched it) has nothing to
+carry, so today's implicit schema default is unchanged there — LedFX's own
+`/effects` PUT handler 400s on a virtual with no active effect at all, so
+that case can only be proven at the pure-function unit, not through a live
+PUT. Deliberately scoped to exactly these two base fields, not a full
+config merge — an effect-specific param (e.g. `particle_count`) genuinely
+shouldn't leak from the old effect into the new one. Tests:
+`tests/test_fx_write_seam.py`. Real-data proof (his actual
+`storage/color_sets.json` + `storage/spectra/scenes.json`, read-only,
+driving the unmodified production compiler + an in-process headless fx
+host): `scripts/check_brightness_carry_forward.py`.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
