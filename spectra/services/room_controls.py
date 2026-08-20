@@ -386,6 +386,26 @@ class RoomControlState(BaseModel):
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
 
+    # Rainbow select (spectra/services/rainbow_select.py, owner ask
+    # 2026-08-20): above this intensity, colour-set selection is restricted
+    # to rainbow-marked cards only; at or below it, to single (non-rainbow)
+    # cards only. His words: "Default it to .9."
+    rainbow_select_limit: float = Field(default=0.9, ge=0.0, le=1.0)
+
+    # The two-dimensional drift gradient (spectra/services/drift_conductor.py
+    # _gradient_leg, spectra/models/gradient2d.py — owner ask 2026-08-20):
+    # None (default) = off, the wheel-based colour journey drives the room's
+    # colour exactly as before this feature. A gradient id here PAUSES the
+    # journey (same "an alternate colour source takes over, the walk holds"
+    # shape as a live rainbow palette) and drives set-mode virtuals' colour
+    # from the gradient instead. gradient_x_period_s/_y_slew_s are state-only
+    # tunables, not something he asked to configure per-gradient — kept here
+    # (agent-tellable) rather than hardcoded so the pace can be retuned
+    # without a redeploy.
+    active_gradient_id: Optional[str] = None
+    gradient_x_period_s: float = Field(default=300.0, gt=0.0)
+    gradient_y_slew_s: float = Field(default=45.0, gt=0.0)
+
     @field_validator("ambient_color", "ambient_color_dark", "display_light_bg_color")
     @classmethod
     def _validate_hex(cls, v: Optional[str]) -> Optional[str]:

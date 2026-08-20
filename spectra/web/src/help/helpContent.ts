@@ -381,6 +381,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'colorsets-rainbow',
+        title: 'Rainbow select — 🌈 Rainbow vs ⬤ Single',
+        keywords: 'rainbow select single hype black hole limit intensity enumerated marked',
+        body: [
+          'Each Set and Group card carries a Rainbow/Single toggle, next to Mode availability. ENUMERATED, not inferred from name or colours — only the three Hype sets, the Hype group, and Black Hole Rainbow are marked Rainbow by default; a colourful-sounding name elsewhere means nothing on its own.',
+          'The room controls bar\'s drift-gradient panel (see "Drift gradient", above) carries the Rainbow select limit (default 0.9). Above that intensity, automatic colour-set selection is restricted to Rainbow-marked sets only; at or below it, to Single sets only — never both, never neither.',
+        ],
+      },
+      {
         id: 'colorsets-preview',
         title: 'Preview: tap vs hold',
         keywords: 'apply to room preview tap hold press revert pause live drag temporary',
@@ -542,6 +551,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Transition: a flat MANUAL override for the room\'s default entry-blend ramp in ms (legacy ledfx_global_transition action) — wins over everything below when set above 0. Leave it at 0 (the default) to let "Transition @ low/high intensity" scale it by intensity instead — see "Intensity-scaled scene transitions" below.',
           'Transition @ low intensity / @ high intensity: the two bounds a scene\'s entry-blend ramp scales between by intensity, linearly, when that scene doesn\'t author its own entry ramp (Scenes → Phase Choreography → Override Blend, entry_ramp_ms) and Transition above is 0. See "Intensity-scaled scene transitions" below for the full mechanic, including why quiet flares land the LONGER transition and hard ones the SHORTER — and why the transition starts slightly before the trigger, not on it.',
           'Scene changes: three understandable, additive ticks for what drives scene changes room-wide. "Transitions only" — a scene change on every song transition, nothing else. "+ Analysed" — transitions plus the analysed mid-song triggers "⟳ Generate" seeds (see the SPECTRA Triggers help). "+ My triggers" (default) — everything: transitions, analysed mid-song triggers, your own hand-placed triggers, AND response-engine flares (charge/lull/drop/flare reactions — a scene\'s own tuned material). Nothing is deleted by moving between ticks — a lower tick just skips firing the higher tiers\' material room-wide.',
+        ],
+      },
+      {
+        id: 'drift-gradient',
+        title: 'Drift gradient — the two-dimensional colour space',
+        keywords: 'gradient 2d two dimensional drift square vertices vertex top bottom edge x axis time y axis intensity loop bounce rainbow select single limit save overwrite new picker',
+        body: [
+          'The square swatch next to Scenes in the room controls bar. A saved 2D gradient is what the room\'s colour drifts THROUGH when one is active — a square, not the usual single horizontal colour bar, with colours authored only along the top edge (high intensity) and bottom edge (low intensity); everything in between blends linearly. This is NOT a rotation control — there\'s no angle to set, only the two edges.',
+          'Tap the swatch to open the picker: saved gradients as tiles (tap one to make it active), "Off" (the wheel-based colour journey drives the room as before — the unmodified default), and "New…" to start one from scratch. With a gradient open, each edge is the SAME gradient-stop picker used everywhere else in the app — drag/add/remove colour stops along it — plus a Loop/Bounce choice for how the drift travels along time, and "Save (overwrite)" / "Save as new…" / "Delete" below.',
+          'While a gradient is active, the room\'s picker moves steadily along the TOP-TO-BOTTOM square as time passes (looping or bouncing per the gradient\'s own setting) and along top-to-bottom as the song\'s intensity changes — drifting toward the new position rather than snapping, re-aiming only when a trigger fires or the song transitions (not continuously chasing every fluctuation). Flares still jump the colour exactly as they always have — this is in addition to that, not instead of it.',
+          'Rainbow select limit — the numeric field at the bottom of the same panel. Above this intensity, automatic colour-set selection is restricted to sets marked "Rainbow" (Colours page); at or below it, only "Single" (non-rainbow) sets are chosen. Default 0.9.',
         ],
       },
       {

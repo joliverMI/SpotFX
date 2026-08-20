@@ -64,6 +64,14 @@ responses = ResponseEngine(
     broadcast=ws_manager.broadcast,
 )
 
+# Two-dimensional drift gradient retarget hook (owner ask 2026-08-20) — wired
+# explicitly here rather than left to a lazy default inside trigger_engine.py
+# (see TriggerEngine.__init__'s own comment for why): this module already
+# owns constructing conductor/responses as production singletons, so it also
+# owns wiring the one other thing trigger_engine.py's real fires need to
+# reach on this process's conductor.
+trigger_engine._intensity_event = conductor.on_intensity_event
+
 
 async def fire_response_event(event_class: str, intensity: float) -> None:
     """The ONE response-fire choke point: the bridge's classified legacy

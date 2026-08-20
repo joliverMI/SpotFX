@@ -302,6 +302,7 @@ class TriggerEngine:
         sequencer_enabled: Callable[[], bool] | None = None,
         auto_generate: Callable[[str], Awaitable[Any]] | None = None,
         lead_ms: Callable[[SpectraTrigger], int] | None = None,
+        intensity_event: Callable[[], None] | None = None,
         rng: Random | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
@@ -319,6 +320,17 @@ class TriggerEngine:
         self._sequencer_enabled = sequencer_enabled or self._default_sequencer_enabled
         self._auto_generate = auto_generate or self._default_auto_generate
         self._lead_ms = lead_ms or self._default_lead_ms
+        # Two-dimensional drift gradient retarget hook (owner ask
+        # 2026-08-20) — deliberately NOT a lazy import of the production
+        # engine.conductor singleton the way _default_fire_scene/
+        # _default_fire_response are: those are the SUBJECT of every test
+        # in this file and are always explicitly overridden; this one is a
+        # small side call easy to forget to stub, so its own default is a
+        # safe no-op instead. Production wiring happens explicitly in
+        # services/engine.py (`trigger_engine._intensity_event =
+        # conductor.on_intensity_event`), the same place that module
+        # already owns the conductor/responses singletons.
+        self._intensity_event = intensity_event or (lambda: None)
         self._generating: set[str] = set()
         self._rng = rng or Random()
 
@@ -367,6 +379,7 @@ class TriggerEngine:
                         "a double scene change")
             return
         intensity = self._transition_intensity()
+        self._notify_intensity_event()
         scene_id = self._select_scene(intensity)
         if scene_id is None:
             logger.info("song transition: kernel picked no scene "
@@ -472,8 +485,23 @@ class TriggerEngine:
             return mode == "full"
         return mode in ("analysed", "full")
 
+    def _notify_intensity_event(self) -> None:
+        """The two-dimensional drift gradient's retarget hook (owner ask
+        2026-08-20, drift_conductor.py's "gradient drift" docstring
+        section) — "the target changes whenever a trigger or analyzed
+        transition changes the intensity." Both _fire() (a trigger) and
+        _fire_transition() (an analysed transition) call this at exactly
+        the moment they resolve their own fire intensity. Best-effort: a
+        failure here must never break the actual scene/response fire it's
+        piggybacking on."""
+        try:
+            self._intensity_event()
+        except Exception:
+            logger.exception("gradient drift: on_intensity_event failed")
+
     async def _fire(self, trig: SpectraTrigger) -> None:
         a = trig.action
+        self._notify_intensity_event()
         try:
             if a.kind == "fire_scene":
                 scene_id = a.scene_id
