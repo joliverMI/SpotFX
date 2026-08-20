@@ -73,25 +73,43 @@ responses = ResponseEngine(
 trigger_engine._intensity_event = conductor.on_intensity_event
 
 
-async def fire_response_event(event_class: str, intensity: float) -> None:
+async def fire_response_event(event_class: str, intensity: float,
+                              via_trigger: bool = False) -> None:
     """The ONE response-fire choke point: the bridge's classified legacy
     trigger_fired events and SPECTRA-native fire_response triggers
-    (spectra.services.trigger_engine) both call this. Flares are the
-    owner's authored material (scene response bands, hand-tuned per scene)
-    — gated to the settings model's "full" tier
-    (room_controls.RoomControlState.scene_change_mode), same as
-    hand-authored triggers. Covers BOTH callers from one seam: a
-    trigger-driven fire_response action is already gated at its own
-    crossing by trigger_engine's tick() (it can only be source="authored"),
-    so this redundantly-but-harmlessly re-checks that path while being the
-    ONLY gate for the bridge's always-classifying path. Also gated by a
-    live colour Preview (spectra/services/preview_pause.py) — checked
-    first, ahead of the settings-tier gate."""
+    (spectra.services.trigger_engine) both call this — and, since
+    "triggers_only" (2026-08-20, data/spectra-my-triggers-only-mode), the
+    two callers need DIFFERENT gates, which is what via_trigger is for.
+    Flares are the owner's authored material (scene response bands,
+    hand-tuned per scene). Also gated by a live colour Preview
+    (spectra/services/preview_pause.py) — checked first, ahead of the
+    settings-tier gate, for both paths.
+
+    via_trigger=False (the default — the bridge's own call site, UNCHANGED
+    by this field): requires literally scene_change_mode=="full", same as
+    before "triggers_only" existed. The bridge classifies EVERY
+    trigger_fired broadcast on the shared /ws, which still includes root
+    spot-effects' own legacy trigger engine firing regardless of light
+    ownership (a separate, larger, un-fixed defect — see
+    data/charge-lull-drop-timing-blends-and-a-sus-7fm2/report.md §1) —
+    this path is never "his triggers," so "triggers_only" never opens it.
+
+    via_trigger=True (trigger_engine's own call site, spectra.services.
+    trigger_engine._default_fire_response): the caller already gated this
+    crossing (it can only be source=="authored", and only ever reaches
+    here on a song trigger_engine._effective_mode_for_song has already
+    confirmed carries an authored trigger of its own) — allowed at "full"
+    OR "triggers_only". This is what makes his own charge/lull/drop marks
+    fire under "triggers_only" while the bridge-relayed duplicate that
+    used to double them stays silent — the mechanism the linked report
+    proved causes that doubling."""
     from spectra.services import fire_history, preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
         return
-    if load_room_controls().scene_change_mode != "full":
+    mode = load_room_controls().scene_change_mode
+    allowed = mode in ("full", "triggers_only") if via_trigger else mode == "full"
+    if not allowed:
         return
     await responses.on_event(event_class, intensity)
     fire_history.record_fire("responses", event_class,
@@ -110,16 +128,20 @@ async def fire_scene_update_event(intensity: float) -> None:
     RULING.md): a SPECTRA-native fire_scene_update trigger
     (spectra.services.trigger_engine) calls this — there is no legacy
     bridge-classified equivalent (update_scene/reset_scene never went
-    through the bridge's flare/charge/lull/drop classification either).
-    Gated the same "full" tier as fire_response_event, for the same
-    reason: an authored trigger's own action, same settings-model rule.
-    Never schedules a hold release — on_update only fires permanent kinds,
-    which carry immediately and never pend a return."""
+    through the bridge's flare/charge/lull/drop classification either),
+    so unlike fire_response_event above there's only ever the one
+    (trigger-driven, necessarily authored) caller — no via_trigger split
+    needed. Gated at "full" OR "triggers_only", same reasoning as
+    fire_response_event's via_trigger=True path: this only ever reaches
+    here on a song trigger_engine._effective_mode_for_song has already
+    confirmed carries an authored trigger of its own. Never schedules a
+    hold release — on_update only fires permanent kinds, which carry
+    immediately and never pend a return."""
     from spectra.services import preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
         return
-    if load_room_controls().scene_change_mode != "full":
+    if load_room_controls().scene_change_mode not in ("full", "triggers_only"):
         return
     await responses.on_update(intensity)
 

@@ -191,18 +191,37 @@ legacy picks: decision-legacy-retirement-picks.md):
   scene_change_mode  the Admiral's binding settings model (decision-
                           mid-song-model.md + its 2026-08-14 framing
                           correction + the settings-model brief,
-                          corr=c14a9bcee40e6df9), replacing front 3's plain
-                          midsong_triggers_enabled bool with three
-                          understandable, ADDITIVE tiers:
-                            "transitions" — a scene change on every song
+                          corr=c14a9bcee40e6df9), extended 2026-08-20
+                          (data/spectra-my-triggers-only-mode) with a
+                          fourth tier that is NOT part of the original
+                          "+" ladder — see the MISLABEL FIX note below
+                          before assuming the four values are a strict
+                          cumulative ladder:
+                            "transitions"   — a scene change on every song
                               transition only (the automatic kernel-picked
                               fire trigger_engine._fire_transition drives
                               on every genuine song-to-song change — see
                               its module docstring). Nothing else.
-                            "analysed"    — transitions PLUS the analysed
+                            "analysed"      — transitions PLUS the analysed
                               mid-song moments midsong_generator seeds
                               (source="generated" triggers).
-                            "full"        — everything: transitions +
+                            "triggers_only" — a PREFERENCE WITH A PER-SONG
+                              FALLBACK, not an absolute (his 2026-08-20
+                              correction below): on a song with at least
+                              one stored "authored" trigger, ONLY his own
+                              hand-authored triggers fire (fire_scene,
+                              fire_response, select_color_set,
+                              fire_scene_update) — transitions, generated
+                              mid-song triggers, and response-engine
+                              flares are all silenced for that song. On a
+                              song with NO stored authored trigger, this
+                              tier behaves exactly like "analysed" for
+                              that song instead (transitions + generated
+                              mid-song triggers fire; flares stay off,
+                              same as "analysed" always has) — see the
+                              PER-SONG FALLBACK entry below for why and
+                              the exact rule.
+                            "full"          — everything: transitions +
                               generated mid-song triggers + the owner's
                               own hand-authored triggers (source=
                               "authored") + response-engine flares (both
@@ -212,12 +231,103 @@ legacy picks: decision-legacy-retirement-picks.md):
                               pre-existing behaviour (authored triggers and
                               flares had no gate at all before this field).
                           Checked by trigger_engine.tick() (generated vs.
-                          authored gating) and engine.fire_response_event
-                          (flare gating) — the same seams the old bool
-                          switch used. "transitions" and "analysed" are
-                          NOT redundant: they differ in whether generated
-                          mid-song triggers fire, exactly the old switch's
-                          two states.
+                          authored gating), trigger_engine._fire_transition
+                          (transitions gating), and engine.fire_response_event
+                          /fire_scene_update_event (flare/update gating) —
+                          the same seams the old bool switch used.
+                          "transitions" and "analysed" are NOT redundant:
+                          they differ in whether generated mid-song
+                          triggers fire, exactly the old switch's two
+                          states.
+
+                          MISLABEL FIX (data/spectra-my-triggers-only-mode,
+                          and the double-fire root cause proven
+                          independently in data/charge-lull-drop-timing-
+                          blends-and-a-sus-7fm2/report.md §1): "full" was
+                          labelled "+ My triggers" in the room bar, read
+                          by him as EXCLUSIVE ("only my triggers do
+                          anything" — his words) when the code was
+                          additive all along — the label and its own
+                          tooltip contradicted each other on his screen.
+                          "triggers_only" is the mode that actually
+                          matches what he wanted; every remaining label
+                          was reworded so none implies exclusivity it
+                          doesn't have (RoomControlsBar.tsx: "Transitions
+                          only" / "Transitions + analysed" / "My triggers
+                          only" / "Everything").
+
+                          PER-SONG FALLBACK, his own correction the same
+                          day, verbatim: "if no triggers exist, use the
+                          analyzed triggers" — a preference with a
+                          fallback, not an absolute. Exact rule, stated so
+                          it can't be misread: **"no triggers exist" means
+                          zero triggers with source=="authored" currently
+                          stored for the song's own URI** — checked fresh
+                          from trigger_store on every tick/transition
+                          (never cached), and independent of each
+                          trigger's own `enabled` flag (a song with
+                          authored triggers that are all currently
+                          disabled still counts as "has authored
+                          triggers" — matches how his own real-data count
+                          below was taken, a raw storage scan, not a
+                          live-gating simulation). PER-SONG, not
+                          per-crossing/per-region within a song: a
+                          region-level fallback would reintroduce the
+                          exact doubling this mode exists to remove,
+                          anywhere a generated and an authored trigger
+                          landed close together within the same song.
+                          His real data settled this rather than leaving
+                          it a judgment call: of 853 songs with any
+                          stored trigger record, only 313 (37%) have any
+                          AUTHORED one — 540 (63%) have none, so the
+                          fallback is the COMMON path, not an edge case,
+                          and had to behave well rather than merely
+                          exist. The sparse-song worry ("one trigger in
+                          the first verse silences four minutes") is
+                          real in shape but narrow in reach: of the 313
+                          authored songs the median carries 29 authored
+                          triggers, and only 4 songs in the entire
+                          library have between 1 and 5 — his authored
+                          songs are densely authored, so the "only his"
+                          half of this tier rarely leaves a real gap.
+                          Implemented in trigger_engine.py's
+                          _effective_mode_for_song (tick()'s stored-
+                          trigger gate) and _fire_transition's own check
+                          (the automatic transition fire) — both resolve
+                          the SAME per-song fallback independently since
+                          they gate different mechanisms, not a shared
+                          cached flag.
+
+                          THE fire_response_event DUAL-PATH:
+                          engine.fire_response_event has TWO callers that
+                          share one signature with no source field: the S2
+                          bridge's own classification of EVERY trigger_fired
+                          broadcast on the shared /ws (which still includes
+                          root spot-effects' original legacy trigger engine,
+                          unconditionally broadcasting regardless of who
+                          owns the lights — a SEPARATE, larger, un-fixed
+                          defect, see that report's §1.2/§5 proposed fix #1,
+                          out of scope here) and trigger_engine's own
+                          fire_response action for a SPECTRA-native
+                          authored trigger. "triggers_only" needs the
+                          SECOND to fire and the FIRST to stay silent —
+                          impossible to tell apart from event_class/
+                          intensity alone, so fire_response_event grew an
+                          explicit via_trigger=False default (the bridge's
+                          existing call site, unchanged) vs. via_trigger=
+                          True (trigger_engine's own call site): via_trigger
+                          re-checks against ("full", "triggers_only");
+                          the bridge path keeps requiring literally "full",
+                          same as before this field existed. This also
+                          means a bridge-relayed duplicate (the mechanism
+                          the linked report proved causes his charge/lull/
+                          drop marks to double-fire) is naturally excluded
+                          under "triggers_only", without this field trying
+                          to solve that larger, separate defect.
+                          fire_scene_update_event has only ever had the one
+                          (trigger-driven) caller, so its own gate simply
+                          extended to ("full", "triggers_only") with no
+                          via_trigger parameter needed.
   ambient_hue_group_ids   WHICH Hue entertainment areas Ambient reaches —
                           his own two-bridge room, "hue-lights" (10 bulbs)
                           vs. "dining-hues" (7), and he asked to choose
@@ -335,7 +445,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from spectra import config
 
-SceneChangeMode = Literal["transitions", "analysed", "full"]
+SceneChangeMode = Literal["transitions", "analysed", "triggers_only", "full"]
 AmbientMode = Literal["off", "always", "auto"]
 DisplayMode = Literal["default", "dark", "light"]
 

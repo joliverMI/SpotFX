@@ -68,7 +68,9 @@ regenerations of the SAME analysis. generate_for_song:
 
 Whether a generated trigger fires at all is gated by the room-level
 scene_change_mode setting (spectra/services/room_controls.py — "analysed"
-or "full" allow it, "transitions" doesn't), checked by trigger_engine at
+or "full" allow it always; "transitions" never does; "triggers_only"
+allows it only on a song with ZERO authored triggers of its own — see
+trigger_engine._effective_mode_for_song), checked by trigger_engine at
 fire time — generation and storage happen regardless of the setting, so
 seeded triggers are always visible/editable on the timeline.
 """

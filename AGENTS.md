@@ -275,26 +275,71 @@ duration). Run bulk generation as a separate offline process against
 `migrate_legacy_triggers.py` already used for the authored corpus, never
 through the live HTTP endpoint in a loop.
 
-**Scene-change settings model** (the Admiral's binding three-tier control,
+**Scene-change settings model** (the Admiral's binding control,
 corr=c14a9bcee40e6df9, superseding front 3's plain `midsong_triggers_enabled`
 bool): `RoomControlState.scene_change_mode` (`spectra/services/
 room_controls.py`, default `"full"`) is `"transitions"` / `"analysed"` /
-`"full"`, additive. Every tier fires an automatic scene change on genuine
-song-to-song transitions — `trigger_engine._fire_transition`, driven
-directly from `on_track_state` (mirrors `scene_sequencer.TransitionSource`'s
-arm/fire semantics), NOT a stored trigger, because the tick()-based
-edge-crossing window is unreliable at `timestamp_ms=0` (see the module
-docstring). `"analysed"` additionally fires GENERATED mid-song triggers;
-`"full"` additionally fires hand-authored triggers AND response-engine
-flares (gated at `engine.fire_response_event`, the same choke point a
-bridge-classified flare and a trigger's `fire_response` action both reach —
-flares are the owner's authored scene material, same tier as authored
-triggers). Gating lives in `trigger_engine._trigger_allowed` (tick()) and
-`engine.fire_response_event`. A pre-existing `midsong_triggers_enabled`
-value on disk migrates on load (`room_controls.load_room_controls`):
-`True → "full"`, `False → "transitions"`. UI: the room bar's "Scene
-changes" select (`RoomControlsBar.tsx`). Spec:
-`scripts/check_triggers.py`; frame-level: `tests/test_trigger_engine.py`.
+`"triggers_only"` / `"full"`. The first three form an additive ladder; every
+tier fires an automatic scene change on genuine song-to-song transitions —
+`trigger_engine._fire_transition`, driven directly from `on_track_state`
+(mirrors `scene_sequencer.TransitionSource`'s arm/fire semantics), NOT a
+stored trigger, because the tick()-based edge-crossing window is unreliable
+at `timestamp_ms=0` (see the module docstring). `"analysed"` additionally
+fires GENERATED mid-song triggers; `"full"` additionally fires hand-authored
+triggers AND response-engine flares (gated at `engine.fire_response_event`,
+the same choke point a bridge-classified flare and a trigger's
+`fire_response` action both reach — flares are the owner's authored scene
+material, same tier as authored triggers). Gating lives in
+`trigger_engine._trigger_allowed` (tick()) and `engine.fire_response_event`.
+A pre-existing `midsong_triggers_enabled` value on disk migrates on load
+(`room_controls.load_room_controls`): `True → "full"`, `False →
+"transitions"`. UI: the room bar's "Scene changes" select
+(`RoomControlsBar.tsx`). Spec: `scripts/check_triggers.py`; frame-level:
+`tests/test_trigger_engine.py`.
+
+**`"triggers_only"` (2026-08-20, data/spectra-my-triggers-only-mode) is
+NOT a fourth rung of that ladder — a PER-SONG PREFERENCE WITH A FALLBACK.**
+Built to fix two things at once: (1) `"full"` was labelled "+ My triggers"
+in the room bar and read by him as exclusive when the code was additive all
+along — every label was reworded so none implies exclusivity/additivity it
+doesn't have ("Transitions only" / "Transitions + analysed" / "My triggers
+only" / "Everything"). (2) a real double-fire he reported on his own
+charge/lull/drop marks, root-caused independently in
+`data/charge-lull-drop-timing-blends-and-a-sus-7fm2/report.md` §1: root
+spot-effects' legacy trigger engine broadcasts `trigger_fired` over the
+shared `/ws` unconditionally (regardless of light ownership), and SPECTRA's
+bridge classifies every one of those into `engine.fire_response_event` —
+the SAME choke point a SPECTRA-native authored `fire_response` trigger
+calls. `fire_response_event` grew an explicit `via_trigger` param
+(default `False`, the bridge's unchanged call site, still gated at literal
+`"full"`; `True`, trigger_engine's own call site, gated at `"full"` OR
+`"triggers_only"`) to tell the two callers apart — this is what lets his
+own trigger fire under `"triggers_only"` while the bridge-relayed duplicate
+that caused the doubling stays silent, without touching that larger,
+separate root-cause defect (root's own broadcast gating) at all.
+`fire_scene_update_event` has only the one (trigger-driven) caller, so its
+gate simply widened to `("full", "triggers_only")`, no `via_trigger` split
+needed. On his own correction — verbatim, "if no triggers exist, use the
+analyzed triggers" — this mode resolves PER SONG, not per-crossing/
+per-region (a region-level fallback would reintroduce the same doubling
+wherever a generated and authored trigger landed close together):
+`trigger_engine._effective_mode_for_song` (the stored-trigger gate) and
+`_fire_transition`'s own check (the automatic transition fire) each ask
+`_song_has_authored_triggers(uri)` independently. **The exact rule, so it
+can't be misread: "no triggers exist" means zero triggers with
+`source=="authored"` currently stored for the song's own URI — checked
+fresh every tick, independent of each trigger's own `enabled` flag.** A
+song with ≥1 authored trigger fires ONLY his own (transitions, generated
+triggers, and flares all silenced for that song); a song with none behaves
+exactly like `"analysed"` for that song. Verified against his real data
+before building, not assumed: of 853 songs with any stored trigger record,
+only 313 (37%) have any authored one — the fallback is the COMMON path
+(540 songs, 63%), not an edge case; of those 313, median 29 authored
+triggers and only 4 songs with 1-5, so the "only his" half rarely leaves a
+real gap. Deliberately NOT touched by this build: `scene_response.py`'s
+fixed 2500ms lull ramp not scaling with the lull — a separate, already
+authorised piece of work; bundling the two would let a fault in one hold
+up the other.
 
 `_fire_transition` DEFERS UNCONDITIONALLY when `scene_sequencer`'s own dark
 switch (`sequencer.json`'s `config.enabled`, separate from

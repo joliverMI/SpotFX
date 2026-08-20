@@ -127,15 +127,27 @@ const DARK_LIGHT_NOTE: Record<string, string> = {
   failed: 'could not reach LedFX to apply the change — saved, but the room may not match this switch',
 };
 
+// His own correction, 2026-08-19: the old "+" ladder implied all four
+// tiers stack cumulatively, which is only true of three of them —
+// "My triggers only" is a fourth, separate mode, not another rung, and
+// its old label ("+ My triggers", on the FULL tier) read as exclusive
+// when the code was additive — the tooltip contradicted the label on his
+// own screen. No label below may imply exclusivity — or additivity — it
+// doesn't have.
 const SCENE_CHANGE_MODES: { value: SceneChangeMode; label: string; title: string }[] = [
   { value: 'transitions', label: 'Transitions only',
     title: 'A scene change on every song transition. Nothing else fires.' },
-  { value: 'analysed', label: '+ Analysed',
+  { value: 'analysed', label: 'Transitions + analysed',
     title: 'Transitions, plus the analysed mid-song triggers "⟳ Generate" seeds. '
       + 'Your own hand-placed triggers and flares still don’t fire.' },
-  { value: 'full', label: '+ My triggers',
-    title: 'Everything: transitions, analysed mid-song triggers, your own '
-      + 'hand-placed triggers, and response-engine flares.' },
+  { value: 'triggers_only', label: 'My triggers only',
+    title: 'On a song where you\'ve placed any trigger: ONLY your own hand-placed '
+      + 'triggers fire — transitions, analysed mid-song triggers, and flares are all '
+      + 'silenced for that song. On a song where you haven\'t placed one, this behaves '
+      + 'exactly like "Transitions + analysed" instead — it never goes silent.' },
+  { value: 'full', label: 'Everything',
+    title: 'Transitions, analysed mid-song triggers, your own hand-placed triggers, '
+      + 'and response-engine flares — every source, on every song.' },
 ];
 
 export default function RoomControlsBar() {

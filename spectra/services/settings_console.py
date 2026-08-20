@@ -155,7 +155,10 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "scene_change_mode", "Scene changes",
         "What drives automatic scene changes: 'transitions' (song "
         "transitions only), 'analysed' (+ analysed mid-song moments), "
-        "'full' (+ hand-authored triggers and response flares)."),
+        "'triggers_only' (his own hand-authored triggers ONLY, on any "
+        "song he's placed one on; a song with none falls back to "
+        "'analysed' for that song), 'full' (+ hand-authored triggers "
+        "and response flares, on every song)."),
 }
 
 
