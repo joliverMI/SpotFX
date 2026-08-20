@@ -75,7 +75,7 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "registry bounds are READ from RoomControlState, not re-typed"
 
     assert sc.SETTINGS_REGISTRY["scene_change_mode"].choices == \
-        ["transitions", "analysed", "full"]
+        ["transitions", "analysed", "triggers_only", "full"]
 
 
 # ═══ 2. validation rejects, nothing persists ════════════════════════════

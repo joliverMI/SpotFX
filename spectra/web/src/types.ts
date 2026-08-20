@@ -277,12 +277,18 @@ export interface RoomColorState {
  * Hue takeover (spectra/services/ambient.py via ambient_music_gate.py)
  * reconciled on every PUT that changes them; global_transition_ms is
  * state-only.
- * scene_change_mode is the Admiral's settings model (three additive tiers,
- * replacing front 3's plain midsong_triggers_enabled bool): "transitions" =
+ * scene_change_mode is the Admiral's settings model (spectra/services/
+ * room_controls.py's own docstring has the full reasoning): "transitions" =
  * a scene change on every song transition only; "analysed" = transitions +
- * GENERATED (seeded) mid-song triggers; "full" = transitions + generated +
- * hand-authored triggers + response-engine flares. Default "full". */
-export type SceneChangeMode = 'transitions' | 'analysed' | 'full';
+ * GENERATED (seeded) mid-song triggers; "triggers_only" = a per-song
+ * PREFERENCE WITH A FALLBACK (his 2026-08-20 correction) — on a song with
+ * any hand-authored trigger of its own, ONLY his triggers fire and
+ * everything else (transitions, generated triggers, response flares) is
+ * silenced for that song; on a song with none, behaves exactly like
+ * "analysed" for that song instead; "full" = transitions + generated +
+ * hand-authored triggers + response-engine flares, on every song.
+ * Default "full". */
+export type SceneChangeMode = 'transitions' | 'analysed' | 'triggers_only' | 'full';
 
 /** Ambient's own three settings, in the Admiral's own language
  * (spectra/services/ambient_music_gate.py) — "off" never holds; "always"

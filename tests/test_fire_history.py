@@ -242,6 +242,44 @@ def test_response_event_gated_tier_does_not_record(monkeypatch):
     assert fire_history.load_all()["responses"] == {}
 
 
+def test_response_event_triggers_only_bridge_path_stays_silent(monkeypatch):
+    """via_trigger=False (the default, the bridge's own call site) still
+    requires literally scene_change_mode=="full" under "triggers_only" —
+    a bridge-relayed event is never "his own trigger" (room_controls.py's
+    scene_change_mode docstring, THE fire_response_event DUAL-PATH)."""
+    from spectra.services import engine, fire_history
+    from spectra.services.room_controls import RoomControlState
+
+    monkeypatch.setattr("spectra.services.room_controls.load_room_controls",
+                        lambda: RoomControlState(scene_change_mode="triggers_only"))
+
+    _run(engine.fire_response_event("charge", 0.6))
+    assert fire_history.load_all()["responses"] == {}
+
+
+def test_response_event_triggers_only_trigger_path_records(monkeypatch):
+    """via_trigger=True (trigger_engine's own call site) IS allowed at
+    "triggers_only" — this is what lets his own authored fire_response
+    trigger fire under this tier while the bridge-relayed duplicate
+    (the double-fire proven in data/charge-lull-drop-timing-blends-and-a-
+    sus-7fm2/report.md §1) stays silent."""
+    from spectra.services import engine, fire_history
+    from spectra.services.room_controls import RoomControlState
+
+    monkeypatch.setattr("spectra.services.room_controls.load_room_controls",
+                        lambda: RoomControlState(scene_change_mode="triggers_only"))
+
+    async def fake_on_event(event_class, intensity):
+        return None
+
+    monkeypatch.setattr(engine.responses, "on_event", fake_on_event)
+    monkeypatch.setattr(engine.responses, "_pending_releases", [])
+
+    _run(engine.fire_response_event("charge", 0.6, via_trigger=True))
+    data = fire_history.load_all()
+    assert data["responses"]["charge"]["count"] == 1
+
+
 # ── choke point 3: drift_conductor.apply_set_directly ─────────────────────
 
 def _conductor():

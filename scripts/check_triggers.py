@@ -361,16 +361,23 @@ check(len(fired8) == 1 and len(fired_scene) == fire_scene_calls_before
       "but the crossing still counts as handled — not a failure")
 
 # the settings model: scene_change_mode gates GENERATED and AUTHORED
-# triggers differently at each of the three tiers
+# triggers differently at each of the four tiers
 song["gated"] = [
     SpectraTrigger(timestamp_ms=100, action=FireSceneAction(scene_id="s"),
                   source="generated"),
     SpectraTrigger(timestamp_ms=100, action=FireResponseAction(event_class="flare"),
                   source="authored"),
 ]
+# A second song with NO authored trigger at all — the PER-SONG FALLBACK's
+# other branch (room_controls.py's scene_change_mode docstring, PER-SONG
+# FALLBACK entry).
+song["gated_no_authored"] = [
+    SpectraTrigger(timestamp_ms=100, action=FireSceneAction(scene_id="s"),
+                  source="generated"),
+]
 
 
-def _gated_run(mode):
+def _gated_run(mode, song_key="gated"):
     fire_scene_calls, fire_resp_calls = [], []
 
     async def fs(*a):
@@ -382,7 +389,7 @@ def _gated_run(mode):
     eng = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
                         fire_scene=fs, fire_response=fr,
                         scene_change_mode=lambda: mode)
-    asyncio.run(eng.on_track_state("gated"))
+    asyncio.run(eng.on_track_state(song_key))
     fired = asyncio.run(eng.tick(100))
     return len(fired), len(fire_scene_calls), len(fire_resp_calls)
 
@@ -401,6 +408,22 @@ fired_f, scene_f, resp_f = _gated_run("full")
 check((fired_f, scene_f, resp_f) == (2, 1, 1),
       "scene_change_mode=full fires both the generated and the authored "
       "trigger's crossing")
+
+# triggers_only (2026-08-20, data/spectra-my-triggers-only-mode): a PER-SONG
+# preference with a fallback, not an absolute — his correction, verbatim:
+# "if no triggers exist, use the analyzed triggers".
+fired_to, scene_to, resp_to = _gated_run("triggers_only", "gated")
+check((fired_to, scene_to, resp_to) == (1, 0, 1),
+      "scene_change_mode=triggers_only, on a song with an authored trigger: "
+      "fires ONLY the authored one, skips the generated one entirely — "
+      "this is the branch that fixes his charge/lull/drop double-fire")
+
+fired_tf, scene_tf, resp_tf = _gated_run("triggers_only", "gated_no_authored")
+check((fired_tf, scene_tf, resp_tf) == (1, 1, 0),
+      "scene_change_mode=triggers_only, on a song with NO authored trigger "
+      "at all: falls back to firing the GENERATED trigger exactly as "
+      "'analysed' would — his own correction, not the first (absolute-"
+      "silence) design")
 
 # the automatic transition fire: a genuine song-to-song change (armed after
 # the first URI ever seen) fires through select_scene + fire_scene, in
@@ -458,6 +481,38 @@ asyncio.run(engine_defer.on_track_state("defer-b"))   # a genuine transition
 check(len(transition_fires) == before_defer,
       "sequencer_enabled=True: the automatic transition fire is a no-op — "
       "the sequencer remains the sole transition authority")
+
+# triggers_only's PER-SONG fallback also governs the automatic transition
+# fire, independently of the stored-trigger gate above (room_controls.py's
+# scene_change_mode docstring, PER-SONG FALLBACK entry): silenced on a song
+# that already carries an authored trigger of its own, but fires (the
+# "analysed" floor) on a song with none.
+authored_trig = SpectraTrigger(timestamp_ms=999999, source="authored",
+                               action=FireSceneAction(scene_id="irrelevant"))
+engine_to_has_authored = TriggerEngine(
+    list_triggers=lambda uri: [authored_trig] if uri == "to-song" else [],
+    fire_scene=transition_fire_scene, select_scene=lambda i: "would-have-picked",
+    scene_change_mode=lambda: "triggers_only")
+asyncio.run(engine_to_has_authored.on_track_state("to-prev"))       # arms
+before_to_authored = len(transition_fires)
+asyncio.run(engine_to_has_authored.on_track_state("to-song"))       # transition INTO an authored song
+check(len(transition_fires) == before_to_authored,
+      "triggers_only, transitioning into a song that already has an "
+      "authored trigger: the automatic transition fire is silenced — "
+      "only his own triggers fire for that song")
+
+engine_to_no_authored = TriggerEngine(
+    list_triggers=lambda uri: [], fire_scene=transition_fire_scene,
+    select_scene=lambda i: "would-have-picked",
+    scene_change_mode=lambda: "triggers_only")
+asyncio.run(engine_to_no_authored.on_track_state("to-prev2"))       # arms
+before_to_none = len(transition_fires)
+asyncio.run(engine_to_no_authored.on_track_state("to-song2"))       # transition INTO an unauthored song
+check(len(transition_fires) == before_to_none + 1,
+      "triggers_only, transitioning into a song with NO authored trigger: "
+      "the automatic transition fire still happens (falls back to the "
+      "'analysed' floor for that song) — a song he hasn't touched is never "
+      "left silent")
 
 # ═══ 5. production wiring — the real (test-isolated, dark) choke points ═════
 # fire_scene_by_id is NOT exercised here: like scene_sequencer's own spec
@@ -614,6 +669,30 @@ check(len(spectra_engine.responses.surges) == before_gated,
       "tuned per scene), gated the same as hand-authored triggers")
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
 
+# triggers_only (2026-08-20, data/spectra-my-triggers-only-mode): the
+# fire_response_event DUAL-PATH — the bridge's own call site
+# (via_trigger=False, default, UNCHANGED) still requires literally "full";
+# trigger_engine's own call site (via_trigger=True) is additionally
+# allowed at "triggers_only". This is the mechanism that lets his own
+# charge/lull/drop marks fire under this tier while a bridge-relayed
+# duplicate (the double-fire proven in
+# data/charge-lull-drop-timing-blends-and-a-sus-7fm2/report.md §1) stays
+# silent.
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="triggers_only"))
+before_to_bridge = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_response_event("flare", 0.8))
+check(len(spectra_engine.responses.surges) == before_to_bridge,
+      "fire_response_event(via_trigger=False, the bridge's own call site) "
+      "is STILL a no-op under triggers_only — a bridge-relayed event is "
+      "never 'his own trigger'")
+before_to_trig = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_response_event("flare", 0.8, via_trigger=True))
+check(len(spectra_engine.responses.surges) == before_to_trig + 1,
+      "fire_response_event(via_trigger=True, trigger_engine's own call "
+      "site) DOES reach the real response engine under triggers_only — "
+      "his own authored fire_response trigger still fires")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
+
 # UPDATE's own choke point (spectra-trigger-migration-scoping RULING.md,
 # 2026-08-14): fire_scene_update_event gated the same "full" tier, same
 # reason — an authored trigger's own action. Prove BOTH sides explicitly:
@@ -635,6 +714,15 @@ check(len(spectra_engine.responses.surges) == before_update_gated,
       "fire_scene_update_event is a no-op outside scene_change_mode=full — "
       "same gate as fire_response_event, same reason (an authored "
       "trigger's own action)")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
+
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="triggers_only"))
+before_update_to = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_scene_update_event(0.8))
+check(len(spectra_engine.responses.surges) == before_update_to + 1,
+      "fire_scene_update_event also reaches the real on_update under "
+      "triggers_only — its only caller is trigger_engine's own "
+      "authored-trigger action, no via_trigger split needed")
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
 
 # render-intensity wiring (2026-08-15 headroom-reserve correction): the

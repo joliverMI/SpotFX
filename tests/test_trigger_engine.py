@@ -437,6 +437,111 @@ def test_scene_change_mode_transitions_skips_authored_trigger(tmp_path):
     _run(main())
 
 
+# ── proof 4c: scene_change_mode="triggers_only" is a PER-SONG PREFERENCE
+#    WITH A FALLBACK (his 2026-08-20 correction), not an absolute — a song
+#    with an authored trigger fires ONLY it; a song with none falls back to
+#    firing a generated one, exactly like "analysed" ────────────────────────
+
+def test_triggers_only_mode_fires_authored_and_skips_generated_on_authored_song(tmp_path):
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.models.trigger import FireSceneAction, SpectraTrigger
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    authored_scene = SceneV2(name="Authored", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 1.5})])
+    generated_scene = SceneV2(name="Generated", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 7.0})])
+    authored_trig = SpectraTrigger(timestamp_ms=1000, source="authored",
+                                   action=FireSceneAction(scene_id=authored_scene.id))
+    generated_trig = SpectraTrigger(timestamp_ms=1000, source="generated",
+                                    action=FireSceneAction(scene_id=generated_scene.id))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "triggers-only-authored")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 9.0})
+                from spectra.services.drift_conductor import DriftConductor
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+                conductor = DriftConductor(executor=executor,
+                                           clock=lambda: clock.now, leg_s=20.0)
+
+                async def fire_scene(scene_id, color_set_id, intensity):
+                    scene = authored_scene if scene_id == authored_scene.id else generated_scene
+                    fire = await _make_fire_scene(executor, conductor, scene)
+                    await fire(scene_id, color_set_id, intensity)
+
+                engine = TriggerEngine(
+                    list_triggers=lambda uri: [authored_trig, generated_trig],
+                    fire_scene=fire_scene, scene_change_mode=lambda: "triggers_only")
+                await engine.on_track_state("authored-song")
+
+                fired = await engine.tick(1000)
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert [t.id for t in fired] == [authored_trig.id], \
+                    "triggers_only, a song with an authored trigger of its own: " \
+                    "ONLY the authored trigger's crossing fires — the generated " \
+                    "one at the SAME timestamp is skipped entirely"
+                assert effect._config["gradient_scale"] == pytest.approx(1.5), \
+                    "the authored scene landed on the real pipeline; the " \
+                    "generated scene never fired at all"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_triggers_only_mode_falls_back_to_generated_on_unauthored_song(tmp_path):
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.models.trigger import FireSceneAction, SpectraTrigger
+    from spectra.services.trigger_engine import TriggerEngine
+
+    _categories_fixture(tmp_path)
+    generated_scene = SceneV2(name="Generated", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 3.25})])
+    generated_trig = SpectraTrigger(timestamp_ms=1000, source="generated",
+                                    action=FireSceneAction(scene_id=generated_scene.id))
+
+    async def main():
+        host, virtual = await _host(tmp_path, "triggers-only-fallback")
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(host, virtual, "concentric",
+                                                {"gradient_scale": 9.0})
+                from spectra.services.drift_conductor import DriftConductor
+                from spectra.services.fx_executor import FacadeExecutor
+                executor = FacadeExecutor(clock=lambda: clock.now)
+                conductor = DriftConductor(executor=executor,
+                                           clock=lambda: clock.now, leg_s=20.0)
+                fire_scene = await _make_fire_scene(executor, conductor, generated_scene)
+
+                engine = TriggerEngine(
+                    list_triggers=lambda uri: [generated_trig],
+                    fire_scene=fire_scene, scene_change_mode=lambda: "triggers_only")
+                await engine.on_track_state("unauthored-song")
+
+                fired = await engine.tick(1000)
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert [t.id for t in fired] == [generated_trig.id] and \
+                    effect._config["gradient_scale"] == pytest.approx(3.25), \
+                    "triggers_only, a song with NO authored trigger at all: " \
+                    "falls back to firing the generated trigger exactly like " \
+                    "'analysed' would — his own correction, not the first " \
+                    "(absolute-silence) design"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
 # ── proof 5: a GENERATED trigger's scene_id=None resolves through the real
 #    selection kernel, then fires and lands exactly like a hand-picked one ──
 

@@ -47,28 +47,58 @@ which scene/flare/colour-set gets picked, so scaling intensity there too
 would double-count genre in the pick, not just in how hard it lands.
 
 THE SETTINGS MODEL (room_controls.RoomControlState.scene_change_mode,
-replacing front 3's plain midsong_triggers_enabled bool): three additive
-tiers the owner ticks on the room bar —
-  "transitions" — a scene change on every song transition only, nothing
-                  else: no stored trigger fires (see _fire_transition below).
-  "analysed"    — transitions + GENERATED mid-song triggers (source=
-                  "generated" — midsong_generator's analysed section
-                  boundaries). Hand-authored triggers still don't fire.
-  "full"        — everything: transitions + generated mid-song triggers +
-                  the owner's own hand-authored triggers (source=
-                  "authored") + response-engine flares (gated at
-                  engine.fire_response_event, the same choke point both a
-                  bridge-classified flare and a trigger's fire_response
-                  action reach). Default.
-Checked per-crossing in tick() below (_trigger_allowed) — same seam the old
-bool switch used, extended to also cover authored triggers (which
-previously always fired regardless of the switch) and, at
-engine.fire_response_event, flares (previously always on regardless).
+replacing front 3's plain midsong_triggers_enabled bool): four tiers the
+owner ticks on the room bar. "transitions"/"analysed"/"full" form the
+original additive ladder; "triggers_only" (2026-08-20,
+data/spectra-my-triggers-only-mode) does NOT — it is a separate, precise
+mode, not another ladder rung. See room_controls.py's own "scene_change_mode"
+docstring entry for the full MISLABEL FIX + dual-path reasoning; summary
+here:
+  "transitions"   — a scene change on every song transition only, nothing
+                    else: no stored trigger fires (see _fire_transition
+                    below).
+  "analysed"      — transitions + GENERATED mid-song triggers (source=
+                    "generated" — midsong_generator's analysed section
+                    boundaries). Hand-authored triggers still don't fire.
+  "triggers_only" — a PER-SONG PREFERENCE WITH A FALLBACK (his 2026-08-20
+                    correction, verbatim: "if no triggers exist, use the
+                    analyzed triggers" — not the absolute silence-
+                    everything design first built). On a song with at
+                    least one stored trigger whose source=="authored",
+                    ONLY his authored triggers fire — transitions,
+                    generated mid-song triggers, and the automatic
+                    transition fire are all silenced FOR THAT SONG. On a
+                    song with NO stored authored trigger, this tier
+                    behaves exactly like "analysed" for that song
+                    instead. See _effective_mode_for_song below and
+                    room_controls.py's own "scene_change_mode" docstring
+                    entry (PER-SONG FALLBACK) for the exact "no triggers
+                    exist" rule and the real-data reasoning (313/853
+                    songs have any authored trigger; the other 540 need
+                    the fallback to behave well, not just exist).
+  "full"          — everything: transitions + generated mid-song triggers +
+                    the owner's own hand-authored triggers (source=
+                    "authored") + response-engine flares (gated at
+                    engine.fire_response_event, the same choke point both a
+                    bridge-classified flare and a trigger's fire_response
+                    action reach). Default.
+Checked per-crossing in tick() below (_trigger_allowed, against the PER-SONG
+EFFECTIVE mode _effective_mode_for_song resolves) — same seam the old bool
+switch used, extended to also cover authored triggers (which previously
+always fired regardless of the switch) and, at engine.fire_response_event,
+flares (previously always on regardless).
 
-THE AUTOMATIC TRANSITION FIRE (_fire_transition, all three modes): "scene
-changes ON song transitions" is the floor every tier shares — the STANDARD
-the binding decision names ("out of the box a song behaves exactly as
-transitions-only"). It is deliberately NOT a stored SpectraTrigger at
+THE AUTOMATIC TRANSITION FIRE (_fire_transition, "transitions"/"analysed"/
+"full" always; "triggers_only" only on a song with no authored trigger of
+its own — see _effective_mode_for_song): "scene changes ON song
+transitions" is the floor those three tiers share — the STANDARD the
+binding decision names ("out of the box a song behaves exactly as
+transitions-only"). "triggers_only" breaks that floor specifically for a
+song he's actually authored (his own ask: "Spectra does not add its own"
+when he's already added his own) — the automatic transition fire, like
+every generated trigger, defers to his authored material for that song;
+an un-authored song keeps the transitions-only floor via the same
+"analysed" fallback the stored-trigger gate uses. It is deliberately NOT a stored SpectraTrigger at
 timestamp_ms=0: the tick() edge-crossing window rearms at
 `position_ms - 1` on a song change (see below), so a trigger sitting
 exactly at 0 only fires if the very first tick after the change happens to
@@ -378,6 +408,13 @@ class TriggerEngine:
                         "(dwell/affinity), so trigger_engine defers to avoid "
                         "a double scene change")
             return
+        if (self._scene_change_mode() == "triggers_only"
+                and self._song_has_authored_triggers(self._uri)):
+            logger.info("song transition: triggers_only and this song already "
+                        "has an authored trigger of its own — automatic "
+                        "transition fire silenced for it (room_controls.py's "
+                        "scene_change_mode docstring, PER-SONG FALLBACK)")
+            return
         intensity = self._transition_intensity()
         self._notify_intensity_event()
         scene_id = self._select_scene(intensity)
@@ -392,6 +429,34 @@ class TriggerEngine:
             return
         logger.info("song transition: fired scene %s", scene_id)
         self.last_fire = {"id": None, "kind": "transition", "ok": True}
+
+    def _song_has_authored_triggers(self, uri: Optional[str]) -> bool:
+        """The PER-SONG FALLBACK's own precondition (room_controls.py's
+        scene_change_mode docstring, PER-SONG FALLBACK entry): True the
+        moment this song has ANY stored trigger with source=="authored" —
+        regardless of that trigger's own `enabled` flag (matches how his
+        real-data 313/853 count was taken: a raw storage scan, not a
+        live-gating simulation). Checked fresh from trigger_store on every
+        call, never cached — he can author a trigger on a song mid-play."""
+        if uri is None:
+            return False
+        return any(t.source == "authored" for t in self._list_triggers(uri))
+
+    @staticmethod
+    def _effective_mode_for_song(mode: str, triggers: list[SpectraTrigger]) -> str:
+        """triggers_only is a per-song PREFERENCE WITH A FALLBACK, not an
+        absolute (his 2026-08-20 correction, verbatim: "if no triggers
+        exist, use the analyzed triggers" — room_controls.py's
+        scene_change_mode docstring has the full reasoning and his real
+        numbers). A song with at least one stored source=="authored"
+        trigger keeps "triggers_only" exactly as-is (only his own
+        triggers reach _trigger_allowed below); a song with none falls
+        back to "analysed" for that song, so transitions + generated
+        triggers fire exactly as the "analysed" tier always has. Every
+        other mode passes through unchanged."""
+        if mode == "triggers_only" and not any(t.source == "authored" for t in triggers):
+            return "analysed"
+        return mode
 
     def maybe_auto_generate(self, uri: Optional[str]) -> None:
         """Called by services/engine.py's _on_track_uri on the same
@@ -434,9 +499,10 @@ class TriggerEngine:
             # horizon entry re-pins cleanly on the next approach.
             self._pins.clear()
             return []  # rewind/seek back: silently rearmed via the line above
-        mode = self._scene_change_mode()
+        triggers = self._list_triggers(self._uri)
+        mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
         fired: list[SpectraTrigger] = []
-        for trig in self._list_triggers(self._uri):
+        for trig in triggers:
             if not trig.enabled:
                 continue
             if not self._trigger_allowed(trig, mode):
@@ -475,14 +541,17 @@ class TriggerEngine:
     @staticmethod
     def _trigger_allowed(trig: SpectraTrigger, mode: str) -> bool:
         """The settings model's gate (room_controls.RoomControlState.
-        scene_change_mode): "full" fires everything; "analysed" and
-        "transitions" both skip hand-authored triggers, and "transitions"
-        additionally skips GENERATED (analysed mid-song) triggers — the
-        automatic transition fire (_fire_transition) is the only thing that
-        still happens in "transitions" mode, and it isn't a stored trigger
-        at all, so it never reaches this gate."""
+        scene_change_mode) — called with the PER-SONG EFFECTIVE mode
+        (see _effective_mode_for_song, tick()'s own call site), not
+        necessarily the raw stored setting: "full" and "triggers_only"
+        both fire hand-authored triggers; "analysed" and "transitions"
+        both skip them, and "transitions" additionally skips GENERATED
+        (analysed mid-song) triggers — the automatic transition fire
+        (_fire_transition) is the only thing that still happens in
+        "transitions" mode, and it isn't a stored trigger at all, so it
+        never reaches this gate."""
         if trig.source == "authored":
-            return mode == "full"
+            return mode in ("full", "triggers_only")
         return mode in ("analysed", "full")
 
     def _notify_intensity_event(self) -> None:
@@ -652,7 +721,12 @@ class TriggerEngine:
 
     async def _default_fire_response(self, event_class: str, intensity: float) -> None:
         from spectra.services import engine
-        await engine.fire_response_event(event_class, intensity)
+        # via_trigger=True: this call only ever happens for a trigger
+        # _trigger_allowed already gated (necessarily source=="authored"),
+        # so it must reach the real response engine whenever the room is
+        # at "full" OR "triggers_only" — see engine.fire_response_event's
+        # own docstring for the dual-path reasoning.
+        await engine.fire_response_event(event_class, intensity, via_trigger=True)
 
     async def _default_fire_scene_update(self, intensity: float) -> None:
         from spectra.services import engine
