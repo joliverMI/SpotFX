@@ -2494,7 +2494,6 @@
       }
     },
     "squiggles": {
-      "no_background_color": true,
       "params": {
         "gradient": {
           "label": "Gradient",
