@@ -28,7 +28,8 @@ BAND_JITTER = 0.06
 # `phase_progress`; see _phase_step)
 DROP_FALLBACK_S = 0.45   # drop completes on this timer if no progress ramp
 DROP_RESET_S = 0.5       # post-burst ease of the horizon back to baseline
-PHASE_BURST_N = 24       # blobs in the drop explosion
+PHASE_BURST_N = 48       # blobs in the drop explosion (his ask: at least 2x
+                         # the original 24)
 CHARGE_HALO_LEAD = 1.4   # halo (capture ring) growth vs the black disc
 
 # infall-mode (`reverse=False`) spawn boundary, in the same normalized-r
@@ -326,6 +327,11 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_cap = np.full(CAP, -1.0, dtype=np.float32)
         # seconds of outward flight left (radial-handoff eruption burst)
         self.p_out = np.zeros(CAP, dtype=np.float32)
+        # True for a drop-payoff burst particle (_phase_burst) — excluded
+        # from the ambient spawn's max_blobs check (see _spawn) so doubling
+        # PHASE_BURST_N can't starve the ambient/beat spawn that's supposed
+        # to keep coming through the drop.
+        self.p_is_burst = np.zeros(CAP, dtype=bool)
         self.n = 0
         self.spawn_acc = 0.0
         self.spin_total = 0.0
@@ -477,6 +483,7 @@ class Blackhole2d(Twod, GradientEffect):
             self.p_band,
             self.p_cap,
             self.p_out,
+            self.p_is_burst,
         ):
             arr[:count] = arr[: self.n][alive]
         self.n = count
@@ -517,7 +524,7 @@ class Blackhole2d(Twod, GradientEffect):
                     name: getattr(self, name)[:n].copy()
                     for name in (
                         "p_r", "p_theta", "p_grad", "p_bright",
-                        "p_age", "p_band", "p_cap", "p_out",
+                        "p_age", "p_band", "p_cap", "p_out", "p_is_burst",
                     )
                 },
             },
@@ -635,6 +642,7 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_age[:k] = FADE_IN_S  # no fade-in flash
         self.p_band[:k] = 0
         self.p_cap[:k] = -1.0
+        self.p_is_burst[:k] = False  # adopted blobs are ordinary population
         self.n = k
         # adopted particles wind up to full speed over handoff_ease seconds
         self._adopt_age = 0.0 if self.handoff_ease > 0.0 else None
@@ -706,7 +714,12 @@ class Blackhole2d(Twod, GradientEffect):
 
     def _phase_burst(self):
         """Drop payoff: a guaranteed burst of full-bright blobs from the
-        center (bypasses max_blobs — the explosion must always land)."""
+        center (bypasses max_blobs — the explosion must always land).
+        Tagged p_is_burst so the ambient spawn's own max_blobs check (see
+        _spawn) doesn't count these against the population budget the
+        music-driven blobs need to keep coming through right after —
+        otherwise doubling PHASE_BURST_N would starve the very spawns that
+        are supposed to fill the post-explosion gap."""
         got = int(min(PHASE_BURST_N, CAP - self.n))
         if got <= 0:
             return
@@ -717,6 +730,7 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_age[s] = FADE_IN_S  # no fade-in flash on the payoff
         self.p_cap[s] = -1.0
         self.p_band[s] = 0
+        self.p_is_burst[s] = True
         if self.color_mode == "wheel":
             self.p_grad[s] = (
                 self.p_theta[s] / (2 * np.pi) - self.spin_total
@@ -881,13 +895,20 @@ class Blackhole2d(Twod, GradientEffect):
 
     def _spawn(self, count, beat_count):
         # max_blobs is the user-facing density cap; CAP is the hard buffer cap.
+        # The cap counts only ambient (non-burst) population — a drop's
+        # _phase_burst blobs are excluded (see its own docstring) so a large
+        # surviving burst can never pause the music-driven ambient/beat
+        # spawn this function drives; CAP - self.n still bounds the total
+        # buffer regardless of tag.
         # int(): morph smoothing can hand us float counts, which numpy's rng
         # size argument rejects.
-        count = int(min(count, self.max_blobs - self.n, CAP - self.n))
+        ambient_n = self.n - int(np.count_nonzero(self.p_is_burst[: self.n]))
+        count = int(min(count, self.max_blobs - ambient_n, CAP - self.n))
         if count <= 0:
             return
         s = slice(self.n, self.n + count)
         rng = self._rng
+        self.p_is_burst[s] = False
         # theta drawn first (both branches want it) — infall mode needs it
         # to look up the boundary at each particle's own spawn direction.
         theta = rng.uniform(0.0, 2 * np.pi, count).astype(np.float32)
