@@ -90,14 +90,17 @@ def resolve_scene(scene: SceneV2, ctx: FireContext) -> SceneV2:
     return resolved
 
 
-def _entry_config(dev: SceneDeviceConfig) -> dict[str, Any]:
+def _entry_config(dev: SceneDeviceConfig, display_mode: str = "default",
+                  light_bg_color: str = "#201830") -> dict[str, Any]:
     config: dict[str, Any] = dict(dev.params)
     if dev.color.mode == "fixed":
         if dev.color.color_value:
             # LedFX gradient params accept solid hex and gradient strings.
             config["gradient"] = dev.color.color_value
         if dev.color.bg_color and not device_model.bg_color_blocked(dev.effect_type):
-            config["background_color"] = dev.color.bg_color
+            from spectra.services.room_controls import resolve_authored_bg_color
+            config["background_color"] = resolve_authored_bg_color(
+                dev.color.bg_color, display_mode, light_bg_color)
         if dev.color.bg_mode:
             config["background_mode"] = dev.color.bg_mode
     if dev.brightness is not None:
@@ -127,12 +130,15 @@ def _set_entry_by_virtual(color_set: ColorSetCard) -> dict[str, ColorSetEntry]:
 
 
 def _apply_set_colors(config: dict[str, Any], effect_type: str,
-                      entry: ColorSetEntry) -> dict[str, Any]:
+                      entry: ColorSetEntry, display_mode: str = "default",
+                      light_bg_color: str = "#201830") -> dict[str, Any]:
     config = dict(config)   # never mutate the config shared across virtuals
     if entry.color_value:
         config["gradient"] = entry.color_value
     if entry.bg_color and not device_model.bg_color_blocked(effect_type):
-        config["background_color"] = entry.bg_color
+        from spectra.services.room_controls import resolve_authored_bg_color
+        config["background_color"] = resolve_authored_bg_color(
+            entry.bg_color, display_mode, light_bg_color)
     if entry.bg_mode:
         config["background_mode"] = entry.bg_mode
     if entry.brightness is not None:
@@ -143,10 +149,21 @@ def _apply_set_colors(config: dict[str, Any], effect_type: str,
 
 
 def compile_scene(scene: SceneV2,
-                  color_set: Optional[ColorSetCard] = None) -> list[dict[str, Any]]:
+                  color_set: Optional[ColorSetCard] = None, *,
+                  display_mode: str = "default",
+                  light_bg_color: str = "#201830") -> list[dict[str, Any]]:
     """[{virtual_id, effect_type, config}] — pure. Callers pass a RESOLVED
     scene (resolve_scene first); a stray binding here is a programming error
-    and fails loudly rather than serializing into a LedFX config."""
+    and fails loudly rather than serializing into a LedFX config.
+
+    display_mode/light_bg_color are PASSED IN, never loaded here (this
+    function must stay I/O-free) — fire_scene below loads
+    room_controls.RoomControlState and threads its display_mode/
+    display_light_bg_color through, the same way it already threads
+    brightness_multiplier and the transition. Only "light" mode does
+    anything with these; every other caller's default ("default"/hybrid)
+    reproduces today's behaviour exactly — see room_controls.
+    resolve_authored_bg_color for the substitution itself."""
     for dev in scene.devices:
         if dev.effect_steps:
             raise ValueError(
@@ -175,7 +192,7 @@ def compile_scene(scene: SceneV2,
                                    scene.name, dev.target)
             else:
                 virtual_ids = [dev.target]
-            config = _entry_config(dev)
+            config = _entry_config(dev, display_mode, light_bg_color)
             for vid in virtual_ids:
                 # entry_id/color_mode ride along for the S2 engine (drift
                 # declarations and palette mechanics follow the WINNING entry
@@ -198,7 +215,8 @@ def compile_scene(scene: SceneV2,
             if entry is None:
                 continue
             w = writes[vid]
-            w["config"] = _apply_set_colors(w["config"], w["effect_type"], entry)
+            w["config"] = _apply_set_colors(w["config"], w["effect_type"], entry,
+                                            display_mode, light_bg_color)
     return list(writes.values())
 
 
@@ -243,26 +261,32 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     and (live only) send through the seam. The returned resolution report +
     writes are the test-fire display: dry and live runs share every step up
     to the seam — a test-fire at a chosen intensity IS the honest window
-    into what that intensity selects. With no explicit color_set the scene
-    wears the room's active set. Live writes carry scene.entry_ramp_ms as
-    the OVERRIDE BLEND entry-ramp equivalent (0 = instant, unchanged); when
+    into what that intensity selects, display_mode's black->Light
+    substitution included. With no explicit color_set the scene wears the
+    room's active set. Live writes carry scene.entry_ramp_ms as the
+    OVERRIDE BLEND entry-ramp equivalent (0 = instant, unchanged); when
     a scene doesn't author its own, the room's global_transition_ms (the
     ledfx_global_transition equivalent) wins if he's set it explicitly,
     else the intensity-scaled scene_transition_ms(room, intensity) is the
     fallback ramp — see the module docstring's fallback-chain note."""
     if color_set is None:
         color_set = room_active_set()
+    # A LOCAL, lazy import — room_controls must never be a module-level
+    # name in this file (see AGENTS.md's light-mode-fix-import-crash
+    # entry): loaded once here, both branches below reuse `room`.
+    from spectra.services import room_controls
+    room = room_controls.load_room_controls()
     ctx = FireContext(intensity, rng=rng)
     resolved = resolve_scene(scene, ctx)
-    writes = compile_scene(resolved, color_set)
+    writes = compile_scene(resolved, color_set,
+                           display_mode=room.display_mode,
+                           light_bg_color=room.display_light_bg_color)
     if not dry_run:
         # The brightness-multiplier room control scales the ACTUAL bytes
         # sent to hardware only — never the returned/baselined writes, so
         # dry-run and live previews stay byte-identical (the honest-window
         # invariant) and the engine's carried baseline stays at the
         # authored level (the multiplier only ever touches final output).
-        from spectra.services import room_controls
-        room = room_controls.load_room_controls()
         multiplier = room.brightness_multiplier
         live_writes = writes if multiplier == 1.0 else [
             {**w, "config": room_controls.apply_brightness(w["config"], multiplier)}

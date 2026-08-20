@@ -242,6 +242,7 @@ class ResponseEngine:
         set_card: Callable[[str], Any] | None = None,
         room_load: Callable[[], color_journey.RoomColorState] | None = None,
         room_save: Callable[[color_journey.RoomColorState], None] | None = None,
+        room_controls: Callable[[], Any] | None = None,
     ) -> None:
         self.conductor = conductor
         self.executor = executor
@@ -255,6 +256,21 @@ class ResponseEngine:
         self._set_card = set_card or self._default_set_card
         self._room_load = room_load or color_journey.load_room
         self._room_save = room_save or color_journey.save_room
+        # Lazy on purpose (never a module-level `room_controls` import in
+        # this file): `room_controls` above is a constructor PARAMETER, so
+        # any reference to that name inside __init__ is this parameter, not
+        # a module. `self._room_controls()` only imports the real module
+        # the first time it's actually CALLED (_default_room_controls,
+        # below) — same shape as DriftConductor's own `_room_controls`.
+        # ResponseEngine is itself built at spectra/services/engine.py's
+        # MODULE IMPORT TIME (`responses = ResponseEngine(...)`), which is
+        # exactly the constraint that broke the reverted PR #142: it bound
+        # `self._room_controls_load = room_controls_load or
+        # room_controls.load_room_controls` — a real module attribute
+        # access — inside __init__ itself, so the eager access ran at
+        # import time. AGENTS.md's light-mode-fix-import-crash entry has
+        # the full incident writeup.
+        self._room_controls = room_controls or self._default_room_controls
 
         self.surges: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
         # (virtual_id, param, hold_s) triples a momentary kind spiked,
@@ -805,7 +821,9 @@ class ResponseEngine:
         if card is None:
             return {"result": "missing_set", "picked_id": pick.picked_id}
         from spectra.services import scene_compiler
+        from spectra.services.room_controls import resolve_authored_bg_color
         by_vid = scene_compiler._set_entry_by_virtual(card)
+        controls = self._room_controls()
         ramp_ms = color_jump_ramp_ms(intensity)
         landed = 0
         for vid, state in self.conductor.virtuals.items():
@@ -820,8 +838,11 @@ class ResponseEngine:
                 carry[(vid, "gradient")] = entry.color_value
             if entry.bg_color and not device_model.bg_color_blocked(
                     state.effect_type):
-                params["background_color"] = entry.bg_color
-                carry[(vid, "background_color")] = entry.bg_color
+                bg_color = resolve_authored_bg_color(
+                    entry.bg_color, controls.display_mode,
+                    controls.display_light_bg_color)
+                params["background_color"] = bg_color
+                carry[(vid, "background_color")] = bg_color
             if entry.bg_mode:
                 params["background_mode"] = entry.bg_mode
             if entry.brightness is not None:
@@ -866,6 +887,11 @@ class ResponseEngine:
                 continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out
+
+    @staticmethod
+    def _default_room_controls():
+        from spectra.services.room_controls import load_room_controls
+        return load_room_controls()
 
     @staticmethod
     def _default_set_card(set_id: str):

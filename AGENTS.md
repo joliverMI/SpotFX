@@ -1452,6 +1452,70 @@ still carries the flag — not part of either his §85 widen ask or his §87
 background ruling, deliberately left alone as his call, not tidied in
 passing.
 
+**In "light" mode, an authored `#000000` background clears to the room's
+own Light background instead of literal black** (`room_controls.
+resolve_authored_bg_color`, his ruling "do option three": Light paints its
+forced background ONCE and never re-asserts it, so a later colour-set fire
+authoring literal black — 30 entries across 22 of his real sets — cleared
+it and it never came back). Threaded into all five places a colour-set/
+scene-entry background reaches the wire: `scene_compiler._entry_config`/
+`_apply_set_colors`, `scene_response.ResponseEngine._color_jump`,
+`drift_conductor.DriftConductor.apply_color_set`/`_journey_leg`. Real-data
+proof: `scripts/check_light_mode_bg_clear.py`. Tests:
+`tests/test_light_mode_bg_clear.py`.
+
+**This feature shipped once (PR #142), crashed the service on every start,
+and was reverted (PR #145) — the rebuild (PR fm/spectra-light-mode-fix-
+import-crash) kept the feature identical and fixed only the construction
+pattern.** `DriftConductor`/`ResponseEngine` are both built as singletons
+at `spectra/services/engine.py`'s MODULE IMPORT TIME (`conductor =
+DriftConductor(...)`, `responses = ResponseEngine(...)`) — never inside a
+function, never lazily. PR #142 gave each of them a
+`room_controls_load: ... = None` constructor param whose fallback,
+evaluated **inside `__init__`**, did `room_controls.load_room_controls`
+— a real attribute access on the module-level `room_controls` imported at
+the top of the file. That module-level name was ALSO reused as a plain
+constructor **parameter** name (`room_controls: Callable[[], Any] | None
+= None`, added independently by PR #144 for the drift-gradient feature,
+already merged to master by the time #142 was reverted) — inside
+`__init__`, any bare reference to `room_controls` binds to the parameter,
+not the module import, so the fallback silently read `None.
+load_room_controls` and threw `AttributeError` on every process start
+(`spectra/services/drift_conductor.py:261`), a two-minute room outage
+before revert. Reproduced exactly by re-applying PR #142's diff on top of
+current master and running `python -c "import spectra.app"` — a plain
+in-process pytest run never catches this, because pytest has already
+imported `spectra.services.room_controls` via some earlier-collected test
+file by the time any one test runs, which is exactly what masked it the
+first time.
+
+**The rule, going forward: nothing that can be constructed at import time
+may touch `room_controls` (or any similarly singleton-adjacent service
+module) eagerly — inside `__init__`, as a bare default expression, or via
+a module-level `from spectra.services import ... room_controls` import in
+a file whose class gets built at another module's import time.** Resolve
+it lazily instead, the pattern `DriftConductor` already used correctly
+before #142 (and which the rebuild copied into `ResponseEngine`): a
+constructor param `room_controls: Callable[[], Any] | None = None`, stored
+as `self._room_controls = room_controls or self._default_room_controls`
+where `_default_room_controls` is a `@staticmethod` doing the real `from
+spectra.services.room_controls import load_room_controls` **inside its own
+body** — nothing is imported or called until `self._room_controls()` is
+actually invoked at runtime. Every OTHER call site that needs
+`resolve_authored_bg_color` imports it locally, inside the function that
+uses it, for the same reason. Before adding ANY new constructor parameter
+to `DriftConductor`/`ResponseEngine` (or introducing a new class
+constructed at `engine.py`'s module scope), grep the class for an existing
+parameter of the same name — a second, differently-scoped meaning for
+one identifier inside one `__init__` is exactly how this broke, and it
+will not raise at review time, only at the next process start. Regression
+proof that a fresh interpreter's cold start still succeeds (the ONLY kind
+of check that would have caught this — a green pytest suite says nothing
+about import order): `tests/test_light_mode_cold_start.py`, which spawns
+`sys.executable -c "import spectra.app"` in a genuinely new subprocess
+rather than relying on whatever's already in `sys.modules` inside the test
+runner.
+
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing

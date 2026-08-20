@@ -532,8 +532,10 @@ class DriftConductor:
         landed — 0 with no live scene, which still leaves the set active
         for the next fire to wear (scene_compiler.fire_scene)."""
         from spectra.services import scene_compiler
+        from spectra.services.room_controls import resolve_authored_bg_color
         from fx import device_model
         by_vid = scene_compiler._set_entry_by_virtual(card)
+        controls = self._room_controls()
         landed = 0
         for vid, state in self.virtuals.items():
             if not state.set_mode:
@@ -547,8 +549,11 @@ class DriftConductor:
                 state.gradient = entry.color_value
             if entry.bg_color and not device_model.bg_color_blocked(
                     state.effect_type):
-                params["background_color"] = entry.bg_color
-                state.background_color = entry.bg_color
+                bg_color = resolve_authored_bg_color(
+                    entry.bg_color, controls.display_mode,
+                    controls.display_light_bg_color)
+                params["background_color"] = bg_color
+                state.background_color = bg_color
             if entry.bg_mode:
                 params["background_mode"] = entry.bg_mode
             if entry.brightness is not None:
@@ -694,6 +699,8 @@ class DriftConductor:
         rec.update(paused=False, arrived=arrived,
                    wheel_position_deg=round(new_deg, 2))
         if delta != 0.0:
+            from spectra.services.room_controls import resolve_authored_bg_color
+            controls = self._room_controls()
             for vid, state in self.virtuals.items():
                 if not state.set_mode:
                     continue
@@ -703,9 +710,22 @@ class DriftConductor:
                         state.gradient, delta)
                     params["gradient"] = state.gradient
                 if state.background_color:
-                    state.background_color = color_rotate.rotate_color_value(
+                    # A hue rotation of an achromatic authored black is a
+                    # no-op (value=0 in HSV carries no hue) — this rotated
+                    # value carries the SAME authored #000000 through as
+                    # many legs as run, so the light-mode substitution
+                    # below still fires correctly no matter how long the
+                    # journey has been walking. Once resolved (light mode
+                    # only) the substitute colour rotates like any other
+                    # authored colour from here on — expected, not a
+                    # separate case to special-case.
+                    rotated = color_rotate.rotate_color_value(
                         state.background_color, delta)
-                    params["background_color"] = state.background_color
+                    bg_color = resolve_authored_bg_color(
+                        rotated, controls.display_mode,
+                        controls.display_light_bg_color)
+                    state.background_color = bg_color
+                    params["background_color"] = bg_color
                 if params:
                     batches.setdefault((vid, leg_ms), {}).update(params)
                     legs.append({"virtual_id": vid, "param": "palette",
