@@ -4,15 +4,36 @@
  * color-coded by action kind instead of by legacy event. Phone-usable:
  * pointer events + touch-action: none, same as the rest of the timeline. */
 import { useRef, useState } from 'react';
-import type { SpectraTrigger, TriggerActionKind } from '../../types';
+import type { ResponseClass, SpectraTrigger, TriggerActionKind } from '../../types';
 import type { Win } from '../canvas/frame';
 
 const KIND_COLOR: Record<TriggerActionKind, string> = {
   fire_scene: '#a855f7',       // violet — matches the SPECTRA purple
-  fire_response: '#f59e0b',    // amber
+  fire_response: '#f59e0b',    // amber — the "flare" default, i.e. a regular trigger
   select_color_set: '#14b8a6', // teal
   fire_scene_update: '#ef4444', // red — "major change", distinct from the flare amber
 };
+
+// Fire-response's own event_class further splits the amber "regular"
+// colour above: charge/lull/drop are the phase-drive classes, each its own
+// colour so they read apart from a plain flare (regular amber) and from
+// each other at a glance while watching a sequence run.
+export const RESPONSE_CLASS_COLOR: Record<ResponseClass, string> = {
+  flare: KIND_COLOR.fire_response,
+  charge: '#fbbf24', // amber-gold — building
+  lull: '#38bdf8',   // sky blue — receding
+  drop: '#ec4899',   // magenta — impact
+};
+
+/** The marker colour for a trigger: fire_response splits further by its
+ * own event_class (charge/lull/drop vs. a plain flare); every other kind
+ * uses its one KIND_COLOR. Shared with SpectraTriggerDialog's Class swatch
+ * so the bar and the editor never disagree about what a colour means. */
+export function triggerColor(t: SpectraTrigger): string {
+  return t.action.kind === 'fire_response'
+    ? RESPONSE_CLASS_COLOR[t.action.event_class]
+    : KIND_COLOR[t.action.kind];
+}
 
 const KIND_LABEL: Record<TriggerActionKind, string> = {
   fire_scene: 'Fire scene',
@@ -127,7 +148,7 @@ export default function SpectraTriggerBar({
           onPointerLeave={() => setHover(null)}
           style={{
             position: 'absolute', top: 2, bottom: 2, left: pct(t.timestamp_ms), width: 5,
-            marginLeft: -2, background: KIND_COLOR[t.action.kind],
+            marginLeft: -2, background: triggerColor(t),
             opacity: t.enabled ? 1 : 0.35, borderRadius: 1, cursor: 'grab',
             // Seeded (generated, untouched) triggers get a dashed outline —
             // still every gesture a hand-placed one has (move/edit/delete).
