@@ -135,8 +135,13 @@ guarded).
 - **Lull** — an old-TV switch-off (`_phase_crt`): vertical squash to a
   bright line over the first 55% of the ramp, then a horizontal pinch into
   a single held white dot.
-- **Drop** — a 9-chain fan erupts from the center (cap bypassed), walls
-  open, population returns to normal over 1 s.
+- **Drop** — once the drop ramp completes (gated on `phase_progress` the
+  same way Blackhole gates its own payoff, not on the instant phase edge —
+  fixed 2026-08-20, PR fm/spectra-squiggles-drop-timing-and-a-much-bigger-
+  explosion: it used to burst at t=0 of the ramp, up to a full ramp EARLY
+  vs. Blackhole on the same trigger), a 9-chain fan erupts from the center
+  (cap bypassed) at 55% of normal speed so it lingers instead of flashing
+  past, walls open, population returns to normal ~1 s after the burst.
 
 ### Dancers (`dancer.py` — state is `_cld_*`; `self._phase` there is the
 beat clock, not this machinery)

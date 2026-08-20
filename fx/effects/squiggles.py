@@ -59,7 +59,20 @@ CHARGE_MAX_X = 1.6   # max_chains growth factor at full charge
 LULL_CRT_S = 2.2     # CRT collapse fallback when no lull ramp arrives
 CRT_SPLIT = 0.55     # lull fraction where the vertical squash completes
 DROP_BURST_N = 9     # chains erupting from the center on the drop
-DROP_SETTLE_S = 1.0  # settle time before phase auto-reset
+# Blackhole times its drop payoff to the END of the phase_progress ramp
+# (progress >= 0.995, DROP_FALLBACK_S wall-clock fallback) — his confirmed
+# "really good" timing. Squiggles used to burst at the INSTANT phase edged
+# to "drop" (t=0 of the same ramp scene_response._drive_phase drives for
+# every phase-capable effect), landing up to a full ramp EARLY relative to
+# the sibling effect firing off the identical trigger. Matching Blackhole's
+# own gate is what "explode right on the trigger" means structurally.
+DROP_FALLBACK_S = 0.45      # matches Blackhole's own fallback exactly
+# Burst chains fly at this fraction of normal speed so the explosion
+# lingers rather than flashing past — his ask "last longer" (2026-08-20,
+# picked value, not measured against a reference; expect to retune).
+DROP_BURST_SPEED_MULT = 0.55
+DROP_SETTLE_S = 1.0  # post-burst settle before phase auto-reset (measured
+                     # from the burst itself, not from phase entry)
 
 # The device lattice (walkable live-LED graph, ring moves, silhouette,
 # brush shells) comes from the shared lattice API — derived from the
@@ -275,6 +288,7 @@ class Squiggles2d(Twod, GradientEffect):
             self._phase_pending = None
             self._phase_rate = 0.0
             self._phase_done_t = None
+            self._drop = None
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
@@ -885,8 +899,10 @@ class Squiggles2d(Twod, GradientEffect):
     # the event's ramp. charge: chains bounce off the silhouette instead of
     # exiting while spawning ramps up; lull: old-TV switch-off — the frame
     # squashes vertically to a line, then the line pinches to a held dot;
-    # drop: a fan of chains erupts from the center and everything returns
-    # to normal (`phase` self-resets to "none").
+    # drop: a fan of chains erupts from the center once the drop ramp
+    # completes, and everything returns to normal (`phase` self-resets to
+    # "none"). The burst is gated on phase_progress the same way Blackhole
+    # gates its own drop payoff — see DROP_FALLBACK_S above for why.
 
     def _enter_phase(self, phase):
         self._phase = phase
@@ -894,7 +910,7 @@ class Squiggles2d(Twod, GradientEffect):
         self._phase_rate = 0.0
         self._phase_done_t = None
         if phase == "drop":
-            self._phase_burst()
+            self._drop = {"burst_t": None}
         if phase in ("drop", "none"):
             # back to normal population no matter how we got here
             self.max_chains = int(self._config["max_blobs"])
@@ -920,6 +936,7 @@ class Squiggles2d(Twod, GradientEffect):
                 self._phase, self._phase_t,
             )
             self._phase = "none"
+            self._drop = None
             self.max_chains = int(self._config["max_blobs"])
             self._phase_rate = 0.0
             self._apply_config(
@@ -937,16 +954,34 @@ class Squiggles2d(Twod, GradientEffect):
             ))
             self._phase_rate = CHARGE_RATE * p
         elif self._phase == "drop":
-            if self._phase_t >= DROP_SETTLE_S:
-                self._phase = "none"
-                self.max_chains = int(self._config["max_blobs"])
-                # sanctioned in-render config path (under the effect lock);
-                # self-reset so an identical later drop write edges again
-                self._apply_config(
-                    {"phase": "none", "phase_progress": 0.0},
-                    validate=False,
-                    fire_event=False,
+            drop = self._drop
+            if drop is None:
+                drop = self._drop = {"burst_t": None}
+            if drop["burst_t"] is None:
+                # pinch: progress-driven, with a wall-clock fallback so the
+                # payoff can never be lost to a dropped ramp (mirrors
+                # Blackhole's own gate exactly)
+                p = max(
+                    self.phase_progress,
+                    min(self._phase_t / DROP_FALLBACK_S, 1.0),
                 )
+                if p >= 0.995:
+                    drop["burst_t"] = 0.0
+                    self._phase_burst()
+            else:
+                drop["burst_t"] += dt
+                if drop["burst_t"] >= DROP_SETTLE_S:
+                    self._phase = "none"
+                    self._drop = None
+                    self.max_chains = int(self._config["max_blobs"])
+                    # sanctioned in-render config path (under the effect
+                    # lock); self-reset so an identical later drop write
+                    # edges again
+                    self._apply_config(
+                        {"phase": "none", "phase_progress": 0.0},
+                        validate=False,
+                        fire_event=False,
+                    )
 
     def _bounce(self, c):
         """Charge/lull wall bounce: a chain that reaches the silhouette
@@ -965,12 +1000,17 @@ class Squiggles2d(Twod, GradientEffect):
 
     def _phase_burst(self):
         """Drop payoff: a fan of chains erupts from the center (bypasses
-        max_chains — the explosion must always land)."""
+        max_chains — the explosion must always land). Pinned to
+        DROP_BURST_SPEED_MULT of normal travel speed (fixed, not
+        audio-scaled) so the fan lingers outward instead of flashing
+        straight past — never cleared, so it holds for the chain's whole
+        flight to the silhouette edge."""
         rng = self._rng
         k = int(min(DROP_BURST_N, CHAIN_HARD_CAP - len(self.chains)))
         if k <= 0:
             return
         base = float(rng.uniform(0.0, 2 * math.pi))
+        burst_speed = self.base_speed * DROP_BURST_SPEED_MULT
         for i in range(k):
             theta = (
                 base
@@ -978,6 +1018,7 @@ class Squiggles2d(Twod, GradientEffect):
                 + math.radians(float(rng.uniform(-10.0, 10.0)))
             )
             c = self._new_chain((self.cx, self.cy), theta)
+            c["speed_override"] = burst_speed
             for _ in range(2):
                 self._walk_one(c)
             self.chains.append(c)
