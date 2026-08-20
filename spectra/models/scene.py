@@ -56,6 +56,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from spectra.models.binding import ValueBinding
+from spectra.models.sequencer import CurvePoint, _validate_sorted_x
 
 SceneParamScalar = bool | int | float | str
 SceneParamValue = SceneParamScalar | ValueBinding
@@ -451,6 +452,31 @@ class PhaseChoreography(BaseModel):
 # scene would hand back the exact problem this fix removes.
 
 
+class CurveAttachment(BaseModel):
+    """A pointer to a curve, the same two-way shape SelectorEntry's curve
+    half already uses (spectra/models/sequencer.py) minus the parts that
+    don't apply to a per-scene minimum dwell (no genre_mult, no the-now-
+    retired dwell_weight — this field replaces that role entirely, see
+    that module's own docstring). Exactly one of curve_ref (a shared named
+    CurveProfile id, spectra/services/sequencer_store.py) / inline_points
+    (a one-off, edited the same CurveAttachmentEditor.tsx way a sequencer
+    entry's curve is) may be set; both None means "no override" — the
+    caller supplies its own default (spectra/services/dwell.py's
+    DEFAULT_DWELL_CURVE for SceneV2.dwell_curve), NOT flat 1.0 the way an
+    unset SelectorEntry curve resolves — a per-scene minimum dwell must
+    still mean something when nothing is authored."""
+    curve_ref:     Optional[str] = None
+    inline_points: Optional[list[CurvePoint]] = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "CurveAttachment":
+        if self.curve_ref is not None and self.inline_points is not None:
+            raise ValueError("attachment may set curve_ref or inline_points, not both")
+        if self.inline_points is not None:
+            _validate_sorted_x(self.inline_points, "inline curve")
+        return self
+
+
 def _as_dict(value) -> dict:
     return value.model_dump() if hasattr(value, "model_dump") else dict(value)
 
@@ -629,6 +655,30 @@ class SceneV2(BaseModel):
     # room_controls.reconcile_force_scene_if_changed's overrode_disabled
     # flag.
     disabled: bool = False
+    # MINIMUM DWELL — his rebuild (2026-08-20, data/plan-make-dwell-
+    # meaningful-under-the-rea-4p73/{report,HIS-DECISION}.md): a per-scene
+    # floor on how long this scene must stay showing before ANY automatic
+    # path (sequencer roll, trigger fire_scene, automatic transition) may
+    # switch away from it — a CURVE OVER INTENSITY, reusing the same
+    # curve-selector shape/UI the sequencer's own likelihood curves use
+    # (CurveAttachmentEditor.tsx), not a parallel control. None = his exact
+    # default (16s @ intensity 0, 4s @ intensity 1, linear —
+    # spectra/services/dwell.py's DEFAULT_DWELL_CURVE), evaluated at the
+    # intensity this scene ACTUALLY fired at, latched once at entry (his
+    # answer B: never re-evaluated mid-dwell, so a moving intensity can't
+    # shrink or stretch an in-progress hold). Gated entirely at
+    # scene_sequencer.fire_scene_by_id — the manual editor Fire button
+    # never reaches that choke point (exempt, same as disabled/mode
+    # availability above); Force Scene still wins but the override is
+    # NAMED (overrode_dwell=True), never silent. A deferred scene change
+    # fires this scene's own update_kind instead (his answer D, confirmed
+    # by him: the existing on_update/SceneV2.update_kind mechanism IS the
+    # "Update effect" he meant) — a scene with no update_kind authored has
+    # nothing to call, so the deferral is absorbed exactly like a held
+    # scene always was, except now RECORDED (fire_history's "deferred"
+    # bucket), never silent. See spectra/services/dwell.py for the full
+    # mechanism.
+    dwell_curve: Optional[CurveAttachment] = None
 
     @model_validator(mode="before")
     @classmethod

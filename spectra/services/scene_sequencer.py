@@ -29,6 +29,17 @@ above) stays on the raw value so genre isn't double-counted there.
 
 Executable spec: scripts/check_spectra.py (fake clock, injected fire — no
 live LedFX, no audio).
+
+MINIMUM DWELL (2026-08-20, data/plan-make-dwell-meaningful-under-the-rea-
+4p73/): dwell no longer lives here at all — SelectorEntry.dwell_weight and
+this class's own served_songs/dwell_target song-count bookkeeping are
+retired. The new per-scene, seconds-not-songs minimum lives in spectra/
+services/dwell.py and gates centrally at fire_scene_by_id, below — see
+that module's docstring for why (it was built on the wrong reading of
+"song transition": between songs, not within a song or a trigger call,
+which is the path his real triggers actually use). This class's own
+_active_id remains, unchanged in purpose, purely for candidate-building
+(prev_id for affinity, the "renewed" comparison in _roll).
 """
 from __future__ import annotations
 
@@ -82,9 +93,32 @@ async def fire_scene_by_id(scene_id: str,
     already does for pause/dinner_party/ambient. A resolved colour set/
     group member failing its own availability check falls back to the
     room's active set, same as an unresolved/unknown color_set_id already
-    does."""
-    from spectra.services import (color_set_groups, color_sets, fire_history,
-                                  mode_availability, scene_compiler, scene_store)
+    does.
+
+    MINIMUM DWELL (2026-08-20, spectra/services/dwell.py — read that
+    module's docstring for the full mechanism) is gated HERE, after
+    disabled/mode-availability, before the colour set even resolves (a
+    deferred request must never advance a Colour Group's own rotation
+    cursor for a fire that never happens): if the room's currently-active
+    scene hasn't yet cleared its own latched minimum hold, the request is
+    deferred — result carries skipped="dwell" plus remaining_dwell_s and
+    update_result (what the update-effect seam did, see below) — UNLESS
+    Force Scene just pinned this scene, which fires anyway but NAMES the
+    override (overrode_dwell=True), same "an explicit pin always wins, but
+    say so" pattern as overrode_disabled above. A deferred request calls
+    engine.fire_scene_update_event(intensity) — the SAME choke point a
+    fire_scene_update trigger action already uses — INSTEAD of compiling
+    and firing the requested scene; a scene with no update_kind authored
+    (his own "might not be defined yet" — most of his real scenes today)
+    degrades to that function's existing no-op, recorded (never silent) to
+    fire_history's "deferred" bucket rather than the "scenes" bucket below.
+    Every real (non-deferred) fire re-latches dwell.note_fired for the
+    scene that just started showing — the ONE place dwell's own "current
+    scene" state updates, which is what keeps it from going stale the way
+    the old sequencer-local dwell bookkeeping did on a trigger fire."""
+    from spectra.services import (color_set_groups, color_sets, dwell,
+                                  fire_history, mode_availability,
+                                  scene_compiler, scene_store)
     from spectra.services.room_controls import load_room_controls
     controls = load_room_controls()
     forced = False
@@ -103,6 +137,19 @@ async def fire_scene_by_id(scene_id: str,
             getattr(scene, "display_availability", "default"), controls.display_mode):
         return {"skipped": "mode_availability", "scene_id": scene_id,
                "scene_name": scene.name}
+    remaining_dwell = dwell.remaining_s()
+    overrode_dwell = forced and remaining_dwell > 0
+    if not forced and remaining_dwell > 0:
+        from spectra.services.engine import fire_scene_update_event
+        update_result = await fire_scene_update_event(intensity)
+        fire_history.record_fire("deferred", scene_id, {
+            "scene_name": scene.name,
+            "remaining_dwell_s": round(remaining_dwell, 1),
+            "update_result": (update_result or {}).get("result"),
+        })
+        return {"skipped": "dwell", "scene_id": scene_id, "scene_name": scene.name,
+               "remaining_dwell_s": round(remaining_dwell, 1),
+               "update_result": update_result}
     color_set = color_sets.get_by_id(color_set_id) if color_set_id else None
     if color_set is not None:
         # A Group reference resolves to its picked member here (§10) — a
@@ -114,6 +161,9 @@ async def fire_scene_by_id(scene_id: str,
                                              color_set=color_set, dry_run=False)
     if overrode_disabled:
         result["overrode_disabled"] = True
+    if overrode_dwell:
+        result["overrode_dwell"] = True
+    dwell.note_fired(scene, intensity)
     fire_history.record_fire("scenes", scene_id, {
         "scene_name": getattr(scene, "name", scene_id),
         "color_set_id": color_set_id,
@@ -212,10 +262,15 @@ class SceneSequencer:
         self.transition_source.bind(self._on_change_moment)
 
         # Runtime state — in-memory only, rebuilt from the room after restart.
+        # _active_id is this instance's own belief for candidate-building
+        # (prev_id for affinity, the "renewed" comparison below) — the
+        # MINIMUM DWELL gate itself lives centrally in spectra/services/
+        # dwell.py, fed by fire_scene_by_id directly, not this field (see
+        # that module's docstring for why: this field only updates from a
+        # roll or an observed legacy trigger fire, so a SPECTRA-native
+        # trigger fire would go stale here the same way it always did —
+        # dwell.py structurally cannot have that problem).
         self._active_id: Optional[str] = None
-        self._served_songs: int = 0
-        self._dwell_target: int = 0
-        self._dwell_weight: float = 1.0
         self._seen_trigger_scene_id: Optional[str] = None
         self._last_pick: Optional[dict] = None
         self._last_moment: Optional[dict] = None
@@ -247,43 +302,32 @@ class SceneSequencer:
             self._record_moment(source, f"deferred:{deferral}")
             return
 
-        adopted_now = self._observe_trigger_fires(config)
-
-        if self._active_id is not None and not adopted_now:
-            self._served_songs += 1
-            if self._served_songs < self._dwell_target:
-                self._record_moment(source, "held")
-                return
-        elif adopted_now and self._served_songs < self._dwell_target:
-            # Freshly adopted (trigger-fired) scene hasn't been through a
-            # full song yet — this moment neither counts nor changes it.
-            self._record_moment(source, "held")
-            return
-
+        # MINIMUM DWELL (spectra/services/dwell.py) no longer gates here —
+        # it gates centrally at fire_scene_by_id, which every real fire
+        # below (self._fire) already funnels through, so a roll that picks
+        # a different scene too soon is simply converted into an update
+        # effect downstream rather than held back from being tried at all.
+        self._observe_trigger_fires(config)
         await self._roll(config, source)
 
     def _observe_trigger_fires(self, config: SequencerConfig) -> bool:
         """Observe (never drive) the legacy engine through the bridge: a new
-        trigger-fired scene id since the last enabled moment is adopted with
-        a fresh dwell count. The first enabled moment only baselines."""
+        trigger-fired scene id since the last enabled moment updates this
+        instance's own "current scene" belief (prev_id for affinity). The
+        first enabled moment only baselines."""
         seen = self._trigger_scene_id() or None
         if self._seen_trigger_scene_id is None:
             self._seen_trigger_scene_id = seen or ""
             return False
         if seen and seen != self._seen_trigger_scene_id:
             self._seen_trigger_scene_id = seen
-            self._adopt(seen, config)
-            logger.info("sequencer: adopted trigger-fired scene %s "
-                        "(dwell reset, target %d songs)", seen, self._dwell_target)
+            self._adopt(seen)
+            logger.info("sequencer: adopted trigger-fired scene %s", seen)
             return True
         return False
 
-    def _adopt(self, scene_id: str, config: SequencerConfig) -> None:
-        entry = config.entries.get(scene_id)
+    def _adopt(self, scene_id: str) -> None:
         self._active_id = scene_id
-        self._served_songs = 0
-        self._dwell_weight = entry.dwell_weight if entry else 1.0
-        self._dwell_target = kernel.resolve_dwell_songs(self._dwell_weight, self._rng)
 
     async def _roll(self, config: SequencerConfig, source: str) -> None:
         curves = sequencer_store.load_curves()
@@ -324,13 +368,12 @@ class SceneSequencer:
                         pick.intensity)
             return
         if pick.picked_id == self._active_id:
-            # Only reachable via the re-admit/uniform rungs. The room already
-            # shows this scene — renew dwell instead of re-firing.
-            self._adopt(pick.picked_id, config)
+            # Only reachable via the re-admit/uniform rungs. The room
+            # already shows this scene — nothing to fire.
+            self._adopt(pick.picked_id)
             self._record_moment(source, "renewed")
-            logger.info("sequencer: current scene %s renewed via rung=%s "
-                        "(dwell target %d songs)", pick.picked_id, pick.rung,
-                        self._dwell_target)
+            logger.info("sequencer: current scene %s renewed via rung=%s",
+                        pick.picked_id, pick.rung)
             return
         color = self._roll_color_set(config, curves, pick.picked_id,
                                      intensity, genre_bucket)
@@ -340,26 +383,34 @@ class SceneSequencer:
             # pick. The FIRE itself gets the current song's genre+bass
             # render scale on top (intensity_scale.py), same split trigger_
             # engine.py's own _fire/_fire_transition make.
-            await self._fire(pick.picked_id,
-                             color["fire_set_id"] if color else None,
-                             self._render_intensity(intensity))
+            fire_result = await self._fire(pick.picked_id,
+                                           color["fire_set_id"] if color else None,
+                                           self._render_intensity(intensity))
         except Exception:
             logger.exception("sequencer: firing scene %s failed", pick.picked_id)
             self._record_moment(source, "fire_failed")
             return
-        self._adopt(pick.picked_id, config)
+        if isinstance(fire_result, dict) and "skipped" in fire_result:
+            # MINIMUM DWELL (or any other fire_scene_by_id gate) declined
+            # the fire — the room's active scene never changed, so this
+            # instance's own "current scene" belief must not move either
+            # (adopting the un-fired pick here would desync prev_id/
+            # affinity from what's actually showing, the exact staleness
+            # dwell.py's own docstring exists to avoid).
+            self._record_moment(source, f"skipped:{fire_result['skipped']}")
+            logger.info("sequencer: kernel picked %s but fire_scene_by_id "
+                        "declined it (%s) — active scene unchanged",
+                        pick.picked_id, fire_result["skipped"])
+            return
+        self._adopt(pick.picked_id)
         if color is not None:
             self._adopt_colors(color)
         self._record_moment(source, "picked")
-        logger.info("sequencer: picked %s via rung=%s at intensity %.2f "
-                    "(dwell target %d songs, weight %g)", pick.picked_id,
-                    pick.rung, pick.intensity, self._dwell_target,
-                    self._dwell_weight)
+        logger.info("sequencer: picked %s via rung=%s at intensity %.2f",
+                    pick.picked_id, pick.rung, pick.intensity)
         await self._broadcast({
             "type": "sequencer_pick",
             **self._last_pick,
-            "dwell_target_songs": self._dwell_target,
-            "dwell_weight": self._dwell_weight,
             "color": self._last_color_pick if color is not None else None,
         })
 
@@ -419,6 +470,7 @@ class SceneSequencer:
     # ── observability (GET /spectra/api/sequencer/status) ───────────────────
 
     def status(self) -> dict:
+        from spectra.services import dwell
         config = sequencer_store.load_config()
         return {
             "enabled": config.enabled,
@@ -429,11 +481,13 @@ class SceneSequencer:
             "active_scene_id": self._active_id,
             "active_scene_name": (self._scene_name(self._active_id)
                                   if self._active_id else None),
-            "dwell": {
-                "served_songs": self._served_songs,
-                "target_songs": self._dwell_target,
-                "weight": self._dwell_weight,
-            } if self._active_id else None,
+            # Minimum dwell (spectra/services/dwell.py) is process-global —
+            # fed by EVERY real fire (sequencer, trigger, automatic
+            # transition), not just this instance's own rolls — so this is
+            # the shared gate's own status, not derived from _active_id
+            # above (which can legitimately differ, e.g. right after a
+            # trigger fired a scene this instance hasn't observed yet).
+            "dwell": dwell.status(),
             "last_pick": self._last_pick,
             "last_moment": self._last_moment,
             "color": {
@@ -449,8 +503,8 @@ class SceneSequencer:
 
     async def _default_fire(self, scene_id: str,
                             color_set_id: Optional[str] = None,
-                            intensity: float = 0.5) -> None:
-        await fire_scene_by_id(scene_id, color_set_id, intensity)
+                            intensity: float = 0.5) -> dict:
+        return await fire_scene_by_id(scene_id, color_set_id, intensity)
 
     def _default_eligible_sets(self, scene_id: str) -> dict[str, Optional[float]]:
         from spectra.services import (color_sets, color_wheel,

@@ -1290,7 +1290,12 @@ async def _fake_fire_scene(scene, *, intensity=0.5, color_set=None,
             "resolved_bindings": {}, "dice_rolls": {}}
 
 scene_compiler.fire_scene = _fake_fire_scene
+from spectra.services import dwell as _fs_dwell   # reset between steps below —
+# this section fires two DIFFERENT scenes back to back; the minimum-dwell
+# gate (2026-08-20) would otherwise defer the second one, since it's an
+# unrelated mechanism this section never means to exercise.
 try:
+    _fs_dwell.reset()
     rc.save_room_controls(rc.RoomControlState(
         force_scene_enabled=True, force_scene_scene_id=fs_held.id))
     asyncio.run(fire_scene_by_id(fs_requested.id, intensity=0.6))
@@ -1298,6 +1303,7 @@ try:
           "Force Scene: the pinned scene fires instead of the one requested "
           "— the sequencer/trigger caller's own intensity still passes through")
 
+    _fs_dwell.reset()
     rc.save_room_controls(rc.RoomControlState(
         force_scene_enabled=True, force_scene_scene_id="missing-scene"))
     asyncio.run(fire_scene_by_id(fs_requested.id, intensity=0.6))
@@ -1305,6 +1311,7 @@ try:
           "Force Scene: a pinned id pointing at a missing scene is treated "
           "as unset, same as legacy's missing/non-scene event guard")
 
+    _fs_dwell.reset()
     rc.save_room_controls(rc.RoomControlState(force_scene_enabled=False))
     asyncio.run(fire_scene_by_id(fs_requested.id, intensity=0.6))
     check(fs_fired[-1] == fs_requested.id,
@@ -1315,6 +1322,7 @@ try:
     # DID that on its own, so on a song with no triggers (his live
     # report) nothing ever fired. reconcile_force_scene_if_changed must
     # fire the pin immediately, right on the enabling edit.
+    _fs_dwell.reset()
     fs_prev = rc.RoomControlState(force_scene_enabled=False)
     fs_next = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=fs_held.id)
     rc.save_room_controls(fs_next)
@@ -1342,7 +1350,88 @@ try:
           "does not re-fire")
 finally:
     scene_compiler.fire_scene = _orig_fire_scene
+    _fs_dwell.reset()
 rc.save_room_controls(rc.RoomControlState())   # reset for later sections
+
+# ── MINIMUM DWELL (2026-08-20, data/plan-make-dwell-meaningful-under-the-
+#    rea-4p73/{report,HIS-DECISION}.md): a per-scene minimum hold, seconds
+#    over intensity, gated at the SAME fire_scene_by_id choke point Force
+#    Scene above already proves — see spectra/services/dwell.py ─────────────
+from spectra.services import dwell, fire_history as fh
+from spectra.models.scene import CurveAttachment as _CurveAttachment
+
+dwell.reset()
+dw_a = SceneV2(name="Dwell A")
+dw_b = SceneV2(name="Dwell B", dwell_curve=_CurveAttachment(
+    inline_points=[{"x": 0.0, "y": 4.0}, {"x": 1.0, "y": 4.0}]))
+scene_store.save(dw_a)
+scene_store.save(dw_b)
+
+dw_fired: list[tuple] = []
+dw_update_calls: list[float] = []
+
+async def _dw_fake_fire_scene(scene, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None):
+    dw_fired.append((scene.id, intensity))
+    return {"dry_run": dry_run, "intensity": intensity, "writes": []}
+
+async def _dw_fake_update_event(intensity):
+    dw_update_calls.append(intensity)
+    return {"result": "no_update_kind"}
+
+from spectra.services import engine as _engine_mod
+
+_orig_fire_scene2 = scene_compiler.fire_scene
+_orig_update_event = _engine_mod.fire_scene_update_event
+scene_compiler.fire_scene = _dw_fake_fire_scene
+_engine_mod.fire_scene_update_event = _dw_fake_update_event
+try:
+    check(dwell.dwell_seconds(dw_a, 0.0) == 16.0
+          and dwell.dwell_seconds(dw_a, 1.0) == 4.0
+          and dwell.dwell_seconds(dw_a, 0.5) == 10.0,
+          "unset dwell_curve resolves to his exact default: 16s @0, 4s @1, linear")
+
+    asyncio.run(fire_scene_by_id(dw_a.id, intensity=0.0))
+    dw_deferred = asyncio.run(fire_scene_by_id(dw_b.id, intensity=0.7))
+    check(dw_fired == [(dw_a.id, 0.0)],
+          "a scene requested inside the active scene's own dwell window "
+          "never reaches scene_compiler.fire_scene")
+    check(dw_update_calls == [0.7],
+          "the deferral calls the update-effect seam at the REQUEST's own "
+          "intensity, not the active scene's")
+    check(dw_deferred["skipped"] == "dwell" and dw_deferred["scene_id"] == dw_b.id
+          and dw_deferred["remaining_dwell_s"] > 0,
+          "the deferred result names what happened, never a bare {} silence")
+    check(fh.load_all()["deferred"][dw_b.id]["count"] == 1,
+          "a deferral is RECORDED — fire_history's own bucket for it")
+
+    # Answer A: no reset on an update effect — a second deferred request
+    # must not touch the latch at all.
+    dwell_seconds_before = dwell.status()["dwell_seconds"]
+    asyncio.run(fire_scene_by_id(dw_b.id, intensity=1.0))
+    check(dwell.active_scene_id() == dw_a.id
+          and dwell.status()["dwell_seconds"] == dwell_seconds_before,
+          "answer A: a deferral never resets or re-latches the active "
+          "scene's own dwell window")
+    # Answer B: the intensity is LATCHED at entry, not re-evaluated.
+    check(dwell.status()["dwell_seconds"] == 16.0,
+          "answer B: dw_a fired at intensity 0.0 (16s) — a later deferred "
+          "request at intensity 1.0 must not shrink it to 4s")
+
+    # Force Scene still wins over an active dwell, but names it.
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=True, force_scene_scene_id=dw_b.id))
+    dw_forced = asyncio.run(fire_scene_by_id(dw_a.id, intensity=0.5))
+    check(dw_fired[-1] == (dw_b.id, 0.5) and dw_forced.get("overrode_dwell") is True,
+          "Force Scene fires through an active dwell but NAMES the "
+          "override — the disabled-scene gate's own pattern")
+    check(dwell.active_scene_id() == dw_b.id,
+          "a Force-Scene fire is a REAL fire — it re-latches like any other")
+finally:
+    scene_compiler.fire_scene = _orig_fire_scene2
+    _engine_mod.fire_scene_update_event = _orig_update_event
+    dwell.reset()
+    rc.save_room_controls(rc.RoomControlState())   # reset for later sections
 
 # ── item-8 CANONICAL shape: a band SELECTS AND SCALES its named kinds ────────
 # The owner's example, executed: the top band fires "Slam" + "Colour Roll"

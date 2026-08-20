@@ -2004,6 +2004,78 @@ to original" undoes an edit session back to exactly what was attached
 before it started. Full detail: `docs/SPECTRA_SPEC.md` §65/§76. Spec:
 `tests/test_color_set_group_curves.py`.
 
+## SPECTRA minimum dwell (rebuilt 2026-08-20 — read before touching "dwell" anywhere)
+
+Dwell was rebuilt under the real definition of a "song transition" (his
+words: it means transitions *within* a song, or scene trigger calls — not
+between songs). The OLD mechanism — `SelectorEntry.dwell_weight`
+(`spectra/models/sequencer.py`), resolved to a SONG COUNT
+(`resolve_dwell_songs`, now removed) and gated only inside
+`SceneSequencer._on_change_moment`'s own song-transition roll — is
+RETIRED. It never touched the path he actually uses: SPECTRA-native
+triggers (`trigger_engine._fire`'s `fire_scene` action) went through
+`fire_scene_by_id` with zero dwell awareness of any kind, on ~22,000 real
+fires.
+
+New mechanism, `spectra/services/dwell.py` — read its own docstring before
+touching this. A per-scene MINIMUM HOLD TIME, a curve over intensity (y =
+SECONDS, not a likelihood), reusing the SAME `CurvePoint`/named-profile
+curve-selector shape and `CurveAttachmentEditor.tsx` component the
+sequencer's likelihood curves already use — `SceneV2.dwell_curve`
+(`spectra/models/scene.py`, a `CurveAttachment` — the same curve_ref/
+inline_points pair minus `SelectorEntry`'s genre_mult/dwell_weight).
+`None` = his exact default, `dwell.DEFAULT_DWELL_CURVE` (16s @ intensity
+0, 4s @ intensity 1, linear). Gated ENTIRELY at `scene_sequencer.
+fire_scene_by_id` — the one choke point every automatic scene-change path
+(sequencer roll, trigger `fire_scene`, automatic transition) already
+funnels through — so it covers all of them uniformly for free, and fixes
+a second bug as a side effect: the OLD mechanism's "current scene" belief
+(`SceneSequencer._active_id`) went stale the instant a SPECTRA-native
+trigger fired a different scene (it only updated from the sequencer's own
+rolls or an OBSERVED legacy bridge fire); `dwell.py`'s state is
+process-global, fed by the one function every real fire passes through,
+so it structurally cannot have that staleness.
+
+His four answers (binding, `data/plan-make-dwell-meaningful-under-the-
+rea-4p73/HIS-DECISION.md` — "do all your recs"): **(A)** no clock reset on
+an update effect — a minimum is a floor; only a REAL fire calls
+`dwell.note_fired`, never a deferral. **(B)** intensity LATCHES at
+entry — `dwell_seconds` is computed once, from the intensity the scene
+actually fired at (the render intensity `fire_scene_by_id` was called
+with), never re-evaluated while the hold is running. **(C)** every
+AUTOMATIC path is gated; the manual editor Fire button is exempt (it
+already bypasses `fire_scene_by_id`, same as disabled/mode-availability);
+Force Scene still wins but the result NAMES the override
+(`overrode_dwell=True`, forwarded through `room_controls.
+reconcile_force_scene_if_changed` — same pattern as `overrode_disabled`).
+**(D)** a deferred scene change fires the current scene's own UPDATE
+EFFECT instead — CONFIRMED BY HIM to be the existing `on_update`/
+`SceneV2.update_kind` mechanism (`scene_response.py`, `engine.
+fire_scene_update_event`, now also called from dwell's deferral branch and
+returning the `on_update` record instead of `None` so the caller can log
+what happened).
+
+**The consequence his answer makes live, handled not discovered**: most
+of his real scenes have no `update_kind` authored, so `on_update` is a
+pre-existing no-op for them (`{"result": "no_update_kind"}`). Dwell ships
+gating them anyway — his own card text anticipated this exact staging
+("they might not be defined yet, but we will do those soon") — but the
+interim hold is NEVER SILENT: `fire_scene_by_id` records every deferral to
+`fire_history`'s new `"deferred"` bucket (`{scene_name, remaining_dwell_s,
+update_result}`, both the durable count and the show-log timeline, visible
+on the Review page), so "why didn't the room change" is a log lookup, not
+a mystery indistinguishable from triggers having stopped working.
+
+Frontend: `SequencingTab.tsx` mounts a SECOND `CurveAttachmentEditor`
+below the likelihood one, `attachField="dwell_curve"` — a THIRD storage
+path the shared component didn't have before (round-trips `POST /scenes`
+via `useAttachCurve`, not `PUT /sequencer/config`), plus two small
+additive props (`defaultPoints`/`noneLabel`) so "no override" previews his
+real 16s/4s default instead of a misleading flat-1.0 line — never a
+parallel control, the same component every other curve in this app uses.
+Spec: `tests/test_dwell.py`, `scripts/check_spectra.py`'s own MINIMUM
+DWELL section (mirrors the Force Scene proof immediately above it).
+
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
 Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/

@@ -431,6 +431,12 @@ overrides display_availability), but `fire_scene_by_id` marks the result
 `force_scene_result.overrode_disabled` so the badge can say so, rather
 than either silently refusing the pin or silently pretending the scene
 was never disabled.
+
+FORCE SCENE OVERRIDING AN ACTIVE MINIMUM DWELL IS NAMED, NOT SILENT (owner
+ask 2026-08-20, spectra/services/dwell.py) — the identical pattern one
+paragraph up: a pin lands even while the active scene hasn't cleared its
+own minimum hold yet, and `fire_scene_by_id` marks the result
+`overrode_dwell=True`, forwarded here as `force_scene_result.overrode_dwell`.
 """
 from __future__ import annotations
 
@@ -840,4 +846,9 @@ async def reconcile_force_scene_if_changed(previous: RoomControlState,
         # NAMED rather than silently applied, same "always state a reason"
         # discipline as the skipped/error branches above.
         result["overrode_disabled"] = True
+    if fire_result.get("overrode_dwell"):
+        # Same pattern, dwell's own gate (spectra/services/dwell.py,
+        # 2026-08-20): the currently-active scene hadn't cleared its own
+        # minimum hold yet, but the pin fires anyway — named, not silent.
+        result["overrode_dwell"] = True
     return result

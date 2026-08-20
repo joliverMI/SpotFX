@@ -1,8 +1,11 @@
 """SPECTRA sequencer API — the spot-effects agent-adjustment surface, ported
 onto SPECTRA's stores. The interface split is unchanged: curves are
 graphical (the UI writes ONLY the profile library and each entry's curve
-attachment); relationships and durations (genre_mult, dwell_weight,
-affinity, enabled) are adjusted by telling the agent through PUT /config.
+attachment); relationships (genre_mult, affinity, enabled) are adjusted by
+telling the agent through PUT /config. Minimum dwell (the retired
+dwell_weight's successor) is NOT here at all — it's a per-scene SceneV2
+field (spectra/models/scene.py's dwell_curve), round-tripped through
+POST /scenes like any other scene field; see spectra/services/dwell.py.
 
   GET/PUT /api/sequencer/config     GET/PUT /api/sequencer/curves
   GET     /api/sequencer/status     POST    /api/sequencer/simulate

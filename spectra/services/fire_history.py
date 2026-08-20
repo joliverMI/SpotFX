@@ -30,6 +30,16 @@ fired" — the same key is used for both the count and the show-log entry:
                "what did THE KEYSTONE itself fire", distinct from the
                scene/response/color_set buckets above which count every
                caller, trigger-originated or not.
+  deferred     scene_sequencer.fire_scene_by_id's dwell gate (spectra/
+               services/dwell.py, 2026-08-20), keyed by the scene id that
+               WOULD have fired — the interim behaviour for a scene change
+               requested while the active scene's own minimum dwell hasn't
+               elapsed: the room holds (an update effect fires instead when
+               one is authored), and this is the non-silent record of that
+               — {requested_scene_id, remaining_dwell_s, update_result}.
+               Without this, a scene with no update_kind authored yet
+               (8 of his 9 real scenes as of this field) would look
+               indistinguishable from "triggers stopped working."
 
 Storage: storage/spectra/fire_history.json (counts) and storage/spectra/
 show_log.json (timeline), same atomic tmp+replace discipline as
@@ -56,7 +66,7 @@ from spectra import config
 
 logger = logging.getLogger(__name__)
 
-BUCKETS = ("scenes", "responses", "color_sets", "triggers")
+BUCKETS = ("scenes", "responses", "color_sets", "triggers", "deferred")
 
 # Entry-count cap for the show log — bounded, never unbounded growth. On
 # each append, entries beyond this count are dropped oldest-first.

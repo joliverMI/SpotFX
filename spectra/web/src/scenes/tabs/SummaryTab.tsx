@@ -115,9 +115,14 @@ export default function SummaryTab({ scene, setScene, goTo }: {
           {entry && (
             <span>
               {entry.curve_ref ? 'named curve' : entry.inline_points ? 'inline curve' : 'flat 1.0'}
-              {' '}· dwell ×{entry.dwell_weight}
             </span>
           )}
+          <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>
+            min dwell {scene.dwell_curve
+              ? (scene.dwell_curve.curve_ref ? 'named curve'
+                : scene.dwell_curve.inline_points ? 'inline curve' : 'flat')
+              : '16s → 4s (default)'}
+          </div>
         </Card>
 
         <Card title="Colour Sets" onClick={() => goTo('Colour Sets')}>
