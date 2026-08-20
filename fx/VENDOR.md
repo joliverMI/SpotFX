@@ -239,6 +239,23 @@ variables named `ledfx` (the core object handle) are untouched.
     `tests/test_hue_tween_achromatic_saturation.py`. Not yet ported back to
     the fork source at `/home/javi/ledfx-src`.
 
+14. `effects/blackhole.py`: `_phase_burst()`/`draw()` — the drop-payoff
+    explosion (BEHAVIOUR CHANGE, PR fm/spectra-blackhole-explosion-twice-as-
+    fast). His ask, verbatim: "the timing is good on black hole, but the
+    speed of the explosion after the implosion needs to be 2 times faster."
+    New constant `PHASE_BURST_SPEED_MULT = 2.0` doubles the outward velocity
+    of ONLY the drop-payoff burst's own particles (tagged `p_is_burst`) in
+    `draw()`'s `out_mask` branch, paired with `_phase_burst()` halving those
+    same particles' `p_out` outward-flight duration — same reach, half the
+    time, not a bigger burst. `_erupt_burst`'s cross-effect handoff
+    eruptions share the `out_mask`/`p_out` mechanism but are never tagged
+    `p_is_burst`, so they are untouched. The pinch (implosion) and the
+    post-burst horizon ease-back (`DROP_RESET_S`) are both untouched, so the
+    burst still fires on the exact same frame relative to the trigger as
+    before — evidence: `scripts/check_blackhole_explosion_speed.py`, tests:
+    `tests/test_blackhole_explosion_speed.py`. Not yet ported back to the
+    fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
