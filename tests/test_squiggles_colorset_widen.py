@@ -12,16 +12,22 @@ effect's configured `background_color` onto every "dark" pixel whenever
 this directly. The seven previously-accepted "Orbit - *" sets all share
 `bg_color=#000000`, the one shape that never triggers the flood.
 
-THE FIX removes the constraint at its source instead of growing the
-allowlist: `config/effect_params.json` now marks squiggles
-`no_background_color: true` — the same registry flag already used for
-`radial` and `pacman` (`fx.device_model.bg_color_blocked()`) — so no
-colour-set-driven write path (`scene_compiler.py`, `drift_conductor.py`,
-`scene_response.py`) ever writes a background onto Squiggles, regardless
-of which set fires. Proof 2 confirms the compiled config; proof 3 confirms
-the accept list itself now admits a previously-excluded bright-background
-set once `accept_all_sets=True` (the migration
-`scripts/widen_squiggles_colorset_accept.py` applies).
+THE ORIGINAL FIX (PR 137) removed the constraint at its source instead of
+growing the allowlist: `config/effect_params.json` marked squiggles
+`no_background_color: true`, the same registry flag `radial`/`pacman`
+carry, blocking every colour-set-driven write path from ever writing a
+background onto Squiggles. **That flag is now REMOVED (his ruling,
+2026-08-19, PR fm/spectra-squiggles-restore-backgrounds): "keep the
+backgrounds, i want to control them with overrides."** He is choosing to
+manage the flood himself with colour-group overrides (§10, §86's
+group-override-overlay fix — now landed and proven reaching his real
+fixtures) rather than have the capability removed outright. Proof 1 still
+holds (the flood is real, unmediated by the flag) — proof 2 below now
+confirms the OPPOSITE of before: `bg_color_blocked("squiggles")` is
+`False` and `compile_scene` DOES write `background_color` for Squiggles
+again, same as any other colour-driven effect. Proof 3 (the widened
+accept list itself, from `scripts/widen_squiggles_colorset_accept.py`) is
+untouched by this reversal and still holds.
 """
 from __future__ import annotations
 
@@ -105,19 +111,18 @@ def test_bright_background_floods_squiggles_on_the_real_pipeline(tmp_path):
     _run(main())
 
 
-# ── proof 2: no_background_color blocks the write at every choke point ──────
+# ── proof 2: the flag is gone — squiggles writes backgrounds again ──────────
 
-def test_bg_color_blocked_for_squiggles_matches_its_dark_canvas_siblings():
-    # radial/pacman already carry this flag for the identical reason
-    # ("a non-black background washes the panel") — squiggles now does too.
-    assert device_model.bg_color_blocked("squiggles") is True
+def test_bg_color_blocked_no_longer_applies_to_squiggles():
+    # radial/pacman are untouched by his ruling and still carry the flag.
+    assert device_model.bg_color_blocked("squiggles") is False
     assert device_model.bg_color_blocked("radial") is True
     assert device_model.bg_color_blocked("pacman") is True
-    # a dense particle effect is unaffected — this is not a blanket flag
+    # a dense particle effect was never blocked either
     assert device_model.bg_color_blocked("blackhole") is False
 
 
-def test_compile_scene_never_writes_background_for_squiggles(tmp_path):
+def test_compile_scene_writes_background_for_squiggles_again(tmp_path):
     from spectra.models.scene import SceneColorAssignment, SceneDeviceConfig, SceneV2
     from spectra.services import scene_compiler
     from spectra.services.color_sets import ColorSetCard, ColorSetEntry, SetScope
@@ -144,8 +149,10 @@ def test_compile_scene_never_writes_background_for_squiggles(tmp_path):
         config = writes[0]["config"]
         # the gradient still rides the fired set's own foreground colour...
         assert config["gradient"] == card.entries[0].color_value, card.name
-        # ...but background_color is NEVER written, bright set or not
-        assert "background_color" not in config, (card.name, config)
+        # ...and background_color is written again, matching the fired set's
+        # own authored value — his ruling: he controls this with overrides.
+        assert config["background_color"] == card.entries[0].bg_color, (
+            card.name, config)
 
 
 # ── proof 3: the widened accept list genuinely admits a Mid-family set ──────
@@ -167,37 +174,29 @@ def test_squiggles_accepts_mid_family_set_once_widened():
     assert widened.accepts_color_set(mid_card) is True
 
 
-# ── proof 4: the fix behaves — a Mid gradient renders clean, not washed ─────
+# ── proof 4: a Mid background genuinely floods again, as his own ────────────
+# ── override control now expects to be needed for ───────────────────────────
 
-def test_mid_family_gradient_renders_clean_once_background_is_blocked(tmp_path):
-    """The render-level confirmation the task asked for: with
-    background_color never written (what device_model.bg_color_blocked
-    now guarantees for squiggles), does a Mid-family FOREGROUND gradient
-    still render as legible chains on black, matching the accepted
-    Orbit sets' own look? Yes — proves "genuinely reachable AND behaves",
-    not just a longer accept list."""
-    mid_foreground_only = {
-        "gradient": "linear-gradient(90deg, #ff0000 0%, #ff8f00 75%, #ff0000 100%)",
-        "spawn_rate": 6.0,
-        "max_blobs": 14,
-        # no background_color/background_brightness/background_mode key —
-        # exactly what compile_scene now produces for squiggles regardless
-        # of the fired set's own bg_color (proof 2)
-    }
+def test_mid_family_gradient_floods_again_now_the_flag_is_removed(tmp_path):
+    """He is choosing to manage the flood himself with colour-group
+    overrides (§10/§86) rather than have Squiggles' background writes
+    suppressed. Confirms the flood he's now controlling is real, not
+    already-neutralized by leftover config — a bright authored bg_color
+    washes Squiggles exactly like proof 1 showed pre-fix."""
     async def main():
-        host = await headless.start_headless_host(str(tmp_path / "clean"))
+        host = await headless.start_headless_host(str(tmp_path / "flood-again"))
         virtual = host.virtuals.get(VID)
         try:
             orbit_frame = _render_last_frame(
                 host, virtual, {**SQUIGGLES_BASE, **ORBIT_BG})
-            mid_frame = _render_last_frame(host, virtual, mid_foreground_only)
+            mid_frame = _render_last_frame(
+                host, virtual, {**SQUIGGLES_BASE, **MID_BG})
         finally:
             await host.shutdown()
         orbit_frac = _frac_bright(orbit_frame)
         mid_frac = _frac_bright(mid_frame)
-        # both render as sparse chains, comparable coverage — no flood
-        assert mid_frac < 0.15, mid_frac
-        assert abs(mid_frac - orbit_frac) < 0.10, (mid_frac, orbit_frac)
+        assert orbit_frac < 0.15, orbit_frac
+        assert mid_frac > 0.95, mid_frac
         # something actually drew (not a silent all-black failure)
         assert float(np.abs(mid_frame).sum()) > 0
 

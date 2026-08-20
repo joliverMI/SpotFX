@@ -1368,22 +1368,26 @@ writes entirely** — `config/effect_params.json`'s per-effect
 by every colour-set-driven write path: `scene_compiler.py` ×2,
 `drift_conductor.py`, `scene_response.py`) makes those paths skip writing
 a fired set's `bg_color` onto that effect's config at all, regardless of
-which set fires. Already set on `radial` ("a non-black background washes
-the panel") and `pacman`; also set on `squiggles` (§85) after a real
-headless render proved a bright authored background floods ~100% of its
-frame (both effects paint thin/sparse content onto a canvas that starts
-as `np.zeros(...)`, unlike the denser particle effects that read their
-own `self._bg_color`/pre-filled `self.matrix`, e.g. `blackhole.py`). If a
-Matrix scene's colour-set accept list looks suspiciously narrow, check
-this flag before assuming the narrowing is arbitrary or before widening
-it — verify from the effect's real render output (`fx.headless`), not
-from set metadata. §85 is the worked example of why this matters: a plain
-"widen the accept list" would have forced a choice between reaching more
-sets and staying legible; blocking the write instead removes that choice
-entirely — every set becomes reachable AND Squiggles stays legible on all
-of them. `pacman` carries the identical byte-for-byte accept list and
-would trivially take the same fix, but that scene wasn't part of the ask
-that produced §85 — deliberately left alone as his call, not tidied in
+which set fires. Still set on `radial` ("a non-black background washes
+the panel") and `pacman` (both paint thin/sparse content onto a canvas
+that starts as `np.zeros(...)`, unlike the denser particle effects that
+read their own `self._bg_color`/pre-filled `self.matrix`, e.g.
+`blackhole.py`). §85 also set it on `squiggles` after a real headless
+render proved a bright authored background floods ~100% of its frame —
+**removed again, §87, his own ruling: "keep the backgrounds, i want to
+control them with overrides."** He was told the legibility tradeoff and
+chose to manage it himself with colour-group overrides (§10) instead of
+having the capability suppressed — made possible once §86 proved a group
+override actually reaches the wire (three choke points were silently
+discarding it before that fix). If a Matrix scene's colour-set accept
+list looks suspiciously narrow, check this flag before assuming the
+narrowing is arbitrary or before widening it — verify from the effect's
+real render output (`fx.headless`), not from set metadata; squiggles'
+widened accept list (§85, `accept_all_sets=True`) itself never depended
+on the flag and is untouched by its removal. `pacman` carries the
+identical byte-for-byte accept list to squiggles' pre-widen state and
+still carries the flag — not part of either his §85 widen ask or his §87
+background ruling, deliberately left alone as his call, not tidied in
 passing.
 
 ## SPECTRA settings console (standing order 5: talk to the software)
