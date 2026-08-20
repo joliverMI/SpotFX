@@ -1452,33 +1452,6 @@ still carries the flag — not part of either his §85 widen ask or his §87
 background ruling, deliberately left alone as his call, not tidied in
 passing.
 
-**In "light" mode, an authored black background now clears to the room's
-Light colour instead of literal black — his ruling, "do option three"** (PR
-fm/spectra-light-mode-clear-to-mode-bg). The bug this fixes: Light paints
-its forced background ONCE (`dark_light.py`'s reconcile write) and never
-re-asserts it, so any of the 30 authored-black entries above (still
-load-bearing in Hybrid, untouched by this fix) clears it right back to
-black on the very next colour-set-driven fire and it never returns — his
-report, effects "start with a background color appropriately and then go
-dark." `room_controls.resolve_authored_bg_color(bg_color, display_mode,
-light_bg_color)` is the one substitution rule (exact `#000000` in `"light"`
-mode only); it is threaded into every one of the FIVE places a colour-set/
-scene-entry background can reach the wire — `scene_compiler._entry_config`/
-`_apply_set_colors` (`compile_scene`, kept pure — mode is passed in, loaded
-once by `fire_scene` the same way it already loads `brightness_multiplier`),
-`scene_response.ResponseEngine._color_jump`, and
-`drift_conductor.DriftConductor.apply_color_set`/`_journey_leg` (the
-journey's own hue-rotated `state.background_color`, a different source
-than the other four's `entry.bg_color` — rotating an achromatic black is a
-no-op in HSV, so it still reads as `#000000` at this fifth point no matter
-how many legs have run). Missing any one of the five reproduces the exact
-bug in a narrower costume — verify a future touch to any of these functions
-still calls `resolve_authored_bg_color` before it writes `background_color`.
-Regression coverage: `tests/test_light_mode_bg_clear.py` (all five write
-points, `RecordingExecutor` only). Real-data proof against his actual
-`storage/color_sets.json`/`storage/spectra/scenes.json` (primary checkout,
-read-only): `scripts/check_light_mode_bg_clear.py`.
-
 ## SPECTRA settings console (standing order 5: talk to the software)
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing

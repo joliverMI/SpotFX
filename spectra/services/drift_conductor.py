@@ -103,7 +103,7 @@ from typing import Any, Awaitable, Callable, Optional
 from spectra.models import gradient2d
 from spectra.models.scene import DriftSpec, SceneV2
 from spectra.models.sequencer import CurvePoint, SelectorEntry
-from spectra.services import color_journey, color_rotate, room_controls
+from spectra.services import color_journey, color_rotate
 from spectra.services import selection_kernel as kernel
 from spectra.services.selection_kernel import curve_eval
 
@@ -237,8 +237,6 @@ class DriftConductor:
         curve_profiles: Callable[[], dict] | None = None,
         room_load: Callable[[], color_journey.RoomColorState] | None = None,
         room_save: Callable[[color_journey.RoomColorState], None] | None = None,
-        room_controls_load: Callable[[], room_controls.RoomControlState]
-                            | None = None,
         set_position: Callable[[str], Optional[float]] | None = None,
         set_cards: Callable[[], list] | None = None,
         sequencer_config: Callable[[], Any] | None = None,
@@ -257,8 +255,6 @@ class DriftConductor:
         self._curve_profiles = curve_profiles or self._default_curve_profiles
         self._room_load = room_load or color_journey.load_room
         self._room_save = room_save or color_journey.save_room
-        self._room_controls_load = (room_controls_load
-                                    or room_controls.load_room_controls)
         self._set_position = set_position or self._default_set_position
         self._set_cards = set_cards or self._default_set_cards
         self._sequencer_config = sequencer_config \
@@ -538,7 +534,6 @@ class DriftConductor:
         from spectra.services import scene_compiler
         from fx import device_model
         by_vid = scene_compiler._set_entry_by_virtual(card)
-        controls = self._room_controls_load()
         landed = 0
         for vid, state in self.virtuals.items():
             if not state.set_mode:
@@ -552,11 +547,8 @@ class DriftConductor:
                 state.gradient = entry.color_value
             if entry.bg_color and not device_model.bg_color_blocked(
                     state.effect_type):
-                bg_color = room_controls.resolve_authored_bg_color(
-                    entry.bg_color, controls.display_mode,
-                    controls.display_light_bg_color)
-                params["background_color"] = bg_color
-                state.background_color = bg_color
+                params["background_color"] = entry.bg_color
+                state.background_color = entry.bg_color
             if entry.bg_mode:
                 params["background_mode"] = entry.bg_mode
             if entry.brightness is not None:
@@ -702,7 +694,6 @@ class DriftConductor:
         rec.update(paused=False, arrived=arrived,
                    wheel_position_deg=round(new_deg, 2))
         if delta != 0.0:
-            controls = self._room_controls_load()
             for vid, state in self.virtuals.items():
                 if not state.set_mode:
                     continue
@@ -712,22 +703,9 @@ class DriftConductor:
                         state.gradient, delta)
                     params["gradient"] = state.gradient
                 if state.background_color:
-                    # A hue rotation of an achromatic authored black is a
-                    # no-op (value=0 in HSV carries no hue) — this rotated
-                    # value carries the SAME authored #000000 through as
-                    # many legs as run, so the light-mode substitution
-                    # below still fires correctly no matter how long the
-                    # journey has been walking. Once resolved (light mode
-                    # only) the substitute colour rotates like any other
-                    # authored colour from here on — expected, not a
-                    # separate case to special-case.
-                    rotated = color_rotate.rotate_color_value(
+                    state.background_color = color_rotate.rotate_color_value(
                         state.background_color, delta)
-                    bg_color = room_controls.resolve_authored_bg_color(
-                        rotated, controls.display_mode,
-                        controls.display_light_bg_color)
-                    state.background_color = bg_color
-                    params["background_color"] = bg_color
+                    params["background_color"] = state.background_color
                 if params:
                     batches.setdefault((vid, leg_ms), {}).update(params)
                     legs.append({"virtual_id": vid, "param": "palette",
