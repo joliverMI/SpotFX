@@ -67,6 +67,7 @@ class SettingsPatch(BaseModel):
     force_scene_enabled: Optional[bool] = None
     force_scene_event_id: Optional[str] = None
     suppress_triggers_during_capture: Optional[bool] = None
+    legacy_trigger_engine_enabled: Optional[bool] = None
     xcorr_monitor_enabled: Optional[bool] = None
     song_source: Optional[str] = None          # "spotify" | "ledfx"
     lastfm_api_key: Optional[str] = None
@@ -121,6 +122,7 @@ async def get_settings():
         "force_scene_enabled": settings.force_scene_enabled,
         "force_scene_event_id": settings.force_scene_event_id,
         "suppress_triggers_during_capture": settings.suppress_triggers_during_capture,
+        "legacy_trigger_engine_enabled": settings.legacy_trigger_engine_enabled,
         "xcorr_monitor_enabled": settings.xcorr_monitor_enabled,
         "song_source": settings.song_source,
         "lastfm_api_key": settings.lastfm_api_key,

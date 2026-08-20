@@ -6853,6 +6853,25 @@ class TriggerEngine:
                 "active_setlist_id":     state.active_setlist_id,
             }
 
+            if not settings.legacy_trigger_engine_enabled:
+                # Retired (his ask, 2026-08-20): fire nothing from legacy
+                # storage/profiles/ data — no preview, no pre-ramp, no
+                # scene-override prep, no trigger_fired/pre_scheduled_fired
+                # broadcast. state.timing right above still gets refreshed
+                # every tick regardless: spectra/services/bridge.py reads
+                # shape_offset_ms off it for its own xcorr-corrected fire
+                # timing, and this loop is the ONLY place that ever sets it
+                # — auto_offset_service's offset/quality fields
+                # (_shape_offset_ms, _play_best_quality, apply_save) are
+                # untouched by this flag, since load_profile()/apply_save()/
+                # reload_shape_offset()/demote_play_best() are all called
+                # from outside this loop. Flip
+                # settings.legacy_trigger_engine_enabled back to True (PATCH
+                # /api/settings or the Settings page checkbox) to restore
+                # firing — no restart required, this is checked fresh every
+                # tick.
+                continue
+
             # ── Pre-select next trigger action for preview ────────────────────
             next_t = next(
                 (t for t in sorted(self._get_active_triggers(), key=lambda x: x.timestamp_ms)

@@ -170,6 +170,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
+        # Always created, even with settings.legacy_trigger_engine_enabled
+        # False (the retired default) — the loop still refreshes
+        # state.timing every tick for SPECTRA's bridge (its xcorr sync),
+        # it just fires nothing. See trigger_engine.run()'s own gate.
         asyncio.create_task(engine.run(), name="trigger-engine"),
         asyncio.create_task(tune_scheduler.worker_loop(), name="tune-scheduler"),
     ]

@@ -376,6 +376,34 @@ byte-identical against spot-effects' own `web/src/builder/` modules, so
 check there first before assuming a root-side frontend module needs
 re-porting.
 
+**The legacy engine (root `services/trigger_engine.py`) is retired,
+2026-08-20 (his ask: "retire the old engine, but make sure i can bring it
+back")** — `settings.legacy_trigger_engine_enabled` (default `False`,
+`PATCH /api/settings` or the checkbox on the Settings page, no restart —
+checked fresh every tick) gates only the back half of its `run()` tick:
+firing from `storage/profiles/` data, the `trigger_fired`/
+`pre_scheduled_fired` broadcasts, preview, pre-ramp, scene-override prep.
+This is what was double-firing his marks — the bridge classified every
+`trigger_fired` broadcast into a flare on top of his own SPECTRA trigger,
+regardless of `scene_change_mode`; stopping the broadcast at its source
+closes that for good, not just the `"full"`-mode consumption gate above.
+**`state.timing` — the sibling field `effective_position_ms()` above reads
+`shape_offset_ms` off — is written NOWHERE else in the codebase**
+(grep-confirmed): the gate sits *after* that assignment in `run()`
+specifically so the retired loop keeps refreshing it every tick regardless
+of the flag. Forgetting this and gating earlier in the tick would silently
+starve SPECTRA's own xcorr sync — `bridge.py`'s documented "no timing yet"
+fallback (raw position, no correction) would go permanently live instead
+of being the down-bridge-only case it's meant for. The `TriggerEngine`
+object and everything it does OUTSIDE that loop — `load_profile`,
+`apply_save`, `reload_shape_offset`, `demote_play_best` (what
+`auto_offset_service`'s eight call sites actually use) — is untouched by
+the flag either way; proven, not assumed, in
+`tests/test_legacy_engine_retirement.py`. Named, not silently lost:
+Guest/AirPlay playback (`services/guest_source.py`) drove its light show
+through this same loop and goes quiet with it retired — see that file's
+own docstring.
+
 **Trigger-level scene pools** (2026-08-17, his ask: "triggers should be
 able to carry some meta data that can say choose from only these scenes
 and includes weights"): `FireSceneAction.scene_pool` (`spectra/models/

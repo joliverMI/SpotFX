@@ -17,6 +17,17 @@ intervals — simple triggerless lighting for guest playback, no per-song
 timelines. A title change in the stream metadata counts as a new song and
 regenerates the interval triggers (start event re-fires).
 
+This firing goes through the SAME run() loop that legacy per-song profile
+firing does, gated by the SAME settings.legacy_trigger_engine_enabled flag
+(engine retired 2026-08-20). With that flag at its retired-default False,
+guest playback still loads its blank profile (state stays correct) but the
+interval triggers above never actually fire — guest sessions go quiet along
+with the rest of the legacy engine. Named, not silently lost: see the PR
+that retired the loop for the reasoning. A SPECTRA-native guest-playback
+light source would be a separate, deliberate follow-up, not a side effect
+of flipping the flag back on (which restores full legacy firing, including
+this).
+
 Ownership rules:
   - Javi's real Spotify always wins: while a real (non-guest) track is
     playing, this service stands down and never touches state.
