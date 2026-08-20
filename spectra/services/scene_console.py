@@ -95,7 +95,7 @@ within scenes, and create scenes" surface he asked for is what's built).
 
 SCENE_SETTINGS_REGISTRY mirrors settings_console.SETTINGS_REGISTRY's own
 discipline: bounds are READ off the real pydantic Field(ge=, le=)
-constraints on SceneV2/PhaseBlend/PhaseChoreography/SceneColorJourney via
+constraints on SceneV2/PhaseChoreography/SceneColorJourney via
 _model_field_bounds() (the same technique room_controls.field_bounds()
 uses, generalized to accept any BaseModel subclass), never re-typed by
 hand — a registry entry cannot silently claim a looser range than the
@@ -126,7 +126,7 @@ from pydantic import BaseModel, ValidationError
 
 from fx import device_model
 from spectra import config
-from spectra.models.scene import (FlareKind, PhaseBlend, PhaseChoreography,
+from spectra.models.scene import (FlareKind, PhaseChoreography,
                                   SceneColorJourney, SceneV2)
 from spectra.services import scene_store
 from spectra.services.sonic_ops import SonicOperation
@@ -166,9 +166,8 @@ def _model_field_bounds(model_cls: type[BaseModel], field_name: str) -> tuple[Op
     """(ge, le) declared on model_cls's own field — the single source of
     truth for SCENE_SETTINGS_REGISTRY's bounds, same technique as
     room_controls.field_bounds(), generalized to any BaseModel subclass so
-    it also covers the nested PhaseBlend/PhaseChoreography/
-    SceneColorJourney submodels a plain top-level reflection couldn't
-    reach."""
+    it also covers the nested PhaseChoreography/SceneColorJourney
+    submodels a plain top-level reflection couldn't reach."""
     ge = le = None
     for constraint in model_cls.model_fields[field_name].metadata:
         if hasattr(constraint, "ge"):
@@ -189,18 +188,18 @@ def _spec(key: str, model_cls: type[BaseModel], field_name: str, label: str, kin
 
 # key -> (getter, setter), each operating on a live SceneV2 instance. The
 # registry key names spell out the nested path with underscores
-# (phase_blend_charge_ramp_ms -> scene.phase_blend.charge_ramp_ms) so a key
+# (choreography_transition_ms -> scene.choreography.transition_ms) so a key
 # is self-describing without a caller needing to know the model shape.
+# phase_blend_charge_ramp_ms/phase_blend_lull_ramp_ms RETIRED 2026-08-20
+# (fm/spectra-lull-ramp-does-not-scale) along with models.scene.PhaseBlend —
+# the charge/lull ramp is now a computed dynamic stretch to the real gap
+# to the next trigger (scene_response._drive_phase), not a per-scene
+# number Sonic (or anyone) could hand-tune; see PhaseBlend's own retirement
+# note in spectra/models/scene.py for why a knob was deliberately not kept.
 _ACCESSORS: dict[str, tuple[Callable[[SceneV2], Any], Callable[[SceneV2, Any], None]]] = {
     "entry_ramp_ms": (
         lambda s: s.entry_ramp_ms,
         lambda s, v: setattr(s, "entry_ramp_ms", v)),
-    "phase_blend_charge_ramp_ms": (
-        lambda s: s.phase_blend.charge_ramp_ms,
-        lambda s, v: setattr(s.phase_blend, "charge_ramp_ms", v)),
-    "phase_blend_lull_ramp_ms": (
-        lambda s: s.phase_blend.lull_ramp_ms,
-        lambda s, v: setattr(s.phase_blend, "lull_ramp_ms", v)),
     "choreography_enabled": (
         lambda s: s.choreography.enabled,
         lambda s, v: setattr(s.choreography, "enabled", v)),
@@ -224,20 +223,6 @@ SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
         "How long this scene blends in when it fires, in milliseconds. 0 "
         "means an instant cut.",
         "Convert spoken seconds to ms yourself (1.5s -> 1500)."),
-    "phase_blend_charge_ramp_ms": _spec(
-        "phase_blend_charge_ramp_ms", PhaseBlend, "charge_ramp_ms",
-        "Charge ramp", "int",
-        "How long a musical 'charge' build ramps in for this scene, in ms. "
-        "Leave unset (null) to use the room's default charge ramp.",
-        "Pass null to clear back to the default; otherwise convert spoken "
-        "seconds to ms.", nullable=True),
-    "phase_blend_lull_ramp_ms": _spec(
-        "phase_blend_lull_ramp_ms", PhaseBlend, "lull_ramp_ms",
-        "Lull ramp", "int",
-        "How long a musical 'lull' build-down ramps in for this scene, in "
-        "ms. Leave unset (null) to use the room's default lull ramp.",
-        "Pass null to clear back to the default; otherwise convert spoken "
-        "seconds to ms.", nullable=True),
     "choreography_enabled": _spec(
         "choreography_enabled", PhaseChoreography, "enabled",
         "Phase choreography on", "bool",

@@ -28,9 +28,11 @@ software; do not build the Admiral a settings page"). Covers:
     to assume.
   - Sonic's WIDENED scene/flare surface (2026-08-15, services/
     scene_console.py, merged into settings_agent.ALL_OPERATIONS): the
-    eight-key SCENE_SETTINGS_REGISTRY (bounds read live off SceneV2/
-    PhaseBlend/PhaseChoreography/SceneColorJourney, same discipline as the
-    room settings registry), create_scene's structural can't-collide
+    six-key SCENE_SETTINGS_REGISTRY (bounds read live off SceneV2/
+    PhaseChoreography/SceneColorJourney, same discipline as the
+    room settings registry — phase_blend_charge_ramp_ms/lull_ramp_ms
+    retired 2026-08-20 along with models.scene.PhaseBlend, see AGENTS.md),
+    create_scene's structural can't-collide
     guarantee, an out-of-range scene setting and a malformed flare kind
     both rejected with the server's own text, a room setting unreachable
     through set_scene_setting, and every write here proven to leave a
@@ -181,10 +183,12 @@ from spectra.services import scene_console as scc  # noqa: E402
 from spectra.services import scene_store  # noqa: E402
 
 check(set(scc.SCENE_SETTINGS_REGISTRY) == {
-    "entry_ramp_ms", "phase_blend_charge_ramp_ms", "phase_blend_lull_ramp_ms",
+    "entry_ramp_ms",
     "choreography_enabled", "choreography_transition_ms", "choreography_anchor_frac",
     "color_journey_pace_factor", "accept_all_sets",
-}, "scene settings registry is the deliberate eight-key scalar allowlist")
+}, "scene settings registry is the deliberate six-key scalar allowlist "
+   "(phase_blend_charge_ramp_ms/lull_ramp_ms retired 2026-08-20 — the "
+   "charge/lull ramp is a computed dynamic stretch now, not a knob)")
 check(scc._model_field_bounds(_SceneV2, "entry_ramp_ms") ==
       (scc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"].min, scc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"].max),
       "scene registry bounds are read live off SceneV2, not re-typed")

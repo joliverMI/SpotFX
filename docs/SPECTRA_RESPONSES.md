@@ -34,17 +34,27 @@ Shared pieces (read them, they are the ground truth):
 
 ## How SPECTRA's response classes drive it
 
-`ResponseEngine.on_event("charge"|"lull"|"drop", intensity)` — exactly the
-drive the original program used (`services/trigger_engine.py`
+`ResponseEngine.on_event("charge"|"lull"|"drop", intensity, gap_ms=None)` —
+exactly the drive the original program used (`services/trigger_engine.py`
 `_fire_phase`):
 
 1. **Arm**: an instant `{"phase": <class>, "phase_progress": 0.0}` jump to
    every virtual whose live effect is phase-capable (the `0.0` reset makes
    the edge re-fire).
-2. **Ramp**: a glide of `phase_progress → 1.0` over the class's duration —
-   charge **4000 ms**, lull **2500 ms**, drop **400 ms** ("drop stays
-   short — it's the snap"; `scene_response.PHASE_RAMP_MS`, the original
-   program's tuned defaults).
+2. **Ramp**: a glide of `phase_progress → 1.0` over the class's duration.
+   Charge/lull DYNAMICALLY STRETCH to ~90% of `gap_ms` — the real distance
+   to the next trigger this song will actually fire
+   (`TriggerEngine._next_trigger_gap_ms`) — hanging the remaining ~10% at
+   `phase_progress=1.0` for free (nothing writes it again before the next
+   phase event); his verbatim spec (2026-08-20, "fix the lull ramp"): "the
+   single blob waiting in lull should reach the center just and hang for
+   just a moment, maybe 10% of the lull time, before the explosion." An
+   UNKNOWN gap (no trigger-schedule context — a bridge-classified legacy
+   flare, or a manual test-fire) falls back to the tuned flat default:
+   charge **4000 ms**, lull **2500 ms** (`scene_response.PHASE_RAMP_MS`,
+   the original program's tuned defaults). Drop is never stretched — it
+   stays **400 ms** ("drop stays short — it's the snap") regardless of
+   `gap_ms`. See `scene_response._phase_ramp_ms`.
 3. The drive fires for **every** charge/lull/drop event — band or no band —
    exactly as the original fired the phase machinery for every phase
    event. The scene's declared band rides **on top** as the scene's

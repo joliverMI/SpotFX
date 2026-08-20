@@ -504,7 +504,8 @@ def test_charge_lull_drop_drive_the_real_phase_machinery(tmp_path):
                 # Charge: arm + 4000 ms build ramp. One frame consumes the
                 # edge — the REAL state machine enters the phase.
                 record = await responder.on_event("charge", 0.8)
-                assert record["phase"] == {"targets": [VID], "ramp_ms": 4000}
+                assert record["phase"] == {"targets": [VID], "ramp_ms": 4000,
+                                           "gap_ms": None}
                 assert record["result"] == "phase_only"
                 headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
                 assert effect._phase == "charge"
@@ -543,33 +544,51 @@ def test_charge_lull_drop_drive_the_real_phase_machinery(tmp_path):
     _run(main())
 
 
-def test_phase_blend_overrides_charge_lull_ramp(tmp_path):
-    """OVERRIDE BLEND equivalent (spectra-kept-equivalents): a scene's
-    phase_blend.charge_ramp_ms/lull_ramp_ms overrides the fixed class
-    default; drop is never overridden (the snap stays fixed); a scene
-    with no override keeps today's PHASE_RAMP_MS behaviour unchanged."""
-    from spectra.models.scene import PhaseBlend, SceneDeviceConfig, SceneV2
+def test_charge_lull_ramp_stretches_to_the_real_trigger_gap(tmp_path):
+    """OVERRIDE BLEND's dynamic half (2026-08-20, Admiral order "fix the
+    lull ramp" — see scene_response.py's own OVERRIDE BLEND note for the
+    full incident writeup): charge/lull ramp to ~90% of a KNOWN real gap,
+    hanging the remaining ~10%; an UNKNOWN gap falls back to the flat
+    class default; drop is never stretched, gap or no gap. His real
+    Dopamine pair (rig-capture.jsonl) is the natural proof: one lull ran
+    6040ms, another 900ms, on the SAME song — the same fire, at different
+    gaps, must land differently, on the real vendored phase machinery."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
     _categories_fixture(tmp_path)
-    scene = SceneV2(name="Blended", phase_blend=PhaseBlend(
-        charge_ramp_ms=9000, lull_ramp_ms=1000),
-        devices=[SceneDeviceConfig(
-            target_kind="virtual", target=VID, effect_type="blackhole",
-            params={})])
+    scene = SceneV2(name="Gap-Stretched", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="blackhole",
+        params={})])
 
     async def main():
-        host, virtual = await _host(tmp_path, "phase-blend")
+        host, virtual = await _host(tmp_path, "gap-stretch")
         try:
             with headless.fake_clock() as clock:
                 config: dict = {}
-                headless.attach_effect(host, virtual, "blackhole", config)
+                effect = headless.attach_effect(host, virtual, "blackhole", config)
                 executor, conductor, responder, room_box = _engine(clock)
                 _fire(conductor, scene, config)
 
-                charge = await responder.on_event("charge", 0.8)
-                assert charge["phase"]["ramp_ms"] == 9000
-                lull = await responder.on_event("lull", 0.5)
-                assert lull["phase"]["ramp_ms"] == 1000
-                drop = await responder.on_event("drop", 0.9)
+                long_lull = await responder.on_event("lull", 0.5, gap_ms=6040)
+                assert long_lull["phase"]["ramp_ms"] == round(6040 * 0.9) == 5436
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._phase == "lull"
+                # 2.5s in — past the OLD flat 2500ms default, which would
+                # have completed by now — still mid-build: the ramp is
+                # genuinely stretched to the 5436ms gap, not the constant
+                headless.render_frames(virtual, 150, clock=clock, dt=1 / 60)
+                assert 0.0 < float(effect._config["phase_progress"]) < 1.0
+
+                short_lull = await responder.on_event("lull", 0.2, gap_ms=900)
+                assert short_lull["phase"]["ramp_ms"] == round(900 * 0.9) == 810
+
+                charge = await responder.on_event("charge", 0.8, gap_ms=4500)
+                assert charge["phase"]["ramp_ms"] == round(4500 * 0.9) == 4050
+
+                unknown = await responder.on_event("lull", 0.5)   # gap_ms omitted
+                assert unknown["phase"]["ramp_ms"] == 2500
+                assert unknown["phase"]["gap_ms"] is None
+
+                drop = await responder.on_event("drop", 0.9, gap_ms=900)
                 assert drop["phase"]["ramp_ms"] == 400
         finally:
             facade.set_host(None)

@@ -83,8 +83,6 @@ def _describe(scene: SceneV2) -> str:
     return (f"  devices: {devices}\n"
            f"  flare_kinds (as loaded/migrated): {len(scene.flare_kinds)}\n"
            f"  entry_ramp_ms: {scene.entry_ramp_ms}\n"
-           f"  phase_blend: charge={scene.phase_blend.charge_ramp_ms} "
-           f"lull={scene.phase_blend.lull_ramp_ms}\n"
            f"  update_kind: {scene.update_kind}\n"
            f"  current preferred_color_set_mode: {scene.preferred_color_set_mode!r}")
 

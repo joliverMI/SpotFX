@@ -27,6 +27,12 @@ moment its timestamp is first crossed:
   fire_response        engine.fire_response_event — the SAME path the
                        bridge's classified trigger_fired events already
                        drive (phase drive, band selection, pulse release).
+                       A charge/lull action also carries the real gap to
+                       the next trigger this song will fire
+                       (_next_trigger_gap_ms) — OVERRIDE BLEND's dynamic
+                       ramp stretch (scene_response._phase_ramp_ms), 2026-
+                       08-20. A bridge-classified flare carries no such
+                       gap; drop is never stretched either way.
   select_color_set      drift_conductor.apply_set_directly — the SAME
                        manual-apply surface POST /api/room-color/apply uses.
   fire_scene_update      engine.fire_scene_update_event — UPDATE (data/
@@ -321,7 +327,7 @@ class TriggerEngine:
         self, *,
         list_triggers: Callable[[str], list[SpectraTrigger]] | None = None,
         fire_scene: Callable[..., Awaitable[Any]] | None = None,
-        fire_response: Callable[[str, float], Awaitable[Any]] | None = None,
+        fire_response: Callable[[str, float, Optional[int]], Awaitable[Any]] | None = None,
         select_color_set: Callable[[str], Awaitable[Any]] | None = None,
         fire_scene_update: Callable[[float], Awaitable[Any]] | None = None,
         select_scene: Callable[[float], Optional[str]] | None = None,
@@ -608,8 +614,16 @@ class TriggerEngine:
                 await self._fire_scene(scene_id, a.color_set_id,
                                        self._render_intensity(a.intensity))
             elif a.kind == "fire_response":
+                # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
+                # ramp"): only charge/lull stretch a ramp to the real gap
+                # — drop is always the fixed snap, so no gap is worth
+                # computing for it (see _next_trigger_gap_ms/_phase_ramp_ms
+                # for the full mechanism).
+                gap_ms = (self._next_trigger_gap_ms(trig)
+                         if a.event_class in ("charge", "lull") else None)
                 await self._fire_response(a.event_class,
-                                          self._render_intensity(a.intensity))
+                                          self._render_intensity(a.intensity),
+                                          gap_ms)
             elif a.kind == "fire_scene_update":
                 await self._fire_scene_update(self._render_intensity(a.intensity))
             else:
@@ -626,6 +640,33 @@ class TriggerEngine:
             "triggers", f"{trig.source}:{a.kind}",
             {"trigger_id": trig.id, "action_kind": a.kind, "source": trig.source},
             uri=self._uri, position_ms=self._last_position_ms)
+
+    def _next_trigger_gap_ms(self, trig: SpectraTrigger) -> Optional[int]:
+        """OVERRIDE BLEND's dynamic half (ported from legacy trigger_engine.
+        _phase_blend_ramp_ms/_blend_factor_for, missing from the SPECTRA
+        port until 2026-08-20 — see scene_response.py's own OVERRIDE BLEND
+        note for the full incident writeup): milliseconds from this trigger
+        to the next trigger THIS SONG WILL ACTUALLY FIRE, honoring the same
+        settings-model gate tick() itself applies (_trigger_allowed) — a
+        trigger the current scene_change_mode won't fire is not a real
+        "next moment" to stretch a ramp toward. None means there's nothing
+        to stretch to: no next trigger is enabled/allowed for this song (this
+        is the last one), or no song is loaded at all — the caller
+        (scene_response._phase_ramp_ms) falls back to a documented flat
+        default in that case, never a guess."""
+        if self._uri is None:
+            return None
+        mode = self._scene_change_mode()
+        nxt = min(
+            (t.timestamp_ms for t in self._list_triggers(self._uri)
+             if t.enabled and t.id != trig.id
+             and t.timestamp_ms > trig.timestamp_ms
+             and self._trigger_allowed(t, mode)),
+            default=None)
+        if nxt is None:
+            return None
+        gap = nxt - trig.timestamp_ms
+        return gap if gap > 0 else None
 
     # ── observability ─────────────────────────────────────────────────────
 
@@ -719,14 +760,20 @@ class TriggerEngine:
         from spectra.services import sequencer_store
         return sequencer_store.load_config().enabled
 
-    async def _default_fire_response(self, event_class: str, intensity: float) -> None:
+    async def _default_fire_response(self, event_class: str, intensity: float,
+                                     gap_ms: Optional[int] = None) -> None:
         from spectra.services import engine
         # via_trigger=True: this call only ever happens for a trigger
         # _trigger_allowed already gated (necessarily source=="authored"),
         # so it must reach the real response engine whenever the room is
         # at "full" OR "triggers_only" — see engine.fire_response_event's
-        # own docstring for the dual-path reasoning.
-        await engine.fire_response_event(event_class, intensity, via_trigger=True)
+        # own docstring for the dual-path reasoning. gap_ms is the
+        # SEPARATE charge/lull OVERRIDE BLEND stretch input (this
+        # engine's own _next_trigger_gap_ms) — orthogonal to via_trigger,
+        # threaded through unconditionally (None for a flare/drop, same
+        # as always).
+        await engine.fire_response_event(event_class, intensity,
+                                         gap_ms=gap_ms, via_trigger=True)
 
     async def _default_fire_scene_update(self, intensity: float) -> None:
         from spectra.services import engine

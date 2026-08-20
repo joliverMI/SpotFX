@@ -220,7 +220,7 @@ async def fake_fire_scene(scene_id, color_set_id, intensity):
     fired_scene.append((scene_id, color_set_id, intensity))
 
 
-async def fake_fire_response(event_class, intensity):
+async def fake_fire_response(event_class, intensity, gap_ms=None):
     fired_resp.append((event_class, intensity))
 
 
@@ -295,6 +295,76 @@ asyncio.run(engine5.on_track_state("color"))
 asyncio.run(engine5.tick(0))
 asyncio.run(engine5.tick(400))
 check(fired_color == ["w"], "select_color_set actions reached the injected fake")
+
+# ═══ OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull ramp"): a
+# charge/lull fire_response action carries the real gap to the next
+# trigger this song will fire — the gap scene_response._phase_ramp_ms
+# stretches a ramp toward instead of a flat constant ═════════════════════
+
+gap_calls: list[tuple] = []
+
+
+async def gap_recording_fire_response(event_class, intensity, gap_ms=None):
+    gap_calls.append((event_class, intensity, gap_ms))
+
+
+song["gap_demo"] = [
+    SpectraTrigger(timestamp_ms=1000,
+                  action=FireResponseAction(event_class="lull", intensity=0.5)),
+    SpectraTrigger(timestamp_ms=1900,
+                  action=FireResponseAction(event_class="drop", intensity=0.9)),
+]
+engine_gap = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                           fire_response=gap_recording_fire_response,
+                           render_intensity=lambda x: x)
+asyncio.run(engine_gap.on_track_state("gap_demo"))
+asyncio.run(engine_gap.tick(0))
+asyncio.run(engine_gap.tick(1000))
+asyncio.run(engine_gap.tick(1900))
+check(gap_calls == [("lull", 0.5, 900), ("drop", 0.9, None)],
+      "a charge/lull action's gap_ms is the real distance to the next "
+      "trigger (1900 - 1000 = 900ms); drop never computes a gap at all — "
+      "it's never stretched, so no gap is worth computing for it")
+
+# a disabled trigger doesn't count as the "next" moment to stretch toward
+# — the gap reaches past it to the next one that will actually fire
+gap_calls.clear()
+song["gap_gated"] = [
+    SpectraTrigger(timestamp_ms=1000,
+                  action=FireResponseAction(event_class="charge", intensity=0.8)),
+    SpectraTrigger(timestamp_ms=1500,
+                  action=FireResponseAction(event_class="lull", intensity=0.3),
+                  enabled=False),
+    SpectraTrigger(timestamp_ms=3000,
+                  action=FireResponseAction(event_class="drop", intensity=1.0)),
+]
+engine_gated = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                             fire_response=gap_recording_fire_response,
+                             render_intensity=lambda x: x)
+asyncio.run(engine_gated.on_track_state("gap_gated"))
+asyncio.run(engine_gated.tick(0))
+asyncio.run(engine_gated.tick(1000))
+check(gap_calls == [("charge", 0.8, 2000)],
+      "a disabled trigger is skipped when finding the next moment to "
+      "stretch toward — the gap is 3000 - 1000 = 2000ms, past the "
+      "disabled one, never a false-short 500ms")
+
+# the LAST trigger in a song has no next trigger to stretch toward — the
+# gap is honestly None (unknown), never a fabricated distance to song end
+gap_calls.clear()
+song["gap_last"] = [
+    SpectraTrigger(timestamp_ms=1000,
+                  action=FireResponseAction(event_class="lull", intensity=0.5)),
+]
+engine_last = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                            fire_response=gap_recording_fire_response,
+                            render_intensity=lambda x: x)
+asyncio.run(engine_last.on_track_state("gap_last"))
+asyncio.run(engine_last.tick(0))
+asyncio.run(engine_last.tick(1000))
+check(gap_calls == [("lull", 0.5, None)],
+      "the last trigger in a song has no next trigger to stretch toward "
+      "— gap_ms is honestly None, not a fabricated distance to song end")
 
 # an action that raises is logged and recorded, never crashes the tick
 song["boom"] = [_mk(0, kind="fire_scene")]

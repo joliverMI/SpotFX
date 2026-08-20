@@ -904,16 +904,42 @@ Owner decision `data/spectra-gap-inventory/decision-legacy-retirement-picks.md`
 KEPT four legacy capabilities needing SPECTRA equivalents (six others RETIRED,
 retire-not-delete). Built:
 
-- **Override Blend** — `models/scene.py` `PhaseBlend` (per-scene
-  `charge_ramp_ms`/`lull_ramp_ms`, read by `scene_response._drive_phase`)
-  and `SceneV2.entry_ramp_ms` (a scene-fire blend-in ramp, threaded through
-  `fx_seam.apply_writes(transition_ms=...)`, hue-arc, same tween shape as
-  `fx_executor`'s glides). A read-only live-storage study found real legacy
-  usage is 265/269 triggers Charge/Lull phase builds, not scene selection —
-  `phase_blend` is the dominant facet; `entry_ramp_ms` covers the thinner
-  scene-entry one. Legacy's dynamic gap-to-next-trigger stretch has no
-  analogue (S2 has no forward trigger schedule) — both fields are
-  authored/configurable instead, the buildable half of the same grammar.
+- **Override Blend** — `SceneV2.entry_ramp_ms` (a scene-fire blend-in ramp,
+  threaded through `fx_seam.apply_writes(transition_ms=...)`, hue-arc, same
+  tween shape as `fx_executor`'s glides) covers the thinner scene-entry
+  facet. A read-only live-storage study found real legacy usage is 265/269
+  triggers Charge/Lull phase builds, not scene selection — that dominant
+  facet is `scene_response._phase_ramp_ms`'s dynamic gap-to-next-trigger
+  stretch (below), not `entry_ramp_ms`.
+
+  **The dominant Charge/Lull facet dynamically stretches to the real gap
+  now (2026-08-20, `fm/spectra-lull-ramp-does-not-scale`, Admiral order
+  "fix the lull ramp")** — a PORTING GAP fixed, not a design reversal:
+  legacy's own dynamic ramp-to-next-trigger stretch had no analogue when
+  this was first built (S2 had no forward trigger schedule to compute a
+  gap against), so `models/scene.py` `PhaseBlend` shipped only the
+  buildable static half — a per-scene `charge_ramp_ms`/`lull_ramp_ms`
+  number, unset on every one of his real scenes. `trigger_store` now
+  supplies exactly that schedule, so `PhaseBlend` is **retired** (removed
+  from `SceneV2`, Sonic's `SCENE_SETTINGS_REGISTRY`, and the Scenes UI) and
+  `scene_response._phase_ramp_ms` computes the real stretch instead — no
+  per-scene knob was rebuilt alongside it: his own two real lull gaps on
+  one song (Dopamine, `data/charge-lull-drop-timing-blends-and-a-sus-
+  7fm2/report.md`: 6040ms and 900ms) prove a single constant can't fit
+  both, so a hand-tuned number would just hand the problem back to him.
+  His spec, verbatim: "the single blob waiting in lull should reach the
+  center just and hang for just a moment, maybe 10% of the lull time,
+  before the explosion" — charge/lull ramp to ~90% of the real gap
+  (`TriggerEngine._next_trigger_gap_ms`, honoring the same
+  `scene_change_mode` gate `tick()` itself applies), hanging the remaining
+  ~10% at `phase_progress=1.0` for free (nothing writes it again before
+  the next phase event); drop is never stretched. An UNKNOWABLE gap (no
+  trigger-schedule context — a bridge-classified legacy flare, or a
+  manual `/api/engine/event` test-fire) is a documented fallback to the
+  flat tuned default, never a silent guess. Spec:
+  `scripts/check_triggers.py` (gap computation, incl. a disabled/mode-
+  gated trigger never counting as "next") + `scripts/check_spectra.py` +
+  `tests/test_spectra_engine.py` (frame-level, his real Dopamine pair).
 - **Energy gates/tilt** — PROVEN EQUIVALENT, nothing built: sequencer
   likelihood curves already express floor/ceiling/scale gating exactly
   (`scripts/seed_sequencer_from_legacy.gate_points`, zero=veto in
@@ -1610,11 +1636,13 @@ settings_agent_model()` (env `SPECTRA_SETTINGS_AGENT_MODEL`, default
 and the settings within the scenes and creating scenes")** — a SECOND
 mechanism module, `spectra/services/scene_console.py`, zero import of
 `settings_console.py`/`room_controls.py`, whose only write surface is
-`scene_store.save()`. `SCENE_SETTINGS_REGISTRY` (8 scalar keys: entry
-blend, charge/lull phase ramps, choreography timing, colour-journey pace,
-colour-set acceptance) reads bounds off `SceneV2`/`PhaseBlend`/
-`PhaseChoreography`/`SceneColorJourney`'s own `Field(ge=,le=)`, same
-discipline as the room registry. Named `FlareKind` create/update/remove
+`scene_store.save()`. `SCENE_SETTINGS_REGISTRY` (6 scalar keys: entry
+blend, choreography timing, colour-journey pace, colour-set acceptance —
+charge/lull phase ramps REMOVED 2026-08-20, see the Override Blend entry
+above; the ramp is a computed dynamic stretch now, not a scene setting)
+reads bounds off `SceneV2`/`PhaseChoreography`/`SceneColorJourney`'s own
+`Field(ge=,le=)`, same discipline as the room registry. Named `FlareKind`
+create/update/remove
 (upsert by name) and `create_scene` (name + labels only — no device/effect
 authoring, that stays the Initial Set tab) round out the original
 enumerated set; device/effect editing is deliberately NOT in scope, still

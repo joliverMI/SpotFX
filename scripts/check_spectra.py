@@ -967,24 +967,26 @@ check(any("reactivity" in w["params"] for w in moved4)
       and all("blur" not in w["params"] for w in moved4),
       "after the re-select the re-roll follows the base variant again")
 
-# ── OVERRIDE BLEND equivalent (spectra-kept-equivalents, live-storage study:
-#    269 legacy blend triggers — 225 Charge, 40 Lull, 4 scene-selection —
-#    trigger_engine._phase_blend_ramp_ms/_blend_factor_for): a scene's
-#    phase_blend overrides the charge/lull ramp; entry_ramp_ms blends a live
-#    fire's writes in via fx_seam instead of an instant jump ─────────────────
-from spectra.models.scene import PhaseBlend
+# ── OVERRIDE BLEND's dynamic half (2026-08-20, Admiral order "fix the lull
+#    ramp" — supersedes the 2026-08-14 keep-as-is call, docs/SPECTRA_SPEC.md
+#    §11): the charge/lull ramp stretches to ~90% of the real gap_ms it's
+#    given, hanging the remaining ~10% at phase_progress=1.0 for free
+#    (nothing writes phase_progress again until the next phase event); an
+#    UNKNOWN gap (None — no trigger-schedule context, e.g. a bridge-
+#    classified legacy event) falls back to the flat class default,
+#    honestly, never a silent guess. A static per-scene override number was
+#    a porting gap, not a design choice, and was retired rather than kept
+#    alongside the dynamic stretch — see models.scene.py's PhaseBlend
+#    retirement note. entry_ramp_ms (untouched by this feature) still
+#    blends a live fire's writes in via fx_seam instead of an instant jump ──
 from spectra.services import fx_seam
 
-check(SceneV2(name="x").phase_blend == PhaseBlend(charge_ramp_ms=None,
-                                                   lull_ramp_ms=None)
-      and SceneV2(name="x").entry_ramp_ms == 0,
-      "no phase_blend / entry_ramp_ms authored: today's fixed-ramp, "
-      "instant-jump behaviour is unchanged")
+check(SceneV2(name="x").entry_ramp_ms == 0,
+      "no entry_ramp_ms authored: today's instant-jump behaviour is unchanged")
 
-blended = SceneV2(name="Blended", phase_blend=PhaseBlend(
-    charge_ramp_ms=9000, lull_ramp_ms=1000), devices=[SceneDeviceConfig(
-        target_kind="category", target="Matrix", effect_type="radial",
-        params={})])
+plain = SceneV2(name="Plain", devices=[SceneDeviceConfig(
+    target_kind="category", target="Matrix", effect_type="radial",
+    params={})])
 exec5 = RecordingExecutor()
 cond5 = DriftConductor(executor=exec5, drift_profiles=lambda: {},
                        curve_profiles=lambda: {},
@@ -995,16 +997,49 @@ resp5 = ResponseEngine(conductor=cond5, executor=exec5, rng=Random(3),
                        sequencer_config=lambda: SequencerConfig(),
                        room_load=lambda: cj.RoomColorState(),
                        room_save=lambda st: None)
-cond5.on_scene_fire(blended, scene_compiler.compile_scene(
-    scene_compiler.resolve_scene(blended, FireContext(0.5, rng=Random(1)))))
-charge_rec = asyncio.run(resp5.on_event("charge", 0.8))
-lull_rec = asyncio.run(resp5.on_event("lull", 0.5))
-drop_rec = asyncio.run(resp5.on_event("drop", 0.9))
-check(charge_rec["phase"]["ramp_ms"] == 9000 and lull_rec["phase"]["ramp_ms"] == 1000,
-      "a scene's phase_blend overrides the charge/lull ramp — the dominant "
-      "real Override Blend usage, made configurable per scene")
+cond5.on_scene_fire(plain, scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(plain, FireContext(0.5, rng=Random(1)))))
+
+# his real Dopamine pair (data/charge-lull-drop-timing-blends-and-a-sus-
+# 7fm2/rig-capture.jsonl), both on the SAME song: a 6040ms lull and a
+# 900ms lull. The flat 2500ms constant used to idle for 3.5s on the first
+# and get cut off at 36% on the second — the SAME mechanism, at the SAME
+# time, must now fit both.
+long_lull = asyncio.run(resp5.on_event("lull", 0.5, gap_ms=6040))
+check(long_lull["phase"]["ramp_ms"] == round(6040 * 0.9) == 5436,
+      "a 6040ms real gap stretches the lull ramp to 90% of it (5436ms) — "
+      "his spec verbatim: 'reach the center just and hang for a moment, "
+      "maybe 10%, before the explosion'; the remaining 604ms hangs at "
+      "phase_progress=1.0 for free — nothing writes it again before the drop")
+short_lull = asyncio.run(resp5.on_event("lull", 0.2, gap_ms=900))
+check(short_lull["phase"]["ramp_ms"] == round(900 * 0.9) == 810,
+      "the SAME mechanism, the SAME song, an entirely different gap: a "
+      "900ms real gap stretches to 810ms — no fixed constant could have "
+      "fit both this and the 6040ms case above")
+check(long_lull["phase"]["gap_ms"] == 6040 and short_lull["phase"]["gap_ms"] == 900,
+      "the resolved gap_ms rides along on the phase record — a starved "
+      "or unusually-timed ramp is explainable by looking, not a mystery")
+
+charge_rec = asyncio.run(resp5.on_event("charge", 0.8, gap_ms=4500))
+check(charge_rec["phase"]["ramp_ms"] == round(4500 * 0.9) == 4050,
+      "charge gets the identical dynamic-stretch treatment as lull — he "
+      "named both as carrying Override Blend deliberately")
+
+unknown_rec = asyncio.run(resp5.on_event("lull", 0.5))   # gap_ms omitted
+check(unknown_rec["phase"]["ramp_ms"] == 2500
+      and unknown_rec["phase"]["gap_ms"] is None,
+      "an UNKNOWN gap falls back to the flat 2500ms class default, "
+      "honestly, never a silently-reintroduced universal constant")
+
+drop_rec = asyncio.run(resp5.on_event("drop", 0.9, gap_ms=900))
 check(drop_rec["phase"]["ramp_ms"] == 400,
-      "drop is never overridden by phase_blend — it stays the fixed snap")
+      "drop is never stretched, even when a gap is known — it stays the "
+      "fixed snap")
+
+tiny_gap_rec = asyncio.run(resp5.on_event("lull", 0.5, gap_ms=100))
+check(tiny_gap_rec["phase"]["ramp_ms"] == 200,
+      "a gap too small to leave a meaningful 90% ramp floors at 200ms "
+      "(legacy's own floor) rather than a near-zero, degenerate glide")
 
 check(fx_seam._body({"effect_type": "radial", "config": {"speed": 1.0}})
       == {"type": "radial", "config": {"speed": 1.0}},
