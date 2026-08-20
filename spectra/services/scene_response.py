@@ -125,7 +125,7 @@ from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
 from spectra.models.sequencer import CurvePoint
-from spectra.services import binding_resolver, color_journey
+from spectra.services import binding_resolver, color_journey, room_controls
 from spectra.services import selection_kernel as kernel
 from spectra.services.binding_resolver import FireContext
 
@@ -242,6 +242,8 @@ class ResponseEngine:
         set_card: Callable[[str], Any] | None = None,
         room_load: Callable[[], color_journey.RoomColorState] | None = None,
         room_save: Callable[[color_journey.RoomColorState], None] | None = None,
+        room_controls_load: Callable[[], room_controls.RoomControlState]
+                            | None = None,
     ) -> None:
         self.conductor = conductor
         self.executor = executor
@@ -255,6 +257,8 @@ class ResponseEngine:
         self._set_card = set_card or self._default_set_card
         self._room_load = room_load or color_journey.load_room
         self._room_save = room_save or color_journey.save_room
+        self._room_controls_load = (room_controls_load
+                                    or room_controls.load_room_controls)
 
         self.surges: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
         # (virtual_id, param, hold_s) triples a momentary kind spiked,
@@ -806,6 +810,7 @@ class ResponseEngine:
             return {"result": "missing_set", "picked_id": pick.picked_id}
         from spectra.services import scene_compiler
         by_vid = scene_compiler._set_entry_by_virtual(card)
+        controls = self._room_controls_load()
         ramp_ms = color_jump_ramp_ms(intensity)
         landed = 0
         for vid, state in self.conductor.virtuals.items():
@@ -820,8 +825,11 @@ class ResponseEngine:
                 carry[(vid, "gradient")] = entry.color_value
             if entry.bg_color and not device_model.bg_color_blocked(
                     state.effect_type):
-                params["background_color"] = entry.bg_color
-                carry[(vid, "background_color")] = entry.bg_color
+                bg_color = room_controls.resolve_authored_bg_color(
+                    entry.bg_color, controls.display_mode,
+                    controls.display_light_bg_color)
+                params["background_color"] = bg_color
+                carry[(vid, "background_color")] = bg_color
             if entry.bg_mode:
                 params["background_mode"] = entry.bg_mode
             if entry.brightness is not None:

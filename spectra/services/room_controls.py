@@ -452,6 +452,27 @@ def scene_transition_ms(state: RoomControlState, intensity: float) -> int:
                         - state.scene_transition_ms_gentle) * frac))
 
 
+def resolve_authored_bg_color(bg_color: str, display_mode: str,
+                              light_bg_color: str) -> str:
+    """A scene/colour-set entry's authored background is DATA, not the
+    room's own Light background — but Light paints its forced background
+    ONCE (dark_light.py's reconcile write) and never re-asserts it, while
+    every later scene fire re-writes its own colour-set background on top.
+    30 entries across 22 of his colour sets author literal #000000, which
+    in overwrite mode clears whatever Light just painted, and it never
+    comes back (his report: effects "start with a background color
+    appropriately and then go dark"). His ruling (option three): in
+    "light" mode only, an authored #000000 becomes the room's own Light
+    colour instead of literal black. "default"/"dark": unchanged — an
+    authored black keeps clearing a virtual's background exactly as it
+    always has (the same black is what stops a PRIOR write's colour from
+    bleeding into the next fire — see AGENTS.md's "An authored black
+    bg_color on a colour set is LOAD-BEARING in Hybrid mode" entry)."""
+    if display_mode == "light" and bg_color == "#000000":
+        return light_bg_color
+    return bg_color
+
+
 def apply_brightness(params: dict, multiplier: float) -> dict:
     """Scale brightness/background_brightness IN a params dict by the room
     multiplier, if present — the uniform write-seam scaling. Never mutates
