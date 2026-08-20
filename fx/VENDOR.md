@@ -216,6 +216,29 @@ variables named `ledfx` (the core object handle) are untouched.
     no meaning for a genuinely full-rectangle matrix virtual, which SpotFX
     doesn't have one of today; revisit if one is ever added.
 
+13. `effects/__init__.py`: `hue_tween_fields()` achromatic-endpoint fix
+    (BEHAVIOUR CHANGE — docs/SPECTRA_SPEC.md §83/§84, PR
+    fm/spectra-achromatic-saturation-fix). The function's own docstring
+    already stated its intent: for an achromatic (black/grey/white)
+    endpoint, adopt the OTHER end's hue "so the blend fades saturation in
+    place instead of sweeping through arbitrary red." It did adopt the
+    other end's hue, but still ramped SATURATION from 0 to the target's own
+    value (`sat(t) = t * target_sat`) — producing a dim-AND-desaturated
+    (grey) midpoint the plain RGB path it replaced never produced (`mix_colors`
+    scales an RGB vector, which leaves its saturation ratio unchanged). Fix:
+    also adopt the other end's SATURATION for an achromatic endpoint, the
+    same way hue already is, so only VALUE ramps — verified byte-identical
+    to the plain RGB path in both directions (fade in from black, fade out
+    to black) on real pairs from his library. Colour-to-colour crossings
+    (neither endpoint achromatic) are untouched by construction — same
+    formula as before for that branch, proven bit-identical, including the
+    separately-filed muddy cream→blue crossing
+    (`data/spectra-grey-midpoint-transition/brief.md`), whose own dip lives
+    in `mix_colors` (the plain RGB path), not this function. Evidence:
+    `scripts/check_hue_blend_achromatic_desaturation.py`; tests:
+    `tests/test_hue_tween_achromatic_saturation.py`. Not yet ported back to
+    the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
