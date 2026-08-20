@@ -30,6 +30,25 @@ DROP_FALLBACK_S = 0.45   # drop completes on this timer if no progress ramp
 DROP_RESET_S = 0.5       # post-burst ease of the horizon back to baseline
 PHASE_BURST_N = 48       # blobs in the drop explosion (his ask: at least 2x
                          # the original 24)
+# His ask, verbatim: "the timing is good on black hole, but the speed of
+# the explosion after the implosion needs to be 2 times faster." Scoped to
+# exactly the post-pinch outward burst (_phase_burst's blobs, tagged
+# p_is_burst) — NOT the implosion (the pinch itself is paced by
+# phase_progress/DROP_FALLBACK_S, untouched) and NOT the whole drop (the
+# horizon's post-burst ease-back is still DROP_RESET_S, untouched). The
+# burst still FIRES at the exact instant it always did (_phase_step's
+# p >= 0.995 check is unchanged), so the drop's landing point on the
+# trigger's timestamp does not move — only what happens after ignition
+# speeds up. Applied as a matched pair in _phase_burst (halves the p_out
+# outward-flight duration) and draw()'s out_mask branch (doubles velocity
+# only for p_is_burst particles): halving time while doubling speed covers
+# the SAME outward distance in half the time — the explosion reaches the
+# same size it always did, just twice as fast, rather than reaching twice
+# as far in the same time (a bigger burst, not a faster one — not what was
+# asked). _erupt_burst's cross-effect handoff eruptions reuse the same
+# out_mask/p_out mechanism but are never tagged p_is_burst, so they are
+# untouched by this multiplier.
+PHASE_BURST_SPEED_MULT = 2.0
 CHARGE_HALO_LEAD = 1.4   # halo (capture ring) growth vs the black disc
 
 # infall-mode (`reverse=False`) spawn boundary, in the same normalized-r
@@ -738,7 +757,12 @@ class Blackhole2d(Twod, GradientEffect):
         else:
             self.p_grad[s] = rng.random(got, dtype=np.float32)
         self.p_bright[s] = 1.0
-        self.p_out[s] = rng.uniform(0.4, 1.1, got).astype(np.float32)
+        # Halved to pair with draw()'s PHASE_BURST_SPEED_MULT-scaled
+        # velocity for these same (p_is_burst) particles — same outward
+        # reach, half the time (see the constant's own docstring).
+        self.p_out[s] = (
+            rng.uniform(0.4, 1.1, got) / PHASE_BURST_SPEED_MULT
+        ).astype(np.float32)
         self.n += got
         self._out_active = True
 
@@ -1176,8 +1200,19 @@ class Blackhole2d(Twod, GradientEffect):
                 out_mask = self.p_out[:n] > 0.0
                 if out_mask.any():
                     # eruption-burst blobs fly outward; when their time
-                    # expires they stall and rejoin the normal infall
-                    new_r = np.where(out_mask, r + v * dt, new_r)
+                    # expires they stall and rejoin the normal infall.
+                    # Drop-payoff bursts (_phase_burst, tagged p_is_burst)
+                    # fly PHASE_BURST_SPEED_MULT times faster — paired with
+                    # _phase_burst's halved p_out so the reach is unchanged,
+                    # just twice as fast. _erupt_burst's cross-effect
+                    # handoff eruptions share out_mask/p_out but are never
+                    # tagged p_is_burst, so they keep their original speed.
+                    out_speed = np.where(
+                        self.p_is_burst[:n], PHASE_BURST_SPEED_MULT, 1.0
+                    )
+                    new_r = np.where(
+                        out_mask, r + v * out_speed * dt, new_r
+                    )
                     self.p_out[:n] = np.maximum(self.p_out[:n] - dt, 0.0)
                 else:
                     self._out_active = False
