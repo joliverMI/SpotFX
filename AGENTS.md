@@ -411,23 +411,27 @@ or repurpose it; don't conflate the two. Spec: `docs/SPECTRA_SPEC.md` §82.
 Tests: `tests/test_lead_time_alignment.py`, `tests/test_trigger_engine.py`
 (frame-level proofs 9/10), `scripts/check_triggers.py` §8.
 
-**The hue-arc blend this transition timing rides on has a real, PINNED
-desaturation defect from an achromatic endpoint** (`docs/SPECTRA_SPEC.md`
-§83, his report 2026-08-19: "goes from black to a gray or a white and then
-changes color"). `fx/effects/__init__.py::hue_tween_fields` — requested as
+**The hue-arc blend this transition timing rides on had a real
+desaturation defect from an achromatic endpoint — FIXED** (`docs/
+SPECTRA_SPEC.md` §83, his report 2026-08-19: "goes from black to a gray or
+a white and then changes color", PR fm/spectra-achromatic-saturation-fix).
+`fx/effects/__init__.py::hue_tween_fields` — requested as
 `transition_blend="hue"` by every real scene fire (`fx_seam`/`fx_executor`
 both hardcode it whenever `transition_ms>0`, which his real
 `global_transition_ms==0` never prevents, since `scene_compiler.fire_scene`'s
-`or`-chain fallback treats falsy `0` as unset) — adopts the far end's hue
-immediately for an achromatic (black, at minimum) endpoint but then
-interpolates SATURATION and VALUE as independent linear scalars from 0,
-i.e. `sat(t) = t × target_sat`. A plain RGB scale-up (`mix_colors`) from
-the SAME black start does not do this (scaling a vector leaves its
-saturation ratio unchanged) — the "careful" path this replaced was already
-saturation-safe from black; the hue-path's own achromatic handling is what
-introduces the dip it was built to prevent. Real numbers, his real data:
-`scripts/check_hue_blend_achromatic_desaturation.py`. Not yet fixed —
-investigation only, his own decision on how/whether to fix it.
+`or`-chain fallback treats falsy `0` as unset) — adopted the far end's hue
+immediately for an achromatic (black, at minimum) endpoint but interpolated
+SATURATION and VALUE as independent linear scalars from 0, i.e.
+`sat(t) = t × target_sat`. Fix: adopt the far end's SATURATION too, the
+same way hue already was, so only value ramps — proven byte-identical to
+the plain RGB path (`mix_colors`) in both directions (fade in from black,
+fade out to black), and proven to leave colour-to-colour crossings
+(neither endpoint achromatic, e.g. the separately-filed muddy cream→blue
+crossing, `data/spectra-grey-midpoint-transition/brief.md`) bit-identical
+to before — that pair's own dip lives in `mix_colors`, a different
+function, still open as its own backlog item. `fx/VENDOR.md` deviation
+#13. Real numbers, before/after: `scripts/check_hue_blend_achromatic_
+desaturation.py`, `tests/test_hue_tween_achromatic_saturation.py`.
 
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 

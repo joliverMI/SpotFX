@@ -125,8 +125,10 @@ def hue_tween_fields(
     (each (3, n), 0..255). Returns (hsv_start, hsv_delta) such that the value
     at progress t is hsv_start + t * hsv_delta (hue wrapped mod 1). Hue takes
     the shortest arc around the wheel; where one end is achromatic (grey /
-    black / white, hue undefined) it adopts the other end's hue so the blend
-    fades saturation in place instead of sweeping through arbitrary red."""
+    black / white, hue undefined) it adopts the other end's hue AND
+    saturation, so the blend fades value (brightness) in place instead of
+    sweeping through arbitrary red or dipping through grey on the way to/from
+    the achromatic endpoint."""
     s_hsv = rgb_curve_to_hsv(start_curve)
     t_hsv = rgb_curve_to_hsv(target_curve)
     s_gray = (s_hsv[1] < achromatic) | (s_hsv[2] < achromatic)
@@ -134,8 +136,10 @@ def hue_tween_fields(
     h_s = np.where(s_gray, t_hsv[0], s_hsv[0])
     h_t = np.where(t_gray, h_s, t_hsv[0])
     dh = ((h_t - h_s + 0.5) % 1.0) - 0.5
-    hsv_start = np.stack([h_s, s_hsv[1], s_hsv[2]])
-    hsv_delta = np.stack([dh, t_hsv[1] - s_hsv[1], t_hsv[2] - s_hsv[2]])
+    sat_s = np.where(s_gray, t_hsv[1], s_hsv[1])
+    sat_t = np.where(t_gray, sat_s, t_hsv[1])
+    hsv_start = np.stack([h_s, sat_s, s_hsv[2]])
+    hsv_delta = np.stack([dh, sat_t - sat_s, t_hsv[2] - s_hsv[2]])
     return hsv_start, hsv_delta
 
 
