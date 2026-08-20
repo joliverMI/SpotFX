@@ -165,6 +165,7 @@ export default function SpectraTriggerDialog({
                 onChange={(v) => setAction({ ...action, scene_id: v || null })}
                 options={(scenes ?? []).map((s) => ({ value: s.id, label: s.name }))}
                 placeholder="— sequencer picks at fire time —" width={260} allowEmpty />
+              <HelpLink topic="spectra-trigger-lead-time-alignment" title="When this actually lands on the mark" />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}
               title="Fire wearing THIS colour set instead of the room's active one. Blank = the room's active set.">
@@ -188,6 +189,7 @@ export default function SpectraTriggerDialog({
               {RESPONSE_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
             <HelpLink topic="charge-lull-drop" title="Charge / Lull / Drop / Flare" />
+            <HelpLink topic="spectra-trigger-lead-time-alignment" title="When this actually lands on the mark" />
           </label>
         )}
 
