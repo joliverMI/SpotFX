@@ -528,15 +528,19 @@ class ResponseEngine:
         return rolled
 
     def _carried_value(self, vid: str, state, pname: str,
-                       carry: dict) -> Optional[float]:
+                       carry: dict) -> Optional[float | bool]:
         """The baseline a scale excursion measures from and a momentary
         move returns to: same-surge carry first, then brightness's own
         baseline, a creep's current wander position, or the tracked param
-        baseline. None = unknown (scale falls back to the declared value)."""
+        baseline. None = unknown (scale falls back to the declared value).
+        A toggle param's baseline is a bool, returned as-is (not coerced to
+        float) — a creep never drives a toggle, so only the carry/tracked-
+        baseline branches can ever produce one."""
         if (vid, pname) in carry:
             v = carry[(vid, pname)]
-            return float(v) if isinstance(v, (int, float)) \
-                and not isinstance(v, bool) else None
+            if isinstance(v, bool):
+                return v
+            return float(v) if isinstance(v, (int, float)) else None
         if pname == "brightness":
             return float(state.brightness_baseline)
         for mech in self.conductor.mechanisms:
@@ -544,8 +548,9 @@ class ResponseEngine:
                     and mech.kind == "creep":
                 return float(mech.position)
         v = state.param_baseline.get(pname)
-        return float(v) if isinstance(v, (int, float)) \
-            and not isinstance(v, bool) else None
+        if isinstance(v, bool):
+            return v
+        return float(v) if isinstance(v, (int, float)) else None
 
     def _resolve_target(self, target: ParamTarget, base: Optional[float],
                         rolled: dict[str, float], pname: str) -> Optional[float]:
@@ -578,7 +583,17 @@ class ResponseEngine:
         parity), any other scale moves it to baseline + (declared −
         baseline)·scale, clamped to the param's registry range. PERMANENT
         enters the carry; MOMENTARY schedules the return at its CHOSEN HOLD
-        (kind.hold_ms, default PULSE_HOLD_S) instead."""
+        (kind.hold_ms, default PULSE_HOLD_S) instead.
+
+        A TOGGLE-type param (registry KIND_TOGGLE — e.g. `reverse`) can
+        never be meaningfully scaled or offset (ParamTarget.value is a
+        float, so an authored True/False arrives here as 1.0/0.0): its
+        declared target is landed as a real Python bool at scale 1, or a
+        0.5-threshold blend of the (bool) baseline and declared target at
+        any other scale — never a bare float, which the effect's own
+        CONFIG_SCHEMA (`bool` exactly, no coercion) would silently reject
+        (fx/effects/__init__.py::_apply_config, validate=True logs and
+        drops the whole write rather than raising)."""
         rolled = {pname: self._rng.uniform(target.lo, target.hi)
                   for pname, target in kind.params.items()
                   if target.mode == "random"}
@@ -591,22 +606,29 @@ class ResponseEngine:
                 meta = device_model.get_param_meta(state.effect_type, pname)
                 if meta is None:
                     continue
+                mkind, lo, hi = binding_resolver.kind_for_meta(meta)
                 base = None
-                if target.mode == "offset" or scale != 1.0:
+                if target.mode == "offset" or scale != 1.0 \
+                        or mkind == binding_resolver.KIND_TOGGLE:
                     base = self._carried_value(vid, state, pname, carry)
                 declared = self._resolve_target(target, base, rolled, pname)
                 if declared is None:
                     continue
-                value = declared
-                if scale != 1.0:
-                    b = base if base is not None else declared
-                    value = b + (declared - b) * scale
-                    mkind, lo, hi = binding_resolver.kind_for_meta(meta)
-                    if mkind == binding_resolver.KIND_NUMERIC:
-                        if lo is not None:
-                            value = max(float(lo), value)
-                        if hi is not None:
-                            value = min(float(hi), value)
+                if mkind == binding_resolver.KIND_TOGGLE:
+                    if scale != 1.0 and base is not None:
+                        value = (float(base) + (declared - float(base)) * scale) >= 0.5
+                    else:
+                        value = bool(declared)
+                else:
+                    value = declared
+                    if scale != 1.0:
+                        b = base if base is not None else declared
+                        value = b + (declared - b) * scale
+                        if mkind == binding_resolver.KIND_NUMERIC:
+                            if lo is not None:
+                                value = max(float(lo), value)
+                            if hi is not None:
+                                value = min(float(hi), value)
                 moves[pname] = value
                 if kind.type == "permanent":
                     carry[(vid, pname)] = value

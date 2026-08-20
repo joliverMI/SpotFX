@@ -969,6 +969,68 @@ def test_momentary_target_expressions_and_chosen_hold_on_the_harness(tmp_path):
     _run(main())
 
 
+# ── momentary flare targeting a TOGGLE param (e.g. `reverse`) ────────────────
+
+def test_momentary_toggle_param_flare_lands_a_real_bool_and_releases(tmp_path):
+    """A ParamTarget's `value` is a float field (an authored True/False
+    coerces to 1.0/0.0 — spectra/models/scene.py), but a toggle param's
+    CONFIG_SCHEMA accepts nothing but a real Python bool (voluptuous `bool`
+    exactly, no coercion — fx/effects/__init__.py::_apply_config,
+    validate=True). Without the KIND_TOGGLE coercion in
+    scene_response._compute_param_moves, this write would silently fail
+    validation (a logged warning, no exception) and the effect's `reverse`
+    would never actually flip. Proven end to end on the real vendored
+    `squiggles` effect: the spike lands `reverse=True` (verified `is True`,
+    not just `== 1.0`), then the release — which depends on
+    VirtualState.param_baseline/_carried_value carrying a bool baseline
+    forward, not discarding it — returns exactly to the pre-flare
+    `reverse=False`."""
+    from spectra.models.scene import (FlareBand, FlareKind, ResponseSpec,
+                                      SceneDeviceConfig, SceneV2)
+    _categories_fixture(tmp_path)
+    scene = SceneV2(
+        name="Toggle",
+        devices=[SceneDeviceConfig(
+            target_kind="virtual", target=VID, effect_type="squiggles",
+            params={"reverse": False})],
+        flare_kinds=[
+            FlareKind(name="Reverse Momentarily (500ms)", type="momentary",
+                      hold_ms=500,
+                      params={"reverse": {"mode": "absolute", "value": 1}}),
+        ],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=1.0,
+                      kinds={"Reverse Momentarily (500ms)": 1.0}),
+        ])})
+
+    async def main():
+        host, virtual = await _host(tmp_path, "toggle")
+        try:
+            with headless.fake_clock() as clock:
+                config = {"reverse": False}
+                effect = headless.attach_effect(host, virtual, "squiggles",
+                                                config)
+                executor, conductor, responder, _ = _engine(clock)
+                _fire(conductor, scene, config)
+
+                record = await responder.on_event("flare", 0.5)
+                moved = record["kinds"][0]["moved"][0]["params"]["reverse"]
+                assert moved is True
+
+                headless.render_frames(virtual, 2, clock=clock, dt=1 / 60)
+                assert effect._config["reverse"] is True
+
+                released = await responder.flush_releases(0.5)
+                assert released == 1
+                headless.render_frames(virtual, 2, clock=clock, dt=1 / 60)
+                assert effect._config["reverse"] is False
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
 # ── offline guarantee ────────────────────────────────────────────────────────
 
 def test_no_audio_hardware_was_touched():

@@ -906,6 +906,36 @@ fx/ tween engine. S3 goes live by swapping the executor — nothing else
 changes. Specs: `scripts/check_drift.py` (conductor + journey),
 check_spectra.py (responses/bridge/Mid Group),
 `tests/test_spectra_engine.py` (frame-level proof on the dummy device).
+
+**A momentary/permanent kind targeting a TOGGLE-type param (e.g. `reverse`
+on blackhole/orbits/squiggles) needs a real Python `bool` to reach the
+effect, not the float `ParamTarget.value` naturally produces — fixed
+2026-08-20, PR fm/momentary-reverse-flare-on-black-hole-orbits-squiggles.**
+`ParamTarget.value` is a plain float field (`spectra/models/scene.py`), so
+an authored `true`/`false` silently coerces to `1.0`/`0.0`; the real
+effect's `CONFIG_SCHEMA` validates a toggle param against bare `bool`
+(voluptuous, no coercion — `fx/effects/__init__.py::_apply_config`,
+`validate=True` LOGS a warning and drops the whole write on mismatch,
+never raises), so before this fix a toggle-targeting kind looked declared
+and attached but silently did nothing on fire. `scene_response.
+_compute_param_moves` now coerces a `KIND_TOGGLE` param's resolved target
+to a real bool (verbatim at scale 1, else a 0.5-threshold blend against
+the bool baseline). The release side needed its own fix: `drift_conductor.
+VirtualState.param_baseline` and `scene_response._carried_value` used to
+explicitly EXCLUDE bool values ("NUMERIC baselines" by design) — a
+toggle's pre-flare state was never tracked, so a momentary release could
+never resolve where to return to and silently skipped. Both now carry a
+toggle baseline as a real bool alongside the numeric ones. `reverse` means
+something different per effect — chain retrace (squiggles), spin
+direction (orbits), infall vs. outward (blackhole, the most dramatic, and
+worth a beat's thought against the charge/lull/drop implosion choreography
+already on that scene — flagged, not resolved, in the migration script's
+own docstring) — see `scripts/add_momentary_reverse_flares.py` for the
+full trace and for why a fixed absolute target (not a true invert) is the
+only expressible form given ParamTarget's float-only `value`/`offset`
+fields. Proof on the real vendored pipeline: `tests/test_spectra_engine.py::
+test_momentary_toggle_param_flare_lands_a_real_bool_and_releases`.
+
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a drift declaration
 is authored param-agnostic (a named profile is reused across effects), so
 its lo/hi can be legal-looking but wrong for the param it lands on — e.g. a
