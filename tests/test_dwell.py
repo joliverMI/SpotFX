@@ -400,3 +400,30 @@ def test_roll_adopts_normally_when_the_fire_actually_lands():
     _run(seq._roll(cfg, "test"))
     assert seq._active_id == "a"
     assert seq._last_moment["result"] == "picked"
+
+
+# ── 6. manual editor Fire bypasses the gate entirely (structural, unchanged) ─
+
+def test_manual_editor_fire_bypasses_dwell(monkeypatch):
+    """POST /scenes/{id}/fire calls scene_compiler.fire_scene directly,
+    never fire_scene_by_id — same bypass disabled/mode-availability already
+    document (test_scene_disable.py's own proof). The dwell gate lives
+    entirely inside fire_scene_by_id (spectra/api/scenes.py is untouched by
+    this module), so the REAL scene_compiler.fire_scene must still fire
+    immediately even while another scene's minimum dwell is actively held."""
+    from spectra.services.scene_sequencer import fire_scene_by_id
+    from spectra.services import scene_compiler
+
+    scene_b = _scene("b")
+    scene_store.save(_scene("a"))
+    scene_store.save(scene_b)
+    fired: list = []
+    orig_fire_scene = scene_compiler.fire_scene
+    _fake_scene_compiler(monkeypatch, fired)
+
+    _run(fire_scene_by_id("a", intensity=0.0))
+    assert dwell.remaining_s() > 0
+
+    monkeypatch.setattr(scene_compiler, "fire_scene", orig_fire_scene)
+    result = _run(scene_compiler.fire_scene(scene_b, intensity=0.5, dry_run=True))
+    assert "skipped" not in result
