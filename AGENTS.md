@@ -2234,6 +2234,38 @@ verify only. Specs: `tests/test_gradient2d.py`,
 `tests/test_drift_conductor_gradient.py`, `tests/test_rainbow_select.py`,
 `tests/test_gradient_retarget_hook.py`, `tests/test_mark_rainbow_color_sets.py`.
 
+**A `ColorGradientPicker` nested inside a `TopBarGroupButton` panel closed
+the WHOLE panel on TOUCH (not mouse) the instant he tapped anything inside
+the nested picker — fixed 2026-08-20.** His report on `DriftGradientBar`
+(top bar → "Gradient"): opening the panel and picking an existing gradient
+worked (PR #152's New-draft-race fix, unrelated), but tapping the Solid/
+Gradient tab or the hue/saturation area inside the Top/Bottom edge's
+colour picker closed the entire Drift gradient panel out from under him.
+Root cause, general to BOTH `ColorGradientPicker.tsx` copies (`spectra/
+web/src/components/` and `web/src/components/`) and any future consumer
+with the same shape: its popover is its OWN `createPortal(...,
+document.body)`, a DOM **sibling** of the panel it was opened from, not a
+descendant — an enclosing panel's own outside-click dismissal
+(`TopBarGroupButton`'s `document.addEventListener('mousedown', ...)`
+containment check) can't see the popover's subtree and reads every tap
+inside it as an outside click. **Reproduced only under REAL touch
+(`Input.dispatchTouchEvent`, letting Chrome synthesize the compat mouse
+sequence) — a CDP mouse-only click (`Input.dispatchMouseEvent`/
+Puppeteer's `page.click()`) on the identical element did NOT reproduce
+it**, so a click-only eye-check of this class of bug can pass while the
+real phone still fails; test dialog-closing reports with a raw
+`Input.dispatchTouchEvent` tap (see git history for the throwaway CDP
+script), not `page.click()`. Fixed at the source, not per-consumer:
+`ColorGradientPicker`'s own popover div stops the `mousedown` from
+bubbling past itself (`onMouseDown={(e) => e.stopPropagation()}`) — it
+never reaches ANY ancestor's document-level listener, regardless of DOM
+position, and the picker's own `onDocDown` already excluded clicks inside
+its own `popoverRef` so nothing relied on the event still bubbling.
+Fixed only in `spectra/web/`'s copy (his actual report); `web/`'s copy
+has the identical `createPortal` + document-mousedown shape and is a
+same-class latent risk for any future outside-click panel there, not
+touched by this fix.
+
 ## SPECTRA Sonic token-usage record (review page)
 
 `spectra/services/sonic_usage.py` — durable per-call token usage, his ask:

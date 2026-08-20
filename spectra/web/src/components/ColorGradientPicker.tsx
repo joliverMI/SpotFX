@@ -117,6 +117,18 @@ export default function ColorGradientPicker({
           ref={popoverRef}
           className="color-gradient-popover"
           style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
+          // This popover is its own document.body portal, a DOM sibling of
+          // whatever panel it was opened from rather than a descendant —
+          // an enclosing panel's own outside-click dismissal (e.g.
+          // TopBarGroupButton) can't see this subtree in its containment
+          // check and reads every tap inside here (the Solid/Gradient tab,
+          // the hue/saturation area, the hex field) as an outside click,
+          // closing the enclosing panel out from under the user. Stop the
+          // mousedown here so it never reaches any ancestor's document
+          // listener — this picker's own onDocDown below already excludes
+          // clicks inside popoverRef, so nothing here relied on the event
+          // still bubbling.
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <ReactGPicker
             value={value}
