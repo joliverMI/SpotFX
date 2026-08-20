@@ -146,6 +146,57 @@ export const releasePreviewBeacon = (): void => {
   }
 };
 
+/* ── flare scrubbing preview (owner ask, flares first — data/
+   timeline-preview-scrub-flares-and-drop-sequences) ──
+ * Plain async functions, not mutations — FlarePreviewOverlay.tsx drives
+ * these off its own open/heartbeat/close lifecycle, the same shape the
+ * room-colour Preview above uses. */
+
+export interface FlarePreviewWrite {
+  seq: number;
+  at_s: number;
+  kind: 'jump' | 'glide';
+  virtual_id: string;
+  effect_type: string;
+  params: Record<string, unknown>;
+  duration_ms: number;
+}
+
+export interface FlarePreviewTimeline {
+  kind_name: string;
+  kind_type: string;
+  intensity: number;
+  result: string;
+  /** Both relative to the EARLIEST write (== the fire instant) — null
+   * when the kind produced no writes at this intensity (an unregistered
+   * param, or a colour-jump kind with no eligible sets). */
+  animation_start_s: number | null;
+  animation_end_s: number | null;
+  duration_s: number;
+  writes: FlarePreviewWrite[];
+}
+
+export const openFlarePreview = (sceneId: string, kindName: string, intensity: number) =>
+  apiPost<FlarePreviewTimeline>('/flare-preview/open',
+    { scene_id: sceneId, kind_name: kindName, intensity });
+
+export const heartbeatFlarePreview = () =>
+  apiPost<{ active: boolean; remaining_s: number }>('/flare-preview/heartbeat', {});
+
+export const closeFlarePreview = () =>
+  apiPost<{ active: boolean }>('/flare-preview/close', {});
+
+/** Tab-close/reload release — same sendBeacon-over-fetch rationale as
+ * releasePreviewBeacon above. */
+export const closeFlarePreviewBeacon = (): void => {
+  try {
+    navigator.sendBeacon('/spectra/api/flare-preview/close',
+      new Blob(['{}'], { type: 'application/json' }));
+  } catch {
+    // best-effort only
+  }
+};
+
 /* ── sequencer ── */
 
 export interface CurveProfile { id: string; name: string; points: CurvePoint[]; }

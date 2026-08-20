@@ -2199,6 +2199,81 @@ promised. `dwell.py` and `_phase_ramp_ms`'s own docstrings both spell out
 why these are genuinely different gaps (not a shared formula that could
 drift) and why predicting the other side isn't attempted — see either.
 
+## SPECTRA flare scrubbing-preview timeline (flares first — charge/lull/drop is next, not built)
+
+Owner ask 2026-08-20, `data/timeline-preview-scrub-flares-and-drop-
+sequences/HIS-VERBATIM-WORDS.md`, his own sequencing: "start with the
+flares, then we will do lull charge drop" — do NOT extend this to
+charge/lull/drop or scene transitions without a fresh ask; the design
+below is scoped to a single isolated `FlareKind` on purpose.
+
+`ResponseEngine.fire_kind(kind, intensity)` (`spectra/services/
+scene_response.py`) fires ONE declared kind in isolation, bypassing band
+selection — mirrors `on_event`'s fixed dice→moves→gain→colour order at
+scale=1.0. `spectra/services/flare_preview.build_timeline(scene, kind,
+intensity)` drives it against a SCRATCH `DriftConductor`/`ResponseEngine`
+pair (real `scene_compiler.resolve_scene`/`compile_scene` resolution —
+same reads a dry-run scene test-fire already makes — but `room_save=
+lambda _st: None` on both, so nothing is ever persisted) wired to a
+`RecordingExecutor` and a controllable fake clock: every write's real
+relative timing (glide duration, hold_s before a momentary release,
+`PULSE_RELEASE_S`) is computed in one synchronous burst, never actually
+waited. This is his pre-authorised "catch-up" path ("ideally live, but
+catch-up is fine if substantially easier") — and a better instrument for
+his stated purpose than a live capture would be, since a live poll can
+itself lie about a fast transition (see the CLIP v2 `dynamics.duration`
+polling entry above); the returned `animation_start_s`/`animation_end_s`
+are read straight off the real production constants, not sampled.
+**One easy-to-repeat mistake, caught building this**: `conductor.
+on_scene_fire` must be called with the scene's ORIGINAL `flare_kinds`/
+`devices` (bindings intact), not the `resolve_scene`-resolved copy — the
+resolved copy has already replaced every `ValueBinding` with a scalar, so
+a dice-reroll kind previewed against it re-rolls nothing (zero writes).
+`scene_compiler.fire_scene` itself gets this right by calling
+`engine.on_scene_fired(scene, writes, ...)` with the pre-resolution
+`scene`, not `resolved` — mirror that, not the resolved copy, in any
+future code that seeds a conductor this way.
+
+API: `spectra/api/flare_preview.py` — `POST /open` (computes the
+timeline, arms `preview_pause` — see that module's docstring, now a
+second caller alongside `room_preview.py`), `POST /heartbeat` (re-arms;
+the frontend pings this every 5s while the overlay is open), `POST
+/close`. "Automatically pauses the trigger engine" is this pause, kept
+alive only by the heartbeat — no fixed-duration timer covers "however
+long he leaves the overlay open."
+
+Frontend: `spectra/web/src/scenes/tabs/FlarePreviewOverlay.tsx`, opened
+from a "▶ Preview" button on each flare-kind card in `ResponseTab.tsx`.
+Two independently-positioned marker kinds, per his brief ("I would see
+the marker for where the trigger should align, as well as some markers
+showing start and end of animation" — deliberately not the same line):
+the TRIGGER mark is draggable and DEFAULTS to coincident with the
+computed animation start; the START/END markers are fixed, computed,
+never dragged. Dragging the trigger mark writes `FlareKind.
+trigger_offset_ms` (`spectra/models/scene.py`, signed ms, default 0) via
+`setScene` — a real scene-DRAFT edit, saved by the page's own Save
+button like any other field, not a preview-only value discarded on
+close. **This field is DESCRIPTIVE ONLY today — no fire path reads it.**
+The real, live schedule-lead computation is `trigger_engine.py`'s own
+lookahead-lead system (a scheduled song trigger against `lead_ms`/
+`anchor_frac`, a different mechanism entirely reading live registry
+state, not a stored per-kind field) — this field is where his own tuning
+conclusion from watching the preview lives so it survives the session;
+wiring it into a live fire path is future work, not assumed here. Don't
+conflate the two when this area comes up again.
+
+Help: `spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`
+(under the `scenes-page` section, next to `flare-kind-edit-box`),
+deep-linked from the overlay's own `<HelpLink topic="flare-preview-
+timeline" />`.
+
+Executable spec: `scripts/check_flare_preview.py` (dry-run-only, no live
+storage write — asserts against the real `scene_response.py` timing
+constants, not re-derived approximations; also proves a momentary
+kind's release is silently skipped when its param has no resolvable
+baseline, e.g. a boolean, matching real production behaviour rather than
+being a gap this feature introduces).
+
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
 Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/

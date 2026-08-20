@@ -457,6 +457,54 @@ class ResponseEngine:
         await self._broadcast({"type": "surge", **record})
         return record
 
+    async def fire_kind(self, kind: FlareKind, intensity: float) -> dict:
+        """Fire ONE declared kind in isolation, bypassing band selection
+        entirely — the scrubbing flare-preview timeline's execution entry
+        point (spectra/services/flare_preview.py, his ask: "bring up a
+        timeline... so I can see it's evolution and help edit where the
+        trigger should land with respect to the effect"). Mirrors on_event's
+        own fixed dice -> moves -> gain -> colour order for exactly this one
+        kind, at scale=1.0 — a kind previewed alone carries its own declared
+        magnitude; there is no band in play to scale it. Momentary releases
+        still go through the normal _pending_releases/pending_hold_groups/
+        flush_releases path — the preview service drives those against its
+        own fake clock so the recorded release write lands at its real
+        hold_s offset instead of coinciding with the spike."""
+        scene = self.conductor.scene
+        record: dict[str, Any] = {
+            "at": self._clock(), "kind": kind.name, "type": kind.type,
+            "intensity": round(intensity, 4)}
+        if scene is None:
+            record["result"] = "no_active_scene"
+            return record
+        carry: dict[tuple[str, str], Any] = {}
+        jumps: dict[str, dict[str, Any]] = {}
+        glides: dict[str, dict[str, Any]] = {}
+        if kind.type == "drift_jump" and kind.jump == "dice":
+            record["rolled"] = self._reroll(scene, intensity, jumps, glides, carry)
+        if kind.params:
+            record["moved"] = self._move_params(kind, 1.0, jumps, glides, carry)
+        for vid, patched in jumps.items():
+            for pname in patched:
+                glides.get(vid, {}).pop(pname, None)
+        for vid, params in glides.items():
+            state = self.conductor.virtuals.get(vid)
+            if state is not None and params:
+                await self.executor.glide(
+                    vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
+        for vid, params in jumps.items():
+            state = self.conductor.virtuals.get(vid)
+            if state is not None:
+                await self.executor.jump(vid, state.effect_type, params)
+        if kind.gain != 1.0:
+            record["gain_envelope"] = await self._gain(kind, 1.0, carry)
+        if kind.type == "drift_jump" and kind.jump == "color_set":
+            record["color_jump"] = await self._color_jump(scene, intensity, carry)
+        self.conductor.on_surge(carry)
+        record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
+        record["result"] = "applied"
+        return record
+
     # ── batched actions ──────────────────────────────────────────────────────
 
     def _reroll(self, scene: SceneV2, intensity: float,

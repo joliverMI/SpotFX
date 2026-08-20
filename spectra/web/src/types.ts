@@ -105,7 +105,11 @@ export interface ParamTarget {
  * set via the shipped selector, or a 🎲 re-roll); momentary spikes and
  * RETURNS; permanent lands and BECOMES the baseline drift carries from.
  * hold_ms (momentary only; null = the fixed PULSE_HOLD_S default, 250 ms)
- * is the CHOSEN HOLD before the release glide starts. */
+ * is the CHOSEN HOLD before the release glide starts.
+ * trigger_offset_ms (default 0 = coincident) is his own tuned reference
+ * point from the scrubbing preview's trigger-alignment marker — see
+ * models/scene.py's FlareKind docstring for the full authored-vs-live
+ * distinction; nothing in the fire path reads it yet. */
 export interface FlareKind {
   name: string;
   type: 'drift_jump' | 'momentary' | 'permanent';
@@ -113,6 +117,7 @@ export interface FlareKind {
   params: Record<string, ParamTarget>;
   gain: number;
   hold_ms: number | null;
+  trigger_offset_ms: number;
 }
 
 export interface FlareBand {

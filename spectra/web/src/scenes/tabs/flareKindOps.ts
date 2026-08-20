@@ -100,6 +100,18 @@ export function pasteKind(scene: SceneV2, incoming: FlareKind): SceneV2 {
   return { ...scene, flare_kinds: [...scene.flare_kinds, { ...incoming, name }] };
 }
 
+/** The scrubbing preview's trigger-alignment marker writes here — a real
+ * scene-draft edit (Save persists it), not a preview-only value. Clamped
+ * to the model's own [-60000, 60000] range (models/scene.py FlareKind). */
+export function setKindTriggerOffset(scene: SceneV2, name: string, ms: number): SceneV2 {
+  const clamped = Math.max(-60_000, Math.min(60_000, Math.round(ms)));
+  return {
+    ...scene,
+    flare_kinds: scene.flare_kinds.map((k) =>
+      k.name === name ? { ...k, trigger_offset_ms: clamped } : k),
+  };
+}
+
 export interface LaneRef { cls: ResponseClass; bandIdx: number; laneIdx: number; }
 
 /** Attach/reorder/move a kind to a specific lane (= a position in the
