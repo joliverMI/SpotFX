@@ -1263,6 +1263,34 @@ matrix shape — a named incompatibility, not a silent gap. Did not change
 show it was never the cause. Full measured numbers and reasoning:
 `docs/SPECTRA_SPEC.md` §43.
 
+**"Still" bad 2026-08-20, over his real remote link — TRANSPORT bytes-per-
+frame, ruled out above by a LOCAL-only measurement, was the actual
+remaining cause** (`data/preview-frame-rate-is-still-bad-over-rem-dhvp/`,
+his words: "the frame rate on the preview is still terrible... I'm always
+on a remote computer, but LEDFx previews were really good"). The §43
+"payload size was never load-bearing" finding measured `JSON.parse`+decode
+CPU cost only, never bytes actually crossing a bandwidth-constrained link
+— his stated permanent condition. Root cause: `_facade_frame_payload`
+(his live default source since the S3 split) emitted pixels as a JSON
+list-of-three-channel-lists ("uncompressed"); the LedFX-relay path forwards
+whatever LedFX itself sent, which defaults to `transmission_mode=
+"compressed"` — base64 of interleaved rgb bytes (`ledfx/config.py`'s own
+default, confirmed in `/home/javi/ledfx-src`) — so LedFX being "really
+good" on the exact same link was never about downsampling alone, it was
+also sending far fewer bytes per point. Fix: `_facade_frame_payload` now
+emits the same base64 encoding — no frontend change needed, since
+`decodePixels()` (api/devicePreviewWs.ts) already parsed both shapes, just
+never received the compact one from this path. Deliberately NOT
+reintroducing LedFX's `visualisation_maxlen≈81` downsample cap — same
+still-standing reason as before (his matrix-shape ask) — this changes only
+the encoding, not the point count. Measured, not asserted:
+`scripts/check_device_preview_remote_transport.py` — exact bytes/frame
+from the real serialization code (crystal-mapper 36,624B → 10,758B, 3.4x)
+plus a real throttled-loopback-socket delivery test at two representative
+constrained-link profiles (2 Mbps/60ms: 4.76fps → 9.59fps; 768kbps/120ms:
+1.96fps → 4.27fps) — labeled a remote-EQUIVALENT proxy, not his actual
+connection, which this task never touched.
+
 Verified against a static harness reproducing his real favourite shapes
 at 390×844 and 360×780 (headless Chromium via chrome-devtools-axi), plus
 a live isolated instance (spare port, `fx.headless` multi-virtual host
