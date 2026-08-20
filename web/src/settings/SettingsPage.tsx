@@ -92,6 +92,7 @@ export default function SettingsPage() {
         hue_blend_transitions: bool('hue_blend_transitions', true),
         show_advanced: bool('show_advanced'),
         suppress_triggers_during_capture: bool('suppress_triggers_during_capture', true),
+        legacy_trigger_engine_enabled: bool('legacy_trigger_engine_enabled', false),
         xcorr_monitor_enabled: bool('xcorr_monitor_enabled', true),
         ambient_target_category: ambientCatId,
         ambient_color_mode: str('ambient_color_mode', 'white'),
@@ -127,6 +128,18 @@ export default function SettingsPage() {
             Show advanced controls
           </label>
         </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          Legacy Trigger Engine
+          <HelpLink topic="legacy-trigger-engine" title="Legacy Trigger Engine help" />
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+          <input type="checkbox" checked={bool('legacy_trigger_engine_enabled', false)}
+            onChange={(e) => set('legacy_trigger_engine_enabled', e.target.checked)} />
+          Fire triggers from the Profile Builder / storage/profiles data (retired — off by default)
+        </label>
       </div>
 
       <div className="card">

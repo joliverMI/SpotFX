@@ -1238,6 +1238,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'legacy-trigger-engine',
+        title: 'Legacy Trigger Engine (retired)',
+        keywords: 'retire retired old engine profile builder doubling double fire trigger_fired storage/profiles bring back rollback',
+        body: [
+          'Off by default (retired 2026-08-20). The legacy engine used to fire lighting straight out of storage/profiles/ data — the Profile Builder\'s per-song trigger timelines — on every play. Its trigger_fired broadcast was also being picked up by SPECTRA as a second, unwanted flare on top of your own SPECTRA triggers, which is what caused marks to double-fire.',
+          'Turning this back on restores exactly the old behavior — Profile Builder triggers fire again, and the doubling comes back with them. Nothing else changes: the engine still loads each song\'s profile and still feeds SpotFX\'s own automatic latency calibration either way, on or off.',
+        ],
+      },
+      {
         id: 'hue-blend-transitions',
         title: 'Hue-rotation color blending',
         keywords: 'color wheel rotate gradient transition gray desaturate rgb hsv blend tween ramp',

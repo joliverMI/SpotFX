@@ -634,6 +634,22 @@ class Settings(BaseSettings):
     # writes while audio_shape_service is recording so capture doesn't compete
     # with LedFX writes. Turn OFF to let triggers fire during capture.
     suppress_triggers_during_capture: bool = True
+    # Legacy Trigger Engine — retired 2026-08-20 (his ask: "retire the old
+    # engine, but make sure i can bring it back"). OFF (the retired default)
+    # stops services/trigger_engine.py's run() loop from firing anything out
+    # of legacy storage/profiles/ data: no trigger_fired/pre_scheduled_fired
+    # broadcasts (the doubling this retired — SPECTRA's bridge classified
+    # every one of those into a flare, on top of his own SPECTRA triggers),
+    # no preview, no pre-ramp, no scene-override prep. The TriggerEngine
+    # object itself, and everything else it does OUTSIDE that loop
+    # (load_profile, apply_save, reload_shape_offset, demote_play_best,
+    # reconsider_genre_blend — what auto_offset_service/guest_source/
+    # ledfx_song_client actually call), is untouched: those three
+    # subsystems hold a reference to the engine singleton, not to this
+    # flag. Flip back to True — PATCH /api/settings or the checkbox on the
+    # Settings page — to restore legacy firing; checked fresh every tick,
+    # no restart needed.
+    legacy_trigger_engine_enabled: bool = False
 
     # ── Last.fm (genre fallback / primary in LedFX mode) ─────────────────────
     lastfm_api_key: str = ""
