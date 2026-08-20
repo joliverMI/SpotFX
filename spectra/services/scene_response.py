@@ -236,7 +236,14 @@ def _phase_ramp_ms(event_class: str, gap_ms: Optional[int]) -> int:
     Falling back to the flat, hand-tuned class default in that case is a
     DOCUMENTED degradation — the honest "nothing to stretch toward" answer
     — never a silent reintroduction of the constant this feature exists to
-    replace for the common case."""
+    replace for the common case.
+
+    NOT the same "gap" minimum dwell reasons about (spectra/services/
+    dwell.py, landed the same week) — that module's own docstring has the
+    full comparison and the one real interaction between the two (a ramp
+    that stretches toward a fire_scene trigger dwell then defers into an
+    update effect instead of the switch the build promised); checked
+    deliberately, not assumed, since both features touch trigger timing."""
     if (event_class in PHASE_RAMP_STRETCH_CLASSES
             and gap_ms is not None and gap_ms > 0):
         return max(PHASE_RAMP_MIN_MS,

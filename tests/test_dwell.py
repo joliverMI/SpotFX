@@ -298,6 +298,63 @@ def test_deferred_fires_are_recorded_never_silent(monkeypatch):
     assert list(data["scenes"].keys()) == ["a"]
 
 
+# ── 3b. the update seam's own gate, post-#148 (his room's live mode) ────
+
+def test_fire_scene_update_event_runs_under_triggers_only(monkeypatch):
+    """engine.fire_scene_update_event gained a second caller here (dwell's
+    deferral) the same week #148 widened its own internal gate from
+    literal "full" to ("full", "triggers_only") for the pre-existing
+    trigger-driven caller. His room runs "triggers_only" live — dwell's
+    deferral must still reach on_update there, not just under "full"."""
+    from spectra.services import engine, room_controls as rc
+
+    calls: list = []
+
+    async def fake_on_update(intensity):
+        calls.append(intensity)
+        return {"result": "updated", "intensity": intensity}
+    # Patched on the INSTANCE, not the class: an instance attribute is
+    # called exactly as given (no implicit self-binding), unlike a class
+    # attribute accessed through the instance.
+    monkeypatch.setattr(engine.responses, "on_update", fake_on_update)
+
+    for mode in ("full", "triggers_only"):
+        calls.clear()
+        rc.save_room_controls(rc.RoomControlState(scene_change_mode=mode))
+        result = _run(engine.fire_scene_update_event(0.6))
+        assert calls == [0.6], f"on_update must run under {mode!r}"
+        assert result == {"result": "updated", "intensity": 0.6}
+
+    for mode in ("analysed", "transitions"):
+        calls.clear()
+        rc.save_room_controls(rc.RoomControlState(scene_change_mode=mode))
+        result = _run(engine.fire_scene_update_event(0.6))
+        assert calls == [], f"on_update must NOT run under {mode!r}"
+        assert result is None
+
+
+def test_dwell_defers_correctly_regardless_of_scene_change_mode(monkeypatch):
+    """The dwell gate itself (fire_scene_by_id) never reads scene_change_mode
+    at all — his decision C, every automatic path gated uniformly. Proven
+    under his room's real live mode, "triggers_only", not just the "full"
+    default every other test in this file runs under."""
+    from spectra.services import room_controls as rc
+    from spectra.services.scene_sequencer import fire_scene_by_id
+    rc.save_room_controls(rc.RoomControlState(scene_change_mode="triggers_only"))
+    scene_store.save(_scene("a"))
+    scene_store.save(_scene("b"))
+    fired: list = []
+    _fake_scene_compiler(monkeypatch, fired)
+    update_calls: list = []
+    _fake_update_seam(monkeypatch, update_calls, result={"result": "updated"})
+
+    _run(fire_scene_by_id("a", intensity=0.0))
+    result = _run(fire_scene_by_id("b", intensity=0.7))
+    assert fired == [("a", 0.0)]
+    assert update_calls == [0.7]
+    assert result["skipped"] == "dwell"
+
+
 # ── 4. Force Scene wins but names the override ──────────────────────────
 
 def test_force_scene_overrides_active_dwell_and_names_it(monkeypatch):

@@ -2076,6 +2076,31 @@ parallel control, the same component every other curve in this app uses.
 Spec: `tests/test_dwell.py`, `scripts/check_spectra.py`'s own MINIMUM
 DWELL section (mirrors the Force Scene proof immediately above it).
 
+**Rebased past #148 (My-triggers-only mode) and #150 (charge/lull ramp
+scales to the real gap to the next trigger) — both landed on master the
+same week and both touch this area; checked, not assumed, that they
+compose.** `engine.fire_scene_update_event` gained a second caller (this
+module's deferral) the same week #148 widened its own internal gate from
+literal `"full"` to `("full", "triggers_only")` — the merged function
+keeps BOTH: the widened gate AND the `Optional[dict]` return this module
+needs to log what the update seam actually did
+(`tests/test_dwell.py::test_fire_scene_update_event_runs_under_triggers_only`
+proves the merge, all four tiers). The dwell gate itself never reads
+`scene_change_mode` — it applies uniformly regardless (his decision C),
+proven directly under `"triggers_only"` (his room's real live mode) in
+`test_dwell_defers_correctly_regardless_of_scene_change_mode`, not just
+the `"full"` default every other test here runs under. #150 removed
+`SceneV2.phase_blend`/`PhaseBlend` entirely — unrelated to `dwell_curve`,
+which sits lower in the same model and rebased clean. **The one real
+interaction, named not silently accepted**: #150's charge/lull ramp
+stretches toward the NEXT trigger's timestamp (`_next_trigger_gap_ms`, a
+FORWARD-looking gap read off the trigger schedule) — if that next trigger
+is a `fire_scene` action and dwell's minimum hasn't cleared, the dramatic
+build lands on an update effect instead of the scene switch it visually
+promised. `dwell.py` and `_phase_ramp_ms`'s own docstrings both spell out
+why these are genuinely different gaps (not a shared formula that could
+drift) and why predicting the other side isn't attempted — see either.
+
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
 Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/

@@ -58,6 +58,32 @@ that staleness cannot recur here structurally, not just by convention.
 In-memory only, like every other engine runtime state in this app (drift,
 response surges) — a cold start has no active scene tracked, so the very
 first fire after a restart is never deferred.
+
+NOT THE SAME "GAP" AS THE CHARGE/LULL RAMP STRETCH (scene_response.py's
+`_phase_ramp_ms`/`_next_trigger_gap_ms`, landed the same week as this
+module, #150) — checked deliberately, not assumed, since both features
+reason about timing near a trigger. `_next_trigger_gap_ms` is FORWARD-
+looking: milliseconds from one trigger to the NEXT one this song will
+actually fire, read straight off the trigger schedule, used only to pace
+a charge/lull param glide. `remaining_s()` here is BACKWARD-looking: how
+much of the CURRENT scene's own latched minimum (an authored curve, not a
+schedule) is still owed, counted from when that scene last actually
+fired. They don't share a computation, a data source, or a call path —
+there is nothing to keep "in sync" between them, so this is not a
+duplicated-formula drift risk.
+
+There IS one real, un-mitigated interaction between the two, worth naming
+rather than discovering live: a charge/lull ramp stretches toward the
+NEXT trigger's timestamp regardless of what that trigger will actually do
+when it arrives — if it's a `fire_scene` action and the room's active
+scene hasn't cleared its own minimum yet, this module converts it into an
+update effect instead of the scene switch the build visually promised.
+Neither mechanism predicts the other's outcome (nor should it try to —
+`_next_trigger_gap_ms` would have to simulate dwell's own future state,
+which depends on things that haven't happened yet: another fire landing
+first, Force Scene, a restart). If this reads as a real visual mismatch
+on his room, it is a product question for him — not something to
+"fix" by inventing cross-mechanism prediction here.
 """
 from __future__ import annotations
 
