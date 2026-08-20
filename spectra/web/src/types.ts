@@ -150,12 +150,14 @@ export interface PhaseChoreography {
   anchor_frac: number;
 }
 
-/** OVERRIDE BLEND equivalent, charge/lull facet — null = the fixed class
- * default (charge 4000 ms, lull 2500 ms); drop is never overridable. */
-export interface PhaseBlend {
-  charge_ramp_ms: number | null;
-  lull_ramp_ms: number | null;
-}
+// PhaseBlend (OVERRIDE BLEND's charge/lull facet, a static per-scene ramp
+// number) RETIRED 2026-08-20 (fm/spectra-lull-ramp-does-not-scale, Admiral
+// order "fix the lull ramp") — it was a porting gap, not a design choice:
+// legacy dynamically stretched the ramp to the gap to the next trigger,
+// and this field only ever carried the buildable-at-the-time static half.
+// The charge/lull ramp is now a computed dynamic stretch to the real gap
+// (spectra/services/scene_response.py's _phase_ramp_ms) — no scene field,
+// no knob to hand-tune, see that module's own OVERRIDE BLEND note.
 
 export interface SceneV2 {
   id: string;
@@ -171,7 +173,6 @@ export interface SceneV2 {
   update_kind: string | null;
   color_journey: SceneColorJourney;
   choreography: PhaseChoreography;
-  phase_blend: PhaseBlend;
   /** OVERRIDE BLEND equivalent, scene-entry facet: blend this scene's
    * writes in over this ramp (ms) instead of an instant jump when it
    * fires live. 0 = today's unchanged instant-jump behaviour. */
@@ -777,7 +778,6 @@ export function newScene(id: string): SceneV2 {
     update_kind: null,
     color_journey: { mode: 'inherit', pace_factor: 1, journey: null },
     choreography: { enabled: false, transition_ms: 800, transition_mode: 'Add', anchor_frac: 0.45 },
-    phase_blend: { charge_ramp_ms: null, lull_ramp_ms: null },
     entry_ramp_ms: 0,
     accept_all_sets: true,
     accepted_set_ids: [],

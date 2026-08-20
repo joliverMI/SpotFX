@@ -74,6 +74,7 @@ trigger_engine._intensity_event = conductor.on_intensity_event
 
 
 async def fire_response_event(event_class: str, intensity: float,
+                              gap_ms: int | None = None,
                               via_trigger: bool = False) -> None:
     """The ONE response-fire choke point: the bridge's classified legacy
     trigger_fired events and SPECTRA-native fire_response triggers
@@ -102,7 +103,16 @@ async def fire_response_event(event_class: str, intensity: float,
     OR "triggers_only". This is what makes his own charge/lull/drop marks
     fire under "triggers_only" while the bridge-relayed duplicate that
     used to double them stays silent — the mechanism the linked report
-    proved causes that doubling."""
+    proved causes that doubling.
+
+    gap_ms is the OVERRIDE BLEND charge/lull stretch input
+    (scene_response._phase_ramp_ms): TriggerEngine._fire computes it from
+    the real per-song trigger schedule (honoring the SAME per-song
+    effective mode _effective_mode_for_song resolves — see
+    TriggerEngine._next_trigger_gap_ms) and passes it through; the
+    bridge's own classified-event call (no SPECTRA trigger context) and a
+    manual /api/engine/event test-fire both omit it, its documented
+    default — an honest "unknown," not a zero."""
     from spectra.services import fire_history, preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
@@ -111,7 +121,7 @@ async def fire_response_event(event_class: str, intensity: float,
     allowed = mode in ("full", "triggers_only") if via_trigger else mode == "full"
     if not allowed:
         return
-    await responses.on_event(event_class, intensity)
+    await responses.on_event(event_class, intensity, gap_ms)
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
     for hold_s in responses.pending_hold_groups():

@@ -88,21 +88,21 @@ def _seed_his_real_scenes():
 # ═══ 1. registry: generated from the real schema, not re-typed ═════════
 
 def test_scene_settings_registry_bounds_are_read_from_the_real_models():
-    from spectra.models.scene import PhaseBlend, PhaseChoreography, SceneColorJourney, SceneV2
+    from spectra.models.scene import PhaseChoreography, SceneColorJourney, SceneV2
     from spectra.services import scene_console as sc
 
+    # phase_blend_charge_ramp_ms/lull_ramp_ms retired 2026-08-20
+    # (fm/spectra-lull-ramp-does-not-scale) along with models.scene.
+    # PhaseBlend — the charge/lull ramp is a computed dynamic stretch to
+    # the real gap to the next trigger now, not a per-scene knob.
     assert set(sc.SCENE_SETTINGS_REGISTRY) == {
-        "entry_ramp_ms", "phase_blend_charge_ramp_ms", "phase_blend_lull_ramp_ms",
+        "entry_ramp_ms",
         "choreography_enabled", "choreography_transition_ms", "choreography_anchor_frac",
         "color_journey_pace_factor", "accept_all_sets",
     }
 
     spec = sc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"]
     assert (spec.min, spec.max) == sc._model_field_bounds(SceneV2, "entry_ramp_ms") == (0.0, 20000.0)
-
-    spec = sc.SCENE_SETTINGS_REGISTRY["phase_blend_charge_ramp_ms"]
-    assert (spec.min, spec.max) == sc._model_field_bounds(PhaseBlend, "charge_ramp_ms") == (200.0, 20000.0)
-    assert spec.nullable is True
 
     spec = sc.SCENE_SETTINGS_REGISTRY["choreography_anchor_frac"]
     assert (spec.min, spec.max) == sc._model_field_bounds(PhaseChoreography, "anchor_frac") == (0.0, 1.0)

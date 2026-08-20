@@ -434,22 +434,21 @@ class PhaseChoreography(BaseModel):
     anchor_frac:     float = Field(default=0.45, ge=0.0, le=1.0)
 
 
-class PhaseBlend(BaseModel):
-    """OVERRIDE BLEND equivalent for the charge/lull phase build — the
-    dominant real usage of legacy Override Blend (269 live triggers studied
-    read-only: 225 Charge, 40 Lull, 4 scene-selection/update — trigger_engine
-    `_phase_blend_ramp_ms`/`_blend_factor_for`). Legacy stretched the ramp
-    DYNAMICALLY to the gap to the next enabled trigger, so a charge always
-    peaked exactly as the lull hit. SPECTRA's S2 engine is bridge-reactive
-    with no forward schedule of trigger fires to compute that gap against
-    (that needs per-song trigger authoring — the gap report's item 1, a
-    separate large gap) — so this authors the buildable half of the same
-    grammar: a per-scene CONFIGURABLE ramp instead of the fixed global
-    default (`scene_response.PHASE_RAMP_MS`), so a scene tuned for a long
-    build can stretch it and one tuned for a tight cut can shorten it.
-    None = unchanged default ramp for that class."""
-    charge_ramp_ms: Optional[int] = Field(default=None, ge=200, le=20000)
-    lull_ramp_ms:   Optional[int] = Field(default=None, ge=200, le=20000)
+# PhaseBlend (the charge/lull OVERRIDE BLEND equivalent) RETIRED 2026-08-20
+# (`fm/spectra-lull-ramp-does-not-scale`, Admiral order "fix the lull ramp").
+# It was a static, optional per-scene ramp number — a PORTING GAP, not a
+# deliberate design choice: legacy dynamically stretched the charge/lull
+# ramp to the gap to the next enabled trigger so a build always peaked
+# exactly as the next moment hit; this field only ever carried the
+# buildable-at-the-time half of that grammar (no forward trigger schedule
+# existed yet to compute the gap against). Nobody chose the static number
+# as the fix — a per-song trigger schedule (trigger_store) now exists, so
+# scene_response._drive_phase computes the real dynamic stretch instead
+# (his own spec: ramp to ~90% of the actual gap, hang the remaining ~10%).
+# A static per-scene knob was deliberately NOT rebuilt alongside it — his
+# own two real lull gaps on one song (6040ms, 900ms) prove a single
+# constant can't satisfy both, so handing him a number to hand-tune per
+# scene would hand back the exact problem this fix removes.
 
 
 def _as_dict(value) -> dict:
@@ -559,9 +558,10 @@ class SceneV2(BaseModel):
     update_kind: Optional[str] = None
     color_journey: SceneColorJourney = Field(default_factory=SceneColorJourney)
     choreography: PhaseChoreography = Field(default_factory=PhaseChoreography)
-    phase_blend: PhaseBlend = Field(default_factory=PhaseBlend)
     # OVERRIDE BLEND equivalent for scene entry (the thinner facet of the
-    # same legacy flag — see PhaseBlend for the dominant charge/lull facet):
+    # same legacy flag — the dominant charge/lull facet is now the dynamic
+    # gap-to-next-trigger stretch in scene_response._drive_phase, not a
+    # per-scene field; see this model's retired-PhaseBlend note above):
     # blend the scene's compiled writes in over this ramp instead of an
     # instant jump when the scene fires, hue-arc for colour (fx_seam,
     # coherent with the flare colour-jump ramp-in — scene_response.

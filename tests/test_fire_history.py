@@ -217,7 +217,7 @@ def test_response_event_records_when_full_tier(monkeypatch):
     monkeypatch.setattr("spectra.services.room_controls.load_room_controls",
                         lambda: RoomControlState(scene_change_mode="full"))
 
-    async def fake_on_event(event_class, intensity):
+    async def fake_on_event(event_class, intensity, gap_ms=None):
         return None
 
     monkeypatch.setattr(engine.responses, "on_event", fake_on_event)
@@ -269,7 +269,7 @@ def test_response_event_triggers_only_trigger_path_records(monkeypatch):
     monkeypatch.setattr("spectra.services.room_controls.load_room_controls",
                         lambda: RoomControlState(scene_change_mode="triggers_only"))
 
-    async def fake_on_event(event_class, intensity):
+    async def fake_on_event(event_class, intensity, gap_ms=None):
         return None
 
     monkeypatch.setattr(engine.responses, "on_event", fake_on_event)
@@ -318,7 +318,7 @@ def test_trigger_fire_records_source_and_action_kind():
     from spectra.services import fire_history
     from spectra.services.trigger_engine import TriggerEngine
 
-    async def fake_fire_response(event_class, intensity):
+    async def fake_fire_response(event_class, intensity, gap_ms=None):
         return None
 
     trig = SpectraTrigger(timestamp_ms=1000, source="generated",
@@ -343,7 +343,7 @@ def test_trigger_fire_failure_does_not_record():
     from spectra.services import fire_history
     from spectra.services.trigger_engine import TriggerEngine
 
-    async def failing_fire_response(event_class, intensity):
+    async def failing_fire_response(event_class, intensity, gap_ms=None):
         raise RuntimeError("boom")
 
     trig = SpectraTrigger(timestamp_ms=1000, source="authored",
