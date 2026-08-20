@@ -137,6 +137,22 @@ an invented "primary owner." No backend/storage change was needed or made
 — the tiering and the reordered Overrides/Members/Rotation editor are
 UI-only, computed client-side from the already-fetched card list.
 
+**The terminal fallback (`scene_compiler.room_active_set()`) was missing
+`resolve_for_fire` entirely until 2026-08-19 (PR fm/spectra-active-set-
+overlay-bypass, `docs/SPECTRA_SPEC.md` §86)** — every choke point above
+resolves the overlay when it's handed an explicit set/group id, but a
+`fire_scene_by_id(color_set_id=None)` call (100% of his real `fire_scene`
+triggers) fell through to this function, which fetched the room's active
+set RAW. Fixed there (overlay only, deliberately not mode-gated — see the
+function's own docstring for why). The same audit found two more
+overlay-missing choke points that also feed a real write:
+`scene_response.py`'s flare colour-jump (`_default_set_card`) and
+`drift_conductor.py`'s room colour bootstrap (`_bootstrap_room_color`,
+first-ever pick on a genuinely set-less room) — both fixed the same way.
+Before trusting a "this choke point already resolves the overlay"
+belief, check the specific function, not just the family — three
+separate ones in this one area didn't.
+
 This top-level copy predates the S3 process split and is genuinely dark/unused
 in his real room today (`storage/sequencer.json` has `enabled: false`) —
 `spectra/models/sequencer.py` + `spectra/services/{selection_kernel,
