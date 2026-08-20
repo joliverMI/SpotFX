@@ -30,6 +30,7 @@ storage/spectra/ownership.json.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import socket
 
@@ -618,8 +619,11 @@ def test_facade_relay_receives_real_frames_with_no_websocket(tmp_path, _isolated
                 frame = received[0]
                 assert frame["vis_id"] == "preview-virtual"
                 assert frame["shape"] == [3, 4], "rows from the virtual's own config (12 px / 3 rows)"
-                assert len(frame["pixels"]) == 3, "[r-list, g-list, b-list] — same wire shape as the LedFX path"
-                assert len(frame["pixels"][0]) == 12
+                assert isinstance(frame["pixels"], str), \
+                    "base64 interleaved rgb bytes — same compact wire shape LedFX's own " \
+                    "default (transmission_mode=compressed) uses, not a JSON int list"
+                decoded = base64.b64decode(frame["pixels"])
+                assert len(decoded) == 12 * 3, "12 pixels x 3 channels, full resolution — no downsampling"
             finally:
                 await relay.stop()
         finally:

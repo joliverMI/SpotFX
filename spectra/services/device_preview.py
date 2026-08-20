@@ -44,15 +44,18 @@ explicitly `Dropped entirely` from the fx/ vendoring (VENDOR.md), so it is
 not part of this repo's GPL-3.0 subtree at all; lifting it now would be a
 fresh, deliberate act of incorporating that code that Stage 1 chose not to
 do. `_facade_frame_payload` below is an independent, much simpler
-implementation of the same generic idea (numpy pixels -> per-channel lists
+implementation of the same generic idea (numpy pixels -> base64 bytes
 + a throttle-by-timestamp), reusing THIS module's own pre-existing,
 SpotFX-authored throttle bookkeeping (`_throttle_ok`, MIT-licensed, already
-here for the LedFX path) rather than core.py's. The frontend's
-`decodePixels()` (api/devicePreviewWs.ts) needed no change and so carries
-no new exposure either: it already independently reimplements (not copies)
-LedFX-Frontend-v2's AGPL-3.0 decode behaviour, and this repo has no other
-relationship with that project — the wire shape emitted by both source
-paths is identical, so that concern is untouched.
+here for the LedFX path) rather than core.py's; its base64 step is a
+one-line stdlib call, not a port of core.py's own encode logic. The
+frontend's `decodePixels()` (api/devicePreviewWs.ts) needed no change and
+so carries no new exposure either: it already independently reimplements
+(not copies) LedFX-Frontend-v2's AGPL-3.0 decode behaviour, and this repo
+has no other relationship with that project — the wire shape emitted by
+both source paths is identical (dict keys, and, since 2026-08-20, the
+`pixels` encoding too — see `_facade_frame_payload`'s own docstring), so
+that concern is untouched.
 
 LedFX transport (report §2, read from the real LedFX fork at
 /home/javi/ledfx-src, used only when owner == spot-effects): every
@@ -229,22 +232,54 @@ def _source_mode() -> str:
 
 def _facade_frame_payload(vis_id: str, pixels, host) -> dict:
     """The in-process equivalent of a relayed LedFX visualisation_update
-    frame — same wire shape (module docstring's licence note explains why
-    this is a fresh, independent implementation, not a port of
-    ledfx/core.py's dropped-from-vendoring serialize logic). `pixels` is
-    the real per-virtual buffer fx/virtuals.py just flushed to the device
-    (fx.events.VirtualUpdateEvent.pixels), shape (pixel_count, 3)."""
+    frame (module docstring's licence note explains why this is a fresh,
+    independent implementation, not a port of ledfx/core.py's
+    dropped-from-vendoring serialize logic). `pixels` is the real
+    per-virtual buffer fx/virtuals.py just flushed to the device
+    (fx.events.VirtualUpdateEvent.pixels), shape (pixel_count, 3).
+
+    ENCODING MATCHES LEDFX'S OWN DEFAULT (fixed 2026-08-20, his report
+    "the frame rate on the preview is still terrible... I'm always on a
+    remote computer, but LEDFx previews were really good" —
+    data/preview-frame-rate-is-still-bad-over-rem-dhvp/): base64 of the
+    raw interleaved r,g,b bytes, exactly `transmission_mode="compressed"`
+    (ledfx/config.py's own default, `ledfx/core.py::handle_visualisation_
+    update`'s `pybase64.b64encode(bytes(pixels...))`). This used to emit a
+    JSON list of three per-channel lists ("uncompressed" shape) instead —
+    correct in structure (the frontend's `decodePixels()` in
+    api/devicePreviewWs.ts already handles both, written to match LedFX's
+    own two transmission modes) but far heavier on the wire: a JSON int
+    array costs ~4 bytes per channel value (digits + comma) versus 4/3
+    bytes per byte for base64, a ~2.7x difference that scales with pixel
+    count — for crystal-mapper (2664 px) the prior list encoding measured
+    ~29.4KB/frame at 8fps (docs/SPECTRA_SPEC.md §43); base64 cuts that to
+    ~3.5KB/frame, same resolution, same shape, zero downsampling. §43's
+    own prior investigation into this exact "choppy preview" complaint
+    measured RENDER (DOM vs canvas) and ruled out payload size — but did
+    so by timing local JSON.parse/decode cost only, never actual network
+    transfer over his real remote link; that local measurement is still
+    true and still irrelevant to why bytes-on-the-wire matter for him.
+    Deliberately NOT reintroducing LedFX's `visualisation_maxlen≈81`
+    downsample cap — that was evaluated and rejected in the same PR for a
+    real, still-standing reason (his own "I don't see any Matrix for The
+    Matrix previews" ask): downsampling drops points, this only changes
+    how the same points are written on the wire. No frontend change is
+    needed — `decodePixels()` already parses this exact shape; it just
+    never received it from this path before."""
+    import base64
+
     import numpy as np
 
     virtual = host.virtuals.get(vis_id) if host is not None else None
     rows = max(1, virtual.rows) if virtual is not None else 1
     pixel_count = int(pixels.shape[0])
     cols = pixel_count // rows if rows else pixel_count
-    channels = np.clip(pixels, 0, 255).astype(np.uint8).T.tolist()
+    raw = np.ascontiguousarray(np.clip(pixels, 0, 255).astype(np.uint8)).tobytes()
+    encoded = base64.b64encode(raw).decode("ascii")
     return {
         "type": "device_preview_frame",
         "vis_id": vis_id,
-        "pixels": channels,
+        "pixels": encoded,
         "shape": [rows, cols],
         "is_device": False,
     }
