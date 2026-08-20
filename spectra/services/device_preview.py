@@ -76,6 +76,77 @@ doesn't need 30fps of motion fidelity. The in-process facade path
 (`_consume_facade`) applies the SAME RELAY_TARGET_FPS throttle itself,
 since nothing upstream of it does that throttling for it.
 
+PREVIEW FRAME DELIVERY — pacing, not payload (2026-08-20,
+data/preview-skips-under-fast-motion/, his SECOND "LedFX was better"
+report: "the preview might look better but when there are fast motions it
+skips still... LedFX was better"). PR #143 fixed BYTES PER FRAME (the
+base64 encoding above) — real, measured, 3.4x smaller. Bytes-per-frame is
+constant regardless of motion, so it could not have been the cause of a
+MOTION-dependent symptom, and it wasn't: "skips under fast motion" is a
+DELIVERY-timing complaint, not a volume one, and it survived that fix
+untouched.
+
+Read LedFX's real client fan-out a second time (`ledfx/api/websocket.py`
+`WebsocketConnection`), this time for what happens AFTER encoding, not
+before: `send()` never queues a vis frame for delivery — it drops it into
+a per-vis_id SINGLE-SLOT MAILBOX (`self._vis_slots[vis_id] = message`,
+unconditionally overwriting whatever hasn't been sent yet), and exactly
+ONE `_sender()` task per connection drains that mailbox (latest value
+only — anything still sitting there when a newer frame lands is silently
+dropped, never queued) plus a separate ordered control queue, writing to
+the socket one message at a time. Two properties that gives LedFX and
+SPECTRA's relay never had: (1) a client that can't keep up is never handed
+a backlog — it only ever gets told the CURRENT state, so falling behind
+reads as "skip to now," not "stutter through a growing queue"; (2) exactly
+one coroutine ever writes to a given socket at a time.
+
+SPECTRA's relay did neither. `_consume_facade`'s `on_update` fired a bare
+`asyncio.create_task(self._on_frame(payload))` per accepted frame —
+RELAY_TARGET_FPS=8 caps ACCEPTANCE, but nothing capped DELIVERY time — and
+`_on_frame` was `preview_ws_manager.broadcast`, which wraps each client's
+`ws.send_json()` in `asyncio.wait_for(..., timeout=SEND_DEADLINE_S=0.25s)`
+(`spectra/services/ws.py`). Two real consequences, neither about bytes:
+whenever one send takes longer than one frame interval (125ms) — ordinary
+on a real remote/VPN link, no motion required, just link jitter — the next
+frame's broadcast task starts before the previous one finishes, so two or
+more coroutines can be mid-write on the SAME connection at once (Starlette
+gives no guarantee concurrent `send()` calls on one WebSocket interleave
+safely); and whenever a send exceeds 250ms, `asyncio.wait_for` raises,
+`broadcast()` treats that as connection failure and calls
+`self.disconnect(ws)` — which only does `self._connections.remove(ws)`. It
+never calls `ws.close()`. The browser's own WebSocket is left fully OPEN
+(`devicePreviewWs.ts`'s `onclose` — its only reconnect trigger — never
+fires) while the server has silently stopped sending it anything, forever.
+Not jitter: a permanent, invisible stall that looks exactly like his
+report and never self-heals. Fast motion doesn't cause this directly —
+it raises how often SOME send exceeds 250ms (more/larger state churn over
+an already-jittery link) — but one occurrence is enough to strand a tab
+for the rest of the session, which is consistent with a complaint that
+gets worse the longer/more active a session runs.
+
+Fix (`_PreviewFrameSender`/`PreviewFrameHub` below — ported to fit, not
+copied verbatim): status pushes (pause/resume/connect — low frequency,
+reliability matters more than latency there) stay on
+`preview_ws_manager`'s existing ordered broadcast, unchanged — LedFX's own
+control-queue half. Frame delivery gets its own per-connection
+single-slot mailbox + one dedicated sender task, mirroring
+`WebsocketConnection.send()`/`_sender()`: a new frame for a vis_id already
+waiting to be sent overwrites it instead of queuing, and the sender loop
+is the only writer for that socket, ever — no `asyncio.create_task` per
+frame, so concurrent sends to one connection are impossible by
+construction rather than merely unlikely. `FRAME_SEND_TIMEOUT_S` still
+guards a genuinely wedged socket, but generously — it is not a per-frame
+race against RELAY_TARGET_FPS — and when it actually trips, the sender
+calls `ws.close()` for real before giving up, so a genuinely dead client
+gets the close frame that lets `onclose` fire and reconnect, instead of
+the silent strand above. Evidence:
+`scripts/check_device_preview_frame_pacing.py` (the concurrent-send
+violations and the false-eviction-without-close, both reproduced against
+the OLD path for comparison and shown absent on the new one — a
+throttled-loopback/injected-latency REMOTE-EQUIVALENT proxy, not a test
+against his real link, which this task never touched) +
+`tests/test_device_preview.py` section 6.
+
 THE PAUSE MUST GENUINELY STOP THE WORK (owner's own words, and the reason
 this got a whole section instead of a one-line toggle): pausing must drop
 the live connection to the source itself, not just blank the display while
@@ -159,6 +230,12 @@ RECONNECT_MAX_S = 30.0
 # connected — this bounds how quickly a pause actually closes the socket,
 # so it must stay well under a human's sense of "immediate".
 POLL_INTERVAL_S = 0.2
+# Guards a genuinely wedged frame-sender socket only — generous on purpose,
+# not a per-frame race against RELAY_TARGET_FPS's 125ms cadence the way the
+# old SEND_DEADLINE_S=0.25s broadcast timeout was (see the module docstring's
+# "PREVIEW FRAME DELIVERY" section for why that raced real remote-link
+# jitter and silently stranded clients).
+FRAME_SEND_TIMEOUT_S = 10.0
 
 preview_ws_manager = WSManager()
 
@@ -530,8 +607,99 @@ class DevicePreviewRelay:
         self.connected = False
 
 
+class _PreviewFrameSender:
+    """One connected preview client's dedicated frame-write path — the
+    per-connection half of LedFX's own `WebsocketConnection.send()`/
+    `_sender()` (module docstring's "PREVIEW FRAME DELIVERY" section): a
+    single-slot, latest-value-wins mailbox per vis_id, drained by exactly
+    ONE loop that ever writes to this socket. A vis_id already waiting to
+    be sent is overwritten by a newer frame, never queued behind it —
+    there is never a backlog to fall behind on, and concurrent sends to
+    this connection are impossible by construction, not merely unlikely."""
+
+    def __init__(self, ws) -> None:
+        self.ws = ws
+        self._slots: dict[str, dict] = {}
+        self._wake = asyncio.Event()
+        self._task: Optional[asyncio.Task] = None
+        self.dropped_frames = 0
+
+    def submit(self, payload: dict) -> None:
+        vis_id = payload.get("vis_id")
+        if vis_id in self._slots:
+            self.dropped_frames += 1
+        self._slots[vis_id] = payload
+        self._wake.set()
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run())
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                await self._wake.wait()
+                self._wake.clear()
+                pending = self._slots
+                self._slots = {}
+                for payload in pending.values():
+                    await asyncio.wait_for(
+                        self.ws.send_json(payload), timeout=FRAME_SEND_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A genuinely broken/wedged connection: close it FOR REAL so the
+            # browser's onclose fires and it reconnects, instead of the old
+            # broadcast()-timeout path's silent strand (module docstring).
+            logger.info("device_preview: frame sender closing a dead connection")
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._task = None
+
+
+class PreviewFrameHub:
+    """Fan-out for `device_preview_frame` messages only — one
+    `_PreviewFrameSender` per connected client. Status messages
+    (pause/resume/connect — low frequency, ordering matters more than
+    latency there) stay on `preview_ws_manager`'s existing broadcast,
+    unchanged; this is purely the high-frequency motion path LedFX's own
+    vis-frame mailbox covers."""
+
+    def __init__(self) -> None:
+        self._senders: dict[object, _PreviewFrameSender] = {}
+
+    def connect(self, ws) -> None:
+        sender = _PreviewFrameSender(ws)
+        self._senders[ws] = sender
+        sender.start()
+
+    async def disconnect(self, ws) -> None:
+        sender = self._senders.pop(ws, None)
+        if sender is not None:
+            await sender.stop()
+
+    def submit(self, payload: dict) -> None:
+        for sender in list(self._senders.values()):
+            sender.submit(payload)
+
+    def client_count(self) -> int:
+        return len(self._senders)
+
+
+frame_hub = PreviewFrameHub()
+
+
 async def _broadcast_frame(payload: dict) -> None:
-    await preview_ws_manager.broadcast(payload)
+    frame_hub.submit(payload)
 
 
 async def _broadcast_status() -> None:

@@ -1402,6 +1402,42 @@ a live isolated instance (spare port, `fx.headless` multi-virtual host
 built to his real device shapes) for the canvas rewrite specifically —
 his live `:8010` instance was read-only and untouched throughout both.
 
+**Still skipping under fast motion after the bytes fix, 2026-08-20 — the
+DELIVERY path, not payload size, was the remaining cause**
+(`data/preview-skips-under-fast-motion/`, his second "LedFX was better"
+report). Read LedFX's client fan-out (`ledfx/api/websocket.py
+WebsocketConnection.send()`/`_sender()`) a second time, this time for what
+happens AFTER encoding: it never queues a vis frame — a per-vis_id
+single-slot mailbox unconditionally overwrites whatever hasn't been sent
+yet, and exactly ONE sender task per connection drains it, one message at
+a time. SPECTRA's relay did neither: the facade source fired a bare
+`asyncio.create_task` per accepted frame into `WSManager.broadcast`
+(`spectra/services/ws.py`), which wraps each client's send in
+`asyncio.wait_for(..., timeout=SEND_DEADLINE_S=0.25s)`. Whenever one send
+takes longer than a 125ms frame interval — ordinary on a real remote
+link, no motion required — the next frame's task starts before the
+previous one finishes, so two+ coroutines can be mid-write on the SAME
+WebSocket at once (undefined behaviour); whenever a send exceeds 250ms,
+the timeout fires and `broadcast()` calls `self.disconnect(ws)` — which
+only removes the connection from its list, NEVER calls `ws.close()`. The
+browser's socket is left fully open (`devicePreviewWs.ts`'s `onclose`,
+its only reconnect trigger, never fires) while the server has silently
+stopped sending it anything, forever — a permanent, invisible stall, not
+jitter, and it never self-heals. Fix: `spectra/services/
+device_preview.py`'s `PreviewFrameHub`/`_PreviewFrameSender` — one
+single-slot mailbox + one dedicated sender task per connection, ported
+from LedFX's shape, wired into the `/device-preview/ws` endpoint
+alongside (not replacing) `preview_ws_manager`, which still carries only
+the low-frequency status pushes. A frame send that genuinely fails now
+gets a real `ws.close()` before giving up. Status messages are unaffected
+and unchanged. Measured, not asserted:
+`scripts/check_device_preview_frame_pacing.py` (delay-injected fake
+socket bracketing the old 125ms/250ms thresholds — reproduces the OLD
+path's concurrent-send overlap and its false eviction-without-close
+side by side with the NEW path showing neither) + `tests/
+test_device_preview.py` section 6. This is a delivery-TIMING fix, not a
+second bytes fix — `_facade_frame_payload`'s encoding above is untouched.
+
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
 built, room-proof pending for the Light half — see below); NOT the same
 feature as the retired per-node Light Mode Chooser/§36, which shares only a

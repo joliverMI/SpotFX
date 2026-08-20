@@ -74,6 +74,7 @@ async def post_resume():
 @router.websocket("/device-preview/ws")
 async def device_preview_ws(ws: WebSocket):
     await device_preview.preview_ws_manager.connect(ws)
+    device_preview.frame_hub.connect(ws)
     device_preview.relay.viewers_changed()
     try:
         await ws.send_json({"type": "device_preview_status", **device_preview.relay.status()})
@@ -83,4 +84,5 @@ async def device_preview_ws(ws: WebSocket):
         pass
     finally:
         device_preview.preview_ws_manager.disconnect(ws)
+        await device_preview.frame_hub.disconnect(ws)
         device_preview.relay.viewers_changed()
