@@ -3158,6 +3158,23 @@ a later wiring stage. The Hue-DTLS / DDP single-sender exclusivity with the
 running LedFX service is resolved by the S3 ownership gate: the facade
 reaches live hardware only through the handover (see the S3 section above).
 
+## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
+
+`fx/effects/radial.py`'s ONLY motion source is the audio callback:
+`spin_total += lows_impulse * spin_cfg²/10` per 60 Hz callback, i.e.
+**rev/s = 6 × lows_impulse × spin²** — `spin` is a gain on the LIVE
+captured lows power (snapcast.monitor melbank), NOT a motor speed, and NOT
+the bridge's "intensity" (that's stored librosa file analysis; the two
+diverge freely). During bass-light passages the lows impulse idles ~0.01,
+so a healthy spin 0.55 turns ~6°/s — reads as frozen while rendering fine.
+Diagnosed live 2026-08-21 (his "star is not moving at any speed" — his own
+binding edit and #168's flip port both ruled out with evidence):
+`docs/spectra-star-motion-audio-idle.md`. Executable proof, real pipeline,
+no live access: `scripts/check_star_spin_motion.py`. Before diagnosing any
+"effect X ignores its speed/reactivity param" report, check whether the
+param is an audio gain (`aspect: reactivity` in `config/effect_params.json`)
+and measure the live impulse before blaming the param value or the writer.
+
 ## `crystal-mapper` (the hex Matrix virtual) — read the skill before touching it
 
 Load `.claude/skills/crystal-hex-grid/SKILL.md` before changing any effect
