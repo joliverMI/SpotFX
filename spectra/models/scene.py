@@ -403,12 +403,36 @@ class FlareBand(BaseModel):
     # (curve/gain/param_patch) remain accepted input and are auto-named into
     # kinds on load (_migrate_flare_kinds) — post-validation they are always
     # neutral; the engine executes kinds only.
+    #
+    # LANES (owner ask, 2026-08-21 — his reversal of the §81-addendum
+    # decision that declined this mechanism, driven by the colour-rotate
+    # placement problem; his words: "all lanes fire together, but pick one
+    # action within each lane... more similar to spotfx... randomly pick one
+    # of them by some kind of weighting. For now, just even weights"):
+    # kind_lanes maps kind name → lane name. Kinds sharing a lane name form
+    # a POOL OF ALTERNATIVES — at fire time the engine picks exactly ONE
+    # member per pool (even weights today; scene_response.resolve_lane_picks
+    # is the single seam a future per-member weight/curve plugs into — he
+    # deferred that himself: "later, we might use curves to handle the
+    # weighting") and every lane's pick fires together, the legacy
+    # MorphLane/_pick_morph_lanes shape (models/music_event.py,
+    # services/trigger_engine.py) ported onto band attachments. A kind
+    # ABSENT from this map is its own implicit one-member lane — a pick-one
+    # over a pool of one is that one — so the empty default means every
+    # pre-lanes band (all 28 of his real bands when this shipped, 25 of
+    # them multi-kind) keeps firing ALL of its kinds exactly as before;
+    # a pick only ever happens where he deliberately pools two kinds under
+    # one lane name. Being a dict keyed by kind name, membership in two
+    # lanes at once is structurally impossible, and execution order stays
+    # `kinds`' own insertion order (the same-param precedence tie-break is
+    # untouched — lanes decide WHO fires, never in what order).
     intensity_min: float = Field(default=0.0, ge=0.0, le=1.0)
     intensity_max: float = Field(default=1.0, ge=0.0, le=1.0)
     curve: Literal["linear", "ease_in", "ease_out", "pulse"] = "linear"
     gain:  float = Field(default=1.0, ge=0.0)
     param_patch: dict[str, float] = Field(default_factory=dict)
     kinds: dict[str, float] = Field(default_factory=dict)
+    kind_lanes: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _band_ordered(self) -> "FlareBand":
@@ -420,6 +444,15 @@ class FlareBand(BaseModel):
             if scale < 0.0:
                 raise ValueError(
                     f"kind '{name}' scale must be ≥ 0 (got {scale})")
+        for name, lane in self.kind_lanes.items():
+            if name not in self.kinds:
+                raise ValueError(
+                    f"kind_lanes entry '{name}' references a kind not "
+                    f"attached to this band")
+            if not lane or not lane.strip():
+                raise ValueError(
+                    f"kind '{name}' has an empty lane name — omit the "
+                    f"entry for a kind in its own lane")
         return self
 
 

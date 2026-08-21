@@ -4,12 +4,15 @@
  * params/gain/hold stay agent-adjustable, no settings forms); the band
  * strip stays the graphical piece, and each band SELECTS AND SCALES kinds
  * via a small vertical LANE RACK — drag a kind card into a lane to attach
- * it there (2 lanes by default, up to 4), drag between lanes to reorder,
- * ✕ to detach. A lane is a POSITION in the band's own kinds dict, not a
- * new stored concept — see flareKindOps.ts's header for why that position
- * is load-bearing (same-param precedence in scene_response.py's fixed
- * execution order). Copy/Paste ports a kind's own declaration to any other
- * scene (never a live link — see lib/flareClipboard.ts). */
+ * it there (2 lanes by default, up to 4), ✕ to detach. Every lane fires
+ * together; a lane holding SEVERAL kinds is a pool of alternatives the
+ * engine picks ONE from per fire (owner ask 2026-08-21, even weights —
+ * FlareBand.kind_lanes, scene_response.resolve_lane_picks): drop a kind ON
+ * an occupied lane to pool it there, or on the slim strip before a lane /
+ * an empty lane for a lane of its own (the position still matters —
+ * same-param precedence in scene_response.py's fixed execution order; see
+ * flareKindOps.ts's header). Copy/Paste ports a kind's own declaration to
+ * any other scene (never a live link — see lib/flareClipboard.ts). */
 import { useRef, useState } from 'react';
 import BandStrip from '../../components/BandStrip';
 import FlareLaneRack from '../../components/FlareLaneRack';
@@ -21,7 +24,8 @@ import { emptyBand, emptyResponse } from '../../types';
 import FlareKindEditDialog from './FlareKindEditDialog';
 import FlarePreviewOverlay from './FlarePreviewOverlay';
 import {
-  deleteFlareKind, moveKindToLane, pasteKind, renameFlareKind, setKindTriggerOffset,
+  bandPools, deleteFlareKind, moveKindToLane, pasteKind, prunedLanes,
+  renameFlareKind, setKindTriggerOffset,
 } from './flareKindOps';
 import type { LaneRef } from './flareKindOps';
 
@@ -41,7 +45,8 @@ const CLASS_HINTS: Record<ResponseClass, string> = {
 
 const kindIcon = (k: FlareKind): string =>
   k.type === 'drift_jump' ? (k.jump === 'color_set' ? '🎨' : '🎲')
-    : k.type === 'momentary' ? '↩' : '⚓';
+    : k.type === 'color_rotate' ? '🔄'
+      : k.type === 'momentary' ? '↩' : '⚓';
 
 const kindTypeLabel = (k: FlareKind): string =>
   k.type === 'drift_jump'
@@ -137,8 +142,14 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
       bands: spec.bands.map((b, j) => {
         if (j !== bandIdx) return b;
         const next = { ...(b.kinds ?? {}) };
-        if (scale === null) delete next[name];
-        else next[name] = scale;
+        if (scale === null) {
+          // Detach also leaves its lane pool; a pool shrunk to one member
+          // is pruned so the stored map stays canonical (flareKindOps.ts).
+          delete next[name];
+          const { [name]: _omit, ...lanes } = b.kind_lanes ?? {};
+          return { ...b, kinds: next, kind_lanes: prunedLanes(next, lanes) };
+        }
+        next[name] = scale;
         return { ...b, kinds: next };
       }),
     });
@@ -169,7 +180,8 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
         const over: LaneRef | null = laneEl ? {
           cls: laneEl.dataset.cls as ResponseClass,
           bandIdx: Number(laneEl.dataset.band),
-          laneIdx: Number(laneEl.dataset.laneIdx),
+          mode: laneEl.dataset.laneMode === 'join' ? 'join' : 'insert',
+          anchor: laneEl.dataset.laneAnchor || null,
         } : null;
         const next = { ...initial, x: ev.clientX, y: ev.clientY, over };
         dragRef.current = next;
@@ -305,11 +317,11 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                   .sort((a, z) => a.b.intensity_min - z.b.intensity_min)
                   .map(({ b, i }) => {
                     const laneKey = `${cls}:${i}`;
-                    const attachedCount = Object.keys(b.kinds ?? {}).length;
-                    const visibleLanes = Math.max(2 + (laneExtra[laneKey] ?? 0), attachedCount);
+                    const laneCount = bandPools(b).length;
+                    const visibleLanes = Math.max(2 + (laneExtra[laneKey] ?? 0), laneCount);
                     const canAddLane = visibleLanes < 4;
-                    const overLaneIdx = drag?.over && drag.over.cls === cls && drag.over.bandIdx === i
-                      ? drag.over.laneIdx : null;
+                    const overTarget = drag?.over && drag.over.cls === cls && drag.over.bandIdx === i
+                      ? { mode: drag.over.mode, anchor: drag.over.anchor } : null;
                     return (
                       <div key={i} style={{ marginBottom: 10 }}>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4,
@@ -323,7 +335,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                             visibleLanes={visibleLanes} canAddLane={canAddLane}
                             kindsByName={kindsByName}
                             draggingName={drag?.name ?? null}
-                            overLaneIdx={overLaneIdx}
+                            overTarget={overTarget}
                             onAddLane={() => setLaneExtra((m) => ({
                               ...m, [laneKey]: Math.min(2, (m[laneKey] ?? 0) + 1),
                             }))}

@@ -1024,15 +1024,26 @@ a FlareKind is exactly what that function is for). Full writeup:
 `docs/SPECTRA_SPEC.md` §78. **"The Scenes page's band-strip chip" above is
 now the LANE RACK** (`spectra/web/src/components/FlareLaneRack.tsx`, §81,
 PR fm/spectra-flare-lanes-and-edit): a band attaches kinds by drag, not a
-click-toggle chip row. A lane is a POSITION in `FlareBand.kinds` (dict,
-name→scale) — not a new stored concept — so lane order IS the dict's own
-insertion order, which the engine already reads as a tie-break when two
-same-type kinds (e.g. two permanent param moves) target the same param:
-the later one in that order wins (`scene_response.py`'s fixed
-dice→permanent→momentary→gain→colour execution order, generalized — see
-that module's own docstring before assuming "combine" means additive; dice
-re-rolls and colour jumps are each a SINGLETON pick per fire regardless of
-how many are attached, only param moves/gains actually compose). Rename/
+click-toggle chip row. **Since 2026-08-21 (§88, PR fm/flare-lanes-pick-one
+— his own reversal of the §81-addendum decision that declined this) a lane
+is a stored PICK-ONE POOL, not just a position**: `FlareBand.kind_lanes`
+(kind name → lane name; empty default) pools attached kinds, and
+`scene_response.resolve_lane_picks` rolls ONE member per pool per fire
+(even weights — curve weighting deliberately deferred, his words), every
+lane's pick firing together, the legacy MorphLane shape. A kind with no
+entry is its own one-member lane, so every pre-§88 band fires all of its
+kinds unchanged — the empty default is the whole safety of that change;
+zero scene files were rewritten. Execution order stays `FlareBand.kinds`'
+own insertion order regardless of pooling — the engine reads it as a
+tie-break when two same-type kinds (e.g. two permanent param moves) target
+the same param: the later one in that order wins (`scene_response.py`'s
+fixed dice→permanent→momentary→gain→colour execution order, generalized —
+see that module's own docstring before assuming "combine" means additive;
+dice re-rolls and colour jumps are each a SINGLETON pick per fire
+regardless of how many actually fire, only param moves/gains compose). The
+lead/offset forward peeks (`band_trigger_offset_ms` etc.) aggregate over
+ALL pool members — the possibility-set bound, documented in each
+docstring, since the fire-time pick can't be known early. Rename/
 delete/copy got a direct edit box (`FlareKindEditDialog.tsx`, tap or
 double-click) — deliberately narrower than the no-settings-forms rule
 above, since those three are identity ops on the kind's NAME, not its

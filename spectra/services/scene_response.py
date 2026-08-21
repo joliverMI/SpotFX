@@ -30,7 +30,13 @@ Per event, fed by the bridge with the fire's intensity:
      the response's WHEN along the axis (the phase drive above is not
      band-gated).
   2. THE BAND SELECTS AND SCALES NAMED KINDS (the owner's item-8 shape):
-     band.kinds maps kind name → scale factor; each kind executes per its
+     band.kinds maps kind name → scale factor. LANES first (owner ask,
+     2026-08-21, the legacy MorphLane shape): band.kind_lanes pools
+     attached kinds into named lanes of alternatives — resolve_lane_picks
+     rolls ONE member per pool (even weights, re-resolved every fire) and
+     every lane's pick fires together; a kind in no pool always fires, so
+     a band with no kind_lanes runs all of its kinds exactly as it always
+     did. Each surviving kind then executes per its
      type, in a fixed order so the carry interplay is deterministic —
      dice drift-jumps, permanent param moves, momentary param moves,
      permanent gains, momentary gains, colour drift-jumps (the legacy
@@ -265,7 +271,17 @@ def color_rotate_lead_ms(scene: SceneV2, event_class: ResponseClass,
     by exactly the ramp's own duration. 0 when no color_rotate kind is
     attached to the band at this intensity (true of every scene this build
     ships against — declared, never attached; see
-    scripts/add_color_rotate_flares.py)."""
+    scripts/add_color_rotate_flares.py).
+
+    LANES: iterates every attached kind, including pooled alternatives that
+    may lose the fire-time per-lane roll (resolve_lane_picks) —
+    deliberately the max over the POSSIBILITY SET, since the pick is random
+    and re-resolved at fire time, so no forward peek can know the winner. A
+    losing pool member can contribute a lead the winner doesn't need — the
+    fire lands a hair early, the same accepted trade _response_switch_
+    lead_ms's own max-of-contributors rule already documents ("shorter ones
+    bloom a hair early"), never late. Same note applies to momentary_
+    switch_would_glide and band_trigger_offset_ms below."""
     spec = scene.responses.get(event_class)
     band = select_band(spec.bands, intensity) if spec else None
     if band is None:
@@ -354,6 +370,46 @@ def select_band(bands: list[FlareBand], intensity: float) -> Optional[FlareBand]
     return None
 
 
+def resolve_lane_picks(band: FlareBand,
+                       rng: Random) -> tuple[list[str], list[dict]]:
+    """LANES (owner ask, 2026-08-21): which of a fired band's attached kinds
+    actually run THIS fire. band.kind_lanes (models/scene.py FlareBand — its
+    field comment has his verbatim words and the zero-migration default)
+    groups attached kinds into pools of alternatives; each pool picks
+    exactly ONE member per fire, EVEN WEIGHTS (rng.choice — this call is
+    the single seam a future per-member weight/curve steers, per his own
+    deferral: "later, we might use curves to handle the weighting"), and
+    every pool's pick fires together — the legacy _pick_morph_lanes shape
+    (services/trigger_engine.py: one weighted pick per lane, all picks
+    fire concurrently), re-resolved fresh on every fire exactly like the
+    legacy pick, never baked into the scene.
+
+    A kind with no kind_lanes entry is its own one-member pool, so a band
+    with an empty kind_lanes (every band predating this field) returns ALL
+    of its kinds — byte-identical to the pre-lanes engine. Returns
+    (picked kind names IN band.kinds' own insertion order — lanes decide
+    WHO fires, never the execution order the same-param precedence
+    tie-break reads; pick records for every genuine >1-member pool, for
+    the fire record/show log so "why didn't my other colour flare run"
+    is a log lookup, not a mystery)."""
+    pools: dict[str, list[str]] = {}
+    for name in band.kinds:
+        lane = band.kind_lanes.get(name)
+        # \x00 can't appear in a stored lane name — a collision-proof key
+        # for the implicit solo pools.
+        pools.setdefault(lane if lane is not None else f"\x00solo:{name}",
+                         []).append(name)
+    picked: set[str] = set()
+    records: list[dict] = []
+    for lane_key, members in pools.items():
+        choice = members[0] if len(members) == 1 else rng.choice(members)
+        picked.add(choice)
+        if len(members) > 1:
+            records.append({"lane": lane_key, "picked": choice,
+                            "pool": list(members)})
+    return [n for n in band.kinds if n in picked], records
+
+
 def _kind_would_glide(kind: FlareKind, virtuals: dict) -> bool:
     """Per-KIND core of momentary_switch_would_glide's own smooth gate,
     extracted so the flare scrubbing-preview's live fire schedule
@@ -386,7 +442,9 @@ def momentary_switch_would_glide(scene: SceneV2, event_class: ResponseClass,
     hold, then the flip back after). True iff firing this response class at
     this intensity would land at least one MOMENTARY kind's param on a
     registry-smooth target (see _kind_would_glide, above, for the per-kind
-    check this loops)."""
+    check this loops). Loops ALL attached kinds, pooled lane alternatives
+    included — the possibility-set bound; see color_rotate_lead_ms's own
+    LANES note for why that's deliberate."""
     spec = scene.responses.get(event_class)
     band = select_band(spec.bands, intensity) if spec else None
     if band is None:
@@ -427,7 +485,10 @@ def band_trigger_offset_ms(scene: SceneV2, event_class: ResponseClass,
     untouched default (0) doesn't veto a sibling's authored ask; a band
     with no authored offset at all is 0 — byte-identical to pre-offset
     behaviour (every one of his 61 real flare kinds, re-verified live the
-    day this shipped). Unlike the lead's own drop rule
+    day this shipped). The min runs over ALL attached kinds, pooled lane
+    alternatives included (the possibility-set bound — see
+    color_rotate_lead_ms's own LANES note): "nothing fires later than its
+    authored ask" holds for whichever member wins the fire-time roll. Unlike the lead's own drop rule
     (_response_switch_lead_ms's unconditional lead=0 for drops), a DROP
     band's authored offset IS honoured: that rule pins the AUTOMATIC
     anchor-family lead, not his explicit hand on the preview's marker —
@@ -572,9 +633,18 @@ class ResponseEngine:
         and fold the results into `record` — the shared tail of on_event
         (a genuine flare/charge/lull/drop) and on_update's placeholder
         double-intensity flare (below), factored out so the two can never
-        drift into two different executions of "what a band does"."""
+        drift into two different executions of "what a band does".
+
+        "Run every kind" is post-LANE-PICK since 2026-08-21: resolve_lane_
+        picks (above) first drops every pooled alternative that lost this
+        fire's per-lane roll — a band with no kind_lanes pools is
+        unaffected (all attached kinds survive the resolve, the pre-lanes
+        behaviour, byte-identical for every band that predates the field)."""
         declared = {k.name: k for k in scene.flare_kinds}
-        attached = [(declared[n], s) for n, s in band.kinds.items()]
+        picked_names, lane_picks = resolve_lane_picks(band, self._rng)
+        if lane_picks:
+            record["lane_picks"] = lane_picks
+        attached = [(declared[n], band.kinds[n]) for n in picked_names]
         # Fixed execution order (the legacy reroll → patch → gain → colour
         # pass, generalized): dice first so explicit param kinds override
         # same-key rolls; permanent params before momentary so a spike on

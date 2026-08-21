@@ -118,7 +118,10 @@ export interface ParamTarget {
  * retimes his real show, not only the preview. */
 export interface FlareKind {
   name: string;
-  type: 'drift_jump' | 'momentary' | 'permanent';
+  /** color_rotate: the rotate-and-back colour flare — carries no
+   * jump/params/gain/hold of its own; all four of its quantities scale
+   * from the fire's intensity (models/scene.py FlareKind._shape). */
+  type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate';
   jump: 'color_set' | 'dice' | null;
   params: Record<string, ParamTarget>;
   gain: number;
@@ -135,6 +138,12 @@ export interface FlareBand {
   param_patch: Record<string, number>;
   /** kind name → scale factor: the band SELECTS AND SCALES the kinds. */
   kinds: Record<string, number>;
+  /** kind name → lane name: kinds sharing a lane name are a POOL OF
+   * ALTERNATIVES — at fire time the engine picks exactly ONE per pool
+   * (even weights) and every lane's pick fires together. A kind absent
+   * here is its own one-member lane, so an empty map = every attached
+   * kind fires, the pre-lanes behaviour (models/scene.py FlareBand). */
+  kind_lanes: Record<string, string>;
 }
 
 export interface ResponseSpec {
@@ -798,6 +807,7 @@ export const emptyBand = (min = 0, max = 1): FlareBand => ({
   gain: 1,
   param_patch: {},
   kinds: {},
+  kind_lanes: {},
 });
 
 export const emptyResponse = (): ResponseSpec => ({

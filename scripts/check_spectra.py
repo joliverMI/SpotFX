@@ -1491,6 +1491,78 @@ check(back["params"]["twist"] == 0.25
       "the release returns the spike to the baseline AS CARRIED NOW — "
       "twist to its own, brightness to the colour roll's landing")
 
+# ── LANES: pick-one-per-lane pools (owner ask 2026-08-21 — his words: "all
+# lanes fire together, but pick one action within each lane... more similar
+# to spotfx... randomly pick one of them by some kind of weighting. For
+# now, just even weights" — the legacy MorphLane/_pick_morph_lanes shape on
+# FlareBand.kind_lanes, resolved fresh EVERY fire by scene_response.
+# resolve_lane_picks; a kind with no entry is its own one-member lane, so a
+# band with no pools — every band predating the field — fires everything,
+# unchanged). ─────────────────────────────────────────────────────────────
+lane_kind_hi = {"name": "Twist High", "type": "momentary", "jump": None,
+                "params": {"twist": {"mode": "absolute", "value": 0.9}},
+                "gain": 1.0, "hold_ms": None}
+lane_kind_lo = {"name": "Twist Low", "type": "momentary", "jump": None,
+                "params": {"twist": {"mode": "absolute", "value": 0.4}},
+                "gain": 1.0, "hold_ms": None}
+
+unpooled = SceneV2(**{**{k: v for k, v in resp_base.items()
+                         if k not in ("responses", "id", "flare_kinds")},
+                      "flare_kinds": [lane_kind_hi, lane_kind_lo],
+                      "responses": {"flare": {"bands": [
+                          {"intensity_min": 0.0, "intensity_max": 1.0,
+                           "kinds": {"Twist High": 1.0, "Twist Low": 1.0}},
+                      ]}}})
+conductor2.on_scene_fire(unpooled, scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(unpooled, FireContext(0.5, rng=Random(3)))))
+exec2.writes.clear()
+rec_all = asyncio.run(responder.on_event("flare", 0.5))
+check([k["name"] for k in rec_all["kinds"]] == ["Twist High", "Twist Low"]
+      and "lane_picks" not in rec_all,
+      "THE BLAST RADIUS: a multi-kind band with no kind_lanes fires EVERY "
+      "kind, in kinds order, with no lane_picks record — byte-identical to "
+      "the pre-lanes engine (25 of his 28 real bands are multi-kind)")
+asyncio.run(responder.flush_releases())
+
+pooled = SceneV2(**{**{k: v for k, v in resp_base.items()
+                       if k not in ("responses", "id", "flare_kinds")},
+                    "flare_kinds": [lane_kind_hi, lane_kind_lo],
+                    "responses": {"flare": {"bands": [
+                        {"intensity_min": 0.0, "intensity_max": 1.0,
+                         "kinds": {"Twist High": 1.0, "Twist Low": 1.0},
+                         "kind_lanes": {"Twist High": "colour",
+                                        "Twist Low": "colour"}},
+                    ]}}})
+conductor2.on_scene_fire(pooled, scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(pooled, FireContext(0.5, rng=Random(3)))))
+lane_winners: set = set()
+lane_write_ok = True
+for _ in range(24):
+    exec2.writes.clear()
+    rec_pool = asyncio.run(responder.on_event("flare", 0.5))
+    fired = [k["name"] for k in rec_pool["kinds"]]
+    if len(fired) != 1 or rec_pool.get("lane_picks") != [{
+            "lane": "colour", "picked": fired[0],
+            "pool": ["Twist High", "Twist Low"]}]:
+        lane_write_ok = False
+        break
+    spike = [w for w in exec2.writes if w["kind"] == "glide"
+             and "twist" in w["params"]][0]
+    base_tw = conductor2.virtuals["v-m1"].param_baseline["twist"]
+    want = 0.9 if fired[0] == "Twist High" else 0.4
+    if abs(spike["params"]["twist"]
+           - (base_tw + (want - base_tw))) > 1e-9:
+        lane_write_ok = False
+        break
+    lane_winners.add(fired[0])
+    asyncio.run(responder.flush_releases())
+    if lane_winners == {"Twist High", "Twist Low"}:
+        break
+check(lane_write_ok and lane_winners == {"Twist High", "Twist Low"},
+      "a pooled lane fires exactly ONE member per fire (the write matches "
+      "the winner, the fire record names pick + pool), and the pick is "
+      "re-resolved fresh every fire — both members win across fires")
+
 # ── STAR's two reverse flares (owner ask 2026-08-17, mechanism switched to
 # the FLIP control 2026-08-20, his words: "use the flip control for star"):
 # permanent + 500ms momentary, both now targeting `spin_sign` (radial's
