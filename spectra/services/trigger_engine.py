@@ -185,28 +185,14 @@ LEAD-TIME ALIGNMENT (his ask, 2026-08-19 — "this is how it worked in the
 old SpotFX, use it as reference," legacy's services/transition_phases.py +
 trigger_engine.py's transition_lead_ms/_entry_transition_lead_ms): a scene
 transition should LAND on the trigger, not start there — the switch fires
-`anchor_frac x crossfade_ms` EARLY. THREE anchors, deliberately different,
-settled 2026-08-20 (data/drops-still-fire-early-star-does-not-explode/ —
-Black Hole was tried as a "known-good" drop-timing reference, then
-withdrawn when he found it early too; the three-anchor split below is his
-own resolution, reconfirming the first two and adding the third):
-  - a scene transition lands its MID-POINT (0.5 fallback, or a registered
-    phased effect's own payoff fraction — services/transition_phases.py)
-    on the trigger (_scene_transition_lead_ms) — starts EARLY by design.
-  - a momentary flare's FIRST SWITCH lands its END (the full
-    DICE_REROLL_GLIDE_MS) on the trigger, so the switch finishes, THEN the
-    hold, THEN the flip-back after the trigger mark
-    (_response_switch_lead_ms, event_class in charge/lull/flare) — also
-    starts EARLY by design.
-  - a DROP/explosion anchors its START to the trigger instead — it begins
-    ON the mark, never before it (_response_switch_lead_ms,
-    event_class=="drop" short-circuits to lead=0 unconditionally, ahead of
-    the momentary-glide check the other two classes use). Don't let a
-    future drop-band edit reintroduce the momentary rule's early start —
-    see that function's own docstring for why the branch has to come
-    first, not just happen to evaluate to 0 today.
-Both scene-transition and momentary-flare peeks are read-only and
-conservative: a fire with nothing to glide yields lead=0. tick()'s
+`anchor_frac x crossfade_ms` EARLY. Two anchors, deliberately different
+(_scene_transition_lead_ms / _response_switch_lead_ms below): a scene
+transition lands its MID-POINT (0.5 fallback, or a registered phased
+effect's own payoff fraction — services/transition_phases.py) on the
+trigger; a momentary flare's FIRST SWITCH lands its END (the full
+DICE_REROLL_GLIDE_MS) on the trigger, so the switch finishes, THEN the
+hold, THEN the flip-back after the trigger mark. Both peeks are read-only
+and conservative: a fire with nothing to glide yields lead=0. tick()'s
 crossing check always ALSO checks the trigger's own unshifted timestamp as
 a safety net (fire_at is recomputed from live state every tick, so it
 isn't guaranteed monotonic) — a trigger fires by its nominal moment at the
@@ -215,15 +201,6 @@ intensity-scaled separately (room_controls.scene_transition_ms, consulted
 by scene_compiler.fire_scene for every scene fire, not just trigger-driven
 ones — his other ask, two Inspector settings scaling transition time by
 intensity, linearly).
-
-Settling the drop anchor does NOT, by itself, prove the VISIBLE explosion
-begins on the mark — only that the WRITE does (already true before this
-change, for every real scene: scripts/check_triggers.py never found a
-drop band anywhere in his data that would have taken the momentary lead
-anyway). What each phase-capable effect DOES with phase_progress as it
-ramps 0->1 (fx/effects/{radial,blackhole,orbits,squiggles}.py) is a
-separate, still-open question — see docs/SPECTRA_SPEC.md's onset-timing
-entry and scripts/check_drop_visible_onset.py.
 
 LOOKAHEAD (his ask, 2026-08-19, same day as the alignment above — "his
 triggers never name their scene in advance, peek the upcoming trigger
@@ -1000,33 +977,13 @@ class TriggerEngine:
         return True
 
     def _response_switch_lead_ms(self, a) -> int:
-        """A fire_response action's lead — two DIFFERENT anchor rules by
-        event class (his ruling, settled 2026-08-20 after Black Hole was
-        tried and then withdrawn as a "known-good" reference for drop
-        timing specifically — data/drops-still-fire-early-star-does-not-
-        explode/: MOMENTARY FLARES anchor their first switch's END to the
-        mark ('the first switch must finish on the trigger, then the hold,
-        then the flip back after the trigger mark') — only a MOMENTARY
-        kind's param move onto a registry-smooth target actually takes time
-        to switch (scene_response.DICE_REROLL_GLIDE_MS), so that's the only
-        case worth firing early for; an instant jump already finishes at
-        fire time with zero lead needed.
-
-        DROPS/explosions anchor their START to the mark instead — 'an
-        explosion begins on the trigger mark rather than before it'. A drop
-        therefore ALWAYS gets zero lead, structurally, before the momentary-
-        glide check below is ever consulted — not merely because none of
-        his real drop bands happen to carry a qualifying momentary+params
-        kind today (proven true for his four real scenes in
-        scripts/check_triggers.py, but that was incidental, not
-        guaranteed). Without this explicit branch, a future drop band that
-        added such a kind would silently start borrowing the momentary
-        rule's END-anchor lead — exactly the anchor a drop must never take.
-        Charge/lull are unaffected either way (still end-anchored like
-        flare) — this settlement was about drop specifically, not the
-        wider phase-driven family, and must not leak into it."""
-        if a.event_class == "drop":
-            return 0
+        """A fire_response action's lead for the momentary-flare alignment
+        (his words: 'the first switch must finish on the trigger, then the
+        hold, then the flip back after the trigger mark'): only a MOMENTARY
+        kind's param move that lands on a registry-smooth target actually
+        takes time to switch (scene_response.DICE_REROLL_GLIDE_MS) — an
+        instant jump (non-smooth param, or a momentary gain's spike, always
+        a jump) already finishes at fire time with zero lead needed."""
         from spectra.services.scene_response import (DICE_REROLL_GLIDE_MS,
                                                       momentary_switch_would_glide)
         scene = self._active_scene()

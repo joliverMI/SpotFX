@@ -33,6 +33,7 @@ BAND_JITTER = 0.06
 # flash. The lull holds black with a phosphor dot; the drop sweeps back
 # and erupts a burst of blobs through the ring.
 CHARGE_HALO_LEAD = 1.4  # halo growth vs the swallowing disc
+DROP_FALLBACK_S = 0.45  # drop completes on this timer if no progress ramp
 DROP_RESET_S = 0.5      # post-burst ease of the strip back to life
 PHASE_BURST_N = 12      # blobs in the drop explosion
 
@@ -400,14 +401,15 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
             if drop is None:
                 drop = self._drop = {"burst_t": None}
             if drop["burst_t"] is None:
-                # DROP ANCHORS ITS START TO THE MARK — same ruling and
-                # same shape as the 2D Blackhole's own _phase_step (see
-                # that module's docstring); the burst fires on the first
-                # frame of the phase, not gated to the ramp's end.
-                drop["burst_t"] = 0.0
-                self._restore_phase_overrides()
-                if not drop.get("silent"):
-                    self._phase_burst(ring)
+                p = max(
+                    self.phase_progress,
+                    min(self._phase_t / DROP_FALLBACK_S, 1.0),
+                )
+                if p >= 0.995:
+                    drop["burst_t"] = 0.0
+                    self._restore_phase_overrides()
+                    if not drop.get("silent"):
+                        self._phase_burst(ring)
             else:
                 drop["burst_t"] += dt
                 if drop["burst_t"] >= DROP_RESET_S:
@@ -439,12 +441,19 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
             halo_g = 0.25 + 0.75 * p
         elif phase == "lull":
             mask = 0.0
-        else:  # drop — post-burst fade only (see _phase_step: the burst
-               # fires on the phase's first frame, so there's no pre-burst
-               # pinch state left to render here)
+        else:  # drop
             drop = self._drop
-            burst_t = drop["burst_t"] if drop is not None else 0.0
-            mask = float(min(burst_t / DROP_RESET_S, 1.0))
+            if drop is not None and drop["burst_t"] is not None:
+                mask = float(min(drop["burst_t"] / DROP_RESET_S, 1.0))
+            else:
+                p = max(
+                    self.phase_progress,
+                    min(self._phase_t / DROP_FALLBACK_S, 1.0),
+                )
+                halo_r = ((1.0 - p) ** 2) * top
+                disc_r = halo_r
+                mask = float(np.clip((ring + 0.04 - disc_r) / 0.12, 0.0, 1.0))
+                halo_g = 1.0
         out = out * np.float32(mask)
         if halo_r is not None and halo_g > 0.0:
             # halo flash as the horizon crosses the sample ring — brighter

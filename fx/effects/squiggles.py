@@ -59,11 +59,14 @@ CHARGE_MAX_X = 1.6   # max_chains growth factor at full charge
 LULL_CRT_S = 2.2     # CRT collapse fallback when no lull ramp arrives
 CRT_SPLIT = 0.55     # lull fraction where the vertical squash completes
 DROP_BURST_N = 9     # chains erupting from the center on the drop
-# The burst fires on the phase's first frame — drop anchors its START to
-# the trigger mark (his ruling, 2026-08-20, superseding the end-anchored
-# gate this effect used to mirror from Blackhole; see _phase_step's own
-# comment for the full history and fx/effects/blackhole.py's matching
-# change).
+# Blackhole times its drop payoff to the END of the phase_progress ramp
+# (progress >= 0.995, DROP_FALLBACK_S wall-clock fallback) — his confirmed
+# "really good" timing. Squiggles used to burst at the INSTANT phase edged
+# to "drop" (t=0 of the same ramp scene_response._drive_phase drives for
+# every phase-capable effect), landing up to a full ramp EARLY relative to
+# the sibling effect firing off the identical trigger. Matching Blackhole's
+# own gate is what "explode right on the trigger" means structurally.
+DROP_FALLBACK_S = 0.45      # matches Blackhole's own fallback exactly
 # Burst chains fly at this fraction of normal speed so the explosion
 # lingers rather than flashing past — his ask "last longer" (2026-08-20,
 # picked value, not measured against a reference; expect to retune).
@@ -896,9 +899,10 @@ class Squiggles2d(Twod, GradientEffect):
     # the event's ramp. charge: chains bounce off the silhouette instead of
     # exiting while spawning ramps up; lull: old-TV switch-off — the frame
     # squashes vertically to a line, then the line pinches to a held dot;
-    # drop: a fan of chains erupts from the center on the phase's first
-    # frame, and everything returns to normal (`phase` self-resets to
-    # "none") once the post-burst settle finishes.
+    # drop: a fan of chains erupts from the center once the drop ramp
+    # completes, and everything returns to normal (`phase` self-resets to
+    # "none"). The burst is gated on phase_progress the same way Blackhole
+    # gates its own drop payoff — see DROP_FALLBACK_S above for why.
 
     def _enter_phase(self, phase):
         self._phase = phase
@@ -954,21 +958,16 @@ class Squiggles2d(Twod, GradientEffect):
             if drop is None:
                 drop = self._drop = {"burst_t": None}
             if drop["burst_t"] is None:
-                # DROP ANCHORS ITS START TO THE MARK (his ruling,
-                # 2026-08-20, data/drops-still-fire-early-star-does-not-
-                # explode/ — Black Hole was tried as a "known-good" drop
-                # reference and then withdrawn when he found it early too).
-                # This REPLACES the progress-gated end-anchor
-                # (`p >= 0.995`, DROP_FALLBACK_S) PR fm/spectra-squiggles-
-                # drop-timing-and-a-much-bigger-explosion built to mirror
-                # Black Hole's THEN-confirmed-good timing — that anchor is
-                # now superseded, not merely unused: the burst fires on the
-                # phase's first frame instead, matching orbits.py's own
-                # drop branch. His other two asks from that same PR (burst
-                # count, burst speed/lingering) are untouched — this only
-                # moves WHEN the burst fires, not its size or pace.
-                drop["burst_t"] = 0.0
-                self._phase_burst()
+                # pinch: progress-driven, with a wall-clock fallback so the
+                # payoff can never be lost to a dropped ramp (mirrors
+                # Blackhole's own gate exactly)
+                p = max(
+                    self.phase_progress,
+                    min(self._phase_t / DROP_FALLBACK_S, 1.0),
+                )
+                if p >= 0.995:
+                    drop["burst_t"] = 0.0
+                    self._phase_burst()
             else:
                 drop["burst_t"] += dt
                 if drop["burst_t"] >= DROP_SETTLE_S:
