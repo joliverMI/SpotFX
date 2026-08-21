@@ -1,5 +1,25 @@
 # SpotFX — agent notes
 
+## Timing and offset-direction conventions — READ BEFORE TOUCHING ANY TIMING CODE
+
+`docs/SPECTRA_TIMING_CONVENTIONS.md` is the canonical, file:line-cited record
+of every timing/offset/lead/delay quantity in this codebase — its unit, its
+sign convention in plain words, which engine owns it, and whether it's live
+in SPECTRA or dark/inherited from the predecessor. **Two families of timing
+quantity use OPPOSITE sign conventions for "earlier"** (a `lead_ms` family,
+positive=earlier; an `offset_ms` family, negative=earlier) and both are live
+simultaneously in `spectra/services/trigger_engine.py`'s `tick()` — mixing
+them up is silent and has cost real time more than once. Five real failures
+this week (arguing an audio delay in the wrong direction; treating a
+wandering `shape_offset_ms` reading as a measurement; reading the
+**predecessor's** composite timing offset while SPECTRA's own, narrower one
+actually governed the room; diagnosing a trigger-store divergence by
+inference instead of reading both stores; asserting a flare offset was
+consulted by the firing path without checking) all trace to knowledge that
+was already written down in this repo and not read. Check that document
+before writing, measuring, or reasoning about anything time-related — it is
+also where new timing quantities get recorded, not here.
+
 ## Adding a new LedFX effect
 
 Follow `docs/ADDING_EFFECTS.md` — the full checklist (LedFX effect →
@@ -221,6 +241,12 @@ pre-rebuild source, not what SPECTRA currently stores) — and never treat
 that something is old, not that he put it there.
 
 ## SPECTRA trigger authoring (THE KEYSTONE — mid-song clock)
+
+This section and "SPECTRA transition-timing alignment" below carry the
+lead/offset mechanics inline; `docs/SPECTRA_TIMING_CONVENTIONS.md` is where
+they're collected against every OTHER timing quantity in the codebase
+(including the predecessor's, and where the two sign conventions collide) —
+read it before trusting a lead/offset number from just this section.
 
 Binding decision: scene changes are driven by triggers
 (`/home/javi/fleet-spotfx/data/spectra-gap-inventory/decision-mid-song-model.md`)
