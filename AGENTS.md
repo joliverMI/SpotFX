@@ -1177,18 +1177,7 @@ engine fires exactly ONCE on that path (proven by running the pre-fix
 module, not argued). UNRELATED to the overrun; the magnitude corroborates
 (the net's extension is ≤ ~400ms even in the hypothetical glide-band
 case, while the measured holds run 967-1905ms against the authored 500
-— a +660ms median overrun on the fuller 23-sample measurement). **The
-"snap back" he reported alongside this overrun (2026-08-21, "particles
-that left the Event Horizon shoot back really fast") was a SEPARATE
-defect, fixed (PR fm/blackhole-reverse-snapback, VENDOR.md deviation
-#15): not a speed asymmetry — a stale `p_cap` teleport in
-`fx/effects/blackhole.py`'s capture branch snapped every dispersed
-ex-captive onto the horizon ring in one frame when reverse flipped back
-(40x a legitimate frame's movement at 500ms, 86x at the real ~1160ms
-hold — dispersal distance scales with the hold, so the overrun AMPLIFIED
-this one's visibility without causing it). Post-fix, the overrun's most
-visible symptom is gone — don't read a calmer-looking reverse flare as
-the overrun having healed; measure the hold itself.
+— a +660ms median overrun on the fuller 23-sample measurement).
 
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a drift declaration
 is authored param-agnostic (a named profile is reused across effects), so
