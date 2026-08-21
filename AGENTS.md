@@ -2573,9 +2573,11 @@ current value without re-snapshotting, so a later revert always restores
 the ORIGINAL pre-preview state, never a mid-session one. Help
 (`spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`) leads
 with what opening a preview does to the room (real lights, paused live
-show, ~17s worst-case auto-revert) before any control explanation —
-Order 20: a feature whose help contradicts what it now does has not
-shipped. Proof bar: a real headless render pipeline (`fx.headless` +
+show, ~17s worst-case abandonment revert AND a 3-minute absolute ceiling —
+see "MAXIMUM HOLD CEILING" below, they are two different claims) before
+any control explanation — Order 20: a feature whose help contradicts what
+it now does has not shipped. Proof bar: a real headless render pipeline
+(`fx.headless` +
 `fx.facade`, ownership=spectra — the same rig `test_room_preview.py`
 already uses), reading a written value off a live
 `virtual.active_effect.config`, never a `RecordingExecutor`'s own write
@@ -2743,6 +2745,40 @@ BOTH env vars explicitly and confirm nothing is reachable at the
 `fx_seam` HTTP fallback target (`config.ledfx_url()`, `LEDFX_HOST`/
 `LEDFX_PORT`) before opening any preview against it — don't assume
 `SPECTRA_STORAGE_DIR` alone isolates the write path.
+
+**MAXIMUM HOLD CEILING (2026-08-21, PR fm/preview-hold-needs-a-ceiling) —
+his room was held 13m54s in one continuous window by a client that never
+stopped heartbeating (a headless browser left running by mistake),
+refusing 85 scene changes.** `HEARTBEAT_TIMEOUT_S`/`SWEEP_INTERVAL_S`
+above only bound ABANDONMENT (how long a hold survives once heartbeats
+STOP) — they say nothing about a client that keeps heartbeating forever,
+which is exactly what happened: a bound a live client can push out
+forever is not a bound. `flare_preview_hold.MAX_HOLD_DURATION_S` (180s,
+3 minutes — long enough for a real unhurried look, several loops, an
+intensity nudge; short enough that a forgotten tab is a brief nuisance,
+not a lost show) is an ABSOLUTE ceiling on one continuous hold, counted
+from the session's first real fire (`_session_started_at`) and enforced
+by capping every `_rearm()` call against it — no number of heartbeats
+moves it. Reaching it locks the session (`_locked_until_reopen`) so a
+client that keeps calling `/fire`/`/heartbeat` afterward (the reported
+failure mode — no further `/open` ever arrives) cannot silently
+re-establish a new hold; only a genuine fresh `POST /open` (a real mount,
+or him moving the intensity slider — never a bare heartbeat) calls
+`clear_ceiling_lock()` and lets a new session begin. `preview_pause` —
+armed independently by `spectra/api/flare_preview.py`, the thing that
+actually refuses his scene changes — is capped to the SAME ceiling via
+`flare_preview_hold.capped_pause_s()`, so it can never outlive the light
+hold's own deadline; without this the scene gate could stay refused for
+up to another `HEARTBEAT_TIMEOUT_S` after the lights already reverted.
+The frontend (`FlarePreviewOverlay.tsx`) surfaces the ceiling firing as a
+visible banner and stops its own loop, rather than silently continuing to
+poll a room that already let go. Proof that the ceiling actually holds
+while a client keeps heartbeating THE WHOLE TIME (never letting the
+heartbeat lapse — a test where heartbeats stop only proves the
+pre-existing abandonment bound, not this one):
+`tests/test_flare_preview_hold.py` (real headless fixture) +
+`tests/test_flare_preview_api.py` (the `preview_pause` capping, route
+wiring).
 
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 

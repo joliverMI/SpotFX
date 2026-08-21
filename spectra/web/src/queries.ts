@@ -204,6 +204,13 @@ export interface FlarePreviewFireResult {
   held: boolean;
   first_open?: boolean;
   fire_record?: Record<string, unknown>;
+  /** True once the server's absolute MAX_HOLD_DURATION_S ceiling has fired
+   * (spectra/services/flare_preview_hold.py — heartbeats can never push
+   * this back out) and released the room on its own; reason is always
+   * "max_duration" when set. FlarePreviewOverlay surfaces this rather than
+   * silently letting the loop keep calling a no-op /fire. */
+  expired?: boolean;
+  reason?: string;
 }
 
 /** Computes the timeline ONLY — no live fire. Call on mount and whenever
@@ -222,7 +229,8 @@ export const fireFlarePreview = (sceneId: string, kindName: string, intensity: n
     { scene_id: sceneId, kind_name: kindName, intensity });
 
 export const heartbeatFlarePreview = () =>
-  apiPost<{ active: boolean; remaining_s: number }>('/flare-preview/heartbeat', {});
+  apiPost<{ active: boolean; remaining_s: number; expired?: boolean; reason?: string }>(
+    '/flare-preview/heartbeat', {});
 
 export const closeFlarePreview = () =>
   apiPost<{ active: boolean }>('/flare-preview/close', {});

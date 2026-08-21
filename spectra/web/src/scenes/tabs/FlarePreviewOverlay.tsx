@@ -54,7 +54,16 @@
  * Since the loop below issues real fires, the SAME heartbeat also keeps
  * the live hold's own server-side revert timer armed — a lapsed heartbeat
  * (closed browser, dropped connection) reverts his room automatically,
- * not just un-pauses the trigger engine. */
+ * not just un-pauses the trigger engine.
+ *
+ * MAXIMUM HOLD CEILING (2026-08-21): the server also enforces an ABSOLUTE
+ * cap on one continuous hold (spectra/services/flare_preview_hold.py,
+ * MAX_HOLD_DURATION_S = 180s) that heartbeats/re-fires can never push
+ * back out — his room was once held 13m54s by a client that never
+ * stopped heartbeating. Once that ceiling fires, /fire and /heartbeat
+ * both start coming back with `expired: true` — the loop below stops
+ * itself and shows exactly why, rather than silently continuing to poll
+ * a room that has already released itself. */
 import { useEffect, useRef, useState } from 'react';
 import HelpLink from '../../help/HelpLink';
 import {
@@ -97,6 +106,13 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   const [intensity, setIntensity] = useState(1.0);
   const [timeline, setTimeline] = useState<FlarePreviewTimeline | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set once the server's absolute MAX_HOLD_DURATION_S ceiling has fired
+  // and released the room on its own (see the module docstring above) —
+  // distinct from `error` so it reads as "the preview let go on its own,"
+  // not a failure. Stops the fire loop (setPlaying(false)) so it doesn't
+  // keep polling a room the server has already stopped holding.
+  const [holdExpired, setHoldExpired] = useState(false);
+  const onHoldExpired = () => { setHoldExpired(true); setPlaying(false); };
   const [durationS, setDurationS] = useState(6.0);
   const [animAnchorS, setAnimAnchorS] = useState(2.0);
   const [fireAtS, setFireAtS] = useState(2.0);
@@ -141,6 +157,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           if (cancelled) return;
           setTimeline(tl);
           setError(null);
+          setHoldExpired(false);
           setAnimAnchorS(tl.animation_anchor_s);
           setFireAtS(tl.fire_at_s);
           setDurationS((prev) => (initializedMarksRef.current ? Math.max(prev, tl.duration_s) : tl.duration_s));
@@ -161,7 +178,11 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   // ── heartbeat + release-on-close (auto-pauses the trigger engine for
   // as long as this overlay is open) ────────────────────────────────────
   useEffect(() => {
-    const iv = setInterval(() => { void heartbeatFlarePreview(); }, HEARTBEAT_MS);
+    const iv = setInterval(() => {
+      void heartbeatFlarePreview().then((res) => {
+        if (res.expired) onHoldExpired();
+      });
+    }, HEARTBEAT_MS);
     const onBeforeUnload = () => closeFlarePreviewBeacon();
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
@@ -169,6 +190,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
       window.removeEventListener('beforeunload', onBeforeUnload);
       void closeFlarePreview();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── play/loop: advance the playhead in real time, wrap at durationS, AND
@@ -195,7 +217,9 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
     nextFireAtRef.current = performance.now() + delayToFireS * 1000;
     const fireLive = () => {
       const { sceneId: sid, kindName, intensity: it } = fireParamsRef.current;
-      fireFlarePreview(sid, kindName, it).catch((e) => setError(String(e)));
+      fireFlarePreview(sid, kindName, it)
+        .then((res) => { if (res.expired) onHoldExpired(); })
+        .catch((e) => setError(String(e)));
     };
     const step = (now: number) => {
       if (lastFrameRef.current != null) {
@@ -304,6 +328,13 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           <span style={{ fontVariantNumeric: 'tabular-nums', width: 36 }}>{intensity.toFixed(2)}</span>
         </label>
 
+        {holdExpired && (
+          <div style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6, marginBottom: 4,
+                        background: 'var(--accent)', color: '#1a1024' }}>
+            ⏱ This preview reached its maximum hold time and let go of your room on its
+            own — your show has resumed. Close and reopen to look again.
+          </div>
+        )}
         {error && <div style={{ color: 'var(--danger, #f66)', fontSize: 12 }}>{error}</div>}
         {!timeline && !error && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Computing…</div>}
 

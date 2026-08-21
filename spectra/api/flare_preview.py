@@ -51,7 +51,21 @@ where the drawn trigger mark sat. Now:
       close, mirroring ColorSetsPage.tsx's own unmount pattern.
 
 A service restart mid-hold is handled separately, at process startup —
-spectra/app.py's lifespan calls flare_preview_hold.recover_stale_hold()."""
+spectra/app.py's lifespan calls flare_preview_hold.recover_stale_hold().
+
+MAXIMUM HOLD CEILING (2026-08-21): his room was held 13m54s by a client
+that never stopped heartbeating — HEARTBEAT_TIMEOUT_S bounds ABANDONMENT,
+not an actively heartbeating client, which is exactly what happened. See
+flare_preview_hold.py's own "MAXIMUM HOLD CEILING" docstring section for
+the full mechanism (MAX_HOLD_DURATION_S, the absolute ceiling; the reason
+180s was chosen; why it locks against a client that keeps calling /fire or
+/heartbeat afterward). Every endpoint here that arms preview_pause routes
+its duration through flare_preview_hold.capped_pause_s() rather than the
+raw HEARTBEAT_TIMEOUT_S, so preview_pause — the thing that actually
+refuses his scene changes — can never stay armed past the same ceiling
+that reverts the lights; /open additionally clears a fired ceiling's lock
+(clear_ceiling_lock()), since a genuine fresh open is a deliberate new
+look, never a bare heartbeat."""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -93,7 +107,13 @@ def _resolve_scene_and_kind(scene_id: str, kind_name: str) -> tuple[SceneV2, Fla
 async def open_preview(body: OpenRequest):
     scene, kind = _resolve_scene_and_kind(body.scene_id, body.kind_name)
     timeline = await flare_preview.build_timeline(scene, kind, body.intensity)
-    preview_pause.start(HEARTBEAT_TIMEOUT_S)
+    # A real /open is a deliberate new look — a mount, or him moving the
+    # intensity slider — never a bare heartbeat, so it's always allowed to
+    # clear a ceiling lock from a prior session and let a new one begin.
+    flare_preview_hold.clear_ceiling_lock()
+    capped = flare_preview_hold.capped_pause_s(HEARTBEAT_TIMEOUT_S)
+    if capped > 0:
+        preview_pause.start(capped)
     return timeline
 
 
@@ -105,13 +125,26 @@ async def fire_preview(body: OpenRequest):
             scene, kind, body.intensity, heartbeat_timeout_s=HEARTBEAT_TIMEOUT_S)
     except Exception as exc:
         raise HTTPException(502, f"live preview fire failed: {exc}")
-    preview_pause.start(HEARTBEAT_TIMEOUT_S)
+    if hold.get("expired"):
+        # The ceiling already fired and locked the session — do NOT re-arm
+        # preview_pause on top of a fire that itself refused to do anything.
+        return hold
+    capped = flare_preview_hold.capped_pause_s(HEARTBEAT_TIMEOUT_S)
+    if capped > 0:
+        preview_pause.start(capped)
     return hold
 
 
 @router.post("/heartbeat")
 async def heartbeat_preview():
-    preview_pause.start(HEARTBEAT_TIMEOUT_S)
+    if flare_preview_hold.locked_until_reopen():
+        return {"active": False, "remaining_s": 0.0,
+               "expired": True, "reason": "max_duration"}
+    capped = flare_preview_hold.capped_pause_s(HEARTBEAT_TIMEOUT_S)
+    if capped <= 0:
+        return {"active": False, "remaining_s": 0.0,
+               "expired": True, "reason": "max_duration"}
+    preview_pause.start(capped)
     await flare_preview_hold.touch(HEARTBEAT_TIMEOUT_S)
     return {"active": True, "remaining_s": preview_pause.remaining_s()}
 
