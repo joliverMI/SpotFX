@@ -126,6 +126,46 @@ render pipeline (fx.headless + fx.facade, ownership=spectra — the same rig
 test_room_preview.py already uses) — a written config value on a live
 `virtual.active_effect.config`, not a call recorded on a RecordingExecutor.
 See tests/test_flare_preview_hold.py.
+
+MAXIMUM HOLD CEILING (2026-08-21, PR fm/preview-hold-needs-a-ceiling): his
+live room was held for 13m54s in one continuous window (2026-08-21,
+17:23:19-17:37:12), refusing 85 scene changes, because a client (a
+headless browser left running by mistake — human error, not a code
+defect) never stopped heartbeating. HEARTBEAT_TIMEOUT_S/SWEEP_INTERVAL_S
+above bound ABANDONMENT — how long a hold survives once heartbeats STOP —
+they say nothing about a client that keeps heartbeating forever, which is
+exactly what happened: a bound a live client can push out forever is not
+a bound.
+
+MAX_HOLD_DURATION_S is the fix: an ABSOLUTE ceiling on one continuous
+hold, counted from when it actually started controlling his fixtures
+(the first real fire — `_session_started_at` below), never reset by a
+heartbeat or a re-fire that arrives before it. `_rearm()` caps every
+requested deadline against `_session_started_at + MAX_HOLD_DURATION_S`,
+so heartbeats can push the deadline right up to the ceiling and no
+further — the clock starts once and never moves. His use of this feature
+is looking at ONE flare against his room — seconds to a couple of minutes
+of real judging, per his own framing, never a stretch he'd plan to sit
+through. 180s (3 minutes) comfortably covers a real, unhurried look (open,
+watch several loops, nudge the intensity slider, watch again) while
+making a forgotten/minimised tab a brief, self-correcting nuisance instead
+of a lost show — nowhere near the 14 minutes that actually happened.
+
+Reaching the ceiling runs the SAME revert the heartbeat-lapse path already
+does, but it ALSO locks the session (`_locked_until_reopen`) so a client
+that keeps calling /fire or /heartbeat afterward — exactly the reported
+failure mode, no further /open calls, just the loop and the heartbeat
+ticking on — cannot silently re-establish a new hold and restart the
+clock: `open_hold()`/`capped_pause_s()` become no-ops while locked. Only a
+genuine fresh `/open` (a real mount, or him moving the intensity slider —
+never a bare heartbeat) calls `clear_ceiling_lock()` and lets a new
+session begin. The SAME ceiling is exposed to spectra/api/flare_preview.py
+via `capped_pause_s()`/`locked_until_reopen()` so its own, separately
+armed `preview_pause.start()` calls — what actually blocks his scene
+changes, fire_history's "deferred"/"preview" bucket — can never outlive
+this module's own light-hold deadline; the two must expire together, or
+"the preview released" is still a lie for however long preview_pause
+stays armed on its own.
 """
 from __future__ import annotations
 
@@ -156,6 +196,12 @@ HEARTBEAT_TIMEOUT_S = 15.0
 # safety mechanism.
 SWEEP_INTERVAL_S = 2.0
 
+# The ABSOLUTE ceiling on one continuous hold — see the module docstring's
+# "MAXIMUM HOLD CEILING" section for the incident this closes and why 180s
+# (3 minutes) was chosen. Unlike HEARTBEAT_TIMEOUT_S, no number of
+# heartbeats or re-fires can push this further out.
+MAX_HOLD_DURATION_S = 180.0
+
 _lock = asyncio.Lock()
 _snapshot: dict[str, dict] | None = None
 # The deadline this hold expires at — a plain monotonic timestamp, the
@@ -167,6 +213,15 @@ _snapshot: dict[str, dict] | None = None
 # correctly fired — see run_supervised()'s own docstring for the earlier,
 # weaker design this replaced.
 _deadline: float | None = None
+# When the CURRENT session's first real fire happened — the anchor
+# MAX_HOLD_DURATION_S counts from. Set once per session (alongside
+# _snapshot, on first_open) and cleared on every revert, whatever the
+# reason, so a genuinely new session always starts its own fresh ceiling.
+_session_started_at: float | None = None
+# Sticky once the ceiling fires (_revert_locked(reason="max_duration"));
+# only clear_ceiling_lock() — called from a genuine POST /open, never a
+# heartbeat or a re-fire — clears it. See "MAXIMUM HOLD CEILING" above.
+_locked_until_reopen: bool = False
 _release_tasks: list["asyncio.Task"] = []
 
 # A revert must NOT use transition_ms=0: fx/effects/__init__.py's
@@ -258,17 +313,24 @@ def active() -> bool:
            and time.monotonic() < _deadline)
 
 
-async def _revert_locked() -> None:
+async def _revert_locked(reason: str = "explicit_close") -> None:
     """Caller must hold _lock. Writes the snapshot back and clears every
     piece of session state (in-memory and persisted) — safe to call with
-    no active hold (idempotent, mirroring room_preview._revert_locked)."""
-    global _snapshot, _deadline
+    no active hold (idempotent, mirroring room_preview._revert_locked).
+    `reason` distinguishes what triggered this: only "max_duration" (the
+    ceiling firing) locks the session against a client that keeps
+    heartbeating/re-firing afterward — an explicit close or a plain
+    abandoned/lapsed heartbeat leaves it free to start fresh on its own
+    next open, exactly as before this ceiling existed."""
+    global _snapshot, _deadline, _session_started_at, _locked_until_reopen
     for task in _release_tasks:
         task.cancel()
     _release_tasks.clear()
     snap = _snapshot
     _snapshot = None
     _deadline = None
+    _session_started_at = None
+    _locked_until_reopen = (reason == "max_duration")
     _clear_snapshot_file()
     if not snap:
         return
@@ -278,11 +340,65 @@ async def _revert_locked() -> None:
         await fx_seam.apply_writes(writes, transition_ms=REVERT_TRANSITION_MS)
     except Exception:
         logger.exception("flare_preview_hold: revert failed for %s", sorted(snap))
+    if reason == "max_duration":
+        logger.warning(
+            "flare_preview_hold: MAX_HOLD_DURATION_S (%.0fs) reached while "
+            "still heartbeating — releasing his room regardless (%d "
+            "virtual(s)); locked until a fresh /open", MAX_HOLD_DURATION_S,
+            len(snap))
 
 
 def _rearm(duration_s: float) -> None:
+    """(Re)arm the release deadline `duration_s` from now — capped so the
+    deadline can never cross the ABSOLUTE ceiling
+    (_session_started_at + MAX_HOLD_DURATION_S) once a real session has
+    begun. This is what makes the ceiling immune to heartbeats: a
+    heartbeat/re-fire arriving before the ceiling can still push the
+    deadline UP TO it, never past it — see the module docstring's
+    "MAXIMUM HOLD CEILING" section."""
     global _deadline
-    _deadline = time.monotonic() + duration_s
+    deadline = time.monotonic() + duration_s
+    if _session_started_at is not None:
+        deadline = min(deadline, _session_started_at + MAX_HOLD_DURATION_S)
+    _deadline = deadline
+
+
+def locked_until_reopen() -> bool:
+    """Pure read — True once the ceiling has fired and no fresh /open has
+    cleared it yet. spectra/api/flare_preview.py's /fire and /heartbeat
+    consult this before doing anything, so a client that keeps calling
+    either — exactly the reported failure mode: no further /open calls,
+    just the RAF fire-loop and the heartbeat ticking on — can never
+    silently re-establish a new hold and restart the ceiling's clock."""
+    return _locked_until_reopen
+
+
+def clear_ceiling_lock() -> None:
+    """Called from a genuine POST /open — a real mount, or him moving the
+    intensity slider — never from /fire or /heartbeat. A fresh open is a
+    deliberate new look, not a passive heartbeat, so it's allowed to start
+    a new session even if the ceiling just fired on the previous one."""
+    global _locked_until_reopen
+    _locked_until_reopen = False
+
+
+def capped_pause_s(requested_s: float) -> float:
+    """Cap a proposed spectra.services.preview_pause arm/re-arm duration
+    against the SAME ceiling _rearm applies to this module's own deadline —
+    exposed because preview_pause is armed independently, by
+    spectra/api/flare_preview.py, and is what actually blocks his scene
+    changes (fire_history's "deferred"/"preview" bucket). Without this, his
+    scene changes could stay refused for up to another HEARTBEAT_TIMEOUT_S
+    after the lights already reverted at the ceiling — "the preview
+    released" would still be a lie for however long preview_pause stayed
+    armed on its own. Returns 0.0 once the ceiling has already passed, or
+    while locked (see locked_until_reopen())."""
+    if _locked_until_reopen:
+        return 0.0
+    if _session_started_at is None:
+        return requested_s
+    remaining = (_session_started_at + MAX_HOLD_DURATION_S) - time.monotonic()
+    return max(0.0, min(requested_s, remaining))
 
 
 async def sweep_once() -> bool:
@@ -302,11 +418,22 @@ async def sweep_once() -> bool:
     shape spectra/services/ambient_music_gate.py's own status-honesty fix
     already established in this codebase: a write-time confirmation proves
     only the moment it was taken, so a standing guarantee needs its own
-    recheck loop. Returns True if a revert happened."""
+    recheck loop. Returns True if a revert happened.
+
+    Distinguishes WHY the deadline lapsed for _revert_locked's own
+    reason param: if the ceiling (_session_started_at + MAX_HOLD_DURATION_S)
+    has itself been reached, this is the absolute ceiling firing (lock the
+    session) — otherwise it's an ordinary abandoned-heartbeat lapse at an
+    earlier, uncapped deadline (no lock; a fresh open next time is not a
+    circumvention of anything)."""
     async with _lock:
         if _snapshot is None or _deadline is None or time.monotonic() < _deadline:
             return False
-        await _revert_locked()
+        reached_ceiling = (
+            _session_started_at is not None
+            and time.monotonic() >= _session_started_at + MAX_HOLD_DURATION_S - 1e-6)
+        reason = "max_duration" if reached_ceiling else "heartbeat_lapsed"
+        await _revert_locked(reason)
         return True
 
 
@@ -357,9 +484,18 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
     least as much a heartbeat as an explicit /heartbeat ping. Raises on a
     live-write failure (ownership refusal, an unreachable LedFX) — the
     caller surfaces that to the owner rather than silently arming a pause
-    with nothing actually shown."""
-    global _snapshot
+    with nothing actually shown.
+
+    Refuses outright (no fire, no snapshot, {"held": False, "expired":
+    True, "reason": "max_duration"}) while locked_until_reopen() is True —
+    the ceiling above having fired and no fresh /open having cleared it
+    yet. This is what stops a client that keeps calling /fire after the
+    ceiling (the reported failure mode) from silently re-establishing a
+    new hold; see the module docstring's "MAXIMUM HOLD CEILING" section."""
+    global _snapshot, _session_started_at
     async with _lock:
+        if _locked_until_reopen:
+            return {"held": False, "expired": True, "reason": "max_duration"}
         for task in _release_tasks:
             task.cancel()
         _release_tasks.clear()
@@ -383,6 +519,7 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
                 snapshot[vid] = {"type": effect_type,
                                  "config": dict(effect.get("config") or {})}
             _snapshot = snapshot
+            _session_started_at = time.monotonic()
             _save_snapshot(snapshot)
         room = room_controls.load_room_controls()
         entry_ramp_ms = (scene.entry_ramp_ms or room.global_transition_ms
@@ -399,7 +536,11 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
 async def touch(heartbeat_timeout_s: float) -> None:
     """The heartbeat's own re-arm — no recompute, no re-fire. A no-op once
     the session has already ended (deadline lapsed and swept / explicit
-    close), so a straggling heartbeat can't resurrect a dead session."""
+    close), so a straggling heartbeat can't resurrect a dead session.
+    _rearm() itself caps against the absolute ceiling, so an actively
+    heartbeating client still can't push the deadline past it — see
+    capped_pause_s() above for the sibling cap spectra/api/flare_preview.py
+    applies to its own, separately armed preview_pause window."""
     async with _lock:
         if _snapshot is not None:
             _rearm(heartbeat_timeout_s)

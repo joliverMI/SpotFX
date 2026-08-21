@@ -84,17 +84,20 @@ def _isolated_storage(tmp_path, monkeypatch):
 def _reset_hold_state():
     from spectra.services import flare_preview_hold as fph
     from spectra.services import preview_pause
-    fph._snapshot = None
-    fph._deadline = None
-    fph._release_tasks = []
-    preview_pause.clear()
+
+    def _reset():
+        fph._snapshot = None
+        fph._deadline = None
+        fph._session_started_at = None
+        fph._locked_until_reopen = False
+        fph._release_tasks = []
+        preview_pause.clear()
+
+    _reset()
     yield
     for t in fph._release_tasks:
         t.cancel()
-    fph._snapshot = None
-    fph._deadline = None
-    fph._release_tasks = []
-    preview_pause.clear()
+    _reset()
 
 
 def _own(monkeypatch, tmp_path) -> None:
@@ -138,6 +141,27 @@ def _scene_and_kind():
                                          out_min=0.0, out_max=1.0)})],
     )
     kind = FlareKind(name="spin-flare", type="momentary",
+                     params={"spin": ParamTarget(mode="absolute", value=0.9)})
+    return scene, kind
+
+
+def _permanent_scene_and_kind():
+    """A CARRYING (permanent) kind, unlike _scene_and_kind's momentary one —
+    it never self-releases, so a later "did the revert actually happen"
+    assertion proves the explicit revert write did it, not a coincidental
+    momentary release landing around the same time."""
+    from spectra.models.binding import ValueBinding
+    from spectra.models.scene import (FlareKind, ParamTarget,
+                                      SceneDeviceConfig, SceneV2)
+    scene = SceneV2(
+        name="Ceiling Check Scene",
+        devices=[SceneDeviceConfig(
+            id="dev1", target_kind="virtual", target=VID, effect_type="radial",
+            params={"spin": 0.2,
+                   "twist": ValueBinding(signal="random", mode="map",
+                                         out_min=0.0, out_max=1.0)})],
+    )
+    kind = FlareKind(name="spin-carry", type="permanent",
                      params={"spin": ParamTarget(mode="absolute", value=0.9)})
     return scene, kind
 
@@ -416,6 +440,118 @@ def test_recover_stale_hold_lands_a_leftover_snapshot(tmp_path, monkeypatch):
 
             # idempotent: nothing left to recover a second time
             assert await fph.recover_stale_hold() is False
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── 8. MAXIMUM HOLD CEILING (fm/preview-hold-needs-a-ceiling): fires even
+#      while a client keeps heartbeating THE WHOLE TIME — this is the
+#      exact reported failure mode (a client that never stopped
+#      heartbeating held his room 13m54s, refusing 85 scene changes). A
+#      test where heartbeats STOP only proves the earlier, pre-existing
+#      abandonment bound (tests 5/6 above) — it teaches nothing about this
+#      ceiling. This test never lets the heartbeat lapse even once. ───────
+
+def test_ceiling_fires_despite_continuous_heartbeating(tmp_path, monkeypatch):
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    # A tiny ceiling so the test runs fast — the real 180s value is
+    # asserted separately below; what matters here is the MECHANISM.
+    monkeypatch.setattr(fph, "MAX_HOLD_DURATION_S", 0.3)
+    scene, kind = _permanent_scene_and_kind()
+
+    async def main():
+        host, virtual = await _start_host(tmp_path)
+        try:
+            orig_spin = virtual.active_effect.config["spin"]
+            await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=1.0)
+            await _pump_frames_for(virtual, 0.05)
+            assert virtual.active_effect.config["spin"] != orig_spin, \
+                "the fire must have really landed — this is a genuine " \
+                "hold, not a no-op, before we prove it can't be extended"
+
+            # Heartbeat continuously — every 30ms, much faster than both
+            # HEARTBEAT_TIMEOUT_S (1.0s) and MAX_HOLD_DURATION_S (0.3s).
+            # If a heartbeat could extend the deadline even slightly, this
+            # hold would still read active() well past the ceiling; it
+            # must not. The heartbeat NEVER lapses in this test — that is
+            # the whole point.
+            elapsed = 0.0
+            tick = 0.03
+            while elapsed < 0.5:
+                await fph.touch(1.0)
+                await _pump_frames_for(virtual, tick)
+                elapsed += tick
+
+            assert fph.active() is False, (
+                "continuous heartbeating for 0.5s (with a 1.0s heartbeat "
+                "timeout) must not keep a 0.3s ceiling active — a bound a "
+                "live client can push out forever is not a bound")
+
+            reverted = await fph.sweep_once()
+            await _land_revert(virtual)
+            assert reverted is True
+            assert virtual.active_effect.config["spin"] == pytest.approx(orig_spin), \
+                "the ceiling's own revert must land for real, on the " \
+                "actual fixture — not merely flip an in-memory flag"
+
+            # LOCKED: a client that keeps calling /fire or /heartbeat after
+            # the ceiling (exactly today's reported failure mode — no
+            # further /open ever arrives) must not silently re-establish a
+            # new hold and restart the clock.
+            assert fph.locked_until_reopen() is True
+            result = await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=1.0)
+            assert result == {"held": False, "expired": True, "reason": "max_duration"}
+            await fph.touch(1.0)
+            assert fph.active() is False
+            await _pump_frames_for(virtual, 0.05)
+            assert virtual.active_effect.config["spin"] == pytest.approx(orig_spin), \
+                "a locked /fire must not touch the lights at all"
+
+            # Only a genuine fresh /open (clear_ceiling_lock — never a bare
+            # heartbeat or re-fire) lets a new session begin.
+            fph.clear_ceiling_lock()
+            result = await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=1.0)
+            assert result["held"] is True
+            assert result["first_open"] is True
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+# ── 9. the real ceiling value and its capped_pause_s() sibling (used by
+#      spectra/api/flare_preview.py to keep preview_pause — what actually
+#      blocks his scene changes — from ever outliving this module's own
+#      light-hold deadline) ────────────────────────────────────────────────
+
+def test_max_hold_duration_is_three_minutes():
+    from spectra.services import flare_preview_hold as fph
+    assert fph.MAX_HOLD_DURATION_S == 180.0
+
+
+def test_capped_pause_s_reaches_zero_at_the_ceiling_and_locks(tmp_path, monkeypatch):
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    monkeypatch.setattr(fph, "MAX_HOLD_DURATION_S", 0.2)
+    scene, kind = _permanent_scene_and_kind()
+
+    async def main():
+        host, virtual = await _start_host(tmp_path)
+        try:
+            await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=5.0)
+            # requested far more than remains until the ceiling — capped
+            assert 0 < fph.capped_pause_s(5.0) <= 0.2
+            await _pump_frames_for(virtual, 0.25)
+            assert await fph.sweep_once() is True
+            await _land_revert(virtual)
+            # locked: even a modest request is refused outright
+            assert fph.capped_pause_s(1.0) == 0.0
+            assert fph.locked_until_reopen() is True
         finally:
             facade.set_host(None)
             await host.shutdown()
