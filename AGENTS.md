@@ -2304,6 +2304,113 @@ kind's release is silently skipped when its param has no resolvable
 baseline, e.g. a boolean, matching real production behaviour rather than
 being a gap this feature introduces).
 
+**Correction, same day (2026-08-20): the preview above touched nothing
+real, and his own live test caught it** ("i have tested some of the
+flares and they do not actually change anything on the lights"). His
+words on opening one, verbatim: "previewing a flare should temporarily
+call the scene, and hold it while the preview window is open. then
+release when it is closed" (his transcription drops letters — "hold" is
+the only reading that fits). `spectra/services/flare_preview_hold.py` is
+the live half, built ALONGSIDE `flare_preview.build_timeline` above,
+which stays exactly as documented (a pure, hardware-free computation for
+the browser's scrub/markers — unchanged). `open_hold(scene, kind,
+intensity)` calls `flare_preview._scratch_engine` (now taking a
+caller-supplied `executor`/`clock` rather than always building its own
+`RecordingExecutor`, so the timeline model and the live fire can never
+silently diverge in what they resolve) wired to `_SeamExecutor` — an
+adapter onto `fx_seam.apply_writes`, the SAME ownership-routed seam
+`room_preview.py`/`dark_light.py`/`ambient.py` already use for their own
+explicit-owner writes, never a bespoke live-write path or the PRODUCTION
+`engine.conductor`/`engine.responses` singletons (using those would make
+"release" require deep-copying and restoring live engine-internal state —
+the exact trap `room_preview.py`'s own docstring names for
+`active_set_id`/wheel position). The scene's own compiled writes land via
+`fx_seam.apply_writes` directly (skipping `scene_compiler.fire_scene`'s
+`engine.on_scene_fired` call for the same reason), then `kind` fires for
+real against the scratch pair via `ResponseEngine.fire_kind` — so a real
+momentary/permanent/dice/gain/colour-jump write reaches his fixtures,
+with real relative timing (`PULSE_HOLD_S`/`PULSE_RELEASE_S`/
+`DICE_REROLL_GLIDE_MS`), not a `RecordingExecutor` entry.
+
+**A facade PUT with `transition_ms>0` does not update `effect.config`
+synchronously** — `fx/effects/__init__.py`'s `start_param_transitions`
+stores a per-param tween, advanced once per RENDERED FRAME, not per PUT.
+This bit the revert specifically: `transition_ms=0` (room_preview's own
+convention, safe there because that module never creates a tween in the
+first place) calls `_apply_config` directly WITHOUT clearing any
+already-in-flight tween on the same key — a still-glide-ing flare param
+would silently resume overwriting the "reverted" value on the very next
+rendered frame, landing on the flare's own target instead of the true
+baseline. Fixed with `REVERT_TRANSITION_MS=1` (mirrors `fx_executor.py`'s
+own `JUMP_MS` convention): a positive duration always takes the
+tween-RETARGET branch, replacing any dangling tween for that key from
+wherever it currently sits — no snap, and no way for an old glide to fight
+a revert. Any future revert/instant-write code in this codebase that
+might race a param this same module (or the production engine) is
+mid-tweening needs the same 1ms convention, not `transition_ms=0`.
+
+**Release is deadline-driven, not close-driven — the same shape as
+`spectra/services/preview_pause.py`'s own `_until`, not a bespoke
+per-session `asyncio` task.** `_deadline` is a plain monotonic timestamp;
+`open_hold`/`touch` only ever write it (a trivial operation that can't
+itself fail); `run_supervised()` — started once from `spectra/app.py`'s
+lifespan alongside `frame_watchdog`/`ownership_reconciler`/
+`ambient_music_gate`'s own — independently checks every
+`SWEEP_INTERVAL_S` (2s) whether a held hold's deadline has lapsed and
+reverts it if so, exactly the "a write-time confirmation proves only the
+moment it was taken" lesson `ambient_music_gate.py`'s own status-honesty
+fix already established in this codebase. This is what makes a lapsed
+heartbeat (browser closed rather than the tab's own unmount handler
+firing, a dropped connection, a wedged tab) self-heal with NO dependency
+on an explicit `/close` ever arriving: worst case `HEARTBEAT_TIMEOUT_S`
+(15s, owned by this module, reused verbatim by `spectra/api/
+flare_preview.py`'s `preview_pause` window rather than a second,
+separately-tuned number) + `SWEEP_INTERVAL_S` (2s) = **17s** after the
+last heartbeat. `active()` is itself a pure deadline read (mirrors
+`preview_pause.active()`), so a caller never sees "active" reported past
+the deadline just because the sweep hasn't ticked yet — reporting and
+reverting are deliberately separate concerns.
+
+**A service restart is the one case the deadline can't cover** — it's
+in-memory only, same as `preview_pause`'s own `_until`, so it (and the
+sweep's ability to know a hold was ever open) is wiped along with
+everything else, while the light bytes a restart leaves behind are real.
+Handled the same SHAPE as `fx/light_ownership.py`'s own
+`recover_stale_handover()`: the pre-fire snapshot is persisted
+(`FLARE_PREVIEW_HOLD_FILE`, tmp+`os.replace` atomic, mirroring
+`dark_light.py`'s own pre-dark snapshot survival) the instant a hold
+starts; `recover_stale_hold()`, called once from `spectra/app.py`'s
+startup lifespan (after `handover.resume_own_room()` re-activates the
+live stack — reverting is itself a real `fx_seam` write), lands any
+snapshot still on disk before anything else touches the lights.
+Deliberately NOT age-gated the way `recover_stale_handover()` is: that
+gate exists because a young handing-over record might be a LIVE
+orchestrator in the OTHER process, still legitimately mid-transition —
+there is no second process that could legitimately hold a flare preview
+open, so a leftover snapshot found at startup is unconditionally stale
+and always gets landed back.
+
+Snapshotting happens once per session (the first `/open` call): every
+subsequent `/open` in the same session (an intensity-slider change)
+re-fires scene+kind live at the new value without re-snapshotting, so a
+later revert always restores the ORIGINAL pre-preview state, never a
+mid-session one. API surface unchanged in shape (`spectra/api/
+flare_preview.py`'s `/open`/`/heartbeat`/`/close`), now also invoking
+`flare_preview_hold`'s `open_hold`/`touch`/`close_hold` alongside the
+existing `preview_pause`/timeline calls; `/open` raises HTTP 502 on a
+live-write failure (ownership refusal, an unreachable LedFX) rather than
+silently arming a pause with nothing shown. Help (`spectra/web/src/help/
+helpContent.ts` id `flare-preview-timeline`) leads with what opening a
+preview does to the room (real lights, paused live show, ~17s worst-case
+auto-revert) before any control explanation — Order 20: a feature whose
+help contradicts what it now does has not shipped. Proof bar: a real
+headless render pipeline (`fx.headless` + `fx.facade`, ownership=spectra —
+the same rig `test_room_preview.py` already uses), reading a written
+value off a live `virtual.active_effect.config`, never a
+`RecordingExecutor`'s own write log. Tests: `tests/
+test_flare_preview_hold.py` (fire+release, mid-session re-fire, deadline
+lapse + sweep, `run_supervised()` end-to-end, restart recovery).
+
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
 Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/
