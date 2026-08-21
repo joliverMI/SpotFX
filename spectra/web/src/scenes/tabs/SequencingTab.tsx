@@ -37,15 +37,23 @@ export default function SequencingTab({ scene, scenes }: {
     (e) => e.from_id === scene.id || e.to_id === scene.id);
 
   // Reuses the SAME entries-record shape CurveAttachmentEditor already
-  // expects for the likelihood curve above — computed here from every
+  // expects for the likelihood curve above — computed here from each
   // scene's own dwell_curve, since it's a plain SceneV2 field, not a
-  // SequencerConfig dict.
+  // SequencerConfig dict. A scene with NO real attachment (dwell_curve
+  // null, or a both-null attachment — either means "use the 16s/4s
+  // default", dwell.py's resolve_dwell_curve_points) must get NO entry
+  // here: the editor's 'none' state (the noneLabel/defaultPoints preview
+  // below) is keyed on `entries[id]` being undefined, and a fabricated
+  // {curve_ref: null, inline_points: null} entry reads as 'flat' instead —
+  // showing "Flat 1.0" for a scene that is actually on the default.
   const dwellEntries: Record<string, SelectorEntry> = Object.fromEntries(
-    allScenes.map((s) => [s.id, {
-      curve_ref: s.dwell_curve?.curve_ref ?? null,
-      inline_points: s.dwell_curve?.inline_points ?? null,
-      genre_mult: {},
-    } as SelectorEntry]));
+    allScenes
+      .filter((s) => s.dwell_curve?.curve_ref != null || s.dwell_curve?.inline_points != null)
+      .map((s) => [s.id, {
+        curve_ref: s.dwell_curve?.curve_ref ?? null,
+        inline_points: s.dwell_curve?.inline_points ?? null,
+        genre_mult: {},
+      } as SelectorEntry]));
 
   return (
     <div>
