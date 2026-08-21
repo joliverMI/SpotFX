@@ -954,12 +954,13 @@ export interface SelectColorSetAction {
   set_id: string;
 }
 
-/** UPDATE (data/spectra-trigger-migration-scoping RULING.md, 2026-08-14):
- * "a major change within the scene, bigger than a flare, overriding the
- * drift, going somewhere new on a ramp-in transition." Fires the ACTIVE
- * scene's own SceneV2.update_kind by name, bypassing intensity-band
- * selection entirely (unlike fire_response) — no update_kind authored on
- * the active scene is a silent no-op. Reset is the same action. */
+/** UPDATE (data/spectra-trigger-migration-scoping RULING.md, 2026-08-14).
+ * Placeholder as of 2026-08-20 ("make update scene act like a double
+ * intensity flare until we build it out specifically"): fires the ACTIVE
+ * scene's own ordinary Flare response at 2x intensity (capped at 1.0),
+ * not SceneV2.update_kind — see scene_response.ResponseEngine.on_update's
+ * own docstring. No Flare response declared on the active scene is a
+ * silent no-op. Reset is the same action. */
 export interface FireSceneUpdateAction {
   kind: 'fire_scene_update';
   intensity: number;

@@ -255,11 +255,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'minimum-dwell',
         title: 'Minimum dwell (seconds) — a floor, not the same curve as likelihood',
-        keywords: 'dwell minimum hold floor update effect scene change intensity curve default',
+        keywords: 'dwell minimum hold floor update effect flare double intensity scene change intensity curve default',
         body: [
           'A per-scene MINIMUM HOLD TIME, a curve over intensity — but Y is SECONDS here, not a likelihood weight, so don\'t read it the same way as the likelihood curve above it. Default (no override): 16 seconds at intensity 0, 4 seconds at intensity 1, linear between — his exact numbers. The intensity used is LATCHED the moment the scene actually fires; it never moves mid-hold even if the live intensity changes.',
           'This gates every AUTOMATIC scene change — a sequencer roll, a trigger\'s Fire Scene action, or the automatic song-transition fire — whichever scene is currently showing must clear its own minimum before any of those may switch away from it. A manual Fire press in the editor is exempt (it never goes through this gate) and always fires immediately. Force Scene still wins over an active minimum, but the room bar names the override rather than applying it silently.',
-          'If a scene change is requested before the minimum clears, the room does an UPDATE EFFECT instead of switching — the scene\'s own designated Update kind (a permanent flare kind named on the scene, "a major change within the scene, bigger than a flare, overriding the drift, landing on a ramp-in"). A scene with no Update kind authored yet simply holds — recorded, never a silent no-op, so "why didn\'t the room change" is never a mystery.',
+          'If a scene change is requested before the minimum clears, the room does an UPDATE EFFECT instead of switching: it fires the CURRENT scene\'s own ordinary Flare response — whatever\'s already attached to its bands — at DOUBLE the intensity that would otherwise have applied (capped at 1.0, so anything already at intensity 0.5 or above reads the same doubled or not). This is a deliberate placeholder standing in for a future purpose-built Update effect — nothing new needs authoring, and it works on every scene that already has a Flare response. You will see a real flare during a hold where the room previously did nothing; that\'s expected, not a bug. A scene with no Flare response/bands declared at all still just holds, silently — recorded, never a silent no-op internally, so "why didn\'t the room change" is a log lookup, not a mystery.',
+          'The "Update kind" picker on the Flares tab is reserved for a future, purpose-built Update effect and is not read by this placeholder — attaching one there does nothing yet.',
           'The clock never resets on an update effect — it keeps running from the moment the current scene actually fired, so a busy song can\'t re-arm the minimum indefinitely.',
         ],
       },
@@ -981,7 +982,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         table: [
           ['Fire scene', 'Fires a scene by name at a chosen intensity (⚡), optionally wearing a specific colour set instead of the room\'s active one — through the same choke point the sequencer\'s own picks use.'],
           ['Fire response', 'Fires a response class (flare / charge / lull / drop) at a chosen intensity — the same phase drive and band selection a bridge-classified charge/lull/drop/flare already drives.'],
-          ['Fire update', 'Fires the ACTIVE scene\'s own UPDATE content directly, at a chosen intensity — no target to pick, and it bypasses band selection entirely (unlike Fire response). A major change WITHIN the current scene: bigger than a flare, overrides the drift, lands somewhere new on a ramp-in. If the active scene has no UPDATE authored, this is a silent no-op.'],
+          ['Fire update', 'A placeholder for a future, purpose-built Update effect (not built yet): fires the ACTIVE scene\'s own ordinary Flare response, at DOUBLE the chosen intensity (capped at 1.0) — no target to pick. Works on every scene that already has a Flare response; one with none declared at all is a silent no-op, same as an empty Fire response band.'],
           ['Select colour set', 'Moves the room to a named colour set directly — the same manual-apply surface as the Scenes page\'s colour controls.'],
         ],
         kbd: false,

@@ -218,28 +218,34 @@ def test_trigger_fires_response_action_on_the_real_pipeline(tmp_path):
     _run(main())
 
 
-# ── proof 2b: fire_scene_update (UPDATE) fires bypassing band gating ─────────
+# ── proof 2b: fire_scene_update (UPDATE) fires the scene's own flare ────────
+# ── response at double intensity (2026-08-20 placeholder — see ─────────────
+# ── scene_response.ResponseEngine.on_update's own docstring) ───────────────
 
 def test_trigger_fires_scene_update_action_on_the_real_pipeline(tmp_path):
     """A fire_scene_update trigger reaches the real ResponseEngine.on_update
-    at its moment — no response bands configured at all on this scene,
-    proving update doesn't need them (unlike fire_response's proof 2
-    above)."""
-    from spectra.models.scene import (FlareKind, ParamTarget,
+    at its moment. Two "flare" bands, chosen so the trigger's own
+    intensity (0.2) would land in the LOW band un-doubled but the HIGH band
+    once doubled to 0.4 — proving fire_scene_update reached the real
+    doubling + band-selection, not a stale bypass."""
+    from spectra.models.scene import (FlareBand, ResponseSpec,
                                       SceneDeviceConfig, SceneV2)
     from spectra.models.trigger import FireSceneUpdateAction, SpectraTrigger
+    from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
     from spectra.services.trigger_engine import TriggerEngine
 
     _categories_fixture(tmp_path)
     scene = SceneV2(name="Updating", devices=[SceneDeviceConfig(
         target_kind="virtual", target=VID, effect_type="concentric",
         params={"gradient_scale": 1.0})],
-        flare_kinds=[FlareKind(
-            name="Big Shift", type="permanent",
-            params={"gradient_scale": ParamTarget(mode="absolute", value=1.8)})],
-        update_kind="Big Shift")
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=0.3,
+                      param_patch={"gradient_scale": 1.2}),
+            FlareBand(intensity_min=0.3, intensity_max=1.0,
+                      param_patch={"gradient_scale": 1.8}),
+        ])})
     trig = SpectraTrigger(timestamp_ms=2000,
-                          action=FireSceneUpdateAction(intensity=1.0))
+                          action=FireSceneUpdateAction(intensity=0.2))
 
     async def main():
         host, virtual = await _host(tmp_path, "update")
@@ -265,14 +271,12 @@ def test_trigger_fires_scene_update_action_on_the_real_pipeline(tmp_path):
 
                 fired = await engine.tick(2000)
                 assert len(fired) == 1
-                # the ramp-in, not an instant jump: not landed one frame later
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
-                assert effect._config["gradient_scale"] < 1.8
-                # but landed well past the ramp
-                headless.render_frames(virtual, 300, clock=clock, dt=1 / 60)
+                glide_frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
                 assert effect._config["gradient_scale"] == pytest.approx(1.8), \
                     "fire_scene_update reached the real response engine's " \
-                    "on_update — no response band was configured at all"
+                    "on_update, which doubled the trigger's 0.2 to 0.4 and " \
+                    "landed the HIGH band's kind, not the low one"
         finally:
             facade.set_host(None)
             await host.shutdown()

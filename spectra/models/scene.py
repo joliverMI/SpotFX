@@ -614,18 +614,18 @@ class SceneV2(BaseModel):
     devices: list[SceneDeviceConfig] = Field(default_factory=list)
     flare_kinds: list[FlareKind] = Field(default_factory=list)
     responses: dict[ResponseClass, ResponseSpec] = Field(default_factory=dict)
-    # UPDATE (the owner's words, 2026-08-14, spectra-trigger-migration-
-    # scoping RULING.md): "a major change within the scene, bigger than the
-    # flare, overriding the drift, going somewhere new on a ramp-in
-    # transition." NOT band-gated like the four ResponseClass axes above —
-    # a fire_scene_update trigger always executes THIS scene's own kind by
-    # name, bypassing intensity-band selection entirely (scene_response.
-    # ResponseEngine.on_update). References a name in flare_kinds, same
-    # declared-kind vocabulary as a band — reuses the type="permanent"
-    # primitive (params/gain land and BECOME the new baseline) rather than
-    # inventing a new content model. None = no update authored for this
-    # scene yet — a fire_scene_update trigger on it is a silent no-op, the
-    # same "nothing declared → nothing happens" convention as an empty band.
+    # UPDATE (the owner's original words, 2026-08-14, spectra-trigger-
+    # migration-scoping RULING.md): "a major change within the scene,
+    # bigger than the flare, overriding the drift, going somewhere new on a
+    # ramp-in transition." That original design — fire_scene_update always
+    # executing THIS named kind directly, bypassing band selection — is
+    # RETIRED at runtime (2026-08-20, his ask: "make update scene act like
+    # a double intensity flare until we build it out specifically" —
+    # scene_response.ResponseEngine.on_update now fires the scene's own
+    # "flare" ResponseClass at 2x intensity instead; see its own docstring).
+    # This field is UNREAD by that placeholder — kept, unvalidated-away,
+    # reserved for whenever the real update effect described above actually
+    # gets built; don't repurpose it for that build without a fresh ask.
     update_kind: Optional[str] = None
     color_journey: SceneColorJourney = Field(default_factory=SceneColorJourney)
     choreography: PhaseChoreography = Field(default_factory=PhaseChoreography)
@@ -716,13 +716,12 @@ class SceneV2(BaseModel):
     # never reaches that choke point (exempt, same as disabled/mode
     # availability above); Force Scene still wins but the override is
     # NAMED (overrode_dwell=True), never silent. A deferred scene change
-    # fires this scene's own update_kind instead (his answer D, confirmed
-    # by him: the existing on_update/SceneV2.update_kind mechanism IS the
-    # "Update effect" he meant) — a scene with no update_kind authored has
-    # nothing to call, so the deferral is absorbed exactly like a held
-    # scene always was, except now RECORDED (fire_history's "deferred"
-    # bucket), never silent. See spectra/services/dwell.py for the full
-    # mechanism.
+    # fires an UPDATE EFFECT instead (his answer D) — as of 2026-08-20 a
+    # placeholder (his own ask) that fires this scene's own "flare"
+    # response at double intensity rather than the original update_kind
+    # design (see on_update's own docstring); recorded either way
+    # (fire_history's "deferred" bucket), never silent. See
+    # spectra/services/dwell.py for the full mechanism.
     dwell_curve: Optional[CurveAttachment] = None
 
     @model_validator(mode="before")

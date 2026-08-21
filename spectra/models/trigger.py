@@ -15,13 +15,17 @@ one SPECTRA-native action:
   fire_scene_update  intensity only — through
                      spectra.services.scene_response.ResponseEngine.
                      on_update, the UPDATE behaviour (data/spectra-trigger-
-                     migration-scoping RULING.md, 2026-08-14): "a major
-                     change within the scene, bigger than a flare,
-                     overriding the drift, going somewhere new on a
-                     ramp-in transition." Fires the ACTIVE scene's own
-                     SceneV2.update_kind by name, bypassing intensity-band
-                     selection entirely (unlike fire_response) — no
-                     update_kind authored on the active scene is a silent
+                     migration-scoping RULING.md, 2026-08-14, originally:
+                     "a major change within the scene, bigger than a
+                     flare, overriding the drift, going somewhere new on a
+                     ramp-in transition," firing the ACTIVE scene's own
+                     SceneV2.update_kind by name). That original mechanism
+                     is RETIRED (2026-08-20, his ask: "make update scene
+                     act like a double intensity flare until we build it
+                     out specifically") — on_update now fires the active
+                     scene's own ordinary "flare" ResponseClass at 2x
+                     intensity instead (see on_update's own docstring); no
+                     "flare" response/bands declared at all is a silent
                      no-op, same convention as an empty response band.
                      Reset is the SAME action (his correction: "reset is
                      treated as update" — one behaviour, not two).

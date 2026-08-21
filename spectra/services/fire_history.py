@@ -34,12 +34,15 @@ fired" — the same key is used for both the count and the show-log entry:
                services/dwell.py, 2026-08-20), keyed by the scene id that
                WOULD have fired — the interim behaviour for a scene change
                requested while the active scene's own minimum dwell hasn't
-               elapsed: the room holds (an update effect fires instead when
-               one is authored), and this is the non-silent record of that
+               elapsed: the room holds and fires the current scene's own
+               "flare" response at double intensity instead (scene_response.
+               ResponseEngine.on_update, a deliberate placeholder — see its
+               own docstring), and this is the non-silent record of that
                — {requested_scene_id, remaining_dwell_s, update_result}.
-               Without this, a scene with no update_kind authored yet
-               (8 of his 9 real scenes as of this field) would look
-               indistinguishable from "triggers stopped working."
+               Without this, a scene with no "flare" response/bands
+               declared at all (the same silent-no-op case a genuine flare
+               already has) would look indistinguishable from "triggers
+               stopped working."
 
 Storage: storage/spectra/fire_history.json (counts) and storage/spectra/
 show_log.json (timeline), same atomic tmp+replace discipline as

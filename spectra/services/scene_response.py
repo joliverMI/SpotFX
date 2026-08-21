@@ -166,15 +166,6 @@ DICE_REROLL_GLIDE_MS = 220
 COLOR_JUMP_RAMP_MS_GENTLE = 2500   # intensity 0.0 — the felt ease-in
 COLOR_JUMP_RAMP_MS_HARD = 150      # intensity 1.0 — lands hard
 
-# UPDATE's own ramp-in (the owner's words, spectra-trigger-migration-scoping
-# RULING.md: "a major change ... bigger than the flare ... arriving on a
-# ramp-in transition"). Same intensity-scaled shape as the colour jump's
-# (gentle eases in, hard lands quicker) but deliberately slower at both
-# ends — "bigger than a flare" should never glide faster than the flare
-# colour-jump's own hard end.
-UPDATE_RAMP_MS_GENTLE = 3000   # intensity 0.0
-UPDATE_RAMP_MS_HARD = 800      # intensity 1.0 — still a visible glide, never a snap
-
 
 def _intensity_scaled(intensity: float, at0: float, at1: float) -> float:
     """Shared linear-interpolation shape behind every intensity-scaled
@@ -189,19 +180,14 @@ def _intensity_scaled(intensity: float, at0: float, at1: float) -> float:
 
 def _intensity_scaled_ramp_ms(intensity: float, gentle_ms: int, hard_ms: int) -> int:
     """Same shape as _intensity_scaled, rounded to whole milliseconds —
-    every ramp-duration family in this module (colour jump, update, colour
-    rotate's ramp/dwell/fade) shares this rounding."""
+    every ramp-duration family in this module (colour jump, colour rotate's
+    ramp/dwell/fade) shares this rounding."""
     return int(round(_intensity_scaled(intensity, gentle_ms, hard_ms)))
 
 
 def color_jump_ramp_ms(intensity: float) -> int:
     return _intensity_scaled_ramp_ms(
         intensity, COLOR_JUMP_RAMP_MS_GENTLE, COLOR_JUMP_RAMP_MS_HARD)
-
-
-def update_ramp_ms(intensity: float) -> int:
-    return _intensity_scaled_ramp_ms(
-        intensity, UPDATE_RAMP_MS_GENTLE, UPDATE_RAMP_MS_HARD)
 
 
 # COLOUR ROTATE-AND-BACK FLARE (owner ask, 2026-08-20 — verbatim spec in
@@ -468,7 +454,18 @@ class ResponseEngine:
             return record
         record["band"] = {"intensity_min": band.intensity_min,
                           "intensity_max": band.intensity_max}
+        await self._execute_band(scene, band, intensity, record)
+        self.surges.append(record)
+        await self._broadcast({"type": "surge", **record})
+        return record
 
+    async def _execute_band(self, scene: SceneV2, band: FlareBand,
+                            intensity: float, record: dict[str, Any]) -> None:
+        """Run every kind attached to an already-selected band at `intensity`
+        and fold the results into `record` — the shared tail of on_event
+        (a genuine flare/charge/lull/drop) and on_update's placeholder
+        double-intensity flare (below), factored out so the two can never
+        drift into two different executions of "what a band does"."""
         declared = {k.name: k for k in scene.flare_kinds}
         attached = [(declared[n], s) for n, s in band.kinds.items()]
         # Fixed execution order (the legacy reroll → patch → gain → colour
@@ -559,9 +556,6 @@ class ResponseEngine:
         record["carried"] = [{"virtual_id": vid, "param": p}
                              for (vid, p) in carry]
         record["result"] = "applied"
-        self.surges.append(record)
-        await self._broadcast({"type": "surge", **record})
-        return record
 
     async def fire_kind(self, kind: FlareKind, intensity: float) -> dict:
         """Fire ONE declared kind in isolation, bypassing band selection
@@ -726,11 +720,9 @@ class ResponseEngine:
     def _compute_param_moves(self, kind: FlareKind, scale: float,
                              carry: dict) -> dict[str, dict[str, float]]:
         """Per-virtual param moves for one kind at this scale — the pure
-        declared/scale/clamp computation. Split out of _move_params so
-        on_update's ramped path (_move_params_ramped) shares the EXACT same
-        math and carry/hold bookkeeping; the two differ only in how the
-        result reaches the executor (an instant jump collected across
-        several kinds vs. this one kind's own ramp). Name-broadcast
+        declared/scale/clamp computation. Split out of _move_params so any
+        future caller needing this same math (carry/hold bookkeeping
+        included) doesn't have to re-derive it. Name-broadcast
         targeting: each key lands on every virtual whose live effect has
         that param (registry truth). Each param's ParamTarget resolves to a
         declared target (absolute value / baseline + offset / a fresh
@@ -830,23 +822,6 @@ class ResponseEngine:
                 jumps.setdefault(vid, {}).update(instant)
             if eased:
                 glides.setdefault(vid, {}).update(eased)
-            landed.append({"virtual_id": vid, "params": moves})
-        return landed
-
-    async def _move_params_ramped(self, kind: FlareKind, scale: float,
-                                  carry: dict, ramp_ms: int) -> list[dict]:
-        """on_update's own param-move path: same declared/scale/clamp math
-        as _move_params, but glides each virtual to its landed value over
-        ramp_ms instead of an instant jump — the "ramp in transition" his
-        definition calls for. Only ever called with a permanent kind (see
-        on_update), so always carries via _compute_param_moves, never
-        schedules a release."""
-        landed: list[dict] = []
-        for vid, moves in self._compute_param_moves(kind, scale, carry).items():
-            state = self.conductor.virtuals.get(vid)
-            if state is None:
-                continue
-            await self.executor.glide(vid, state.effect_type, moves, ramp_ms)
             landed.append({"virtual_id": vid, "params": moves})
         return landed
 
@@ -959,17 +934,13 @@ class ResponseEngine:
             count += 1
         return count
 
-    async def _gain(self, kind: FlareKind, scale: float, carry: dict,
-                    *, ramp_ms: Optional[int] = None) -> list[dict]:
+    async def _gain(self, kind: FlareKind, scale: float,
+                    carry: dict) -> list[dict]:
         """One kind's brightness envelope around the carried baseline, at
         effective gain 1 + (gain − 1)·scale — neutral stays neutral, a duck
         scales into a deeper duck. MOMENTARY: spike to baseline×effective,
         release back (the baseline stays). PERMANENT: glide to
-        baseline×effective and hold — CARRIED. `ramp_ms` overrides the
-        default GAIN_GLIDE_S duration for the permanent glide only (on_update
-        passes its own update_ramp_ms so params and gain land on the same
-        transition; every other caller leaves it unset — unchanged
-        behaviour)."""
+        baseline×effective and hold over the default GAIN_GLIDE_S — CARRIED."""
         effective = 1.0 + (kind.gain - 1.0) * scale
         hold_s = (kind.hold_ms / 1000.0 if kind.hold_ms is not None
                   else PULSE_HOLD_S)
@@ -985,57 +956,61 @@ class ResponseEngine:
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
-                duration_ms = ramp_ms if ramp_ms is not None else int(GAIN_GLIDE_S * 1000)
                 await self.executor.glide(vid, state.effect_type,
                                           {"brightness": peak},
-                                          duration_ms)
+                                          int(GAIN_GLIDE_S * 1000))
                 carry[(vid, "brightness")] = peak
                 out.append({"virtual_id": vid, "lands": round(peak, 4),
                             "held": True})
         return out
 
-    # ── UPDATE (report data/spectra-trigger-migration-scoping/RULING.md) ──
+    # ── UPDATE (placeholder, 2026-08-20 — see on_update's own docstring) ──
 
     async def on_update(self, intensity: float) -> dict:
-        """A major change WITHIN the active scene, bigger than a flare,
-        overriding the drift, landing on a ramp-in — the owner's words.
-        Deliberately NOT band-gated like on_event's four classes: this
-        always executes the active scene's OWN designated kind
-        (SceneV2.update_kind), bypassing intensity-band selection entirely
-        — reset and update are the SAME call (his correction: "reset is
-        treated as update"). No update_kind authored on the active scene,
-        or the named kind isn't a declared type="permanent" kind, is a
-        silent no-op — same "nothing declared → nothing happens"
-        convention as on_event's "no band". Only permanent params/gain are
-        supported (never drift_jump/colour — his definition is about
-        magnitude and drift override, not a colour pick; also keeps this
-        path clear of the colour-jump KeyError class documented in
-        spectra-room-fault-diagnosis/report.md section 3)."""
+        """PLACEHOLDER (his words: "make update scene act like a double
+        intensity flare until we build it out specifically"). This is a
+        full replacement of the original UPDATE design (data/spectra-
+        trigger-migration-scoping/RULING.md), not an extension of it: that
+        design fired the active scene's OWN designated kind
+        (SceneV2.update_kind) directly, bypassing intensity-band selection,
+        restricted to a single type="permanent" kind — but 8 of his 9 real
+        scenes have no update_kind authored, so the minimum-dwell rebuild's
+        own deferral (engine.fire_scene_update_event) was landing on
+        nothing for almost every hold. Confirmed reading, approved as-is:
+        fire the active scene's own ordinary "flare" ResponseClass — the
+        SAME band-selection + kind-execution on_event runs for a genuine
+        flare (_execute_band, shared with on_event above) — at 2x
+        `intensity`, clamped to 1.0 (his own accepted ceiling: "double" and
+        "full" read identical from intensity 0.5 up; a deliberately
+        accepted consequence, not a gap to fill with a second gain or a
+        rescale). No permanent-only restriction and nothing new to author —
+        whatever kinds the doubled intensity's own band already has
+        attached fire exactly as a real flare would, on every scene he
+        already has; a scene with no "flare" response/bands declared at
+        all still holds silently, same "nothing declared → nothing
+        happens" convention on_event's own "no band" already follows.
+        SceneV2.update_kind is untouched by this and simply unread by this
+        path now — a future, deliberately-designed update effect is its
+        own build, not this placeholder; don't repurpose update_kind for
+        it without a fresh ask."""
         scene = self.conductor.scene
+        doubled = min(1.0, intensity * 2.0)
         record: dict[str, Any] = {"at": self._clock(), "class": "update",
-                                  "intensity": round(intensity, 4)}
+                                  "intensity": round(intensity, 4),
+                                  "doubled_intensity": round(doubled, 4)}
         if scene is None:
             record["result"] = "no_active_scene"
             self.surges.append(record)
             return record
-        kind = None
-        if scene.update_kind:
-            kind = {k.name: k for k in scene.flare_kinds}.get(scene.update_kind)
-        if kind is None or kind.type != "permanent":
-            record["result"] = "no_update_kind"
+        spec = scene.responses.get("flare")
+        band = select_band(spec.bands, doubled) if spec else None
+        if spec is None or band is None:
+            record["result"] = "no_class" if spec is None else "no_band"
             self.surges.append(record)
             return record
-
-        ramp_ms = update_ramp_ms(intensity)
-        record["ramp_ms"] = ramp_ms
-        carry: dict[tuple[str, str], Any] = {}
-        if kind.params:
-            record["moved"] = await self._move_params_ramped(kind, intensity, carry, ramp_ms)
-        if kind.gain != 1.0:
-            record["gained"] = await self._gain(kind, intensity, carry, ramp_ms=ramp_ms)
-        self.conductor.on_surge(carry)
-        record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
-        record["result"] = "updated"
+        record["band"] = {"intensity_min": band.intensity_min,
+                          "intensity_max": band.intensity_max}
+        await self._execute_band(scene, band, doubled, record)
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
         return record

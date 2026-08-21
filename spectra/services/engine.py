@@ -160,9 +160,17 @@ async def fire_scene_update_event(intensity: float) -> Optional[dict]:
     same reasoning as fire_response_event's via_trigger=True path: a
     fire_scene_update trigger action only ever reaches here on a song
     trigger_engine._effective_mode_for_song has already confirmed carries
-    an authored trigger of its own. Never schedules a hold release —
-    on_update only fires permanent kinds, which carry immediately and
-    never pend a return.
+    an authored trigger of its own.
+
+    responses.on_update() is now (2026-08-20, his ask: "make update scene
+    act like a double intensity flare until we build it out specifically")
+    a placeholder that fires the active scene's own ordinary "flare" band
+    at 2x intensity — the SAME kind execution a genuine flare runs, so
+    unlike the original permanent-only design it CAN land a momentary
+    kind, a dice re-roll, or a colour rotate, each of which pends its own
+    release. This mirrors fire_response_event's own scheduling immediately
+    below, rather than skipping it — a real hold/release here now behaves
+    exactly like a real flare's.
 
     A SECOND caller as of the dwell rebuild (2026-08-20,
     spectra.services.scene_sequencer.fire_scene_by_id's dwell gate,
@@ -185,7 +193,12 @@ async def fire_scene_update_event(intensity: float) -> Optional[dict]:
         return None
     if load_room_controls().scene_change_mode not in ("full", "triggers_only"):
         return None
-    return await responses.on_update(intensity)
+    record = await responses.on_update(intensity)
+    for hold_s in responses.pending_hold_groups():
+        asyncio.create_task(_release_after_hold(hold_s))
+    for dwell_s in responses.pending_color_rotate_holds():
+        asyncio.create_task(_release_color_rotate_after_dwell(dwell_s))
+    return record
 
 
 _last_track_uri: str | None = None

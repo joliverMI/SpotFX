@@ -287,8 +287,9 @@ def map_update(music_trigger: dict) -> Optional[dict]:
     UPDATE_BUCKET (fixed-update-scene / fixed-reset-scene, one behaviour
     per his correction). Maps to fire_scene_update with the trigger's own
     recorded intensity — no scene_id, no event_class, just the one field
-    on_update needs to compute its ramp and scale (spectra.services.
-    scene_response.ResponseEngine.on_update / update_ramp_ms).
+    on_update needs (spectra.services.scene_response.ResponseEngine.
+    on_update — a 2026-08-20 placeholder now doubles this intensity to
+    fire the active scene's own flare response; see its own docstring).
 
     Returns None for a non-update bucket, a retired id, or an unknown id."""
     entry = classify(music_trigger["event_id"])

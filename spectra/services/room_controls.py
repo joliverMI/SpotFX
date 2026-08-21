@@ -169,9 +169,8 @@ legacy picks: decision-legacy-retirement-picks.md):
                           the SAME gentle/hard naming spectra/services/
                           scene_response.py already uses for every other
                           intensity-scaled ramp in this codebase
-                          (COLOR_JUMP_RAMP_MS_GENTLE/_HARD,
-                          UPDATE_RAMP_MS_GENTLE/_HARD — this is the fourth
-                          instance of the same shape, not a new one):
+                          (COLOR_JUMP_RAMP_MS_GENTLE/_HARD — this is the
+                          same shape again, not a new one):
                             scene_transition_ms_gentle  300ms @ intensity 0.0
                             scene_transition_ms_hard    200ms @ intensity 1.0
                           Both are plain settings (Sonic-editable via

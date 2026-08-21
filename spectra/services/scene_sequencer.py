@@ -108,10 +108,12 @@ async def fire_scene_by_id(scene_id: str,
     say so" pattern as overrode_disabled above. A deferred request calls
     engine.fire_scene_update_event(intensity) — the SAME choke point a
     fire_scene_update trigger action already uses — INSTEAD of compiling
-    and firing the requested scene; a scene with no update_kind authored
-    (his own "might not be defined yet" — most of his real scenes today)
-    degrades to that function's existing no-op, recorded (never silent) to
-    fire_history's "deferred" bucket rather than the "scenes" bucket below.
+    and firing the requested scene; that seam (scene_response.ResponseEngine.
+    on_update, a 2026-08-20 placeholder) fires the current scene's own
+    "flare" response at double intensity — degrading to the same "no flare
+    response/bands declared" no-op only a scene with no flare material at
+    all would hit — recorded (never silent) to fire_history's "deferred"
+    bucket rather than the "scenes" bucket below.
     Every real (non-deferred) fire re-latches dwell.note_fired for the
     scene that just started showing — the ONE place dwell's own "current
     scene" state updates, which is what keeps it from going stale the way
