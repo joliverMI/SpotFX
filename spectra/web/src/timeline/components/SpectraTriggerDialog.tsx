@@ -127,7 +127,9 @@ export default function SpectraTriggerDialog({
         </div>
 
         {recents.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Recent:</span>
+            <HelpLink topic="spectra-trigger-recents" title="Quick-pick recent actions" />
             {recents.map((r, i) => (
               <button key={i} style={{ fontSize: 11, padding: '2px 8px' }}
                 title="Quick-pick a recently used action" onClick={() => applyRecent(r)}>
@@ -228,6 +230,7 @@ export default function SpectraTriggerDialog({
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           <span style={{ color: 'var(--text-muted)' }}>Enabled</span>
+          <HelpLink topic="spectra-trigger-enabled" title="Enabled toggle" />
         </label>
 
         <div style={{ display: 'flex', gap: 8 }}>

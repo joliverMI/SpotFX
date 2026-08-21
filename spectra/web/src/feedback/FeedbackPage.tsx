@@ -192,6 +192,7 @@ export default function FeedbackPage() {
         >
           {justMarked ? 'Marked!' : '● Mark'}
         </button>
+        <HelpLink topic="feedback-mark-then-nudge" title="Mark, then nudge" />
       </div>
 
       <div className="card">

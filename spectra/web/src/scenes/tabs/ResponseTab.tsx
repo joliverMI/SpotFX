@@ -265,6 +265,12 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
         </label>
       </div>
 
+      {classes.includes('charge') && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+          What each effect actually looks like on charge/lull/drop <HelpLink topic="response-families" />
+        </div>
+      )}
+
       {classes.map((cls) => {
         const spec = scene.responses[cls];
         return (
@@ -291,6 +297,9 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
               <>
                 <BandStrip bands={spec.bands}
                   onChange={(bands) => setSpec(cls, { ...spec, bands })} />
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Lanes <HelpLink topic="tab-flares-lanes" />
+                </div>
                 {[...spec.bands]
                   .map((b, i) => ({ b, i }))
                   .sort((a, z) => a.b.intensity_min - z.b.intensity_min)

@@ -203,6 +203,7 @@ export default function SettingsConsolePage() {
           >
             {recording ? '■' : '🎤'}
           </button>
+          <HelpLink topic="settings-console-voice" title="Voice: the mic button" />
           <input
             type="text"
             placeholder="Type a settings request…"
@@ -218,7 +219,9 @@ export default function SettingsConsolePage() {
       </div>
 
       <div className="card">
-        <div className="card-title">Current settings</div>
+        <div className="card-title">
+          Current settings <HelpLink topic="settings-console-scope" title="What it can change here" />
+        </div>
         {!registry ? (
           <p className="empty-note">Loading…</p>
         ) : (

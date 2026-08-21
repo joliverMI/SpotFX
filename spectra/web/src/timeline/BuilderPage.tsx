@@ -221,7 +221,7 @@ export default function BuilderPage() {
 
       <CollapsibleCard
         id="timeline"
-        title="Timeline"
+        title={<>Timeline <HelpLink topic="builder-timeline-bar" title="Full-song timeline bar" /></>}
         headerExtra={
           <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
             {blendBrush && (
@@ -253,6 +253,7 @@ export default function BuilderPage() {
             <span style={{ color: 'var(--text-muted)' }}>
               {fmtMs(coarseMs)} / {fmtMs(durationMs)}
             </span>
+            <HelpLink topic="builder-pan-zoom" title="Pan, zoom & follow" />
             <HelpLink topic="builder" title="Builder help — shortcuts & gestures" />
           </span>
         }
@@ -293,7 +294,8 @@ export default function BuilderPage() {
 
       <CollapsibleCard
         id="shape"
-        title="Audio Shape"
+        title={<>Audio Shape <HelpLink topic="builder-mouse" title="Canvas mouse actions" />
+          <HelpLink topic="builder-selection-keys" title="Selection & intensity keys" /></>}
         headerExtra={
           <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {capturing && (
@@ -306,6 +308,7 @@ export default function BuilderPage() {
               </span>
             )}
             <OffsetBadge meta={meta ?? null} uri={uri} />
+            <HelpLink topic="builder-misc" title="Other timeline controls" />
             <button
               style={{ fontSize: 12 }}
               className={shiftOpen || triggerPreviewOffsetMs !== 0 ? 'primary' : ''}
@@ -367,6 +370,7 @@ export default function BuilderPage() {
           ⣀⣀⣀
         </div>
         <ShiftAllControl open={shiftOpen} setOpen={setShiftOpen} durationMs={durationMs} />
+        <HelpLink topic="builder-navigation" title="Navigation & view" />
         {beatTip && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             beat @ {fmtMs(beatTip.ms)} —{' '}
@@ -375,6 +379,7 @@ export default function BuilderPage() {
               onClick={() => setBeatTip(null)}>✕</button>
           </div>
         )}
+        <HelpLink topic="builder-shape-controls" title="Waveform & layer controls" />
         <ShapeControls
           view={view}
           setFilters={(p) => setBandFilters((f) => ({ ...f, ...p }))}
@@ -387,7 +392,10 @@ export default function BuilderPage() {
         />
       </CollapsibleCard>
 
-      <CollapsibleCard id="palettes" title="Palettes" defaultCollapsed>
+      <CollapsibleCard id="palettes"
+        title={<>Palettes <HelpLink topic="builder-palette-keys" title="Keyboard palettes" />
+          <HelpLink topic="builder-palette-card" title="Palette card gestures" /></>}
+        defaultCollapsed>
         <PaletteCard events={data.events} />
       </CollapsibleCard>
 

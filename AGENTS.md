@@ -20,6 +20,29 @@ Deep links: `<HelpLink topic="<section-or-entry-id>" />` renders the small
 circled-"?" used across the UI. Don't rename an id in `helpContent.ts`
 without updating its `topic=` callers (grep `topic="`).
 
+**A topic isn't done when it's written — it's done when something in the UI
+links to it.** Found 2026-08-21 (`fm/help-context-sensitive-question-mark`):
+65 of SPECTRA's 117 help topics had real, written content and were never
+`topic=`'d from any component — reachable only by guessing a search term.
+Audit method (cheap, run it after any content pass): extract every `id:
+'...'` from `helpContent.ts`, then for each id grep the app's `.tsx`/`.ts`
+files (excluding `helpContent.ts` itself) for that id as a quoted string —
+zero hits means orphaned. Also watch for a topic nested under the wrong parent
+section/subsection in the content tree (one was found filed as a
+subsection of the Timeline builder page while describing SPECTRA process
+restarts entirely unrelated to it) — that kind of misfiling makes a topic
+functionally unreachable from any sane UI location even before anyone
+tries to link it.
+
+SPECTRA's global "?" (`spectra/web/src/App.tsx`'s NavBar) is
+context-sensitive: `spectra/web/src/help/routeTopics.ts` maps the current
+route to the page's own help topic, so it opens Help already scrolled to
+the current page instead of always landing on the bare index. Add a route
+there when adding a new top-level SPECTRA route; a route with no entry
+falls back to the plain index rather than guessing. It's route-level only,
+not tab-level (a page's internal tabs are local component state, not part
+of the URL).
+
 Prefer adding a `HelpLink` next to a complex control over embedding
 instructional prose in the UI; short tooltips (`title=`) are fine.
 

@@ -242,22 +242,25 @@ export default function ScenesPage() {
 
       {/* ── Phone: compact scene selector above the editor; opens the drawer ── */}
       {isPhone && scene && (
-        <button onClick={() => setPickerOpen(true)} title="Choose another scene"
-          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                   textAlign: 'left', padding: '10px 12px', background: 'var(--surface)',
-                   border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-          <span style={{ color: 'var(--accent)' }}>☰</span>
-          <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden',
-                         textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {scene.name}{drafts[scene.id] ? ' •' : ''}
-          </span>
-          {scene.disabled && (
-            <span className="badge badge-red" style={{ flexShrink: 0 }}>⛔ disabled</span>
-          )}
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', flex: 'none' }}>
-            scenes ▾
-          </span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={() => setPickerOpen(true)} title="Choose another scene"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0,
+                     textAlign: 'left', padding: '10px 12px', background: 'var(--surface)',
+                     border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+            <span style={{ color: 'var(--accent)' }}>☰</span>
+            <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden',
+                           textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {scene.name}{drafts[scene.id] ? ' •' : ''}
+            </span>
+            {scene.disabled && (
+              <span className="badge badge-red" style={{ flexShrink: 0 }}>⛔ disabled</span>
+            )}
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', flex: 'none' }}>
+              scenes ▾
+            </span>
+          </button>
+          <HelpLink topic="phone-layout" title="Phone layout" />
+        </div>
       )}
       {isPhone && pickerOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'var(--bg)',
@@ -288,10 +291,13 @@ export default function ScenesPage() {
                 onChange={(e) => setIntensity(Number(e.target.value))} />
               <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', width: 34 }}>{intensity.toFixed(2)}</span>
             </span>
+            <HelpLink topic="editor-toolbar" title="Toolbar" />
             <ModeAvailabilityToggle value={scene.display_availability ?? 'default'}
               onChange={(v) => setScene({ ...scene, display_availability: v })} />
+            <HelpLink topic="mode-availability" title="Mode availability" />
             <DisabledToggle value={scene.disabled ?? false}
               onChange={(v) => setScene({ ...scene, disabled: v })} />
+            <HelpLink topic="scene-disable" title="Disable scene" />
             <button style={{ fontSize: 12, borderColor: 'var(--accent)' }}
               title="Really fire this scene through the live LedFX service"
               onClick={() => void testFire(false)}>

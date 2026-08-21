@@ -323,7 +323,8 @@ export default function ColorSetsPage() {
   const colorSetList = (
     <>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        Colour Sets & Groups <HelpLink topic="colorsets-groups-page" />
+        Colour Sets & Groups <HelpLink topic="colorsets-groups" title="Colour Sets & Groups page" />
+        <HelpLink topic="colorsets-groups-page" title="Sets vs Groups, and the tiered list" />
         {isPhone && pickerOpen && (
           <button style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => setPickerOpen(false)}>✕</button>
         )}
@@ -470,10 +471,13 @@ export default function ColorSetsPage() {
               {...previewLongPress(onPreviewHold)}>
               {previewingId === card.id ? '● Previewing…' : '▶ Preview'}
             </button>
+            <HelpLink topic="colorsets-preview" title="Preview: tap vs hold" />
             <ModeAvailabilityToggle value={card.display_availability ?? 'default'}
               onChange={(v) => setCard({ ...card, display_availability: v })} />
+            <HelpLink topic="mode-availability" title="Mode availability" />
             <RainbowToggle value={card.is_rainbow ?? false}
               onChange={(v) => setCard({ ...card, is_rainbow: v })} />
+            <HelpLink topic="colorsets-rainbow" title="Rainbow select" />
             <button className="danger" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => void del()}>✕ Delete</button>
           </div>
 
@@ -620,6 +624,7 @@ export default function ColorSetsPage() {
 
               <div className="card-title" style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
                 Rotation <HelpLink topic="colorsets-groups-page" />
+                <HelpLink topic="colorsets-group-mechanics" title="How a Group picks" />
               </div>
               <div className="empty-note" style={{ padding: '0 0 8px' }}>
                 Only takes effect when this group itself is fired directly (a trigger's "select colour set" action, ▶

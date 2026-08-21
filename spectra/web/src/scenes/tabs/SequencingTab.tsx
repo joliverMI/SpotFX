@@ -51,6 +51,9 @@ export default function SequencingTab({ scene, scenes }: {
     <div>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         Sequencing <HelpLink topic="tab-sequencing" />
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
+          (replaces legacy energy gates/tilt — <HelpLink topic="energy-gates-equivalence" title="Energy gates/tilt equivalence" />)
+        </span>
       </div>
 
       <CurveAttachmentEditor

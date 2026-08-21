@@ -138,7 +138,10 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
                display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '14vh' }}>
       <div className="card" onClick={(e) => e.stopPropagation()}
         style={{ width: 420, maxWidth: '92vw', margin: 0 }}>
-        <div className="card-title">{isNew ? 'New Trigger' : 'Edit Trigger'}</div>
+        <div className="card-title">
+          {isNew ? 'New Trigger' : 'Edit Trigger'} <HelpLink topic="builder-placing" title="Placing & editing triggers" />
+          <HelpLink topic="builder-trigger-dialog" title="Trigger edit dialog" />
+        </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}>
           <span style={{ width: 90, color: 'var(--text-muted)' }}>Timestamp</span>

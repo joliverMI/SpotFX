@@ -177,6 +177,7 @@ export default function SonicChatPopover() {
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
             flares · scene settings · new scenes · overwrite (backed up)
+            {' '}<HelpLink topic="sonic-scene-backups" title="Backups, undo, and preview" />
           </div>
           <div className="settings-console-messages" ref={scrollRef} style={{ flex: 1, minHeight: 0 }}>
             {messages.length === 0 ? (

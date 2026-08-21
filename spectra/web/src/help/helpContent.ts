@@ -551,6 +551,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'ownership-resume',
+        title: 'Restarts while SPECTRA owns',
+        keywords: 'restart resume auto reactivate dark crash deploy',
+        body: [
+          'SPECTRA runs as her own process (spectra.service). If that process restarts while the record says she owns the room, the light stack reactivates itself at startup through the same guarded path the handover uses — no manual handover cycle. If the resume fails, the room stays dark-but-owned and the liveness endpoint answers 503 until the cause is fixed.',
+        ],
+      },
+      {
         id: 'panic-release',
         title: 'Panic release — let go of every light',
         keywords: 'release home assistant ha panic emergency let go stop wled hue ddp virtuals band',
@@ -892,13 +900,6 @@ export const HELP_SECTIONS: HelpSection[] = [
             kbd: false,
           },
         ],
-      },
-      {
-        id: 'ownership-resume',
-        title: 'Restarts while SPECTRA owns',
-        keywords: 'restart resume auto reactivate dark crash deploy',
-        intro:
-          'SPECTRA runs as her own process (spectra.service). If that process restarts while the record says she owns the room, the light stack reactivates itself at startup through the same guarded path the handover uses — no manual handover cycle. If the resume fails, the room stays dark-but-owned and the liveness endpoint answers 503 until the cause is fixed.',
       },
     ],
   },

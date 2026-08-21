@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/spotfx';
 import { useToast } from '../components/Toast';
+import HelpLink from '../help/HelpLink';
 import LockHistoryPanel from './LockHistoryPanel';
 
 interface Dump {
@@ -177,6 +178,8 @@ export default function TimingVizPage() {
             <div style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'monospace' }}>{uri || '—'}</div>
           </div>
           <button style={{ marginLeft: 'auto', fontSize: 12 }} onClick={() => void refetch()}>Refresh</button>
+          <HelpLink topic="timing-debug" title="Timing & Debug" />
+          <HelpLink topic="timing-pipeline" title="Trigger fire-time pipeline" />
           <button className="danger" style={{ fontSize: 12 }}
             title="Delete the stored audio shape so the song re-captures on next play."
             onClick={() => void recapture()}>
