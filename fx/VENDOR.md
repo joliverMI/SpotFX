@@ -256,6 +256,30 @@ variables named `ledfx` (the core object handle) are untouched.
     `tests/test_blackhole_explosion_speed.py`. Not yet ported back to the
     fork source at `/home/javi/ledfx-src`.
 
+15. `effects/blackhole.py`: `draw()` — a `reverse` flip releases horizon
+    captives (BEHAVIOUR CHANGE / defect fix, PR fm/blackhole-reverse-
+    snapback). His report, 2026-08-21: blobs the reversal carried off the
+    event horizon "shoot back really fast" when reverse flips back. Not a
+    speed asymmetry (`new_r = r ± v*dt` is one formula both directions) —
+    a stale-state teleport: `p_cap` was never cleared when `reverse`
+    turned on, so every orbiting blob kept its captured marker while the
+    outflow dispersed it, and the capture branch's `np.where(captured,
+    rh, new_r)` snapped the whole cohort back onto the ring in a single
+    frame the instant reverse ended (measured 40x the legitimate
+    per-frame move at a 500ms hold, 86x at his real ~1160ms hold). Fix:
+    one guard in the physics branch — while `reverse` is on, `cap[cap >=
+    0] = -1.0` — so ex-captives return as ordinary free blobs at the
+    shared per-radius speed and RE-capture at the horizon on arrival
+    (fresh hold, fresh color blend). Also removes two smaller stale-cap
+    artifacts: the instant full-horizon-color pop on return, and
+    ex-captives whose frozen cap already exceeded `horizon_hold +
+    HORIZON_FADE_S` being deleted mid-air on the flip-back frame.
+    `blackhole1d.py` has no capture mechanism (pure sign-flip, already
+    symmetric) — 2D only. Evidence:
+    `scripts/check_blackhole_reverse_snapback.py`, tests:
+    `tests/test_blackhole_reverse_snapback.py`. Not yet ported back to
+    the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
