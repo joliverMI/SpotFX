@@ -818,6 +818,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             keywords: 'charge lull drop phase buildup build payoff snap fixed built-in',
             body: [
               'The three fixed events drive the build→hold→payoff arc on every phase-capable effect: fire Charge on a buildup, Lull at the peak hush, Drop at the impact. In SPECTRA these same fires reach the response engine as the charge/lull/drop classes and drive the identical vendored choreography — see "Response families" under the editor help for what each effect family does. Give Charge/Lull triggers Override Blend so the build stretches to the next trigger; Drop stays a snap and re-fires cleanly every time.',
+              'Where each of these actually LANDS relative to the trigger\'s own timestamp isn\'t the same for all four — a Drop begins ON the mark, a plain Flare\'s payoff finishes there instead (so it starts early), and Charge/Lull ride the Override Blend stretch above. See "Lead-time alignment — three anchors, not one" for the full rule.',
             ],
           },
           {
@@ -998,6 +999,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'xcorr sync shape offset lag audio latency effective position timing',
         body: [
           'The clock this page ticks against isn\'t the raw Spotify-reported song position — it\'s that position corrected by spot-effects\' own live xcorr audio-alignment offset (shape_offset_ms), the same correction spot-effects\' own trigger engine has always applied before comparing against a trigger\'s timestamp. Without it a migrated trigger fires late or early by however far that song\'s own offset runs (seconds, not milliseconds, for some songs) — see the Timing page\'s "Trigger fire-time pipeline" to see the live number for whatever\'s playing.',
+        ],
+      },
+      {
+        id: 'spectra-trigger-lead-time-alignment',
+        title: 'Lead-time alignment — three anchors, not one',
+        keywords: 'lead time alignment anchor early start middle end momentary flare scene transition drop explosion timing begins finishes midpoint',
+        body: [
+          'A trigger\'s own stored timestamp is the moment on the clock — but what actually LANDS there depends on which kind of change is firing, because three different kinds of change anchor to the mark in three different places. His settled rule, 2026-08-20:',
+          '• A MOMENTARY FLARE anchors its first switch\'s END to the mark — the switch fires early enough that it finishes exactly on the trigger, then holds, then flips back afterward. Starts before the mark, on purpose.',
+          '• A SCENE TRANSITION (Fire scene) anchors its MIDDLE to the mark — a registered phased effect\'s own payoff point, or the plain half-way point of an ordinary crossfade, lands on the trigger. Also starts before the mark, on purpose.',
+          '• A DROP/EXPLOSION anchors its START to the mark — the explosion begins ON the trigger, never before it. This is the newest of the three, added after Black Hole was tried and then withdrawn as a "the timing feels right" reference for drops specifically (his words: "an explosion begins on the trigger mark rather than before it").',
+          'None of the three is more "correct" than the others — a flare\'s payoff and a scene\'s midpoint are SUPPOSED to start early; only a drop is supposed to start exactly on time. If a drop still looks early after the fire itself lands on the mark, the cause isn\'t this alignment — it\'s something inside the effect\'s own choreography (what it visibly does as its phase ramps from 0 to 1), a separate, ongoing question from where the trigger fires.',
         ],
       },
       {

@@ -562,6 +562,92 @@ shouldn't leak from the old effect into the new one. Tests:
 driving the unmodified production compiler + an in-process headless fx
 host): `scripts/check_brightness_carry_forward.py`.
 
+**THREE anchors, not two — a DROP/explosion anchors its START to the
+trigger mark, settled 2026-08-20** (`data/drops-still-fire-early-star-
+does-not-explode/`). Black Hole was tried as a "known-good" drop-timing
+reference (his original complaint was Orbits reading too early against
+it) and then WITHDRAWN when he found Black Hole early too — his resolution
+generalizes to three anchor families, each deliberately different, and
+none more "correct" than the others: a momentary flare anchors its first
+switch's END to the mark (`trigger_engine._response_switch_lead_ms`,
+unchanged); a scene transition anchors its MIDDLE
+(`_scene_transition_lead_ms`, unchanged); a drop/explosion anchors its
+START — begins ON the mark, never before it. `_response_switch_lead_ms`
+now short-circuits to `lead=0` for `event_class=="drop"` UNCONDITIONALLY,
+ahead of the momentary-glide check the other two classes still use —
+proven a STRUCTURAL guarantee, not an accident of his current scene data
+(his four real scenes' own drop bands never happened to carry a
+qualifying momentary+params kind anyway — `scripts/check_triggers.py`
+proves both the real-data case and a synthetic one that WOULD have
+qualified under the old, unconditional rule).
+
+Settling the write's own lead didn't fix the visible defect by itself —
+the write already landed with zero lead before this change, on every real
+scene. The actual visible-onset gap lived downstream, inside each
+phase-capable effect's own choreography:
+`fx/effects/{blackhole,blackhole1d,squiggles}.py`'s drop payoff (the
+particle burst) used to be GATED on `phase_progress` reaching ~0.995 —
+anchoring the explosion to the RAMP'S END (~400ms after the mark), not
+its start. That gate is now removed in all three — the burst fires
+unconditionally on the phase's first rendered frame, matching
+`orbits.py`'s own drop branch, which never had the gate (its `burst_done`
+flag already fired immediately). Squiggles' end-anchored gate was itself
+a deliberate, previously-shipped fix (PR fm/spectra-squiggles-drop-
+timing-and-a-much-bigger-explosion, mirroring Black Hole's THEN-good
+timing) — this reverses that one specific mechanism while keeping its
+other two asks (burst count, burst speed/lingering) untouched; don't read
+the reversal as a flip-flop, the REFERENCE it was built against was
+withdrawn, not the ask itself. `DROP_FALLBACK_S` (the wall-clock fallback
+for a dropped/lost progress ramp) is now dead in all three modules and
+removed — nothing waits on `phase_progress` reaching anything any more,
+so there's nothing left to fall back from.
+
+`radial.py` (STAR) has no discrete burst — its drop payoff is a
+CONTINUOUS smoothstep reveal (`_phase_warp`'s own `e = s²(3-2s)`, gating
+the bloom-out warp scale AND the background fade), left unchanged by this
+pass. `scripts/check_drop_visible_onset.py` instruments the real
+`_phase_warp` and measures where that curve crosses a 5%-revealed
+threshold: ~50ms after the mark under the fixed 400ms drop ramp — not
+asserted pass/fail (unlike the three burst effects, which ARE asserted at
+"within one frame"), because whether a continuous ease-in reads as
+"begins on the mark" to the eye is a live-room judgment this offline
+instrument can measure but not settle by itself. **Firstmate's own
+standing order on this: the onset investigation does not close when the
+anchor rule ships — keep measuring the visible onset per effect, in case
+the anchor fix and the perceived "still early" report turn out to be two
+separate things with only one actually fixed.** Executable specs:
+`scripts/check_triggers.py` (the lead-time structural guarantee),
+`scripts/check_drop_visible_onset.py` +
+`tests/test_drop_visible_onset.py` (per-effect visible onset, all four),
+`scripts/check_squiggles_drop_timing.py` +
+`tests/test_squiggles_drop_timing.py` (Squiggles' own reversal),
+`tests/test_trigger_engine.py` (proof 12, frame-level: a drop's switch is
+still IN FLIGHT at the mark, the opposite of proof 10's momentary flare).
+
+**The above shipped a real crash the same night, fixed same-day (PR
+fm/blackhole-horizon-none-crash): `blackhole.py`/`blackhole1d.py`'s orphan
+watchdog (`_phase_step`, releasing a charge/lull whose drop trigger never
+arrived) set `self._drop = {"burst_t": None, "silent": True}` and
+`return`ed immediately — skipping the SAME method's own "drop" branch that
+resolves `burst_t` out of that `None` sentinel, which every OTHER entry
+path (a normal `_enter_phase("drop")`) falls through into within one call.
+`draw()` reads `burst_t` via `_horizon_radius()`/`_phase_halo()`
+(`_phase_post()` in the 1d strip) immediately after `_phase_step()`
+returns, every frame, with no chance for a next call to self-heal first —
+so `None / DROP_RESET_S` raised inside the render thread, killing it
+silently (the service kept reporting healthy until the render-plane
+dead-man watchdog noticed frames had stopped and restarted the whole
+process). Fixed by removing the early `return` so the watchdog path falls
+through to the same resolution the normal path already uses — `burst_t` is
+now never externally observable as `None`. If you touch a charge/lull/drop
+state machine anywhere in `fx/effects/` (`squiggles.py`, `eye.py`, and the
+1d siblings all use the same shape), check that every `return` inside
+`_phase_step` happens AFTER any sentinel it just set has been resolved to
+a real value, not before — `eye.py`'s watchdog path got this right by
+never using a `None` sentinel in the first place (it sets a concrete `t:
+0.0` directly), which is the simpler pattern to prefer in new code.
+Regression: `tests/test_blackhole_orphan_drop_none_crash.py`.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
