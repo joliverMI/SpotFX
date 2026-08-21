@@ -107,9 +107,12 @@ export interface ParamTarget {
  * hold_ms (momentary only; null = the fixed PULSE_HOLD_S default, 250 ms)
  * is the CHOSEN HOLD before the release glide starts.
  * trigger_offset_ms (default 0 = coincident) is his own tuned reference
- * point from the scrubbing preview's trigger-alignment marker — see
- * models/scene.py's FlareKind docstring for the full authored-vs-live
- * distinction; nothing in the fire path reads it yet. */
+ * point from the scrubbing preview's trigger-alignment marker — HIS sign
+ * convention (ruling 2026-08-21): negative = fire earlier, positive =
+ * fire later. See models/scene.py's FlareKind docstring for the full
+ * statement. Now read by the live preview's own fire loop (spectra/
+ * services/flare_preview_hold.py, via flare_preview.trigger_mark_s) —
+ * no longer descriptive only. */
 export interface FlareKind {
   name: string;
   type: 'drift_jump' | 'momentary' | 'permanent';
@@ -977,6 +980,11 @@ export type TriggerActionKind = TriggerAction['kind'];
  * authored — see spectra/api/triggers.py). */
 export type TriggerSource = 'authored' | 'generated';
 
+/** trigger_offset_ms (default 0 = coincident): same field, units, and sign
+ * convention as FlareKind.trigger_offset_ms above — descriptive only
+ * today, no authoring UI writes it yet and trigger_engine.py's own
+ * schedule doesn't read it (see models/trigger.py's SpectraTrigger
+ * docstring). */
 export interface SpectraTrigger {
   id: string;
   timestamp_ms: number;
@@ -984,6 +992,7 @@ export interface SpectraTrigger {
   source: TriggerSource;
   generator_key: string | null;
   action: TriggerAction;
+  trigger_offset_ms: number;
 }
 
 export const newTrigger = (timestampMs: number): SpectraTrigger => ({
@@ -993,6 +1002,7 @@ export const newTrigger = (timestampMs: number): SpectraTrigger => ({
   source: 'authored',
   generator_key: null,
   action: { kind: 'fire_scene', scene_id: '', intensity: 0.5, color_set_id: null },
+  trigger_offset_ms: 0,
 });
 
 /** Feedback-session mark-then-nudge queue (Stage 2, GET /api/feedback/mark,

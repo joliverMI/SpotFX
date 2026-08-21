@@ -172,3 +172,19 @@ class SpectraTrigger(BaseModel):
     source: TriggerSource = "authored"
     generator_key: Optional[str] = None
     action: TriggerAction
+    # 2026-08-21, his ask (data/preview-loops-and-fires-on-the-trigger):
+    # "do events like flares and scene changes carry an offset value...
+    # they need to." Same field, same units, same sign convention as
+    # FlareKind.trigger_offset_ms (models/scene.py — negative = fire
+    # earlier, positive = fire later, 0 = coincident with timestamp_ms) —
+    # one vocabulary for "how far from the marked moment should this
+    # actually land" across both the thing a preview fires and the thing
+    # a song trigger fires. DESCRIPTIVE ONLY today, same status the flare
+    # field had before this change: no authoring UI writes it yet (his
+    # scene-change equivalent of the preview's drag-the-marker gesture is
+    # future work — "flares first... lull charge drop" next, per the
+    # flare preview's own sequencing) and trigger_engine.py's tick()/
+    # lookahead-lead system does not read it. Default 0 keeps every
+    # existing trigger (all ~22k of his real fire_scene triggers)
+    # unaffected.
+    trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)

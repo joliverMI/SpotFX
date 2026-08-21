@@ -46,6 +46,28 @@ mechanism and the revert-on-close/heartbeat-timeout/restart guarantees.
 specifically so the two callers (this module's dark timeline, that
 module's live hold) share one resolve/compile/seed path and can never
 silently diverge in what they compute.
+
+TRUE SIMULATION (2026-08-21, data/preview-loops-and-fires-on-the-trigger,
+his report: "the preview only happens once, it should happen every time,
+and it should fire with the same timing as if the playhead was crossing a
+trigger"): before this, the live hold fired instantly the moment the
+overlay opened, no matter where the drawn trigger mark sat — the DRAWING
+knew about the mark, the FIRING did not. `animation_anchor_s`/
+`trigger_mark_s` below are the fix: a fixed ruler-layout position (where
+"the animation starts" is drawn — never authored, purely a layout choice)
+and the trigger mark's position derived from it via `kind.
+trigger_offset_ms`, HIS sign convention (see FlareKind.trigger_offset_ms's
+own docstring, models/scene.py, for the full ruling and the 2026-08-20
+build's inverted-sign defect it corrects). Both numbers ride in every
+build_timeline() response so the frontend's ruler draw AND its live-fire
+loop (FlarePreviewOverlay.tsx) read the IDENTICAL values — one source of
+truth, never two independently-computed anchors that could quietly
+disagree. The live fire itself is scheduled at `animation_anchor_s`
+seconds into every loop cycle: since trigger_mark_s is DEFINED as
+`animation_anchor_s - offset_ms/1000`, firing at animation_anchor_s each
+cycle is definitionally the same real-time instant as "fire offset_ms
+early/late relative to the trigger mark's own crossing" — there is no
+second, independently-tuned lead-time computation to keep in sync.
 """
 from __future__ import annotations
 
@@ -67,6 +89,30 @@ MIN_TIMELINE_S = 6.0
 # Padding after the last write settles, so a looped preview visibly rests
 # at baseline before it repeats instead of looping mid-glide.
 TAIL_PAD_S = 2.0
+
+
+def animation_anchor_s(duration_s: float) -> float:
+    """Where "the animation starts" is drawn on the ruler / where the live
+    loop actually issues its fire each cycle — a fixed ruler-LAYOUT choice,
+    never authored, never derived from trigger_offset_ms (the trigger mark
+    is what moves relative to this, not the other way around). Kept short
+    of the ruler's own front edge even on a very short timeline so a
+    negative offset still has room to draw its mark to the left of it."""
+    return min(2.0, duration_s / 3)
+
+
+def trigger_mark_s(anchor_s: float, offset_ms: int, duration_s: float) -> float:
+    """Where the trigger mark sits, HIS sign convention (ruling 2026-08-21,
+    data/preview-loops-and-fires-on-the-trigger — see FlareKind.
+    trigger_offset_ms's own docstring for the full statement): negative
+    offset = fire earlier, so the mark sits to the RIGHT of animation
+    start; positive = fire later, mark to the LEFT. T = F - offset_ms/1000.
+    Clamped into the visible ruler purely for drawing — the live-fire loop
+    itself never reads this clamped value, only the unclamped anchor_s
+    (an offset large enough to push the mark off-ruler still fires
+    correctly, it just draws off the edge)."""
+    t = anchor_s - offset_ms / 1000.0
+    return max(0.0, min(duration_s, t))
 
 
 class _FakeClock:
@@ -154,16 +200,22 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
 
     writes = list(responder.executor.writes)
     if not writes:
+        anchor_s = animation_anchor_s(MIN_TIMELINE_S)
         return {
             "kind_name": kind.name, "kind_type": kind.type,
             "intensity": round(intensity, 4),
             "result": fire_record.get("result", "no_visible_effect"),
             "animation_start_s": None, "animation_end_s": None,
-            "duration_s": MIN_TIMELINE_S, "writes": [],
+            "duration_s": MIN_TIMELINE_S,
+            "animation_anchor_s": round(anchor_s, 4),
+            "trigger_mark_s": round(
+                trigger_mark_s(anchor_s, kind.trigger_offset_ms, MIN_TIMELINE_S), 4),
+            "writes": [],
         }
     start_s = min(w["at"] for w in writes)
     end_s = max(w["at"] + w["duration_ms"] / 1000.0 for w in writes)
     duration_s = max(MIN_TIMELINE_S, (end_s - start_s) + TAIL_PAD_S + 2.0)
+    anchor_s = animation_anchor_s(duration_s)
     return {
         "kind_name": kind.name,
         "kind_type": kind.type,
@@ -172,6 +224,9 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         "animation_start_s": round(start_s - start_s, 4),
         "animation_end_s": round(end_s - start_s, 4),
         "duration_s": round(duration_s, 4),
+        "animation_anchor_s": round(anchor_s, 4),
+        "trigger_mark_s": round(
+            trigger_mark_s(anchor_s, kind.trigger_offset_ms, duration_s), 4),
         "writes": [
             {
                 "seq": w["seq"],

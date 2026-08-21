@@ -30,6 +30,18 @@ the previewed scene + kind, until the preview closes. This is a real,
 visible interruption of his live show, not a side channel — it belongs in
 the help copy (spectra/web/src/help/helpContent.ts), not just here.
 
+TRUE SIMULATION (2026-08-21, data/preview-loops-and-fires-on-the-trigger):
+open_hold() is no longer called once, on /open — it's called once per loop
+cycle, from spectra/api/flare_preview.py's own /fire endpoint, timed by
+the frontend's playhead loop to land exactly when it crosses
+flare_preview.animation_anchor_s(). This is what makes the preview a real
+simulation of a trigger crossing rather than an instant flash the moment
+the window opens: the FIRST fire waits for the mark same as every fire
+after it. open_hold() itself needed no change for this — it was already
+safe to call repeatedly in one session (see its own docstring: "a later
+call in the SAME session... re-fires both at the new value"); the only
+thing that changed is WHO calls it and WHEN.
+
 A SEPARATE, SCRATCH conductor+responder pair (flare_preview._scratch_engine)
 does the firing — NEVER the production engine.conductor/engine.responses
 singletons, and NEVER scene_compiler.fire_scene's live branch (which also

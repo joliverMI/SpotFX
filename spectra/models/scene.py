@@ -308,19 +308,27 @@ class FlareKind(BaseModel):
     data/timeline-preview-scrub-flares-and-drop-sequences — "help edit
     where the trigger should land with respect to the effect") is an
     AUTHORED reference point, tuned by dragging the preview's trigger-
-    alignment marker: how far, in ms, the moment this kind should be
-    considered "triggered" sits from its own computed animation start
-    (spectra/services/flare_preview.py — positive = the trigger lands
-    AFTER the animation visibly starts; negative = before, i.e. the effect
-    would need to fire early for its start to land on the trigger).
-    Default 0 = coincident, matching every kind that predates this field.
-    DESCRIPTIVE ONLY today — no fire path reads it; the real, LIVE
-    schedule-lead computation is trigger_engine.py's own lookahead-lead
-    system, a different mechanism entirely (a scheduled song trigger, not
-    an isolated kind preview). This field is where his own tuning
-    conclusion from watching the preview lives so it survives past the
-    preview session; wiring it into a live fire path is future work, not
-    assumed here."""
+    alignment marker — the marker's own position IS the offset, no second
+    field. HIS SIGN CONVENTION (ruling 2026-08-21,
+    data/preview-loops-and-fires-on-the-trigger — corrected a sign
+    inversion in the original 2026-08-20 build, caught before any real
+    value existed to migrate; every one of his 61 real flare kinds carried
+    0 at the time, so nothing of his was flipped): NEGATIVE = fire
+    earlier, POSITIVE = fire later. 0 = the animation starts exactly on
+    the trigger mark (the default, matching every kind that predates this
+    field). Dragging the marker to the RIGHT makes the offset MORE
+    NEGATIVE — the animation must start earlier for its own landing point
+    to still land on the mark. Concretely: trigger_mark_s = animation_
+    anchor_s - trigger_offset_ms/1000 (spectra/services/flare_preview.
+    trigger_mark_s — the one function both the scrub ruler's draw and the
+    live preview's fire-loop schedule read, so the two can never disagree
+    on what a given offset means). NO LONGER DESCRIPTIVE ONLY: the flare
+    preview's live hold (spectra/services/flare_preview_hold.py) now
+    reads this to schedule when it actually fires each loop, landing the
+    animation on the trigger mark the same way a real playhead crossing
+    would. The production trigger_engine.py's own lookahead-lead system
+    (a different mechanism — a scheduled song trigger, not an isolated
+    kind preview) still does not read this field."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate"]
     jump: Optional[Literal["color_set", "dice"]] = None

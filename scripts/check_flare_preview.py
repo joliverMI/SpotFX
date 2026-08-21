@@ -108,6 +108,32 @@ check(abs(tl["animation_end_s"] - expected_end) < 1e-6,
 check(tl["animation_start_s"] == 0.0, "spin-flare: animation_start_s == 0")
 check(tl["duration_s"] >= 6.0, "spin-flare: timeline never shorter than his 6s example")
 
+# ── 1b. animation_anchor_s / trigger_mark_s, HIS sign convention (ruling
+#    2026-08-21, data/preview-loops-and-fires-on-the-trigger): 0 offset =
+#    coincident with the anchor; negative offset (fire earlier) moves the
+#    mark to the RIGHT of the anchor; positive (fire later) moves it LEFT.
+#    Both fields are what the frontend's ruler draw AND its live-fire loop
+#    both read — one source of truth for "where does the animation start." ─
+anchor = flare_preview.animation_anchor_s(tl["duration_s"])
+check(abs(tl["animation_anchor_s"] - anchor) < 1e-9,
+     "spin-flare: animation_anchor_s == animation_anchor_s(duration_s)")
+check(abs(tl["trigger_mark_s"] - anchor) < 1e-9,
+     "spin-flare: trigger_mark_s == animation_anchor_s at offset 0 (coincident)")
+
+neg_kind = kinds["spin-flare"].model_copy(update={"trigger_offset_ms": -500})
+tl_neg = run(flare_preview.build_timeline(scene, neg_kind, 1.0))
+check(tl_neg["trigger_mark_s"] > tl_neg["animation_anchor_s"],
+     "negative offset (fire earlier): mark sits to the RIGHT of the anchor")
+check(abs(tl_neg["trigger_mark_s"] - tl_neg["animation_anchor_s"] - 0.5) < 1e-6,
+     "negative offset -500ms: mark is exactly 500ms right of the anchor")
+
+pos_kind = kinds["spin-flare"].model_copy(update={"trigger_offset_ms": 500})
+tl_pos = run(flare_preview.build_timeline(scene, pos_kind, 1.0))
+check(tl_pos["trigger_mark_s"] < tl_pos["animation_anchor_s"],
+     "positive offset (fire later): mark sits to the LEFT of the anchor")
+check(abs(tl_pos["animation_anchor_s"] - tl_pos["trigger_mark_s"] - 0.5) < 1e-6,
+     "positive offset +500ms: mark is exactly 500ms left of the anchor")
+
 # ── 2. momentary NON-smooth (toggle) param: instant jump, and — matching
 #    real production behaviour, not a gap this feature introduces — no
 #    resolvable release target, so it never glides back ───────────────────
@@ -152,6 +178,9 @@ check(tl6["writes"] == [] and tl6["animation_start_s"] is None
      and tl6["animation_end_s"] is None, "unregistered-kind: no writes, no markers")
 check(tl6["duration_s"] == flare_preview.MIN_TIMELINE_S,
      "unregistered-kind: falls back to the minimum timeline length")
+check(tl6["animation_anchor_s"] == flare_preview.animation_anchor_s(flare_preview.MIN_TIMELINE_S)
+     and tl6["trigger_mark_s"] == tl6["animation_anchor_s"],
+     "unregistered-kind: anchor/mark still computed even with no writes")
 
 # ── 7. no live storage write: room_controls/color_sets/room_color files
 #    the module read from during the runs above were never created ────────
