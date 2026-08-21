@@ -2390,6 +2390,18 @@ via `useAttachCurve`, not `PUT /sequencer/config`), plus two small
 additive props (`defaultPoints`/`noneLabel`) so "no override" previews his
 real 16s/4s default instead of a misleading flat-1.0 line — never a
 parallel control, the same component every other curve in this app uses.
+**Those props only engage when the caller passes NO entry for an unset
+item** — `CurveAttachmentEditor`'s 'none' state is keyed on `entries[id]`
+being `undefined`; an entry present with both curve fields null reads as
+'flat'. `SequencingTab`'s dwellEntries shipped fabricating a both-null
+entry for every scene, so every unset scene (all nine of his — stored
+`dwell_curve: null`, correct data) displayed "Flat 1.0" and clicking the
+Default tile looked dead (it wrote null over null and the display lied
+again after refetch) — his 2026-08-21 report, fixed by filtering unset
+scenes out of the entries record, display-only, no data touched
+(`scripts/check_dwell_curve_display.mjs` reproduces both sides). Any
+future caller adapting a nullable single-field attachment into this
+component must map "unset" to entry-absent, never to a both-null entry.
 Spec: `tests/test_dwell.py`, `scripts/check_spectra.py`'s own MINIMUM
 DWELL section (mirrors the Force Scene proof immediately above it).
 
