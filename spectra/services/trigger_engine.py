@@ -1024,19 +1024,33 @@ class TriggerEngine:
         rule's END-anchor lead — exactly the anchor a drop must never take.
         Charge/lull are unaffected either way (still end-anchored like
         flare) — this settlement was about drop specifically, not the
-        wider phase-driven family, and must not leak into it."""
+        wider phase-driven family, and must not leak into it.
+
+        Two independent contributors, taken as a MAX (mirrors
+        _scene_transition_lead_ms_for's own max-across-virtuals shape): a
+        registry-smooth momentary param glide always needs the fixed
+        DICE_REROLL_GLIDE_MS; a color_rotate kind needs its own
+        INTENSITY-SCALED ramp-in (color_rotate_lead_ms — a different
+        function, not folded into momentary_switch_would_glide, because
+        its duration varies by intensity where the dice-glide's doesn't —
+        see that function's own docstring). Either, both, or neither may
+        apply to a given band; every band on his real scenes today only
+        ever hits the dice-glide branch (or neither) — color_rotate is
+        declared, never attached, by this build's own scope."""
         if a.event_class == "drop":
             return 0
         from spectra.services.scene_response import (DICE_REROLL_GLIDE_MS,
+                                                      color_rotate_lead_ms,
                                                       momentary_switch_would_glide)
         scene = self._active_scene()
         if scene is None:
             return 0
         intensity = self._render_intensity(a.intensity)
         virtuals = self._live_virtuals()
+        lead = color_rotate_lead_ms(scene, a.event_class, intensity, virtuals)
         if momentary_switch_would_glide(scene, a.event_class, intensity, virtuals):
-            return DICE_REROLL_GLIDE_MS
-        return 0
+            lead = max(lead, DICE_REROLL_GLIDE_MS)
+        return lead
 
     @staticmethod
     def _live_virtuals() -> dict:

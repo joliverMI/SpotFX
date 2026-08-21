@@ -15,12 +15,15 @@ plus DECLARED MECHANISMS:
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
   flare_kinds — NAMED FLARE KINDS (the owner's item-8 shape, judged and
-               accepted): each kind is one of three types —
+               accepted): each kind is one of four types —
                  drift_jump  jumps the drift: the colour-set jump through
                              the shipped selector, or a 🎲 re-roll for shape
                  momentary   a parameter spike that RETURNS to where it was
                  permanent   the parameter lands and BECOMES the new
                              baseline drift carries from
+                 color_rotate the foreground colour's hue spikes by an
+                             intensity-scaled rotation and RETURNS to the
+                             exact original — see FlareKind's own docstring
                A momentary/permanent kind's params are ParamTarget
                expressions (absolute / offset-from-baseline / random-in-
                range — see ParamTarget); INTENSITY-DRIVEN strength is the
@@ -267,7 +270,7 @@ class ParamTarget(BaseModel):
 
 class FlareKind(BaseModel):
     """One NAMED flare kind — a first-class concept the scene declares and
-    its bands select. The three types, binding semantics:
+    its bands select. Four types, binding semantics:
       drift_jump  jump the drift — jump="color_set" rolls the shipped
                   colour-set selector and JUMPS to the pick; jump="dice"
                   re-rolls the scene's 🎲 bindings (fresh shape). Both
@@ -276,6 +279,18 @@ class FlareKind(BaseModel):
                   baseline (the release honors drift's current position).
       permanent   params/gain land and BECOME the new baseline drift
                   carries from (conductor.on_surge).
+      color_rotate  the COLOUR ROTATE-AND-BACK flare (owner ask,
+                  2026-08-20 — scripts/add_color_rotate_flares.py has his
+                  verbatim spec): rotates the live FOREGROUND colour's hue
+                  by an intensity-scaled amount, ramps in to land the full
+                  rotation ON the trigger mark, dwells, then fades back to
+                  the exact original — a spike-and-return like momentary,
+                  but on the colour lane rather than an effect param, and
+                  with every one of its four quantities (degrees, ramp,
+                  dwell, fade) computed from the fire's own intensity
+                  (spectra/services/scene_response.py's color_rotate_*
+                  functions) rather than authored — this type carries no
+                  jump/params/gain/hold_ms of its own (see _shape below).
     gain is a brightness-envelope multiplier around the carried baseline;
     params are ParamTarget expressions (absolute/offset/random — see that
     type), name-broadcast to every virtual whose live effect carries the
@@ -307,7 +322,7 @@ class FlareKind(BaseModel):
     preview session; wiring it into a live fire path is future work, not
     assumed here."""
     name: str = Field(min_length=1)
-    type: Literal["drift_jump", "momentary", "permanent"]
+    type: Literal["drift_jump", "momentary", "permanent", "color_rotate"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
@@ -339,6 +354,18 @@ class FlareKind(BaseModel):
                 raise ValueError(
                     f"drift-jump kind '{self.name}' never releases — "
                     f"hold_ms belongs on a momentary kind")
+        elif self.type == "color_rotate":
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is color_rotate — jump belongs on "
+                    f"a drift_jump kind")
+            if self.params or self.gain != 1.0 or self.hold_ms is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is color_rotate — rotation degrees, "
+                    f"ramp-in, dwell, and fade-back all scale from the "
+                    f"fire's own intensity (scene_response.color_rotate_* — "
+                    f"see FlareKind's own docstring); params/gain/hold_ms "
+                    f"don't apply here and would silently do nothing")
         else:
             if self.jump is not None:
                 raise ValueError(
