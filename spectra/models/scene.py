@@ -323,12 +323,19 @@ class FlareKind(BaseModel):
     trigger_mark_s — the one function both the scrub ruler's draw and the
     live preview's fire-loop schedule read, so the two can never disagree
     on what a given offset means). NO LONGER DESCRIPTIVE ONLY: the flare
-    preview's live hold (spectra/services/flare_preview_hold.py) now
-    reads this to schedule when it actually fires each loop, landing the
+    preview's live hold (spectra/services/flare_preview_hold.py) reads
+    this to schedule when it actually fires each loop, landing the
     animation on the trigger mark the same way a real playhead crossing
-    would. The production trigger_engine.py's own lookahead-lead system
-    (a different mechanism — a scheduled song trigger, not an isolated
-    kind preview) still does not read this field."""
+    would — AND, since 2026-08-21 (his ask: "make the engine read the
+    offset and work with the offset like we had in spot FX"), THE REAL
+    FIRING PATH READS IT TOO: trigger_engine.tick() relocates a
+    fire_response trigger's target by the offset of the band the active
+    scene would fire (scene_response.band_trigger_offset_ms — that
+    docstring has the multi-kind aggregation rule), composed with the
+    automatic lead exactly the way #172 composes the trigger-level
+    sibling field (target = timestamp + offset; fire_at = target -
+    lead). Dragging the preview's marker therefore retimes his real
+    show, not only the preview."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate"]
     jump: Optional[Literal["color_set", "dice"]] = None

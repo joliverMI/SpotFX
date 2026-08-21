@@ -1525,9 +1525,14 @@ check(len(asyncio.run(composed_engine.tick(3700))) == 1 and offset_calls == [off
       "systems compose by each acting in its OWN native direction "
       "against a shared base, never by adding/subtracting the same sign")
 
-# SCOPE: a fire_response trigger's own trigger_offset_ms is still ignored
-# (this task's own ask is scoped to scene-change/fire_scene triggers) —
-# fires at its raw stored timestamp regardless of a nonzero offset.
+# SCOPE: a fire_response trigger's own TRIGGER-LEVEL trigger_offset_ms is
+# still ignored (this task's own ask was scoped to scene-change/fire_scene
+# triggers) — fires at its raw stored timestamp regardless of a nonzero
+# offset on the TRIGGER. The FLARE KIND's own trigger_offset_ms is a
+# different field and IS honoured for fire_response triggers since
+# 2026-08-21 — see section 11 below; the engine here has no active scene,
+# so the kind peek resolves 0 and this proof isolates the trigger-level
+# field's continued inertness.
 response_trig = SpectraTrigger(timestamp_ms=5000, trigger_offset_ms=-1000,
                                action=FireResponseAction(event_class="flare",
                                                          intensity=0.5))
@@ -1541,5 +1546,119 @@ check(len(asyncio.run(response_engine.tick(5000))) == 1
       "a fire_response trigger still fires at its raw, un-relocated "
       "stored timestamp — trigger_offset_ms stays scoped to fire_scene "
       "until a future ask widens it")
+
+# ═══ 11. FLARE-KIND TRIGGER OFFSET ON THE FIRING PATH (2026-08-21) ══════════
+# His ask: "make the engine read the offset and work with the offset like
+# we had in spot FX." The record followed: tick()'s own SpotFX-descended
+# `fire_at = timestamp - lead_ms` (positive lead = EARLIER) stays untouched;
+# FlareKind.trigger_offset_ms (the number the flare scrubbing-preview's
+# drag writes, HIS sign: NEGATIVE = earlier) relocates the base target
+# first, #172's exact target-then-lead shape reused for the sibling field:
+# target = timestamp + kind_offset; fire_at = target - lead. Proven at
+# BOTH extremes (a one-sided test has passed with the sign inverted
+# before), through the REAL band aggregation (scene_response.
+# band_trigger_offset_ms) against a real SceneV2 — plus the exactly-once
+# guarantee the relocation surfaced: the pre-existing safety-net OR
+# clause used to fire an early-fired trigger AGAIN at its nominal mark.
+
+from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
+                                  ResponseSpec, SceneDeviceConfig, SceneV2)
+from spectra.services.scene_response import band_trigger_offset_ms
+
+kind_offset_scene = SceneV2(
+    name="Kind Offset Probe",
+    devices=[SceneDeviceConfig(target_kind="virtual", target="v-m1",
+                               effect_type="concentric", params={})],
+    flare_kinds=[
+        FlareKind(name="Early Pulse", type="momentary", trigger_offset_ms=-500,
+                  params={"gradient_scale": ParamTarget(mode="absolute", value=1.5)}),
+        FlareKind(name="Untouched", type="momentary",
+                  params={"gradient_scale": ParamTarget(mode="absolute", value=1.2)}),
+    ],
+    responses={"flare": ResponseSpec(bands=[
+        FlareBand(intensity_min=0.0, intensity_max=1.0,
+                  kinds={"Early Pulse": 1.0, "Untouched": 1.0})])})
+
+check(band_trigger_offset_ms(kind_offset_scene, "flare", 0.5) == -500,
+      "band aggregation: the one explicitly-authored (nonzero) offset wins; "
+      "a sibling kind still at the untouched default 0 doesn't veto it")
+
+
+def _kind_offset_engine(trig, *, offset_ms, lead_ms=0):
+    return TriggerEngine(
+        list_triggers=lambda uri: [trig],
+        fire_scene=_record_offset_scene,
+        fire_response=_record_offset_response,
+        lead_ms=lambda t: lead_ms,
+        response_offset_ms=lambda a: offset_ms,
+        scene_change_mode=lambda: "full")
+
+
+# NEGATIVE extreme, through the REAL aggregation function against the real
+# scene above — fires 500ms EARLIER than the stored mark.
+offset_response_calls.clear()
+kind_early_trig = SpectraTrigger(timestamp_ms=5000, action=FireResponseAction(
+    event_class="flare", intensity=0.5))
+kind_early_engine = TriggerEngine(
+    list_triggers=lambda uri: [kind_early_trig],
+    fire_scene=_record_offset_scene,
+    fire_response=_record_offset_response,
+    lead_ms=lambda t: 0,
+    response_offset_ms=lambda a: band_trigger_offset_ms(
+        kind_offset_scene, a.event_class, a.intensity),
+    scene_change_mode=lambda: "full")
+asyncio.run(kind_early_engine.on_track_state("song:kind-early"))
+check(asyncio.run(kind_early_engine.tick(4499)) == [],
+      "kind offset -500: nothing fires one ms before the relocated target")
+check(len(asyncio.run(kind_early_engine.tick(4500))) == 1
+      and offset_response_calls == ["flare"],
+      "kind offset -500 (read through the REAL band_trigger_offset_ms "
+      "against a real scene): the flare fires at 4500 — 500ms EARLIER "
+      "than the stored 5000ms mark, exactly what dragging the preview's "
+      "trigger mark right promises")
+
+# POSITIVE extreme — fires LATER, and the raw mark does NOT fire it.
+offset_response_calls.clear()
+kind_late_trig = SpectraTrigger(timestamp_ms=5000, action=FireResponseAction(
+    event_class="flare", intensity=0.5))
+kind_late_engine = _kind_offset_engine(kind_late_trig, offset_ms=500)
+asyncio.run(kind_late_engine.on_track_state("song:kind-late"))
+check(asyncio.run(kind_late_engine.tick(5000)) == [],
+      "kind offset +500: the RAW stored mark does NOT fire it — the "
+      "relocated target owns the crossing, or a positive 'fire later' "
+      "ask would be silently discarded")
+check(len(asyncio.run(kind_late_engine.tick(5500))) == 1
+      and offset_response_calls == ["flare"],
+      "kind offset +500: fires at 5500 — 500ms LATER than the stored mark")
+
+# COMPOSITION with the oppositely-signed lead system — same identity as
+# section 10's fire_scene proof: fire_at = 5000 + (-1000) - 300 = 3700.
+offset_response_calls.clear()
+kind_composed_trig = SpectraTrigger(timestamp_ms=5000, action=FireResponseAction(
+    event_class="flare", intensity=0.5))
+kind_composed_engine = _kind_offset_engine(kind_composed_trig,
+                                           offset_ms=-1000, lead_ms=300)
+asyncio.run(kind_composed_engine.on_track_state("song:kind-composed"))
+check(asyncio.run(kind_composed_engine.tick(3699)) == [],
+      "kind offset composed with lead: nothing one ms before 3700")
+check(len(asyncio.run(kind_composed_engine.tick(3700))) == 1,
+      "kind offset -1000 + lead 300 fires at exactly 3700 = timestamp + "
+      "offset - lead — each system acting in its OWN native sign against "
+      "the shared base, never added/subtracted from each other directly")
+
+# EXACTLY-ONCE (the pre-existing double-fire, fixed): an early fire more
+# than one tick ahead of its target used to fire AGAIN when the nominal
+# target itself crossed the safety-net OR clause — red against pre-fix code.
+offset_calls.clear()
+once_trig = SpectraTrigger(timestamp_ms=5000, action=FireSceneAction(
+    scene_id=offset_scene_id, intensity=0.5))
+once_engine = _offset_engine(once_trig, lead_ms=450)
+asyncio.run(once_engine.on_track_state("song:exactly-once"))
+check(len(asyncio.run(once_engine.tick(4550))) == 1,
+      "exactly-once: the trigger fires early at fire_at (4550 = 5000 - 450)")
+check(asyncio.run(once_engine.tick(5100)) == [] and len(offset_calls) == 1,
+      "exactly-once: the nominal 5000ms mark crossing does NOT fire it a "
+      "second time — 'fires once per crossing' (the module docstring's own "
+      "contract) is now explicit, not emergent")
 
 print("\nALL CHECKS PASSED")

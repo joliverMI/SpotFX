@@ -399,6 +399,50 @@ def momentary_switch_would_glide(scene: SceneV2, event_class: ResponseClass,
     return False
 
 
+def band_trigger_offset_ms(scene: SceneV2, event_class: ResponseClass,
+                           intensity: float) -> int:
+    """Read-only peek for trigger_engine's FLARE-KIND TRIGGER OFFSET (his
+    ask, 2026-08-21 — "make the engine read the offset and work with the
+    offset like we had in spot FX"): the authored FlareKind.trigger_offset_ms
+    the band this response class would fire at this intensity carries, in
+    HIS sign convention (negative = fire earlier, positive = fire later,
+    0 = unchanged — see that field's own docstring, models/scene.py).
+    tick() relocates a fire_response trigger's target by this value the
+    same way #172 relocates a fire_scene trigger's by the trigger's OWN
+    trigger_offset_ms field (target = timestamp + offset, lead applied to
+    the relocated target) — the same authored number the flare
+    scrubbing-preview timeline (flare_preview.trigger_mark_s) already reads
+    to place its drawn mark, so dragging that mark retimes the real show
+    and the preview identically.
+
+    AGGREGATION when a band attaches more than one kind: a band fires
+    atomically (one _execute_band burst — per-kind independent timing
+    inside one fire would be a genuinely new execution mechanism, not
+    built without his word), so ONE offset must speak for the band. The
+    EARLIEST explicitly-authored (nonzero) offset wins — min over the
+    nonzero values — mirroring _response_switch_lead_ms's own documented
+    max-lead rule ("the dominant transition lands on the trigger, shorter
+    ones bloom a hair early"): siblings fire a hair off their own mark,
+    nothing fires later than its authored ask. A kind still at the field's
+    untouched default (0) doesn't veto a sibling's authored ask; a band
+    with no authored offset at all is 0 — byte-identical to pre-offset
+    behaviour (every one of his 61 real flare kinds, re-verified live the
+    day this shipped). Unlike the lead's own drop rule
+    (_response_switch_lead_ms's unconditional lead=0 for drops), a DROP
+    band's authored offset IS honoured: that rule pins the AUTOMATIC
+    anchor-family lead, not his explicit hand on the preview's marker —
+    the preview honours the offset for any kind, and the firing path
+    matching the preview is the point of this field existing."""
+    spec = scene.responses.get(event_class)
+    band = select_band(spec.bands, intensity) if spec else None
+    if band is None:
+        return 0
+    declared = {k.name: k for k in scene.flare_kinds}
+    offsets = [declared[n].trigger_offset_ms for n in band.kinds
+               if n in declared and declared[n].trigger_offset_ms != 0]
+    return min(offsets) if offsets else 0
+
+
 def kind_lead_ms(kind: FlareKind, intensity: float, virtuals: dict) -> int:
     """The lead ONE kind, fired in isolation (bypassing band selection —
     scale=1.0, matching ResponseEngine.fire_kind's own contract), would need

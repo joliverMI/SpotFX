@@ -1150,7 +1150,23 @@ offline, which narrows it to something only a live run has (real
 concurrent fires, real device/network timing) rather than a defect in this
 scheduling code. Don't re-litigate the lead-time or `record_fire`
 theories without new evidence; the mechanism this rotate flare's own
-release queue is built on is proven correct in isolation.
+release queue is built on is proven correct in isolation. **A ninth
+elimination, 2026-08-21 (PR fm/engine-reads-flare-trigger-offset, checked
+at firstmate's direction when that PR found a REAL double-fire in
+`tick()`'s safety-net OR clause)**: that double-fire DOES hit
+`fire_response` triggers in general (pre-fix, empirically: lead=220 → two
+fires 200ms apart; lead=450 → 400ms apart — spacing = the lead, rounded
+up to tick cadence), but it structurally requires lead > one 200ms tick,
+and every one of the 9 real bands attaching "Reverse Momentarily (500ms)"
+(Black Hole V2 / Orbits V2 / Squiggles V2 × 3 flare bands each, read from
+the live process) computes lead = 0 — toggle-only, no registry-smooth
+momentary param, no attached color_rotate — so `fire_at == target`, the
+two OR clauses collapse to one predicate on one tick, and the pre-fix
+engine fires exactly ONCE on that path (proven by running the pre-fix
+module, not argued). UNRELATED to the overrun; the magnitude corroborates
+(the net's extension is ≤ ~400ms even in the hypothetical glide-band
+case, while the measured holds run 967-1905ms against the authored 500
+— a +660ms median overrun on the fuller 23-sample measurement).
 
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a drift declaration
 is authored param-agnostic (a named profile is reused across effects), so
@@ -2462,11 +2478,33 @@ inverted-sign defect it corrects) via `setScene` — a real scene-DRAFT
 edit, saved by the page's own Save button like any other field, not a
 preview-only value discarded on close. **No longer descriptive only as
 of 2026-08-21 — this field is what the live preview's own fire loop
-schedules from** (see below). `trigger_engine.py`'s own production
-lookahead-lead system (a scheduled song trigger against `lead_ms`/
-`anchor_frac`, live registry state, not this stored per-kind field) is
-still a separate mechanism this field does not feed. Don't conflate the
-two when this area comes up again.
+schedules from** (see below), **and since the same day's follow-up (PR
+fm/engine-reads-flare-trigger-offset, his ask: "make the engine read the
+offset and work with the offset like we had in spot FX") THE REAL FIRING
+PATH READS IT TOO**: `trigger_engine.tick()` relocates a `fire_response`
+trigger's target by the fired band's authored kind offset
+(`scene_response.band_trigger_offset_ms` — its docstring carries the
+multi-kind aggregation rule: min over the NONZERO offsets, a kind at the
+untouched default 0 never vetoes a sibling's authored ask, because a band
+fires atomically), read LIVE off the ACTIVE scene at render intensity,
+composed with the automatic lead exactly as #172 composes the
+trigger-level sibling field (`target = timestamp + his_offset`, then
+`fire_at = target - lead` — never the same sign added/subtracted). All 61
+of his real flare kinds carried offset 0 when this shipped (re-verified
+live), so it changed nothing stored. Two structural guards ride with it
+in `tick()`, both needed because this target is LIVE (the active scene
+changes between ticks): a fired-keys memory — `(trigger_id,
+timestamp_ms)`, cleared with `_pins` on song change/rewind — that ALSO
+fixes a pre-existing double-fire in the safety-net OR clause (any trigger
+fired more than one tick early used to fire AGAIN when its nominal
+target crossed the window — reproduced red pre-fix; the module
+docstring's "fires once per crossing" was emergent, now explicit), and a
+stranded-target net (a target relocated behind the window uncrossed
+fires late-not-never, only while the raw mark is still ahead and
+playback advanced). Scoped like the lead system: stored triggers only —
+a bridge-classified flare has no forward notice, nothing to relocate.
+Specs: `scripts/check_triggers.py` §11,
+`tests/test_flare_kind_trigger_offset.py`.
 
 Help: `spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`
 (under the `scenes-page` section, next to `flare-kind-edit-box`),

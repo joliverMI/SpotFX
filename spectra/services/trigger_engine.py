@@ -229,8 +229,33 @@ tick()'s own inline comment for the exact composition
 (fire_at = trig.timestamp_ms + trig.trigger_offset_ms - lead_ms) and why
 it reduces to today's exact pre-offset behaviour whenever offset is 0
 (every one of his real fire_scene triggers, as of this field's
-introduction). Scoped to fire_scene only; fire_response/select_color_set/
-fire_scene_update triggers still ignore the field.
+introduction). The TRIGGER-level field stays scoped to fire_scene;
+select_color_set/fire_scene_update triggers still ignore offsets entirely.
+
+FLARE-KIND TRIGGER OFFSET (his ask, 2026-08-21 — "make the engine read
+the offset and work with the offset like we had in spot FX"): a
+fire_response trigger's target is relocated the SAME way, by the SAME
+composition, from a different authored source — FlareKind.
+trigger_offset_ms (models/scene.py), the number the flare
+scrubbing-preview's drag gesture writes (FlarePreviewOverlay.tsx →
+flare_preview.trigger_mark_s), read LIVE off the band the ACTIVE scene
+would fire for this class at this intensity (scene_response.
+band_trigger_offset_ms, via _default_response_offset_ms — the same
+active-scene + render-intensity peek _response_switch_lead_ms already
+does). Same sign (negative = earlier), same target-then-lead composition
+(target_ms = timestamp + kind_offset; fire_at = target_ms - lead_ms),
+same offset=0 no-op guarantee (all 61 of his real flare kinds carried 0
+when this shipped, re-verified live). Because this source is LIVE (the
+active scene changes between ticks), a fire_response target isn't
+constant the way a stored fire_scene offset is — tick() carries an
+explicit fired-keys memory (exactly-once per approach; also closes a
+pre-existing double-fire in the safety-net OR clause, which used to fire
+an early-fired trigger AGAIN when its nominal target crossed the window)
+and a stranded-target net (a target relocated behind the window uncrossed
+fires late-not-never, only while the raw mark is still ahead). Scoped to
+stored-trigger fires only, like the lead system: a bridge-classified
+legacy flare arrives AT its moment with no forward notice, so there is
+nothing to relocate earlier — same reason _fire_transition takes no lead.
 
 Settling the drop anchor does NOT, by itself, prove the VISIBLE explosion
 begins on the mark — only that the WRITE does (already true before this
@@ -319,6 +344,20 @@ TICK_S = 0.2
 # necessary and sufficient for this horizon, not a separately-tuned number.
 LOOKAHEAD_HORIZON_MS = transition_phases.MAX_LEAD_MS
 
+# FLARE-KIND TRIGGER OFFSET peek window (his ask, 2026-08-21): how near a
+# fire_response trigger's RAW timestamp tick() bothers asking the active
+# scene's band for an authored FlareKind.trigger_offset_ms
+# (scene_response.band_trigger_offset_ms). Derived, not tuned:
+# FlareKind.trigger_offset_ms's own model clamp is +/-60_000ms
+# (models/scene.py), so a legal offset can relocate the target at most 60s
+# either side of the raw mark, and the lead system needs at most
+# LOOKAHEAD_HORIZON_MS extra notice ahead of any relocated target — outside
+# this band a peek could never change when the trigger fires, so skipping
+# it there is pure cost avoidance, never a behaviour change
+# (tests/test_flare_kind_trigger_offset.py pins the derivation against the
+# model clamp itself).
+RESPONSE_OFFSET_HORIZON_MS = 60_000 + LOOKAHEAD_HORIZON_MS
+
 
 @dataclass
 class _PinnedPick:
@@ -377,6 +416,7 @@ class TriggerEngine:
         sequencer_enabled: Callable[[], bool] | None = None,
         auto_generate: Callable[[str], Awaitable[Any]] | None = None,
         lead_ms: Callable[[SpectraTrigger], int] | None = None,
+        response_offset_ms: Callable[[Any], int] | None = None,
         intensity_event: Callable[[], None] | None = None,
         rng: Random | None = None,
     ) -> None:
@@ -395,6 +435,7 @@ class TriggerEngine:
         self._sequencer_enabled = sequencer_enabled or self._default_sequencer_enabled
         self._auto_generate = auto_generate or self._default_auto_generate
         self._lead_ms = lead_ms or self._default_lead_ms
+        self._response_offset_ms = response_offset_ms or self._default_response_offset_ms
         # Two-dimensional drift gradient retarget hook (owner ask
         # 2026-08-20) — deliberately NOT a lazy import of the production
         # engine.conductor singleton the way _default_fire_scene/
@@ -414,6 +455,27 @@ class TriggerEngine:
         # STAY rung / an empty scene_pool) — a bare-None cache entry so that
         # negative result is never retried either. See _pin_for.
         self._pins: dict[str, Optional[_PinnedPick]] = {}
+
+        # EXACTLY-ONCE per approach (2026-08-21, found building the
+        # flare-kind offset below): (trigger_id, timestamp_ms) keys already
+        # fired since the last rearm. The docstring's own "fires once per
+        # crossing" contract used to be emergent from the target being
+        # constant and the position monotone — but the safety-net OR clause
+        # in tick() breaks it for any EARLY fire more than one tick ahead
+        # of its target (fired at fire_at, then AGAIN when the nominal
+        # target itself crossed the window — reproduced red against the
+        # pre-fix code in tests/test_flare_kind_trigger_offset.py), and a
+        # LIVE-relocated fire_response target (the flare-kind offset, read
+        # off the active scene each tick) can additionally move forward
+        # across an already-fired position. This set makes the contract
+        # explicit for both. Keyed on (id, timestamp_ms) — not id alone —
+        # so a trigger whose stored timestamp he EDITS mid-song is a fresh
+        # key and fires at its new mark (today's live-authoring
+        # affordance), while an offset drag (timestamp unchanged) can
+        # never machine-gun re-fires. Cleared exactly where _pins is:
+        # song change and rewind ("approaching the same moment again
+        # fires it again").
+        self._fired: set[tuple[str, int]] = set()
 
         self._uri: Optional[str] = None
         self._last_position_ms: Optional[int] = None
@@ -437,8 +499,10 @@ class TriggerEngine:
             self._last_position_ms = None
             # A new song's trigger list is unrelated to the old one's — any
             # LOOKAHEAD pin from the previous song is dead weight, never a
-            # reusable commitment (see _pin_for).
+            # reusable commitment (see _pin_for). The fired-keys memory
+            # rearms with it.
             self._pins.clear()
+            self._fired.clear()
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -541,8 +605,11 @@ class TriggerEngine:
             # stale commitment — arbitrary time may have passed off-screen
             # (room state can drift any amount during a scrub). Drop every
             # LOOKAHEAD pin rather than trust one across a rewind; a fresh
-            # horizon entry re-pins cleanly on the next approach.
+            # horizon entry re-pins cleanly on the next approach. The
+            # fired-keys memory clears with it — "approaching the same
+            # moment again fires it again" (module docstring).
             self._pins.clear()
+            self._fired.clear()
             return []  # rewind/seek back: silently rearmed via the line above
         triggers = self._list_triggers(self._uri)
         mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
@@ -552,19 +619,46 @@ class TriggerEngine:
                 continue
             if not self._trigger_allowed(trig, mode):
                 continue
-            # SCENE-CHANGE TRIGGER OFFSET (his ask, 2026-08-21 — the scene-
-            # change equivalent of the flare preview's trigger_offset_ms,
-            # data/preview-loops-and-fires-on-the-trigger): trig.
-            # trigger_offset_ms relocates the moment a fire_scene trigger
-            # targets, in HIS sign convention — negative = fire earlier,
-            # positive = fire later, 0 = unchanged (SpectraTrigger.
-            # trigger_offset_ms's own docstring). target_ms is that
-            # relocated moment; every "when to fire" comparison below uses
-            # it in place of the raw stored trig.timestamp_ms. Scoped to
-            # fire_scene only, per this task's own ask — fire_response/
-            # select_color_set/fire_scene_update triggers keep firing at
-            # their raw stored timestamp; the field stays inert for those
-            # kinds until a future ask widens it.
+            # EXACTLY-ONCE per approach (see self._fired's own comment in
+            # __init__): a trigger that already fired since the last rearm
+            # never re-fires, however its computed target/fire_at drift
+            # afterwards — this is what lets the safety-net OR below stay a
+            # NET (fire at the nominal target if the early window was
+            # missed) instead of a second fire after a successful early
+            # one, and what keeps a LIVE-relocated fire_response target
+            # (below) from re-crossing an already-fired position.
+            fired_key = (trig.id, trig.timestamp_ms)
+            if fired_key in self._fired:
+                continue
+            # TRIGGER OFFSET (his sign convention throughout — negative =
+            # fire earlier, positive = fire later, 0 = unchanged):
+            # target_ms is the relocated moment every "when to fire"
+            # comparison below uses in place of the raw stored
+            # trig.timestamp_ms. TWO authored sources, one per action kind:
+            #   - fire_scene (2026-08-21, #172): the trigger's OWN
+            #     SpectraTrigger.trigger_offset_ms — stored on the trigger,
+            #     constant, cheap (a field add, no gate needed).
+            #   - fire_response (his ask, 2026-08-21 — "make the engine
+            #     read the offset and work with the offset like we had in
+            #     spot FX"): the FLARE KIND's FlareKind.trigger_offset_ms,
+            #     the number the flare scrubbing-preview's drag writes —
+            #     read LIVE off the band the active scene would fire for
+            #     this class at this intensity (scene_response.
+            #     band_trigger_offset_ms via _default_response_offset_ms,
+            #     mirroring _response_switch_lead_ms's own live peek), only
+            #     within RESPONSE_OFFSET_HORIZON_MS of the raw mark (a
+            #     derived cost gate — see that constant). Because this
+            #     source is live (the active scene can change between
+            #     ticks), target_ms for a fire_response trigger is NOT
+            #     guaranteed constant — the fired-keys guard above and the
+            #     stranded-target net below are what keep "at most once,
+            #     never dropped" true anyway. select_color_set/
+            #     fire_scene_update triggers keep firing at their raw
+            #     stored timestamp (nothing to align — instant applies);
+            #     a fire_response trigger's own trigger-level
+            #     trigger_offset_ms field ALSO stays inert (#172's own
+            #     scoping, unchanged by this build — the kind's field is
+            #     the one his preview drag writes).
             #
             # THE SIGN COMPOSITION WITH _lead_ms, STATED EXPLICITLY (a wrong
             # sign here is invisible to a naive test and has cost hours
@@ -585,9 +679,21 @@ class TriggerEngine:
             # At offset=0 this is byte-identical to the pre-existing
             # formula (trig.timestamp_ms - lead_ms) — every one of his real
             # fire_scene triggers carries offset=0 today, so this is
-            # provably a no-op for everything currently on disk.
-            target_ms = (trig.timestamp_ms + trig.trigger_offset_ms
-                        if trig.action.kind == "fire_scene" else trig.timestamp_ms)
+            # provably a no-op for everything currently on disk. The
+            # fire_response branch composes the SAME way with the SAME
+            # proof obligation (both extremes — scripts/check_triggers.py
+            # §11): the kind's offset relocates the base target in HIS
+            # sense first, the lead then subtracts in its own sense,
+            # and all 61 of his real flare kinds carried offset=0 when
+            # this shipped (re-verified live), so it too is a no-op on
+            # everything currently stored.
+            if trig.action.kind == "fire_scene":
+                target_ms = trig.timestamp_ms + trig.trigger_offset_ms
+            elif (trig.action.kind == "fire_response"
+                    and abs(trig.timestamp_ms - last) <= RESPONSE_OFFSET_HORIZON_MS):
+                target_ms = trig.timestamp_ms + self._response_offset_ms(trig.action)
+            else:
+                target_ms = trig.timestamp_ms
             # TRANSITION/FLARE LEAD-TIME ALIGNMENT (his ask, 2026-08-19):
             # fire up to lead_ms EARLY so a scene transition's mid-point (or
             # a registered phased effect's own payoff — see
@@ -621,8 +727,29 @@ class TriggerEngine:
             # safety net would still fire at the raw, un-relocated
             # timestamp, defeating the entire point of asking for a later
             # fire.
+            # STRANDED-TARGET NET (fire_response only — the one kind whose
+            # target is read LIVE, above): a negative kind offset can
+            # relocate the target BEHIND the tick window without it ever
+            # being crossed — the active scene changing between ticks
+            # (different band, different authored offset), a forward seek
+            # landing between the relocated target and the raw mark, or a
+            # process (re)start finding the relocated moment already past
+            # while the raw mark is still ahead. "Late but never dropped"
+            # (the same posture the OR net above takes for a missed early
+            # window): fire NOW, once, provided the RAW mark hasn't itself
+            # passed (last <= timestamp — past-mark triggers stay history,
+            # the no-backfill rule) and playback actually advanced this
+            # tick (position_ms > last — a paused poll must never fire).
+            # Constant-target kinds (fire_scene's stored offset included)
+            # can never strand, so they never take this branch.
+            stranded = (trig.action.kind == "fire_response"
+                        and target_ms < trig.timestamp_ms
+                        and target_ms <= last <= trig.timestamp_ms
+                        and position_ms > last)
             if (last < fire_at <= position_ms
-                    or last < target_ms <= position_ms):
+                    or last < target_ms <= position_ms
+                    or stranded):
+                self._fired.add(fired_key)
                 await self._fire(trig)
                 fired.append(trig)
         return fired
@@ -1111,6 +1238,28 @@ class TriggerEngine:
         if momentary_switch_would_glide(scene, a.event_class, intensity, virtuals):
             lead = max(lead, DICE_REROLL_GLIDE_MS)
         return lead
+
+    def _default_response_offset_ms(self, a) -> int:
+        """A fire_response action's authored FLARE-KIND offset (his ask,
+        2026-08-21 — the firing-path half of the flare scrubbing-preview's
+        trigger_offset_ms drag): the FlareKind.trigger_offset_ms the band
+        this fire would select carries, HIS sign convention (negative =
+        fire earlier, positive = fire later). Mirrors
+        _response_switch_lead_ms's own reads exactly — the ACTIVE scene
+        (the scene whose kinds will actually fire) at the RENDER intensity
+        (the same _render_intensity(a.intensity) the real fire hands
+        on_event, so this peek selects the same band the fire will) — and
+        delegates the band walk + multi-kind aggregation to
+        scene_response.band_trigger_offset_ms (see its docstring for the
+        min-over-nonzero rule and why a drop band's offset IS honoured
+        where the lead's drop rule is not). No active scene = 0, the
+        conservative nothing-to-read answer, same as the lead's own."""
+        from spectra.services.scene_response import band_trigger_offset_ms
+        scene = self._active_scene()
+        if scene is None:
+            return 0
+        return band_trigger_offset_ms(scene, a.event_class,
+                                      self._render_intensity(a.intensity))
 
     @staticmethod
     def _live_virtuals() -> dict:
