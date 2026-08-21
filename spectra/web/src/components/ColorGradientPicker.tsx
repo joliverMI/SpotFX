@@ -134,6 +134,14 @@ export default function ColorGradientPicker({
             value={value}
             format="hex"
             showAlpha={false}
+            // Linear only — no radial/linear mode toggle, no angle dial (his
+            // ask: "I do not need the shape dialog for the gradient"). Every
+            // gradient this app stores or produces is linear-gradient, so
+            // hiding these costs nothing; showGradientPosition is the
+            // radial-only position picker, pointless with mode hidden.
+            showGradientMode={false}
+            showGradientAngle={false}
+            showGradientPosition={false}
             debounce
             debounceMS={200}
             solid

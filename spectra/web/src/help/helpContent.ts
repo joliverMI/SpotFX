@@ -128,10 +128,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'colour-gradient-picker',
         title: 'The colour picker',
-        keywords: 'color picker gradient swatch solid hex stops angle ledfx',
+        keywords: 'color picker gradient swatch solid hex stops linear ledfx',
         body: [
           'Every colour and gradient field in SPECTRA — Fixed colours here, Background, Ambient\'s colour in the room bar — opens the same picker: LedFX\'s own colour-picker component, not a lookalike. Click a swatch to open it; click outside or press Esc to close.',
-          'Two tabs where both apply (a colour field that only ever takes one solid colour, like Ambient, shows Solid only): Solid picks one colour off a board or by hex. Gradient builds a multi-stop CSS gradient — drag to add a stop on the bar, drag a stop to move it, pick each stop\'s colour, set the angle. Saved colours and gradients from the shared library show as quick-pick swatches at the top.',
+          'Two tabs where both apply (a colour field that only ever takes one solid colour, like Ambient, shows Solid only): Solid picks one colour off a board or by hex. Gradient builds a multi-stop linear CSS gradient — drag to add a stop on the bar, drag a stop to move it, pick each stop\'s colour. Saved colours and gradients from the shared library show as quick-pick swatches at the top.',
           'The value it produces is the exact CSS this app already stores everywhere (e.g. `linear-gradient(90deg, rgb(255,0,0) 0%, rgb(0,0,255) 100%)`) — every colour and gradient you already had keeps working, nothing to redo.',
         ],
       },
