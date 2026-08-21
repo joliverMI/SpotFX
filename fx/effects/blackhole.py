@@ -792,7 +792,14 @@ class Blackhole2d(Twod, GradientEffect):
             self._phase_t = 0.0
             self.phase_progress = 0.0
             self._drop = {"burst_t": None, "silent": True}
-            return
+            # No `return` here, unlike the other early-outs in this method:
+            # falling through into the "drop" branch below is what resolves
+            # burst_t out of its None sentinel on THIS SAME call, before
+            # draw() goes on to call _horizon_radius()/_phase_halo() this
+            # frame. A prior version returned here, leaving burst_t=None
+            # observable for one frame — draw() always reads it before the
+            # next _phase_step() call has a chance to self-heal, so it
+            # crashed instead (TypeError: None / float).
         if self._phase == "drop":
             drop = self._drop
             if drop is None:
@@ -872,8 +879,28 @@ class Blackhole2d(Twod, GradientEffect):
         # zero) on the very first frame of the phase — see _phase_step's
         # own docstring on why there is no pre-burst pinch state left to
         # compute here.
+        #
+        # burst_t is only ever None as a same-call sentinel inside
+        # _phase_step's own drop branch, which always resolves it to 0.0
+        # (a real float) before returning — every path that sets
+        # self._drop to {"burst_t": None, ...} falls through into that
+        # resolution in the SAME _phase_step() call, and draw() only ever
+        # calls this method after _phase_step() has run for the frame. So
+        # by the time we get here, burst_t is never actually None; the
+        # `or 0.0` below is a guard against that invariant regressing
+        # again (a 2026-08-20 bug had one such path `return` before
+        # reaching the resolution, leaving None observable for a frame —
+        # TypeError: None / float, crashing the render thread). If it ever
+        # does fire, 0.0 is the CORRECT value, not a fudge: it's exactly
+        # what burst_t is resolved to an instant later in the same
+        # scenario, i.e. "the drop just started, ease-back hasn't begun" —
+        # never the old pre-#160 meaning ("still pinching down from the
+        # full panel"), which this redesign retired along with the
+        # progress-gated burst it went with.
         drop = self._drop
         burst_t = drop["burst_t"] if drop is not None else 0.0
+        if burst_t is None:
+            burst_t = 0.0
         return base * min(burst_t / DROP_RESET_S, 1.0)
 
     def _phase_halo(self, out, rh):
@@ -891,9 +918,14 @@ class Blackhole2d(Twod, GradientEffect):
         elif phase == "drop":
             # post-burst fade only — the burst fires on the phase's first
             # frame (see _phase_step), so there is no pre-burst pinch state
-            # left for the halo to render here.
+            # left for the halo to render here. burst_t is never actually
+            # None by the time draw() gets here — see _horizon_radius's own
+            # comment for the invariant and why 0.0 is the right fallback,
+            # not a fudge, on the off chance it ever is.
             drop = self._drop
             burst_t = drop["burst_t"] if drop is not None else 0.0
+            if burst_t is None:
+                burst_t = 0.0
             w = 0.10
             b = 0.6 * max(1.0 - burst_t / DROP_RESET_S, 0.0)
         else:

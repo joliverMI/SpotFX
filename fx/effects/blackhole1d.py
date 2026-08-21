@@ -394,7 +394,13 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
             self._phase_t = 0.0
             self.phase_progress = 0.0
             self._drop = {"burst_t": None, "silent": True}
-            return
+            # No `return` here, unlike the other early-outs in this method:
+            # falling through into the "drop" branch below resolves burst_t
+            # out of its None sentinel on THIS SAME call, before draw() goes
+            # on to call _phase_post() this frame. A prior version returned
+            # here, leaving burst_t=None observable for one frame — see the
+            # identical fix and its rationale in blackhole.py's own
+            # _phase_step (TypeError: None / float).
         if self._phase == "drop":
             drop = self._drop
             if drop is None:
@@ -444,6 +450,8 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
                # pinch state left to render here)
             drop = self._drop
             burst_t = drop["burst_t"] if drop is not None else 0.0
+            if burst_t is None:
+                burst_t = 0.0
             mask = float(min(burst_t / DROP_RESET_S, 1.0))
         out = out * np.float32(mask)
         if halo_r is not None and halo_g > 0.0:

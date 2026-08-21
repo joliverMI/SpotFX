@@ -624,6 +624,30 @@ separate things with only one actually fixed.** Executable specs:
 `tests/test_trigger_engine.py` (proof 12, frame-level: a drop's switch is
 still IN FLIGHT at the mark, the opposite of proof 10's momentary flare).
 
+**The above shipped a real crash the same night, fixed same-day (PR
+fm/blackhole-horizon-none-crash): `blackhole.py`/`blackhole1d.py`'s orphan
+watchdog (`_phase_step`, releasing a charge/lull whose drop trigger never
+arrived) set `self._drop = {"burst_t": None, "silent": True}` and
+`return`ed immediately — skipping the SAME method's own "drop" branch that
+resolves `burst_t` out of that `None` sentinel, which every OTHER entry
+path (a normal `_enter_phase("drop")`) falls through into within one call.
+`draw()` reads `burst_t` via `_horizon_radius()`/`_phase_halo()`
+(`_phase_post()` in the 1d strip) immediately after `_phase_step()`
+returns, every frame, with no chance for a next call to self-heal first —
+so `None / DROP_RESET_S` raised inside the render thread, killing it
+silently (the service kept reporting healthy until the render-plane
+dead-man watchdog noticed frames had stopped and restarted the whole
+process). Fixed by removing the early `return` so the watchdog path falls
+through to the same resolution the normal path already uses — `burst_t` is
+now never externally observable as `None`. If you touch a charge/lull/drop
+state machine anywhere in `fx/effects/` (`squiggles.py`, `eye.py`, and the
+1d siblings all use the same shape), check that every `return` inside
+`_phase_step` happens AFTER any sentinel it just set has been resolved to
+a real value, not before — `eye.py`'s watchdog path got this right by
+never using a `None` sentinel in the first place (it sets a concrete `t:
+0.0` directly), which is the simpler pattern to prefer in new code.
+Regression: `tests/test_blackhole_orphan_drop_none_crash.py`.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
