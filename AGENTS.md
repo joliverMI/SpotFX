@@ -1114,7 +1114,18 @@ kind's ramp has a real, intensity-scaled duration, so it can't share
 `momentary_switch_would_glide`'s single fixed `DICE_REROLL_GLIDE_MS`
 boolean-then-constant shape. `flare_preview.build_timeline` drains the new
 release queue too, so the scrubbing preview shows a `color_rotate` kind's
-full ramp/dwell/fade shape like any other. Declared on every scene (not
+full ramp/dwell/fade shape like any other. **A new ResponseEngine release
+queue must be scheduled at every drain point, not just `engine.py`** —
+there are four (`engine.fire_response_event`, `engine.
+fire_scene_update_event`, `flare_preview.build_timeline`, and
+`flare_preview_hold.open_hold`, the live preview's per-lap fire): this
+queue was missed at `open_hold` when it shipped, so a live-previewed
+rotation never faded back — the gradient sat parked rotated between laps
+and every crossing after the first showed nothing (his 2026-08-21 report,
+fixed PR fm/rotate-preview-stops-on-intensity-change; the intensity
+slider was the moment he noticed, not the cause — the client's fire
+schedule was proven sound, `scripts/check_flare_preview_frontend_loop.mjs`
+§FIVE/SIX). Declared on every scene (not
 effect-scoped like `reverse` — `gradient` exists on every set-mode virtual
 regardless of effect type — `scripts/add_color_rotate_flares.py`, dry-run
 default, never attaches to a band, his data is his to attach). Executable
