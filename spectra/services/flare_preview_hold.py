@@ -29,6 +29,12 @@ moment the preview opens: no scene changes, no other flares, nothing but
 the previewed scene + kind, until the preview closes. This is a real,
 visible interruption of his live show, not a side channel — it belongs in
 the help copy (spectra/web/src/help/helpContent.ts), not just here.
+"No scene changes" here was only half true until 2026-08-21 (fm/
+preview-must-hold-scene-changes) — scene_sequencer.fire_scene_by_id, the
+ONE choke point his fire_scene triggers actually route through, never
+consulted preview_pause at all, so a trigger-driven scene fire sailed
+through a paused, open preview while responses/flares correctly went
+silent. See preview_pause.py's own docstring for the fix.
 
 TRUE SIMULATION (2026-08-21, data/preview-loops-and-fires-on-the-trigger):
 open_hold() is no longer called once, on /open — it's called once per loop

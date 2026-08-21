@@ -117,11 +117,34 @@ async def fire_scene_by_id(scene_id: str,
     Every real (non-deferred) fire re-latches dwell.note_fired for the
     scene that just started showing — the ONE place dwell's own "current
     scene" state updates, which is what keeps it from going stale the way
-    the old sequencer-local dwell bookkeeping did on a trigger fire."""
+    the old sequencer-local dwell bookkeeping did on a trigger fire.
+
+    PREVIEW HOLD (2026-08-21, fm/preview-must-hold-scene-changes) is gated
+    FIRST, ahead of every other check including Force Scene — the one gate
+    in this function Force Scene does NOT override, matching preview_pause's
+    own documented precedence at bridge.py's conductor_deferral/
+    sequencer_deferral (preview outranks force_scene there too): a hand-held
+    preview is the most explicit, momentary override a room can be under,
+    and a Force Scene reassert landing on top of the exact flare he opened
+    the preview to judge would defeat the preview's whole purpose. Recorded
+    to fire_history's "deferred" bucket like the dwell case, but never fires
+    an update effect — dwell's placeholder flare exists to make an
+    otherwise-invisible hold visible; a preview's whole point is an
+    isolated, motionless room, so adding motion here would fight the thing
+    he opened the preview to see."""
     from spectra.services import (color_set_groups, color_sets, dwell,
                                   fire_history, mode_availability,
-                                  scene_compiler, scene_store)
+                                  preview_pause, scene_compiler, scene_store)
     from spectra.services.room_controls import load_room_controls
+    if preview_pause.active():
+        scene = scene_store.get_by_id(scene_id)
+        scene_name = scene.name if scene is not None else scene_id
+        fire_history.record_fire("deferred", scene_id, {
+            "scene_name": scene_name,
+            "reason": "preview",
+        })
+        return {"skipped": "preview", "scene_id": scene_id,
+               "scene_name": scene_name}
     controls = load_room_controls()
     forced = False
     if controls.force_scene_enabled and controls.force_scene_scene_id:

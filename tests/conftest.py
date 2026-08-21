@@ -225,6 +225,23 @@ def _isolated_dwell():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_preview_pause():
+    """spectra/services/preview_pause.py (the flare/colour-set preview's
+    global pause deadline) is a bare module global (_until) with no DI
+    seam — same no-DI-seam shape as dwell.py above. scene_sequencer.
+    fire_scene_by_id now reads it too (2026-08-21,
+    fm/preview-must-hold-scene-changes), on top of the pre-existing
+    room_preview.py/flare_preview.py callers — a leaked active pause from
+    one test would now silently defer a scene fire in a completely
+    unrelated test that never touches preview_pause itself. Autouse so no
+    individual test needs to know this store exists."""
+    from spectra.services import preview_pause
+    preview_pause.clear()
+    yield
+    preview_pause.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_sonic_usage(tmp_path, monkeypatch):
     """spectra/services/sonic_usage.py (Sonic's durable per-call token-usage
     record, review page) is written from inside settings_agent.run_turn /

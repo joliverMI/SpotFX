@@ -173,17 +173,30 @@ export interface FlarePreviewTimeline {
   animation_start_s: number | null;
   animation_end_s: number | null;
   duration_s: number;
-  /** Where "the animation starts" is drawn/fires each loop — a fixed
-   * ruler-layout position, computed server-side (spectra/services/
-   * flare_preview.animation_anchor_s) so the ruler draw and the live-fire
-   * loop below read the SAME number, never two independently-derived
-   * ones. trigger_mark_s is derived from it via the kind's own
-   * trigger_offset_ms (HIS sign convention — see FlareKind.
+  /** Where "the animation starts" is DRAWN — a fixed ruler-layout
+   * position, computed server-side (spectra/services/flare_preview.
+   * animation_anchor_s). trigger_mark_s is derived from it via the kind's
+   * own trigger_offset_ms (HIS sign convention — see FlareKind.
    * trigger_offset_ms's docstring, spectra/models/scene.py): negative
    * offset fires earlier (mark to the right of anchor), positive fires
    * later (mark to the left), 0 = coincident. */
   animation_anchor_s: number;
   trigger_mark_s: number;
+  /** The AUTOMATIC lead (ms) a real trigger fire would compute for this
+   * exact kind — scene_response.kind_lead_ms, the fixed DICE_REROLL_GLIDE_MS
+   * for a registry-smooth momentary param glide, or the intensity-scaled
+   * color_rotate ramp, never a hardcoded number. 0 for a kind with neither. */
+  lead_ms: number;
+  /** Where the live-fire loop actually issues its /fire call each cycle —
+   * NOT animation_anchor_s. fire_at_s = animation_anchor_s - lead_ms/1000
+   * (spectra/services/flare_preview.fire_at_s): his authored offset is
+   * already baked into animation_anchor_s by construction of
+   * trigger_mark_s's own formula, so this is the SAME target-then-lead
+   * composition #172 established for SpectraTrigger.trigger_offset_ms,
+   * with nothing left to add on top. Can be negative or exceed duration_s
+   * — the loop's own modular real-time wraparound handles both, never
+   * clamp this before scheduling against it. */
+  fire_at_s: number;
   writes: FlarePreviewWrite[];
 }
 

@@ -10,11 +10,17 @@
  * alone never touches his fixtures. The LIVE fire is a separate call
  * (fireFlarePreview), issued by the playhead effect below once per loop,
  * timed to land exactly when the simulated playhead crosses
- * `animation_anchor_s` — never on open, and every lap, not once: "it
- * should happen every time... with the same timing as if the playhead was
- * crossing a trigger." Closing (or losing the tab/connection — see the
- * heartbeat block below) reverts his room to exactly what it showed
- * before the preview opened.
+ * `fire_at_s` — never on open, and every lap, not once: "it should happen
+ * every time... with the same timing as if the playhead was crossing a
+ * trigger." fire_at_s (2026-08-21, fm/preview-must-hold-scene-changes) is
+ * NOT animation_anchor_s: it's animation_anchor_s adjusted by this kind's
+ * own automatic lead (scene_response.kind_lead_ms — the SAME lead a real
+ * trigger fire would compute, never a hardcoded number), so the preview
+ * fires at the same real-time moment production would, per his own ask —
+ * "the same lead the real show applies must apply here, or the preview
+ * lies about when his flare lands." Closing (or losing the tab/connection
+ * — see the heartbeat block below) reverts his room to exactly what it
+ * showed before the preview opened.
  *
  * Two independent marker kinds, per his brief:
  *   - the TRIGGER mark (draggable) — where he considers this kind
@@ -32,11 +38,14 @@
  *     gap readout below the ruler states, in milliseconds, how far the
  *     trigger sits from where the effect actually starts moving.
  *
- * animAnchorS/triggerMarkS below are read straight off the backend's own
- * `animation_anchor_s`/`trigger_mark_s` (spectra/services/flare_preview.py)
- * rather than re-derived client-side — ONE source of truth for "where does
- * the animation start:" the ruler draw and the live-fire loop's real-time
- * schedule can never silently disagree on it.
+ * animAnchorS/triggerMarkS/fireAtS below are read straight off the
+ * backend's own `animation_anchor_s`/`trigger_mark_s`/`fire_at_s`
+ * (spectra/services/flare_preview.py) rather than re-derived client-side —
+ * ONE source of truth: the ruler draw and the live-fire loop's real-time
+ * schedule can never silently disagree on where the animation starts or
+ * when the write actually fires (fire_at_s, animAnchorS adjusted by this
+ * kind's own automatic lead — see FlarePreviewTimeline.fire_at_s's own
+ * docstring, spectra/web/src/queries.ts).
  *
  * "Automatically pauses the trigger engine": /flare-preview/open arms
  * preview_pause for as long as this overlay stays mounted, kept alive by
@@ -90,6 +99,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   const [error, setError] = useState<string | null>(null);
   const [durationS, setDurationS] = useState(6.0);
   const [animAnchorS, setAnimAnchorS] = useState(2.0);
+  const [fireAtS, setFireAtS] = useState(2.0);
   const [triggerMarkS, setTriggerMarkS] = useState(2.0 - kind.trigger_offset_ms / 1000);
   const [playheadS, setPlayheadS] = useState(0);
   const [playing, setPlaying] = useState(true);
@@ -119,7 +129,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   // his report was that the live fire used to happen "almost as soon as
   // the preview started" instead of waiting for the mark, so even the
   // FIRST fire (not just subsequent loops) now waits for the playhead to
-  // reach animAnchorS. An intensity change restarts the playhead at 0 and
+  // reach fireAtS. An intensity change restarts the playhead at 0 and
   // clears the fire schedule, so the next fire (at the new intensity)
   // waits for the mark exactly like a fresh open, rather than firing
   // immediately at the slider's new position. ────────────────────────────
@@ -132,6 +142,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           setTimeline(tl);
           setError(null);
           setAnimAnchorS(tl.animation_anchor_s);
+          setFireAtS(tl.fire_at_s);
           setDurationS((prev) => (initializedMarksRef.current ? Math.max(prev, tl.duration_s) : tl.duration_s));
           if (!initializedMarksRef.current) {
             setTriggerMarkS(tl.trigger_mark_s);
@@ -162,20 +173,26 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
 
   // ── play/loop: advance the playhead in real time, wrap at durationS, AND
   // fire the kind live for real exactly when the playhead crosses
-  // animAnchorS — every lap, not once on open, "the same timing as if the
-  // playhead was crossing a trigger." The next-fire deadline is derived
-  // fresh from the CURRENT playhead position every time this effect
-  // (re)starts (pause/resume, an Extend, a fresh timeline after an
-  // intensity change) rather than carried across restarts, so it can never
-  // drift out of phase with what's drawn. Pausing/scrubbing stops the fire
-  // loop too (scrubRuler below sets playing=false), matching "scrubbing
-  // never sends anything further to your fixtures." ──────────────────────
+  // fireAtS (animAnchorS adjusted by this kind's own automatic lead — see
+  // fire_at_s's own docstring, spectra/services/flare_preview.py) — every
+  // lap, not once on open, "the same timing as if the playhead was
+  // crossing a trigger." The next-fire deadline is derived fresh from the
+  // CURRENT playhead position every time this effect (re)starts
+  // (pause/resume, an Extend, a fresh timeline after an intensity change)
+  // rather than carried across restarts, so it can never drift out of
+  // phase with what's drawn. Pausing/scrubbing stops the fire loop too
+  // (scrubRuler below sets playing=false), matching "scrubbing never sends
+  // anything further to your fixtures." fireAtS can be negative or exceed
+  // durationS (a lead longer than the gap to the ruler's own front edge) —
+  // normalize into [0, durationS) first so the wraparound below is always
+  // correct, never assume it already sits inside the ruler. ─────────────
   useEffect(() => {
     if (!playing || !timeline) { lastFrameRef.current = null; return undefined; }
-    const delayToAnchorS = animAnchorS >= playheadRef.current
-      ? animAnchorS - playheadRef.current
-      : durationS - playheadRef.current + animAnchorS;
-    nextFireAtRef.current = performance.now() + delayToAnchorS * 1000;
+    const normalizedFireAtS = ((fireAtS % durationS) + durationS) % durationS;
+    const delayToFireS = normalizedFireAtS >= playheadRef.current
+      ? normalizedFireAtS - playheadRef.current
+      : durationS - playheadRef.current + normalizedFireAtS;
+    nextFireAtRef.current = performance.now() + delayToFireS * 1000;
     const fireLive = () => {
       const { sceneId: sid, kindName, intensity: it } = fireParamsRef.current;
       fireFlarePreview(sid, kindName, it).catch((e) => setError(String(e)));
@@ -204,7 +221,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       lastFrameRef.current = null;
     };
-  }, [playing, durationS, animAnchorS, timeline]);
+  }, [playing, durationS, fireAtS, timeline]);
 
   const xToS = (clientX: number): number => {
     const svg = rulerRef.current;
@@ -255,9 +272,15 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
     window.addEventListener('pointerup', up);
   };
 
-  const gapMs = Math.round((triggerMarkS - animAnchorS) * 1000);
-  const animStartAbs = timeline?.animation_start_s != null ? animAnchorS + timeline.animation_start_s : null;
-  const animEndAbs = timeline?.animation_end_s != null ? animAnchorS + timeline.animation_end_s : null;
+  // The accent "start"/"end" lines represent when the write actually
+  // lands — that's fireAtS now (animAnchorS adjusted by this kind's own
+  // automatic lead), not animAnchorS itself, so they stay honest about
+  // when the real live /fire call goes out. animation_start_s is always
+  // exactly 0 (every recorded write is normalized to its own earliest
+  // write), so animStartAbs === fireAtS whenever there are any writes.
+  const gapMs = Math.round((triggerMarkS - fireAtS) * 1000);
+  const animStartAbs = timeline?.animation_start_s != null ? fireAtS + timeline.animation_start_s : null;
+  const animEndAbs = timeline?.animation_end_s != null ? fireAtS + timeline.animation_end_s : null;
   const ticks: number[] = [];
   for (let t = 0; t <= durationS + 1e-6; t += tickStep(durationS)) ticks.push(t);
 
@@ -359,9 +382,10 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
                 {animEndAbs != null && <> — the visible effect runs for {fmtMs(animEndAbs - animStartAbs)} total</>}.
                 Drag the trigger line to test a different alignment; it saves onto this kind's
                 own trigger_offset_ms (Save the scene to keep it) — drag it right to fire
-                earlier (negative), left to fire later (positive). The live fire is timed to
-                this same mark: it waits for the white playhead to reach the accent-coloured
-                "start" line before it fires, every loop.
+                earlier (negative), left to fire later (positive). The live fire waits for the
+                white playhead to reach the accent-coloured "start" line before it fires, every
+                loop{timeline?.lead_ms ? <> — {timeline.lead_ms}ms earlier than the trigger mark
+                itself, the same automatic lead a real trigger fire would apply for this kind</> : null}.
               </div>
             )}
 
