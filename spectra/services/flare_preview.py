@@ -144,6 +144,13 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     for hold_s in responder.pending_hold_groups():
         clock.advance_to(hold_s)
         await responder.flush_releases(hold_s)
+    # The colour ROTATE-AND-BACK flare's own release queue (its fade-back
+    # duration is intensity-scaled, so it can't share pending_hold_groups/
+    # flush_releases' fixed PULSE_RELEASE_S — see scene_response.
+    # _color_rotate's own docstring). Same drain shape, separate queue.
+    for dwell_s in responder.pending_color_rotate_holds():
+        clock.advance_to(dwell_s)
+        await responder.flush_color_rotates(dwell_s)
 
     writes = list(responder.executor.writes)
     if not writes:

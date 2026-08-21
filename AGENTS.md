@@ -1022,6 +1022,76 @@ only expressible form given ParamTarget's float-only `value`/`offset`
 fields. Proof on the real vendored pipeline: `tests/test_spectra_engine.py::
 test_momentary_toggle_param_flare_lands_a_real_bool_and_releases`.
 
+**A fourth `FlareKind` type, `color_rotate` — the COLOUR ROTATE-AND-BACK
+flare (owner ask, 2026-08-20, PR fm/rotate-and-back-colour-flare)**: rotates
+a set-mode virtual's live foreground colour (`VirtualState.gradient`, via
+the same `spectra/services/color_rotate.rotate_color_value` the room's own
+colour-journey rotation already uses) by an intensity-scaled amount, ramps
+in to land the full rotation ON the trigger mark, dwells, then fades back
+to the exact original — his four numbers, exact:
+`scene_response.color_rotate_{degrees,ramp_ms,dwell_ms,fade_ms}` (60°→180°,
+1000ms→250ms ramp, 1000ms→400ms dwell, fade = 1.5× the ramp). Unlike every
+other kind, it carries NO authored params/gain/hold_ms — all four
+quantities are computed from the fire's own intensity, never a fifth knob
+(`FlareKind._shape` rejects any). It's a genuinely new mechanism, not a
+`_move_params` reuse: `gradient` is a scene colour assignment, never a
+`device_model` registry param, so it can't flow through the param/gain
+machinery every other momentary/permanent kind shares — this is *why* it
+composes for free alongside a shape-targeting kind in the same band (his
+"concur with some shape flares" requirement): it never touches the
+`jumps`/`glides` dicts those kinds build. Its own release queue
+(`ResponseEngine._pending_color_rotates` / `pending_color_rotate_holds` /
+`flush_color_rotates`) is separate from `_pending_releases`/
+`flush_releases` because its fade-back duration is itself intensity-scaled,
+where every other momentary release shares one fixed `PULSE_RELEASE_S` —
+wired into `engine.py`'s `fire_response_event` the same way, as a second,
+parallel scheduling loop. ANCHORING (the flare rule — ramp ends on the
+mark, not the drop rule): `trigger_engine._response_switch_lead_ms` now
+takes `max()` of the existing dice-glide lead
+(`momentary_switch_would_glide`, unchanged) and the new
+`scene_response.color_rotate_lead_ms` — a separate function because this
+kind's ramp has a real, intensity-scaled duration, so it can't share
+`momentary_switch_would_glide`'s single fixed `DICE_REROLL_GLIDE_MS`
+boolean-then-constant shape. `flare_preview.build_timeline` drains the new
+release queue too, so the scrubbing preview shows a `color_rotate` kind's
+full ramp/dwell/fade shape like any other. Declared on every scene (not
+effect-scoped like `reverse` — `gradient` exists on every set-mode virtual
+regardless of effect type — `scripts/add_color_rotate_flares.py`, dry-run
+default, never attaches to a band, his data is his to attach). Executable
+spec + real-async-timing dwell measurement + the anchoring arithmetic
+identity (`fire_at + ramp_ms == trigger mark`) + the colour/shape
+concurrency proof: `scripts/check_color_rotate.py`. Fast deterministic
+pytest coverage of the same mechanism (ramp/dwell/fade sequence on the
+real vendored blackhole effect, the two release queues' independence, the
+concurrency proof, the model's rejected-fifth-knob cases):
+`tests/test_color_rotate.py`.
+
+**The reverse flare's reported ~2x dwell overrun (905-1097ms measured live
+against an authored 500ms) was investigated as this build's test case and
+is NOT a lead-time bug**: `reverse` is toggle-typed
+(`config/effect_params.json`, `smooth: false`), so
+`momentary_switch_would_glide` structurally returns `False` for it — no
+early-write-vs-late-hold-clock gap is possible for a toggle-only momentary
+kind, proven by a code argument, not a measurement. Reproducing
+`engine.py`'s exact unmodified scheduling shape (`on_event` →
+`fire_history.record_fire` → `create_task(_release_after_hold)` →
+`asyncio.sleep(hold_s)` → `flush_releases`) against the real vendored
+Black Hole effect on `fx.headless`, with a genuine `asyncio`/wall-clock
+timer (not `flare_preview.py`'s synchronous fake-clock shortcut, which
+can't see a scheduling-layer bug by construction), measured 509-638ms
+across ten fires with an empty `fire_history`/`show_log`, and 558-685ms
+with `show_log` prefilled to its real 5000-entry cap — correct, not
+doubled, and `record_fire`'s own write cost (measured directly) is nowhere
+near large enough to explain a doubling either. The doubling was
+independently confirmed live-side to not be the legacy-engine double-fire
+path either (`legacy_trigger_engine_enabled` is `False` in his real
+process, no env override) — it reproduces on his live room only, not
+offline, which narrows it to something only a live run has (real
+concurrent fires, real device/network timing) rather than a defect in this
+scheduling code. Don't re-litigate the lead-time or `record_fire`
+theories without new evidence; the mechanism this rotate flare's own
+release queue is built on is proven correct in isolation.
+
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a drift declaration
 is authored param-agnostic (a named profile is reused across effects), so
 its lo/hi can be legal-looking but wrong for the param it lands on — e.g. a

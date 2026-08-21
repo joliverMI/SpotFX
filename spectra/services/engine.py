@@ -29,7 +29,10 @@ trigger-fired) both arrive through fire_response_event above.
 Pulse releases: the spike must land a render frame before the release glide
 starts (scene_response docstring); production schedules one release task per
 responses.pending_hold_groups() entry — a momentary kind's CHOSEN HOLD
-(hold_ms, default PULSE_HOLD_S) after each surge.
+(hold_ms, default PULSE_HOLD_S) after each surge. The colour ROTATE-AND-BACK
+flare (2026-08-20) schedules its own, separately-timed release the same way,
+off responses.pending_color_rotate_holds() — see scene_response._color_rotate's
+own docstring for why it can't share the param/gain queue above.
 """
 from __future__ import annotations
 
@@ -126,11 +129,23 @@ async def fire_response_event(event_class: str, intensity: float,
                              {"event_class": event_class, "intensity": intensity})
     for hold_s in responses.pending_hold_groups():
         asyncio.create_task(_release_after_hold(hold_s))
+    # The colour ROTATE-AND-BACK flare's own release queue (owner ask,
+    # 2026-08-20) — its fade-back duration is intensity-scaled per fire, so
+    # it can't share pending_hold_groups/_release_after_hold's fixed
+    # PULSE_RELEASE_S (see scene_response._color_rotate's own docstring).
+    # Same shape, separate queue, separate scheduling loop.
+    for dwell_s in responses.pending_color_rotate_holds():
+        asyncio.create_task(_release_color_rotate_after_dwell(dwell_s))
 
 
 async def _release_after_hold(hold_s: float) -> None:
     await asyncio.sleep(hold_s)
     await responses.flush_releases(hold_s)
+
+
+async def _release_color_rotate_after_dwell(dwell_s: float) -> None:
+    await asyncio.sleep(dwell_s)
+    await responses.flush_color_rotates(dwell_s)
 
 
 async def fire_scene_update_event(intensity: float) -> Optional[dict]:

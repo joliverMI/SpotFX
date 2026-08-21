@@ -86,6 +86,15 @@ Per event, fed by the bridge with the fire's intensity:
                   wheel position at selection, and the room journey
                   RESUMES FROM THE NEW POINT — the jump moves the story,
                   the walk carries on.
+       color_rotate — the ROTATE-AND-BACK flare (owner ask, 2026-08-20):
+                  rotates the live foreground colour's hue by an
+                  intensity-scaled amount, ramps in to land the full
+                  rotation ON the trigger mark, dwells, then fades back to
+                  the exact original — see _color_rotate's own docstring.
+                  MOMENTARY in spirit (spike-and-return) but never carries
+                  and never touches the jumps/glides dicts the param/gain
+                  kinds above share, so it composes freely alongside a
+                  shape-targeting kind in the same band.
   Stepped-effect entries (SceneDeviceConfig.effect_steps) and surges — the
   stated interplay, simple on purpose: EFFECT SELECTION IS FIRE-TIME ONLY.
   A surge never switches an entry's effect; dice re-rolls re-resolve the
@@ -128,7 +137,7 @@ from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
 from spectra.models.sequencer import CurvePoint
-from spectra.services import binding_resolver, color_journey
+from spectra.services import binding_resolver, color_journey, color_rotate
 from spectra.services import selection_kernel as kernel
 from spectra.services.binding_resolver import FireContext
 
@@ -167,13 +176,22 @@ UPDATE_RAMP_MS_GENTLE = 3000   # intensity 0.0
 UPDATE_RAMP_MS_HARD = 800      # intensity 1.0 — still a visible glide, never a snap
 
 
-def _intensity_scaled_ramp_ms(intensity: float, gentle_ms: int, hard_ms: int) -> int:
-    """Shared shape behind every intensity-scaled ramp-in in this module:
-    linear between GENTLE (intensity 0.0) and HARD (intensity 1.0), clamped.
-    A future change to the interpolation itself (easing, clamp behaviour)
-    only needs to happen here, not once per ramp family."""
+def _intensity_scaled(intensity: float, at0: float, at1: float) -> float:
+    """Shared linear-interpolation shape behind every intensity-scaled
+    quantity in this module: at0 at intensity 0.0, at1 at intensity 1.0,
+    clamped first so an out-of-range fire intensity never extrapolates past
+    either named endpoint. A future change to the interpolation itself
+    (easing, clamp behaviour) only needs to happen here, not once per
+    family."""
     frac = max(0.0, min(1.0, intensity))
-    return int(round(gentle_ms + (hard_ms - gentle_ms) * frac))
+    return at0 + (at1 - at0) * frac
+
+
+def _intensity_scaled_ramp_ms(intensity: float, gentle_ms: int, hard_ms: int) -> int:
+    """Same shape as _intensity_scaled, rounded to whole milliseconds —
+    every ramp-duration family in this module (colour jump, update, colour
+    rotate's ramp/dwell/fade) shares this rounding."""
+    return int(round(_intensity_scaled(intensity, gentle_ms, hard_ms)))
 
 
 def color_jump_ramp_ms(intensity: float) -> int:
@@ -184,6 +202,73 @@ def color_jump_ramp_ms(intensity: float) -> int:
 def update_ramp_ms(intensity: float) -> int:
     return _intensity_scaled_ramp_ms(
         intensity, UPDATE_RAMP_MS_GENTLE, UPDATE_RAMP_MS_HARD)
+
+
+# COLOUR ROTATE-AND-BACK FLARE (owner ask, 2026-08-20 — verbatim spec in
+# scripts/add_color_rotate_flares.py's own docstring): rotate the live
+# FOREGROUND colour's hue by an intensity-scaled amount, ramp in so the
+# full rotation lands ON THE TRIGGER MARK (the flare anchor rule — see
+# color_rotate_lead_ms/trigger_engine._response_switch_lead_ms), dwell,
+# then fade back to the exact original over 1.5x the (already-scaled)
+# ramp. All four numbers are his own, exact; they scale from the SAME
+# effective intensity as one mechanism — no per-kind authored knobs
+# (FlareKind.type="color_rotate" carries none, see its own docstring).
+COLOR_ROTATE_DEG_GENTLE = 60.0       # intensity 0.0
+COLOR_ROTATE_DEG_HARD = 180.0        # intensity 1.0
+COLOR_ROTATE_RAMP_MS_GENTLE = 1000   # intensity 0.0 — ramp-IN duration
+COLOR_ROTATE_RAMP_MS_HARD = 250      # intensity 1.0
+COLOR_ROTATE_DWELL_MS_GENTLE = 1000  # intensity 0.0
+COLOR_ROTATE_DWELL_MS_HARD = 400     # intensity 1.0
+COLOR_ROTATE_FADE_FACTOR = 1.5       # fade-back = 1.5x the ramp, itself scaled
+
+
+def color_rotate_degrees(intensity: float) -> float:
+    return _intensity_scaled(intensity, COLOR_ROTATE_DEG_GENTLE, COLOR_ROTATE_DEG_HARD)
+
+
+def color_rotate_ramp_ms(intensity: float) -> int:
+    return _intensity_scaled_ramp_ms(
+        intensity, COLOR_ROTATE_RAMP_MS_GENTLE, COLOR_ROTATE_RAMP_MS_HARD)
+
+
+def color_rotate_dwell_ms(intensity: float) -> int:
+    return _intensity_scaled_ramp_ms(
+        intensity, COLOR_ROTATE_DWELL_MS_GENTLE, COLOR_ROTATE_DWELL_MS_HARD)
+
+
+def color_rotate_fade_ms(intensity: float) -> int:
+    return int(round(color_rotate_ramp_ms(intensity) * COLOR_ROTATE_FADE_FACTOR))
+
+
+def color_rotate_lead_ms(scene: SceneV2, event_class: ResponseClass,
+                         intensity: float, virtuals: dict) -> int:
+    """Read-only peek for trigger_engine's lead-time alignment — the colour
+    ROTATE-AND-BACK flare's own contribution, alongside
+    momentary_switch_would_glide's fixed-duration one (see
+    trigger_engine._response_switch_lead_ms, which takes the max of both).
+    A separate function rather than folded into momentary_switch_would_glide
+    because this kind's ramp-in has a real, INTENSITY-SCALED duration
+    (color_rotate_ramp_ms), not that function's single fixed
+    DICE_REROLL_GLIDE_MS — it can't share that function's boolean-then-
+    constant shape. His own words apply the same rule momentary flares
+    already use: 'It should reach the full rotation at the trigger point' —
+    the ramp must finish ON the mark, so the fire itself must move earlier
+    by exactly the ramp's own duration. 0 when no color_rotate kind is
+    attached to the band at this intensity (true of every scene this build
+    ships against — declared, never attached; see
+    scripts/add_color_rotate_flares.py)."""
+    spec = scene.responses.get(event_class)
+    band = select_band(spec.bands, intensity) if spec else None
+    if band is None:
+        return 0
+    declared = {k.name: k for k in scene.flare_kinds}
+    lead = 0
+    for name, scale in band.kinds.items():
+        kind = declared.get(name)
+        if kind is not None and kind.type == "color_rotate":
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            lead = max(lead, color_rotate_ramp_ms(sel_intensity))
+    return lead
 
 # phase_progress ramp per class — the original program's tuned durations
 # (config.py phase_*_ramp_ms defaults): "Drop stays short — it's the snap."
@@ -344,6 +429,14 @@ class ResponseEngine:
         # different lengths before releasing (pending_hold_groups groups
         # them for the engine to schedule one release task per hold).
         self._pending_releases: list[tuple[str, str, float]] = []
+        # (virtual_id, original_gradient, dwell_s, fade_ms) — the colour
+        # ROTATE-AND-BACK flare's OWN release queue, separate from
+        # _pending_releases: its fade-back duration is itself
+        # intensity-scaled per fire (color_rotate_fade_ms), where every
+        # other momentary kind's release shares one fixed PULSE_RELEASE_S
+        # — the two can't share flush_releases' hardcoded duration. See
+        # _color_rotate's own docstring.
+        self._pending_color_rotates: list[tuple[str, str, float, int]] = []
         self._phase_armed: Optional[str] = None  # "charge"|"lull" awaiting payoff
 
     # ── the event ────────────────────────────────────────────────────────────
@@ -382,8 +475,12 @@ class ResponseEngine:
         # pass, generalized): dice first so explicit param kinds override
         # same-key rolls; permanent params before momentary so a spike on
         # the same param returns to the just-carried point; gains read the
-        # carried brightness; colour last so its landed brightness is the
-        # release target, never an enveloped one.
+        # carried brightness; colour jump then colour rotate last so a
+        # rotate (if ever attached alongside a jump) has the last word on
+        # `gradient` — rotate never conflicts with any of the param/gain
+        # kinds above it (gradient is never a device_model registry param,
+        # so it never enters their shared jumps/glides dicts — see
+        # _color_rotate's own docstring on shape/colour concurrency).
         dice = [(k, s) for k, s in attached
                 if k.type == "drift_jump" and k.jump == "dice"]
         moves = sorted(((k, s) for k, s in attached if k.params),
@@ -394,6 +491,7 @@ class ResponseEngine:
                        key=lambda ks: ks[0].type != "permanent")
         colours = [(k, s) for k, s in attached
                    if k.type == "drift_jump" and k.jump == "color_set"]
+        rotates = [(k, s) for k, s in attached if k.type == "color_rotate"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
@@ -448,6 +546,14 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type, "jump": "color_set",
                 "scale": scale, **record["color_jump"]})
 
+        if rotates:   # one rotation per fire — a spike is a spike
+            kind, scale = rotates[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            record["color_rotate"] = await self._color_rotate(sel_intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **record["color_rotate"]})
+
         record["kinds"] = kind_records
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p}
@@ -500,6 +606,8 @@ class ResponseEngine:
             record["gain_envelope"] = await self._gain(kind, 1.0, carry)
         if kind.type == "drift_jump" and kind.jump == "color_set":
             record["color_jump"] = await self._color_jump(scene, intensity, carry)
+        if kind.type == "color_rotate":
+            record["color_rotate"] = await self._color_rotate(intensity)
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
         record["result"] = "applied"
@@ -741,6 +849,115 @@ class ResponseEngine:
             await self.executor.glide(vid, state.effect_type, moves, ramp_ms)
             landed.append({"virtual_id": vid, "params": moves})
         return landed
+
+    async def _color_rotate(self, intensity: float) -> dict:
+        """The COLOUR ROTATE-AND-BACK flare (owner ask, 2026-08-20, his
+        verbatim spec in scripts/add_color_rotate_flares.py): rotate every
+        set-mode virtual's live FOREGROUND colour (state.gradient — his own
+        word; the background is a deliberately different target, untouched
+        here, unlike the colour journey's own rotation in drift_conductor.py
+        which moves both together) by an intensity-scaled number of
+        degrees, RAMPING IN so the full rotation lands ON THE TRIGGER MARK
+        (the flare anchor rule, not the drop rule — see
+        color_rotate_lead_ms/trigger_engine._response_switch_lead_ms),
+        DWELLING at the rotated colour, then FADING BACK to the exact
+        original value over 1.5x the ramp. All four quantities (degrees,
+        ramp-in, dwell, fade-back) scale together from this one effective
+        intensity — one mechanism, no fifth knob, matching his own
+        instruction.
+
+        MOMENTARY, never carried: unlike the flare colour JUMP (which picks
+        a fresh set and moves the room's story forward), a rotation is a
+        spike-and-return around the CURRENT colour — state.gradient itself
+        is left untouched at spike time (mirrors _compute_param_moves'
+        momentary branch, which never writes into `carry`/param_baseline
+        either), so a concurrent read of "the room's current colour" during
+        the dwell still sees the pre-rotation truth. The fade-back glide
+        therefore targets its own CAPTURED original, not a live baseline
+        lookup — gradient isn't a device_model registry param, so
+        _carried_value's generic machinery doesn't apply to it.
+
+        Releases through its OWN queue (_pending_color_rotates /
+        pending_color_rotate_holds / flush_color_rotates), never
+        _pending_releases/flush_releases: this kind's fade-back duration is
+        itself intensity-scaled per fire, where every existing momentary
+        kind's release shares one fixed PULSE_RELEASE_S — the two can't
+        share one queue without one of them losing its own duration.
+
+        COLOUR/SHAPE CONCURRENCY (his requirement, not a preference —
+        "should concur with some shape flares"): this method only ever
+        writes `gradient` via its own direct executor.glide call, entirely
+        outside the jumps/glides dicts _move_params/_reroll build from the
+        device_model PARAM REGISTRY (gradient is a scene colour assignment,
+        never a registered per-effect param) — so a shape-targeting
+        momentary/permanent kind attached to the SAME band still executes
+        its own jump/glide calls independently, in the same on_event pass,
+        never gated on or overwritten by this one. Proven, not assumed:
+        tests/test_color_rotate.py's concurrency proof fires a band
+        carrying both a color_rotate kind and a shape param-move kind and
+        asserts both land as separate executor writes.
+
+        A virtual with no live gradient (achromatic/rainbow, or not
+        currently set-mode) has nothing to rotate and is silently skipped,
+        matching every other colour write's "nothing to move" convention in
+        this module. A rotation that lands back on its own starting colour
+        (delta a multiple of 360°, or an unparseable/None value
+        color_rotate.rotate_color_value passes through unchanged) is also
+        skipped — nothing visible would happen and nothing should be
+        queued for release."""
+        degrees = color_rotate_degrees(intensity)
+        ramp_ms = color_rotate_ramp_ms(intensity)
+        dwell_ms = color_rotate_dwell_ms(intensity)
+        fade_ms = color_rotate_fade_ms(intensity)
+        dwell_s = dwell_ms / 1000.0
+        rotated_count = 0
+        for vid, state in self.conductor.virtuals.items():
+            if not state.set_mode or not state.gradient:
+                continue
+            original = state.gradient
+            rotated = color_rotate.rotate_color_value(original, degrees)
+            if rotated == original:
+                continue
+            await self.executor.glide(vid, state.effect_type,
+                                      {"gradient": rotated}, ramp_ms)
+            self._pending_color_rotates.append((vid, original, dwell_s, fade_ms))
+            rotated_count += 1
+        return {"degrees": round(degrees, 2), "ramp_ms": ramp_ms,
+                "dwell_ms": dwell_ms, "fade_ms": fade_ms,
+                "virtuals": rotated_count}
+
+    def pending_color_rotate_holds(self) -> list[float]:
+        """Distinct DWELLS still pending for the colour rotate-and-back
+        flare — mirrors pending_hold_groups()'s shape for this kind's own,
+        separately-timed release queue (see _color_rotate's own docstring
+        for why the two can't share one)."""
+        return sorted({dwell_s for _, _, dwell_s, _ in self._pending_color_rotates})
+
+    async def flush_color_rotates(self, dwell_s: Optional[float] = None) -> int:
+        """Fade every pending colour rotation back to its captured ORIGINAL
+        value, over ITS OWN intensity-scaled fade_ms (captured at spike
+        time — recomputing it now would need the original fire's
+        intensity, which this queue doesn't otherwise carry). dwell_s=None
+        drains every pending rotation regardless of its own dwell (test/
+        preview convenience, mirrors flush_releases); a specific dwell_s
+        drains only that dwell's group, leaving other dwells' entries
+        pending for their own release."""
+        if dwell_s is None:
+            pending, self._pending_color_rotates = self._pending_color_rotates, []
+        else:
+            due, keep = [], []
+            for entry in self._pending_color_rotates:
+                (due if entry[2] == dwell_s else keep).append(entry)
+            pending, self._pending_color_rotates = due, keep
+        count = 0
+        for vid, original, _dwell_s, fade_ms in pending:
+            state = self.conductor.virtuals.get(vid)
+            if state is None:
+                continue
+            await self.executor.glide(vid, state.effect_type,
+                                      {"gradient": original}, fade_ms)
+            count += 1
+        return count
 
     async def _gain(self, kind: FlareKind, scale: float, carry: dict,
                     *, ramp_ms: Optional[int] = None) -> list[dict]:
