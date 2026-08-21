@@ -944,19 +944,56 @@ same pass — verified from source (`fx/utils.py::nonlinear_log` is
 continuous through a sign change), not from his ask alone, and provably
 inert against `_reroll` since no live scene binds `spin` via
 `signal="random"`. **`spin_sign` ("Flip", `maps_to: spin`,
-`sign_control: true`) is INERT under SPECTRA** — that translation exists
-only in legacy `services/morph_compiler.py::_sign_control_patch`, never
-ported to `spectra/`/`fx/`, and `fx/effects/radial.py`'s real schema has
-no `spin_sign` key at all (voluptuous `extra=ALLOW_EXTRA` lets a write to
-it land as an inert, unread key) — to reverse direction under SPECTRA,
-target `spin` itself with a signed value, never `spin_sign`; see
-`config/effect_params.json`'s own note on both params. Two new named
-kinds on STAR built the same pass, declared but not band-attached
-(matching Fireworks V2's own "Reverse Direction" precedent — a human
-attaches via the Scenes page's band-strip chip, not an agent):
-"Reverse Direction" (permanent, `spin → -0.55`) and "Reverse Momentarily
-(500ms)" (momentary, `hold_ms: 500`, same target) — `-0.55` matches his
-own already-authored spin-patch magnitude, negated. Migration:
+`sign_control: true`) — INERT under SPECTRA until 2026-08-20, PORTED
+since**: originally that translation existed only in legacy
+`services/morph_compiler.py::_sign_control_patch`, never ported to
+`spectra/`/`fx/`, and `fx/effects/radial.py`'s real schema has no
+`spin_sign` key at all — a raw write targeting it would land as an inert,
+unread key (voluptuous `extra=ALLOW_EXTRA`). Two new named kinds on STAR
+built that same pass, declared but not band-attached (matching Fireworks
+V2's own "Reverse Direction" precedent — a human attaches via the Scenes
+page's band-strip chip, not an agent): "Reverse Direction" (permanent)
+and "Reverse Momentarily (500ms)" (momentary, `hold_ms: 500`) both then
+targeted `spin` directly with a signed absolute value (`-0.55`, negating
+his own already-authored spin-patch magnitude) — which worked, but
+GLIDED (spin is registry smooth=true) from +0.55 to -0.55, visibly
+crossing a real zero-speed moment: his report, precisely, "star is
+freezing on every flare... but then it continues smoothly."
+
+**PR fm/star-reverse-flare-use-flip (2026-08-20), his ask: "use the flip
+control for star"** — told the trade and taking it knowingly (no pause,
+but the turn is instant and more jarring) — is what actually ports
+`spin_sign`, rather than routing around its inertness: both kinds now
+target `spin_sign` (value 0/1), and `scene_response._compute_param_moves`
+gained a `sign_control` branch that redirects the write onto the REAL
+param (`meta["maps_to"]`, i.e. `spin`) with only its sign flipped,
+MAGNITUDE PRESERVED from `spin`'s own current carried value (never a
+fixed `-0.55` — proven against a 0.2 baseline too, not just this scene's
+coincidental 0.55) — and, critically, forces that write through
+`executor.jump()`, never `.glide()`, on BOTH the departure and the
+momentary kind's release (`_pending_releases` grew a 4th `instant: bool`
+field; `flush_releases` now splits jump/glide by it, same shape
+`_move_params` already used for the departure split). A sign flip can
+never be allowed to glide regardless of the real param's own `smooth`
+tag — that's the whole point: no continuous crossing, either direction.
+**The collision question this required answering before shipping**: a
+sign-control write and a plain absolute `spin` write (e.g. STAR's own
+untouched "Flare/Drop patch" kinds) land in the exact SAME `(vid,
+"spin")` carry slot — there is no second, independently-tracked "flip
+bit" anywhere that could disagree with `spin`'s own value and strand
+STAR reversed; the two compose by ordinary last-write-wins carry
+semantics, the same as any other two permanent kinds sharing a target
+param (`scripts/check_spectra.py`'s own collision section proves this
+directly). `config/effect_params.json`'s notes on both `spin`/`spin_sign`
+are updated in the same PR — check those, not this paragraph, for the
+current mechanism detail. Migration:
+`scripts/switch_star_reverse_flares_to_flip.py` (raw-dict patch — NOT
+`scene_console.apply_flare_kind`'s model round-trip, since this is a
+single-field edit on two ALREADY-EXISTING kinds, and a round-trip write
+of that shape silently added unwanted flare kinds to Squiggles the same
+night this PR was built; dry-run default, `--apply`, `--revert` for the
+exact one-field-back inverse). Original migration (creating the two
+kinds in the first place, still accurate for that history):
 `scripts/add_star_reverse_flares.py` (dry-run default, `--apply`,
 idempotent, goes through `scene_console.apply_flare_kind` — Sonic's own
 write path, backed up automatically — not a raw-JSON patch, since adding

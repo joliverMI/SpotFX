@@ -66,6 +66,29 @@ Per event, fed by the bridge with the fire's intensity:
                   the release itself was already an unconditional glide
                   (flush_releases, PULSE_RELEASE_S) before this fix and is
                   unaffected by it.
+                     A SIGN-CONTROL target (registry `sign_control: true`
+                  on the AUTHORED param, e.g. radial's `spin_sign`/"Flip")
+                  is the one exception to both rules above (2026-08-20,
+                  STAR's own reverse flares, owner ask: "use the flip
+                  control for star"). The write never lands on the
+                  authored key itself — LedFX has no bool to receive it,
+                  the same reason legacy's own services/morph_compiler.py
+                  ::_sign_control_patch never wrote it either — it's
+                  redirected onto the REAL param (`maps_to`, e.g. `spin`)
+                  with only its SIGN changed, magnitude preserved from
+                  that param's own current carried value. Both the spike
+                  AND the release are FORCED INSTANT (executor.jump, never
+                  glide) regardless of the real param's own registry
+                  `smooth` tag: `spin` is smooth=true (a genuine continuous
+                  register — nonlinear_log is continuous through zero), so
+                  the ORDINARY smooth-gate glide above would tween straight
+                  through zero on a sign flip, which is the exact
+                  freeze-then-continue his flare was built to fix
+                  (gliding +0.55→−0.55 passes through a real zero-speed
+                  moment). A flip is a discontinuous, one-frame direction
+                  change, not a continuous quantity change, so it can never
+                  be allowed to glide — on departure OR on return. See
+                  _compute_param_moves/_move_params/flush_releases.
        momentary/permanent gain — the brightness envelope around the
                   carried baseline at effective gain 1 + (gain − 1)·s:
                   MOMENTARY spikes to baseline×effective and glides back
@@ -408,13 +431,17 @@ class ResponseEngine:
         self._room_controls = room_controls or self._default_room_controls
 
         self.surges: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
-        # (virtual_id, param, hold_s) triples a momentary kind spiked,
-        # awaiting the release glide back to the carried baseline — hold_s
+        # (virtual_id, param, hold_s, instant) quadruples a momentary kind
+        # spiked, awaiting the release back to the carried baseline — hold_s
         # is the CHOSEN HOLD (kind.hold_ms or the PULSE_HOLD_S default) so
         # different kinds in the same surge can hold their spike for
         # different lengths before releasing (pending_hold_groups groups
         # them for the engine to schedule one release task per hold).
-        self._pending_releases: list[tuple[str, str, float]] = []
+        # instant=True (sign-control kinds only, e.g. STAR's "Flip" reverse
+        # — see the module docstring) forces flush_releases to JUMP this
+        # entry back rather than glide it; every other entry stays False,
+        # unchanged single-glide-per-virtual release.
+        self._pending_releases: list[tuple[str, str, float, bool]] = []
         # (virtual_id, original_gradient, dwell_s, fade_ms) — the colour
         # ROTATE-AND-BACK flare's OWN release queue, separate from
         # _pending_releases: its fade-back duration is itself
@@ -717,8 +744,9 @@ class ResponseEngine:
             return None if base is None else base + target.offset
         return rolled[pname]   # random — pre-rolled once, broadcast to all
 
-    def _compute_param_moves(self, kind: FlareKind, scale: float,
-                             carry: dict) -> dict[str, dict[str, float]]:
+    def _compute_param_moves(
+        self, kind: FlareKind, scale: float, carry: dict,
+    ) -> tuple[dict[str, dict[str, float]], set[tuple[str, str]]]:
         """Per-virtual param moves for one kind at this scale — the pure
         declared/scale/clamp computation. Split out of _move_params so any
         future caller needing this same math (carry/hold bookkeeping
@@ -733,6 +761,11 @@ class ResponseEngine:
         enters the carry; MOMENTARY schedules the return at its CHOSEN HOLD
         (kind.hold_ms, default PULSE_HOLD_S) instead.
 
+        Returns (moves_by_vid, forced_instant) — forced_instant is the set
+        of (vid, real_pname) pairs a SIGN-CONTROL param resolved (below):
+        _move_params/flush_releases must land these via executor.jump()
+        regardless of the real param's own registry `smooth` tag.
+
         A TOGGLE-type param (registry KIND_TOGGLE — e.g. `reverse`) can
         never be meaningfully scaled or offset (ParamTarget.value is a
         float, so an authored True/False arrives here as 1.0/0.0): its
@@ -741,18 +774,60 @@ class ResponseEngine:
         any other scale — never a bare float, which the effect's own
         CONFIG_SCHEMA (`bool` exactly, no coercion) would silently reject
         (fx/effects/__init__.py::_apply_config, validate=True logs and
-        drops the whole write rather than raising)."""
+        drops the whole write rather than raising).
+
+        A SIGN-CONTROL param (registry `sign_control: true`, e.g. radial's
+        `spin_sign`/"Flip", `maps_to: "spin"`) is likewise never
+        meaningfully scaled — a sign is binary, not a magnitude to
+        interpolate against a baseline — so it too always lands verbatim,
+        the same "can't be meaningfully scaled" convention TOGGLE already
+        uses. It targets NO real config key of its own: fx/effects/
+        radial.py's CONFIG_SCHEMA has no `spin_sign` key (confirmed —
+        that's why this translation exists rather than a bare write, same
+        as legacy's own services/morph_compiler.py::_sign_control_patch,
+        never ported here until now). Instead: resolve the declared target
+        as a tri-state (declared >= 0.5 → positive/"On", same coercion
+        TOGGLE uses), read the REAL param's current carried magnitude
+        (abs(), falling back to its registry default if never carried),
+        and land signed magnitude on the REAL param — `real_pname`, not
+        `pname` — in `moves`, `carry`, and `_pending_releases` alike, so
+        every downstream consumer (carry/param_baseline/flush_releases)
+        sees an ordinary `spin` write and needs no sign-control awareness
+        of its own. A current magnitude of 0 stays 0 (sign is meaningless),
+        matching legacy's own documented convention exactly."""
         rolled = {pname: self._rng.uniform(target.lo, target.hi)
                   for pname, target in kind.params.items()
                   if target.mode == "random"}
         hold_s = (kind.hold_ms / 1000.0 if kind.hold_ms is not None
                   else PULSE_HOLD_S)
         out: dict[str, dict[str, float]] = {}
+        forced_instant: set[tuple[str, str]] = set()
         for vid, state in self.conductor.virtuals.items():
             moves: dict[str, float] = {}
             for pname, target in kind.params.items():
                 meta = device_model.get_param_meta(state.effect_type, pname)
                 if meta is None:
+                    continue
+                if meta.get("sign_control"):
+                    real_pname = meta.get("maps_to") or pname
+                    real_meta = device_model.get_param_meta(
+                        state.effect_type, real_pname)
+                    if real_meta is None:
+                        continue
+                    declared = self._resolve_target(target, None, rolled, pname)
+                    if declared is None:
+                        continue
+                    cur = self._carried_value(vid, state, real_pname, carry)
+                    magnitude = (abs(float(cur)) if cur is not None
+                                else abs(float(real_meta.get("default") or 0.0)))
+                    value = magnitude if bool(declared) else -magnitude
+                    moves[real_pname] = value
+                    forced_instant.add((vid, real_pname))
+                    if kind.type == "permanent":
+                        carry[(vid, real_pname)] = value
+                    else:
+                        self._pending_releases.append(
+                            (vid, real_pname, hold_s, True))
                     continue
                 mkind, lo, hi = binding_resolver.kind_for_meta(meta)
                 base = None
@@ -781,10 +856,10 @@ class ResponseEngine:
                 if kind.type == "permanent":
                     carry[(vid, pname)] = value
                 else:
-                    self._pending_releases.append((vid, pname, hold_s))
+                    self._pending_releases.append((vid, pname, hold_s, False))
             if moves:
                 out[vid] = moves
-        return out
+        return out, forced_instant
 
     def _move_params(self, kind: FlareKind, scale: float,
                      jumps: dict, glides: dict, carry: dict) -> list[dict]:
@@ -803,13 +878,21 @@ class ResponseEngine:
         lookup, dice and a patch targeting the SAME param always agree on
         which dict it lands in — precedence (patch overrides dice) falls
         out of plain dict.update() ordering (moves execute after dice),
-        with no risk of a value landing in both."""
+        with no risk of a value landing in both. A sign-control kind's move
+        (forced_instant, from _compute_param_moves) always lands in
+        `jumps` regardless of the real target param's own registry smooth
+        tag — a sign flip is never allowed to glide, see that function's
+        and the module's own docstring for why."""
         landed: list[dict] = []
-        for vid, moves in self._compute_param_moves(kind, scale, carry).items():
+        moves_by_vid, forced_instant = self._compute_param_moves(kind, scale, carry)
+        for vid, moves in moves_by_vid.items():
             state = self.conductor.virtuals.get(vid)
             instant: dict[str, Any] = {}
             eased: dict[str, Any] = {}
             for pname, value in moves.items():
+                if (vid, pname) in forced_instant:
+                    instant[pname] = value
+                    continue
                 meta = (device_model.get_param_meta(state.effect_type, pname)
                         if state is not None else None)
                 mkind, _lo, _hi = binding_resolver.kind_for_meta(meta)
@@ -952,7 +1035,7 @@ class ResponseEngine:
             if kind.type == "momentary":
                 await self.executor.jump(vid, state.effect_type,
                                          {"brightness": peak})
-                self._pending_releases.append((vid, "brightness", hold_s))
+                self._pending_releases.append((vid, "brightness", hold_s, False))
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
@@ -1022,22 +1105,31 @@ class ResponseEngine:
         in the same surge each release on their own schedule. A surge with
         every kind at the PULSE_HOLD_S default returns exactly one group —
         today's unchanged single-task shape."""
-        return sorted({hold_s for _, _, hold_s in self._pending_releases})
+        return sorted({hold_s for _, _, hold_s, _ in self._pending_releases})
 
     async def flush_releases(self, hold_s: Optional[float] = None) -> int:
         """Issue pending momentary releases — every spiked (virtual, param)
-        glides back to its baseline AS CARRIED NOW (a colour jump or
-        permanent kind in the same surge may have moved it; a creep kept
-        wandering — the release honors the carry, never a stale snapshot).
-        hold_s=None drains EVERY pending release regardless of its authored
-        hold (test/preview convenience and a final drain point — the /api/
+        returns to its baseline AS CARRIED NOW (a colour jump or permanent
+        kind in the same surge may have moved it; a creep kept wandering —
+        the release honors the carry, never a stale snapshot). hold_s=None
+        drains EVERY pending release regardless of its authored hold
+        (test/preview convenience and a final drain point — the /api/
         engine/event dark injector uses this to settle immediately); a
         specific hold_s (production: engine._release_after_hold, one task
         per pending_hold_groups() entry) drains only that hold's group,
         leaving other holds' entries pending for their own release.
         Production schedules the default group PULSE_HOLD_S after the
         spike (services/engine.py); specs call it directly once the spike
-        has provably landed. Returns virtuals released."""
+        has provably landed.
+
+        Every release GLIDES back over PULSE_RELEASE_S, EXCEPT an entry
+        flagged instant=True (sign-control kinds only — STAR's own "Flip"
+        reverse, see the module docstring): that one JUMPS, same reasoning
+        as its own departure in _move_params — the real target param
+        (e.g. `spin`) is a genuine numeric register, so an ordinary glide
+        back to baseline would tween continuously through zero exactly
+        like the bug this flare exists to avoid, on the way BACK this
+        time. Returns virtuals released (union of both groups)."""
         if hold_s is None:
             pending, self._pending_releases = self._pending_releases, []
         else:
@@ -1045,20 +1137,25 @@ class ResponseEngine:
             for entry in self._pending_releases:
                 (due if entry[2] == hold_s else keep).append(entry)
             pending, self._pending_releases = due, keep
-        by_vid: dict[str, dict[str, float]] = {}
-        for vid, pname, _hold_s in dict.fromkeys(pending):
+        jump_by_vid: dict[str, dict[str, float]] = {}
+        glide_by_vid: dict[str, dict[str, float]] = {}
+        for vid, pname, _hold_s, instant in dict.fromkeys(pending):
             state = self.conductor.virtuals.get(vid)
             if state is None:
                 continue
             target = self._carried_value(vid, state, pname, {})
             if target is None:
                 continue
-            by_vid.setdefault(vid, {})[pname] = target
-        for vid, params in by_vid.items():
+            dest = jump_by_vid if instant else glide_by_vid
+            dest.setdefault(vid, {})[pname] = target
+        for vid, params in jump_by_vid.items():
+            state = self.conductor.virtuals[vid]
+            await self.executor.jump(vid, state.effect_type, params)
+        for vid, params in glide_by_vid.items():
             state = self.conductor.virtuals[vid]
             await self.executor.glide(vid, state.effect_type, params,
                                       int(PULSE_RELEASE_S * 1000))
-        return len(by_vid)
+        return len(set(jump_by_vid) | set(glide_by_vid))
 
     async def _drive_phase(self, event_class: str,
                            gap_ms: Optional[int] = None) -> dict:

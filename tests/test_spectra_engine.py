@@ -1064,6 +1064,96 @@ def test_momentary_toggle_param_flare_lands_a_real_bool_and_releases(tmp_path):
     _run(main())
 
 
+# ── STAR's reverse flare: the FLIP control, not a signed glide ───────────────
+
+def test_star_reverse_flare_flip_lands_with_no_pause_and_restores_direction(tmp_path):
+    """STAR's reverse flares switched mechanism 2026-08-20 (his own words:
+    "use the flip control for star", the trade told to him and taken
+    knowingly: no pause, more jarring). Proves BOTH halves of his stated
+    proof standard, on the REAL vendored `radial` effect:
+
+      1. the turn lands with NO PAUSE — the sign flips within the very
+         next rendered frame, never a multi-frame glide. `spin` is
+         registry smooth=true (a genuine continuous nonlinear_log register,
+         AGENTS.md's own retag note), so the OLD mechanism (an absolute
+         `spin: -0.55` patch) would glide over DICE_REROLL_GLIDE_MS and
+         visibly pass through zero along the way — the exact freeze his
+         flare exists to fix. A sign-control target (`spin_sign`) is
+         instead forced through executor.jump() regardless of that tag
+         (scene_response._compute_param_moves/_move_params), so there is
+         no intermediate frame to ever catch mid-crossing.
+      2. STAR is running its ORIGINAL direction after the flare RELEASES —
+         the release is ALSO forced through jump() (flush_releases), not
+         the ordinary glide every other momentary kind's release uses, for
+         the identical reason: gliding back would re-cross zero on the way
+         home. The reverse flare has a KNOWN, unexplained real-room
+         release-timing overrun (905-1097ms measured against a 500ms
+         hold) on the TOGGLE-typed reverse kinds elsewhere — independently
+         investigated and found to be a live-room-only scheduling
+         question, not a wrong landed value (see AGENTS.md). This test
+         proves the value ITSELF lands correctly, which is what an offline
+         harness can prove; the live room is where the timing question
+         gets settled."""
+    from spectra.models.scene import (FlareBand, FlareKind, ResponseSpec,
+                                      SceneDeviceConfig, SceneV2)
+    _categories_fixture(tmp_path)
+    scene = SceneV2(
+        name="Star",
+        devices=[SceneDeviceConfig(
+            target_kind="virtual", target=VID, effect_type="radial",
+            params={"spin": 0.55})],
+        flare_kinds=[
+            FlareKind(name="Reverse Momentarily (500ms)", type="momentary",
+                      hold_ms=500,
+                      params={"spin_sign": {"mode": "absolute", "value": 0.0}}),
+        ],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=1.0,
+                      kinds={"Reverse Momentarily (500ms)": 1.0}),
+        ])})
+
+    async def main():
+        host, virtual = await _host(tmp_path, "star-flip")
+        try:
+            with headless.fake_clock() as clock:
+                config = {"spin": 0.55}
+                effect = headless.attach_effect(host, virtual, "radial", config)
+                executor, conductor, responder, _ = _engine(clock)
+                _fire(conductor, scene, config)
+
+                record = await responder.on_event("flare", 0.5)
+                moved = record["kinds"][0]["moved"][0]["params"]["spin"]
+                assert moved == -0.55   # magnitude preserved, sign flipped
+                assert "spin_sign" not in record["kinds"][0]["moved"][0]["params"]
+
+                # NO PAUSE: the sign lands within the very NEXT rendered
+                # frame — a glide (the old mechanism) would still be
+                # mid-tween here, passing through a near-zero value.
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["spin"] == pytest.approx(-0.55)
+                assert effect.spin < 0   # config_updated re-derived the sign
+
+                # Rendering well past where the old DICE_REROLL_GLIDE_MS
+                # glide would still have been mid-flight: the value never
+                # moves off -0.55, because there is no interpolation left
+                # to run — it already landed on the first frame.
+                headless.render_frames(virtual, 20, clock=clock, dt=1 / 60)
+                assert effect._config["spin"] == pytest.approx(-0.55)
+
+                released = await responder.flush_releases(0.5)
+                assert released == 1
+                # RESTORES ORIGINAL DIRECTION, also with no pause: the
+                # release is a jump, not a glide back through zero.
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect._config["spin"] == pytest.approx(0.55)
+                assert effect.spin > 0
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
 # ── offline guarantee ────────────────────────────────────────────────────────
 
 def test_no_audio_hardware_was_touched():

@@ -656,7 +656,7 @@ check(res.devices[0].params["spin"] == 0.55,
 # ═══ S2 — the evolution engine ═══════════════════════════════════════════════
 
 from spectra.services.drift_conductor import DriftConductor
-from spectra.services.fx_executor import RecordingExecutor
+from spectra.services.fx_executor import JUMP_MS, RecordingExecutor
 from spectra.services.scene_response import (DICE_REROLL_GLIDE_MS,
                                               ResponseEngine, select_band)
 from spectra.services import color_journey as cj
@@ -1491,20 +1491,25 @@ check(back["params"]["twist"] == 0.25
       "the release returns the spike to the baseline AS CARRIED NOW — "
       "twist to its own, brightness to the colour roll's landing")
 
-# ── STAR's two reverse flares (owner ask 2026-08-17): permanent + 500ms
-# momentary, both targeting `spin` (radial's own signed direction+speed
-# param — spin_sign is inert under SPECTRA, see config/effect_params.json's
-# own note). Proven here against the SAME synthetic radial fixture
-# (resp_base's device shape), not live storage — scripts/
-# add_star_reverse_flares.py carries the identical kind shapes.
+# ── STAR's two reverse flares (owner ask 2026-08-17, mechanism switched to
+# the FLIP control 2026-08-20, his words: "use the flip control for star"):
+# permanent + 500ms momentary, both now targeting `spin_sign` (radial's
+# "Flip") instead of driving `spin` negative directly. spin_sign is
+# translated by scene_response._compute_param_moves onto the REAL param
+# (spin) with only its sign changed, magnitude preserved, forced INSTANT
+# (jump, never glide) on both departure and release — see spin_sign's own
+# registry note and the module docstring. Proven here against the SAME
+# synthetic radial fixture (resp_base's device shape), not live storage —
+# scripts/update_star_reverse_flares_to_flip.py carries the identical kind
+# shapes.
 reverse_direction_kind = {
     "name": "Reverse Direction", "type": "permanent", "jump": None,
-    "params": {"spin": {"mode": "absolute", "value": -0.55}}, "gain": 1.0,
+    "params": {"spin_sign": {"mode": "absolute", "value": 0.0}}, "gain": 1.0,
     "hold_ms": None,
 }
 reverse_momentary_kind = {
     "name": "Reverse Momentarily (500ms)", "type": "momentary", "jump": None,
-    "params": {"spin": {"mode": "absolute", "value": -0.55}}, "gain": 1.0,
+    "params": {"spin_sign": {"mode": "absolute", "value": 0.0}}, "gain": 1.0,
     "hold_ms": 500,
 }
 check(FlareKind(**reverse_direction_kind).jump is None
@@ -1532,12 +1537,16 @@ rec_mom = asyncio.run(responder.on_event("flare", 0.3))
 check({k["name"] for k in rec_mom["kinds"]} == {"Reverse Momentarily (500ms)"},
       "Reverse Momentarily (500ms) is the only kind attached at 0.3")
 mom_spike = [w for w in exec2.writes if "spin" in w["params"]]
-check(len(mom_spike) == 3 and all(w["kind"] == "glide" for w in mom_spike)
-      and all(w["params"]["spin"] == -0.55 for w in mom_spike)
-      and all(w["duration_ms"] == DICE_REROLL_GLIDE_MS for w in mom_spike),
-      "the 500ms reverse EASES to -0.55 (spin retagged smooth=true "
-      "2026-08-17) — a jump here would be the exact snap this scene's "
-      "fix was for")
+check(len(mom_spike) == 3 and all(w["kind"] == "jump" for w in mom_spike)
+      and all(w["params"]["spin"] == -abs(spin_before) for w in mom_spike)
+      and all(w["duration_ms"] == JUMP_MS for w in mom_spike),
+      "the 500ms reverse JUMPS to -spin_before (the FLIP: magnitude "
+      "preserved, sign flipped, no interpolation) — spin is registry "
+      "smooth=true, so an ordinary glide here would tween through zero, "
+      "the exact freeze the flip control was chosen to avoid")
+check(all("spin_sign" not in w["params"] for w in exec2.writes),
+      "the write lands on spin itself, never the (structurally inert) "
+      "spin_sign key — radial.py's CONFIG_SCHEMA has no such key")
 check(conductor2.virtuals["v-m1"].param_baseline.get("spin") == spin_before,
       "MOMENTARY reverse never moves spin's baseline")
 check(all("star" not in w["params"] and "edges" not in w["params"]
@@ -1545,27 +1554,117 @@ check(all("star" not in w["params"] and "edges" not in w["params"]
       "the momentary reverse touches only spin — no star/edges write of "
       "any kind lands, so it cannot reintroduce the dice-reroll snap")
 asyncio.run(responder.flush_releases())
-mom_release = [w for w in exec2.writes if w["kind"] == "glide"
+mom_release = [w for w in exec2.writes if w["kind"] == "jump"
               and "spin" in w["params"]][-1]
-check(mom_release["params"]["spin"] == spin_before,
-      "the 500ms reverse RELEASES back to spin's carried baseline, "
-      "unchanged since the spike never carried")
+check(mom_release["params"]["spin"] == spin_before
+      and mom_release["duration_ms"] == JUMP_MS,
+      "the 500ms reverse RELEASES back to spin's carried baseline via a "
+      "JUMP too, not a glide — proves the return half of 'no pause': a "
+      "glide back would re-cross zero exactly like the bug this flare "
+      "exists to fix, just on the way home instead of the way out")
 
 exec2.writes.clear()
 rec_perm = asyncio.run(responder.on_event("flare", 0.7))
 check({k["name"] for k in rec_perm["kinds"]} == {"Reverse Direction"},
       "Reverse Direction is the only kind attached at 0.7")
 perm_writes = [w for w in exec2.writes if "spin" in w["params"]]
-check(len(perm_writes) == 3 and all(w["kind"] == "glide" for w in perm_writes)
-      and all(w["params"]["spin"] == -0.55 for w in perm_writes),
-      "Reverse Direction EASES spin to -0.55, same smooth gate as the "
-      "500ms kind")
-check(conductor2.virtuals["v-m1"].param_baseline.get("spin") == -0.55,
-      "Reverse Direction CARRIES — -0.55 becomes spin's new baseline, "
-      "matching the model's own permanent-kind contract")
+check(len(perm_writes) == 3 and all(w["kind"] == "jump" for w in perm_writes)
+      and all(w["params"]["spin"] == -abs(spin_before) for w in perm_writes),
+      "Reverse Direction JUMPS spin to -spin_before, same forced-instant "
+      "transport as the 500ms kind")
+check(conductor2.virtuals["v-m1"].param_baseline.get("spin")
+      == -abs(spin_before),
+      "Reverse Direction CARRIES — the sign-flipped value becomes spin's "
+      "new baseline, matching the model's own permanent-kind contract")
 check(all("star" not in w["params"] and "edges" not in w["params"]
           for w in exec2.writes),
       "Reverse Direction touches only spin too")
+
+# ── magnitude preservation is DERIVED, not a hardcoded -0.55: prove it
+# against a differently-baselined spin, or the assertions above could pass
+# by coincidence (his real scene's own baseline happens to be 0.55) ────────
+rev2 = SceneV2(**{**{k: v for k, v in resp_base.items()
+                     if k not in ("responses", "id", "flare_kinds", "devices")},
+                  "devices": [{**resp_base["devices"][0],
+                               "params": {**resp_base["devices"][0]["params"],
+                                          "spin": 0.2}}],
+                  "flare_kinds": [reverse_direction_kind],
+                  "responses": {"flare": {"bands": [
+                      {"intensity_min": 0.0, "intensity_max": 1.0,
+                       "kinds": {"Reverse Direction": 1.0}}]}}})
+exec_mag = RecordingExecutor()
+cond_mag = DriftConductor(executor=exec_mag, drift_profiles=lambda: {},
+                          curve_profiles=lambda: {},
+                          room_load=lambda: cj.RoomColorState(),
+                          room_save=lambda st: None,
+                          set_position=lambda sid: None)
+resp_mag = ResponseEngine(conductor=cond_mag, executor=exec_mag, rng=Random(1),
+                          sequencer_config=lambda: SequencerConfig(),
+                          room_load=lambda: cj.RoomColorState(),
+                          room_save=lambda st: None)
+rev2_writes = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(rev2, FireContext(0.5, rng=Random(3))))
+cond_mag.on_scene_fire(rev2, rev2_writes)
+check(cond_mag.virtuals["v-m1"].param_baseline.get("spin") == 0.2,
+      "fixture sanity: this scene's spin baseline is 0.2, not 0.55")
+asyncio.run(resp_mag.on_event("flare", 0.7))
+low_mag_writes = [w for w in exec_mag.writes if "spin" in w["params"]]
+check(low_mag_writes and all(w["params"]["spin"] == -0.2
+                             for w in low_mag_writes),
+      "the flip lands -0.2 here, NOT -0.55 — magnitude tracks spin's own "
+      "current carried value, it is never a fixed authored number")
+
+# ── the collision question: can the flip and a plain signed write to spin
+# disagree and leave it stuck the wrong way? No — both land on the exact
+# SAME (vid, 'spin') carry slot, so they compose by ordinary last-write-
+# wins semantics, the same as any two permanent kinds sharing a target
+# param; there is no second, independently-tracked "flip bit" that could
+# go stale. Proven directly: fire Reverse Direction (flips to negative),
+# then an ordinary absolute `spin` patch (mirrors STAR's own untouched
+# "Flare/Drop patch" kinds, which always author a POSITIVE spin) — the
+# later fire wins outright, exactly as the carry contract already
+# guarantees for every other param collision in this engine ─────────────
+plain_patch_kind = {
+    "name": "Flare patch 0.7–1 (untouched, synthetic)", "type": "permanent",
+    "jump": None, "params": {"spin": {"mode": "absolute", "value": 0.55}},
+    "gain": 1.0, "hold_ms": None,
+}
+collide = SceneV2(**{**{k: v for k, v in resp_base.items()
+                        if k not in ("responses", "id", "flare_kinds")},
+                     "flare_kinds": [reverse_direction_kind, plain_patch_kind],
+                     "responses": {"flare": {"bands": [
+                         {"intensity_min": 0.0, "intensity_max": 1.0,
+                          "kinds": {"Reverse Direction": 1.0}}]}}})
+exec_collide = RecordingExecutor()
+cond_collide = DriftConductor(executor=exec_collide, drift_profiles=lambda: {},
+                              curve_profiles=lambda: {},
+                              room_load=lambda: cj.RoomColorState(),
+                              room_save=lambda st: None,
+                              set_position=lambda sid: None)
+resp_collide = ResponseEngine(conductor=cond_collide, executor=exec_collide,
+                              rng=Random(1),
+                              sequencer_config=lambda: SequencerConfig(),
+                              room_load=lambda: cj.RoomColorState(),
+                              room_save=lambda st: None)
+collide_writes = scene_compiler.compile_scene(
+    scene_compiler.resolve_scene(collide, FireContext(0.5, rng=Random(3))))
+cond_collide.on_scene_fire(collide, collide_writes)
+asyncio.run(resp_collide.on_event("flare", 0.9))   # Reverse Direction fires
+check(cond_collide.virtuals["v-m1"].param_baseline.get("spin") < 0,
+      "Reverse Direction alone leaves spin negative")
+# The plain patch kind is not attached to any band here (STAR's real scene
+# never attaches it alongside Reverse Direction on the same band either —
+# this is a direct-call proof of the carry mechanics, not a re-enactment
+# of STAR's own band layout), so fire it via fire_kind() the same way
+# Sonic's flare preview does.
+plain_kind_obj = FlareKind(**plain_patch_kind)
+asyncio.run(resp_collide.fire_kind(plain_kind_obj, 1.0))
+check(cond_collide.virtuals["v-m1"].param_baseline.get("spin") == 0.55,
+      "a later plain absolute write to spin wins outright — LAST WRITE "
+      "WINS, the same carry semantics every other param collision in "
+      "this engine already has; there is no separate spin_sign state "
+      "left pointing 'reversed' that could disagree with spin's own "
+      "value and strand STAR running the wrong way")
 
 # ── the bridge: classification, feeds, deferral split, RAW section energy ────
 from spectra.services import analysis_reader
