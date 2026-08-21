@@ -173,11 +173,39 @@ export interface FlarePreviewTimeline {
   animation_start_s: number | null;
   animation_end_s: number | null;
   duration_s: number;
+  /** Where "the animation starts" is drawn/fires each loop — a fixed
+   * ruler-layout position, computed server-side (spectra/services/
+   * flare_preview.animation_anchor_s) so the ruler draw and the live-fire
+   * loop below read the SAME number, never two independently-derived
+   * ones. trigger_mark_s is derived from it via the kind's own
+   * trigger_offset_ms (HIS sign convention — see FlareKind.
+   * trigger_offset_ms's docstring, spectra/models/scene.py): negative
+   * offset fires earlier (mark to the right of anchor), positive fires
+   * later (mark to the left), 0 = coincident. */
+  animation_anchor_s: number;
+  trigger_mark_s: number;
   writes: FlarePreviewWrite[];
 }
 
+export interface FlarePreviewFireResult {
+  held: boolean;
+  first_open?: boolean;
+  fire_record?: Record<string, unknown>;
+}
+
+/** Computes the timeline ONLY — no live fire. Call on mount and whenever
+ * intensity changes; the live fire is a separate call (fireFlarePreview),
+ * timed by the frontend's own playhead loop to land on animation_anchor_s
+ * each cycle, never here (see spectra/api/flare_preview.py's module
+ * docstring for why open/fire split apart). */
 export const openFlarePreview = (sceneId: string, kindName: string, intensity: number) =>
   apiPost<FlarePreviewTimeline>('/flare-preview/open',
+    { scene_id: sceneId, kind_name: kindName, intensity });
+
+/** The live half — fires scene+kind for real and holds it. Called once
+ * per loop cycle by FlarePreviewOverlay's playhead effect, not on open. */
+export const fireFlarePreview = (sceneId: string, kindName: string, intensity: number) =>
+  apiPost<FlarePreviewFireResult>('/flare-preview/fire',
     { scene_id: sceneId, kind_name: kindName, intensity });
 
 export const heartbeatFlarePreview = () =>

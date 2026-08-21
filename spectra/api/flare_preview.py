@@ -4,18 +4,36 @@ correction, same day — see spectra/services/flare_preview_hold.py's own
 docstring for the full history of why the hold is not optional: previewing
 a flare with no live component left his real fixtures showing nothing).
 
+OPEN AND FIRE ARE SEPARATE CALLS (2026-08-21, data/preview-loops-and-
+fires-on-the-trigger — his report: "the preview only happens once, it
+should happen every time, and it should fire with the same timing as if
+the playhead was crossing a trigger"). Before this, /open did both in one
+call — computed the timeline AND fired live, instantly, regardless of
+where the drawn trigger mark sat. Now:
+
   POST /api/flare-preview/open       {scene_id, kind_name, intensity} —
-      computes the isolated single-kind timeline (spectra/services/
-      flare_preview.build_timeline, unchanged, still purely computed — the
-      browser's scrub/markers) AND fires the scene + kind for real
-      (flare_preview_hold.open_hold) so his fixtures show what the timeline
-      predicts, then arms the "automatically pauses the trigger engine"
-      preview_pause for HEARTBEAT_TIMEOUT_S. OPENING A PREVIEW THEREFORE
-      STOPS HIS LIVE SHOW: with the trigger engine paused, any triggers
-      firing mid-song go silent for as long as the preview stays open.
-      Call again (same session) whenever the intensity slider changes —
-      each call recomputes the timeline, re-fires scene+kind live at the
-      new value, and re-arms the pause.
+      computes the isolated single-kind timeline ONLY (spectra/services/
+      flare_preview.build_timeline — the browser's scrub/markers, incl.
+      the new animation_anchor_s/trigger_mark_s fields) and arms the
+      "automatically pauses the trigger engine" preview_pause for
+      HEARTBEAT_TIMEOUT_S. Does NOT fire live — no light changes yet.
+      OPENING A PREVIEW STILL STOPS HIS LIVE SHOW the instant it opens
+      (the pause is unconditional, ahead of any actual fire): with the
+      trigger engine paused, any triggers firing mid-song go silent for as
+      long as the preview stays open. Call again whenever the intensity
+      slider changes — recomputes the timeline at the new value (still no
+      live fire; the frontend resets its playhead and waits for the mark
+      like a fresh open).
+  POST /api/flare-preview/fire       {scene_id, kind_name, intensity} —
+      the live half: fires the scene + kind for real
+      (flare_preview_hold.open_hold) so his fixtures show what the
+      timeline predicts, and re-arms the pause. The frontend calls this
+      once per loop cycle, timed to land exactly when its own simulated
+      playhead crosses animation_anchor_s — never on open itself, and
+      every loop, not once — so a fresh preview waits for its own trigger
+      mark before anything changes, then repeats that same wait on every
+      subsequent lap, "the same timing as if the playhead was crossing a
+      trigger."
   POST /api/flare-preview/heartbeat  {} — re-arms the pause AND the live
       hold's own release DEADLINE, without recomputing/re-firing anything;
       the frontend pings this on an interval shorter than
@@ -39,6 +57,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from spectra.models.scene import FlareKind, SceneV2
 from spectra.services import (flare_preview, flare_preview_hold,
                               preview_pause, scene_store)
 
@@ -60,23 +79,34 @@ class OpenRequest(BaseModel):
     intensity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
-@router.post("/open")
-async def open_preview(body: OpenRequest):
-    scene = scene_store.get_by_id(body.scene_id)
+def _resolve_scene_and_kind(scene_id: str, kind_name: str) -> tuple[SceneV2, FlareKind]:
+    scene = scene_store.get_by_id(scene_id)
     if scene is None:
         raise HTTPException(404, "scene not found")
-    kind = next((k for k in scene.flare_kinds if k.name == body.kind_name), None)
+    kind = next((k for k in scene.flare_kinds if k.name == kind_name), None)
     if kind is None:
         raise HTTPException(404, "flare kind not found on scene")
+    return scene, kind
+
+
+@router.post("/open")
+async def open_preview(body: OpenRequest):
+    scene, kind = _resolve_scene_and_kind(body.scene_id, body.kind_name)
     timeline = await flare_preview.build_timeline(scene, kind, body.intensity)
+    preview_pause.start(HEARTBEAT_TIMEOUT_S)
+    return timeline
+
+
+@router.post("/fire")
+async def fire_preview(body: OpenRequest):
+    scene, kind = _resolve_scene_and_kind(body.scene_id, body.kind_name)
     try:
         hold = await flare_preview_hold.open_hold(
             scene, kind, body.intensity, heartbeat_timeout_s=HEARTBEAT_TIMEOUT_S)
     except Exception as exc:
         raise HTTPException(502, f"live preview fire failed: {exc}")
     preview_pause.start(HEARTBEAT_TIMEOUT_S)
-    timeline["live"] = hold
-    return timeline
+    return hold
 
 
 @router.post("/heartbeat")

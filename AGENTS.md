@@ -2439,11 +2439,13 @@ future code that seeds a conductor this way.
 
 API: `spectra/api/flare_preview.py` — `POST /open` (computes the
 timeline, arms `preview_pause` — see that module's docstring, now a
-second caller alongside `room_preview.py`), `POST /heartbeat` (re-arms;
-the frontend pings this every 5s while the overlay is open), `POST
-/close`. "Automatically pauses the trigger engine" is this pause, kept
-alive only by the heartbeat — no fixed-duration timer covers "however
-long he leaves the overlay open."
+second caller alongside `room_preview.py` — does NOT fire live, see the
+TRUE SIMULATION entry below), `POST /fire` (the live half — the ONLY
+caller of `flare_preview_hold.open_hold`, called once per loop cycle by
+the frontend), `POST /heartbeat` (re-arms; the frontend pings this every
+5s while the overlay is open), `POST /close`. "Automatically pauses the
+trigger engine" is this pause, kept alive only by the heartbeat — no
+fixed-duration timer covers "however long he leaves the overlay open."
 
 Frontend: `spectra/web/src/scenes/tabs/FlarePreviewOverlay.tsx`, opened
 from a "▶ Preview" button on each flare-kind card in `ResponseTab.tsx`.
@@ -2453,17 +2455,18 @@ showing start and end of animation" — deliberately not the same line):
 the TRIGGER mark is draggable and DEFAULTS to coincident with the
 computed animation start; the START/END markers are fixed, computed,
 never dragged. Dragging the trigger mark writes `FlareKind.
-trigger_offset_ms` (`spectra/models/scene.py`, signed ms, default 0) via
-`setScene` — a real scene-DRAFT edit, saved by the page's own Save
-button like any other field, not a preview-only value discarded on
-close. **This field is DESCRIPTIVE ONLY today — no fire path reads it.**
-The real, live schedule-lead computation is `trigger_engine.py`'s own
+trigger_offset_ms` (`spectra/models/scene.py`, signed ms, default 0,
+**HIS sign convention** — negative = fire earlier, positive = fire
+later, see the TRUE SIMULATION entry below for the full ruling and the
+inverted-sign defect it corrects) via `setScene` — a real scene-DRAFT
+edit, saved by the page's own Save button like any other field, not a
+preview-only value discarded on close. **No longer descriptive only as
+of 2026-08-21 — this field is what the live preview's own fire loop
+schedules from** (see below). `trigger_engine.py`'s own production
 lookahead-lead system (a scheduled song trigger against `lead_ms`/
-`anchor_frac`, a different mechanism entirely reading live registry
-state, not a stored per-kind field) — this field is where his own tuning
-conclusion from watching the preview lives so it survives the session;
-wiring it into a live fire path is future work, not assumed here. Don't
-conflate the two when this area comes up again.
+`anchor_frac`, live registry state, not this stored per-kind field) is
+still a separate mechanism this field does not feed. Don't conflate the
+two when this area comes up again.
 
 Help: `spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`
 (under the `scenes-page` section, next to `flare-kind-edit-box`),
@@ -2563,26 +2566,67 @@ there is no second process that could legitimately hold a flare preview
 open, so a leftover snapshot found at startup is unconditionally stale
 and always gets landed back.
 
-Snapshotting happens once per session (the first `/open` call): every
-subsequent `/open` in the same session (an intensity-slider change)
-re-fires scene+kind live at the new value without re-snapshotting, so a
-later revert always restores the ORIGINAL pre-preview state, never a
-mid-session one. API surface unchanged in shape (`spectra/api/
-flare_preview.py`'s `/open`/`/heartbeat`/`/close`), now also invoking
-`flare_preview_hold`'s `open_hold`/`touch`/`close_hold` alongside the
-existing `preview_pause`/timeline calls; `/open` raises HTTP 502 on a
-live-write failure (ownership refusal, an unreachable LedFX) rather than
-silently arming a pause with nothing shown. Help (`spectra/web/src/help/
-helpContent.ts` id `flare-preview-timeline`) leads with what opening a
-preview does to the room (real lights, paused live show, ~17s worst-case
-auto-revert) before any control explanation — Order 20: a feature whose
-help contradicts what it now does has not shipped. Proof bar: a real
-headless render pipeline (`fx.headless` + `fx.facade`, ownership=spectra —
-the same rig `test_room_preview.py` already uses), reading a written
-value off a live `virtual.active_effect.config`, never a
-`RecordingExecutor`'s own write log. Tests: `tests/
-test_flare_preview_hold.py` (fire+release, mid-session re-fire, deadline
-lapse + sweep, `run_supervised()` end-to-end, restart recovery).
+Snapshotting happens once per session (the first live fire — see the
+TRUE SIMULATION rebuild below for what "first" means now): every
+subsequent live fire in the same session re-fires scene+kind at the
+current value without re-snapshotting, so a later revert always restores
+the ORIGINAL pre-preview state, never a mid-session one. Help
+(`spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`) leads
+with what opening a preview does to the room (real lights, paused live
+show, ~17s worst-case auto-revert) before any control explanation —
+Order 20: a feature whose help contradicts what it now does has not
+shipped. Proof bar: a real headless render pipeline (`fx.headless` +
+`fx.facade`, ownership=spectra — the same rig `test_room_preview.py`
+already uses), reading a written value off a live
+`virtual.active_effect.config`, never a `RecordingExecutor`'s own write
+log. Tests: `tests/test_flare_preview_hold.py` (fire+release, mid-session
+re-fire, deadline lapse + sweep, `run_supervised()` end-to-end, restart
+recovery) — `open_hold()` itself is unchanged by the rebuild below, only
+who calls it and when.
+
+**TRUE SIMULATION — loop + fire-on-the-mark (2026-08-21, PR
+fm/preview-loops-and-fires-on-the-trigger, his report: "the preview only
+happens once, it should happen every time, and it should fire with the
+same timing as if the playhead was crossing a trigger").** Before this,
+`/open` did two things in one call — computed the (hardware-free) ruler
+timeline AND fired live, INSTANTLY, regardless of where the drawn trigger
+mark sat: the drawing knew about the mark, the firing didn't.
+`spectra/api/flare_preview.py` now splits this: `POST /open` computes the
+timeline only (still arms `preview_pause`, no live write) and `POST
+/fire` is the sole caller of `flare_preview_hold.open_hold`. The frontend
+(`FlarePreviewOverlay.tsx`) calls `/fire` once per loop, timed by its
+existing RAF playhead loop to land exactly when the playhead crosses
+`animation_anchor_s` — a new field in `build_timeline`'s response
+(`spectra/services/flare_preview.animation_anchor_s`/`trigger_mark_s`,
+computed server-side so the ruler draw and the fire schedule are
+ONE source of truth, never two independently-derived numbers). Firing at
+the anchor every cycle is definitionally "lead `offset_ms`
+early/late relative to the trigger mark's own crossing," since
+`trigger_mark_s` is DEFINED from the anchor via the offset — there is no
+second lead-time computation to keep in sync.
+
+**The sign-convention fix this exposed, HIS RULING (same PR, corrected a
+genuine inversion in the 2026-08-20 original build):** negative
+`trigger_offset_ms` = fire earlier, positive = fire later, 0 =
+coincident; dragging the trigger marker RIGHT makes the offset MORE
+NEGATIVE. The original build had `trigger_mark_s = anchor + offset/1000`
+(the opposite sign) — caught before any real value existed to migrate:
+all 61 of his real flare kinds carried 0 at the time, confirmed by a
+parallel live-data audit before the fix shipped, so nothing of his was
+flipped. `FlareKind.trigger_offset_ms` is NO LONGER descriptive-only — it
+is what the live preview loop schedules its fires from now (his
+scene-change/trigger-level equivalent, `SpectraTrigger.trigger_offset_ms`
+on `spectra/models/trigger.py`, same field/units/sign, stays descriptive
+only — no authoring UI yet, `trigger_engine.py` doesn't read it; his ask
+was schema parity, not a live-wiring change to the production trigger
+clock). If you touch this area again: `trigger_mark_s =
+animation_anchor_s - trigger_offset_ms/1000` is the ONE formula (spectra/
+services/flare_preview.py) — never re-derive it independently in the
+frontend or you will reintroduce exactly this class of bug. Tests:
+`scripts/check_flare_preview.py` (the sign proof, both directions),
+`tests/test_flare_preview_api.py` (the open/fire route split),
+`tests/test_spectra_trigger_offset_field.py` (the trigger-model field
+shape).
 
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 

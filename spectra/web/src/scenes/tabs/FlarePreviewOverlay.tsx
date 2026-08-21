@@ -1,23 +1,30 @@
 /** The flare scrubbing-preview timeline (owner ask, flares first —
  * data/timeline-preview-scrub-flares-and-drop-sequences/HIS-VERBATIM-
- * WORDS.md), NOW WITH A LIVE HOLD (owner correction, same day —
- * spectra/services/flare_preview_hold.py's own docstring has the full
- * history). Opened from a "▶ Preview" button on a flare kind card
- * (ResponseTab.tsx). /flare-preview/open does two things: computes a
- * deterministic write timeline for this ONE kind (spectra/services/
- * flare_preview.py, still hardware-free — the ruler/scrub/loop below plays
- * this locally, no repeated backend calls per frame) AND, separately,
- * fires this card's scene + kind for REAL onto his fixtures and holds
- * them there for as long as this overlay stays open. Closing (or losing
- * the tab/connection — see the heartbeat block below) reverts his room to
- * exactly what it showed before the preview opened.
+ * WORDS.md), a TRUE SIMULATION (owner correction 2026-08-21, data/
+ * preview-loops-and-fires-on-the-trigger — spectra/services/
+ * flare_preview_hold.py's own docstring has the full history). Opened
+ * from a "▶ Preview" button on a flare kind card (ResponseTab.tsx). Open
+ * computes a deterministic write timeline for this ONE kind (spectra/
+ * services/flare_preview.py, still hardware-free — the ruler/scrub/loop
+ * below plays this locally, no repeated backend calls per frame) — that
+ * alone never touches his fixtures. The LIVE fire is a separate call
+ * (fireFlarePreview), issued by the playhead effect below once per loop,
+ * timed to land exactly when the simulated playhead crosses
+ * `animation_anchor_s` — never on open, and every lap, not once: "it
+ * should happen every time... with the same timing as if the playhead was
+ * crossing a trigger." Closing (or losing the tab/connection — see the
+ * heartbeat block below) reverts his room to exactly what it showed
+ * before the preview opened.
  *
  * Two independent marker kinds, per his brief:
  *   - the TRIGGER mark (draggable) — where he considers this kind
  *     "fired." Dragging it writes SceneV2.flare_kinds[].trigger_offset_ms
- *     via onTriggerOffsetChange — this is a real scene-draft EDIT, saved
- *     by the page's own Save button like any other field, not a
- *     preview-only, forgotten-on-close exploration.
+ *     via onTriggerOffsetChange, HIS sign convention (negative = fires
+ *     earlier, positive = later, 0 = coincident — see FlareKind.
+ *     trigger_offset_ms's own docstring, spectra/models/scene.py, for the
+ *     full ruling) — this is a real scene-draft EDIT, saved by the page's
+ *     own Save button like any other field, not a preview-only,
+ *     forgotten-on-close exploration.
  *   - the ANIMATION START/END markers (fixed, computed) — read straight
  *     off the real production timing constants (DICE_REROLL_GLIDE_MS,
  *     hold_ms, PULSE_RELEASE_S, GAIN_GLIDE_S, the colour-jump ramp). This
@@ -25,18 +32,25 @@
  *     gap readout below the ruler states, in milliseconds, how far the
  *     trigger sits from where the effect actually starts moving.
  *
+ * animAnchorS/triggerMarkS below are read straight off the backend's own
+ * `animation_anchor_s`/`trigger_mark_s` (spectra/services/flare_preview.py)
+ * rather than re-derived client-side — ONE source of truth for "where does
+ * the animation start:" the ruler draw and the live-fire loop's real-time
+ * schedule can never silently disagree on it.
+ *
  * "Automatically pauses the trigger engine": /flare-preview/open arms
  * preview_pause for as long as this overlay stays mounted, kept alive by
  * a heartbeat (server timeout is generous — a missed beat or two doesn't
  * un-pause under it) and explicitly released on close/unmount/tab-close.
- * Since the hold above is now a real fire, the SAME heartbeat also keeps
+ * Since the loop below issues real fires, the SAME heartbeat also keeps
  * the live hold's own server-side revert timer armed — a lapsed heartbeat
  * (closed browser, dropped connection) reverts his room automatically,
  * not just un-pauses the trigger engine. */
 import { useEffect, useRef, useState } from 'react';
 import HelpLink from '../../help/HelpLink';
 import {
-  closeFlarePreview, closeFlarePreviewBeacon, heartbeatFlarePreview, openFlarePreview,
+  closeFlarePreview, closeFlarePreviewBeacon, fireFlarePreview, heartbeatFlarePreview,
+  openFlarePreview,
 } from '../../queries';
 import type { FlarePreviewTimeline, FlarePreviewWrite } from '../../queries';
 import type { FlareKind } from '../../types';
@@ -76,16 +90,39 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   const [error, setError] = useState<string | null>(null);
   const [durationS, setDurationS] = useState(6.0);
   const [animAnchorS, setAnimAnchorS] = useState(2.0);
-  const [triggerMarkS, setTriggerMarkS] = useState(2.0 + kind.trigger_offset_ms / 1000);
+  const [triggerMarkS, setTriggerMarkS] = useState(2.0 - kind.trigger_offset_ms / 1000);
   const [playheadS, setPlayheadS] = useState(0);
   const [playing, setPlaying] = useState(true);
   const rulerRef = useRef<SVGSVGElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
   const initializedMarksRef = useRef(false);
+  // Mirrors playheadS for the fire-loop effect below to read synchronously
+  // (that effect deliberately does NOT depend on playheadS itself — doing
+  // so would restart the RAF loop, and therefore the fire schedule, on
+  // every single frame). Kept in sync everywhere playheadS is set.
+  const playheadRef = useRef(0);
+  // The real-time deadline (performance.now() domain) for the NEXT live
+  // fire — recomputed from playheadRef whenever the loop (re)starts, so it
+  // never drifts out of sync with what's drawn (see the effect below).
+  const nextFireAtRef = useRef<number | null>(null);
+  // Read by the fire loop without needing to be a RAF-effect dependency —
+  // an intensity slider drag must not restart the loop/fire schedule on
+  // every tick, only the debounced timeline-refetch effect below does that.
+  const fireParamsRef = useRef({ sceneId, kindName: kind.name, intensity });
+  useEffect(() => {
+    fireParamsRef.current = { sceneId, kindName: kind.name, intensity };
+  }, [sceneId, kind.name, intensity]);
 
-  // ── fetch a fresh timeline whenever intensity changes (debounced) —
-  // also (re)arms preview_pause on the server. ──────────────────────────
+  // ── fetch a fresh (dark) timeline whenever intensity changes (debounced)
+  // — also (re)arms preview_pause on the server. NEVER fires live here —
+  // his report was that the live fire used to happen "almost as soon as
+  // the preview started" instead of waiting for the mark, so even the
+  // FIRST fire (not just subsequent loops) now waits for the playhead to
+  // reach animAnchorS. An intensity change restarts the playhead at 0 and
+  // clears the fire schedule, so the next fire (at the new intensity)
+  // waits for the mark exactly like a fresh open, rather than firing
+  // immediately at the slider's new position. ────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
@@ -94,13 +131,15 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           if (cancelled) return;
           setTimeline(tl);
           setError(null);
-          const anchor = Math.min(2.0, tl.duration_s / 3);
-          setAnimAnchorS(anchor);
+          setAnimAnchorS(tl.animation_anchor_s);
           setDurationS((prev) => (initializedMarksRef.current ? Math.max(prev, tl.duration_s) : tl.duration_s));
           if (!initializedMarksRef.current) {
-            setTriggerMarkS(Math.max(0, Math.min(tl.duration_s, anchor + kind.trigger_offset_ms / 1000)));
+            setTriggerMarkS(tl.trigger_mark_s);
             initializedMarksRef.current = true;
           }
+          setPlayheadS(0);
+          playheadRef.current = 0;
+          nextFireAtRef.current = null;
         })
         .catch((e) => !cancelled && setError(String(e)));
     }, 200);
@@ -121,18 +160,43 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
     };
   }, []);
 
-  // ── play/loop: advance the playhead in real time, wrap at durationS ───
+  // ── play/loop: advance the playhead in real time, wrap at durationS, AND
+  // fire the kind live for real exactly when the playhead crosses
+  // animAnchorS — every lap, not once on open, "the same timing as if the
+  // playhead was crossing a trigger." The next-fire deadline is derived
+  // fresh from the CURRENT playhead position every time this effect
+  // (re)starts (pause/resume, an Extend, a fresh timeline after an
+  // intensity change) rather than carried across restarts, so it can never
+  // drift out of phase with what's drawn. Pausing/scrubbing stops the fire
+  // loop too (scrubRuler below sets playing=false), matching "scrubbing
+  // never sends anything further to your fixtures." ──────────────────────
   useEffect(() => {
-    if (!playing) { lastFrameRef.current = null; return undefined; }
+    if (!playing || !timeline) { lastFrameRef.current = null; return undefined; }
+    const delayToAnchorS = animAnchorS >= playheadRef.current
+      ? animAnchorS - playheadRef.current
+      : durationS - playheadRef.current + animAnchorS;
+    nextFireAtRef.current = performance.now() + delayToAnchorS * 1000;
+    const fireLive = () => {
+      const { sceneId: sid, kindName, intensity: it } = fireParamsRef.current;
+      fireFlarePreview(sid, kindName, it).catch((e) => setError(String(e)));
+    };
     const step = (now: number) => {
       if (lastFrameRef.current != null) {
         const dt = (now - lastFrameRef.current) / 1000;
         setPlayheadS((prev) => {
           const next = prev + dt;
-          return next >= durationS ? next % durationS : next;
+          const wrapped = next >= durationS ? next % durationS : next;
+          playheadRef.current = wrapped;
+          return wrapped;
         });
       }
       lastFrameRef.current = now;
+      if (nextFireAtRef.current != null && now >= nextFireAtRef.current) {
+        fireLive();
+        // advance by whole periods (never a burst of catch-up fires if a
+        // backgrounded tab caused a huge single dt)
+        while (nextFireAtRef.current <= now) nextFireAtRef.current += durationS * 1000;
+      }
       rafRef.current = requestAnimationFrame(step);
     };
     rafRef.current = requestAnimationFrame(step);
@@ -140,7 +204,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       lastFrameRef.current = null;
     };
-  }, [playing, durationS]);
+  }, [playing, durationS, animAnchorS, timeline]);
 
   const xToS = (clientX: number): number => {
     const svg = rulerRef.current;
@@ -162,7 +226,11 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       const s = xToS(ev.clientX);
-      onTriggerOffsetChange(Math.round((s - animAnchorS) * 1000));
+      // HIS sign convention (ruling 2026-08-21): negative offset = fire
+      // earlier (mark right of anchor), positive = later (mark left) —
+      // offset = animAnchorS - markS. Mirrors flare_preview.trigger_mark_s
+      // (spectra/services/flare_preview.py), which computes the inverse.
+      onTriggerOffsetChange(Math.round((animAnchorS - s) * 1000));
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -171,8 +239,14 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   const scrubRuler = (e: React.PointerEvent) => {
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     setPlaying(false);
-    setPlayheadS(xToS(e.clientX));
-    const move = (ev: PointerEvent) => setPlayheadS(xToS(ev.clientX));
+    const s0 = xToS(e.clientX);
+    setPlayheadS(s0);
+    playheadRef.current = s0;
+    const move = (ev: PointerEvent) => {
+      const s = xToS(ev.clientX);
+      setPlayheadS(s);
+      playheadRef.current = s;
+    };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -265,7 +339,9 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, marginTop: 4 }}>
               <button onClick={() => setPlaying((p) => !p)}>{playing ? '⏸ Pause' : '▶ Play'}</button>
-              <span style={{ color: 'var(--text-muted)' }}>↻ loops at {fmtS(durationS)}</span>
+              <span style={{ color: 'var(--text-muted)' }}>
+                ↻ loops & re-fires live every {fmtS(durationS)} — pausing stops both
+              </span>
               <button onClick={() => setDurationS((d) => Math.min(MAX_DURATION_S, d + EXTEND_STEP_S))}
                 disabled={durationS >= MAX_DURATION_S}>
                 ⇥ Extend +{EXTEND_STEP_S}s
@@ -282,7 +358,10 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
                 where this kind's animation actually starts moving
                 {animEndAbs != null && <> — the visible effect runs for {fmtMs(animEndAbs - animStartAbs)} total</>}.
                 Drag the trigger line to test a different alignment; it saves onto this kind's
-                own trigger_offset_ms (Save the scene to keep it).
+                own trigger_offset_ms (Save the scene to keep it) — drag it right to fire
+                earlier (negative), left to fire later (positive). The live fire is timed to
+                this same mark: it waits for the white playhead to reach the accent-coloured
+                "start" line before it fires, every loop.
               </div>
             )}
 
