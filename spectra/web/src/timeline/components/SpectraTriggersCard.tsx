@@ -56,6 +56,7 @@ export default function SpectraTriggersCard({
             }}>
             + Add Trigger
           </button>
+          <HelpLink topic="spectra-trigger-authoring" title="Placing & editing" />
           <button style={{ fontSize: 12 }}
             title="Seed/refresh mid-song triggers from this song's analysis — idempotent, never touches a trigger you've edited or placed by hand"
             disabled={generateMutation.isPending}
@@ -68,10 +69,15 @@ export default function SpectraTriggersCard({
             })}>
             {generateMutation.isPending ? 'Generating…' : '⟳ Generate'}
           </button>
+          <HelpLink topic="spectra-trigger-generate" title="Generating from analysis" />
           <HelpLink topic="spectra-triggers" title="SPECTRA trigger authoring" />
         </span>
       }
     >
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>
+        <span>Marker colours <HelpLink topic="spectra-trigger-colours" title="Marker colours" /></span>
+        <span>Fires on the xcorr-synced clock <HelpLink topic="spectra-trigger-sync" title="When a trigger actually fires" /></span>
+      </div>
       <SpectraTriggerBar
         durationMs={durationMs}
         triggers={list}

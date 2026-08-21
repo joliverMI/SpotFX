@@ -39,6 +39,9 @@ export default function SummaryTab({ scene, setScene, goTo }: {
 
   return (
     <div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Summary <HelpLink topic="tab-summary" />
+      </div>
       <div className="field" style={{ maxWidth: 420 }}>
         <label>Labels (comma separated)</label>
         <LabelsInput value={scene.labels ?? []} placeholder="e.g. mid-group, particle"

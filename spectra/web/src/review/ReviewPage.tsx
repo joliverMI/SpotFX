@@ -113,7 +113,9 @@ export default function ReviewPage() {
           </div>
         ) : (
           <>
-            <div className="review-picker-label">Session</div>
+            <div className="review-picker-label">
+              Session <HelpLink topic="review-session-song" title="Picking a session and song" />
+            </div>
             <div className="review-session-picker">
               {sessions.map((s) => (
                 <button
@@ -141,7 +143,7 @@ export default function ReviewPage() {
         <>
           <CollapsibleCard
             id="review-lane"
-            title="Show + notes"
+            title={<>Show + notes <HelpLink topic="review-lane-and-list" title="The lane bar and the list" /></>}
             headerExtra={
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 {timeline.length} item{timeline.length === 1 ? '' : 's'}

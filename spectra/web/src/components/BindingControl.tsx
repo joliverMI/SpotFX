@@ -11,6 +11,7 @@ import type { ReactNode } from 'react';
 import type { BindingStep, SignalName, ValueBinding } from '../types';
 import { isBinding } from '../types';
 import { Checkbox, NumberInput, Select } from './inputs';
+import HelpLink from '../help/HelpLink';
 
 export type ValueKind = 'number' | 'toggle' | 'option';
 
@@ -92,6 +93,7 @@ export function BindingEditor({ binding, onChange, kind, options }: {
                   display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ color: 'var(--accent)' }}>{isRandom ? '🎲 random' : '⚡ signal'}</span>
+        <HelpLink topic="bindings" title="Value bindings" />
         {wideSignal ? (
           <span className="chip" title="An agent-authored signal beyond this page's menu — edit via the agent">
             {wideSignal}
@@ -111,12 +113,17 @@ export function BindingEditor({ binding, onChange, kind, options }: {
               onChange={(v) => set({ dice: v === '' ? null : v })}
               options={[{ value: '', label: '—' },
                         ...DICE_LETTERS.map((l) => ({ value: l, label: l.toUpperCase() }))]} />
+            <HelpLink topic="binding-dice" title="Correlated dice" />
           </>
         )}
         {!stepsOnly && (
-          <Select value={binding.mode} width={90}
-            onChange={(v) => set({ mode: v as 'map' | 'steps' })}
-            options={[{ value: 'map', label: 'map' }, { value: 'steps', label: 'steps' }]} />
+          <>
+            <Select value={binding.mode} width={90}
+              onChange={(v) => set({ mode: v as 'map' | 'steps' })}
+              options={[{ value: 'map', label: 'map' }, { value: 'steps', label: 'steps' }]} />
+            <HelpLink topic={binding.mode === 'map' ? 'binding-map' : 'binding-steps'}
+              title={binding.mode === 'map' ? 'Map mode' : 'Steps mode'} />
+          </>
         )}
         {kind === 'number' && (
           <button title="Random sign — the result flips to negative 50% of the time (per fire). Clamped fields still clamp after the flip."
@@ -187,6 +194,7 @@ export function BindingEditor({ binding, onChange, kind, options }: {
             onChange={(v) => set({
               fallback: v ? (kind === 'number' ? 0 : kind === 'toggle' ? false : options?.[0] ?? '') : null,
             })} />
+          <HelpLink topic="binding-fallback" title="Fallback" />
           {binding.fallback !== null && (
             <StepValueInput kind={kind} value={binding.fallback} options={options}
               onChange={(v) => set({ fallback: v })} />

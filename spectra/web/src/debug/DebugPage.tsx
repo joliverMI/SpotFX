@@ -339,6 +339,7 @@ export default function DebugPage() {
               onChange={() => void toggleAnalyzedOverride()} />
             Analyzed override
           </label>
+          <HelpLink topic="debug-analyzed-override" title="Analyzed override" />
           <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
             {uri ?? ''}
           </span>
@@ -348,6 +349,7 @@ export default function DebugPage() {
           offsetMs={timing.shape_offset_ms != null ? Number(timing.shape_offset_ms) : null}
           quality={timing.shape_offset_quality != null ? Number(timing.shape_offset_quality) : null}
         />
+        <HelpLink topic="debug-lock" title="Lock badge & live nudge" />
       </div>
 
       {/* ── Audio Shape (saved up / live down) ── */}

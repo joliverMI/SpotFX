@@ -21,6 +21,7 @@ import GradientEditor2D, { type XMode } from './GradientEditor2D';
 import GradientSquarePreview from './GradientSquarePreview';
 import TopBarGroupButton from './TopBarGroupButton';
 import { useToast } from './Toast';
+import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
 import {
   useGradient2dProfiles, useRoomControls, useSaveGradient2dProfiles, useSaveRoomControls,
@@ -123,7 +124,7 @@ export default function DriftGradientBar() {
       holdToExpand={false}
       title="Drift gradient — the two-dimensional colour space the room drifts through"
       ariaLabel="Drift gradient"
-      panelTitle="Drift gradient"
+      panelTitle={<>Drift gradient <HelpLink topic="drift-gradient" /></>}
       panel={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 300 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 6 }}>

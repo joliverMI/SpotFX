@@ -124,6 +124,9 @@ export default function DriftTab({ scene, setScene }: {
 
   return (
     <div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Drift <HelpLink topic="tab-drift" />
+      </div>
       {/* ── Colour journey ── */}
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         Colour journey <HelpLink topic="color-journey" />
@@ -132,18 +135,21 @@ export default function DriftTab({ scene, setScene }: {
         {journey.mode === 'inherit' ? (
           <>
             <span className="badge badge-gray" style={{ marginRight: 8 }}>inherits the room</span>
+            <HelpLink topic="journey-inherit" title="Inherit and pace" />{' '}
             The room's palette always heads for a <b>destination</b> colour set (picked by the
-            selector: curve × genre × wheel-travel) at a reference pace of <b>{roomPace}°/min</b>
+            selector: curve × genre × wheel-travel) <HelpLink topic="journey-destination" title="Destinations and pace" />{' '}
+            at a reference pace of <b>{roomPace}°/min</b>
             — the destination fixes its own travel speed from how far away it is, and on
             arrival the next destination is picked
             {journey.pace_factor !== 1 && (
               <> — this scene scales the pace <b>×{journey.pace_factor}</b>
                 {journey.pace_factor === 0 && ' (holds the walk while it shows)'}</>
-            )}.
+            )}. Rainbow sets pause the walk entirely <HelpLink topic="journey-rainbow" title="Rainbow sets pause the walk" />.
           </>
         ) : (
           <>
             <span className="badge badge-purple" style={{ marginRight: 8 }}>OVERRIDE</span>
+            <HelpLink topic="journey-override" title="Override — a scene takes the pen" />{' '}
             While this scene shows, it steers the wheel itself — same destination model,
             but destinations are picked <b>within this scene's own palette bounds</b> (its
             accepted sets), at its own reference pace of{' '}

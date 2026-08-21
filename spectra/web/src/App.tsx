@@ -8,6 +8,7 @@ import { confirmLeave } from './lib/unsavedGuard';
 import ColorSetsPage from './colorsets/ColorSetsPage';
 import FeedbackPage from './feedback/FeedbackPage';
 import HelpPage from './help/HelpPage';
+import { topicForPath } from './help/routeTopics';
 import ReviewPage from './review/ReviewPage';
 import ScenesPage from './scenes/ScenesPage';
 import SettingsConsolePage from './settings/SettingsConsolePage';
@@ -40,6 +41,8 @@ function usePageTitle() {
 function NavBar() {
   const { pathname } = useLocation();
   const cls = (match: (p: string) => boolean) => (match(pathname) ? 'active' : '');
+  const helpTopic = topicForPath(pathname);
+  const helpTo = helpTopic ? `/help?topic=${encodeURIComponent(helpTopic)}` : '/help';
   return (
     // Capture-phase so the unsaved-changes guard runs before any Link handler.
     <nav onClickCapture={(e) => {
@@ -59,7 +62,7 @@ function NavBar() {
       <Link to="/debug" className={cls((p) => p === '/debug')}>Debug</Link>
       <Link to="/settings" className={cls((p) => p === '/settings')}>Settings</Link>
       <Link to="/status" className={cls((p) => p === '/status')}>Status</Link>
-      <Link to="/help" className="help-link" title="Help" aria-label="Help">?</Link>
+      <Link to={helpTo} className="help-link" title="Help for this page" aria-label="Help">?</Link>
     </nav>
   );
 }

@@ -19,12 +19,16 @@ export default function StatusPage() {
           <div className="empty-note">Loading…</div>
         ) : (
           <div className="meta-grid">
-            <div><div className="k">Increment</div>{st.increment} — evolution engine live (dark against lights)</div>
+            <div><div className="k">Increment <HelpLink topic="concept-increments" title="What works today" /></div>{st.increment} — evolution engine live (dark against lights)</div>
             <div><div className="k">Scenes</div>{st.scenes}</div>
-            <div><div className="k">Light ownership</div>
+            <div><div className="k">Light ownership <HelpLink topic="ownership" title="Light ownership & handover" /></div>
               <span className="badge badge-gray" title="One system owns the lights at a time; the S3 handover is the owner's call">
                 {st.light_ownership}
               </span>
+              <HelpLink topic="ownership-record" title="Reading the state" />
+              <HelpLink topic="ownership-liveness" title="The liveness endpoint" />
+              <HelpLink topic="ownership-handover" title="How the switch works" />
+              <HelpLink topic="ownership-resume" title="Restarts while SPECTRA owns" />
             </div>
             <div><div className="k">Music bridge</div>
               {st.bridge_connected ? 'connected (read-only)' : 'down — intensity holds at 0.5 neutral'}

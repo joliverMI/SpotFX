@@ -26,12 +26,12 @@ export default function EngineStatusStrip() {
       flexWrap: 'wrap', padding: '8px 12px', fontSize: 12,
     }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-        Engine <HelpLink topic="engine" />
+        Engine <HelpLink topic="engine" /><HelpLink topic="engine-strip" title="The Engine strip" />
       </span>
       {st.dark && (
         <span className="badge badge-purple"
           title="The evolution engine computes and records every leg and surge, but no write reaches the lights — live execution arrives with the S3 handover (owner's call)">
-          dark — recording
+          dark — recording <HelpLink topic="engine-dark" title="Dark — recording, not driving" />
         </span>
       )}
 
@@ -92,6 +92,7 @@ export default function EngineStatusStrip() {
         <span style={{ color: 'var(--text-muted)' }}
           title="Most recent response event and what it did">
           last surge: {surge.class} @ {surge.intensity.toFixed(2)} → {surge.result}
+          <HelpLink topic="engine-surges" title="Surges — how a response executes" />
         </span>
       )}
 
@@ -105,6 +106,7 @@ export default function EngineStatusStrip() {
           && ` · i=${st.bridge.intensity.toFixed(2)}`}
         {st.bridge.connected && st.bridge.last_event?.class
           && ` · ${st.bridge.last_event.class}`}
+        <HelpLink topic="engine-bridge" title="The read-only bridge" />
       </span>
     </div>
   );
