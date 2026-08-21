@@ -26,28 +26,28 @@ BAND_ANCHORS = np.array([0.0, 1 / 3, 2 / 3], dtype=np.float32)
 BAND_JITTER = 0.06
 # charge/lull/drop choreography (SpotFX drives `phase` + ramps
 # `phase_progress`; see _phase_step)
+DROP_FALLBACK_S = 0.45   # drop completes on this timer if no progress ramp
 DROP_RESET_S = 0.5       # post-burst ease of the horizon back to baseline
 PHASE_BURST_N = 48       # blobs in the drop explosion (his ask: at least 2x
                          # the original 24)
 # His ask, verbatim: "the timing is good on black hole, but the speed of
 # the explosion after the implosion needs to be 2 times faster." Scoped to
 # exactly the post-pinch outward burst (_phase_burst's blobs, tagged
-# p_is_burst) — NOT the whole drop (the horizon's post-burst ease-back is
-# still DROP_RESET_S, untouched). The burst's own LANDING point on the
-# trigger's timestamp is a separate question from this multiplier — it
-# used to be pinned by this same comment (progress-gated, `p >= 0.995`);
-# that anchor was superseded 2026-08-20 (drop anchors its START to the
-# mark now, not its end — see _phase_step's own docstring) and this
-# multiplier is unaffected either way: it only scales what happens AFTER
-# the burst fires, never when. Applied as a matched pair in _phase_burst
-# (halves the p_out outward-flight duration) and draw()'s out_mask branch
-# (doubles velocity only for p_is_burst particles): halving time while
-# doubling speed covers the SAME outward distance in half the time — the
-# explosion reaches the same size it always did, just twice as fast,
-# rather than reaching twice as far in the same time (a bigger burst, not
-# a faster one — not what was asked). _erupt_burst's cross-effect handoff
-# eruptions reuse the same out_mask/p_out mechanism but are never tagged
-# p_is_burst, so they are untouched by this multiplier.
+# p_is_burst) — NOT the implosion (the pinch itself is paced by
+# phase_progress/DROP_FALLBACK_S, untouched) and NOT the whole drop (the
+# horizon's post-burst ease-back is still DROP_RESET_S, untouched). The
+# burst still FIRES at the exact instant it always did (_phase_step's
+# p >= 0.995 check is unchanged), so the drop's landing point on the
+# trigger's timestamp does not move — only what happens after ignition
+# speeds up. Applied as a matched pair in _phase_burst (halves the p_out
+# outward-flight duration) and draw()'s out_mask branch (doubles velocity
+# only for p_is_burst particles): halving time while doubling speed covers
+# the SAME outward distance in half the time — the explosion reaches the
+# same size it always did, just twice as fast, rather than reaching twice
+# as far in the same time (a bigger burst, not a faster one — not what was
+# asked). _erupt_burst's cross-effect handoff eruptions reuse the same
+# out_mask/p_out mechanism but are never tagged p_is_burst, so they are
+# untouched by this multiplier.
 PHASE_BURST_SPEED_MULT = 2.0
 CHARGE_HALO_LEAD = 1.4   # halo (capture ring) growth vs the black disc
 
@@ -798,23 +798,18 @@ class Blackhole2d(Twod, GradientEffect):
             if drop is None:
                 drop = self._drop = {"burst_t": None}
             if drop["burst_t"] is None:
-                # DROP ANCHORS ITS START TO THE MARK (his ruling,
-                # 2026-08-20, data/drops-still-fire-early-star-does-not-
-                # explode/ — Black Hole was tried as the "known-good" drop
-                # reference and then withdrawn when he found it early too):
-                # the burst fires on the very first _phase_step after
-                # entering "drop", unconditionally — the SAME shape
-                # orbits.py's own drop branch already used (its
-                # `burst_done` flag). This REPLACES the old progress-gated
-                # pinch-then-burst (`p >= 0.995`, DROP_FALLBACK_S) that
-                # anchored the payoff to the RAMP'S END instead — that
-                # anchor was his own prior ask, and is now superseded, not
-                # merely unused: don't reintroduce it.
-                drop["burst_t"] = 0.0
-                self.p_cap[: self.n] = -1.0
-                self._restore_phase_overrides()
-                if not drop.get("silent"):
-                    self._phase_burst()
+                # pinch: progress-driven, with a wall-clock fallback so the
+                # payoff can never be lost to a dropped ramp
+                p = max(
+                    self.phase_progress,
+                    min(self._phase_t / DROP_FALLBACK_S, 1.0),
+                )
+                if p >= 0.995:
+                    drop["burst_t"] = 0.0
+                    self.p_cap[: self.n] = -1.0
+                    self._restore_phase_overrides()
+                    if not drop.get("silent"):
+                        self._phase_burst()
             else:
                 drop["burst_t"] += dt
                 if drop["burst_t"] >= DROP_RESET_S:
@@ -828,12 +823,7 @@ class Blackhole2d(Twod, GradientEffect):
 
     def _phase_spawn_paused(self, rh):
         """Ambient spawning pauses while the panel is swallowed (lull, late
-        charge). The drop clause is a defensive no-op in the current
-        design (burst_t lands in the same _phase_step call that enters
-        "drop" — see that method — so there is no live pre-burst window
-        left to pause spawning during); kept so a future change to when
-        the burst fires doesn't silently let ambient spawn clutter the
-        payoff's very first frame again."""
+        charge) and during the drop pinch — the payoff burst starts clean."""
         if self._phase == "lull":
             return True
         if self._phase == "charge" and rh >= 1.0:
@@ -868,13 +858,16 @@ class Blackhole2d(Twod, GradientEffect):
             )
         if phase == "lull":
             return top
-        # drop: the burst fires (and the horizon starts easing back from
-        # zero) on the very first frame of the phase — see _phase_step's
-        # own docstring on why there is no pre-burst pinch state left to
-        # compute here.
+        # drop
         drop = self._drop
-        burst_t = drop["burst_t"] if drop is not None else 0.0
-        return base * min(burst_t / DROP_RESET_S, 1.0)
+        if drop is not None and drop["burst_t"] is not None:
+            # post-burst: ease back up to the configured baseline
+            return base * min(drop["burst_t"] / DROP_RESET_S, 1.0)
+        p = max(
+            self.phase_progress,
+            min(getattr(self, "_phase_t", 0.0) / DROP_FALLBACK_S, 1.0),
+        )
+        return top * (1.0 - p) ** 2
 
     def _phase_halo(self, out, rh):
         """Explicit halo ring painted at the horizon radius. The blob-built
@@ -889,13 +882,15 @@ class Blackhole2d(Twod, GradientEffect):
             w = 0.05 + 0.17 * p    # half-thickness (normalized radius)
             b = 0.30 + 0.70 * p    # brightness scale
         elif phase == "drop":
-            # post-burst fade only — the burst fires on the phase's first
-            # frame (see _phase_step), so there is no pre-burst pinch state
-            # left for the halo to render here.
             drop = self._drop
-            burst_t = drop["burst_t"] if drop is not None else 0.0
-            w = 0.10
-            b = 0.6 * max(1.0 - burst_t / DROP_RESET_S, 0.0)
+            if drop is not None and drop.get("burst_t") is not None:
+                # post-burst: fade out as the horizon eases back
+                w = 0.10
+                b = 0.6 * max(1.0 - drop["burst_t"] / DROP_RESET_S, 0.0)
+            else:
+                # pinch: full-charge thickness, full bright, collapsing
+                w = 0.22
+                b = 1.0
         else:
             return
         if b <= 0.0:
