@@ -112,7 +112,19 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   // not a failure. Stops the fire loop (setPlaying(false)) so it doesn't
   // keep polling a room the server has already stopped holding.
   const [holdExpired, setHoldExpired] = useState(false);
-  const onHoldExpired = () => { setHoldExpired(true); setPlaying(false); };
+  // Ref twin of holdExpired for the timeline-refetch .then below — that
+  // closure's own state value can be stale by the time the fetch resolves
+  // (the debounce + network sit between them), and it must know whether the
+  // loop was stopped by the CEILING (revive it — the /open it just made
+  // cleared the server's ceiling lock and began a genuine new session) or
+  // by his own ⏸ Pause (leave it paused — an intensity change while
+  // deliberately paused must never restart the live firing).
+  const holdExpiredRef = useRef(false);
+  const onHoldExpired = () => {
+    holdExpiredRef.current = true;
+    setHoldExpired(true);
+    setPlaying(false);
+  };
   const [durationS, setDurationS] = useState(6.0);
   const [animAnchorS, setAnimAnchorS] = useState(2.0);
   const [fireAtS, setFireAtS] = useState(2.0);
@@ -157,6 +169,15 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           if (cancelled) return;
           setTimeline(tl);
           setError(null);
+          if (holdExpiredRef.current) {
+            // The 3-minute ceiling stopped the loop; this /open just began
+            // a genuine new session server-side (clear_ceiling_lock — "a
+            // real mount, or him moving the intensity slider"). Without
+            // this the banner cleared but `playing` stayed false: playhead
+            // frozen at 0, nothing ever fired again until a manual ▶ Play.
+            holdExpiredRef.current = false;
+            setPlaying(true);
+          }
           setHoldExpired(false);
           setAnimAnchorS(tl.animation_anchor_s);
           setFireAtS(tl.fire_at_s);
@@ -332,7 +353,8 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           <div style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6, marginBottom: 4,
                         background: 'var(--accent)', color: '#1a1024' }}>
             ⏱ This preview reached its maximum hold time and let go of your room on its
-            own — your show has resumed. Close and reopen to look again.
+            own — your show has resumed. Close and reopen — or nudge the intensity
+            slider — to look again.
           </div>
         )}
         {error && <div style={{ color: 'var(--danger, #f66)', fontSize: 12 }}>{error}</div>}

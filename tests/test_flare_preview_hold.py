@@ -447,6 +447,154 @@ def test_recover_stale_hold_lands_a_leftover_snapshot(tmp_path, monkeypatch):
     _run(main())
 
 
+# ── 7b. the colour ROTATE-AND-BACK flare in a LIVE preview: the fade-back
+#      must actually land on the fixture (his report, 2026-08-21: "when I
+#      change the intensity on the flare preview specifically for color
+#      rotate and back it no longer runs as the playhead crosses the
+#      trigger"). color_rotate releases through its OWN queue
+#      (pending_color_rotate_holds/flush_color_rotates — see
+#      scene_response._color_rotate's docstring), which engine.py's
+#      fire_response_event and flare_preview.build_timeline both drain —
+#      open_hold() scheduled only pending_hold_groups() (written in #163,
+#      before this kind existed), so a live-previewed rotation ramped in
+#      and NEVER faded back: the gradient sat rotated between laps, and
+#      every later /fire re-targeted the same rotated value — zero visible
+#      change on every crossing after the first. The drawn ruler promised
+#      the full ramp/dwell/fade the whole time. ──────────────────────────
+
+ORIGINAL_GRADIENT = "#3366cc"
+
+
+def _rotate_categories(tmp_path) -> None:
+    """The colour-set entry below scopes VID explicitly, and
+    device_model.resolve_scope intersects with the imported set — an empty
+    categories file (the autouse fixture's default) resolves it to nothing."""
+    device_model.CATEGORIES_FILE.write_text(json.dumps({
+        "c1": {"id": "c1", "name": "Headless", "parent_id": None,
+               "virtuals": [VID], "effects": ["blackhole"], "role": None}}))
+    device_model.refresh()
+
+
+def _rotate_room_storage() -> None:
+    """A set-mode scene entry only carries a gradient once the room wears a
+    colour set — seed the isolated storage with one scoping VID, exactly
+    what scene_compiler.room_active_set() reads on a real fire."""
+    from spectra import config as scfg
+    scfg.COLOR_SETS_FILE.write_text(json.dumps({
+        "cs1": {"id": "cs1", "name": "Rotate Set", "kind": "set",
+                "entries": [{"scope": {"virtual_ids": [VID]},
+                             "color_kind": "solid",
+                             "color_value": ORIGINAL_GRADIENT}]}}))
+    scfg.ROOM_COLOR_FILE.write_text(json.dumps({"active_set_id": "cs1"}))
+
+
+def _rotate_scene_and_kind():
+    from spectra.models.scene import FlareKind, SceneDeviceConfig, SceneV2
+    # color defaults to mode="set" — the active set above supplies the
+    # gradient, making VID a set-mode virtual with something to rotate.
+    scene = SceneV2(
+        name="Rotate Hold Scene",
+        devices=[SceneDeviceConfig(
+            id="dev1", target_kind="virtual", target=VID,
+            effect_type="blackhole", params={"swirl": 3.0})],
+    )
+    kind = FlareKind(name="Colour Rotate & Back", type="color_rotate")
+    return scene, kind
+
+
+async def _start_rotate_host(tmp_path):
+    host = await headless.start_headless_host(str(tmp_path / "host"))
+    facade.set_host(host)
+    virtual = host.virtuals.get(VID)
+    headless.attach_effect(host, virtual, "blackhole",
+                           {"gradient": "#101010", "swirl": 1.0})
+    return host, virtual
+
+
+def test_color_rotate_fade_back_lands_live_in_a_preview_hold(tmp_path, monkeypatch):
+    """Production parity: engine.fire_response_event schedules
+    flush_color_rotates after the dwell; the live preview hold must too, or
+    the previewed rotation is a one-way trip the drawn timeline never
+    promised."""
+    from spectra.services import color_rotate
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    _rotate_categories(tmp_path)
+    _rotate_room_storage()
+    scene, kind = _rotate_scene_and_kind()
+    # intensity 1.0: ramp 250ms, dwell 400ms (fade launches dwell after the
+    # fire, engine.py's own convention), fade 375ms — fully settled ~775ms.
+    expected_rotated = color_rotate.rotate_color_value(ORIGINAL_GRADIENT, 180.0)
+    assert expected_rotated != ORIGINAL_GRADIENT
+
+    async def main():
+        host, virtual = await _start_rotate_host(tmp_path)
+        try:
+            result = await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=30.0)
+            assert result["held"] is True
+            rec = result["fire_record"]["color_rotate"]
+            assert rec["virtuals"] == 1, \
+                "the rotate must genuinely fire — otherwise this test " \
+                "asserts a no-op faded back, which proves nothing"
+
+            # the ramp lands the rotation for real first (also proves the
+            # fire itself is visible on the fixture)
+            await _pump_frames_for(virtual, 0.35)
+            assert virtual.active_effect.config["gradient"] == expected_rotated
+
+            # ...and after its own dwell + fade the gradient must be back at
+            # the EXACT original — the "and back" half of the kind's name
+            await _pump_frames_for(virtual, 0.9)
+            assert virtual.active_effect.config["gradient"] == ORIGINAL_GRADIENT, \
+                "the fade-back never ran: open_hold scheduled only " \
+                "pending_hold_groups(), not pending_color_rotate_holds()"
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_color_rotate_still_visibly_fires_after_an_intensity_change(tmp_path, monkeypatch):
+    """His exact reported sequence: fires at the mark, nudge the intensity
+    slider, and every later crossing must STILL show a full rotate-and-back
+    — possible only because the fade-back (above) parks the gradient at the
+    original between laps, so each re-fire has a real visible delta."""
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    _rotate_categories(tmp_path)
+    _rotate_room_storage()
+    scene, kind = _rotate_scene_and_kind()
+
+    async def main():
+        host, virtual = await _start_rotate_host(tmp_path)
+        try:
+            await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=30.0)
+            await _pump_frames_for(virtual, 1.3)   # full ramp+dwell+fade cycle
+            assert virtual.active_effect.config["gradient"] == ORIGINAL_GRADIENT
+
+            # the intensity nudge — the next lap's /fire at the new value
+            result = await fph.open_hold(scene, kind, 0.8, heartbeat_timeout_s=30.0)
+            assert result["fire_record"]["color_rotate"]["virtuals"] == 1
+
+            # sample every rendered frame across the whole cycle: the
+            # crossing must be VISIBLE (some frame away from the original)
+            # and must SETTLE back at the exact original for the next lap
+            seen: set[str] = set()
+            for _ in range(int(2.2 * 60)):
+                await asyncio.sleep(1 / 60)
+                headless.render_frames(virtual, 1)
+                seen.add(virtual.active_effect.config["gradient"])
+            assert any(g != ORIGINAL_GRADIENT for g in seen), \
+                "the post-nudge crossing rendered no visible change at all"
+            assert virtual.active_effect.config["gradient"] == ORIGINAL_GRADIENT
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
 # ── 8. MAXIMUM HOLD CEILING (fm/preview-hold-needs-a-ceiling): fires even
 #      while a client keeps heartbeating THE WHOLE TIME — this is the
 #      exact reported failure mode (a client that never stopped
