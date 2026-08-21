@@ -216,6 +216,22 @@ by scene_compiler.fire_scene for every scene fire, not just trigger-driven
 ones — his other ask, two Inspector settings scaling transition time by
 intensity, linearly).
 
+SCENE-CHANGE TRIGGER OFFSET (his ask, 2026-08-21, models/trigger.py's
+SpectraTrigger.trigger_offset_ms — the scene-change equivalent of
+FlareKind.trigger_offset_ms, which the flare scrubbing-preview timeline
+already honours): a fire_scene trigger's own trigger_offset_ms relocates
+the moment tick() targets — HIS sign convention, negative = fire earlier,
+positive = fire later, 0 = unchanged — BEFORE the lead-time alignment
+above ever runs. The two systems use OPPOSITE senses for "earlier"
+(lead_ms: positive = earlier; his offset: negative = earlier) and must
+never be combined by naive addition/subtraction of the same sign — see
+tick()'s own inline comment for the exact composition
+(fire_at = trig.timestamp_ms + trig.trigger_offset_ms - lead_ms) and why
+it reduces to today's exact pre-offset behaviour whenever offset is 0
+(every one of his real fire_scene triggers, as of this field's
+introduction). Scoped to fire_scene only; fire_response/select_color_set/
+fire_scene_update triggers still ignore the field.
+
 Settling the drop anchor does NOT, by itself, prove the VISIBLE explosion
 begins on the mark — only that the WRITE does (already true before this
 change, for every real scene: scripts/check_triggers.py never found a
@@ -536,33 +552,77 @@ class TriggerEngine:
                 continue
             if not self._trigger_allowed(trig, mode):
                 continue
+            # SCENE-CHANGE TRIGGER OFFSET (his ask, 2026-08-21 — the scene-
+            # change equivalent of the flare preview's trigger_offset_ms,
+            # data/preview-loops-and-fires-on-the-trigger): trig.
+            # trigger_offset_ms relocates the moment a fire_scene trigger
+            # targets, in HIS sign convention — negative = fire earlier,
+            # positive = fire later, 0 = unchanged (SpectraTrigger.
+            # trigger_offset_ms's own docstring). target_ms is that
+            # relocated moment; every "when to fire" comparison below uses
+            # it in place of the raw stored trig.timestamp_ms. Scoped to
+            # fire_scene only, per this task's own ask — fire_response/
+            # select_color_set/fire_scene_update triggers keep firing at
+            # their raw stored timestamp; the field stays inert for those
+            # kinds until a future ask widens it.
+            #
+            # THE SIGN COMPOSITION WITH _lead_ms, STATED EXPLICITLY (a wrong
+            # sign here is invisible to a naive test and has cost hours
+            # twice): _lead_ms below uses the OPPOSITE sense from his
+            # offset — a POSITIVE lead means fire EARLIER
+            # (`fire_at = target - lead`), while his offset is NEGATIVE for
+            # earlier. These are two independently-signed quantities and
+            # must never be added or subtracted from each other directly —
+            # doing so would silently invert one of them. They compose
+            # correctly by each acting in its OWN native direction against
+            # a shared base: his offset first relocates the base target
+            # from trig.timestamp_ms to target_ms (ADDING a negative offset
+            # moves target_ms earlier — his convention, unchanged); the
+            # transition's own auto-computed lead THEN SUBTRACTS from that
+            # relocated target, exactly as it always has (lead_ms's own
+            # sign and its subtraction are untouched by this change). Net:
+            # fire_at = trig.timestamp_ms + trig.trigger_offset_ms - lead_ms.
+            # At offset=0 this is byte-identical to the pre-existing
+            # formula (trig.timestamp_ms - lead_ms) — every one of his real
+            # fire_scene triggers carries offset=0 today, so this is
+            # provably a no-op for everything currently on disk.
+            target_ms = (trig.timestamp_ms + trig.trigger_offset_ms
+                        if trig.action.kind == "fire_scene" else trig.timestamp_ms)
             # TRANSITION/FLARE LEAD-TIME ALIGNMENT (his ask, 2026-08-19):
             # fire up to lead_ms EARLY so a scene transition's mid-point (or
             # a registered phased effect's own payoff — see
             # services/transition_phases.py) or a momentary flare's first
-            # switch lands exactly on the trigger's timestamp instead of
-            # starting there. Only bother computing it within striking
-            # distance (cheap: most of a song's triggers sit far from
-            # `position_ms` on any given tick) — LOOKAHEAD_HORIZON_MS both
-            # caps the computed lead and bounds this gate; for an unresolved
-            # fire_scene trigger it's ALSO the moment _lead_ms's own
-            # _pin_for commits its one-shot early pick (see that module-
-            # level constant's docstring).
-            fire_at = trig.timestamp_ms
-            if 0 <= trig.timestamp_ms - last <= LOOKAHEAD_HORIZON_MS:
+            # switch lands exactly on target_ms instead of starting there.
+            # Only bother computing it within striking distance (cheap:
+            # most of a song's triggers sit far from `position_ms` on any
+            # given tick) — LOOKAHEAD_HORIZON_MS both caps the computed
+            # lead and bounds this gate, now measured against target_ms (not
+            # the raw timestamp) so a large negative offset opens the
+            # window — and commits a LOOKAHEAD pin, see _pin_for — early
+            # enough to matter; for an unresolved fire_scene trigger it's
+            # ALSO the moment _lead_ms's own _pin_for commits its one-shot
+            # early pick (see that module-level constant's docstring).
+            fire_at = target_ms
+            if 0 <= target_ms - last <= LOOKAHEAD_HORIZON_MS:
                 lead = self._lead_ms(trig)
                 if lead > 0:
-                    fire_at = trig.timestamp_ms - lead
+                    fire_at = target_ms - lead
             # The OR is a safety net, not an optimization: fire_at is
             # recomputed fresh every tick from live state (the registry
             # match against whatever effect is CURRENTLY live on a target
             # virtual), so it isn't guaranteed monotonic tick to tick — a
-            # trigger must still fire by its own nominal timestamp even if
-            # an earlier tick's early-fire window was missed for any
-            # reason. trig.timestamp_ms itself never drifts, so this clause
-            # alone reproduces today's exact pre-lead behaviour.
+            # trigger must still fire by its own nominal (offset-relocated)
+            # target even if an earlier tick's early-fire window was missed
+            # for any reason. target_ms itself never drifts within a tick,
+            # so this clause alone reproduces today's exact pre-lead
+            # behaviour whenever trigger_offset_ms is 0. Comparing against
+            # target_ms here — not the raw trig.timestamp_ms — is load-
+            # bearing for a POSITIVE offset (fire later): without it, this
+            # safety net would still fire at the raw, un-relocated
+            # timestamp, defeating the entire point of asking for a later
+            # fire.
             if (last < fire_at <= position_ms
-                    or last < trig.timestamp_ms <= position_ms):
+                    or last < target_ms <= position_ms):
                 await self._fire(trig)
                 fired.append(trig)
         return fired

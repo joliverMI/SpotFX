@@ -2614,19 +2614,42 @@ NEGATIVE. The original build had `trigger_mark_s = anchor + offset/1000`
 all 61 of his real flare kinds carried 0 at the time, confirmed by a
 parallel live-data audit before the fix shipped, so nothing of his was
 flipped. `FlareKind.trigger_offset_ms` is NO LONGER descriptive-only — it
-is what the live preview loop schedules its fires from now (his
-scene-change/trigger-level equivalent, `SpectraTrigger.trigger_offset_ms`
-on `spectra/models/trigger.py`, same field/units/sign, stays descriptive
-only — no authoring UI yet, `trigger_engine.py` doesn't read it; his ask
-was schema parity, not a live-wiring change to the production trigger
-clock). If you touch this area again: `trigger_mark_s =
-animation_anchor_s - trigger_offset_ms/1000` is the ONE formula (spectra/
-services/flare_preview.py) — never re-derive it independently in the
-frontend or you will reintroduce exactly this class of bug. Tests:
+is what the live preview loop schedules its fires from now. If you touch
+this area again: `trigger_mark_s = animation_anchor_s -
+trigger_offset_ms/1000` is the ONE formula (spectra/services/
+flare_preview.py) — never re-derive it independently in the frontend or
+you will reintroduce exactly this class of bug. Tests:
 `scripts/check_flare_preview.py` (the sign proof, both directions),
 `tests/test_flare_preview_api.py` (the open/fire route split),
 `tests/test_spectra_trigger_offset_field.py` (the trigger-model field
 shape).
+
+**His scene-change/trigger-level equivalent, `SpectraTrigger.
+trigger_offset_ms` (`spectra/models/trigger.py`, same field/units/sign),
+is HONOURED too now (2026-08-21, PR fm/scene-changes-honour-trigger-
+offset)** — `trigger_engine.py`'s `tick()` reads it for `fire_scene`
+triggers (fire_response/select_color_set/fire_scene_update still ignore
+it; no authoring UI yet either way). The care here: `tick()` already had
+a lead-time system (`_lead_ms`, the three-anchor alignment above) whose
+sign is the OPPOSITE of his — there, a POSITIVE lead means fire EARLIER
+(`fire_at = target - lead`); his offset is NEGATIVE for earlier. The two
+never combine by adding/subtracting the same sign — that would silently
+invert one of them. They compose by each acting in its own native
+direction against a shared, relocated base: `target_ms = trig.timestamp_ms
++ trig.trigger_offset_ms` (his convention, applied first), then
+`fire_at = target_ms - lead_ms` (the existing lead system, unchanged) —
+net `fire_at = trig.timestamp_ms + trig.trigger_offset_ms - lead_ms`,
+which is byte-identical to the pre-existing formula whenever offset=0
+(every one of his real fire_scene triggers, as of this field's
+introduction — no stored data was touched). `tick()`'s own inline comment
+has the full reasoning, including why the crossing-check's safety-net OR
+clause must compare against `target_ms`, not the raw `trig.timestamp_ms`
+— using the raw timestamp there would silently discard a positive
+("later") offset by firing at the old mark anyway. Proof is offline only
+(both sign extremes plus the composed case): `scripts/check_triggers.py`
+§10, `tests/test_trigger_engine.py`. No live fixture proof exists for
+this — his room is released (panic release taken back), so nothing can be
+proven against real hardware right now.
 
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
