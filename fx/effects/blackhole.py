@@ -1214,19 +1214,6 @@ class Blackhole2d(Twod, GradientEffect):
         elif n:
             r = self.p_r[:n]
             cap = self.p_cap[:n]
-            # A reversal releases horizon captives. `cap` survives a mid-run
-            # `reverse` flip (config_updated only re-reads scalars) and the
-            # capture branch below is skipped entirely while reversed, so
-            # without this a stale cap >= 0 rode along on every blob the
-            # outflow carried off the ring — and the frame reverse flipped
-            # back, `np.where(captured, rh, new_r)` teleported all of them
-            # from wherever they'd dispersed to straight onto the horizon
-            # in one frame (a radial streak via the substep smear — his
-            # "particles shoot back really fast" report, 2026-08-21).
-            # Released, they fall back at the same per-radius speed as any
-            # free blob and re-capture on arrival (fresh hold, fresh blend).
-            if self.reverse:
-                cap[cap >= 0] = -1.0
             r0 = r.copy()
             th0 = self.p_theta[:n].copy()
             # edge_speed sets the rim/center speed ratio: a low floor makes
