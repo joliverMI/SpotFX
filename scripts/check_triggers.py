@@ -1422,4 +1422,124 @@ check(prod_engine._pin_still_valid(pin) is True,
       "re-enabling it makes the SAME pin valid again — the pin's identity "
       "(which scene) never depended on the disabled flag's fluctuation")
 
+# ═══ 10. SCENE-CHANGE TRIGGER OFFSET (his ask, 2026-08-21) ══════════════════
+# SpectraTrigger.trigger_offset_ms is now honoured by tick() for fire_scene
+# triggers, HIS sign convention: negative = fire earlier, positive = fire
+# later, 0 = unchanged. Proven at BOTH extremes against a fixed lead_ms
+# fake (isolating the offset's own effect from the pre-existing lead-time
+# alignment system), then proven to COMPOSE correctly with a nonzero lead —
+# the two systems use OPPOSITE senses for "earlier" (lead_ms: positive;
+# his offset: negative) and a naive combination would silently invert one.
+# Each engine below is fresh (no shared _last_position_ms/_pins state) —
+# same discipline as section 8/9's own per-scenario engines.
+
+offset_scene_id = "offset-scene"
+offset_calls: list = []
+offset_response_calls: list = []
+
+
+async def _record_offset_scene(scene_id, color_set_id, intensity):
+    offset_calls.append(scene_id)
+
+
+async def _record_offset_response(event_class, intensity, gap_ms=None):
+    offset_response_calls.append(event_class)
+
+
+def _offset_engine(trig, *, lead_ms=0):
+    return TriggerEngine(
+        list_triggers=lambda uri: [trig],
+        fire_scene=_record_offset_scene,
+        fire_response=_record_offset_response,
+        lead_ms=lambda t: lead_ms,
+        scene_change_mode=lambda: "full")
+
+
+# baseline: offset=0, lead=0 — fires exactly at the stored timestamp,
+# unchanged from every pre-existing (pre-this-build) trigger's behaviour.
+base_trig = SpectraTrigger(timestamp_ms=5000, action=FireSceneAction(
+    scene_id=offset_scene_id, intensity=0.5))
+base_engine = _offset_engine(base_trig)
+asyncio.run(base_engine.on_track_state("song:offset-base"))
+check(asyncio.run(base_engine.tick(4999)) == [],
+      "offset=0: nothing fires one ms before the stored timestamp")
+check(len(asyncio.run(base_engine.tick(5000))) == 1 and offset_calls == [offset_scene_id],
+      "offset=0, lead=0: fires exactly at the stored timestamp — byte-"
+      "identical to pre-offset behaviour")
+
+# NEGATIVE offset fires EARLIER than the zero-offset baseline (his own
+# words: "negative offset is 'fire earlier'").
+offset_calls.clear()
+early_trig = SpectraTrigger(timestamp_ms=5000, trigger_offset_ms=-500,
+                            action=FireSceneAction(scene_id=offset_scene_id,
+                                                   intensity=0.5))
+early_engine = _offset_engine(early_trig)
+asyncio.run(early_engine.on_track_state("song:offset-early"))
+check(asyncio.run(early_engine.tick(4499)) == [],
+      "offset=-500: nothing fires yet one ms before the relocated target")
+check(len(asyncio.run(early_engine.tick(4500))) == 1 and offset_calls == [offset_scene_id],
+      "offset=-500, lead=0: fires at 4500 — 500ms EARLIER than the stored "
+      "5000ms timestamp, and earlier than the offset=0 baseline above")
+
+# POSITIVE offset fires LATER than the zero-offset baseline (his own
+# words: "positive is 'fire later'") — and, critically, does NOT fire at
+# the raw stored timestamp: this is the regression case for the bug this
+# build fixes in tick()'s own safety-net OR clause (comparing against the
+# offset-relocated target_ms, not the raw trig.timestamp_ms — see that
+# function's inline comment). Before this fix the safety net would have
+# fired this trigger at 5000 regardless of the offset, silently discarding
+# a positive "fire later" ask.
+offset_calls.clear()
+late_trig = SpectraTrigger(timestamp_ms=5000, trigger_offset_ms=500,
+                           action=FireSceneAction(scene_id=offset_scene_id,
+                                                  intensity=0.5))
+late_engine = _offset_engine(late_trig)
+asyncio.run(late_engine.on_track_state("song:offset-late"))
+check(asyncio.run(late_engine.tick(5000)) == [],
+      "offset=+500: the RAW stored timestamp (5000) does NOT fire it — "
+      "the safety net must track the relocated target, not the original "
+      "mark, or a positive offset would be silently discarded")
+check(asyncio.run(late_engine.tick(5499)) == [],
+      "offset=+500: still nothing one ms before the relocated target")
+check(len(asyncio.run(late_engine.tick(5500))) == 1 and offset_calls == [offset_scene_id],
+      "offset=+500, lead=0: fires at 5500 — 500ms LATER than the stored "
+      "5000ms timestamp, and later than the offset=0 baseline above")
+
+# COMPOSITION with the pre-existing (oppositely-signed) lead-time
+# alignment system: offset=-1000 (his convention: relocate the target
+# 1000ms earlier) composed with an injected lead_ms=300 (that system's
+# convention: fire 300ms earlier than whatever it's handed). Neither sign
+# is inverted by the other: fire_at = timestamp + offset - lead =
+# 5000 + (-1000) - 300 = 3700.
+offset_calls.clear()
+composed_trig = SpectraTrigger(timestamp_ms=5000, trigger_offset_ms=-1000,
+                               action=FireSceneAction(scene_id=offset_scene_id,
+                                                      intensity=0.5))
+composed_engine = _offset_engine(composed_trig, lead_ms=300)
+asyncio.run(composed_engine.on_track_state("song:offset-composed"))
+check(asyncio.run(composed_engine.tick(3699)) == [],
+      "composed offset+lead: nothing fires one ms before 3700")
+check(len(asyncio.run(composed_engine.tick(3700))) == 1 and offset_calls == [offset_scene_id],
+      "composed offset+lead: fires at exactly 3700 = timestamp(5000) + "
+      "offset(-1000) - lead(300) — proves the two oppositely-signed "
+      "systems compose by each acting in its OWN native direction "
+      "against a shared base, never by adding/subtracting the same sign")
+
+# SCOPE: a fire_response trigger's own trigger_offset_ms is still ignored
+# (this task's own ask is scoped to scene-change/fire_scene triggers) —
+# fires at its raw stored timestamp regardless of a nonzero offset.
+response_trig = SpectraTrigger(timestamp_ms=5000, trigger_offset_ms=-1000,
+                               action=FireResponseAction(event_class="flare",
+                                                         intensity=0.5))
+response_engine = _offset_engine(response_trig)
+asyncio.run(response_engine.on_track_state("song:offset-response"))
+check(asyncio.run(response_engine.tick(4999)) == [],
+      "a fire_response trigger's offset is inert: nothing fires early at "
+      "4000 (timestamp - 1000) the way a fire_scene trigger would")
+check(len(asyncio.run(response_engine.tick(5000))) == 1
+     and offset_response_calls == ["flare"],
+      "a fire_response trigger still fires at its raw, un-relocated "
+      "stored timestamp — trigger_offset_ms stays scoped to fire_scene "
+      "until a future ask widens it")
+
 print("\nALL CHECKS PASSED")

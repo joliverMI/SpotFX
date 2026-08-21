@@ -179,12 +179,13 @@ class SpectraTrigger(BaseModel):
     # earlier, positive = fire later, 0 = coincident with timestamp_ms) —
     # one vocabulary for "how far from the marked moment should this
     # actually land" across both the thing a preview fires and the thing
-    # a song trigger fires. DESCRIPTIVE ONLY today, same status the flare
-    # field had before this change: no authoring UI writes it yet (his
-    # scene-change equivalent of the preview's drag-the-marker gesture is
-    # future work — "flares first... lull charge drop" next, per the
-    # flare preview's own sequencing) and trigger_engine.py's tick()/
-    # lookahead-lead system does not read it. Default 0 keeps every
-    # existing trigger (all ~22k of his real fire_scene triggers)
-    # unaffected.
+    # a song trigger fires. HONOURED for fire_scene triggers since the
+    # same-day follow-up (spectra/services/trigger_engine.py's tick() —
+    # see its own SCENE-CHANGE TRIGGER OFFSET docstring section for the
+    # exact composition with the pre-existing, oppositely-signed lead-time
+    # alignment system); fire_response/select_color_set/fire_scene_update
+    # triggers still ignore it, and there is still no authoring UI (his
+    # scene-change equivalent of the flare preview's drag-the-marker
+    # gesture remains future work). Default 0 keeps every existing
+    # trigger (all ~22k of his real fire_scene triggers) unaffected.
     trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)

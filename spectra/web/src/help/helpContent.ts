@@ -1007,13 +1007,14 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'spectra-trigger-lead-time-alignment',
         title: 'Lead-time alignment — three anchors, not one',
-        keywords: 'lead time alignment anchor early start middle end momentary flare scene transition drop explosion timing begins finishes midpoint',
+        keywords: 'lead time alignment anchor early start middle end momentary flare scene transition drop explosion timing begins finishes midpoint offset relocate',
         body: [
           'A trigger\'s own stored timestamp is the moment on the clock — but what actually LANDS there depends on which kind of change is firing, because three different kinds of change anchor to the mark in three different places. His settled rule, 2026-08-20:',
           '• A MOMENTARY FLARE anchors its first switch\'s END to the mark — the switch fires early enough that it finishes exactly on the trigger, then holds, then flips back afterward. Starts before the mark, on purpose.',
           '• A SCENE TRANSITION (Fire scene) anchors its MIDDLE to the mark — a registered phased effect\'s own payoff point, or the plain half-way point of an ordinary crossfade, lands on the trigger. Also starts before the mark, on purpose.',
           '• A DROP/EXPLOSION anchors its START to the mark — the explosion begins ON the trigger, never before it. This is the newest of the three, added after Black Hole was tried and then withdrawn as a "the timing feels right" reference for drops specifically (his words: "an explosion begins on the trigger mark rather than before it").',
           'None of the three is more "correct" than the others — a flare\'s payoff and a scene\'s midpoint are SUPPOSED to start early; only a drop is supposed to start exactly on time. If a drop still looks early after the fire itself lands on the mark, the cause isn\'t this alignment — it\'s something inside the effect\'s own choreography (what it visibly does as its phase ramps from 0 to 1), a separate, ongoing question from where the trigger fires.',
+          'A Fire scene trigger can also carry its own offset (trigger_offset_ms, same field and sign convention as a flare kind\'s preview marker: negative = fire earlier, positive = fire later, 0 = coincident with the stored timestamp) that RELOCATES the mark this alignment targets, before the scene-transition midpoint rule above ever runs — so the two stack rather than replace each other. There\'s no dialog field to set it yet (API-only today), the same way the flare preview\'s own drag gesture arrived before this scene-change equivalent did.',
         ],
       },
       {
