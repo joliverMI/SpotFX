@@ -2651,6 +2651,99 @@ clause must compare against `target_ms`, not the raw `trig.timestamp_ms`
 this — his room is released (panic release taken back), so nothing can be
 proven against real hardware right now.
 
+**The preview's own live-fire loop honours the SAME automatic lead a real
+trigger fire would apply (2026-08-21, PR fm/preview-must-hold-scene-
+changes), and separately, opening a preview now genuinely holds SCENE
+CHANGES too, not just flares/responses — a real live regression, not a
+design gap.** His report, verbatim: "I was using spectra, playing music,
+and tried to preview. now it won't even hold... The music show is playing
+regardless of the fact that I have the preview window open and it says
+'deferred by preview.'" Root cause: `bridge.py`'s `conductor_deferral`/
+`sequencer_deferral` (the "deferred by preview" string he saw) already
+checked `preview_pause.active()` — true, correctly gating the sequencer's
+own rolls and drift — but `scene_sequencer.fire_scene_by_id`, the ONE
+choke point every scene change funnels through INCLUDING his authored
+`fire_scene` triggers (`trigger_engine._fire`/`_fire_transition`), never
+consulted it at all; `preview_pause.py`'s own docstring had named that
+function as gated since it was written — the documentation described a
+gate that was never built. Fixed by gating `fire_scene_by_id` on
+`preview_pause.active()` FIRST, ahead of even Force Scene — the one gate
+in that function Force Scene does NOT override, matching `bridge.py`'s own
+precedence (preview already outranked force_scene there too) — because a
+hand-held preview is the most explicit, momentary override a room can be
+under. Recorded to `fire_history`'s `"deferred"` bucket like the dwell
+gate (never silent) but, unlike dwell, does NOT fire an update effect on a
+skip: dwell's placeholder flare exists to make an otherwise-invisible hold
+visible; a preview's whole point is an isolated, motionless room, so an
+update effect would put motion into the exact thing he opened the preview
+to judge. Self-heals on abandonment with no code beyond the existing
+deadline: `preview_pause.active()` is a plain `time.monotonic()`
+comparison, not a flag anyone must remember to clear, so a browser
+close/dropped connection/wedged tab (heartbeats simply stop arriving)
+resumes his show on its own within `HEARTBEAT_TIMEOUT_S` — proven directly
+in `tests/test_preview_scene_hold.py` by letting a started pause's
+deadline lapse and firing again WITHOUT ever calling `preview_pause.clear()`,
+not just by testing the clean-close path.
+
+Separately (same PR, his ask: "the preview must use the app's own
+delay/offset setting when it fires... the same lead the real show applies
+must apply here, or the preview lies about when his flare lands"): before
+this, the live fire was scheduled at `animation_anchor_s` unconditionally
+— an authored/manual ruler position with no reference to the AUTOMATIC
+lead `trigger_engine._response_switch_lead_ms` computes for a real
+trigger fire (`DICE_REROLL_GLIDE_MS` for a registry-smooth momentary
+glide, or the intensity-scaled `color_rotate_ramp_ms` for a colour-rotate
+kind). `scene_response.kind_lead_ms` is the per-KIND extraction of that
+same computation (`_kind_would_glide` factored out of
+`momentary_switch_would_glide`'s own band loop so the two can never
+silently diverge) — reused, not reapproximated, since `ResponseEngine.
+fire_kind` previews ONE kind in isolation, bypassing band selection
+entirely, so there's no band for the band-scoped functions to loop over.
+`spectra/services/flare_preview.fire_at_s(anchor_s, lead_ms)` composes it
+with his own `trigger_offset_ms` EXACTLY the way #172 above composes
+`SpectraTrigger.trigger_offset_ms` with `_lead_ms` — proven algebraically
+in `build_timeline`'s own docstring and in `scripts/check_flare_preview.py`
+§1c: since `trigger_mark_s = animation_anchor_s - offset_ms/1000` already
+means `trigger_mark_s + offset_ms/1000 == animation_anchor_s` for ANY
+offset, his authored offset is already baked into `animation_anchor_s` by
+construction — so `target ≡ animation_anchor_s` and `fire_at_s = target -
+lead_ms/1000` is the whole composition, with nothing left to add.
+`trigger_mark_s`'s own formula/meaning is UNCHANGED — the drawn mark still
+reflects only his authored offset; only WHEN THE WRITE ACTUALLY HAPPENS
+moves, earlier by however long this kind's own switch/ramp needs. Frontend
+(`FlarePreviewOverlay.tsx`) schedules its `/fire` loop against the new
+`fire_at_s` field instead of `animation_anchor_s`, and the accent
+"start"/"end" ruler markers move with it too (they represent when the
+write lands, which is now `fire_at_s`, not the old fixed anchor).
+
+His other two asks in the same brief were AUDITED, not rebuilt — both were
+already correct as of PR #170/#172, verified rather than assumed: (1)
+"fires every time the playhead crosses the trigger line, every lap" — the
+RAF loop's own catch-up-avoiding `while (nextFireAt <= now) nextFireAt +=
+durationS * 1000` shape was already sound; (2) "dragging the trigger mark
+changes the flare's offset" — `dragTrigger`'s pointerup already called
+`onTriggerOffsetChange` → `setKindTriggerOffset`, a real scene-draft edit.
+Both audited with `scripts/check_flare_preview_frontend_loop.mjs` — a
+plain Node script (no framework; this repo has no JS test tooling) that
+extracts the exact scheduling/offset formulas VERBATIM from
+`FlarePreviewOverlay.tsx`/`flareKindOps.ts` and drives them with a fake
+clock: zero network, zero browser, so it can prove multi-lap firing
+cadence and the lead-vs-no-lead schedule delta without ever risking a
+real `/fire` HTTP call. **This offline-only proof was a deliberate
+choice, not a shortcut**: a live isolated `python -m spectra` instance on
+a spare port was tried first and aborted immediately after its bridge
+connected to a real `ws://127.0.0.1:8000/ws` (a live, in-use service,
+consistent with his room being in active use at the time) — `SPECTRA_
+STORAGE_DIR` repoints scene/room storage but NOT `fx/light_ownership.py`'s
+`OWNERSHIP_FILE` (a fixed, worktree-relative path) or the bridge's WS
+target (`SPECTRA_BRIDGE_WS_URL`, not set by default), so an isolated
+instance's flare-preview live-fire path is not automatically network-safe
+by construction. If a future task needs a truly live-isolated proof, set
+BOTH env vars explicitly and confirm nothing is reachable at the
+`fx_seam` HTTP fallback target (`config.ledfx_url()`, `LEDFX_HOST`/
+`LEDFX_PORT`) before opening any preview against it — don't assume
+`SPECTRA_STORAGE_DIR` alone isolates the write path.
+
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
 Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/

@@ -134,6 +134,42 @@ check(tl_pos["trigger_mark_s"] < tl_pos["animation_anchor_s"],
 check(abs(tl_pos["animation_anchor_s"] - tl_pos["trigger_mark_s"] - 0.5) < 1e-6,
      "positive offset +500ms: mark is exactly 500ms left of the anchor")
 
+# ── 1c. FIRE-TIME LEAD (2026-08-21, fm/preview-must-hold-scene-changes):
+#    fire_at_s reuses scene_response.kind_lead_ms — the SAME automatic lead
+#    trigger_engine._response_switch_lead_ms would compute for this exact
+#    kind (DICE_REROLL_GLIDE_MS for a registry-smooth momentary glide, 0 for
+#    a non-smooth/toggle target) — never a hardcoded number. spin-flare's
+#    own "spin" target IS registry-smooth (radial's spin, retagged
+#    smooth=true), so it must carry the full 220ms lead. ───────────────────
+check(tl["lead_ms"] == scene_response.DICE_REROLL_GLIDE_MS,
+     f"spin-flare: lead_ms == DICE_REROLL_GLIDE_MS ({scene_response.DICE_REROLL_GLIDE_MS})")
+check(abs(tl["fire_at_s"] - (tl["animation_anchor_s"] - scene_response.DICE_REROLL_GLIDE_MS / 1000)) < 1e-9,
+     "spin-flare: fire_at_s == animation_anchor_s - lead_ms/1000")
+check(tl["fire_at_s"] < tl["animation_anchor_s"],
+     "spin-flare: a positive lead always fires strictly before the anchor")
+
+# fire_at_s must compose with his OWN trigger_offset_ms exactly like #172's
+# target-then-lead formula (target := timestamp_ms + trigger_offset_ms;
+# fire_at := target - lead_ms) — proven here as target ≡ animation_anchor_s
+# for ANY offset (trigger_mark_s's own formula bakes it in by construction:
+# trigger_mark_s + offset_ms/1000 == animation_anchor_s always), so
+# fire_at_s must equal animation_anchor_s - lead_ms/1000 regardless of which
+# offset produced that particular anchor — proven at both sign extremes,
+# not just offset=0 above.
+check(abs(tl_neg["fire_at_s"] - (tl_neg["animation_anchor_s"] - scene_response.DICE_REROLL_GLIDE_MS / 1000)) < 1e-9,
+     "negative offset (-500ms): fire_at_s still == anchor - lead_ms/1000 (offset already baked into anchor)")
+check(abs(tl_pos["fire_at_s"] - (tl_pos["animation_anchor_s"] - scene_response.DICE_REROLL_GLIDE_MS / 1000)) < 1e-9,
+     "positive offset (+500ms): fire_at_s still == anchor - lead_ms/1000 (offset already baked into anchor)")
+
+# A color_rotate kind's lead is the intensity-scaled ramp (color_rotate_
+# ramp_ms), not the fixed dice-glide constant — same function production's
+# own color_rotate_lead_ms calls, just invoked per-kind instead of per-band.
+rotate_kind = FlareKind(name="rotate", type="color_rotate")
+tl_rotate = run(flare_preview.build_timeline(scene, rotate_kind, 0.6))
+expected_rotate_lead = scene_response.color_rotate_ramp_ms(0.6)
+check(tl_rotate["lead_ms"] == expected_rotate_lead,
+     f"color_rotate kind: lead_ms == color_rotate_ramp_ms(0.6) ({expected_rotate_lead})")
+
 # ── 2. momentary NON-smooth (toggle) param: instant jump, and — matching
 #    real production behaviour, not a gap this feature introduces — no
 #    resolvable release target, so it never glides back ───────────────────
@@ -143,6 +179,8 @@ w = tl2["writes"][0]
 check(w["kind"] == "jump" and w["at_s"] == 0.0, "polygon-flare: instant jump at t=0")
 check(tl2["animation_end_s"] == w["duration_ms"] / 1000.0,
      "polygon-flare: animation_end_s reflects the jump's own (near-zero) duration")
+check(tl2["lead_ms"] == 0 and tl2["fire_at_s"] == tl2["animation_anchor_s"],
+     "polygon-flare: a toggle target needs no lead — fires exactly at the anchor")
 
 # ── 3. momentary gain: spike jump + release glide, same hold/release shape ──
 tl3 = run(flare_preview.build_timeline(scene, kinds["gain-pulse"], 1.0))
@@ -181,6 +219,8 @@ check(tl6["duration_s"] == flare_preview.MIN_TIMELINE_S,
 check(tl6["animation_anchor_s"] == flare_preview.animation_anchor_s(flare_preview.MIN_TIMELINE_S)
      and tl6["trigger_mark_s"] == tl6["animation_anchor_s"],
      "unregistered-kind: anchor/mark still computed even with no writes")
+check(tl6["lead_ms"] == 0 and tl6["fire_at_s"] == tl6["animation_anchor_s"],
+     "unregistered-kind: no writes at all still gets a real lead_ms/fire_at_s (0/anchor)")
 
 # ── 7. no live storage write: room_controls/color_sets/room_color files
 #    the module read from during the runs above were never created ────────

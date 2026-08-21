@@ -62,12 +62,35 @@ build's inverted-sign defect it corrects). Both numbers ride in every
 build_timeline() response so the frontend's ruler draw AND its live-fire
 loop (FlarePreviewOverlay.tsx) read the IDENTICAL values — one source of
 truth, never two independently-computed anchors that could quietly
-disagree. The live fire itself is scheduled at `animation_anchor_s`
-seconds into every loop cycle: since trigger_mark_s is DEFINED as
-`animation_anchor_s - offset_ms/1000`, firing at animation_anchor_s each
-cycle is definitionally the same real-time instant as "fire offset_ms
-early/late relative to the trigger mark's own crossing" — there is no
-second, independently-tuned lead-time computation to keep in sync.
+disagree.
+
+FIRE-TIME LEAD (2026-08-21, fm/preview-must-hold-scene-changes, his ask:
+the preview must use the app's own delay/offset setting when it fires, not
+a hardcoded number or a private idea of timing — "the same lead the real
+show applies must apply here, or the preview lies about when his flare
+lands"). Before this, the live fire was scheduled at `animation_anchor_s`
+unconditionally — a purely authored/manual position, with no reference to
+the AUTOMATIC lead trigger_engine._response_switch_lead_ms computes for a
+real trigger fire (the fixed DICE_REROLL_GLIDE_MS for a momentary param
+glide, or the intensity-scaled color_rotate_ramp_ms for a colour-rotate
+kind — see scene_response.kind_lead_ms, the per-kind extraction this reuses
+verbatim rather than re-deriving). `fire_at_s` below is the fix, using
+EXACTLY the composition #172 (SpectraTrigger.trigger_offset_ms landing in
+trigger_engine.tick()) established for the sibling authored-offset field,
+so the two never silently diverge in HOW an offset and an automatic lead
+combine: `target := animation_anchor_s` (algebraically, since
+`trigger_mark_s = animation_anchor_s - offset_ms/1000` already means
+`trigger_mark_s + offset_ms/1000 == animation_anchor_s` for ANY offset —
+his own authored offset is already baked into animation_anchor_s by
+construction, the same way #172's `target_ms = timestamp_ms +
+trigger_offset_ms` bakes the authored offset into its own target before
+lead ever runs); `fire_at_s = target - lead_ms/1000`, lead acting in its
+own native "positive = earlier" sense, exactly as production's `fire_at =
+target_ms - lead_ms` does. This never changes `trigger_mark_s`'s own
+formula or meaning — the drawn mark still reflects only his authored
+offset — it only moves WHEN THE WRITE ACTUALLY HAPPENS, closer to the
+mark by however long this kind's own switch/ramp needs to complete before
+landing there, same as a real trigger fire would.
 """
 from __future__ import annotations
 
@@ -79,7 +102,7 @@ from spectra.services import room_controls, scene_compiler
 from spectra.services.binding_resolver import FireContext
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
-from spectra.services.scene_response import ResponseEngine
+from spectra.services.scene_response import ResponseEngine, kind_lead_ms
 
 # A scrub timeline must never look shorter than his own worked example (a
 # 6s timeline holding a 3s effect) even when a kind's own computed shape is
@@ -113,6 +136,21 @@ def trigger_mark_s(anchor_s: float, offset_ms: int, duration_s: float) -> float:
     correctly, it just draws off the edge)."""
     t = anchor_s - offset_ms / 1000.0
     return max(0.0, min(duration_s, t))
+
+
+def fire_at_s(anchor_s: float, lead_ms: int) -> float:
+    """When the live-fire loop actually issues its /fire call — the write
+    itself, not the drawn mark. `target := anchor_s` here always (see this
+    module's own "FIRE-TIME LEAD" docstring section for the algebraic proof
+    that his authored offset is already baked into anchor_s by construction
+    of trigger_mark_s above), so this is #172's `fire_at = target - lead_ms`
+    composition with nothing left to add. NOT clamped into [0, duration_s]
+    — unlike trigger_mark_s (a pure drawing value), the frontend's own loop
+    wraps a negative or over-long delay correctly via plain modular
+    real-time arithmetic against whatever the CURRENT duration_s is, so
+    clamping here would silently shrink a lead that's genuinely longer than
+    the gap to the ruler's front edge."""
+    return anchor_s - lead_ms / 1000.0
 
 
 class _FakeClock:
@@ -198,6 +236,12 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         clock.advance_to(dwell_s)
         await responder.flush_color_rotates(dwell_s)
 
+    # Same registry-smoothness/color-rotate lead a REAL trigger fire would
+    # compute for this exact kind (scene_response.kind_lead_ms — reused
+    # verbatim, see this module's own "FIRE-TIME LEAD" docstring section),
+    # read against the SAME conductor.virtuals this fire just ran against.
+    lead_ms = kind_lead_ms(kind, intensity, conductor.virtuals)
+
     writes = list(responder.executor.writes)
     if not writes:
         anchor_s = animation_anchor_s(MIN_TIMELINE_S)
@@ -210,6 +254,8 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
             "animation_anchor_s": round(anchor_s, 4),
             "trigger_mark_s": round(
                 trigger_mark_s(anchor_s, kind.trigger_offset_ms, MIN_TIMELINE_S), 4),
+            "lead_ms": lead_ms,
+            "fire_at_s": round(fire_at_s(anchor_s, lead_ms), 4),
             "writes": [],
         }
     start_s = min(w["at"] for w in writes)
@@ -227,6 +273,8 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         "animation_anchor_s": round(anchor_s, 4),
         "trigger_mark_s": round(
             trigger_mark_s(anchor_s, kind.trigger_offset_ms, duration_s), 4),
+        "lead_ms": lead_ms,
+        "fire_at_s": round(fire_at_s(anchor_s, lead_ms), 4),
         "writes": [
             {
                 "seq": w["seq"],

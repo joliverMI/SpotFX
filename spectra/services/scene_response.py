@@ -354,18 +354,39 @@ def select_band(bands: list[FlareBand], intensity: float) -> Optional[FlareBand]
     return None
 
 
+def _kind_would_glide(kind: FlareKind, virtuals: dict) -> bool:
+    """Per-KIND core of momentary_switch_would_glide's own smooth gate,
+    extracted so the flare scrubbing-preview's live fire schedule
+    (spectra/services/flare_preview.kind_lead_ms below — a single kind
+    fired in isolation, bypassing band selection entirely, so there is no
+    band to loop over) can ask the identical question production asks per
+    kind inside a band, without re-approximating the check. True iff `kind`
+    is momentary with params AND at least one of those params targets a
+    registry-smooth numeric on some live virtual — i.e. _move_params would
+    put it in `glides` (a DICE_REROLL_GLIDE_MS ease) rather than `jumps`
+    (instant, already finishes at fire time with no lead needed). A
+    momentary GAIN's spike is always an instant jump (see _gain) and never
+    needs this — only param moves can glide."""
+    if kind.type != "momentary" or not kind.params:
+        return False
+    for pname in kind.params:
+        for state in virtuals.values():
+            meta = device_model.get_param_meta(state.effect_type, pname)
+            mkind, _lo, _hi = binding_resolver.kind_for_meta(meta)
+            if (mkind == binding_resolver.KIND_NUMERIC and meta is not None
+                    and meta.get("smooth")):
+                return True
+    return False
+
+
 def momentary_switch_would_glide(scene: SceneV2, event_class: ResponseClass,
                                  intensity: float, virtuals: dict) -> bool:
     """Read-only peek for trigger_engine's lead-time alignment (his ask: a
     momentary flare's FIRST SWITCH must FINISH on the trigger, then the
     hold, then the flip back after). True iff firing this response class at
     this intensity would land at least one MOMENTARY kind's param on a
-    registry-smooth target — i.e. _move_params would put it in `glides` (a
-    DICE_REROLL_GLIDE_MS ease) rather than `jumps` (instant, already
-    finishes at fire time with no lead needed). Mirrors _move_params' own
-    smooth gate exactly, without executing any write or rolling any dice.
-    A momentary GAIN's spike is always an instant jump (see _gain) and
-    never needs this — only param moves can glide."""
+    registry-smooth target (see _kind_would_glide, above, for the per-kind
+    check this loops)."""
     spec = scene.responses.get(event_class)
     band = select_band(spec.bands, intensity) if spec else None
     if band is None:
@@ -373,16 +394,31 @@ def momentary_switch_would_glide(scene: SceneV2, event_class: ResponseClass,
     declared = {k.name: k for k in scene.flare_kinds}
     for name in band.kinds:
         kind = declared.get(name)
-        if kind is None or kind.type != "momentary" or not kind.params:
-            continue
-        for pname in kind.params:
-            for state in virtuals.values():
-                meta = device_model.get_param_meta(state.effect_type, pname)
-                mkind, _lo, _hi = binding_resolver.kind_for_meta(meta)
-                if (mkind == binding_resolver.KIND_NUMERIC and meta is not None
-                        and meta.get("smooth")):
-                    return True
+        if kind is not None and _kind_would_glide(kind, virtuals):
+            return True
     return False
+
+
+def kind_lead_ms(kind: FlareKind, intensity: float, virtuals: dict) -> int:
+    """The lead ONE kind, fired in isolation (bypassing band selection —
+    scale=1.0, matching ResponseEngine.fire_kind's own contract), would need
+    if it were the sole contributor to trigger_engine._response_switch_
+    lead_ms's own max-of-two-contributors computation. Reused, not
+    reapproximated, by the flare scrubbing-preview's live fire loop
+    (spectra/services/flare_preview.py) so a previewed kind's own automatic
+    lead matches exactly what a real trigger fire would compute for it —
+    same DICE_REROLL_GLIDE_MS constant, same color_rotate_ramp_ms function,
+    same registry-smoothness check (_kind_would_glide), never a hardcoded
+    number or an independently-tuned approximation. Drop's unconditional
+    lead=0 branch in _response_switch_lead_ms has no analogue here — a
+    flare kind previewed in isolation is never a drop/explosion, only ever
+    the momentary/permanent/dice/gain/color_rotate family."""
+    lead = 0
+    if kind.type == "color_rotate":
+        lead = max(lead, color_rotate_ramp_ms(intensity))
+    if _kind_would_glide(kind, virtuals):
+        lead = max(lead, DICE_REROLL_GLIDE_MS)
+    return lead
 
 
 class ResponseEngine:
