@@ -28,18 +28,29 @@ this question).
 
 Read-only against live storage (room controls, the room's active colour
 set/wheel position, sequencer curves) — the SAME reads a dry-run scene
-test-fire already performs (scene_compiler.fire_scene, dry_run=True) — but
-NEVER a write: both the scratch DriftConductor and ResponseEngine get
-`room_save=lambda _st: None` so `on_scene_fire`'s "clear the journey
-destination" update and a colour-jump kind's wheel-position landing are
-computed and reported but never persisted. No fx_seam/executor.facade call
-of any kind is reachable from this path — the RecordingExecutor's `glide`/
-`jump` only ever append to an in-memory deque.
+test-fire already performs (scene_compiler.fire_scene, dry_run=True). This
+module's OWN timeline computation (build_timeline, below) never writes:
+both the scratch DriftConductor and ResponseEngine get `room_save=lambda
+_st: None` so `on_scene_fire`'s "clear the journey destination" update and
+a colour-jump kind's wheel-position landing are computed and reported but
+never persisted, and `_scratch_engine` is always handed a RecordingExecutor
+here — its `glide`/`jump` only ever append to an in-memory deque.
+
+Opening the preview overlay DOES now reach his real fixtures, via a
+SEPARATE module: spectra/services/flare_preview_hold.py fires the same
+scene + kind this module computes against `_scratch_engine`'s SAME
+resolve/compile path, just handed a live, fx_seam-backed executor instead
+of a RecordingExecutor — see that module's own docstring for the full
+mechanism and the revert-on-close/heartbeat-timeout/restart guarantees.
+`_scratch_engine` takes its executor as a caller-supplied argument
+specifically so the two callers (this module's dark timeline, that
+module's live hold) share one resolve/compile/seed path and can never
+silently diverge in what they compute.
 """
 from __future__ import annotations
 
 from random import Random
-from typing import Any
+from typing import Any, Callable
 
 from spectra.models.scene import FlareKind, SceneV2
 from spectra.services import room_controls, scene_compiler
@@ -78,15 +89,20 @@ class _FakeClock:
 
 
 def _scratch_engine(scene: SceneV2, intensity: float,
-                    clock: _FakeClock) -> tuple[DriftConductor, ResponseEngine]:
+                    clock: Callable[[], float], executor: Any
+                    ) -> tuple[DriftConductor, ResponseEngine, list[dict]]:
     """Seed a conductor+responder pair exactly the way a real scene fire
     would (reusing scene_compiler.resolve_scene/compile_scene — the same
     resolution a dry-run scene test-fire performs, effect_steps/bindings
-    included), wired to a shared RecordingExecutor and fake clock. Every
+    included), wired to `executor` (a RecordingExecutor for this module's
+    own dark timeline; flare_preview_hold.py hands in a live, fx_seam-backed
+    one instead — the caller decides, this function only ever seeds). Every
     constructor injectable besides `room_save` is left at its own
     production default (a real, read-only storage load) — the same reads a
-    dry-run test-fire already makes; only the write side is stubbed out."""
-    executor = RecordingExecutor(clock=clock)
+    dry-run test-fire already makes; only the write side is stubbed out.
+    Returns the compiled writes too, alongside the pair — a caller that
+    needs to apply them for real (flare_preview_hold's own "call the
+    scene" step) must not re-derive them a second, possibly-diverging way."""
     conductor = DriftConductor(
         executor=executor, clock=clock,
         room_save=lambda _st: None,   # a preview must never move the room
@@ -109,7 +125,7 @@ def _scratch_engine(scene: SceneV2, intensity: float,
         conductor=conductor, executor=executor, clock=clock,
         rng=Random(2),
         room_save=lambda _st: None)   # same rule for _color_jump's own save
-    return conductor, responder
+    return conductor, responder, writes
 
 
 async def build_timeline(scene: SceneV2, kind: FlareKind,
@@ -122,7 +138,8 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     issued synchronously at t=0) — the frontend positions this whole block
     against its own independently-draggable trigger-alignment marker."""
     clock = _FakeClock()
-    conductor, responder = _scratch_engine(scene, intensity, clock)
+    executor = RecordingExecutor(clock=clock)
+    conductor, responder, _writes = _scratch_engine(scene, intensity, clock, executor)
     fire_record = await responder.fire_kind(kind, intensity)
     for hold_s in responder.pending_hold_groups():
         clock.advance_to(hold_s)

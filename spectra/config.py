@@ -53,6 +53,11 @@ INTENSITY_SCALE_MARKS_FILE = SPECTRA_STORAGE / "intensity_scale_marks.json"
 # "what was showing before Dark" record the Light transition replays, since
 # clearing dark_lock alone restores nothing (see that module's docstring).
 DARK_LIGHT_SNAPSHOT_FILE = SPECTRA_STORAGE / "dark_light_snapshot.json"
+# The flare scrubbing-preview's LIVE hold (spectra/services/
+# flare_preview_hold.py) — the pre-preview per-virtual snapshot a hold
+# restores on close/heartbeat-timeout, persisted so a service restart mid-
+# hold can land it back too (that module's own docstring has the mechanism).
+FLARE_PREVIEW_HOLD_FILE = SPECTRA_STORAGE / "flare_preview_hold.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).

@@ -148,7 +148,8 @@ async def _standalone_lifespan(app):
 
     logger = logging.getLogger("spectra")
     from spectra.services import (ambient_music_gate, device_preview, engine,
-                                   frame_watchdog, handover, ownership_reconciler)
+                                   flare_preview_hold, frame_watchdog,
+                                   handover, ownership_reconciler)
     await engine.start()
     await device_preview.start()
     # Restart mid-reign: if the ownership record says spectra owns, the
@@ -156,6 +157,15 @@ async def _standalone_lifespan(app):
     # (grant + readiness gate). Failure stays dark-but-owned and keeps
     # serving — liveness 503 is the alarm.
     await handover.resume_own_room()
+    # A flare preview's live hold (spectra/services/flare_preview_hold.py)
+    # can't survive a restart on its own — its release deadline is
+    # in-memory only, same as preview_pause's own `_until`, and dies with
+    # the old process. Same shape as fx/light_ownership.py's own
+    # recover_stale_handover(): a durable, timestamped record, landed back
+    # to a known-safe state at startup because a restart is proof nothing
+    # is still managing it. Must run AFTER resume_own_room() re-activates
+    # the live stack — reverting is itself a real fx_seam write.
+    await flare_preview_hold.recover_stale_hold()
     # Freeze state is in-memory only on the fresh HueDevice objects
     # resume_own_room() just built (fx/devices/hue.py's own docstring) — a
     # restart while ambient was genuinely holding a quiet room would
@@ -186,11 +196,21 @@ async def _standalone_lifespan(app):
     # held. GET-only, own short cadence, independent of bridge broadcasts.
     ambient_verify_task = asyncio.create_task(
         ambient_music_gate.run_supervised(), name="spectra-ambient-verifier")
+    # The flare preview hold's OWN safety mechanism (its module docstring:
+    # "deadline-driven, not close-driven") — an always-on sweep checking
+    # every SWEEP_INTERVAL_S whether a hold's deadline has lapsed and
+    # reverting it if so. This is what actually protects a browser-closed/
+    # connection-dropped session; recover_stale_hold() above only covers
+    # the separate restart case.
+    flare_preview_sweep_task = asyncio.create_task(
+        flare_preview_hold.run_supervised(), name="spectra-flare-preview-sweep")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
-    for task in (watchdog_task, reconciler_task, ambient_verify_task):
+    all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
+                flare_preview_sweep_task)
+    for task in all_tasks:
         task.cancel()
-    for task in (watchdog_task, reconciler_task, ambient_verify_task):
+    for task in all_tasks:
         try:
             await task
         except asyncio.CancelledError:

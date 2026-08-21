@@ -1,11 +1,16 @@
 /** The flare scrubbing-preview timeline (owner ask, flares first —
  * data/timeline-preview-scrub-flares-and-drop-sequences/HIS-VERBATIM-
- * WORDS.md). Opened from a "▶ Preview" button on a flare kind card
- * (ResponseTab.tsx). Fetches a deterministic, hardware-free write
- * timeline for this ONE kind (spectra/services/flare_preview.py) and
- * plays/loops/scrubs it entirely client-side — no repeated backend calls
- * per frame (his own pre-authorisation: "catch up" is fine if
- * substantially easier than live).
+ * WORDS.md), NOW WITH A LIVE HOLD (owner correction, same day —
+ * spectra/services/flare_preview_hold.py's own docstring has the full
+ * history). Opened from a "▶ Preview" button on a flare kind card
+ * (ResponseTab.tsx). /flare-preview/open does two things: computes a
+ * deterministic write timeline for this ONE kind (spectra/services/
+ * flare_preview.py, still hardware-free — the ruler/scrub/loop below plays
+ * this locally, no repeated backend calls per frame) AND, separately,
+ * fires this card's scene + kind for REAL onto his fixtures and holds
+ * them there for as long as this overlay stays open. Closing (or losing
+ * the tab/connection — see the heartbeat block below) reverts his room to
+ * exactly what it showed before the preview opened.
  *
  * Two independent marker kinds, per his brief:
  *   - the TRIGGER mark (draggable) — where he considers this kind
@@ -23,7 +28,11 @@
  * "Automatically pauses the trigger engine": /flare-preview/open arms
  * preview_pause for as long as this overlay stays mounted, kept alive by
  * a heartbeat (server timeout is generous — a missed beat or two doesn't
- * un-pause under it) and explicitly released on close/unmount/tab-close. */
+ * un-pause under it) and explicitly released on close/unmount/tab-close.
+ * Since the hold above is now a real fire, the SAME heartbeat also keeps
+ * the live hold's own server-side revert timer armed — a lapsed heartbeat
+ * (closed browser, dropped connection) reverts his room automatically,
+ * not just un-pauses the trigger engine. */
 import { useEffect, useRef, useState } from 'react';
 import HelpLink from '../../help/HelpLink';
 import {
