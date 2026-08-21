@@ -382,7 +382,9 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
                 {animEndAbs != null && <> — the visible effect runs for {fmtMs(animEndAbs - animStartAbs)} total</>}.
                 Drag the trigger line to test a different alignment; it saves onto this kind's
                 own trigger_offset_ms (Save the scene to keep it) — drag it right to fire
-                earlier (negative), left to fire later (positive). The live fire waits for the
+                earlier (negative), left to fire later (positive). Once saved, your real song
+                triggers fire this flare by the same offset — the drag retimes your show, not
+                just this preview. The live fire waits for the
                 white playhead to reach the accent-coloured "start" line before it fires, every
                 loop{timeline?.lead_ms ? <> — {timeline.lead_ms}ms earlier than the trigger mark
                 itself, the same automatic lead a real trigger fire would apply for this kind</> : null}.

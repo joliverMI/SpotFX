@@ -110,9 +110,12 @@ export interface ParamTarget {
  * point from the scrubbing preview's trigger-alignment marker — HIS sign
  * convention (ruling 2026-08-21): negative = fire earlier, positive =
  * fire later. See models/scene.py's FlareKind docstring for the full
- * statement. Now read by the live preview's own fire loop (spectra/
- * services/flare_preview_hold.py, via flare_preview.trigger_mark_s) —
- * no longer descriptive only. */
+ * statement. Read by the live preview's own fire loop (spectra/
+ * services/flare_preview_hold.py, via flare_preview.trigger_mark_s) AND —
+ * since 2026-08-21 — by the REAL firing path: trigger_engine.tick()
+ * relocates a fire_response trigger's target by the fired band's authored
+ * offset (scene_response.band_trigger_offset_ms), so dragging the marker
+ * retimes his real show, not only the preview. */
 export interface FlareKind {
   name: string;
   type: 'drift_jump' | 'momentary' | 'permanent';
