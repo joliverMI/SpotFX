@@ -234,7 +234,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                 {kindIcon(k)} {k.name}
                 <span className="chip" style={{ marginLeft: 6 }}>{kindTypeLabel(k)}</span>
                 {scene.update_kind === k.name && (
-                  <span className="chip" style={{ marginLeft: 4 }} title="This scene's fire_scene_update triggers fire this kind">
+                  <span className="chip" style={{ marginLeft: 4 }} title="Reserved for a future Update effect — not read today. A dwell hold or fire_scene_update trigger currently fires this scene's Flare response at double intensity instead; see the Update effect help topic.">
                     ⚓ UPDATE
                   </span>
                 )}
@@ -251,8 +251,8 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}
-          title="A fire_scene_update trigger fires this scene's designated kind directly, bypassing band selection. Only permanent kinds are eligible — a momentary or drift-jump kind would return or roll, not 'become the new baseline'.">
-          <span style={{ color: 'var(--text-muted)' }}>Update kind</span>
+          title="Reserved for a future, purpose-built Update effect — not read by fire_scene_update or a dwell hold today. Right now both fire this scene's own Flare response at double intensity instead, whatever's attached to its bands; see the Update effect help topic.">
+          <span style={{ color: 'var(--text-muted)' }}>Update kind (reserved)</span>
           <select value={scene.update_kind ?? ''}
             onChange={(e) => setScene({ ...scene, update_kind: e.target.value || null })}
             style={{ fontSize: 12 }}>

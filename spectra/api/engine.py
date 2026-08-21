@@ -11,7 +11,10 @@
       (spectra-trigger-migration-scoping RULING.md) even though it isn't a
       ResponseClass — it's the same manual test-fire surface the other four
       classes already have, routed to ResponseEngine.on_update instead of
-      on_event since UPDATE bypasses band selection entirely.
+      on_event. As of the 2026-08-20 placeholder (on_update's own
+      docstring), this fires the "flare" class at 2x the given intensity —
+      no longer a bypass of band selection, just a different intensity
+      input.
   POST /api/engine/baseline/{scene_id} — re-baseline the engine on a scene
       WITHOUT firing anything: resolve at the given intensity, hand the
       writes to the conductor. This is how the engine adopts a scene while

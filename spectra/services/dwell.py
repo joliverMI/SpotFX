@@ -35,18 +35,21 @@ His four answered questions (HIS-DECISION.md), each now a specification:
      named (overrode_dwell).
   D. A deferred scene change (still inside the active scene's dwell
      window) fires an UPDATE EFFECT instead —
-     spectra.services.engine.fire_scene_update_event, CONFIRMED BY HIM to
-     be the existing on_update/SceneV2.update_kind mechanism, not a new
-     thing to build. 8 of his 9 real scenes have no update_kind authored
-     today; on_update's own pre-existing "no update_kind → no-op"
-     convention means those scenes simply hold when deferred — his own
-     card text anticipated exactly this staging ("they might not be
-     defined yet, but we will do those soon"), so dwell ships now rather
-     than waiting on every scene to be authored. The hold is never silent:
-     fire_scene_by_id records every deferral to fire_history's "deferred"
-     bucket (requested scene, remaining dwell, and the update seam's own
-     result), so "why didn't the room change" is a log lookup, not a
-     mystery.
+     spectra.services.engine.fire_scene_update_event. Originally the
+     existing on_update/SceneV2.update_kind mechanism; 8 of his 9 real
+     scenes had no update_kind authored, so that first cut of on_update
+     landed on nothing for almost every hold — he'd anticipated the
+     staging ("they might not be defined yet, but we will do those soon")
+     but the gap still made a hold indistinguishable from a broken engine,
+     so on_update was replaced same-day (2026-08-20, his ask: "make update
+     scene act like a double intensity flare until we build it out
+     specifically") to fire the scene's own ordinary flare response at 2x
+     intensity — nothing new to author, works on every scene he already
+     has; see scene_response.ResponseEngine.on_update's own docstring. The
+     hold is never silent either way: fire_scene_by_id records every
+     deferral to fire_history's "deferred" bucket (requested scene,
+     remaining dwell, and the update seam's own result), so "why didn't
+     the room change" is a log lookup, not a mystery.
 
 State is process-global, not per-scene-sequencer-instance. The OLD dwell's
 "current scene" bookkeeping lived only on SceneSequencer's own instance

@@ -2271,22 +2271,41 @@ Force Scene still wins but the result NAMES the override
 (`overrode_dwell=True`, forwarded through `room_controls.
 reconcile_force_scene_if_changed` — same pattern as `overrode_disabled`).
 **(D)** a deferred scene change fires the current scene's own UPDATE
-EFFECT instead — CONFIRMED BY HIM to be the existing `on_update`/
-`SceneV2.update_kind` mechanism (`scene_response.py`, `engine.
-fire_scene_update_event`, now also called from dwell's deferral branch and
-returning the `on_update` record instead of `None` so the caller can log
-what happened).
+EFFECT instead — `engine.fire_scene_update_event` (`scene_response.py`'s
+`on_update`), called from dwell's deferral branch, which returns the
+`on_update` record (not `None`) so the caller can log what happened.
+Originally this meant the scene's own named, type="permanent"
+`SceneV2.update_kind` (bypassing band selection entirely) — but 8 of his
+9 real scenes had no `update_kind` authored, so most deferred dwells held
+with nothing visible happening. **Replaced same-day (2026-08-20, his ask:
+"make update scene act like a double intensity flare until we build it
+out specifically")**: `on_update` now doubles the given intensity (clamped
+to 1.0 — his accepted ceiling, so "double" and "full" read identical from
+intensity 0.5 up) and runs it through the scene's own ordinary "flare"
+ResponseClass — the SAME band-selection + kind-execution `on_event` runs
+for a genuine flare (`_execute_band`, shared by both). No permanent-only
+restriction, nothing new to author: every one of his real scenes already
+has a "flare" response, so a deferred dwell now visibly flares on all of
+them, not just the one (STAR) with an authored `update_kind`.
+`SceneV2.update_kind` is untouched (still authorable, still validated) but
+simply unread by this path now — reserved for whenever a real, purpose-
+built update effect gets designed; don't repurpose it for that without a
+fresh ask. Because `on_update` can now land a momentary kind, a dice
+re-roll, or a colour rotate — none of which the original permanent-only
+design ever produced — `fire_scene_update_event` also schedules their
+releases the same way `fire_response_event` already does
+(`pending_hold_groups`/`pending_color_rotate_holds`), which it never
+needed to before.
 
-**The consequence his answer makes live, handled not discovered**: most
-of his real scenes have no `update_kind` authored, so `on_update` is a
-pre-existing no-op for them (`{"result": "no_update_kind"}`). Dwell ships
-gating them anyway — his own card text anticipated this exact staging
-("they might not be defined yet, but we will do those soon") — but the
-interim hold is NEVER SILENT: `fire_scene_by_id` records every deferral to
-`fire_history`'s new `"deferred"` bucket (`{scene_name, remaining_dwell_s,
-update_result}`, both the durable count and the show-log timeline, visible
-on the Review page), so "why didn't the room change" is a log lookup, not
-a mystery indistinguishable from triggers having stopped working.
+**The interim hold is NEVER SILENT either way**: `fire_scene_by_id`
+records every deferral to `fire_history`'s `"deferred"` bucket
+(`{scene_name, remaining_dwell_s, update_result}`, both the durable count
+and the show-log timeline, visible on the Review page), so "why didn't
+the room change" is a log lookup, not a mystery indistinguishable from
+triggers having stopped working — now doubly true since a scene with no
+"flare" response at all (the only remaining no-op case) is rare to begin
+with. Real-fixture proof against his actual scene library (not just a
+synthetic harness): `scripts/check_update_effect_double_intensity.py`.
 
 Frontend: `SequencingTab.tsx` mounts a SECOND `CurveAttachmentEditor`
 below the likelihood one, `attachField="dwell_curve"` — a THIRD storage

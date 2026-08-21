@@ -241,18 +241,22 @@ def test_surge_patch_eases_and_carries(tmp_path):
     _run(main())
 
 
-# ── proof 2b: UPDATE glides (never jumps), carries, and bypasses band ────────
-# ── gating entirely (data/spectra-trigger-migration-scoping RULING.md) ───────
+# ── proof 2b: UPDATE is now a placeholder double-intensity FLARE ─────────────
+# ── (2026-08-20, his ask: "make update scene act like a double intensity ────
+# ── flare until we build it out specifically") — no more update_kind/ ───────
+# ── permanent-only band bypass; see on_update's own docstring. ──────────────
 
-def test_update_glides_and_carries_bypassing_bands(tmp_path):
-    """The owner's UPDATE definition, proved frame-by-frame: "a major change
-    within the scene, bigger than a flare, overriding the drift, going
-    somewhere new on a ramp-in transition." This scene has NO response
-    bands at all (proving update doesn't need band/intensity-gate setup)
-    and update_kind names a type="permanent" kind directly."""
-    from spectra.models.scene import (DriftRef, DriftSpec, FlareKind,
-                                      ParamTarget, SceneDeviceConfig, SceneV2)
-    from spectra.services.scene_response import update_ramp_ms
+def test_update_fires_the_scenes_flare_response_at_double_intensity(tmp_path):
+    """Proves the doubling actually changes what fires, not just a cosmetic
+    number: two "flare" bands, chosen so intensity 0.2 would land in the LOW
+    band un-doubled but the HIGH band once doubled to 0.4 — the same
+    band-selection + kind-execution a genuine flare runs (_execute_band,
+    shared with on_event), reached through on_update at 2x intensity. CARRY
+    is proved the same way the old test proved it for a band-driven surge:
+    the creep resumes from the landed point, not from 1.0."""
+    from spectra.models.scene import (DriftRef, DriftSpec, FlareBand,
+                                      ResponseSpec, SceneDeviceConfig, SceneV2)
+    from spectra.services.scene_response import DICE_REROLL_GLIDE_MS
     _categories_fixture(tmp_path)
     scene = SceneV2(
         name="Updating",
@@ -261,10 +265,12 @@ def test_update_glides_and_carries_bypassing_bands(tmp_path):
             params={"gradient_scale": 1.0},
             drift={"gradient_scale": DriftRef(inline=DriftSpec(
                 kind="creep", rate_per_min=1.5, lo=0.5, hi=2.0))})],
-        flare_kinds=[FlareKind(
-            name="Big Shift", type="permanent",
-            params={"gradient_scale": ParamTarget(mode="absolute", value=1.8)})],
-        update_kind="Big Shift")
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=0.3,
+                      param_patch={"gradient_scale": 1.2}),
+            FlareBand(intensity_min=0.3, intensity_max=1.0,
+                      param_patch={"gradient_scale": 1.8}),
+        ])})
 
     async def main():
         host, virtual = await _host(tmp_path, "update")
@@ -276,32 +282,23 @@ def test_update_glides_and_carries_bypassing_bands(tmp_path):
                 executor, conductor, responder, _ = _engine(clock)
                 _fire(conductor, scene, config)
 
-                # intensity 1.0 lands the declared target VERBATIM (same
-                # ×1-scale convention as on_event's band-driven kinds) —
-                # the clean case to prove the glide lands where authored.
-                record = await responder.on_update(1.0)
-                assert record["result"] == "updated"
-                expected_ramp = update_ramp_ms(1.0)
-                assert record["ramp_ms"] == expected_ramp
-                # parity with on_event's "applied" records: report what carried
+                record = await responder.on_update(0.2)
+                assert record["class"] == "update"
+                assert record["intensity"] == 0.2
+                assert record["doubled_intensity"] == pytest.approx(0.4)
+                assert record["result"] == "applied"
+                assert record["band"] == {"intensity_min": 0.3, "intensity_max": 1.0}
                 assert record["carried"] == [{"virtual_id": VID, "param": "gradient_scale"}]
+                assert not any(w["kind"] == "jump" for w in executor.writes), \
+                    "gradient_scale is registry-smooth — a patch on it glides"
 
-                glide_write = [w for w in executor.writes if w["kind"] == "glide"][-1]
-                assert glide_write["duration_ms"] == expected_ramp
-                assert glide_write["params"]["gradient_scale"] == pytest.approx(1.8)
-                # never an instant jump — the ramp-in is the whole point
-                assert not any(w["kind"] == "jump" for w in executor.writes)
+                glide_frames = int(DICE_REROLL_GLIDE_MS / 1000 / (1 / 60)) + 2
+                headless.render_frames(virtual, glide_frames, clock=clock, dt=1 / 60)
+                assert effect._config["gradient_scale"] == pytest.approx(1.8), \
+                    "the HIGH band's kind landed — the doubled intensity " \
+                    "(0.4), not the raw 0.2, is what selected the band"
 
-                # Nothing has landed on the render pipeline until frames
-                # advance past the ramp — a real glide, not a same-frame snap.
-                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
-                assert effect._config["gradient_scale"] < 1.8
-                headless.render_frames(virtual, int(expected_ramp / 1000 * 60) + 5,
-                                       clock=clock, dt=1 / 60)
-                assert effect._config["gradient_scale"] == pytest.approx(1.8)
-
-                # CARRY: the creep resumes its wander from the landed point,
-                # not from 1.0 — same proof shape as the band-driven surge.
+                # CARRY: the creep resumes its wander from the landed point.
                 mech = conductor.mechanisms[0]
                 assert mech.position == pytest.approx(1.8)
         finally:
@@ -311,12 +308,48 @@ def test_update_glides_and_carries_bypassing_bands(tmp_path):
     _run(main())
 
 
-def test_update_is_a_silent_noop_without_an_authored_update_kind(tmp_path):
+def test_update_doubled_intensity_clamps_at_one(tmp_path):
+    """His accepted ceiling: intensity ≥ 0.5 doubles past 1.0 and clamps
+    there rather than extrapolating or inventing headroom — a deliberate,
+    approved consequence (AGENTS.md), not a gap to fill."""
+    from spectra.models.scene import (FlareBand, ResponseSpec,
+                                      SceneDeviceConfig, SceneV2)
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Updating", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric",
+        params={"gradient_scale": 1.0})],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=1.0,
+                      param_patch={"gradient_scale": 1.5})])})
+
+    async def main():
+        host, virtual = await _host(tmp_path, "update-clamp")
+        try:
+            with headless.fake_clock() as clock:
+                config = {"gradient_scale": 1.0}
+                headless.attach_effect(host, virtual, "concentric", config)
+                _, conductor, responder, _ = _engine(clock)
+                _fire(conductor, scene, config)
+
+                for raw in (0.6, 0.9, 1.0):
+                    record = await responder.on_update(raw)
+                    assert record["doubled_intensity"] == 1.0, raw
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_update_is_a_silent_noop_without_a_flare_response(tmp_path):
+    """No "flare" response/bands declared at all — the same "nothing
+    declared → nothing happens" convention a genuine flare's own "no_band"
+    result already follows; update_kind is irrelevant now (not read)."""
     from spectra.models.scene import SceneDeviceConfig, SceneV2
     _categories_fixture(tmp_path)
-    scene = SceneV2(name="No Update Authored", devices=[SceneDeviceConfig(
+    scene = SceneV2(name="No Flare Response", devices=[SceneDeviceConfig(
         target_kind="virtual", target=VID, effect_type="concentric",
-        params={"gradient_scale": 1.0})])  # no flare_kinds, no update_kind
+        params={"gradient_scale": 1.0})])  # no responses at all
 
     async def main():
         host, virtual = await _host(tmp_path, "no-update")
@@ -328,7 +361,7 @@ def test_update_is_a_silent_noop_without_an_authored_update_kind(tmp_path):
                 _fire(conductor, scene, config)
 
                 record = await responder.on_update(0.9)
-                assert record["result"] == "no_update_kind"
+                assert record["result"] == "no_class"
                 assert list(executor.writes) == []
         finally:
             facade.set_host(None)
