@@ -467,6 +467,22 @@ async def _release_after_hold(responder, hold_s: float) -> None:
     await responder.flush_releases(hold_s)
 
 
+async def _release_color_rotates_after_dwell(responder, dwell_s: float) -> None:
+    # The colour ROTATE-AND-BACK flare's own release queue — engine.py's
+    # _release_color_rotate_after_dwell mirrored onto the scratch responder.
+    # Its fade-back duration is intensity-scaled per fire, so it can't share
+    # _release_after_hold's fixed-PULSE_RELEASE_S queue (see
+    # scene_response._color_rotate's own docstring). Left unscheduled here
+    # until 2026-08-21 (his report: the previewed rotation ramped in and
+    # never came back, so every later lap re-targeted the already-rotated
+    # gradient — zero visible change on every crossing after the first).
+    try:
+        await asyncio.sleep(dwell_s)
+    except asyncio.CancelledError:
+        return
+    await responder.flush_color_rotates(dwell_s)
+
+
 async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
                     heartbeat_timeout_s: float) -> dict:
     """Fire `scene` live (the "call the scene" step) then `kind` live on
@@ -479,7 +495,13 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
     revert restores — never a mid-session state. Any release task still
     pending from a PRIOR call in this session is cancelled first, so an
     intensity change mid-hold can't race its own earlier momentary release
-    against the new fire. Re-arms the release deadline (module docstring,
+    against the new fire. BOTH release queues are scheduled — the fixed
+    momentary one (pending_hold_groups) and the colour rotate-and-back
+    flare's own intensity-scaled one (pending_color_rotate_holds),
+    mirroring engine.fire_response_event's pair of scheduling loops; the
+    rotate queue was missed here until 2026-08-21 (his report: a previewed
+    rotation never faded back, so every crossing after the first showed
+    nothing). Re-arms the release deadline (module docstring,
     "deadline-driven, not close-driven") either way — an /open call is at
     least as much a heartbeat as an explicit /heartbeat ping. Raises on a
     live-write failure (ownership refusal, an unreachable LedFX) — the
@@ -529,6 +551,9 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
         for hold_s in responder.pending_hold_groups():
             _release_tasks.append(asyncio.create_task(
                 _release_after_hold(responder, hold_s)))
+        for dwell_s in responder.pending_color_rotate_holds():
+            _release_tasks.append(asyncio.create_task(
+                _release_color_rotates_after_dwell(responder, dwell_s)))
         _rearm(heartbeat_timeout_s)
         return {"held": True, "first_open": first_open, "fire_record": fire_record}
 

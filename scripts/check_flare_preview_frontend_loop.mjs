@@ -154,4 +154,110 @@ function simulateLoop({ fireAtS, durationS, totalRealSeconds, dtMs = 16 }) {
   }
 }
 
+// ── FIVE: an INTENSITY CHANGE mid-loop (the colour rotate-and-back case —
+// the ONLY kind whose lead, and therefore fireAtS, moves with intensity).
+// Models the component's actual transition, verbatim from the timeline-
+// refetch .then + the loop effect's restart: the .then resets the playhead
+// to 0 and keeps durationS = max(prev, new) (so an Extend-grown or
+// longer-previous ruler never shrinks under him), the effect restarts and
+// derives the next-fire deadline fresh from the CURRENT playhead. The
+// question this answers (2026-08-21, his report "after I change intensity
+// it no longer runs as the playhead crosses the trigger"): does the kept
+// stale-longer duration strand the fire schedule away from the drawn
+// marks? It cannot — proven here — because playhead wrap, fire cadence,
+// and every drawn mark all share the SAME durationS, and the anchor
+// geometry is pinned (see SIX below). The real defect was server-side
+// (flare_preview_hold.open_hold never scheduled the rotate's fade-back
+// release queue — tests/test_flare_preview_hold.py), not this arithmetic.
+function simulateIntensityChange({ fire1, dur1, fire2, dur2server, changeAtS, totalRealSeconds, dtMs = 16 }) {
+  // durationS transition, verbatim: setDurationS((prev) => Math.max(prev, tl.duration_s))
+  const dur2 = Math.max(dur1, dur2server);
+  let playhead = 0;
+  let now = 0;
+  let durationS = dur1;
+  let fireAtS = fire1;
+  const startSchedule = () => {
+    const normalizedFireAtS = ((fireAtS % durationS) + durationS) % durationS;
+    const delayToFireS = normalizedFireAtS >= playhead
+      ? normalizedFireAtS - playhead
+      : durationS - playhead + normalizedFireAtS;
+    return now + delayToFireS * 1000;
+  };
+  let nextFireAt = startSchedule();
+  const fires = [];
+  let lastFrame = null;
+  let changed = false;
+  while (now < totalRealSeconds * 1000) {
+    now += dtMs;
+    if (!changed && now >= changeAtS * 1000) {
+      // the .then, verbatim: new timeline lands — playhead resets to 0,
+      // duration keeps the max, fireAtS takes the server's new value, and
+      // the loop effect restarts (deps: durationS/fireAtS/timeline)
+      changed = true;
+      durationS = dur2;
+      fireAtS = fire2;
+      playhead = 0;
+      lastFrame = null;
+      nextFireAt = startSchedule();
+      continue;
+    }
+    if (lastFrame != null) {
+      const dt = (now - lastFrame) / 1000;
+      const next = playhead + dt;
+      playhead = next >= durationS ? next % durationS : next;
+    }
+    lastFrame = now;
+    if (nextFireAt != null && now >= nextFireAt) {
+      fires.push({ atMs: now, playheadS: playhead, afterChange: changed });
+      while (nextFireAt <= now) nextFireAt += durationS * 1000;
+    }
+  }
+  return { fires, dur2 };
+}
+
+{
+  // The rotate's REAL numbers (scene_response.py): fire_at_s = 2.0 - ramp.
+  // Open at intensity 0.3 (ramp 775ms, server duration 6.758s), then RAISE
+  // to 1.0 (ramp 250ms, server duration 6.0s) — the shrink direction, where
+  // Math.max keeps the stale 6.758s while the server computed against 6.0.
+  const { fires, dur2 } = simulateIntensityChange({
+    fire1: 2.0 - 0.775, dur1: 6.758,
+    fire2: 2.0 - 0.25, dur2server: 6.0,
+    changeAtS: 9.0, totalRealSeconds: 40,
+  });
+  check(dur2 === 6.758, 'FIVE: Math.max keeps the stale longer duration (the suspected desync)');
+  const after = fires.filter((f) => f.afterChange);
+  check(after.length >= 4, `FIVE: the loop keeps firing after the change (${after.length} fires)`);
+  for (const f of after) {
+    // every post-change fire lands exactly where the ruler draws the
+    // "start" line — playhead == fireAtS at the moment of fire — so the
+    // fire schedule and the drawn marks still agree despite the stale max
+    check(Math.abs(f.playheadS - 1.75) <= 0.04,
+      `FIVE: post-change fire lands ON the drawn start line (playhead=${f.playheadS.toFixed(3)}s vs 1.75s)`);
+  }
+  // cadence: consecutive post-change fires are one (stale) lap apart —
+  // the SAME lap length the playhead itself wraps at, so no drift ever
+  // accumulates between the white playhead and the fire schedule
+  for (let i = 1; i < after.length; i++) {
+    const gap = after[i].atMs - after[i - 1].atMs;
+    check(Math.abs(gap - 6758) <= 20, `FIVE: post-change cadence matches the shared duration (${gap}ms)`);
+  }
+}
+
+// ── SIX: the structural premise that makes FIVE hold — the anchor cannot
+// move. animation_anchor_s (verbatim from spectra/services/flare_preview.py)
+// is min(2.0, duration_s / 3), and duration_s is never below MIN_TIMELINE_S
+// (6.0) — so the anchor is pinned at exactly 2.0 for EVERY reachable
+// timeline, every intensity, every kind. A stale-longer client duration
+// therefore never shifts where the anchor/trigger geometry sits — only how
+// long a lap takes. ──────────────────────────────────────────────────────
+{
+  const MIN_TIMELINE_S = 6.0;
+  const animationAnchorS = (durationS) => Math.min(2.0, durationS / 3);
+  for (const d of [6.0, 6.263, 6.758, 7.5, 20.0, 60.0]) {
+    check(d >= MIN_TIMELINE_S && animationAnchorS(d) === 2.0,
+      `SIX: anchor pinned at 2.0 for duration ${d}s`);
+  }
+}
+
 console.log('\nAll flare-preview frontend loop checks passed (pure logic, no network, no browser).');
