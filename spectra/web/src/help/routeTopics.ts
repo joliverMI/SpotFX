@@ -19,6 +19,7 @@ const ROUTE_TOPICS: [prefix: string, topic: string][] = [
   ['/feedback', 'feedback-page'],
   ['/review', 'review-page'],
   ['/timing', 'timing-debug'],
+  ['/avsync', 'av-sync-page'],
   ['/debug', 'timing-debug'],
   ['/settings', 'settings-console'],
   ['/status', 'status-page'],

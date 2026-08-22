@@ -15,6 +15,7 @@ import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
 import TimingVizPage from './timingviz/TimingVizPage';
+import AvSyncPage from './avsync/AvSyncPage';
 import DebugPage from './debug/DebugPage';
 
 const PAGE_TITLES: [string, string][] = [
@@ -24,6 +25,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/feedback', 'Feedback'],
   ['/review', 'Review'],
   ['/timing', 'Timing'],
+  ['/avsync', 'AV Sync'],
   ['/debug', 'Debug'],
   ['/settings', 'Settings'],
   ['/status', 'Status'],
@@ -59,6 +61,7 @@ function NavBar() {
       <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
       <Link to="/review" className={cls((p) => p === '/review')}>Review</Link>
       <Link to="/timing" className={cls((p) => p === '/timing')}>Timing</Link>
+      <Link to="/avsync" className={cls((p) => p === '/avsync')}>AV Sync</Link>
       <Link to="/debug" className={cls((p) => p === '/debug')}>Debug</Link>
       <Link to="/settings" className={cls((p) => p === '/settings')}>Settings</Link>
       <Link to="/status" className={cls((p) => p === '/status')}>Status</Link>
@@ -85,6 +88,7 @@ export default function App() {
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/timing" element={<TimingVizPage />} />
+          <Route path="/avsync" element={<AvSyncPage />} />
           <Route path="/debug" element={<DebugPage />} />
           <Route path="/settings" element={<SettingsConsolePage />} />
           <Route path="/status" element={<StatusPage />} />

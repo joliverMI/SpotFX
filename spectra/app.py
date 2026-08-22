@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 from spectra import config
 from spectra.api import engine as engine_api
-from spectra.api import (device_preview, feedback, fire_history,
+from spectra.api import (av_sync, device_preview, feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
                          ownership, registry, room_controls, room_preview,
                          scenes, sequencer, settings_console, show_review,
@@ -91,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(sonic_usage.router)
     app.include_router(spec.router)
     app.include_router(gradient2d.router)
+    app.include_router(av_sync.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):
@@ -167,6 +168,13 @@ async def _standalone_lifespan(app):
     # is still managing it. Must run AFTER resume_own_room() re-activates
     # the live stack — reverting is itself a real fx_seam write.
     await flare_preview_hold.recover_stale_hold()
+    # Same shape for the AV-sync flash-pattern driver (spectra/services/
+    # av_sync_pattern.py): a pre-pattern snapshot still on disk at startup
+    # means the process died mid-pattern — land it back rather than leave
+    # the room parked white. Bounded runs (≤30 s) make this rare; the file
+    # makes it harmless.
+    from spectra.services import av_sync_pattern
+    await av_sync_pattern.recover_stale_pattern()
     # Freeze state is in-memory only on the fresh HueDevice objects
     # resume_own_room() just built (fx/devices/hue.py's own docstring) — a
     # restart while ambient was genuinely holding a quiet room would

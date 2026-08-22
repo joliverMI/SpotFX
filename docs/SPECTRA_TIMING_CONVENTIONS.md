@@ -88,6 +88,7 @@ in root `spotfx` code and was never ported to `spectra/` at all.
 | `flare_preview_hold.HEARTBEAT_TIMEOUT_S` (15) / `SWEEP_INTERVAL_S` (2) / `MAX_HOLD_DURATION_S` (180) | s | Not signed — abandonment/ceiling durations for the live flare-preview hold | SPECTRA flare preview | **Live** | `spectra/services/flare_preview_hold.py:191,197,203` |
 | `param_watchdog.SWEEP_INTERVAL_S` (10) / `ORPHAN_GRACE_S` (30) / `RESTORE_GLIDE_MS` (= `PULSE_RELEASE_S`×1000 = 1500) | s / s / ms | Not signed — the param orphan watchdog's sweep cadence, the continuous away-from-baseline-with-nothing-holding-it age before it restores (margin over the worst legitimate hold+release ≈ 3.5 s — justified in the module docstring), and the restore glide (deliberately the same duration a momentary release uses, so a restore looks like the release that never came) | SPECTRA param orphan watchdog | **Live** | `spectra/services/param_watchdog.py` (constants near the top of the module) |
 | `activation_report.RECHECK_INTERVAL_S` (30) / `RECHECK_PROBE_TIMEOUT_S` (3 = `live_host.DEVICE_VERIFY_TIMEOUT_S`) | s | Not signed — how often a light the last take-back/resume had to SKIP (unreachable/slow/not receiving) is re-asked after commit, and the per-device json/info read bound for that re-ask (the same probe `device_gaps()` polls at activation — `live_host.probe_device_live`, one definition of "confirmed driving"). Cadence matches the reconciler/frame watchdog's 30 s tick. A take-back from `released` itself still waits the activation probes' own `DEVICE_LIVE_DEADLINE_S` (25) before deciding a device is skipped — this recheck is what keeps that verdict honest afterwards. | SPECTRA activation report (the tolerant take-back, owner ruling 2026-08-21) | **Live** | `spectra/services/activation_report.py` (constants near the top of the module) |
+| `av_offset_ms` (phone A/V-sync instrument: `light_lag_ms − audio_lag_ms`) | ms | **MEASURED, neither family**: positive = the LIGHT reached the phone LATER than the sound it was meant to land with (lights behind/lag); negative = lights EARLIER (ahead/lead). `light_lag_ms` = (phone sees a light edge) − (server wrote it); `audio_lag_ms` = (phone hears a sound onset) − (SPECTRA's own audio hub heard it); the phone↔server clock offset cancels in the difference. A measurement of his room from where the phone stood — NOT authored, NOT applied anywhere by the build that introduced it (the number is presented for him to accept; no setting is written). To close a measured offset the engine would have to fire lights EARLIER by `+av_offset_ms` (a LEAD-family quantity, positive=earlier) — that translation, if ever built, belongs in this table as its own row | SPECTRA AV-sync instrument (`spectra/services/av_sync_session.py`, `av_sync_correlate.py`, UI `/avsync`) | **Live** (measure-only; pattern mode flashes the room over fx_seam and reverts) | `spectra/services/av_sync_correlate.py` (module docstring: the algebra), `spectra/services/av_sync_session.py` (module docstring: sign + privacy), `scripts/check_av_sync.py` (simulated rooms, the number vs truth) |
 | `LOOKAHEAD_HORIZON_MS` (= `transition_phases.MAX_LEAD_MS` = 5000) / `RESPONSE_OFFSET_HORIZON_MS` (= 60000+horizon) | ms | Not signed — cost-gate windows bounding how far ahead `tick()` bothers computing a lead/offset, not timing conventions themselves | SPECTRA trigger engine | **Live** | `spectra/services/trigger_engine.py:279-359` |
 
 ---
@@ -216,22 +217,26 @@ it, had it been read.
 ### 1. The audio delay was argued in the wrong direction
 
 An audio-delay value was moved (1650 → worse, per the owner) and then
-corrected twice by his own ears (→ 650 → 150). **No specific code location
-in this repository could be verified as the source of these three numbers**
-— this investigation is not represented in the current codebase as a
-committed change: a commit-message search and a full pickaxe search
-(`git log --all -S"1650"`) both come up empty for anything from this
-period — the only hits for the literal string `1650` anywhere in history
-are unrelated xcorr benchmark-tuning commits from 2026-06 (`7e0a1aa`,
-`2b1e70f`, and siblings), two months before this investigation. The
-closest mechanism that matches the shape of "a user-tunable audio delay
-argued against his ears" is `perception_trim_ms`
-(`models/audio_shape.py:72-74`, `routers/audio_shape_router.py:243-299`) —
-a predecessor-only, per-song manual nudge layered onto `shape_offset_ms`.
-**This is flagged, not asserted**, exactly per this document's own
-verify-don't-trust standard: if a future agent locates the actual mechanism
-tuned during that investigation, this entry should be corrected to cite it
-directly.
+corrected twice by his own ears (→ 650 → 150). **Located 2026-08-22 (PR
+fm/phone-audio-video-capture-for-measured-a-7b), strong circumstantial,
+not a logged diff**: the number is SpotFX's `settings.audio_latency_ms` —
+code default `1000` (`config.py:110-111`, "Milliseconds between audio
+playback and Spotify timestamp"), typed into the Settings page's
+"Latency & Timing" card (`web/src/settings/SettingsPage.tsx:146-149`,
+`step={50}` — 1650/650/150 are all on that stepper), and sitting at `150`
+in the live, **gitignored** `storage/settings.json` (file mtime
+2026-08-20 21:21) — which is exactly why the earlier pickaxe search of
+this repo's history came up empty: the value was never a commit. The
+earlier guess at `perception_trim_ms` is withdrawn. **And the sting:
+`audio_latency_ms` is not a fire-time offset at all** (see its own row
+above) — it labels WAV-capture timestamps for the xcorr corpus and moves
+the DRAWN playhead (`spectra/web/src/help/helpContent.ts`'s own words:
+"audio latency shifts where the playhead is drawn, not when triggers
+fire"); nothing in the engine that runs his room reads it. The week was
+spent tuning, against his ears, a number that only reaches his lights
+second-hand (via a corrupted xcorr corpus → `shape_offset_ms`). The
+instrument that would have settled this by measurement now exists:
+`/avsync` (the `av_offset_ms` row above).
 
 ### 2. The "proof" was noise
 
@@ -246,7 +251,8 @@ exactly why: it re-snaps live, mid-song, on every improved cross-
 correlation read. **The record this document keeps: never measure a
 timing change via a raw `shape_offset_ms`/`effective_offset_ms` delta.**
 Corroborate against the owner's own ears, or against a genuine measurement
-instrument (a phone A/V capture, still unbuilt as of this writing).
+instrument — the phone A/V capture at `/avsync` (`av_offset_ms` row above),
+built 2026-08-22 for exactly this.
 
 ### 3. One engine's timing was read while his show ran on another
 

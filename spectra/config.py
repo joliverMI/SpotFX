@@ -58,6 +58,16 @@ DARK_LIGHT_SNAPSHOT_FILE = SPECTRA_STORAGE / "dark_light_snapshot.json"
 # restores on close/heartbeat-timeout, persisted so a service restart mid-
 # hold can land it back too (that module's own docstring has the mechanism).
 FLARE_PREVIEW_HOLD_FILE = SPECTRA_STORAGE / "flare_preview_hold.json"
+# The phone audio/visual-offset instrument (spectra/services/av_sync_*.py):
+# AV_SYNC_MEASUREMENTS_FILE is the ONLY thing it ever persists — a bounded
+# list of finished measurement RECORDS (numbers + the confidence statement),
+# never audio, never video, never frames (privacy statement in the help
+# topic "av-sync-page" and the av_sync_session.py module docstring).
+# AV_SYNC_PATTERN_FILE is the flash-pattern driver's pre-pattern per-virtual
+# snapshot, persisted for the same reason FLARE_PREVIEW_HOLD_FILE is: a
+# restart mid-pattern must land the lights back, not strand them white.
+AV_SYNC_MEASUREMENTS_FILE = SPECTRA_STORAGE / "av_sync_measurements.json"
+AV_SYNC_PATTERN_FILE = SPECTRA_STORAGE / "av_sync_pattern.json"
 
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).

@@ -2949,6 +2949,37 @@ pre-existing abandonment bound, not this one):
 `tests/test_flare_preview_api.py` (the `preview_pause` capping, route
 wiring).
 
+## SPECTRA phone A/V-sync instrument (`/avsync`) — MEASURE the audio/visual offset, don't argue it
+
+`spectra/services/av_sync_{correlate,audio_ref,pattern,session}.py` +
+`spectra/api/av_sync.py` + `spectra/web/src/avsync/` (built 2026-08-22,
+PR fm/phone-audio-video-capture-for-measured-a-7b; `docs/SPECTRA_SPEC.md`
+§93). His phone's mic + camera are reduced ON THE PHONE to two number
+streams (raw media never leaves it) and correlated server-side against
+SPECTRA's own live audio hub (`live.hub`, snapcast.monitor = speaker
+time, server timestamps) and a light reference (a random-hold white flash
+PATTERN driven over fx_seam with snapshot/revert, or the show's own
+writes). Result: `av_offset_ms` (positive = lights BEHIND the sound,
+negative = AHEAD — the sign row is in `docs/SPECTRA_TIMING_CONVENTIONS.md`,
+it is neither LEAD nor OFFSET family, it is a MEASUREMENT) plus a
+statistical ± and NAMED systematic terms with direction; a weak/ambiguous/
+unstable correlation REFUSES by name, never guesses. Nothing measured is
+applied to any setting. Three things to know before touching it: (1) the
+flash pattern's RANDOM holds are load-bearing (a periodic blink is refused
+as ambiguous by design) and the light correlation is on signed EDGES, not
+levels (`av_sync_correlate.signed_edges` docstring has the measured why);
+(2) the ONLY file it writes is `storage/spectra/av_sync_measurements.json`
+(numbers + statement, last 100) — keep it that way, the privacy statement
+in help topic `av-sync-privacy` promises it; (3) **camera/mic need a
+secure context** and he reaches SPECTRA over plain http (Tailscale, no
+`tailscale serve`) — the page detects it and names the two fixes (Chrome's
+per-origin flag tonight; HTTPS in front of :8000 properly — which also
+unblocks the Settings voice mic, silently dead on his phone for the same
+reason). The vision/ArUco stage is deliberately NOT built — only its seam
+(`FrameRing`, frame tap OFF by default) is. Proof without a room:
+`scripts/check_av_sync.py` (simulated rooms through the real code);
+`tests/test_av_sync_*.py`.
+
 ## SPECTRA param orphan watchdog (the safety net under momentary releases)
 
 `spectra/services/param_watchdog.py` (own supervised task in `spectra/app.py`'s
