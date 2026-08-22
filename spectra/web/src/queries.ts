@@ -564,6 +564,48 @@ export function useAppStatus() {
 
 /* ── light ownership / the panic release ── */
 
+/** One light the last take-back/resume could not bring up (spectra/
+ * services/activation_report.py SkippedDevice.to_json). `why` is the
+ * sentence he reads; `reason` the verifier's raw text; `still_dark`
+ * flips false the moment a recheck confirms the light driving. */
+export interface SkippedLight {
+  device_id: string;
+  name: string;
+  kind: 'unresolved' | 'unreachable' | 'not-receiving' | string;
+  why: string;
+  reason: string;
+  address: string | null;
+  first_seen_wall: number;
+  last_checked_wall: number;
+  last_checked_age_s: number;
+  recovered_wall: number | null;
+  recovered_age_s: number | null;
+  still_dark: boolean;
+  retries: number;
+}
+
+/** The activation report (spectra/services/activation_report.py
+ * ActivationReport.to_json): what the last activation of the live stack
+ * brought up and what it had to skip. null while the stack is down or
+ * nothing was recorded. Owner ruling 2026-08-21: a take-back from
+ * `released` commits over an unreachable light instead of aborting to
+ * darkness — and the skipped light must be VISIBLE, not only logged. */
+export interface ActivationReport {
+  source: 'take-back' | 'resume' | string;
+  at_wall_ms: number;
+  age_s: number;
+  partial: boolean;
+  expected_virtuals: number;
+  up_virtuals: number;
+  devices_total: number;
+  devices_skipped: number;
+  devices_still_dark: number;
+  skipped: SkippedLight[];
+  virtual_gaps: Record<string, string>;
+  summary: string;
+  recheck_interval_s: number;
+}
+
 export interface OwnershipRecord {
   owner: string;
   handover: {
@@ -574,6 +616,7 @@ export interface OwnershipRecord {
   armed: boolean;
   live_stack_active: boolean;
   history: { at: number; event: string; detail: string }[];
+  activation: ActivationReport | null;
 }
 
 /** Polls fast enough that the banner/button reflect a press from another
@@ -599,11 +642,16 @@ export function useReleaseRoom() {
 
 /** The way back from released: the normal guarded handover to SPECTRA,
  * readiness-gated and SPECTRA_HANDOVER_ARMED-gated same as any handover. */
+/** The way back from released. result "committed" (every light up) or
+ * "committed-partial" (the room came up minus the lights named in
+ * `activation` — the owner's 2026-08-21 ruling: never abort to darkness
+ * over one unreachable light; never hide which one it was). */
 export function useTakeBackToSpectra() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      apiPost<{ result: string; owner: string }>('/ownership/handover', { to: 'spectra' }),
+      apiPost<{ result: string; owner: string; activation?: ActivationReport }>(
+        '/ownership/handover', { to: 'spectra' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-ownership'] }),
   });
 }

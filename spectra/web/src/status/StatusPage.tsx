@@ -2,12 +2,15 @@
  * frame-flush freshness, the named contract) arrives with S3 ownership;
  * this page states what exists now rather than pretending. */
 import HelpLink from '../help/HelpLink';
-import { useAppStatus, useEngineStatus, useSequencerStatus } from '../queries';
+import { fmtAgo } from '../lib/time';
+import { useAppStatus, useEngineStatus, useOwnership, useSequencerStatus } from '../queries';
 
 export default function StatusPage() {
   const { data: st } = useAppStatus();
   const { data: seq } = useSequencerStatus();
   const { data: eng } = useEngineStatus();
+  const { data: own } = useOwnership();
+  const act = own?.activation ?? null;
 
   return (
     <div>
@@ -29,6 +32,34 @@ export default function StatusPage() {
               <HelpLink topic="ownership-liveness" title="The liveness endpoint" />
               <HelpLink topic="ownership-handover" title="How the switch works" />
               <HelpLink topic="ownership-resume" title="Restarts while SPECTRA owns" />
+            </div>
+            <div><div className="k">Lights at {act?.source === 'resume' ? 'restart' : 'take-back'} <HelpLink topic="take-back-skipped-light" title="A light the take-back had to skip" /></div>
+              {!act ? (
+                <span style={{ opacity: 0.7 }}>— (no activation recorded — SPECTRA is not driving the lights)</span>
+              ) : !act.partial ? (
+                <span title={act.summary}>all {act.devices_total} lights came up · {fmtAgo(act.age_s)}</span>
+              ) : (
+                <span>
+                  {act.devices_total - act.devices_still_dark}/{act.devices_total} lights up · {fmtAgo(act.age_s)}
+                  {act.skipped.length > 0 && (
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                      {act.skipped.map((d) => (
+                        <li key={d.device_id} title={`${d.device_id}: ${d.reason}`}>
+                          {d.still_dark ? '⚠' : '✓'} <strong>{d.name}</strong> — {d.still_dark ? d.why : `came back ${fmtAgo(d.recovered_age_s)}`}
+                          {d.still_dark && <span style={{ opacity: 0.7 }}> · rechecked {fmtAgo(d.last_checked_age_s)}{d.retries > 0 ? `, driver retried ×${d.retries}` : ''}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {Object.keys(act.virtual_gaps).length > 0 && (
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                      {Object.entries(act.virtual_gaps).map(([vid, why]) => (
+                        <li key={vid}>⚠ <strong>{vid}</strong> — virtual never came up: {why}</li>
+                      ))}
+                    </ul>
+                  )}
+                </span>
+              )}
             </div>
             <div><div className="k">Music bridge</div>
               {st.bridge_connected ? 'connected (read-only)' : 'down — intensity holds at 0.5 neutral'}

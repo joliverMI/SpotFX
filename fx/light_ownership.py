@@ -339,9 +339,13 @@ def mark_quiesced(token: str) -> None:
     _transition(mutate)
 
 
-def commit(token: str) -> OwnershipRecord:
+def commit(token: str, detail: Optional[str] = None) -> OwnershipRecord:
     """handing-over(activating) → owner=<to>. The new writer is up and
-    verified; the room changes hands."""
+    verified; the room changes hands. `detail`, when given, is appended to
+    the durable history note — the orchestrator uses it to name a PARTIAL
+    take-back (the way back from `released` committing over a device it
+    could not bring up, spectra/services/handover.py) so the record itself
+    says which light was skipped, not only a log line."""
 
     def mutate(record: OwnershipRecord) -> None:
         handover = _require_in_flight(record, token)
@@ -349,9 +353,11 @@ def commit(token: str) -> OwnershipRecord:
             raise OwnershipError(
                 f"cannot commit from step {handover.step} — the quiesce gate "
                 "was never passed")
-        _note(record, "handover_commit",
-              f"{handover.to_world} owns the lights "
-              f"(from {handover.from_world})")
+        note = (f"{handover.to_world} owns the lights "
+                f"(from {handover.from_world})")
+        if detail:
+            note += f" — {detail}"
+        _note(record, "handover_commit", note)
         record.owner = handover.to_world
         record.handover = None
 

@@ -55,6 +55,34 @@ state) and `spectra/services/release.py` for the implementation; per-device
 RELEASED semantics are documented in `spectra/web/src/help/helpContent.ts`
 (topic `panic-release`).
 
+**The way back TOLERATES a partial activation (owner ruling 2026-08-21:
+"one unreachable device must not be able to keep his entire room dark").**
+Before this, the take-back aborted the whole room — tearing down every
+light that HAD come up — the instant any one device could not be confirmed
+driving, and landed "back" at released, which is darkness, not safety; he
+hit it six times in one night on one WLED whose mDNS name would not resolve
+and twice the morning before on two sconces that merely answered too
+slowly. Aborting never saved the unreachable light. Now, when the stack
+comes up with at least one expected virtual driving but some device (or
+virtual) could not be confirmed, the take-back **commits**: HTTP 200,
+`result: "committed-partial"`, with an `activation` report naming every
+skipped light and why (`spectra/services/activation_report.py`); the
+ownership record's own history note for that commit names it too; the
+same report rides on `GET /spectra/api/ownership` (`activation`) and, as an
+informational (never `healthy`-affecting) key, on `GET /spectra/api/
+liveness`; the SPECTRA UI shows an amber strip on every page and a line on
+the Status page. Every 30 s the still-dark lights are re-asked (the same
+probe the activation used) and a light whose name never resolved gets its
+own driver re-initialized, so a light fixed afterwards joins the running
+show by itself — no second release/take-back cycle to collect one fixture.
+A HARD failure — the stack never comes up, or not one expected virtual is
+driving — still aborts back to released exactly as before (502). **Scope
+is bounded**: only the way back from `released` is tolerant; a handover
+FROM a running world keeps its strict all-or-nothing rollback below.
+Proofs: `tests/test_take_back_partial.py` (real FxHost + real WLED driver
+against a genuinely unresolvable `.invalid` name, through the real armed
+route), `scripts/check_ownership.py` §12b.
+
 ## Preparation (any time before go day, all read-only for the room)
 
 1. Seed SPECTRA's live device config from the running LedFX install:
@@ -137,7 +165,10 @@ switch or stated here as why it stays an operator note:
 
    A `502` response instead means a step failed and the handover **landed
    back at spot-effects** (LedFX restarted, record settled) — read
-   `.error` and the record's `history`; the room never splits.
+   `.error` and the record's `history`; the room never splits. (From
+   `released` only: a `200` with `result: "committed-partial"` means the
+   room came up minus the lights named in `.activation` — see "Panic
+   release" above.)
 
 4. **Repoint the fleet checker** to `GET /spectra/api/liveness` (200/503).
 
@@ -161,10 +192,14 @@ more switches are planned.
 watchdog) auto-resumes — at process start, a record that says `spectra`
 reactivates the live stack through the same guarded path the handover uses
 (grant + frame-freshness readiness gate; `handover.resume_own_room`). No
-handover cycle needed. If the resume FAILS (devices unreachable, seed
+handover cycle needed. If the resume FAILS outright (stack never up, seed
 missing), the process lands dark-but-owned and keeps serving — liveness
 answers 503 `state: "dark"` and the record is untouched; fix the cause and
-restart spectra, or hand the room back manually.
+restart spectra, or hand the room back manually. A PARTIAL resume (the
+stack is up, one device could not be confirmed) keeps every other light
+driving and reports the skipped light the same way a partial take-back
+does (the `activation` report above; liveness `activation_gaps` still
+flips `healthy` for a virtual that never came up).
 
 ## If things go wrong
 
@@ -175,6 +210,12 @@ restart spectra, or hand the room back manually.
 - **Failed handover**: lands single-owner automatically (the proofs cover
   the §4d failure modes: Hue session exclusivity, handshake timeouts, a
   quiesce that lies). Nothing to clean up; retry when ready.
+- **Partial take-back (from released, HTTP 200 `committed-partial`)**: not
+  a failure — the room is up on every light that answered; the named
+  light is dark because it could not be reached. Fix the light (power,
+  network, its mDNS name); SPECTRA rechecks it every 30 s and brings it
+  in on its own. Do NOT release and take back again just for it — that
+  blinks every other light for nothing.
 - **Crash mid-handover**: the record may be orphaned at `handing-over` —
   both worlds refuse to write (dark but safe). It lands back at the
   from-world automatically at the next engine start (age-gated, 120 s), or

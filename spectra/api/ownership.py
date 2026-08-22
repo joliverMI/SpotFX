@@ -14,7 +14,13 @@
       staged, readiness-gated handover — the way back from the panic
       release (spectra/services/handover.py's from_world==RELEASED
       handling); still requires SPECTRA_HANDOVER_ARMED, same as any other
-      handover.
+      handover. Since 2026-08-21 (owner ruling: one unreachable device
+      must not keep the whole room dark) that way back COMMITS a PARTIAL
+      activation instead of aborting to darkness: HTTP 200 with
+      result="committed-partial" and an `activation` report naming every
+      light it could not bring up and why (spectra/services/
+      activation_report.py); the same report rides on GET /ownership as
+      `activation` until the stack is torn down, rechecked every 30 s.
   POST /api/ownership/release  — THE PANIC HANDLE (spectra/services/
       release.py): one press, no body, no confirmation — the press is the
       consent. NOT gated by SPECTRA_HANDOVER_ARMED (going to no-writer is
@@ -67,7 +73,15 @@
                            restore count/suspicions/give-ups
                            (spectra/services/param_watchdog.py), so a
                            recurring orphan is visible on the fleet's own
-                           check rather than merely handled.
+                           check rather than merely handled. activation
+                           (added 2026-08-21) is additive and informational
+                           the same way: the activation report (spectra/
+                           services/activation_report.py) — which lights
+                           the last take-back/resume had to skip, why, and
+                           whether they have since come back. NEVER part
+                           of `healthy`: a device-level skip must not
+                           restart-loop the service through the systemd
+                           dead-man.
         owner=spot-effects healthy iff SPECTRA is correctly DARK (a live
                            stack without ownership is the split-brain
                            tripwire → 503).
@@ -91,6 +105,7 @@ from pydantic import BaseModel
 
 from fx import light_ownership
 from spectra import config
+from spectra.services import activation_report
 from spectra.services import fx_seam
 from spectra.services import handover as handover_svc
 from spectra.services import param_watchdog
@@ -116,6 +131,11 @@ def _record_json() -> dict:
         "armed": config.handover_armed(),
         "live_stack_active": live.active,
         "history": record.history,
+        # The activation report (spectra/services/activation_report.py):
+        # None unless the live stack is up and an activation was recorded;
+        # `partial` + `skipped[]` name every light the last take-back/
+        # resume could not bring up, and whether it has since recovered.
+        "activation": activation_report.status(),
     }
     if record.handover:
         out["handover"]["age_s"] = round(
@@ -150,6 +170,13 @@ async def post_handover(body: HandoverRequest):
         return JSONResponse(
             {"result": "failed-landed-single-owner", "error": str(exc),
              "record": _record_json()}, status_code=502)
+    report = activation_report.current()
+    if report is not None and report.partial \
+            and report.source == activation_report.SOURCE_TAKE_BACK:
+        # Committed, but not over every light — say so in the response
+        # itself (the bar's toast), not only in the record/log.
+        return {"result": "committed-partial", "owner": record.owner,
+                "activation": report.to_json(), "record": _record_json()}
     return {"result": "committed", "owner": record.owner,
             "record": _record_json()}
 
@@ -234,6 +261,11 @@ async def get_liveness():
             # orphan is something to SEE here, not something a restart
             # fixes — informational only, never affects `healthy`.
             "param_watchdog": param_watchdog.liveness_summary(),
+            # Additive (2026-08-21, the activation report — spectra/
+            # services/activation_report.py): which lights the last
+            # take-back/resume had to skip, why, and whether they have come
+            # back since. Informational only; never affects `healthy`.
+            "activation": activation_report.liveness_summary(),
         },
         status_code=200 if healthy else 503,
     )

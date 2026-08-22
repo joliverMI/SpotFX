@@ -147,10 +147,10 @@ async def _standalone_lifespan(app):
     import os
 
     logger = logging.getLogger("spectra")
-    from spectra.services import (ambient_music_gate, device_preview, engine,
-                                   flare_preview_hold, frame_watchdog,
-                                   handover, ownership_reconciler,
-                                   param_watchdog)
+    from spectra.services import (activation_report, ambient_music_gate,
+                                   device_preview, engine, flare_preview_hold,
+                                   frame_watchdog, handover,
+                                   ownership_reconciler, param_watchdog)
     await engine.start()
     await device_preview.start()
     # Restart mid-reign: if the ownership record says spectra owns, the
@@ -214,10 +214,20 @@ async def _standalone_lifespan(app):
     # down by itself while the engine is dark or a preview holds the room.
     param_watchdog_task = asyncio.create_task(
         param_watchdog.run_supervised(), name="spectra-param-watchdog")
+    # The activation report's recheck (owner ruling 2026-08-21, spectra/
+    # services/activation_report.py): a take-back/resume that had to skip
+    # a light it could not reach is a snapshot — every RECHECK_INTERVAL_S
+    # the still-dark lights are re-asked (same probe device_gaps uses),
+    # marked recovered the moment they confirm, and a driver that never
+    # resolved its address is re-initialized so a fixed light rejoins the
+    # running show on its own. Idle-cheap when nothing was skipped.
+    activation_recheck_task = asyncio.create_task(
+        activation_report.run_supervised(), name="spectra-activation-recheck")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
-                flare_preview_sweep_task, param_watchdog_task)
+                flare_preview_sweep_task, param_watchdog_task,
+                activation_recheck_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

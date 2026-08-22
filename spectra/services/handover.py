@@ -55,6 +55,35 @@ restoring a from_side (there is none — released was already the safe state
 to fall back to). Still gated by SPECTRA_HANDOVER_ARMED and the readiness
 gate, same as any other handover — coming back is a deliberate, armed
 decision even though letting go is not.
+
+THE ONE PLACE the from-released special case was missed, fixed 2026-08-21
+on the owner's ruling ("one unreachable device must not be able to keep his
+entire room dark"): step 2's verify/rollback. A fresh handover FROM A
+RUNNING SHOW keeps its strict all-or-nothing rollback — there a working
+show is genuinely at risk and there is a real from-world to land back on.
+But the way back from `released` has no such fallback: abort() there lands
+on DARKNESS, not safety, and aborting never saves the light that could not
+be reached (it is unreachable either way) — it only darkens the ones that
+DID come up. He hit exactly this six times in one night on one WLED whose
+mDNS name would not resolve, and twice the morning before on two sconces
+that merely answered too slowly. So coming back from released now applies
+the SAME policy resume_own_room has applied to a restart since the owner's
+2026-08-13 amendment: when the to-side reports a PARTIAL activation (the
+stack is up and at least one expected virtual is driving, only some
+devices/virtuals could not be confirmed), the take-back COMMITS, names
+every skipped light LOUDLY (CRITICAL log, the ownership record's own
+history note, and spectra/services/activation_report.py — which feeds the
+API, the liveness endpoint, the ownership bar on every page and the
+Status page, and keeps rechecking the skipped lights), and leaves every
+other device driving. A HARD failure — the stack never came up, or not
+one expected virtual is driving — still aborts back to released exactly
+as before: committing owner=spectra over a wholly dark stack is the
+order-8 defect class, not a partial room. The threshold ("at least one
+expected virtual up") is deliberate: no device in this room is
+load-bearing for another — the vendored render loop skips an inactive
+(unresolved) device's segments per flush and a non-answering DDP target
+simply drops packets, so one dark fixture can only dim the room, never
+corrupt it (proven on the real pipeline in tests/test_take_back_partial.py).
 """
 from __future__ import annotations
 
@@ -62,6 +91,7 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Protocol
 
@@ -70,6 +100,7 @@ import httpx
 from fx import light_ownership
 from fx.host import VENDORED_DEVICE_TYPES
 from spectra import config
+from spectra.services import activation_report
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +113,31 @@ FRESH_VERIFY_TIMEOUT_S = 15.0
 # The go-day preparation the readiness gate names in its refusal (the order-8
 # correction: this step was once skipped and the room went dark for minutes).
 FX_LIVE_SEED_COMMAND = ".venv/bin/python scripts/seed_spectra_fx_live.py --apply"
+
+
+@dataclass
+class ActivationOutcome:
+    """What one verify_active() actually found, structured — the bool the
+    WriterSide protocol returns is kept for every caller that only needs
+    pass/fail; run_handover's from-released path needs the shape behind a
+    False to tell a PARTIAL activation (tolerated, committed, reported)
+    from a HARD one (still aborted)."""
+    ok: bool
+    stack_up: bool
+    expected_ids: frozenset = field(default_factory=frozenset)
+    virtual_gaps: dict = field(default_factory=dict)
+    device_gaps: dict = field(default_factory=dict)
+    detail: Optional[str] = None
+
+    @property
+    def up_ids(self) -> frozenset:
+        return self.expected_ids - set(self.virtual_gaps)
+
+    @property
+    def partial(self) -> bool:
+        """Not verified, but the stack is up and at least one expected
+        virtual is driving — a room that is merely dimmer, not dark."""
+        return (not self.ok) and self.stack_up and bool(self.up_ids)
 
 
 class HandoverFailed(RuntimeError):
@@ -180,6 +236,7 @@ async def run_handover(
     light_ownership.mark_quiesced(handover.token)
 
     # Step 2 — activate the new writer and VERIFY it is driving the room.
+    partial: Optional[ActivationOutcome] = None
     try:
         await to_side.activate()
         if not await to_side.verify_active():
@@ -193,7 +250,25 @@ async def run_handover(
             message = f"{to_side.name} activation not verified"
             if detail:
                 message += f" — {detail}"
-            raise HandoverFailed(message)
+            outcome = getattr(to_side, "activation_outcome", lambda: None)()
+            if from_released and outcome is not None and outcome.partial:
+                # THE OWNER'S RULING (2026-08-21, module docstring): coming
+                # back from released, a PARTIAL activation commits. There
+                # is no working show to protect and no from-world but
+                # darkness to land on; aborting here would tear down every
+                # light that DID come up for the sake of one that is
+                # unreachable either way. A HARD failure (stack down, or
+                # not one expected virtual driving) takes the raise below
+                # exactly as before. A handover FROM a running world never
+                # reaches this branch — its strict rollback is unchanged.
+                partial = outcome
+                logger.critical(
+                    "handover: PARTIAL TAKE-BACK from released — committing "
+                    "anyway (%d/%d expected virtual(s) driving); every "
+                    "other light stays up: %s",
+                    len(outcome.up_ids), len(outcome.expected_ids), message)
+            else:
+                raise HandoverFailed(message)
         # Race-window close (two-writers incident, 2026-08-13 — report gate
         # e4i): re-verify the from-world is STILL quiesced immediately
         # before commit. The record staying HANDING_OVER throughout already
@@ -221,8 +296,25 @@ async def run_handover(
             f"activation failed — landed back at {from_name}: {exc}"
         ) from exc
 
-    record = light_ownership.commit(handover.token)
-    logger.warning("handover: %s owns the lights", to_side.name)
+    commit_detail = None
+    if partial is not None:
+        # Name the skipped lights where he will see them (the report feeds
+        # the API/bar/Status page/liveness) AND in the record's own durable
+        # history — the one place that survives a restart. Reporting can
+        # never be the reason a tolerated take-back fails to commit.
+        try:
+            report = activation_report.record_from_live(
+                activation_report.SOURCE_TAKE_BACK,
+                partial.virtual_gaps, partial.device_gaps)
+            commit_detail = "PARTIAL — " + report.summary()
+        except Exception:
+            logger.exception("handover: activation report failed (partial "
+                             "take-back still commits)")
+            commit_detail = "PARTIAL — " + (partial.detail or
+                                            "some lights could not be confirmed")
+    record = light_ownership.commit(handover.token, detail=commit_detail)
+    logger.warning("handover: %s owns the lights%s", to_side.name,
+                   " (PARTIAL — see activation report)" if partial else "")
     return record
 
 
@@ -315,6 +407,7 @@ class SpectraSide:
         self.open_audio = open_audio
         self.audio_source_factory = audio_source_factory
         self._last_failure_detail: Optional[str] = None
+        self._last_outcome: Optional[ActivationOutcome] = None
 
     async def readiness_problems(self) -> list[str]:
         """The order-8 gate: SPECTRA cannot take the room on a missing,
@@ -352,6 +445,9 @@ class SpectraSide:
         from spectra.services.fx_executor import FacadeExecutor
         from spectra.services.live_host import live
 
+        # A new activation attempt starts from a clean report — whatever
+        # the previous stack left dark is no longer a fact about this one.
+        activation_report.clear()
         grant = light_ownership.mint_activation_grant(light_ownership.SPECTRA)
         await live.activate(grant, self.config_dir,
                             open_audio=self.open_audio,
@@ -365,13 +461,16 @@ class SpectraSide:
         # raise on what's still missing after the wait — verify_active()
         # below is the single source of truth for "fully up", and callers
         # act on a gap differently: run_handover's activation-failure
-        # handling rolls back to the known-good from-world on ANY gap (there
-        # IS a working fallback to land on); resume_own_room has no
-        # from-world to fall back to, so it reports gaps loudly and keeps
-        # whatever DID come up rather than darkening working devices behind
-        # one broken link (owner amendment, 2026-08-13: "the crystal must
-        # never need a human again" — a stranding teardown on resume would
-        # make that worse, not better).
+        # handling rolls back to the known-good from-world on ANY gap when
+        # there IS a working fallback to land on (a handover from a running
+        # show); coming back from `released` (no from-world but darkness)
+        # and resume_own_room (no from-world at all) instead report gaps
+        # loudly and keep whatever DID come up rather than darkening working
+        # devices behind one broken link (owner amendment, 2026-08-13: "the
+        # crystal must never need a human again"; owner ruling 2026-08-21:
+        # "one unreachable device must not be able to keep his entire room
+        # dark" — a stranding teardown on either path makes that worse, not
+        # better).
         await live.wait_fully_active(timeout_s=FRESH_VERIFY_TIMEOUT_S)
 
     async def verify_active(self) -> bool:
@@ -380,27 +479,49 @@ class SpectraSide:
         in verification_detail() (report gate: the fresh-handover
         'nameless refusal' defect — resume_own_room already named its gaps
         via activation_gaps()/CRITICAL logging + the liveness endpoint;
-        this path had none of that until now)."""
+        this path had none of that until now), and the full structured
+        finding in activation_outcome() — what run_handover's from-released
+        path reads to tell a partial activation from a hard one."""
         from spectra.services.live_host import live
 
+        expected = frozenset(live.expected_active_ids)
         if not live.active:
-            detail = live.describe_gaps(live.activation_gaps())
+            gaps = live.activation_gaps()
+            detail = live.describe_gaps(gaps)
             logger.critical("spectra activation not verified — %s", detail)
             self._last_failure_detail = detail
+            self._last_outcome = ActivationOutcome(
+                ok=False, stack_up=False, expected_ids=expected,
+                virtual_gaps=gaps, detail=detail)
             return False
         gaps = live.activation_gaps()
         if gaps or not live.fresh():
             detail = live.describe_gaps(gaps)
             logger.critical("spectra activation not verified — %s", detail)
             self._last_failure_detail = detail
+            # activation_gaps() already names every EXPECTED virtual that
+            # is not flushing; `fresh()` alone failing means an active
+            # virtual OUTSIDE the expected set went stale — reported as
+            # its own "*" entry so the outcome never claims a clean
+            # virtual roster it did not check.
+            reported = dict(gaps) if gaps else {
+                "*": "one or more active virtuals stopped flushing frames"}
+            self._last_outcome = ActivationOutcome(
+                ok=False, stack_up=True, expected_ids=expected,
+                virtual_gaps=reported, detail=detail)
             return False
         device_gaps = await live.device_gaps()
         if device_gaps:
             detail = live.describe_gaps({}, device_gaps)
             logger.critical("spectra activation not verified — %s", detail)
             self._last_failure_detail = detail
+            self._last_outcome = ActivationOutcome(
+                ok=False, stack_up=True, expected_ids=expected,
+                device_gaps=device_gaps, detail=detail)
             return False
         self._last_failure_detail = None
+        self._last_outcome = ActivationOutcome(
+            ok=True, stack_up=True, expected_ids=expected)
         return True
 
     def verification_detail(self) -> Optional[str]:
@@ -408,6 +529,13 @@ class SpectraSide:
         light that could not rise. None once a verification has passed (or
         before any has run)."""
         return self._last_failure_detail
+
+    def activation_outcome(self) -> Optional[ActivationOutcome]:
+        """The structured finding behind the most recent verify_active():
+        stack up or not, which expected virtuals are driving, which are
+        not, which devices could not be confirmed. None before any
+        verification has run."""
+        return self._last_outcome
 
     async def deactivate(self) -> None:
         from fx import facade
@@ -417,6 +545,9 @@ class SpectraSide:
         engine.go_dark()
         facade.set_host(None)
         await live.deactivate()
+        # A torn-down stack keeps no opinion about lights it no longer
+        # drives (the report self-gates on live.active too — belt and braces).
+        activation_report.clear()
 
     async def quiesce(self) -> None:
         await self.deactivate()
@@ -458,7 +589,11 @@ async def resume_own_room(side: Optional[SpectraSide] = None) -> bool:
     straggler — worse than the original darkfault, and exactly the
     "needs a human" outcome the owner ruled out. So: report every gap
     LOUDLY (CRITICAL + the liveness endpoint's activation_gaps, already
-    wired to unhealthy) and leave every other device driving.
+    wired to unhealthy, + the activation report every surface reads) and
+    leave every other device driving. Since 2026-08-21 the way back from
+    `released` applies this same policy (module docstring) — "a fresh
+    handover … rolls back on ANY gap" above is now true only of a handover
+    FROM A RUNNING WORLD, which still has a working show to fall back to.
 
     Not gated on the SPECTRA_HANDOVER_ARMED latch: the latch guards
     CHANGING hands; the record saying spectra owns is the owner's standing
@@ -495,11 +630,17 @@ async def resume_own_room(side: Optional[SpectraSide] = None) -> bool:
         return False
     gaps = live.activation_gaps()
     device_gaps = await live.device_gaps()
+    # The same visible report the tolerant take-back keeps (spectra/
+    # services/activation_report.py) — a partial resume used to be a
+    # CRITICAL line and nothing he could see in the app.
+    activation_report.record_from_live(
+        activation_report.SOURCE_RESUME, gaps, device_gaps)
     if gaps or device_gaps:
         logger.critical(
             "resume: PARTIAL ACTIVATION — %d virtual(s) never came up "
             "(%s), %d device(s) unconfirmed (%s); every other device stays "
-            "up — see /spectra/api/liveness activation_gaps",
+            "up — see /spectra/api/liveness activation_gaps + activation, "
+            "/spectra/api/ownership activation",
             len(gaps), gaps, len(device_gaps), device_gaps)
     else:
         logger.warning(
