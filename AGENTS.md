@@ -1205,31 +1205,74 @@ every beat burst, which was the "big burst then nothing" cliff. Measure
 with `scripts/check_fireworks_drop_tail.py` (has a his-real-config
 variant) before reasoning about post-drop density.
 
-**The reverse flare's reported ~2x dwell overrun (905-1097ms measured live
-against an authored 500ms) was investigated as this build's test case and
-is NOT a lead-time bug**: `reverse` is toggle-typed
-(`config/effect_params.json`, `smooth: false`), so
-`momentary_switch_would_glide` structurally returns `False` for it — no
-early-write-vs-late-hold-clock gap is possible for a toggle-only momentary
-kind, proven by a code argument, not a measurement. Reproducing
-`engine.py`'s exact unmodified scheduling shape (`on_event` →
-`fire_history.record_fire` → `create_task(_release_after_hold)` →
-`asyncio.sleep(hold_s)` → `flush_releases`) against the real vendored
-Black Hole effect on `fx.headless`, with a genuine `asyncio`/wall-clock
-timer (not `flare_preview.py`'s synchronous fake-clock shortcut, which
-can't see a scheduling-layer bug by construction), measured 509-638ms
-across ten fires with an empty `fire_history`/`show_log`, and 558-685ms
-with `show_log` prefilled to its real 5000-entry cap — correct, not
-doubled, and `record_fire`'s own write cost (measured directly) is nowhere
-near large enough to explain a doubling either. The doubling was
-independently confirmed live-side to not be the legacy-engine double-fire
-path either (`legacy_trigger_engine_enabled` is `False` in his real
-process, no env override) — it reproduces on his live room only, not
-offline, which narrows it to something only a live run has (real
-concurrent fires, real device/network timing) rather than a defect in this
-scheduling code. Don't re-litigate the lead-time or `record_fire`
-theories without new evidence; the mechanism this rotate flare's own
-release queue is built on is proven correct in isolation. **A ninth
+**The reverse flare's ~2x dwell overrun (967-1905ms measured live against
+an authored 500ms, median 1160) — ROOT CAUSE FOUND AND FIXED 2026-08-21
+(PR fm/reverse-flare-glide-and-stuck), after nine eliminations: the
+release timer started at the END of the fire's own serial write burst,
+not at the spike.** `engine.fire_response_event` used to create its
+`asyncio.sleep(hold_s)` release tasks only AFTER `await
+responses.on_event(...)` returned — and `on_event` lands every write of a
+fire serially through the facade (~30ms each on his live room: seq
+spacing in `executor.recent_writes`). A Black Hole V2 flare is 13 writes
+(spike jumps ×5, gain jumps ×5, colour-jump glides ×5 — his live log,
+seq 163-175, ~400ms), so "sleep 500ms" began ~0.4-0.5s late and the
+reverse release landed 1.02s after its spike (seq 164 → seq 181, read
+straight off `GET /spectra/api/engine/status`). The earlier offline
+reproductions (509-638ms, one headless virtual, near-zero write cost)
+were CORRECT measurements of a burst that barely existed there — the
+overrun scales with the fire's write burst, which is why it only ever
+showed on his live room. It was never the tween (both tween engines,
+vendored `fx/` and the external fork, classify a bool target as instant —
+a toggle never glided on the light), never `record_fire`, never the lead
+system (toggle-only kinds compute lead=0 — still true). Fix:
+`scene_response.PendingRelease` entries are ARMED (`armed_at`/`due_at`
+stamped) right after each virtual's spike write lands, and
+`engine._release_group` sleeps until that ABSOLUTE due time
+(`responses.take_release_schedule()` / `seconds_until()`), so the hold is
+measured from the spike regardless of how long the rest of the fire
+takes. Measured on the real pipeline: `tests/test_reverse_flare_release.py`
+(real effect: 536ms for a 500ms hold at 30ms/write; five virtuals, old
+shape 806ms vs new 532-563ms; two flares 250ms apart: 773ms, i.e. the
+LATER hold's full length). **Three more things that shipped with it, all
+in `scene_response.py`'s "RELEASE OWNERSHIP" docstring — read that before
+touching `_pending_releases`/`flush_releases`:** (1) every release is
+OWNED by the fire that created it (`fire_seq`) — the old by-hold_s drain
+let the FIRST of two 500ms flares release the SECOND one mid-hold — and a
+later spike on the same (virtual, param) SUPERSEDES the earlier release
+(holds extend, never cut short); (2) a TOGGLE param's release is forced
+instant (`executor.jump`, never a PULSE_RELEASE_S glide), the rule
+sign-control already had — the light never glided a bool anyway, but the
+executor log and the scrubbing preview's ruler used to describe a 1.5s
+glide-back that never happened (`scripts/check_flare_preview.py`'s
+polygon case was updated from "no release" to "jump back at hold"); (3) a
+momentary spike on a param the scene entry NEVER AUTHORED used to land and
+never release — `flush_releases` skipped a `None` target — stranded until
+an effect-TYPE switch rebuilt the instance: **his Orbits V2 and Squiggles
+V2 both have this shape on their Strips (`orbits1d` registers `reverse`,
+neither entry sets it), a genuine "stuck in Reverse" on the strips from
+the FIRST flare, regardless of spacing.** Every entry now carries a
+`return_to` resolved at spike time (`_resting_value`: the carried
+baseline, else `fx.device_model.resting_default` — the effect's own schema
+default, registry default as fallback — coerced to the registry kind),
+used only when nothing carries a baseline at flush. PR #186's param
+orphan watchdog (`release_target`/`pending_release_keys`, kept and adapted
+to the new entry shape in the same commit) deliberately keeps no opinion
+on never-authored params, so that fix is prevention-only; the two share
+ONE definition of baseline (`_carried_value`). **And the "stuck in
+Reverse" he most likely SEES is STAR's own data shape, reported, not
+changed**: read live off `:8010`, STAR attaches the PERMANENT "Reverse
+Direction" kind to its 0.35-0.7 and 0.7-1.0 flare bands and the momentary
+one to 0-0.35 — a permanent kind's carry moves `param_baseline`
+(`conductor.on_surge`), so after ONE mid/high flare reversed IS the
+baseline and every later momentary reverse lands -|spin| and releases
+back to -|spin|: stuck by construction, not by a race; the watchdog
+rightly sees nothing to restore (`test_star_permanent_reverse_makes_every_
+later_momentary_reverse_stick`, on the real radial effect). Fireworks V2's
+"Reverse Direction" is, despite its name, MOMENTARY (hold 500) — fine.
+Whether STAR's permanent attachment is intended is his call; the scene
+backups (`/home/javi/SpotFX/storage/spectra/scene_backups.json`) show the
+two kinds declared-but-unattached by script, so the band attachments were
+a later UI save. **A ninth
 elimination, 2026-08-21 (PR fm/engine-reads-flare-trigger-offset, checked
 at firstmate's direction when that PR found a REAL double-fire in
 `tick()`'s safety-net OR clause)**: that double-fire DOES hit
@@ -1242,10 +1285,7 @@ the live process) computes lead = 0 — toggle-only, no registry-smooth
 momentary param, no attached color_rotate — so `fire_at == target`, the
 two OR clauses collapse to one predicate on one tick, and the pre-fix
 engine fires exactly ONCE on that path (proven by running the pre-fix
-module, not argued). UNRELATED to the overrun; the magnitude corroborates
-(the net's extension is ≤ ~400ms even in the hypothetical glide-band
-case, while the measured holds run 967-1905ms against the authored 500
-— a +660ms median overrun on the fuller 23-sample measurement).
+module, not argued). UNRELATED to the overrun (now explained above).
 
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a drift declaration
 is authored param-agnostic (a named profile is reused across effects), so
@@ -2930,7 +2970,12 @@ permanent kind's carry moves the baseline (`conductor.on_surge`), a momentary
 kind never does, so the watchdog cannot fight an authored permanent flare by
 construction. The restore target is `ResponseEngine.release_target` — a thin
 wrapper over the SAME `_carried_value` `flush_releases` uses; never introduce a
-second definition of "baseline" next to it. (2) **`background_brightness`/
+second definition of "baseline" next to it (`flush_releases` additionally falls
+back to an entry's spike-time `return_to` for a param with NO baseline at all —
+a never-authored param — which the watchdog deliberately keeps no opinion on;
+`_pending_releases` holds `PendingRelease` dataclass entries since
+fm/reverse-flare-glide-and-stuck, owned per fire and armed at spike landing —
+see the "reverse flare's ~2x dwell overrun" entry above for why). (2) **`background_brightness`/
 `background_color` are out of scope by name** — the conductor's own colour-set
 landings write them to the wire WITHOUT moving `param_baseline` (a pre-existing
 bookkeeping gap, left alone), and Dark/Light mode own both keys too; `brightness`

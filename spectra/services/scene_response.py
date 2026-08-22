@@ -156,10 +156,60 @@ Per event, fed by the bridge with the fire's intensity:
 Pulse releases are two-phase on purpose: the spike must LAND (at least one
 render frame) before the release glide starts, or the tween engine would
 retarget from the pre-spike value and the peak would never show. Production
-schedules one flush_releases(hold_s) task per pending_hold_groups() entry,
-each after its own CHOSEN HOLD (a momentary kind's hold_ms, default
-PULSE_HOLD_S — models.scene.FlareKind); the executable specs call
+schedules one release task per take_release_schedule() group — a group is
+(fire_seq, hold_s, due_at): the entries ONE fire armed at ONE chosen hold,
+due at an ABSOLUTE responder-clock time — sleeping until due_at and then
+calling flush_releases(hold_s, fire_seq=...); the executable specs call
 flush_releases() directly (hold_s=None drains every group) for determinism.
+
+RELEASE OWNERSHIP + WHEN THE HOLD CLOCK STARTS (2026-08-21, his report:
+"if shape flares are too close together the momentary reverse gets tripped
+up and then it gets stuck in Reverse"; the same build finally pinned his
+"Reverse Momentarily (500ms)" flare's live 967-1905ms measured hold):
+  * A PendingRelease is ARMED — armed_at/due_at stamped — the moment its
+    spike write is ISSUED (_arm_pending, called right before _execute_band/
+    fire_kind's jump/glide loops; _gain stamps its own as it writes), and
+    the engine's timer sleeps until due_at, NOT "hold_s after on_event
+    returns". The old shape — one task per distinct hold_s created only
+    after on_event had finished its ENTIRE serial write burst (spike jumps,
+    gain jumps, colour-jump glides: 13 writes at ~30ms each on his live
+    room, ~400ms) — measured the hold from the END of that burst, so a
+    500ms hold released ~1.0s after the spike. That was the whole overrun;
+    read straight off his live executor log (seq 164 spike → seq 181
+    release, 1.02s apart, with the burst's 16 writes in between). Nothing
+    about the tween, the record_fire cost, or the lead system.
+  * A release is OWNED by the fire that created it (fire_seq): one fire's
+    timer never drains another fire's entries — the old by-hold_s drain let
+    the FIRST of two 500ms flares release the SECOND one mid-hold.
+  * A later spike on the SAME (virtual, param) SUPERSEDES an earlier
+    pending release: the param returns to baseline when the LAST spike's
+    hold matures, never when the first one's does (overlapping holds
+    extend, they never cut each other short).
+  * A TOGGLE-type param's release (and its spike) is FORCED INSTANT
+    (executor.jump, never a PULSE_RELEASE_S glide) — the same rule
+    sign-control params already had and for the same reason: there is no
+    continuum between on and off to travel. (Both tween engines — the
+    vendored fx/ and the external LedFX fork — already classify a bool
+    target as "instant", so the LIGHT never glided a toggle; what changes
+    is that the engine no longer ASKS for a 1.5s tween it can't have, so
+    the executor log and the scrubbing preview's ruler stop describing a
+    1.5s glide-back that never existed.)
+  * A momentary spike on a param with NO tracked baseline (the scene entry
+    never authored it — e.g. Orbits V2 / Squiggles V2's Strips run
+    orbits1d, which registers `reverse`, without authoring it) used to
+    land and NEVER release (flush skipped a None target) — stranded until
+    an effect-TYPE switch rebuilt the instance. Every entry now carries a
+    `return_to` resolved at spike time (_resting_value: the carried
+    baseline, else fx.device_model.resting_default — the effect's own
+    schema default, the value nothing-holds-it rests at); the release
+    still prefers the baseline AS CARRIED AT FLUSH TIME and uses
+    return_to only when there is none.
+  * One virtual's failed release write no longer loses the others'
+    (per-virtual try/except, logged); the parameter watchdog
+    (spectra/services/param_watchdog.py, PR #186) is the backstop for a
+    release that genuinely never lands — it reads release_target()/
+    pending_release_keys() off this engine (below) so "expected" and
+    "held" can never drift from what a release itself would do.
 
 Executable specs: scripts/check_spectra.py, tests/test_spectra_engine.py.
 """
@@ -168,8 +218,9 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from dataclasses import dataclass
 from random import Random
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, NamedTuple, Optional
 
 from fx import device_model
 from spectra.models.binding import ValueBinding
@@ -186,6 +237,41 @@ PULSE_HOLD_S = 0.25      # the spike shows for a couple of frames, then releases
 PULSE_RELEASE_S = 1.5    # glide back to baseline
 GAIN_GLIDE_S = 0.8       # linear/ease_* land over this, then hold (carried)
 SURGE_LOG_LIMIT = 50
+
+
+@dataclass
+class PendingRelease:
+    """One momentary spike awaiting its return (module docstring, "RELEASE
+    OWNERSHIP"): (virtual_id, param) spiked by fire `fire_seq` at chosen
+    hold `hold_s`; `instant` forces the return through executor.jump
+    (toggle + sign-control params); `armed_at`/`due_at` are stamped on the
+    responder clock when the spike write is ISSUED (None until then —
+    _arm_pending); `return_to` is the resting value resolved at spike time,
+    used only when no baseline is carried at flush; `scheduled` marks the
+    entry as claimed by an engine release task (take_release_schedule)."""
+    virtual_id: str
+    param: str
+    hold_s: float
+    instant: bool
+    fire_seq: int
+    armed_at: Optional[float] = None
+    due_at: Optional[float] = None
+    return_to: Any = None
+    scheduled: bool = False
+    # True from the moment a flush selects the entry until its write has
+    # landed (or been given up on): still HELD as far as pending_release_
+    # keys is concerned, but never re-selected by a concurrent flush —
+    # release tasks for the same fire wake ~one write apart, and the
+    # earlier one is usually still mid-write when the next one runs.
+    flushing: bool = False
+
+
+class ReleaseGroup(NamedTuple):
+    """One engine release task's worth of pending entries: every entry one
+    fire armed at one chosen hold, due at one absolute clock time."""
+    fire_seq: int
+    hold_s: float
+    due_at: float
 
 # A dice re-roll's own eased landing (registry "smooth": true params only —
 # see _reroll). Live-measured ordinary flare cadence during active music is
@@ -609,17 +695,18 @@ class ResponseEngine:
         self._room_controls = room_controls or self._default_room_controls
 
         self.surges: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
-        # (virtual_id, param, hold_s, instant) quadruples a momentary kind
-        # spiked, awaiting the release back to the carried baseline — hold_s
-        # is the CHOSEN HOLD (kind.hold_ms or the PULSE_HOLD_S default) so
-        # different kinds in the same surge can hold their spike for
-        # different lengths before releasing (pending_hold_groups groups
-        # them for the engine to schedule one release task per hold).
-        # instant=True (sign-control kinds only, e.g. STAR's "Flip" reverse
-        # — see the module docstring) forces flush_releases to JUMP this
-        # entry back rather than glide it; every other entry stays False,
-        # unchanged single-glide-per-virtual release.
-        self._pending_releases: list[tuple[str, str, float, bool]] = []
+        # PendingRelease entries (see the dataclass) — every momentary spike
+        # awaiting its return to the carried baseline. hold_s is the CHOSEN
+        # HOLD (kind.hold_ms or the PULSE_HOLD_S default) so different kinds
+        # in the same surge can hold for different lengths; fire_seq makes
+        # each release owned by the fire that created it; instant=True
+        # (toggle AND sign-control params — module docstring, "RELEASE
+        # OWNERSHIP") forces flush_releases to JUMP the entry back rather
+        # than glide it; every other entry glides over PULSE_RELEASE_S.
+        self._pending_releases: list[PendingRelease] = []
+        # Monotonic per-engine fire counter — stamped onto every entry a
+        # fire arms (ownership), bumped at the top of _execute_band/fire_kind.
+        self._fire_seq = 0
         # (virtual_id, original_gradient, dwell_s, fade_ms) — the colour
         # ROTATE-AND-BACK flare's OWN release queue, separate from
         # _pending_releases: its fade-back duration is itself
@@ -677,6 +764,14 @@ class ResponseEngine:
         fire's per-lane roll — a band with no kind_lanes pools is
         unaffected (all attached kinds survive the resolve, the pre-lanes
         behaviour, byte-identical for every band that predates the field)."""
+        self._fire_seq += 1
+        try:
+            await self._execute_band_locked(scene, band, intensity, record)
+        finally:
+            self._arm_pending()   # safety net: nothing a fire armed stays unstamped
+
+    async def _execute_band_locked(self, scene: SceneV2, band: FlareBand,
+                                   intensity: float, record: dict[str, Any]) -> None:
         declared = {k.name: k for k in scene.flare_kinds}
         picked_names, lane_picks = resolve_lane_picks(band, self._rng)
         if lane_picks:
@@ -734,15 +829,22 @@ class ResponseEngine:
         for vid, patched in jumps.items():
             for pname in patched:
                 glides.get(vid, {}).pop(pname, None)
+        # The hold clock for each spiked (virtual, param) starts the moment
+        # ITS OWN write has gone out (_arm_pending right after each write)
+        # — never when on_event returns (module docstring, "RELEASE
+        # OWNERSHIP"): in a serial burst a later virtual's spike lands
+        # later, and its hold must be measured from there.
         for vid, params in glides.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None and params:
                 await self.executor.glide(
                     vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
+                self._arm_pending(vid, params)
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
                 await self.executor.jump(vid, state.effect_type, params)
+                self._arm_pending(vid, params)
 
         for kind, scale in gains:
             kind_records.append({
@@ -800,6 +902,14 @@ class ResponseEngine:
         if scene is None:
             record["result"] = "no_active_scene"
             return record
+        self._fire_seq += 1
+        try:
+            return await self._fire_kind_locked(scene, kind, intensity, record)
+        finally:
+            self._arm_pending()
+
+    async def _fire_kind_locked(self, scene: SceneV2, kind: FlareKind,
+                                intensity: float, record: dict[str, Any]) -> dict:
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}
         glides: dict[str, dict[str, Any]] = {}
@@ -815,10 +925,12 @@ class ResponseEngine:
             if state is not None and params:
                 await self.executor.glide(
                     vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
+                self._arm_pending(vid, params)   # hold clock starts as the spike lands
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
                 await self.executor.jump(vid, state.effect_type, params)
+                self._arm_pending(vid, params)
         if kind.gain != 1.0:
             record["gain_envelope"] = await self._gain(kind, 1.0, carry)
         if kind.type == "drift_jump" and kind.jump == "color_set":
@@ -1024,8 +1136,10 @@ class ResponseEngine:
                     if kind.type == "permanent":
                         carry[(vid, real_pname)] = value
                     else:
-                        self._pending_releases.append(
-                            (vid, real_pname, hold_s, True))
+                        self._push_release(
+                            vid, real_pname, hold_s, instant=True,
+                            return_to=self._resting_value(
+                                vid, state, real_pname, carry))
                     continue
                 mkind, lo, hi = binding_resolver.kind_for_meta(meta)
                 base = None
@@ -1054,7 +1168,13 @@ class ResponseEngine:
                 if kind.type == "permanent":
                     carry[(vid, pname)] = value
                 else:
-                    self._pending_releases.append((vid, pname, hold_s, False))
+                    # A toggle's return is INSTANT, like its departure and
+                    # like a sign flip's — no continuum to glide across
+                    # (module docstring, "RELEASE OWNERSHIP").
+                    self._push_release(
+                        vid, pname, hold_s,
+                        instant=(mkind == binding_resolver.KIND_TOGGLE),
+                        return_to=self._resting_value(vid, state, pname, carry))
             if moves:
                 out[vid] = moves
         return out, forced_instant
@@ -1282,7 +1402,8 @@ class ResponseEngine:
             if kind.type == "momentary":
                 await self.executor.jump(vid, state.effect_type,
                                          {"brightness": peak})
-                self._pending_releases.append((vid, "brightness", hold_s, False))
+                self._push_release(vid, "brightness", hold_s, instant=False,
+                                   return_to=float(baseline), arm_now=True)
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
@@ -1346,13 +1467,12 @@ class ResponseEngine:
         return record
 
     def pending_hold_groups(self) -> list[float]:
-        """Distinct CHOSEN HOLDS still pending — the engine spawns one
-        release task per group (asyncio.sleep(hold_s) then
-        flush_releases(hold_s)) so kinds authored with different hold_ms
-        in the same surge each release on their own schedule. A surge with
-        every kind at the PULSE_HOLD_S default returns exactly one group —
-        today's unchanged single-task shape."""
-        return sorted({hold_s for _, _, hold_s, _ in self._pending_releases})
+        """Distinct CHOSEN HOLDS still pending — the fake-clock drain shape
+        (flare_preview.build_timeline: advance_to(hold_s) then
+        flush_releases(hold_s)) and the specs' determinism hook. The
+        engine's own scheduling uses take_release_schedule() instead, which
+        is per FIRE and carries each group's absolute due time."""
+        return sorted({e.hold_s for e in self._pending_releases})
 
     def pending_release_keys(self) -> set[tuple[str, str]]:
         """Every (virtual_id, param) a momentary kind has spiked and not yet
@@ -1361,16 +1481,18 @@ class ResponseEngine:
         a key in here is legitimately away from baseline, however long its
         release task takes to run. Read-only; the queue itself is owned by
         flush_releases."""
-        return {(vid, pname) for vid, pname, _hold_s, _instant
-                in self._pending_releases}
+        return {(e.virtual_id, e.param) for e in self._pending_releases}
 
     def release_target(self, vid: str, pname: str) -> Optional[float | bool]:
         """The value a momentary release of (vid, pname) would return it to
         RIGHT NOW — _carried_value with an empty same-surge carry, i.e.
         exactly what flush_releases resolves for that entry (a creep's
         current wander position, brightness's own baseline, or the tracked
-        param baseline; None = unknown, which flush_releases skips and the
-        watchdog therefore never acts on either). The one definition of
+        param baseline; None = unknown, which the watchdog never acts on —
+        flush_releases itself then falls back to the entry's own
+        spike-time `return_to`, the effect's resting default for a param
+        nothing ever authored a baseline for, a case the watchdog
+        deliberately keeps no opinion on). The one definition of
         "baseline" the param orphan watchdog restores to, so it can never
         disagree with a real release."""
         state = self.conductor.virtuals.get(vid)
@@ -1378,55 +1500,209 @@ class ResponseEngine:
             return None
         return self._carried_value(vid, state, pname, {})
 
-    async def flush_releases(self, hold_s: Optional[float] = None) -> int:
+    # ── release bookkeeping (module docstring, "RELEASE OWNERSHIP") ─────────
+
+    def _push_release(self, vid: str, pname: str, hold_s: float, *,
+                      instant: bool, return_to: Any, arm_now: bool = False) -> None:
+        entry = PendingRelease(vid, pname, hold_s, instant, self._fire_seq,
+                               return_to=return_to)
+        if arm_now:
+            entry.armed_at = self._clock()
+            entry.due_at = entry.armed_at + hold_s
+        self._pending_releases.append(entry)
+
+    def _arm_pending(self, vid: Optional[str] = None,
+                     params: Any = None) -> None:
+        """Stamp armed_at/due_at on not-yet-armed entries — for `vid` (and,
+        if given, only the params in `params`) right after that write has
+        gone out, so each spike's hold is measured from ITS OWN landing,
+        never from the end of the fire's whole write burst. No arguments =
+        every unarmed entry (the fire's own safety net)."""
+        now = self._clock()
+        for e in self._pending_releases:
+            if e.armed_at is not None:
+                continue
+            if vid is not None and e.virtual_id != vid:
+                continue
+            if params is not None and e.param not in params:
+                continue
+            e.armed_at = now
+            e.due_at = now + e.hold_s
+
+    def _resting_value(self, vid: str, state, pname: str, carry: dict) -> Any:
+        """Where `pname` sits when nothing holds it: the baseline as carried
+        (same-surge carry, brightness baseline, a creep's wander position,
+        the tracked param baseline — _carried_value), else the effect's own
+        resting default (fx.device_model.resting_default — schema default,
+        registry default as fallback), coerced to the registry kind (bool
+        for a toggle, float for a numeric). None only when neither source
+        knows the param at all."""
+        v = self._carried_value(vid, state, pname, carry)
+        if v is not None:
+            return v
+        meta = device_model.get_param_meta(state.effect_type, pname)
+        if meta is None:
+            return None
+        d = device_model.resting_default(state.effect_type, pname)
+        if d is None:
+            return None
+        mkind, _lo, _hi = binding_resolver.kind_for_meta(meta)
+        if mkind == binding_resolver.KIND_TOGGLE:
+            return bool(d)
+        if mkind == binding_resolver.KIND_NUMERIC:
+            return float(d) if isinstance(d, (int, float)) else None
+        return None
+
+    def take_release_schedule(self) -> list[ReleaseGroup]:
+        """The release tasks the engine must spawn for entries not yet
+        claimed by one: one ReleaseGroup per distinct (fire_seq, hold_s,
+        due_at) among unscheduled entries, each marked scheduled. Entries a
+        fire armed share the fire's arm instant, so a fire with one chosen
+        hold yields exactly one group — the old one-task-per-hold shape,
+        now owned by the fire and due at an absolute time. An entry that is
+        somehow still unarmed (no write ever went out for it) is armed now
+        rather than never scheduled."""
+        self._arm_pending()
+        groups: dict[ReleaseGroup, None] = {}
+        for e in self._pending_releases:
+            if e.scheduled:
+                continue
+            e.scheduled = True
+            groups.setdefault(ReleaseGroup(e.fire_seq, e.hold_s, e.due_at), None)
+        return sorted(groups, key=lambda g: (g.due_at, g.fire_seq, g.hold_s))
+
+    def seconds_until(self, due_at: float) -> float:
+        """How long a release task should sleep before flushing its group —
+        on THIS engine's clock (the same one the entries were armed on),
+        never below zero."""
+        return max(0.0, float(due_at) - self._clock())
+
+    async def flush_releases(self, hold_s: Optional[float] = None, *,
+                             fire_seq: Optional[int] = None,
+                             due_by: Optional[float] = None) -> int:
         """Issue pending momentary releases — every spiked (virtual, param)
         returns to its baseline AS CARRIED NOW (a colour jump or permanent
         kind in the same surge may have moved it; a creep kept wandering —
-        the release honors the carry, never a stale snapshot). hold_s=None
-        drains EVERY pending release regardless of its authored hold
-        (test/preview convenience and a final drain point — the /api/
-        engine/event dark injector uses this to settle immediately); a
-        specific hold_s (production: engine._release_after_hold, one task
-        per pending_hold_groups() entry) drains only that hold's group,
-        leaving other holds' entries pending for their own release.
-        Production schedules the default group PULSE_HOLD_S after the
-        spike (services/engine.py); specs call it directly once the spike
-        has provably landed.
+        the release honors the carry, never a stale snapshot), falling back
+        to the entry's own spike-time `return_to` only when nothing carries
+        a baseline for it (a never-authored param used to be stranded
+        here). hold_s=None drains EVERY pending release regardless of its
+        authored hold or owning fire (test/preview convenience and a final
+        drain point — the /api/engine/event dark injector uses this to
+        settle immediately); a specific hold_s drains only that hold's
+        group; fire_seq additionally restricts the drain to the entries
+        that ONE fire created (production: engine's per-ReleaseGroup task),
+        leaving every other fire's entries pending for their own timer;
+        due_by (production: the group's own due_at) further restricts it
+        to entries due by that clock time — a later-landed spike of the
+        same fire/hold keeps its own full hold. Production schedules each
+        group at its own absolute due time (take_release_schedule/
+        seconds_until — services/engine.py); specs call it directly once
+        the spike has provably landed.
+
+        SUPERSESSION: a (virtual, param) being drained here is SKIPPED —
+        entry dropped, no write — when a pending entry for the same
+        (virtual, param) from a DIFFERENT fire (or a later-due entry of
+        this fire) is still outstanding: the later spike owns the param
+        now and its own release returns it. Overlapping holds extend; they
+        never cut each other short (module docstring, "RELEASE
+        OWNERSHIP").
 
         Every release GLIDES back over PULSE_RELEASE_S, EXCEPT an entry
-        flagged instant=True (sign-control kinds only — STAR's own "Flip"
-        reverse, see the module docstring): that one JUMPS, same reasoning
-        as its own departure in _move_params — the real target param
-        (e.g. `spin`) is a genuine numeric register, so an ordinary glide
-        back to baseline would tween continuously through zero exactly
-        like the bug this flare exists to avoid, on the way BACK this
-        time. Returns virtuals released (union of both groups)."""
-        if hold_s is None:
-            pending, self._pending_releases = self._pending_releases, []
-        else:
-            due, keep = [], []
-            for entry in self._pending_releases:
-                (due if entry[2] == hold_s else keep).append(entry)
-            pending, self._pending_releases = due, keep
-        jump_by_vid: dict[str, dict[str, float]] = {}
-        glide_by_vid: dict[str, dict[str, float]] = {}
-        for vid, pname, _hold_s, instant in dict.fromkeys(pending):
+        flagged instant=True — a TOGGLE param (e.g. `reverse`) or a
+        sign-control param (STAR's own "Flip" reverse): that one JUMPS,
+        same reasoning as its own departure in _move_params — there is no
+        continuum between the two states to travel, and for the real
+        target of a sign flip (e.g. `spin`, a genuine numeric register) an
+        ordinary glide back would tween continuously through zero exactly
+        like the bug this flare exists to avoid, on the way BACK this time.
+        Entries stay listed until their write has been ISSUED (so the
+        watchdog still sees them as held mid-flush); one virtual's failed
+        write is logged and dropped without losing the others'. Returns
+        virtuals released (union of both groups)."""
+        def selected(e: PendingRelease) -> bool:
+            if e.flushing:
+                return False
+            if hold_s is not None and e.hold_s != hold_s:
+                return False
+            if fire_seq is not None and e.fire_seq != fire_seq:
+                return False
+            if due_by is not None and (e.due_at is None
+                                       or e.due_at > due_by + 1e-6):
+                return False
+            return True
+
+        due = [e for e in self._pending_releases if selected(e)]
+        keep = [e for e in self._pending_releases if e not in due]
+        if not due:
+            return 0
+        for e in due:
+            e.flushing = True
+        # Supersession: (vid, param) pairs a still-pending LATER entry owns.
+        superseded: set[tuple[str, str]] = set()
+        for e in due:
+            for other in keep:
+                if (other.virtual_id, other.param) != (e.virtual_id, e.param):
+                    continue
+                if other.fire_seq != e.fire_seq or (
+                        other.due_at is not None and e.due_at is not None
+                        and other.due_at > e.due_at):
+                    superseded.add((e.virtual_id, e.param))
+                    break
+        jump_by_vid: dict[str, dict[str, Any]] = {}
+        glide_by_vid: dict[str, dict[str, Any]] = {}
+        # Latest entry per (vid, param) wins its return_to/instant verdict.
+        latest: dict[tuple[str, str], PendingRelease] = {}
+        for e in due:
+            latest[(e.virtual_id, e.param)] = e
+        for (vid, pname), e in latest.items():
+            if (vid, pname) in superseded:
+                continue
             state = self.conductor.virtuals.get(vid)
             if state is None:
                 continue
             target = self._carried_value(vid, state, pname, {})
             if target is None:
+                target = e.return_to
+            if target is None:
+                logger.warning("flush_releases: %s.%s has no baseline and no "
+                               "resting value — release skipped", vid, pname)
                 continue
-            dest = jump_by_vid if instant else glide_by_vid
+            dest = jump_by_vid if e.instant else glide_by_vid
             dest.setdefault(vid, {})[pname] = target
-        for vid, params in jump_by_vid.items():
+        released: set[str] = set()
+        # Written in the order the spikes were issued (latest preserves
+        # pending-list order), so a serial burst's releases re-stagger the
+        # same way its spikes did — every virtual's hold comes out equal.
+        ordered_vids = list(dict.fromkeys(
+            vid for (vid, _p) in latest if vid in jump_by_vid or vid in glide_by_vid))
+        for vid in ordered_vids:
             state = self.conductor.virtuals[vid]
-            await self.executor.jump(vid, state.effect_type, params)
-        for vid, params in glide_by_vid.items():
-            state = self.conductor.virtuals[vid]
-            await self.executor.glide(vid, state.effect_type, params,
-                                      int(PULSE_RELEASE_S * 1000))
-        return len(set(jump_by_vid) | set(glide_by_vid))
+            try:
+                if vid in jump_by_vid:
+                    await self.executor.jump(vid, state.effect_type,
+                                             jump_by_vid[vid])
+                if vid in glide_by_vid:
+                    await self.executor.glide(vid, state.effect_type,
+                                              glide_by_vid[vid],
+                                              int(PULSE_RELEASE_S * 1000))
+                released.add(vid)
+            except Exception:
+                logger.exception("flush_releases: release write failed for "
+                                 "%s (%s) — dropped; the parameter watchdog "
+                                 "is the backstop", vid, state.effect_type)
+            finally:
+                # Landed (or given up on): this virtual's drained entries
+                # leave the pending list now, not before.
+                done = {id(e) for e in due if e.virtual_id == vid}
+                self._pending_releases = [
+                    e for e in self._pending_releases if id(e) not in done]
+        # Entries drained without a write (superseded / unknown virtual /
+        # no target) leave the list too.
+        drained = {id(e) for e in due}
+        self._pending_releases = [e for e in self._pending_releases
+                                  if id(e) not in drained]
+        return len(released)
 
     async def _drive_phase(self, event_class: str,
                            gap_ms: Optional[int] = None) -> dict:

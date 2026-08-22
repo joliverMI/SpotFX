@@ -170,15 +170,23 @@ expected_rotate_lead = scene_response.color_rotate_ramp_ms(0.6)
 check(tl_rotate["lead_ms"] == expected_rotate_lead,
      f"color_rotate kind: lead_ms == color_rotate_ramp_ms(0.6) ({expected_rotate_lead})")
 
-# ── 2. momentary NON-smooth (toggle) param: instant jump, and — matching
-#    real production behaviour, not a gap this feature introduces — no
-#    resolvable release target, so it never glides back ───────────────────
+# ── 2. momentary NON-smooth (toggle) param on a NEVER-AUTHORED key: instant
+#    jump in, and — since 2026-08-21 (scene_response.py "RELEASE OWNERSHIP")
+#    — an instant jump BACK at hold_s to the param's resting value (the
+#    effect's own schema default; radial's `polygon` rests True) instead
+#    of the old silent skip that stranded a spike with no tracked baseline.
+#    A toggle's return is a JUMP, never a PULSE_RELEASE_S glide, so the
+#    ruler's END marker is the hold itself, not hold+1.5s ─────────────────
 tl2 = run(flare_preview.build_timeline(scene, kinds["polygon-flare"], 1.0))
-check(len(tl2["writes"]) == 1, f"polygon-flare: 1 write (jump, no release), got {len(tl2['writes'])}")
-w = tl2["writes"][0]
+check(len(tl2["writes"]) == 2, f"polygon-flare: 2 writes (jump in, jump back), got {len(tl2['writes'])}")
+w, w_back = sorted(tl2["writes"], key=lambda w: w["at_s"])
 check(w["kind"] == "jump" and w["at_s"] == 0.0, "polygon-flare: instant jump at t=0")
-check(tl2["animation_end_s"] == w["duration_ms"] / 1000.0,
-     "polygon-flare: animation_end_s reflects the jump's own (near-zero) duration")
+check(w_back["kind"] == "jump" and abs(w_back["at_s"] - scene_response.PULSE_HOLD_S) < 1e-6,
+     "polygon-flare: the release is an instant JUMP at hold_s, never a glide")
+check(w_back["params"].get("polygon") is True,
+     "polygon-flare: releases to radial's own resting value for polygon (schema default True) — never stranded for lack of a baseline")
+check(abs(tl2["animation_end_s"] - (scene_response.PULSE_HOLD_S + w_back["duration_ms"] / 1000.0)) < 1e-6,
+     "polygon-flare: animation_end_s == hold + the jump's own (near-zero) duration — no phantom 1.5s glide-back on the ruler")
 check(tl2["lead_ms"] == 0 and tl2["fire_at_s"] == tl2["animation_anchor_s"],
      "polygon-flare: a toggle target needs no lead — fires exactly at the anchor")
 
