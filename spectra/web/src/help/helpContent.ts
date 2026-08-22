@@ -1225,4 +1225,86 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  {
+    id: 'av-sync-page',
+    title: 'AV Sync — measure the audio/visual offset with your phone',
+    keywords: 'av sync audio visual offset latency delay measure phone camera microphone calibrate lights ahead behind flash pattern',
+    intro:
+      'A phone-first page that MEASURES how far the lights are ahead of or behind the sound, instead of arguing it. Your phone stands where you stand: its microphone hears the room and its camera sees the lights; the page reduces both to number streams on the phone and SPECTRA correlates them against what it itself played and wrote. The result is a number AND a statement of how sure it is. Nothing measured here is written into any setting — it is shown for you to act on.',
+    entries: [
+      {
+        id: 'av-sync-what-it-measures',
+        title: 'What the number means',
+        keywords: 'sign ahead behind lag lead ms statement offset definition',
+        body: [
+          '"Lights are N ms AHEAD of the sound" means a light change you can see reaches the phone N ms BEFORE the sound it was meant to land with; "BEHIND" means after. Precisely: light lag (phone sees the light − SPECTRA wrote it) minus audio lag (phone hears the sound − SPECTRA\'s own audio hub heard it). The phone/server clock difference cancels in that subtraction, so it does not matter that the two clocks disagree by days.',
+          'The audio reference is what SPECTRA itself hears on snapcast.monitor (what the speakers are playing now), the same stream its audio-reactive effects use — not Spotify\'s reported position and not the stored song, so the wandering xcorr offset never touches this measurement. The light reference is either the flash pattern SPECTRA drives on purpose, or (passive mode) the show\'s own writes.',
+          'The result is a MEASUREMENT of your room from where the phone stood. It is not applied anywhere: no setting changes because of it. The finished record (numbers + statement) is saved so you can compare runs; what to do with it is your call.',
+        ],
+      },
+      {
+        id: 'av-sync-phone-steps',
+        title: 'Phone steps, in order',
+        keywords: 'how to tap permission allow camera microphone aim still start measure stop',
+        body: [
+          '1. Open SPECTRA on the phone (the address you always use) and tap "AV Sync" in the top bar. If the page says camera & mic are blocked on this address, follow "Camera & mic need https" below first — nothing else will work until then.',
+          '2. Play music through the room the normal way (the measurement needs real sound going through SPECTRA\'s speakers).',
+          '3. Tap "📷 Start camera & mic". The browser asks for Camera — allow — then Microphone — allow. The camera is the back camera; the mic is left raw (no noise suppression) on purpose. A small live picture appears with two level bars: sound and light. Both should move.',
+          '4. Aim the phone so the lights you care about fill a good part of the picture (the crystal, the sconces, the strips — whatever you are judging). Hold the phone still; prop it on something if you can. Moving the phone mid-measurement blurs the result.',
+          '5. Tap "⚡ Flash-pattern measurement (12 s)". Every light turns white on/off at random for 12 seconds while the music keeps playing, then the room comes back exactly as it was. Keep still. The number appears within about two seconds of the flashing ending.',
+          '6. Read the Result card: the big line is the answer; the sentence under it is the honesty. Run it two or three times — if the runs agree within their ± you have a good number; if they scatter more than that, trust the scatter.',
+          '7. Tap "■ Stop camera & disconnect" when done — this also releases the microphone and camera. Closing the tab does the same.',
+        ],
+      },
+      {
+        id: 'av-sync-secure-context',
+        title: 'Camera & mic need https (the one thing that blocks this)',
+        keywords: 'secure context https http blocked getUserMedia mediaDevices undefined chrome flag unsafely treat insecure origin tailscale serve voice mic',
+        body: [
+          'Phone browsers only expose the camera and microphone to pages on a secure address — https, or localhost. SPECTRA today is reached over plain http (for example http://<host>:8000/spectra/), so the browser hides the camera/mic entirely — the same reason the Settings page\'s voice mic button does nothing on a phone. The page detects this and shows the exact address you are on.',
+          'Tonight, Chrome on Android: open a new tab and go to chrome://flags/#unsafely-treat-insecure-origin-as-secure — paste the EXACT address the page shows (scheme, host and port, e.g. http://serenity.tailb5ca89.ts.net:8000), set it to Enabled, tap Relaunch, then come back. This tells Chrome to treat that one origin as secure. iPhone Safari has no such switch.',
+          'The proper fix is HTTPS in front of SPECTRA — a deploy step for firstmate, not a phone step: on the tailnet, `tailscale serve` puts a real certificate in front of :8000 so every phone browser just works (and the voice mic with it). Nothing in this build turns that on.',
+        ],
+      },
+      {
+        id: 'av-sync-privacy',
+        title: 'Privacy — where the audio and video go, what is written, how long it is kept',
+        keywords: 'privacy camera microphone disk retention network cloud stored recording delete',
+        body: [
+          'Raw audio and raw video NEVER leave the phone. The page reduces them in the browser to two small number streams — a microphone loudness envelope (about 90 numbers per second) and a per-frame camera brightness (one mean plus a 4×4 grid of region means) — and sends only those.',
+          'Every hop: phone browser → the same-origin WebSocket to SPECTRA (/spectra/api/av-sync/ws) → the spot-effects reverse proxy on :8000 → the SPECTRA process on :8010, all on whatever network you already reach SPECTRA over (if that is your tailnet, the numbers cross the tailnet — the media never does). Nothing is sent to any cloud or third-party service, ever.',
+          'Written to disk: exactly one file, storage/spectra/av_sync_measurements.json — finished measurement RECORDS (the numbers, the confidence statement, phone capability flags such as "frame capture time available", the browser\'s name). Never audio, never video, never frames, never the number streams. It keeps the last 100 records; older ones fall off automatically. (storage/spectra/av_sync_pattern.json briefly holds the pre-flash light snapshot — effect settings, no media — and is deleted when the room is restored.)',
+          'Kept in memory while connected: about 60 seconds of the two number streams; dropped the moment you disconnect. The frame tap (below) keeps at most 8 still frames in memory, cleared on disconnect.',
+        ],
+      },
+      {
+        id: 'av-sync-confidence',
+        title: 'How sure the number is, and what the error bars depend on',
+        keywords: 'confidence error bars sigma systematic statistical repeat peak ratio ambiguity refused weak',
+        body: [
+          'Two kinds of uncertainty are reported separately, on purpose. STATISTICAL (the ±): from re-reading the lag on several sub-windows of the same capture — how repeatable this capture was. SYSTEMATIC (the "could be up to X ms further ahead / Y ms further behind" sentence): terms the arithmetic cannot see, each named with its bound, its direction and what it depends on — the phone\'s camera pipeline (much smaller when the browser gives a real frame capture time), the phone\'s microphone pipeline (smaller when the browser reports its input latency), camera exposure (the edge is seen about half an exposure late), bulb rise time (Hue fades, WLED snaps — what is in frame matters), and SPECTRA\'s own audio input latency. These are constant for a given phone and room, so a CHANGE between two runs is far tighter than either absolute number.',
+          'The measurement REFUSES rather than guesses: a weak correlation (nothing stands out of the noise — too quiet, phone too far, lights not in frame), an ambiguous one (two lags fit about equally — why the flash pattern is random, never a steady blink), an unstable one (the lag moved mid-capture), or no server audio reference (SPECTRA not driving the room) all show "No number yet" with the reason, never a plausible-looking value.',
+          'Best practice: music with clear beats, the phone within a few metres of both speakers and lights, the lights filling the picture, the phone still, three runs.',
+        ],
+      },
+      {
+        id: 'av-sync-pattern-vs-passive',
+        title: 'Flash pattern vs passive',
+        keywords: 'flash pattern random white passive show writes paused revert restore 12 seconds',
+        body: [
+          'Flash pattern (recommended): SPECTRA switches every live light to white and flips it on/off with RANDOM holds of 150–450 ms for 12 s, recording the exact time of every flip, then restores each light to exactly what it was showing — the same snapshot-and-revert discipline the Colour Set Preview and flare preview use. The show\'s own automatic scene/response/set changes are paused for those seconds so nothing fights the pattern. Random holds are what make the answer unique; a steady blink would fit at every multiple of its period and is refused.',
+          'Passive: nothing flashes. SPECTRA uses its own recent instant writes (jumps and short glides) as the light reference while the show plays. It is free and continuous — the shape a future always-on camera would use — but only as good as the show\'s own edges, and the confidence gate will often say "no number yet". When it does produce a number, the same statement applies.',
+          'A live stream rather than a one-shot: the phone keeps streaming while the page is open, the estimate refreshes every second over the most recent window, and a fixed camera on the same network would speak the same messages — that is the path to continuous calibration, not a rewrite.',
+        ],
+      },
+      {
+        id: 'av-sync-frame-tap',
+        title: 'Frame tap — the hook for the future camera work (not built)',
+        keywords: 'aruco tags led mapping vision frames jpeg seam hook future calibration patterns',
+        body: [
+          'The later ArUco-tag / LED-position / ambient-effect mapping work is NOT built here — on purpose. What is prepared is the seam it will plug into: with the frame tap switched on (Privacy card, off by default), the phone sends small JPEG stills of what the camera sees, each stamped with its capture time, to SPECTRA\'s memory only (GET /spectra/api/av-sync/frame/latest shows the newest; at most 8 are held; cleared on disconnect; nothing on disk). Nothing in SPECTRA inspects or recognises anything in a frame today.',
+        ],
+      },
+    ],
+  },
 ];
