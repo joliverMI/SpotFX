@@ -278,6 +278,21 @@ variables named `ledfx` (the core object handle) are untouched.
     payoff itself does. Tests: `tests/test_firework_burst.py`. Not in the
     fork source at `/home/javi/ledfx-src` (SpotFX-authored mechanism).
 
+16. `effects/fireworks.py`: drop/lull rockets launch RADIALLY EQUIDISTANT
+    (owner ask, 2026-08-21, PR fm/fireworks-rocket-angles). `_launch_rockets`
+    used to draw each of the LULL_ROCKETS start angles independently
+    (`rng.uniform(0, 2*pi, k)`), so the six rockets clumped; the new
+    `_rocket_start_angles(k)` is the ONE angular plan — even `2*pi/k`
+    spacing, the whole ring randomly rotated per launch, each rocket
+    nudged by at most `LULL_ROCKET_WIGGLE_FRAC` (1/6 of the step, +/-10
+    degrees at six rockets — small enough that the ring still reads as a
+    ring and no two rockets can ever swap order). `end_r` (0.36–0.76 past
+    centre), the +/-0.5 rad end-angle jitter and LULL_ROCKETS=6 are
+    deliberately unchanged (he praised them). `fireworks1d` needs no change:
+    its two rockets leave from the fixed strip ends, equidistant by
+    construction. Tests: `tests/test_fireworks_rocket_angles.py`. Not in
+    the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
