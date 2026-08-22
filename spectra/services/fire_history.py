@@ -69,7 +69,11 @@ from spectra import config
 
 logger = logging.getLogger(__name__)
 
-BUCKETS = ("scenes", "responses", "color_sets", "triggers", "deferred")
+BUCKETS = ("scenes", "responses", "color_sets", "triggers", "deferred",
+           # "watchdog": the param orphan watchdog's restores
+           # (spectra/services/param_watchdog.py) — every restore is a
+           # show event worth seeing on the Review page timeline.
+           "watchdog")
 
 # Entry-count cap for the show log — bounded, never unbounded growth. On
 # each append, entries beyond this count are dropped oldest-first.

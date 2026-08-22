@@ -75,6 +75,16 @@ export default function StatusPage() {
             </div>
             <div><div className="k">Surges seen</div>{eng.bridge.counts.responses ?? 0}</div>
             <div><div className="k">Recorded writes</div>{eng.executor.recent_writes.length ? `…${eng.executor.recent_writes[eng.executor.recent_writes.length - 1].seq}` : '0'}</div>
+            <div><div className="k">Param watchdog <HelpLink topic="param-watchdog" title="Parameter watchdog — a value left stranded gets put back" /></div>
+              {eng.param_watchdog ? (
+                <span title="Effect values found stranded away from their baseline with nothing holding them, and put back — see the service log for each one">
+                  {eng.param_watchdog.restores_total} restore{eng.param_watchdog.restores_total === 1 ? '' : 's'}
+                  {eng.param_watchdog.suspected.length > 0 && ` · ${eng.param_watchdog.suspected.length} suspected`}
+                  {eng.param_watchdog.given_up.length > 0 && ` · ${eng.param_watchdog.given_up.length} given up`}
+                  {eng.param_watchdog.last_sweep?.skipped && ` · standing down: ${eng.param_watchdog.last_sweep.skipped}`}
+                </span>
+              ) : '—'}
+            </div>
           </div>
         </div>
       )}

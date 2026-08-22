@@ -1354,6 +1354,30 @@ class ResponseEngine:
         today's unchanged single-task shape."""
         return sorted({hold_s for _, _, hold_s, _ in self._pending_releases})
 
+    def pending_release_keys(self) -> set[tuple[str, str]]:
+        """Every (virtual_id, param) a momentary kind has spiked and not yet
+        released — read by the param orphan watchdog (spectra/services/
+        param_watchdog.py) as holder #1 of its "nothing holding it" check:
+        a key in here is legitimately away from baseline, however long its
+        release task takes to run. Read-only; the queue itself is owned by
+        flush_releases."""
+        return {(vid, pname) for vid, pname, _hold_s, _instant
+                in self._pending_releases}
+
+    def release_target(self, vid: str, pname: str) -> Optional[float | bool]:
+        """The value a momentary release of (vid, pname) would return it to
+        RIGHT NOW — _carried_value with an empty same-surge carry, i.e.
+        exactly what flush_releases resolves for that entry (a creep's
+        current wander position, brightness's own baseline, or the tracked
+        param baseline; None = unknown, which flush_releases skips and the
+        watchdog therefore never acts on either). The one definition of
+        "baseline" the param orphan watchdog restores to, so it can never
+        disagree with a real release."""
+        state = self.conductor.virtuals.get(vid)
+        if state is None:
+            return None
+        return self._carried_value(vid, state, pname, {})
+
     async def flush_releases(self, hold_s: Optional[float] = None) -> int:
         """Issue pending momentary releases — every spiked (virtual, param)
         returns to its baseline AS CARRIED NOW (a colour jump or permanent

@@ -2895,6 +2895,47 @@ pre-existing abandonment bound, not this one):
 `tests/test_flare_preview_api.py` (the `preview_pause` capping, route
 wiring).
 
+## SPECTRA param orphan watchdog (the safety net under momentary releases)
+
+`spectra/services/param_watchdog.py` (own supervised task in `spectra/app.py`'s
+lifespan, his ask 2026-08-21 after an effect was left stuck running backwards:
+"some kind of watchdog system to make sure that parameters are set correctly
+like that"). Every 10s it compares each engine-tracked virtual's LIVE effect
+config (read off the in-process host under the effect's own lock) against the
+conductor's `VirtualState.param_baseline`, and restores any param away from
+baseline with NOTHING holding it for 30s continuously — loudly (WARNING log
+naming virtual/param/found/restored/age, `fire_history` bucket `"watchdog"`,
+`engine.status()["param_watchdog"]`, an additive `param_watchdog` key on
+`GET /spectra/api/liveness`, never part of `healthy`). Read its module
+docstring before touching anything that moves a param outside the engine's
+bookkeeping — three things to know: (1) **"nothing holding it" is three
+structural holders** — a pending release (`ResponseEngine.pending_release_keys`),
+a drift mechanism owning the param, a tween in flight on the live effect — and
+**the permanent/momentary discriminator is `param_baseline` itself**: a
+permanent kind's carry moves the baseline (`conductor.on_surge`), a momentary
+kind never does, so the watchdog cannot fight an authored permanent flare by
+construction. The restore target is `ResponseEngine.release_target` — a thin
+wrapper over the SAME `_carried_value` `flush_releases` uses; never introduce a
+second definition of "baseline" next to it. (2) **`background_brightness`/
+`background_color` are out of scope by name** — the conductor's own colour-set
+landings write them to the wire WITHOUT moving `param_baseline` (a pre-existing
+bookkeeping gap, left alone), and Dark/Light mode own both keys too; `brightness`
+is compared against baseline × any `brightness_multiplier` seen since the last
+scene fire (the dimmer doesn't rewrite live brightness until the next write —
+also pre-existing). If you add a NEW writer that moves a baselined param outside
+the engine's carry (another fx_seam path, a new room mode), either move the
+baseline with it or gate/exclude it here — otherwise the watchdog will, after
+30s, correctly-by-its-own-lights undo it and log an orphan. (3) It stands down
+entirely while the engine is dark, the live stack is down, or `preview_pause`/
+`flare_preview_hold` is active. A restore that doesn't take is retried at most 3
+times then given up on at CRITICAL (named in status) until the next scene fire —
+a "PARAM ORPHAN NOT TAKING" line means something keeps re-moving the param or the
+schema rejects the write; find that, don't tune the watchdog. Module-global state
+(no DI seam — `tests/conftest.py`'s autouse `_isolated_param_watchdog` resets
+it); the `Deps` dataclass is the injection seam. Spec:
+`tests/test_param_watchdog.py`; timing constants recorded in
+`docs/SPECTRA_TIMING_CONVENTIONS.md`; `docs/SPECTRA_SPEC.md` §90.
+
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
 Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/
