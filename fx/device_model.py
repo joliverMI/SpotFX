@@ -182,6 +182,16 @@ PHASE_EFFECTS = frozenset({
     "fireworks", "fireworks1d", "squiggles", "dancer", "eye",
 })
 
+# The vendored effects carrying the flare-driven payoff burst: the
+# `burst_rockets` config key (an instant "explode N payoff rockets NOW"
+# count, edge-detected in config_updated, consumed per draw, self-reset to
+# 0 after firing — the drop payoff's own spawn shape, see each effect's
+# _flare_burst). Like the phase keys above, deliberately NOT part of the
+# effect-parameter registry below — burst_rockets rides ONLY the dedicated
+# firework_burst flare write (spectra scene_response._firework_burst),
+# never editor surfaces or band patches.
+FIREWORK_BURST_EFFECTS = frozenset({"fireworks", "fireworks1d"})
+
 
 # ── effect-parameter registry ────────────────────────────────────────────────
 

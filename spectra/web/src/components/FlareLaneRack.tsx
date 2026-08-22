@@ -23,7 +23,8 @@ import type { FlareBand, FlareKind, ResponseClass } from '../types';
 const kindIcon = (k: FlareKind): string =>
   k.type === 'drift_jump' ? (k.jump === 'color_set' ? '🎨' : '🎲')
     : k.type === 'color_rotate' ? '🔄'
-      : k.type === 'momentary' ? '↩' : '⚓';
+      : k.type === 'firework_burst' ? '🎆'
+        : k.type === 'momentary' ? '↩' : '⚓';
 
 export interface RackDropTarget { mode: 'insert' | 'join'; anchor: string | null; }
 

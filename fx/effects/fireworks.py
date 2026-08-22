@@ -56,12 +56,15 @@ class Fireworks2d(Twod, GradientEffect):
     # colors update in place — recreation would kill the particles.
     # phase/phase_progress are SpotFX-driven choreography; advanced (not
     # hidden) so the arc can be hand-scrubbed in the LedFX UI for tuning.
+    # burst_rockets is the same kind of key (SpotFX's firework_burst flare
+    # drives it; self-resets after firing).
     HIDDEN_KEYS = Twod.HIDDEN_KEYS + ["gradient_roll", "color_blend"]
     ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
         "impulse_decay",
         "drag",
         "phase",
         "phase_progress",
+        "burst_rockets",
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -181,6 +184,11 @@ class Fireworks2d(Twod, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "burst_rockets",
+                description="Payoff bursts to explode right now (driven by SpotFX flares; self-resets)",
+                default=0,
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=12)),
         }
     )
 
@@ -275,6 +283,20 @@ class Fireworks2d(Twod, GradientEffect):
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
+
+        # flare-driven payoff burst: edge-detect burst_rockets exactly like
+        # the phase key (SpotFX writes a count, draw consumes it and
+        # self-resets the key to 0 so an identical later write edges again)
+        new_burst = int(self._config.get("burst_rockets", 0))
+        if not hasattr(self, "_burst_seen"):
+            # creation baseline: a stale persisted count must never explode
+            # on a fresh instance
+            self._burst_seen = new_burst
+            self._burst_pending = 0
+        elif new_burst != self._burst_seen:
+            self._burst_seen = new_burst
+            if new_burst > 0:
+                self._burst_pending += new_burst
 
     def audio_data_updated(self, data):
         impulse = self.impulse_filter.update(
@@ -660,7 +682,6 @@ class Fireworks2d(Twod, GradientEffect):
         lull) the payoff is a spread of giant bursts near the center."""
         n = self.n
         idx = np.flatnonzero(self.p_rocket[:n] > 0.0)
-        count = max(int(round(self.burst_size * 2.5)), 24)
         if idx.size:
             origins = [
                 (
@@ -682,17 +703,39 @@ class Fireworks2d(Twod, GradientEffect):
                 for _ in range(LULL_ROCKETS)
             ]
         for ox, oy, grad in origins:
-            self._spawn_burst(
-                count,
-                ox=ox,
-                oy=oy,
-                grad=grad,
-                speed_mult=PAYOFF_SPEED,
-                bright=1.0,
-                life_mult=PAYOFF_LIFE,
-                ignore_cap=True,
-            )
+            self._payoff_burst_at(ox, oy, grad)
         self._rocket_path = None
+
+    def _payoff_burst_at(self, ox, oy, grad):
+        """One giant firework in its own color at one origin — the drop
+        payoff's own spawn shape, shared verbatim by the flare-driven
+        burst (_flare_burst) so the two can never drift."""
+        count = max(int(round(self.burst_size * 2.5)), 24)
+        self._spawn_burst(
+            count,
+            ox=ox,
+            oy=oy,
+            grad=grad,
+            speed_mult=PAYOFF_SPEED,
+            bright=1.0,
+            life_mult=PAYOFF_LIFE,
+            ignore_cap=True,
+        )
+
+    def _flare_burst(self, count):
+        """`count` payoff bursts explode NOW — the flare-driven burst
+        (burst_rockets, written by SpotFX's firework_burst flare kind).
+        Each is _rocket_payoff's own giant firework at its own no-rocket
+        origin spread near the center — purely additive on top of whatever
+        is already flying (ignore_cap, and no live particle, rocket, or
+        phase state is touched)."""
+        rng = self._rng
+        for _ in range(count):
+            self._payoff_burst_at(
+                float(rng.uniform(-0.3, 0.3)),
+                float(rng.uniform(-0.3, 0.3)),
+                float(rng.random()),
+            )
 
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw;
@@ -935,6 +978,28 @@ class Fireworks2d(Twod, GradientEffect):
                         x0 = np.concatenate([x0, self.p_x[fresh]])
                         y0 = np.concatenate([y0, self.p_y[fresh]])
                 n = self.n
+
+            # flare-driven payoff burst — deliberately NOT gated on hold/
+            # lull (a flare during a lull still lands, exactly as the drop
+            # payoff itself does); self-reset re-arms the edge. A stale
+            # persisted count on a fresh instance (nonzero _burst_seen with
+            # nothing pending — the creation baseline armed no spawn) is
+            # reset the same way, so the key reads 0 whenever idle and an
+            # identical later write still edges.
+            if self._burst_pending or self._burst_seen:
+                pending = self._burst_pending
+                self._burst_pending = 0
+                if pending:
+                    prev = self.n
+                    self._flare_burst(pending)
+                    if self.n > prev:
+                        fresh = slice(prev, self.n)
+                        x0 = np.concatenate([x0, self.p_x[fresh]])
+                        y0 = np.concatenate([y0, self.p_y[fresh]])
+                    n = self.n
+                self._apply_config(
+                    {"burst_rockets": 0}, validate=False, fire_event=False
+                )
 
             if self._phase == "lull":
                 # guided rocket motion (positions set directly; the x0/y0

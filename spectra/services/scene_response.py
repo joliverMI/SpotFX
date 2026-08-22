@@ -124,6 +124,16 @@ Per event, fed by the bridge with the fire's intensity:
                   and never touches the jumps/glides dicts the param/gain
                   kinds above share, so it composes freely alongside a
                   shape-targeting kind in the same band.
+       firework_burst — the FIREWORK BURST flare (owner ask, 2026-08-21):
+                  an intensity-scaled count of payoff rockets (3 at 0.0,
+                  6 at 1.0, linear — firework_burst_rockets) explodes
+                  IMMEDIATELY on every virtual whose live effect is a
+                  fireworks effect, layered ON TOP of the scene's own
+                  rockets — see _firework_burst's own docstring. Nothing
+                  carries, nothing releases, and the write never enters
+                  the jumps/glides dicts (burst_rockets is deliberately
+                  unregistered, like the phase keys), so it composes
+                  freely alongside every other kind in the same band.
   Stepped-effect entries (SceneDeviceConfig.effect_steps) and surges — the
   stated interplay, simple on purpose: EFFECT SELECTION IS FIRE-TIME ONLY.
   A surge never switches an entry's effect; dice re-rolls re-resolve the
@@ -253,6 +263,33 @@ def color_rotate_dwell_ms(intensity: float) -> int:
 
 def color_rotate_fade_ms(intensity: float) -> int:
     return int(round(color_rotate_ramp_ms(intensity) * COLOR_ROTATE_FADE_FACTOR))
+
+
+# FIREWORK BURST FLARE (owner ask, 2026-08-21 — verbatim spec in
+# scripts/add_fireworks_burst_flare.py's own docstring): explode an
+# intensity-scaled count of payoff rockets IMMEDIATELY on every live
+# fireworks effect (fx.device_model.FIREWORK_BURST_EFFECTS), via each
+# effect's own drop-payoff spawn shape (`burst_rockets`, an instant
+# self-resetting config key — deliberately NOT beat_burst, which only
+# launches on the NEXT beat and so can't line up with a trigger mark).
+# His numbers, exact; the count is the rockets THIS FLARE ADDS on top of
+# whatever the scene is already doing (the color_rotate precedent: the
+# endpoints are the quantity the flare itself produces, never a total it
+# forces the scene to). No authored knobs — the count scales from the
+# fire's own effective intensity like every color_rotate quantity
+# (FlareKind.type="firework_burst" carries none, see its own docstring).
+FIREWORK_BURST_ROCKETS_GENTLE = 3.0   # intensity 0.0
+FIREWORK_BURST_ROCKETS_HARD = 6.0     # intensity 1.0
+
+
+def firework_burst_rockets(intensity: float) -> int:
+    """Whole rockets — same int(round(...)) convention as every ramp-ms
+    family in this module. The write itself is an instant jump (the spawn
+    happens on the effect's next rendered frame), so unlike color_rotate
+    this kind contributes NO lead — the burst STARTS on the mark, the
+    drop/explosion anchor family's own rule."""
+    return int(round(_intensity_scaled(
+        intensity, FIREWORK_BURST_ROCKETS_GENTLE, FIREWORK_BURST_ROCKETS_HARD)))
 
 
 def color_rotate_lead_ms(scene: SceneV2, event_class: ResponseClass,
@@ -666,6 +703,7 @@ class ResponseEngine:
         colours = [(k, s) for k, s in attached
                    if k.type == "drift_jump" and k.jump == "color_set"]
         rotates = [(k, s) for k, s in attached if k.type == "color_rotate"]
+        bursts = [(k, s) for k, s in attached if k.type == "firework_burst"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
@@ -728,6 +766,14 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **record["color_rotate"]})
 
+        if bursts:   # one burst per fire — the count already scales
+            kind, scale = bursts[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            record["firework_burst"] = await self._firework_burst(sel_intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **record["firework_burst"]})
+
         record["kinds"] = kind_records
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p}
@@ -779,6 +825,8 @@ class ResponseEngine:
             record["color_jump"] = await self._color_jump(scene, intensity, carry)
         if kind.type == "color_rotate":
             record["color_rotate"] = await self._color_rotate(intensity)
+        if kind.type == "firework_burst":
+            record["firework_burst"] = await self._firework_burst(intensity)
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
         record["result"] = "applied"
@@ -1133,6 +1181,55 @@ class ResponseEngine:
         return {"degrees": round(degrees, 2), "ramp_ms": ramp_ms,
                 "dwell_ms": dwell_ms, "fade_ms": fade_ms,
                 "virtuals": rotated_count}
+
+    async def _firework_burst(self, intensity: float) -> dict:
+        """The FIREWORK BURST flare (owner ask, 2026-08-21, his verbatim
+        spec in scripts/add_fireworks_burst_flare.py): explode an
+        intensity-scaled count of payoff rockets NOW — 3 at intensity 0.0,
+        6 at 1.0, linear (firework_burst_rockets) — on every virtual whose
+        live effect is a fireworks effect (fx.device_model.
+        FIREWORK_BURST_EFFECTS, the same membership-gate shape _drive_phase
+        uses for the phase keys). The write is one instant jump of the
+        effect's own `burst_rockets` config key; the effect edge-detects
+        it, spawns via its OWN drop-payoff spawn shape (_flare_burst —
+        fireworks1d's two staggered pairs per rocket, fireworks' giant
+        near-center burst per rocket, both ignore_cap so the density cap
+        can never silently swallow his burst), and self-resets the key to
+        0 so the next fire edges again. Deliberately NOT beat_burst: that
+        param only launches on the NEXT beat, up to a beat-period after
+        the trigger — "meant to line up" rules it out.
+
+        ADDS, never replaces: the spawn is purely additive on top of the
+        scene's own live particles — nothing is restarted, reset, or
+        interrupted (proven against the real vendored effects in
+        tests/test_firework_burst.py, not assumed).
+
+        Nothing carries and nothing releases — the particles age out
+        inside the effect on their own PAYOFF_LIFE clock, so unlike
+        color_rotate there is NO release queue to drain anywhere (none of
+        the four drain points apply). And like the phase keys,
+        burst_rockets is deliberately absent from the effect-parameter
+        registry, so it can never enter the param/gain kinds' shared
+        jumps/glides dicts or a band patch — concurrency with every other
+        kind in the same band is structural.
+
+        LEAD: none, on purpose. The write is instant and the burst is an
+        explosion — the drop anchor family's rule (START on the mark), so
+        kind_lead_ms/_response_switch_lead_ms need no branch for it. The
+        one composition caveat is pre-existing and documented: a band
+        attaching this alongside a lead-carrying kind (e.g. color_rotate)
+        fires the whole band early by the max lead — "shorter ones bloom
+        a hair early" — so the burst would land early by that lead too;
+        no band of his does this today."""
+        rockets = firework_burst_rockets(intensity)
+        targets = 0
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.FIREWORK_BURST_EFFECTS:
+                continue
+            await self.executor.jump(vid, state.effect_type,
+                                     {"burst_rockets": rockets})
+            targets += 1
+        return {"rockets": rockets, "virtuals": targets}
 
     def pending_color_rotate_holds(self) -> list[float]:
         """Distinct DWELLS still pending for the colour rotate-and-back

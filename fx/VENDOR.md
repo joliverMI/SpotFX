@@ -256,6 +256,28 @@ variables named `ledfx` (the core object handle) are untouched.
     `tests/test_blackhole_explosion_speed.py`. Not yet ported back to the
     fork source at `/home/javi/ledfx-src`.
 
+15. `effects/fireworks.py` + `effects/fireworks1d.py`: flare-driven payoff
+    burst (NEW MECHANISM, PR fm/fireworks-burst-flare). New `burst_rockets`
+    config key (int, 0–12, default 0, ADVANCED) on both effects — SpotFX's
+    `firework_burst` flare kind writes an instant "explode N payoff rockets
+    NOW" count; the effect edge-detects it in `config_updated` exactly like
+    the phase key (a stale persisted value never fires on a fresh
+    instance), consumes it in the next draw, and self-resets the key to 0
+    via the same sanctioned in-render `_apply_config(validate=False,
+    fire_event=False)` path the drop's own phase auto-reset uses, so an
+    identical later write edges again. The spawn itself is the drop
+    payoff's OWN shape, factored into `_payoff_burst_at()` and called by
+    both `_rocket_payoff()` (unchanged behaviour) and the new
+    `_flare_burst()`: fireworks1d's two staggered pairs per origin
+    (PAYOFF_SPEED + the 0.6x stagger, PAYOFF_LIFE, bright 1.0,
+    ignore_cap); fireworks' one giant burst per origin (burst_size*2.5
+    min 24 particles, PAYOFF_SPEED, PAYOFF_LIFE, bright 1.0, ignore_cap)
+    at the payoff's own near-center origin spread. Purely additive — live
+    particles, lull rockets, and the phase machinery are untouched, and
+    the burst deliberately still lands during a lull, exactly as the drop
+    payoff itself does. Tests: `tests/test_firework_burst.py`. Not in the
+    fork source at `/home/javi/ledfx-src` (SpotFX-authored mechanism).
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
