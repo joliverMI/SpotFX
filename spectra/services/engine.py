@@ -28,11 +28,17 @@ trigger-fired) both arrive through fire_response_event above.
 
 Pulse releases: the spike must land a render frame before the release glide
 starts (scene_response docstring); production schedules one release task per
-responses.pending_hold_groups() entry — a momentary kind's CHOSEN HOLD
-(hold_ms, default PULSE_HOLD_S) after each surge. The colour ROTATE-AND-BACK
+responses.take_release_schedule() group — the entries ONE fire armed at ONE
+chosen hold (hold_ms, default PULSE_HOLD_S), sleeping until the group's
+ABSOLUTE due time (stamped when the spike write went out, NOT when on_event
+returned — the old "sleep hold_s after the whole fire finished" shape is
+what held his 500ms reverse for ~1.0s live; scene_response.py's module
+docstring, "RELEASE OWNERSHIP", has the trace). The colour ROTATE-AND-BACK
 flare (2026-08-20) schedules its own, separately-timed release the same way,
 off responses.pending_color_rotate_holds() — see scene_response._color_rotate's
-own docstring for why it can't share the param/gain queue above.
+own docstring for why it can't share the param/gain queue above. The
+parameter watchdog (spectra/services/param_watchdog.py, its own supervised
+task in spectra/app.py — PR #186) backstops a release that never lands.
 """
 from __future__ import annotations
 
@@ -127,8 +133,14 @@ async def fire_response_event(event_class: str, intensity: float,
     await responses.on_event(event_class, intensity, gap_ms)
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
-    for hold_s in responses.pending_hold_groups():
-        asyncio.create_task(_release_after_hold(hold_s))
+    # One release task per ReleaseGroup this fire armed — owned by THIS
+    # fire (fire_seq), sleeping until the group's ABSOLUTE due time, which
+    # was stamped when the spike writes went out, not now: on_event's own
+    # serial write burst (measured ~400ms on his live room) used to push
+    # a 500ms hold out to ~1.0s (scene_response.py's module docstring,
+    # "RELEASE OWNERSHIP").
+    for group in responses.take_release_schedule():
+        asyncio.create_task(_release_group(group))
     # The colour ROTATE-AND-BACK flare's own release queue (owner ask,
     # 2026-08-20) — its fade-back duration is intensity-scaled per fire, so
     # it can't share pending_hold_groups/_release_after_hold's fixed
@@ -138,9 +150,10 @@ async def fire_response_event(event_class: str, intensity: float,
         asyncio.create_task(_release_color_rotate_after_dwell(dwell_s))
 
 
-async def _release_after_hold(hold_s: float) -> None:
-    await asyncio.sleep(hold_s)
-    await responses.flush_releases(hold_s)
+async def _release_group(group) -> None:
+    await asyncio.sleep(responses.seconds_until(group.due_at))
+    await responses.flush_releases(group.hold_s, fire_seq=group.fire_seq,
+                                   due_by=group.due_at)
 
 
 async def _release_color_rotate_after_dwell(dwell_s: float) -> None:
@@ -194,8 +207,8 @@ async def fire_scene_update_event(intensity: float) -> Optional[dict]:
     if load_room_controls().scene_change_mode not in ("full", "triggers_only"):
         return None
     record = await responses.on_update(intensity)
-    for hold_s in responses.pending_hold_groups():
-        asyncio.create_task(_release_after_hold(hold_s))
+    for group in responses.take_release_schedule():
+        asyncio.create_task(_release_group(group))
     for dwell_s in responses.pending_color_rotate_holds():
         asyncio.create_task(_release_color_rotate_after_dwell(dwell_s))
     return record

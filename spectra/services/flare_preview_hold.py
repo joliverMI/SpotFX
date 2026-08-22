@@ -459,12 +459,17 @@ async def run_supervised() -> None:
         await asyncio.sleep(SWEEP_INTERVAL_S)
 
 
-async def _release_after_hold(responder, hold_s: float) -> None:
+async def _release_group(responder, group) -> None:
+    # Same shape as engine._release_group: sleep until the group's ABSOLUTE
+    # due time (stamped when the spike write went out), then drain only the
+    # entries that fire created — the preview's hold measures from the
+    # spike exactly like the real show's now does.
     try:
-        await asyncio.sleep(hold_s)
+        await asyncio.sleep(responder.seconds_until(group.due_at))
     except asyncio.CancelledError:
         return
-    await responder.flush_releases(hold_s)
+    await responder.flush_releases(group.hold_s, fire_seq=group.fire_seq,
+                                   due_by=group.due_at)
 
 
 async def _release_color_rotates_after_dwell(responder, dwell_s: float) -> None:
@@ -496,7 +501,7 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
     pending from a PRIOR call in this session is cancelled first, so an
     intensity change mid-hold can't race its own earlier momentary release
     against the new fire. BOTH release queues are scheduled — the fixed
-    momentary one (pending_hold_groups) and the colour rotate-and-back
+    momentary one (take_release_schedule) and the colour rotate-and-back
     flare's own intensity-scaled one (pending_color_rotate_holds),
     mirroring engine.fire_response_event's pair of scheduling loops; the
     rotate queue was missed here until 2026-08-21 (his report: a previewed
@@ -548,9 +553,9 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
                         or room_controls.scene_transition_ms(room, intensity))
         await fx_seam.apply_writes(writes, transition_ms=entry_ramp_ms)
         fire_record = await responder.fire_kind(kind, intensity)
-        for hold_s in responder.pending_hold_groups():
+        for group in responder.take_release_schedule():
             _release_tasks.append(asyncio.create_task(
-                _release_after_hold(responder, hold_s)))
+                _release_group(responder, group)))
         for dwell_s in responder.pending_color_rotate_holds():
             _release_tasks.append(asyncio.create_task(
                 _release_color_rotates_after_dwell(responder, dwell_s)))

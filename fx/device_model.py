@@ -21,6 +21,8 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
+import voluptuous as vol
+
 _REPO_ROOT = Path(__file__).parent.parent
 EFFECT_PARAMS_FILE = _REPO_ROOT / "config" / "effect_params.json"
 CATEGORIES_FILE = _REPO_ROOT / "storage" / "device_categories.json"
@@ -28,6 +30,7 @@ CATEGORIES_FILE = _REPO_ROOT / "storage" / "device_categories.json"
 _registry_cache: tuple[int, dict] | None = None
 _categories_cache: tuple[int, dict] | None = None
 _param_description_cache: dict[str, dict[str, str]] = {}
+_schema_default_cache: dict[str, dict[str, Any]] = {}
 
 # Registry effect ids that differ from their fx module name — mirrors
 # scripts/backfill_param_defaults.py's own MODULE_ALIAS (kept as a second,
@@ -41,6 +44,7 @@ def refresh() -> None:
     _registry_cache = None
     _categories_cache = None
     _param_description_cache.clear()
+    _schema_default_cache.clear()
 
 
 def _load_cached(path: Path, cache: tuple[int, dict] | None) -> tuple[tuple[int, dict], dict]:
@@ -221,6 +225,56 @@ def _effect_class(effect_type: str):
         if cls.__module__ == mod.__name__ and hasattr(cls, "CONFIG_SCHEMA"):
             return cls
     return None
+
+
+def schema_default(effect_type: str, param_name: str) -> Any:
+    """The vendored effect's OWN default for `param_name` — read live off
+    `cls.schema()` exactly like param_descriptions() reads descriptions —
+    i.e. the value an effect genuinely runs at for a param nothing ever
+    authored. None when the effect/param can't be resolved or the key
+    declares no default. Voluptuous wraps every declared default in a
+    `default_factory` callable; it's called here so callers get the value,
+    never the factory. Cached per process alongside descriptions (same
+    redeploy-bound staleness argument)."""
+    cache = _schema_default_cache.get(effect_type)
+    if cache is None:
+        cache = {}
+        cls = _effect_class(effect_type)
+        if cls is not None:
+            try:
+                markers = cls.schema().schema
+            except Exception:
+                markers = {}
+            for key in markers:
+                raw = getattr(key, "default", None)
+                if raw is None or raw is vol.UNDEFINED:
+                    continue
+                try:
+                    cache[str(key.schema)] = raw() if callable(raw) else raw
+                except Exception:
+                    continue
+        _schema_default_cache[effect_type] = cache
+    return cache.get(param_name)
+
+
+def resting_default(effect_type: str, param_name: str) -> Any:
+    """What `param_name` rests at on `effect_type` when NOTHING holds it —
+    the effect's own schema default first (ground truth: it's what the
+    running instance was built with), the registry's `default` as the
+    fallback for a param the vendored schema doesn't declare one for. The
+    one resolution shared by the response engine's momentary release
+    (spectra/services/scene_response.py — the value a spike on a
+    never-authored param returns to, so it can't be stranded for lack of
+    a baseline) and the parameter watchdog (spectra/services/
+    param_watchdog.py — the value it expects an unheld toggle to read).
+    Two readers, one definition, so they can never disagree on "resting".
+    None when neither source knows — a caller must then skip, never
+    invent."""
+    value = schema_default(effect_type, param_name)
+    if value is not None:
+        return value
+    meta = get_param_meta(effect_type, param_name)
+    return None if meta is None else meta.get("default")
 
 
 def param_descriptions(effect_type: str) -> dict[str, str]:
