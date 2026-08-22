@@ -1191,6 +1191,20 @@ drain points; the particles age out inside the effect. Migration
 run only AFTER the code deploys): `scripts/add_fireworks_burst_flare.py`.
 Specs: `scripts/check_firework_burst.py`, `tests/test_firework_burst.py`.
 
+**Fireworks "drop tail" (2026-08-21, PR fm/fireworks-drop-tail, `fx/VENDOR.md`
+#17) — two facts worth knowing before touching fireworks spawn pacing:
+(1) his real Fireworks V2 entries (both effects) run `spawn_rate: 0` —
+beat bursts are their ONLY ordinary launch source, so any `_pspawn`-style
+spawn_rate multiplier (incl. the charge's `CHARGE_SPAWN_X`) is inert on
+his scene; anything that must visibly add launches there has to be a
+launch RATE or touch beat bursts. (2) particles spawned past the density
+cap (payoff, burst flare, tail, rockets) are flagged `p_nocap`/`f_nocap`
+and don't occupy `max_blobs` — before that flag, a payoff held the cap
+full for `PAYOFF_LIFE × burst_life` (~2.6 s on his crystal) and silenced
+every beat burst, which was the "big burst then nothing" cliff. Measure
+with `scripts/check_fireworks_drop_tail.py` (has a his-real-config
+variant) before reasoning about post-drop density.
+
 **The reverse flare's reported ~2x dwell overrun (905-1097ms measured live
 against an authored 500ms) was investigated as this build's test case and
 is NOT a lead-time bug**: `reverse` is toggle-typed

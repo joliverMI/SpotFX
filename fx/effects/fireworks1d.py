@@ -20,7 +20,9 @@ KERNEL_MAX = 8      # max blob radius in pixels
 # `phase_progress`; see _phase_step). Same arc as 2D Fireworks: launch
 # rate climbs while pairs shrink; the lull goes dark except two slow
 # rockets crossing from the strip ends past the middle, dimming with
-# trails; the drop explodes each into giant pairs in its own color.
+# trails; the drop explodes each into giant pairs in its own color, then
+# a shower of ordinary fireworks keeps launching through the payoff's
+# afterglow, easing back to the ordinary show (the drop tail).
 CHARGE_SPAWN_X = 5.0
 CHARGE_SLOW = 0.55
 CHARGE_SHORT = 0.4
@@ -30,6 +32,20 @@ LULL_ROCKET_FADE = 0.75
 DROP_SETTLE_S = 0.9
 PAYOFF_SPEED = 1.8
 PAYOFF_LIFE = 1.5
+# drop tail: extra ordinary launches per second right after the payoff,
+# easing linearly to 0 over DROP_TAIL_S (the charge's own linear ramp,
+# mirrored on the way out). Its own clock, not the drop phase's — the
+# phase self-resets at DROP_SETTLE_S and the tail must outlive it. A
+# launch RATE, not a spawn_rate multiplier: his real scene runs
+# spawn_rate=0 (beat bursts only), so a multiplier would be a no-op
+# there. Tail launches pass ignore_cap like the payoff, so a cap the
+# ordinary show may already be saturating never bounds the shower; and
+# no uncapped particle (payoff, flare burst, tail, rocket) ever OCCUPIES
+# max_blobs (p_nocap/f_nocap), so the ordinary show — his beat bursts —
+# keeps launching underneath the whole time instead of going silent for
+# ~PAYOFF_LIFE x burst_life the way it did before that flag existed.
+DROP_TAIL_RATE = 8.0
+DROP_TAIL_S = 2.5
 
 
 class Fireworks1d(AudioReactiveEffect, GradientEffect):
@@ -166,6 +182,10 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         self.f_rev = np.zeros(CAP, dtype=np.float32)
         # 1 = lull rocket (position guided each frame; see _phase_rockets)
         self.f_rocket = np.zeros(CAP, dtype=np.float32)
+        # 1.0 = spawned past the density cap (payoff, flare burst, drop
+        # tail, lull rockets): never occupies max_blobs, so the ordinary
+        # show keeps launching underneath — see _spawn_firework
+        self.f_nocap = np.zeros(CAP, dtype=np.float32)
         self.n = 0
         self.spawn_acc = 0.0
         self.impulse = 0.0
@@ -211,6 +231,9 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
             self._pspeed = 1.0
             self._plife = 1.0
             self._phase_done_t = None
+            self._tail_t = None
+            self._tail_rate = 0.0
+            self._tail_acc = 0.0
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
@@ -246,7 +269,7 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         for arr in (
             self.f_pos, self.f_vel, self.f_age, self.f_life,
             self.f_grad, self.f_bright, self.f_pos0, self.f_rev,
-            self.f_rocket,
+            self.f_rocket, self.f_nocap,
         ):
             arr[:count] = arr[: self.n][alive]
         self.n = count
@@ -254,9 +277,17 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
     def _spawn_firework(self, pos=None, grad=None, bright=None,
                         speed_mult=1.0, life_mult=1.0, ignore_cap=False):
         """Two particles from one point, racing apart, one color.
-        ignore_cap bypasses max_blobs (the drop payoff must always land)."""
-        room = CAP if ignore_cap else min(self.max_blobs, CAP)
-        if room - self.n < 2:
+        ignore_cap bypasses max_blobs (the drop payoff must always land)
+        and such particles never occupy it either (f_nocap) — they layer
+        on top of the ordinary show rather than pausing it for as long as
+        they live."""
+        n = self.n
+        if ignore_cap:
+            room = CAP - n
+        else:
+            occupied = n - int(np.count_nonzero(self.f_nocap[:n]))
+            room = min(self.max_blobs, CAP) - occupied
+        if room < 2 or CAP - n < 2:
             return
         rng = self._rng
         if pos is None:
@@ -299,6 +330,7 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         self.f_pos0[s] = self.f_pos[s]
         self.f_rev[s] = 1.0 if self.reverse else 0.0
         self.f_rocket[s] = 0.0
+        self.f_nocap[s] = 1.0 if ignore_cap else 0.0
         self.n += 2
 
     # ── charge/lull/drop choreography ───────────────────────────────────
@@ -323,6 +355,7 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         self.f_pos0[s] = starts
         self.f_rev[s] = 0.0
         self.f_rocket[s] = 1.0
+        self.f_nocap[s] = 1.0
         self.n += LULL_ROCKETS
         self._rocket_path = {"s": starts.copy(), "e": ends.copy()}
 
@@ -395,6 +428,7 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                     self._launch_rockets()
                 elif pend == "drop":
                     self._rocket_payoff()
+                    self._tail_t = 0.0
                 elif pend == "none" and prev == "lull":
                     n = self.n
                     idx = np.flatnonzero(self.f_rocket[:n] > 0.0)
@@ -404,6 +438,7 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         self._pspawn = 1.0
         self._pspeed = 1.0
         self._plife = 1.0
+        self._tail_rate = self._drop_tail_step(dt)
         if self._phase == "none":
             return
         self._phase_t += dt
@@ -443,6 +478,21 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                     validate=False,
                     fire_event=False,
                 )
+
+    def _drop_tail_step(self, dt):
+        """Advance the drop tail's own clock; return its launch rate
+        (fireworks/s, 0.0 when no tail is running). Independent of the
+        phase flag: the drop phase self-resets at DROP_SETTLE_S while the
+        tail keeps easing out to DROP_TAIL_S."""
+        t = self._tail_t
+        if t is None:
+            return 0.0
+        t += dt
+        if t >= DROP_TAIL_S:
+            self._tail_t = None
+            return 0.0
+        self._tail_t = t
+        return DROP_TAIL_RATE * (1.0 - t / DROP_TAIL_S)
 
     def _stamp(self, positions, rgb, size):
         """Additive 1D stamp of one sprite's substep path (wrap-aware)."""
@@ -510,6 +560,17 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                 self._beat_pending = False
             for _ in range(bursts):
                 self._spawn_firework()
+            # drop tail: the post-payoff shower, ordinary fireworks at an
+            # easing rate, landed regardless of the density cap (which the
+            # ordinary show itself may be saturating)
+            if self._tail_rate > 0.0:
+                self._tail_acc += self._tail_rate * dt
+                tail = int(self._tail_acc)
+                self._tail_acc -= tail
+                for _ in range(tail):
+                    self._spawn_firework(ignore_cap=True)
+            else:
+                self._tail_acc = 0.0
         else:
             self._beat_pending = False
 

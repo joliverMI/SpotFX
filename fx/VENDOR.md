@@ -293,6 +293,39 @@ variables named `ledfx` (the core object handle) are untouched.
     construction. Tests: `tests/test_fireworks_rocket_angles.py`. Not in
     the fork source at `/home/javi/ledfx-src`.
 
+17. `effects/fireworks.py` + `effects/fireworks1d.py`: the DROP TAIL
+    (BEHAVIOUR CHANGE, PR fm/fireworks-drop-tail; #16 is the concurrent
+    rocket-angles PR). His ask, verbatim: "On the fireworks drop there need
+    to be fireworks spawning continuously after the first big burst." Two
+    mechanisms, both effects identically: (a) new constants `DROP_TAIL_RATE`
+    (8 launches/s) / `DROP_TAIL_S` (2.5 s) beside the other choreography
+    constants — after `_rocket_payoff()` fires on the drop edge, `_drop_
+    tail_step()` runs a shower of ORDINARY fireworks (ordinary size/speed/
+    life, never the payoff's PAYOFF_* shape) at a rate easing linearly
+    from DROP_TAIL_RATE to 0 over DROP_TAIL_S — the charge's own linear
+    ramp, mirrored on the way out — on its OWN clock (`_tail_t`), because
+    the drop phase still self-resets at the untouched `DROP_SETTLE_S`
+    (0.9 s) and the tail must outlive it. It is a launch RATE, not a
+    `_pspawn` multiplier: his real Fireworks V2 entries run `spawn_rate=0`
+    (beat bursts only), where any spawn_rate multiplier — including the
+    charge's CHARGE_SPAWN_X — is inert. Tail launches pass `ignore_cap`
+    like the payoff. (b) particles spawned past the density cap (payoff,
+    flare burst, tail, lull rockets) are flagged `p_nocap`/`f_nocap` (new
+    SoA member, compacted with the rest, carried in the native handoff
+    snapshot) and NO LONGER OCCUPY `max_blobs`: `_capacity()` /
+    `_spawn_firework`'s room count them out, so the ordinary show keeps
+    launching underneath the payoff's afterglow. Measured pre-fix on the
+    real pipeline: the payoff's ignore_cap particles held the live count
+    over max_blobs for PAYOFF_LIFE x burst_life (~2.6 s at his crystal's
+    burst_life 1.9, ~1.5 s at defaults) and EVERY ordinary launch — his
+    beat bursts — was swallowed for that long; the firework_burst flare
+    (#15) did the same after each flare. That silence, then the ordinary
+    show popping back, was the cliff. LULL_ROCKETS, end_r, PAYOFF_*, the
+    flare's counts, and DROP_SETTLE_S are unchanged. Evidence:
+    `scripts/check_fireworks_drop_tail.py` (incl. his real spawn_rate=0 /
+    beat-burst config), tests: `tests/test_fireworks_drop_tail.py`. Not
+    in the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
