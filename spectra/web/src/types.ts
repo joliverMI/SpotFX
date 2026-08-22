@@ -120,8 +120,12 @@ export interface FlareKind {
   name: string;
   /** color_rotate: the rotate-and-back colour flare — carries no
    * jump/params/gain/hold of its own; all four of its quantities scale
-   * from the fire's intensity (models/scene.py FlareKind._shape). */
-  type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate';
+   * from the fire's intensity (models/scene.py FlareKind._shape).
+   * firework_burst: the firework burst flare — same no-authored-knobs
+   * shape; the payoff-rocket count (3 at intensity 0, 6 at 1, linear)
+   * scales from the fire's intensity and explodes immediately on every
+   * live fireworks effect. */
+  type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate' | 'firework_burst';
   jump: 'color_set' | 'dice' | null;
   params: Record<string, ParamTarget>;
   gain: number;

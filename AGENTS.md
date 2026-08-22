@@ -1174,6 +1174,23 @@ real vendored blackhole effect, the two release queues' independence, the
 concurrency proof, the model's rejected-fifth-knob cases):
 `tests/test_color_rotate.py`.
 
+**A fifth `FlareKind` type, `firework_burst` (owner ask, 2026-08-21, PR
+fm/fireworks-burst-flare)**: explodes an intensity-scaled count of payoff
+rockets (3 at intensity 0 → 6 at 1, `scene_response.
+firework_burst_rockets`) IMMEDIATELY on every live fireworks effect —
+`docs/SPECTRA_SPEC.md` §89 has the full writeup. Two things worth knowing
+before touching it: (1) it is deliberately NOT `beat_burst` — that param
+only launches on the NEXT beat, so it can't line up with a trigger; the
+engine instead jumps the effects' own `burst_rockets` key (edge-detected,
+self-resetting, the phase-key pattern — `fx/VENDOR.md` deviation #15;
+gated by `fx.device_model.FIREWORK_BURST_EFFECTS`, and like the phase
+keys deliberately absent from the param registry). (2) unlike
+`color_rotate` it has NO release queue — nothing to schedule at the four
+drain points; the particles age out inside the effect. Migration
+(declares AND band-attaches on Fireworks V2, his explicit placement,
+run only AFTER the code deploys): `scripts/add_fireworks_burst_flare.py`.
+Specs: `scripts/check_firework_burst.py`, `tests/test_firework_burst.py`.
+
 **The reverse flare's reported ~2x dwell overrun (905-1097ms measured live
 against an authored 500ms) was investigated as this build's test case and
 is NOT a lead-time bug**: `reverse` is toggle-typed

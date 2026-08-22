@@ -48,11 +48,14 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
     HIDDEN_KEYS = ["gradient_roll", "color_blend"]
     # phase/phase_progress are SpotFX-driven choreography; advanced (not
     # hidden) so the arc can be hand-scrubbed in the LedFX UI for tuning.
+    # burst_rockets is the same kind of key (SpotFX's firework_burst flare
+    # drives it; self-resets after firing).
     ADVANCED_KEYS = AudioReactiveEffect.ADVANCED_KEYS + [
         "impulse_decay",
         "drag",
         "phase",
         "phase_progress",
+        "burst_rockets",
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -142,6 +145,11 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "burst_rockets",
+                description="Payoff rockets to explode right now (driven by SpotFX flares; self-resets)",
+                default=0,
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=12)),
         }
     )
 
@@ -206,6 +214,20 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
+
+        # flare-driven payoff burst: edge-detect burst_rockets exactly like
+        # the phase key (SpotFX writes a count, render consumes it and
+        # self-resets the key to 0 so an identical later write edges again)
+        new_burst = int(self._config.get("burst_rockets", 0))
+        if not hasattr(self, "_burst_seen"):
+            # creation baseline: a stale persisted count must never explode
+            # on a fresh instance
+            self._burst_seen = new_burst
+            self._burst_pending = 0
+        elif new_burst != self._burst_seen:
+            self._burst_seen = new_burst
+            if new_burst > 0:
+                self._burst_pending += new_burst
 
     def audio_data_updated(self, data):
         impulse = self.impulse_filter.update(
@@ -335,14 +357,30 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                 for _ in range(LULL_ROCKETS)
             ]
         for pos, grad in origins:
-            # two staggered pairs per rocket = a fat, layered burst
-            self._spawn_firework(pos=pos, grad=grad, bright=1.0,
-                                 speed_mult=PAYOFF_SPEED,
-                                 life_mult=PAYOFF_LIFE, ignore_cap=True)
-            self._spawn_firework(pos=pos, grad=grad, bright=1.0,
-                                 speed_mult=PAYOFF_SPEED * 0.6,
-                                 life_mult=PAYOFF_LIFE, ignore_cap=True)
+            self._payoff_burst_at(pos, grad)
         self._rocket_path = None
+
+    def _payoff_burst_at(self, pos, grad):
+        """Two staggered pairs from one origin = a fat, layered burst —
+        the drop payoff's own spawn shape, shared verbatim by the
+        flare-driven burst (_flare_burst) so the two can never drift."""
+        self._spawn_firework(pos=pos, grad=grad, bright=1.0,
+                             speed_mult=PAYOFF_SPEED,
+                             life_mult=PAYOFF_LIFE, ignore_cap=True)
+        self._spawn_firework(pos=pos, grad=grad, bright=1.0,
+                             speed_mult=PAYOFF_SPEED * 0.6,
+                             life_mult=PAYOFF_LIFE, ignore_cap=True)
+
+    def _flare_burst(self, count):
+        """`count` payoff rockets explode NOW — the flare-driven burst
+        (burst_rockets, written by SpotFX's firework_burst flare kind).
+        Each origin gets _rocket_payoff's own layered pair-of-pairs at a
+        uniform strip position like an ordinary launch — purely additive
+        on top of whatever is already flying (ignore_cap, and no live
+        particle, rocket, or phase state is touched)."""
+        rng = self._rng
+        for _ in range(count):
+            self._payoff_burst_at(float(rng.random()), float(rng.random()))
 
     def _phase_step(self, dt):
         pend = self._phase_pending
@@ -474,6 +512,22 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                 self._spawn_firework()
         else:
             self._beat_pending = False
+
+        # flare-driven payoff burst — deliberately NOT gated on the lull
+        # (a flare during a lull still lands, exactly as the drop payoff
+        # itself does); self-reset re-arms the edge for the next write.
+        # A stale persisted count on a fresh instance (nonzero _burst_seen
+        # with nothing pending — the creation baseline armed no spawn) is
+        # reset the same way, so the key reads 0 whenever idle and an
+        # identical later write still edges.
+        if self._burst_pending or self._burst_seen:
+            pending = self._burst_pending
+            self._burst_pending = 0
+            if pending:
+                self._flare_burst(pending)
+            self._apply_config(
+                {"burst_rockets": 0}, validate=False, fire_event=False
+            )
         n = self.n
 
         # ── render ──────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ plus DECLARED MECHANISMS:
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
   flare_kinds — NAMED FLARE KINDS (the owner's item-8 shape, judged and
-               accepted): each kind is one of four types —
+               accepted): each kind is one of five types —
                  drift_jump  jumps the drift: the colour-set jump through
                              the shipped selector, or a 🎲 re-roll for shape
                  momentary   a parameter spike that RETURNS to where it was
@@ -24,6 +24,9 @@ plus DECLARED MECHANISMS:
                  color_rotate the foreground colour's hue spikes by an
                              intensity-scaled rotation and RETURNS to the
                              exact original — see FlareKind's own docstring
+                 firework_burst an intensity-scaled count of payoff rockets
+                             explode NOW on every live fireworks effect —
+                             see FlareKind's own docstring
                A momentary/permanent kind's params are ParamTarget
                expressions (absolute / offset-from-baseline / random-in-
                range — see ParamTarget); INTENSITY-DRIVEN strength is the
@@ -270,7 +273,7 @@ class ParamTarget(BaseModel):
 
 class FlareKind(BaseModel):
     """One NAMED flare kind — a first-class concept the scene declares and
-    its bands select. Four types, binding semantics:
+    its bands select. Five types, binding semantics:
       drift_jump  jump the drift — jump="color_set" rolls the shipped
                   colour-set selector and JUMPS to the pick; jump="dice"
                   re-rolls the scene's 🎲 bindings (fresh shape). Both
@@ -291,6 +294,22 @@ class FlareKind(BaseModel):
                   (spectra/services/scene_response.py's color_rotate_*
                   functions) rather than authored — this type carries no
                   jump/params/gain/hold_ms of its own (see _shape below).
+      firework_burst  the FIREWORK BURST flare (owner ask, 2026-08-21 —
+                  scripts/add_fireworks_burst_flare.py has his verbatim
+                  spec): an intensity-scaled count of payoff rockets (3 at
+                  intensity 0.0, 6 at 1.0, linear — scene_response.
+                  firework_burst_rockets) explodes IMMEDIATELY on every
+                  virtual whose live effect is a fireworks effect
+                  (fx.device_model.FIREWORK_BURST_EFFECTS), via each
+                  effect's own drop-payoff spawn shape (`burst_rockets`,
+                  an instant self-resetting config key — never beat_burst,
+                  which only launches on the NEXT beat and can't line up
+                  with a trigger). Layered ON TOP of the scene's own
+                  rockets, never restarting or interrupting them; nothing
+                  to release, so no hold/return machinery. Like
+                  color_rotate, the count is computed from the fire's own
+                  intensity — this type carries no jump/params/gain/
+                  hold_ms of its own (see _shape below).
     gain is a brightness-envelope multiplier around the carried baseline;
     params are ParamTarget expressions (absolute/offset/random — see that
     type), name-broadcast to every virtual whose live effect carries the
@@ -337,7 +356,8 @@ class FlareKind(BaseModel):
     lead). Dragging the preview's marker therefore retimes his real
     show, not only the preview."""
     name: str = Field(min_length=1)
-    type: Literal["drift_jump", "momentary", "permanent", "color_rotate"]
+    type: Literal["drift_jump", "momentary", "permanent", "color_rotate",
+                  "firework_burst"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
@@ -380,6 +400,18 @@ class FlareKind(BaseModel):
                     f"ramp-in, dwell, and fade-back all scale from the "
                     f"fire's own intensity (scene_response.color_rotate_* — "
                     f"see FlareKind's own docstring); params/gain/hold_ms "
+                    f"don't apply here and would silently do nothing")
+        elif self.type == "firework_burst":
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is firework_burst — jump belongs "
+                    f"on a drift_jump kind")
+            if self.params or self.gain != 1.0 or self.hold_ms is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is firework_burst — the rocket "
+                    f"count scales from the fire's own intensity "
+                    f"(scene_response.firework_burst_rockets — see "
+                    f"FlareKind's own docstring); params/gain/hold_ms "
                     f"don't apply here and would silently do nothing")
         else:
             if self.jump is not None:
