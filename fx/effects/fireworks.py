@@ -39,12 +39,26 @@ LULL_ROCKET_FADE = 0.75  # brightness lost over the rocket flight
 DROP_SETTLE_S = 0.9    # payoff settle time before phase auto-reset
 PAYOFF_SPEED = 1.6     # giant-firework speed multiplier
 PAYOFF_LIFE = 1.35     # giant-firework life multiplier
+# drop tail: extra ordinary launches per second right after the payoff,
+# easing linearly to 0 over DROP_TAIL_S (the charge's own linear ramp,
+# mirrored on the way out). Its own clock, not the drop phase's — the
+# phase self-resets at DROP_SETTLE_S and the tail must outlive it. A
+# launch RATE, not a spawn_rate multiplier: his real scene runs
+# spawn_rate=0 (beat bursts only), so a multiplier would be a no-op
+# there. Tail launches pass ignore_cap like the payoff, so a cap the
+# ordinary show may already be saturating never bounds the shower; and
+# no uncapped particle (payoff, flare burst, tail, rocket) ever OCCUPIES
+# max_blobs (p_nocap/f_nocap), so the ordinary show — his beat bursts —
+# keeps launching underneath the whole time instead of going silent for
+# ~PAYOFF_LIFE x burst_life the way it did before that flag existed.
+DROP_TAIL_RATE = 8.0   # launches/s right after the payoff
+DROP_TAIL_S = 2.5      # seconds for the tail to ease back to the ordinary show
 
 # Every per-particle SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
 _SOA_NAMES = (
     "p_x", "p_y", "p_vx", "p_vy", "p_age", "p_life",
-    "p_grad", "p_bright", "p_shown", "p_rev", "p_rocket",
+    "p_grad", "p_bright", "p_shown", "p_rev", "p_rocket", "p_nocap",
 )
 
 
@@ -216,6 +230,10 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_rev = np.zeros(CAP, dtype=np.float32)
         # 1 = lull rocket (position guided each frame; see _phase_rockets)
         self.p_rocket = np.zeros(CAP, dtype=np.float32)
+        # 1.0 = spawned past the density cap (payoff, flare burst, drop
+        # tail, lull rockets): never occupies max_blobs, so the ordinary
+        # show keeps launching underneath — see _capacity
+        self.p_nocap = np.zeros(CAP, dtype=np.float32)
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
         self.spawn_acc = 0.0
@@ -286,6 +304,10 @@ class Fireworks2d(Twod, GradientEffect):
             self._pcount = 1.0
             self._pspeed = 1.0
             self._plife = 1.0
+            # drop tail (its own clock; see _drop_tail_step)
+            self._tail_t = None
+            self._tail_rate = 0.0
+            self._tail_acc = 0.0
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
@@ -347,7 +369,15 @@ class Fireworks2d(Twod, GradientEffect):
     # ── spawning ────────────────────────────────────────────────────────
 
     def _capacity(self):
-        return int(min(self.max_blobs, CAP) - self.n)
+        """Room left under the density cap for ORDINARY launches. Particles
+        spawned past the cap (p_nocap: the drop payoff, a flare burst, the
+        drop tail, lull rockets) don't occupy it — they layer on top of
+        the ordinary show rather than pausing it for as long as they live
+        (a payoff used to hold the cap full for PAYOFF_LIFE x burst_life,
+        silencing every ordinary launch until it faded)."""
+        n = self.n
+        occupied = n - int(np.count_nonzero(self.p_nocap[:n]))
+        return int(min(self.max_blobs, CAP) - occupied)
 
     def _burst_brightness(self):
         """Launch brightness from the music volume."""
@@ -425,6 +455,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_shown[s] = 0.0
         self.p_rev[s] = 1.0 if self.reverse else 0.0
         self.p_rocket[s] = 0.0
+        self.p_nocap[s] = 1.0 if ignore_cap else 0.0
         self.n += k
 
     def _import_flyers(self, xs, ys, grads, brights, ncx, ncy, speed_mult=1.0):
@@ -459,6 +490,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_shown[s] = 0.0
         self.p_rev[s] = 0.0  # handoff flyers always run forward
         self.p_rocket[s] = 0.0
+        self.p_nocap[s] = 0.0
         self.n += k
 
     # ── handoff ─────────────────────────────────────────────────────────
@@ -629,7 +661,10 @@ class Fireworks2d(Twod, GradientEffect):
     # dark panel from the edges toward offset points past the center,
     # dimming as they travel (trails come free from the trail buffer);
     # drop: each rocket explodes into a giant firework in its own color,
-    # then `phase` self-resets to "none".
+    # then `phase` self-resets to "none" while the drop tail (its own
+    # clock, _drop_tail_step) keeps a shower of ordinary fireworks
+    # launching through the payoff's afterglow, easing back to the
+    # ordinary show.
 
     def _rocket_start_angles(self, k):
         """THE ONE angular plan for a volley of k travelling rockets: evenly
@@ -669,6 +704,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_shown[s] = 0.0
         self.p_rev[s] = 0.0
         self.p_rocket[s] = 1.0
+        self.p_nocap[s] = 1.0
         self.n += k
         self._rocket_path = {"sx": sx_, "sy": sy_, "ex": ex_, "ey": ey_}
 
@@ -771,6 +807,7 @@ class Fireworks2d(Twod, GradientEffect):
                     self._launch_rockets()
                 elif pend == "drop":
                     self._rocket_payoff()
+                    self._tail_t = 0.0
                 elif pend == "none" and prev == "lull":
                     # cancelled mid-lull: let the rockets age out
                     n = self.n
@@ -782,6 +819,7 @@ class Fireworks2d(Twod, GradientEffect):
         self._pcount = 1.0
         self._pspeed = 1.0
         self._plife = 1.0
+        self._tail_rate = self._drop_tail_step(dt)
         if self._phase == "none":
             return
         self._phase_t += dt
@@ -825,6 +863,21 @@ class Fireworks2d(Twod, GradientEffect):
                     validate=False,
                     fire_event=False,
                 )
+
+    def _drop_tail_step(self, dt):
+        """Advance the drop tail's own clock; return its launch rate
+        (fireworks/s, 0.0 when no tail is running). Independent of the
+        phase flag: the drop phase self-resets at DROP_SETTLE_S while the
+        tail keeps easing out to DROP_TAIL_S."""
+        t = self._tail_t
+        if t is None:
+            return 0.0
+        t += dt
+        if t >= DROP_TAIL_S:
+            self._tail_t = None
+            return 0.0
+        self._tail_t = t
+        return DROP_TAIL_RATE * (1.0 - t / DROP_TAIL_S)
 
     # ── draw ────────────────────────────────────────────────────────────
 
@@ -989,13 +1042,27 @@ class Fireworks2d(Twod, GradientEffect):
                 if self._beat_pending:
                     bursts += self.beat_burst
                     self._beat_pending = False
-                for _ in range(bursts):
-                    prev = self.n
-                    self._spawn_burst(self._burst_count())
-                    if self.n > prev:
-                        fresh = slice(prev, self.n)
-                        x0 = np.concatenate([x0, self.p_x[fresh]])
-                        y0 = np.concatenate([y0, self.p_y[fresh]])
+                # drop tail: the post-payoff shower, ordinary fireworks
+                # at an easing rate, landed regardless of the density cap
+                # (which the ordinary show itself may be saturating)
+                if self._tail_rate > 0.0:
+                    self._tail_acc += self._tail_rate * dt
+                    tail = int(self._tail_acc)
+                    self._tail_acc -= tail
+                    launches = [(bursts, False), (tail, True)]
+                else:
+                    self._tail_acc = 0.0
+                    launches = [(bursts, False)]
+                for count, uncapped in launches:
+                    for _ in range(count):
+                        prev = self.n
+                        self._spawn_burst(
+                            self._burst_count(), ignore_cap=uncapped
+                        )
+                        if self.n > prev:
+                            fresh = slice(prev, self.n)
+                            x0 = np.concatenate([x0, self.p_x[fresh]])
+                            y0 = np.concatenate([y0, self.p_y[fresh]])
                 n = self.n
 
             # flare-driven payoff burst — deliberately NOT gated on hold/

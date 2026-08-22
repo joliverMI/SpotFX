@@ -124,7 +124,17 @@ guarded).
 - **Drop** — every rocket explodes exactly where it is into a giant
   firework in its own gradient colour (×1.6 speed, ×1.35 life, cap
   ignored); with no rockets in flight, a spread of giant center bursts.
-  (1D: two staggered pairs per rocket — one fat layered burst.)
+  (1D: two staggered pairs per rocket — one fat layered burst.) Then the
+  **drop tail**: a shower of ordinary fireworks launches at
+  `DROP_TAIL_RATE` (8/s) easing linearly to 0 over `DROP_TAIL_S` (2.5 s)
+  — the charge's linear ramp mirrored on the way out — on its own clock,
+  outliving the phase's own `DROP_SETTLE_S` (0.9 s) self-reset. It's a
+  launch rate, not a `spawn_rate` multiplier (his real scene runs
+  `spawn_rate=0`, beat bursts only, where a multiplier is inert). Payoff,
+  burst-flare, tail and rocket particles never occupy `max_blobs`
+  (`p_nocap`/`f_nocap`), so the scene's own launches keep coming
+  underneath the afterglow instead of pausing for `PAYOFF_LIFE × burst_life`
+  (`fx/VENDOR.md` #17, `scripts/check_fireworks_drop_tail.py`).
 
 ### Squiggles (`squiggles.py`)
 
