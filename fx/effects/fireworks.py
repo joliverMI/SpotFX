@@ -28,6 +28,12 @@ CHARGE_SHRINK = 0.6    # burst particle-count reduction at full charge
 CHARGE_SLOW = 0.55     # burst speed reduction at full charge
 CHARGE_SHORT = 0.4     # burst life reduction at full charge
 LULL_ROCKETS = 6       # slow rockets crossing the dark panel
+LULL_ROCKET_WIGGLE_FRAC = 1.0 / 6.0  # per-rocket start-angle wiggle, as a
+# fraction of the even 2*pi/k step (+/-10 deg at six rockets): the ring
+# still reads as a ring, and no two rockets can ever swap order (needs
+# < 1/2 of the step) — his ask, 2026-08-21: "radially equidistant around
+# the center ... a little bit of wiggle so that they're not all perfectly
+# radial but generally close"
 LULL_FLIGHT_S = 4.0    # rocket flight fallback when no lull ramp arrives
 LULL_ROCKET_FADE = 0.75  # brightness lost over the rocket flight
 DROP_SETTLE_S = 0.9    # payoff settle time before phase auto-reset
@@ -625,12 +631,25 @@ class Fireworks2d(Twod, GradientEffect):
     # drop: each rocket explodes into a giant firework in its own color,
     # then `phase` self-resets to "none".
 
+    def _rocket_start_angles(self, k):
+        """THE ONE angular plan for a volley of k travelling rockets: evenly
+        spaced around the rim, the whole ring randomly rotated per launch
+        (never the same drop twice), each rocket nudged by at most
+        LULL_ROCKET_WIGGLE_FRAC of the step. Anything else that ever spawns
+        drop rockets must take its angles from here, never draw its own —
+        two independent draws clump (the pre-2026-08-21 defect)."""
+        rng = self._rng
+        step = 2 * np.pi / k
+        base = rng.uniform(0.0, 2 * np.pi)
+        wiggle = step * LULL_ROCKET_WIGGLE_FRAC
+        return base + np.arange(k) * step + rng.uniform(-wiggle, wiggle, k)
+
     def _launch_rockets(self):
         k = int(min(LULL_ROCKETS, CAP - self.n))
         if k <= 0:
             return
         rng = self._rng
-        ang = rng.uniform(0.0, 2 * np.pi, k)
+        ang = self._rocket_start_angles(k)
         start_r = float(getattr(self, "r_max", 1.3)) - 0.05
         end_r = rng.uniform(0.36, 0.76, k)  # ~2x his prior 0.18-0.38 past center
         end_ang = ang + np.pi + rng.uniform(-0.5, 0.5, k)
