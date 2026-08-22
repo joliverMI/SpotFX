@@ -515,7 +515,24 @@ def test_color_rotate_fade_back_lands_live_in_a_preview_hold(tmp_path, monkeypat
     """Production parity: engine.fire_response_event schedules
     flush_color_rotates after the dwell; the live preview hold must too, or
     the previewed rotation is a one-way trip the drawn timeline never
-    promised."""
+    promised.
+
+    Proof shape (2026-08-21): sample EVERY rendered frame, the same way the
+    intensity-change test below already does — never a single read at a
+    fixed nominal instant. The original version read the gradient once
+    after a nominal 0.35s pump and asserted the ROTATED colour; at
+    intensity 1.0 the fade-back starts at dwell=400ms after the fire, so
+    that read sat ~20ms inside the dwell window — and _pump_frames_for's
+    21 x asyncio.sleep(1/60) overshoot on a loaded interpreter (measured
+    419ms wall for the nominal 350) routinely pushed it PAST the dwell,
+    reading a mid-FADE frame (`'#cc8233' == '#cc9933'`-shaped failures
+    when run after heavier files, at 08244ca too). The fade-back's TARGET
+    was never wrong — the facade PUT log showed it returning to the exact
+    original every time; the instant of the read was. So: the rotated
+    colour must be RENDERED AND HELD (>= 3 consecutive frames — the dwell
+    is ~150ms past the ramp, nine nominal frames) somewhere inside the
+    first window, and after the whole cycle the gradient must be back at
+    the EXACT original."""
     from spectra.services import color_rotate
     from spectra.services import flare_preview_hold as fph
     _own(monkeypatch, tmp_path)
@@ -527,6 +544,24 @@ def test_color_rotate_fade_back_lands_live_in_a_preview_hold(tmp_path, monkeypat
     expected_rotated = color_rotate.rotate_color_value(ORIGINAL_GRADIENT, 180.0)
     assert expected_rotated != ORIGINAL_GRADIENT
 
+    async def sample_frames(virtual, seconds: float) -> list[str]:
+        seen: list[str] = []
+        step = 1 / 60
+        elapsed = 0.0
+        while elapsed < seconds:
+            await asyncio.sleep(step)
+            headless.render_frames(virtual, 1)
+            seen.append(virtual.active_effect.config["gradient"])
+            elapsed += step
+        return seen
+
+    def longest_run(seq: list[str], value: str) -> int:
+        best = cur = 0
+        for g in seq:
+            cur = cur + 1 if g == value else 0
+            best = max(best, cur)
+        return best
+
     async def main():
         host, virtual = await _start_rotate_host(tmp_path)
         try:
@@ -537,17 +572,24 @@ def test_color_rotate_fade_back_lands_live_in_a_preview_hold(tmp_path, monkeypat
                 "the rotate must genuinely fire — otherwise this test " \
                 "asserts a no-op faded back, which proves nothing"
 
-            # the ramp lands the rotation for real first (also proves the
-            # fire itself is visible on the fixture)
-            await _pump_frames_for(virtual, 0.35)
-            assert virtual.active_effect.config["gradient"] == expected_rotated
+            # the ramp lands the rotation FOR REAL and it dwells there (also
+            # proves the fire itself is visible on the fixture): the exact
+            # rotated colour is rendered on several consecutive frames
+            # somewhere inside the first ~half second
+            first = await sample_frames(virtual, 0.5)
+            assert longest_run(first, expected_rotated) >= 3, \
+                f"the rotation never landed and held on the fixture: {first}"
 
             # ...and after its own dwell + fade the gradient must be back at
             # the EXACT original — the "and back" half of the kind's name
-            await _pump_frames_for(virtual, 0.9)
+            rest = await sample_frames(virtual, 0.9)
             assert virtual.active_effect.config["gradient"] == ORIGINAL_GRADIENT, \
                 "the fade-back never ran: open_hold scheduled only " \
                 "pending_hold_groups(), not pending_color_rotate_holds()"
+            # the fade-back genuinely TRAVELLED back (a glide, not a snap —
+            # some frame between the rotated colour and the original)
+            assert any(g not in (expected_rotated, ORIGINAL_GRADIENT)
+                       for g in first + rest), "no fade frames were rendered"
         finally:
             facade.set_host(None)
             await host.shutdown()
