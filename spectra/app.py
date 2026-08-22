@@ -149,7 +149,8 @@ async def _standalone_lifespan(app):
     logger = logging.getLogger("spectra")
     from spectra.services import (ambient_music_gate, device_preview, engine,
                                    flare_preview_hold, frame_watchdog,
-                                   handover, ownership_reconciler)
+                                   handover, ownership_reconciler,
+                                   param_watchdog)
     await engine.start()
     await device_preview.start()
     # Restart mid-reign: if the ownership record says spectra owns, the
@@ -204,10 +205,19 @@ async def _standalone_lifespan(app):
     # the separate restart case.
     flare_preview_sweep_task = asyncio.create_task(
         flare_preview_hold.run_supervised(), name="spectra-flare-preview-sweep")
+    # The param orphan watchdog (owner ask 2026-08-21, after an effect was
+    # left stuck running backwards with nothing holding it there): every
+    # SWEEP_INTERVAL_S, any engine-baselined effect param sitting away from
+    # its baseline with no pending release, no drift mechanism and no tween
+    # in flight for ORPHAN_GRACE_S gets restored — loudly (WARNING log,
+    # fire_history "watchdog" bucket, a count on /api/liveness). Stands
+    # down by itself while the engine is dark or a preview holds the room.
+    param_watchdog_task = asyncio.create_task(
+        param_watchdog.run_supervised(), name="spectra-param-watchdog")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
-                flare_preview_sweep_task)
+                flare_preview_sweep_task, param_watchdog_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

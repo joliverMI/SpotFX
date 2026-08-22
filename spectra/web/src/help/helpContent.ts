@@ -563,6 +563,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'param-watchdog',
+        title: 'Parameter watchdog — a value left stranded gets put back',
+        keywords: 'watchdog orphan orphaned stuck stranded reverse backwards parameter param value baseline restore restored put back momentary flare release lost nothing holding it left alone permanent in flight hold glide liveness count show log review 30 seconds grace status engine card given up',
+        body: [
+          'A background safety net (runs every 10 s) under the evolution engine\'s flares. A momentary flare spikes an effect value — `reverse` on Black Hole, a brightness duck, a shape param — and releases it back after its hold; if that release is ever lost, the effect is left stuck (running backwards, dimmed, whatever the spike was) with nothing holding it there. The watchdog reads every engine-tracked device\'s LIVE effect values and compares them to the engine\'s own baseline for that scene. A value sitting away from its baseline with nothing legitimately holding it — no pending release, no drift creep/follow owning it, no glide still in flight — for 30 s continuously is put back to the baseline: the exact value the lost release would have returned it to, landed the same way a release lands (a 1.5 s glide, or an instant switch for an on/off value).',
+          'It never fights an authored change. A PERMANENT flare moves the baseline itself — that IS the new baseline, so there is nothing to restore (an effect you told to run backwards permanently stays backwards). A momentary flare still inside its hold is left alone for as long as the hold lasts, however long the engine takes to release it; a glide still in flight is left to land. Backgrounds are out of scope on purpose — colour sets, Dark mode and Light mode all write those legitimately — and the room Brightness dimmer is understood, not "corrected". It stands down entirely while a Colour Set/Group Preview or a flare preview holds the room, and while SPECTRA is dark (not owning the lights).',
+          'Loud, not silent: every restore is logged in the SPECTRA service log (which device, which value, what it found, what it put back, how long it had been stranded), counted on the Status page\'s engine card, on GET /spectra/api/liveness under `param_watchdog` (informational — never part of `healthy`), and written to the show log as a "watchdog" event you can see on the Review page. A recurring restore means something keeps losing a release — the log line is what finds the cause; the restore only covers for it. A restore that doesn\'t take (something keeps moving the value back, or the effect rejects the write) is retried twice more on the same 30 s grace, then given up on — named in the status — rather than fought forever.',
+        ],
+      },
+      {
         id: 'panic-release',
         title: 'Panic release — let go of every light',
         keywords: 'release home assistant ha panic emergency let go stop wled hue ddp virtuals band',

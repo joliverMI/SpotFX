@@ -930,6 +930,27 @@ export interface EngineStatus {
     } | null;
   };
   responses: { recent_surges: SurgeRecord[] };
+  /** The param orphan watchdog (spectra/services/param_watchdog.py):
+   *  effect values found stranded away from their engine baseline with
+   *  nothing holding them, and put back. Loud by design — the Status page
+   *  shows the count; each restore is also a "watchdog" show-log event. */
+  param_watchdog?: {
+    sweep_interval_s: number;
+    orphan_grace_s: number;
+    last_sweep_age_s: number | null;
+    last_sweep: {
+      at: number; skipped: string | null; checked: number; ok: number;
+      held: number; suspected: number; restored: number;
+      type_mismatch: number; unreadable: number; given_up: number;
+    } | null;
+    suspected: { virtual_id: string; param: string; live: unknown; expected: unknown; seen_for_s: number }[];
+    restores_total: number;
+    recent_restores: {
+      at_wall_ms: number; virtual_id: string; effect_type: string; param: string;
+      found: unknown; restored_to: unknown; orphaned_for_s: number; method: string; attempt: number;
+    }[];
+    given_up: { virtual_id: string; param: string; expected: unknown; attempts: number; at_wall_ms: number }[];
+  };
   bridge: {
     connected: boolean;
     ws_url: string;

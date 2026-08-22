@@ -61,7 +61,13 @@
                            as an instant PUT to avoid fx/facade.py's
                            stale-tween-PUT drop (frame freshness alone
                            can't tell a virtual streaming the WRONG effect
-                           apart from a healthy one).
+                           apart from a healthy one). param_watchdog
+                           (added 2026-08-21) is additive and informational
+                           the same way: the param orphan watchdog's
+                           restore count/suspicions/give-ups
+                           (spectra/services/param_watchdog.py), so a
+                           recurring orphan is visible on the fleet's own
+                           check rather than merely handled.
         owner=spot-effects healthy iff SPECTRA is correctly DARK (a live
                            stack without ownership is the split-brain
                            tripwire → 503).
@@ -87,6 +93,7 @@ from fx import light_ownership
 from spectra import config
 from spectra.services import fx_seam
 from spectra.services import handover as handover_svc
+from spectra.services import param_watchdog
 from spectra.services import release as release_svc
 from spectra.services.live_host import STALE_AFTER_S, live
 
@@ -220,6 +227,13 @@ async def get_liveness():
             # from "streaming a stale one" — see fx_seam.stats()'s own
             # docstring. Informational only; never affects `healthy`.
             "write_seam": fx_seam.stats(),
+            # Additive (2026-08-21, the param orphan watchdog —
+            # spectra/services/param_watchdog.py): how many effect params
+            # it has found orphaned away from baseline and restored, what
+            # it currently suspects, what it gave up on. A RECURRING
+            # orphan is something to SEE here, not something a restart
+            # fixes — informational only, never affects `healthy`.
+            "param_watchdog": param_watchdog.liveness_summary(),
         },
         status_code=200 if healthy else 503,
     )

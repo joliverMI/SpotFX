@@ -330,7 +330,7 @@ async def stop() -> None:
 
 
 def status() -> dict:
-    from spectra.services import ambient_music_gate
+    from spectra.services import ambient_music_gate, param_watchdog
     return {
         "increment": "S3",
         "dark": executor.mode == "recording",
@@ -342,4 +342,7 @@ def status() -> dict:
         "bridge": bridge.status(),
         "triggers": trigger_engine.status(),
         "ambient": ambient_music_gate.status(),
+        # The param orphan watchdog (spectra/services/param_watchdog.py):
+        # restores, suspicions, give-ups — loud by design, see its docstring.
+        "param_watchdog": param_watchdog.status(),
     }

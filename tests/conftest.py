@@ -242,6 +242,21 @@ def _isolated_preview_pause():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_param_watchdog():
+    """spectra/services/param_watchdog.py (the param orphan watchdog,
+    2026-08-21) keeps its suspicion clocks / restore counts / give-ups as
+    bare module globals — same no-DI-seam shape as dwell.py / preview_pause
+    above. A suspicion started by one test's sweep would otherwise age into
+    a restore inside an unrelated later test that happens to build the
+    same virtual id. Autouse so no individual test needs to know this
+    store exists."""
+    from spectra.services import param_watchdog
+    param_watchdog.reset()
+    yield
+    param_watchdog.reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_sonic_usage(tmp_path, monkeypatch):
     """spectra/services/sonic_usage.py (Sonic's durable per-call token-usage
     record, review page) is written from inside settings_agent.run_turn /
