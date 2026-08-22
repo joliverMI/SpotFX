@@ -507,6 +507,94 @@ lo.abort(h_back.token, "spec: land back at released")
 check(lo.load().owner == lo.RELEASED,
       "abort() lands back at from_world generically — released included")
 
+# ── 12b. the way back from released TOLERATES a partial activation (owner
+#         ruling 2026-08-21: one unreachable device must not keep his whole
+#         room dark) — and ONLY the way back from released ──────────────────
+from spectra.services.handover import ActivationOutcome
+
+
+class PartialSide(ScriptedSide):
+    """verify_active() False with a structured outcome — the real
+    SpectraSide's activation_outcome() shape: stack up, two of three
+    expected virtuals driving, one device unconfirmed."""
+
+    OUTCOME = ActivationOutcome(
+        ok=False, stack_up=True,
+        expected_ids=frozenset({"crystal-mapper", "tv-mapper", "single"}),
+        device_gaps={"dining-table": "could not confirm live state: "
+                                     "ValueError('WLED None: Failed to connect')"},
+        detail="1 device(s) unconfirmed (dining-table: could not confirm "
+               "live state: ValueError('WLED None: Failed to connect'))")
+
+    async def verify_active(self):
+        self.calls.append("verify_active")
+        return False
+
+    def verification_detail(self):
+        return self.OUTCOME.detail
+
+    def activation_outcome(self):
+        return self.OUTCOME
+
+
+check(lo.load().owner == lo.RELEASED, "settled at released before the way back")
+sides = {lo.SPOT_EFFECTS: ScriptedSide(lo.SPOT_EFFECTS),
+         lo.SPECTRA: PartialSide(lo.SPECTRA)}
+record = asyncio.run(run_handover(lo.SPECTRA, sides, grace_s=0))
+check(record.owner == lo.SPECTRA and record.handover is None,
+      "from released, a PARTIAL activation COMMITS — the room comes up on "
+      "every light that answered instead of aborting back to darkness")
+check(sides[lo.SPECTRA].calls == ["activate", "verify_active"],
+      "…the to-side is never deactivated (nothing that came up is torn down)")
+check("PARTIAL" in record.history[-1]["detail"]
+      and "dining-table" in record.history[-1]["detail"],
+      "…and the record's own durable history note NAMES the skipped device")
+
+# The SAME partial outcome on a handover FROM A RUNNING WORLD keeps the
+# strict all-or-nothing rollback — a working show is genuinely at risk
+# there and there is a real from-world to land on.
+hb = lo.begin_handover(lo.SPOT_EFFECTS)
+lo.mark_quiesced(hb.token)
+lo.commit(hb.token)
+check(lo.load().owner == lo.SPOT_EFFECTS, "settled at spot-effects (a running world)")
+sides = {lo.SPOT_EFFECTS: ScriptedSide(lo.SPOT_EFFECTS),
+         lo.SPECTRA: PartialSide(lo.SPECTRA)}
+try:
+    asyncio.run(run_handover(lo.SPECTRA, sides, grace_s=0))
+    check(False, "a partial activation FROM a running world must still fail")
+except HandoverFailed:
+    pass
+check(lo.load().owner == lo.SPOT_EFFECTS
+      and sides[lo.SPECTRA].calls == ["activate", "verify_active", "deactivate"]
+      and sides[lo.SPOT_EFFECTS].calls[-1] == "activate",
+      "from a running world the SAME outcome rolls back strictly — partial "
+      "new writer released, old writer restored; scope stays bounded")
+
+# A HARD failure from released (not one expected virtual driving) still
+# aborts back to released — a wholly dark stack is the order-8 class.
+lo.release("spec: released again")
+
+
+class HardSide(PartialSide):
+    OUTCOME = ActivationOutcome(
+        ok=False, stack_up=True,
+        expected_ids=frozenset({"a", "b"}),
+        virtual_gaps={"a": "not flushing frames", "b": "missing from the live host"},
+        detail="nothing driving")
+
+
+sides = {lo.SPOT_EFFECTS: ScriptedSide(lo.SPOT_EFFECTS),
+         lo.SPECTRA: HardSide(lo.SPECTRA)}
+try:
+    asyncio.run(run_handover(lo.SPECTRA, sides, grace_s=0))
+    check(False, "a hard failure from released must still abort")
+except HandoverFailed:
+    pass
+check(lo.load().owner == lo.RELEASED
+      and sides[lo.SPECTRA].calls[-1] == "deactivate",
+      "from released, a HARD failure (not one expected virtual driving) "
+      "still aborts back to released — never owner=spectra over a dark stack")
+
 # ── 13. nothing here ever touched audio hardware ─────────────────────────────
 from fx.audio_ingest import AudioIngestHub, LiveDeviceSource
 

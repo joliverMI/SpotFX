@@ -32,3 +32,14 @@ export function parseMsTenths(text: string): number | null {
   if (secs) return Math.round(parseFloat(secs[1]) * 1000);
   return null;
 }
+
+/** "just now" / "4s ago" / "20m ago" / "3h ago" — for a confirmation's AGE
+ * shown next to a claim (the codebase's status-honesty rule: a snapshot
+ * says when it was taken, not just what it found). */
+export function fmtAgo(seconds: number | null | undefined): string {
+  if (seconds == null || Number.isNaN(seconds)) return '';
+  if (seconds < 1) return 'just now';
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
+}

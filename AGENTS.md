@@ -3218,6 +3218,46 @@ fade itself) + `check_ownership.py` §12. Live-fixture proof after a real
 press (offline tests can't reach a bridge): `scripts/verify_release_fixtures.py`
 — read-only, GET-only CLIP v2 + WLED `json/info`, no writes.
 
+### The way back from `released` TOLERATES a partial activation (2026-08-21)
+
+His ruling: "one unreachable device must not be able to keep his entire
+room dark" — after six aborted take-backs in one night on one WLED whose
+mDNS name would not resolve (and two sconces the morning before that
+merely answered too slowly), each abort tearing down the twenty lights
+that HAD come up. `handover.run_handover` step 2 now commits a PARTIAL
+activation (stack up, ≥1 expected virtual driving, some devices/virtuals
+unconfirmed) when `from_world == RELEASED` — aborting there lands on
+darkness, not safety, and never saves the unreachable light. **Scope is
+bounded and must stay bounded**: a handover FROM a running world keeps
+its strict all-or-nothing rollback; a HARD failure from released (stack
+never up, or not one expected virtual driving) still aborts. The policy
+reads `SpectraSide.activation_outcome()` (structured — `ActivationOutcome.
+partial`), mirrors `resume_own_room`'s 2026-08-13 tolerance, and the
+skipped light is NAMED everywhere he looks via `spectra/services/
+activation_report.py` (the take-back response `committed-partial`, `GET
+/ownership` → `activation` → `RoomOwnershipBar`'s amber `ActivationStrip`
+on every page, the Status page line, liveness `activation` — additive,
+NEVER `healthy`, since the frame watchdog's dead-man must not restart-loop
+the service over one dark fixture — and the record's own history note via
+`light_ownership.commit(detail=)`). The report is a SNAPSHOT: its
+`run_supervised()` rechecks still-dark lights every 30 s through the SAME
+probe `device_gaps()` polls (`live_host.probe_device_live`), marks
+recovery, and re-runs the vendored driver's own `async_initialize()`+
+`activate()` for a never-resolved device — nothing in the render loop ever
+re-resolves an inactive device, so without it a fixed light needs a whole
+release+take-back cycle to collect one fixture. Before diagnosing "the
+take-back failed on device X": read `GET /spectra/api/ownership`'s
+`activation` and the record's history — a 200 `committed-partial` is NOT a
+failure. Proofs: `tests/test_take_back_partial.py` (real FxHost + real
+WLED driver against a `.invalid` name through the real armed route — never
+his data, never his network), `tests/test_activation_report.py`,
+`scripts/check_ownership.py` §12b. Known environmental note: this worktree
+carried his real `storage/device_categories.json` (gitignored), which makes
+`tests/test_crystal_activation_verify.py`'s fixture rooms intersect to an
+empty `expected_active_ids` — pre-existing, fails identically on pristine
+master here; `test_take_back_partial.py` stubs `room_topology.
+genuinely_driven_virtual_ids` for exactly that reason.
+
 ### Two-writers prevention build (2026-08-13 incident: `Wants=ledfx.service`
 in the unit resurrected a deliberately-quiesced LedFX on a routine
 `systemctl restart spotfx` while SPECTRA owned — see

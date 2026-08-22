@@ -312,6 +312,62 @@ class LiveLights:
                 return gaps
             await asyncio.sleep(0.05)
 
+    def expected_device_ids(self) -> set[str]:
+        """Every real (non-gap) device id backing an expected-active virtual
+        — the set device_gaps() verifies and the activation report counts
+        (spectra/services/activation_report.py). Empty when the stack is
+        down."""
+        if self.host is None:
+            return set()
+        device_ids: set[str] = set()
+        for vid in self.expected_active_ids:
+            virtual = self.host.virtuals.get(vid)
+            if virtual is None:
+                continue
+            for seg in getattr(virtual, "_segments", None) or []:
+                device_id = seg[0]
+                if not device_id.startswith("gap-"):
+                    device_ids.add(device_id)
+        return device_ids
+
+    async def probe_device_live(self, device_id: str,
+                                timeout_s: float = DEVICE_VERIFY_TIMEOUT_S,
+                                ) -> Optional[str]:
+        """ONE read of one device's own live state — the reason it cannot be
+        confirmed driving, or None when it can (or when there is nothing to
+        confirm: a non-WLED device, or a WLED whose driver never got far
+        enough to have a client). The single definition of "confirmed live"
+        device_gaps() polls and the activation report's recheck re-asks
+        later — never two."""
+        if self.host is None:
+            return None
+        device = self.host.devices.get(device_id)
+        if device is None:
+            return None  # devices.create_from_config already warned
+        if getattr(device, "type", None) != "wled" \
+                or getattr(device, "wled", None) is None:
+            return None  # not a WLED device, or not yet initialized
+        try:
+            wled_info = await asyncio.wait_for(
+                device.wled.get_info(), timeout_s)
+        except Exception as exc:
+            return f"could not confirm live state: {exc!r}"
+        if not wled_info.get("live"):
+            return ("device reports live=false — not "
+                    "receiving realtime data")
+        return None
+
+    async def probe_devices(self, device_ids, timeout_s: float = DEVICE_VERIFY_TIMEOUT_S,
+                            ) -> dict[str, str]:
+        """One pass over `device_ids` with probe_device_live(): every device
+        that could NOT be confirmed, by reason. No polling — device_gaps()
+        is the poll-until-deadline wrapper."""
+        results = await asyncio.gather(
+            *(self.probe_device_live(d, timeout_s) for d in device_ids))
+        return {device_id: reason
+                for device_id, reason in zip(device_ids, results)
+                if reason is not None}
+
     async def device_gaps(self, timeout_s: float = DEVICE_VERIFY_TIMEOUT_S,
                           deadline_s: float = DEVICE_LIVE_DEADLINE_S,
                           poll_interval_s: float = DEVICE_POLL_INTERVAL_S,
@@ -335,46 +391,20 @@ class LiveLights:
         gap. A device that never answers (unreachable) keeps being retried
         like any other unconfirmed device and, if still unreachable at the
         deadline, is named with the same could-not-confirm reason it always
-        had — verified, never assumed."""
+        had — verified, never assumed. The per-device read itself is
+        probe_device_live()."""
         if self.host is None:
             return {}
-        device_ids: set[str] = set()
-        for vid in self.expected_active_ids:
-            virtual = self.host.virtuals.get(vid)
-            if virtual is None:
-                continue
-            for seg in getattr(virtual, "_segments", None) or []:
-                device_id = seg[0]
-                if not device_id.startswith("gap-"):
-                    device_ids.add(device_id)
+        device_ids = self.expected_device_ids()
         if not device_ids:
             return {}
 
-        async def _check(device_id: str) -> tuple[str, Optional[str]]:
-            device = self.host.devices.get(device_id)
-            if device is None:
-                return device_id, None  # devices.create_from_config already warned
-            if getattr(device, "type", None) != "wled" \
-                    or getattr(device, "wled", None) is None:
-                return device_id, None  # not a WLED device, or not yet initialized
-            try:
-                wled_info = await asyncio.wait_for(
-                    device.wled.get_info(), timeout_s)
-            except Exception as exc:
-                return device_id, f"could not confirm live state: {exc!r}"
-            if not wled_info.get("live"):
-                return device_id, ("device reports live=false — not "
-                                   "receiving realtime data")
-            return device_id, None
-
-        pending = set(device_ids)
+        pending = sorted(device_ids)
         gaps: dict[str, str] = {}
         deadline = time.monotonic() + deadline_s
         while True:
-            results = await asyncio.gather(*(_check(d) for d in pending))
-            gaps = {device_id: reason for device_id, reason in results
-                   if reason is not None}
-            pending = set(gaps)
+            gaps = await self.probe_devices(pending, timeout_s)
+            pending = sorted(gaps)
             if not pending or time.monotonic() >= deadline:
                 return gaps
             await asyncio.sleep(poll_interval_s)

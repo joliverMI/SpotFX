@@ -257,6 +257,19 @@ def _isolated_param_watchdog():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_activation_report():
+    """spectra/services/activation_report.py (the take-back/resume
+    activation report, 2026-08-21) is module-global state with no DI seam
+    — same shape as param_watchdog above. A partial report recorded by one
+    test's handover would otherwise show up as that test file's neighbour's
+    "skipped light". Autouse so no individual test needs to know."""
+    from spectra.services import activation_report
+    activation_report.reset()
+    yield
+    activation_report.reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_sonic_usage(tmp_path, monkeypatch):
     """spectra/services/sonic_usage.py (Sonic's durable per-call token-usage
     record, review page) is written from inside settings_agent.run_turn /
