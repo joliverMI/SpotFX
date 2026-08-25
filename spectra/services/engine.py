@@ -131,6 +131,20 @@ async def fire_response_event(event_class: str, intensity: float,
     if not allowed:
         return
     await responses.on_event(event_class, intensity, gap_ms)
+    # The 2D drift gradient's DROP kick (owner ask 2026-08-24, order item 2):
+    # a drop jumps X a full extra leg-step, pushes the Y TARGET up by the
+    # drop's own energy, and lands the resulting colour immediately — see
+    # DriftConductor.on_drop_event. Wired HERE, inside the already
+    # preview-/mode-gated choke point, so it rides exactly the path a real
+    # drop drives; a strict no-op while no gradient is active. Direct call
+    # (not an injectable like trigger_engine._intensity_event) because this
+    # module already owns the conductor singleton — trigger_engine.py needed
+    # the hook only because nothing there may reach this process's conductor.
+    if event_class == "drop":
+        try:
+            await conductor.on_drop_event(intensity)
+        except Exception:
+            logger.exception("gradient drift: on_drop_event failed")
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
     # One release task per ReleaseGroup this fire armed — owned by THIS

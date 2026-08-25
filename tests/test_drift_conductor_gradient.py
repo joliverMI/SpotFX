@@ -166,3 +166,118 @@ def test_missing_gradient_profile_holds_gracefully():
     record = _run(conductor.tick())
     assert record["gradient"]["active"] is False
     assert record["gradient"]["missing"] == "does-not-exist"
+
+
+# ── the DROP kick (owner ask 2026-08-24, order item 2) ───────────────────────
+#
+# "On All effects, when there is a Drop, I want it to change colors. Jump a
+# full extra step in the drift, but also use the drop energy to move the
+# drift target 'up' on the 2D graph."
+
+def test_drop_jumps_x_a_full_extra_leg_step_under_loop():
+    # leg_s=20, x_period_s=100 -> one leg-step is 0.2
+    clock, conductor, executor, room_box = _harness(
+        active_gradient_id="g1", x_period_s=100.0, x_mode="loop")
+    _fire_set_mode_scene(conductor)
+    _run(conductor.tick())
+    assert room_box[0].gradient_x == pytest.approx(0.2, abs=1e-6)
+    _run(conductor.on_drop_event(0.4))
+    assert room_box[0].gradient_x == pytest.approx(0.4, abs=1e-6)
+    # ...and the NEXT scheduled leg continues from the advanced state,
+    # rather than repeating the step the drop already took.
+    _run(conductor.tick())
+    assert room_box[0].gradient_x == pytest.approx(0.6, abs=1e-6)
+
+
+def test_drop_x_jump_wraps_under_loop():
+    room = cj.RoomColorState(gradient_x=0.9)
+    clock, conductor, executor, room_box = _harness(
+        active_gradient_id="g1", x_period_s=100.0, x_mode="loop", room=room)
+    _fire_set_mode_scene(conductor)
+    _run(conductor.on_drop_event(0.1))
+    assert room_box[0].gradient_x == pytest.approx(0.1, abs=1e-6)
+    assert room_box[0].gradient_x_direction == 1
+
+
+def test_drop_x_jump_reflects_under_bounce():
+    room = cj.RoomColorState(gradient_x=0.9, gradient_x_direction=1)
+    clock, conductor, executor, room_box = _harness(
+        active_gradient_id="g1", x_period_s=100.0, x_mode="bounce", room=room)
+    _fire_set_mode_scene(conductor)
+    _run(conductor.on_drop_event(0.1))
+    # 0.9 + 0.2 = 1.1 -> reflects to 0.9, direction flips
+    assert room_box[0].gradient_x == pytest.approx(0.9, abs=1e-6)
+    assert room_box[0].gradient_x_direction == -1
+
+
+def test_drop_pushes_the_target_up_by_the_drop_energy():
+    from spectra.services.drift_conductor import DROP_Y_KICK
+    room = cj.RoomColorState(gradient_y=0.2, gradient_target_y=0.3)
+    clock, conductor, executor, room_box = _harness(
+        active_gradient_id="g1", room=room)
+    _fire_set_mode_scene(conductor)
+    _run(conductor.on_drop_event(0.8))
+    assert room_box[0].gradient_target_y == pytest.approx(
+        0.3 + 0.8 * DROP_Y_KICK, abs=1e-6)
+    # The TARGET moved; Y itself did not — it still drifts there on legs.
+    assert room_box[0].gradient_y == pytest.approx(0.2, abs=1e-6)
+
+
+def test_drop_target_clamps_at_one_and_never_moves_down():
+    room = cj.RoomColorState(gradient_target_y=0.9)
+    clock, conductor, executor, room_box = _harness(
+        active_gradient_id="g1", room=room)
+    _fire_set_mode_scene(conductor)
+    _run(conductor.on_drop_event(1.0))
+    assert room_box[0].gradient_target_y == 1.0
+    # A zero-energy drop is still never a downward move.
+    _run(conductor.on_drop_event(0.0))
+    assert room_box[0].gradient_target_y == 1.0
+
+
+def test_drop_lands_a_colour_immediately_not_next_leg():
+    clock, conductor, executor, room_box = _harness(active_gradient_id="g1")
+    _fire_set_mode_scene(conductor)
+    rec = _run(conductor.on_drop_event(0.6))
+    assert rec["active"] is True
+    assert executor.current["v1"]["gradient"] == rec["color"]
+    assert executor.current["v1"]["gradient"] != "#ffffff"
+
+
+def test_drop_is_a_strict_noop_with_no_gradient_active():
+    clock, conductor, executor, room_box = _harness(active_gradient_id=None)
+    _fire_set_mode_scene(conductor)
+    before = room_box[0]
+    assert _run(conductor.on_drop_event(1.0)) is None
+    assert room_box[0] is before                      # nothing persisted
+    assert executor.current.get("v1") is None         # nothing written
+
+
+def test_drop_is_a_noop_when_the_profile_is_missing():
+    clock, conductor, executor, room_box = _harness(
+        active_gradient_id="does-not-exist")
+    _fire_set_mode_scene(conductor)
+    before = room_box[0]
+    assert _run(conductor.on_drop_event(1.0)) is None
+    assert room_box[0] is before
+
+
+def test_drop_honours_the_conductor_deferral():
+    clock, conductor, executor, room_box = _harness(active_gradient_id="g1")
+    _fire_set_mode_scene(conductor)
+    conductor._deferral = lambda: "preview"
+    before = room_box[0]
+    rec = _run(conductor.on_drop_event(1.0))
+    assert rec == {"active": False, "deferred_by": "preview"}
+    assert room_box[0] is before
+    assert executor.current.get("v1") is None
+
+
+def test_drop_falls_back_to_the_live_intensity_when_none_is_given():
+    clock, conductor, executor, room_box = _harness(
+        active_gradient_id="g1", intensity=0.5)
+    _fire_set_mode_scene(conductor)
+    _run(conductor.on_drop_event())
+    from spectra.services.drift_conductor import DROP_Y_KICK
+    assert room_box[0].gradient_target_y == pytest.approx(
+        0.5 + 0.5 * DROP_Y_KICK, abs=1e-6)

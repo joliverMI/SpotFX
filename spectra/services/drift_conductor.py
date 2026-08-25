@@ -55,6 +55,13 @@ Mechanisms per leg:
            delta) simply overwrites it on its own schedule, same as the
            wheel journey's rotation already gets overwritten-then-resumed
            around a flare jump today.
+           A DROP is the one event that moves this axis pair OUT of band
+           (owner ask 2026-08-24): on_drop_event() jumps X a full extra
+           leg-step, pushes the Y TARGET up by the drop's own energy
+           (DROP_Y_KICK — never down, never past 1.0), and lands the
+           resulting colour immediately instead of waiting for the next
+           ~20 s leg. Y itself still only drifts toward the target on
+           legs — the drop moves the target, not Y.
 
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a creep or follow
 spec is authored PARAM-AGNOSTIC (a named profile is reused across effects —
@@ -111,6 +118,14 @@ logger = logging.getLogger(__name__)
 
 LEG_S = 20.0            # design band 10–30 s; one leg every 20 s
 NEUTRAL_INTENSITY = 0.5  # follow's stated degradation when no feed exists
+
+# The DROP kick (owner ask 2026-08-24, order item 2: "when there is a Drop, I
+# want it to change colors. Jump a full extra step in the drift, but also use
+# the drop energy to move the drift target 'up' on the 2D graph"). Both are
+# HIS tuning knobs, named here rather than inlined:
+DROP_Y_KICK = 0.5          # target_y += drop intensity * this (clamped to 1.0)
+DROP_COLOR_GLIDE_MS = 150  # the drop's own colour change — fast, but not a
+                           # hard snap (a drop is a moment, not a strobe)
 
 
 class VirtualState:
@@ -768,6 +783,101 @@ class DriftConductor:
         self._room_save(room.model_copy(
             update={"gradient_target_y": max(0.0, min(1.0, intensity))}))
 
+    def _gradient_color_params(self, color: str) -> list[tuple[str, dict]]:
+        """The gradient's landing rule, shared by the scheduled leg and the
+        drop kick: every set-mode virtual takes the sampled colour on
+        whichever of gradient/background_color it ALREADY carries (the same
+        "only touch what's already there" rule _journey_leg's palette
+        rotation follows). Mutates VirtualState so the engine's own carried
+        colour stays true; returns (vid, params) for the caller to write
+        however it writes (batched into a leg, or immediately)."""
+        out: list[tuple[str, dict]] = []
+        for vid, state in self.virtuals.items():
+            if not state.set_mode:
+                continue
+            params: dict[str, Any] = {}
+            if state.gradient:
+                state.gradient = color
+                params["gradient"] = color
+            if state.background_color:
+                state.background_color = color
+                params["background_color"] = color
+            if params:
+                out.append((vid, params))
+        return out
+
+    async def on_drop_event(self, intensity: float | None = None) -> dict | None:
+        """A DROP fired (owner ask 2026-08-24, order item 2, his words: "On
+        All effects, when there is a Drop, I want it to change colors. Jump a
+        full extra step in the drift, but also use the drop energy to move
+        the drift target 'up' on the 2D graph"). Three things, in that order,
+        and ONLY while a gradient is active — a strict no-op otherwise (the
+        wheel colour journey is deliberately out of scope):
+
+          X — advance one FULL extra leg-step (self.leg_s over the room's
+              gradient_x_period_s), through gradient2d.advance_x so the
+              profile's own loop/bounce x_mode governs it exactly as a
+              scheduled leg does. This is IN ADDITION to the normal ~20 s
+              leg schedule: the next leg simply continues from here, since
+              the advanced x/direction persist to room state.
+          Y — push the TARGET up by the drop's energy (DROP_Y_KICK), never
+              down, clamped to 1.0. Y ITSELF is untouched: it keeps drifting
+              toward the target over gradient_y_slew_s on ordinary legs,
+              same as on_intensity_event's own retarget.
+          colour — sample at the advanced (x, y-as-it-is-right-now) and land
+              it NOW over DROP_COLOR_GLIDE_MS, rather than waiting up to a
+              full leg for the room to catch up with the music.
+
+        Called from services/engine.py's fire_response_event when
+        event_class == "drop" — the SAME already-mode-gated/preview-gated
+        path a real drop drives, never a second route. Honours the
+        conductor's own deferral (ambient/dinner-party/preview/force-scene)
+        like every other write this class makes."""
+        room_controls = self._room_controls()
+        gradient_id = room_controls.active_gradient_id
+        if gradient_id is None:
+            return None
+        profile = self._gradient_profiles().get(gradient_id)
+        if profile is None:
+            logger.warning("drop kick: active_gradient_id '%s' names no saved "
+                           "gradient — skipped", gradient_id)
+            return None
+        deferred_by = self._deferral()
+        if deferred_by is not None:
+            return {"active": False, "deferred_by": deferred_by}
+        if intensity is None:
+            intensity = self._intensity()
+        if intensity is None:
+            intensity = NEUTRAL_INTENSITY
+        intensity = max(0.0, min(1.0, float(intensity)))
+
+        room = self._room_load()
+        x_delta = self.leg_s / max(room_controls.gradient_x_period_s, 1e-6)
+        new_x, new_dir = gradient2d.advance_x(
+            room.gradient_x, room.gradient_x_direction, x_delta, profile.x_mode)
+        new_target_y = min(1.0, room.gradient_target_y + intensity * DROP_Y_KICK)
+        color = gradient2d.sample(profile.top, profile.bottom, new_x,
+                                  room.gradient_y)
+        rec: dict[str, Any] = {
+            "active": True, "kick": "drop", "gradient_id": profile.id,
+            "gradient_name": profile.name, "intensity": round(intensity, 4),
+            "x": round(new_x, 4), "y": round(room.gradient_y, 4),
+            "target_y": round(new_target_y, 4), "color": color, "legs": [],
+        }
+        if color is not None:
+            for vid, params in self._gradient_color_params(color):
+                state = self.virtuals[vid]
+                await self.executor.glide(vid, state.effect_type, params,
+                                          DROP_COLOR_GLIDE_MS)
+                rec["legs"].append({"virtual_id": vid, "param": "gradient2d",
+                                    "kind": "gradient", "target": color,
+                                    "duration_ms": DROP_COLOR_GLIDE_MS})
+        self._room_save(room.model_copy(update={
+            "gradient_x": new_x, "gradient_x_direction": new_dir,
+            "gradient_target_y": new_target_y}))
+        await self._broadcast({"type": "drift_gradient_drop", **rec})
+        return rec
+
     def _gradient_leg(self, gradient_id: str, batches: dict, leg_ms: int,
                       legs: list[dict]) -> dict:
         """One leg of the 2D drift gradient: advance X (time) a fixed
@@ -795,21 +905,11 @@ class DriftConductor:
             "target_y": round(room.gradient_target_y, 4), "color": color,
         }
         if color is not None:
-            for vid, state in self.virtuals.items():
-                if not state.set_mode:
-                    continue
-                params: dict[str, Any] = {}
-                if state.gradient:
-                    state.gradient = color
-                    params["gradient"] = color
-                if state.background_color:
-                    state.background_color = color
-                    params["background_color"] = color
-                if params:
-                    batches.setdefault((vid, leg_ms), {}).update(params)
-                    legs.append({"virtual_id": vid, "param": "gradient2d",
-                                 "kind": "gradient", "target": color,
-                                 "duration_ms": leg_ms})
+            for vid, params in self._gradient_color_params(color):
+                batches.setdefault((vid, leg_ms), {}).update(params)
+                legs.append({"virtual_id": vid, "param": "gradient2d",
+                             "kind": "gradient", "target": color,
+                             "duration_ms": leg_ms})
         self._room_save(room.model_copy(update={
             "gradient_x": new_x, "gradient_x_direction": new_dir,
             "gradient_y": new_y}))
