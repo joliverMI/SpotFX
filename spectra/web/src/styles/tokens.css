@@ -1082,3 +1082,104 @@ kbd {
   .settings-console-msg { max-width: 100%; }
   .settings-console-log-row { grid-template-columns: 1fr; row-gap: 2px; }
 }
+
+/* ── TESTING IN PROGRESS bar (his ask 2026-08-24, TestingBar.tsx) ────────
+ * LOUD is the requirement, not a preference: this has to be unmissable on
+ * a phone at arm's length, over a purple-on-black UI he is used to
+ * ignoring. Hence full-bleed, hazard stripes, and a title that is the
+ * largest text on the page. It is deliberately NOT theme-toned. */
+.testing-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border-bottom: 3px solid #000;
+  color: #17110a;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  /* Hazard stripes, animated so it reads as ACTIVE, never as a static
+   * decoration someone forgot to remove. */
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--testing-bar-a) 0 22px,
+    var(--testing-bar-b) 22px 44px);
+  background-size: 62px 62px;
+  animation: testing-bar-crawl 2.2s linear infinite;
+}
+
+.testing-bar-yes {
+  --testing-bar-a: #f2b21c;
+  --testing-bar-b: #d94a1f;
+}
+
+/* Distinct from "yes" on purpose — "can't confirm" is a different claim
+ * and must never be mistaken for a confirmed live test. */
+.testing-bar-unknown {
+  --testing-bar-a: #d9d2c4;
+  --testing-bar-b: #8d8577;
+  color: #14100a;
+}
+
+@keyframes testing-bar-crawl {
+  from { background-position: 0 0; }
+  to   { background-position: 62px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .testing-bar { animation: none; }
+}
+
+.testing-bar-title {
+  flex: 0 0 auto;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.1;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #ffd76a;
+  white-space: nowrap;
+}
+
+.testing-bar-unknown .testing-bar-title { color: #f0ece2; }
+
+.testing-bar-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;   /* let long labels wrap instead of pushing the row wide */
+  flex: 1 1 auto;
+}
+
+.testing-bar-headline {
+  font-size: 15px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.testing-bar-sub {
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.88;
+  overflow-wrap: anywhere;
+}
+
+.testing-bar .help-link {
+  flex: 0 0 auto;
+  background: rgba(0, 0, 0, 0.82);
+  color: #ffd76a;
+  border-color: rgba(0, 0, 0, 0.82);
+}
+
+@media (max-width: 720px) {
+  .testing-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .testing-bar-title { font-size: 17px; }
+  .testing-bar-headline { font-size: 14px; }
+  .testing-bar-sub { font-size: 12px; }
+}

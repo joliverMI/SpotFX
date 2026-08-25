@@ -69,6 +69,14 @@ FLARE_PREVIEW_HOLD_FILE = SPECTRA_STORAGE / "flare_preview_hold.json"
 AV_SYNC_MEASUREMENTS_FILE = SPECTRA_STORAGE / "av_sync_measurements.json"
 AV_SYNC_PATTERN_FILE = SPECTRA_STORAGE / "av_sync_pattern.json"
 
+# The TESTING IN PROGRESS record (spectra/services/test_session.py): the
+# DECLARED half of the room-visibility bar — {actor, reason, since_ms,
+# expires_ms}. Durable (not in-memory like preview_pause's own deadline)
+# precisely so a SPECTRA restart mid-test cannot silently drop a live
+# declaration and leave the bar down while his room is still being driven.
+# Expiry is enforced at READ; nothing background prunes this file.
+TEST_SESSION_FILE = SPECTRA_STORAGE / "test_session.json"
+
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
 # The ownership record itself lives in fx/light_ownership.py (shared library:

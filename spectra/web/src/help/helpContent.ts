@@ -538,6 +538,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'testing-bar',
+        title: 'TESTING IN PROGRESS — the top bar',
+        keywords: 'testing bar top banner loud agent live test declared painting driving stripes amber warning unknown who since holding room busy',
+        body: [
+          'A loud striped bar across the very top of every page, above the nav. It is up ONLY while something is actually testing on your room, and it disappears completely the moment nothing is. If you can see it, somebody or something is using your lights right now.',
+          'It tells you three things. WHO: a declared take names the agent and what it is testing; if nobody declared anything but one of SPECTRA\'s own preview paths is holding your room, the bar names that path instead. SINCE WHEN: your own wall clock, plus how long it has been running once that is over a minute. AND WHETHER IT IS ACTUALLY PAINTING: "driving your lights (frames flowing)" means your room really is being rendered; "holding the room but NOT painting — that\'s a fault, not a test" means somebody has taken your lights and they have gone dark, which is a problem, not testing. Those two are different facts, which is why the bar states which one it is — an owner indicator alone once read green right through an outage.',
+          'It clears itself. Every declaration carries a mandatory expiry (an hour at the very most, renewed while the work is still going), checked every time the bar is drawn — there is no flag anyone has to remember to switch off, so a bar cannot outlive the testing that raised it. The automatic half needs no declaration at all: a colour-set preview, a flare preview, or anything else holding your room lights this bar on its own.',
+          'A grey "CAN\'T CONFIRM whether your room is under test right now" bar means SPECTRA could not answer or a status source could not be read. It shows deliberately rather than staying quiet: when the app cannot tell, assume your lights may be in use. A single dropped poll will not raise it — it takes two in a row.',
+        ],
+      },
+      {
         id: 'ownership-liveness',
         title: 'The liveness endpoint',
         keywords: 'health checker frame flush freshness 503 contract',

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import RoomControlsBar from './components/RoomControlsBar';
 import RoomOwnershipBar from './components/RoomOwnershipBar';
+import TestingBar from './components/TestingBar';
 import TopBarStrip from './components/TopBarStrip';
 import { ToastProvider } from './components/Toast';
 import { confirmLeave } from './lib/unsavedGuard';
@@ -74,6 +75,11 @@ export default function App() {
   usePageTitle();
   return (
     <ToastProvider>
+      {/* FIRST, above NavBar — this must genuinely be the top bar on every
+        * route (his ask 2026-08-24). It renders nothing at all on a
+        * confirmed "not testing", so it costs no vertical space in normal
+        * use; see TestingBar.tsx for why "unknown" still shows. */}
+      <TestingBar />
       <NavBar />
       <RoomControlsBar />
       <TopBarStrip />

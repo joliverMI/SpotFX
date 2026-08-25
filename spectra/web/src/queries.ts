@@ -7,7 +7,8 @@ import type {
   EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark, Registry,
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
-  SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TranscribeResult, UndoResult,
+  Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
+  TranscribeResult, UndoResult,
 } from './types';
 
 /* ── scenes ── */
@@ -865,5 +866,32 @@ export function useClearIntensityScaleMark(uri: string | null) {
       apiDel<{ uri: string; cleared: boolean }>(
         `/intensity-scale/mark?uri=${encodeURIComponent(uri!)}`),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-intensity-mark', uri] }),
+  });
+}
+
+/* ── TESTING IN PROGRESS bar (his ask 2026-08-24) ── */
+
+/** The room-visibility surface. `retry: false` on purpose: the bar's own
+ * failure handling counts CONSECUTIVE failures to debounce a transient
+ * blip (TestingBar.tsx), and react-query's internal retries would hide
+ * those transitions from it. 3s to match useEngineStatus. */
+export function useTestSession() {
+  return useQuery({
+    queryKey: ['spectra-test-session'],
+    queryFn: () => apiGet<TestSessionStatus>('/test-session'),
+    refetchInterval: 3000,
+    retry: false,
+  });
+}
+
+/** Liveness — already published, no new plumbing. The bar uses it to say
+ * WHICH kind of busy the room is: driving frames, or holding and not
+ * painting (which is a fault, not a test). */
+export function useLiveness() {
+  return useQuery({
+    queryKey: ['spectra-liveness'],
+    queryFn: () => apiGet<Liveness>('/liveness'),
+    refetchInterval: 3000,
+    retry: false,
   });
 }
