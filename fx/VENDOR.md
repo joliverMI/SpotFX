@@ -326,6 +326,48 @@ variables named `ledfx` (the core object handle) are untouched.
     beat-burst config), tests: `tests/test_fireworks_drop_tail.py`. Not
     in the fork source at `/home/javi/ledfx-src`.
 
+18. `effects/blackhole.py`: the reverse RELEASE fall-back (BEHAVIOUR
+    CHANGE, PR fm/blackhole-drop-suite). His ask, verbatim: "I like how on
+    reverse, the event horizon immediately ejects blobs, but when it
+    reverses back to normal, currently the blobs immediately change
+    direction. I want them to accelerate back to the black hole, but not
+    immediately change direction. Just start falling back using the
+    acceleration value we have... The current setting is too jerky."
+    `reverse` is a spawn-side flag that ALSO picks the sign in draw()'s
+    `new_r = r ± v·dt`, so the momentary flare's release flipped the whole
+    outbound population's direction in one frame. New per-particle SoA
+    members `p_turn`/`p_vr` (compacted and carried in the native handoff
+    snapshot like every other member) plus `REVERSE_FALLBACK_TURN_S = 0.5`:
+    on the reverse True→False EDGE (`_reverse_edge`, armed in
+    `config_updated` exactly like the phase key — never on an ordinary
+    config write) every live blob enters a turnaround carrying the exact
+    outward speed it already had, decelerates at 2·v(r)/TURN_S — the
+    effect's OWN speed curve, so the turn takes TURN_S regardless of
+    base_speed, radius or the live audio boost — passes continuously
+    through zero and MERGES into ordinary infall the instant its velocity
+    equals the curve's own speed for its radius (no step at either seam:
+    unlike `p_out`'s expiry, which stalls to zero and hands the particle
+    full-speed infall on the next frame). The False→True eject is
+    deliberately untouched and still instant — his liked half. Second,
+    smaller change in the same mechanism: a horizon captive is now PINNED
+    to the ring only while it is within `REVERSE_FALLBACK_RING_TOL` (0.02)
+    of it, so a captive the outflow carried off the ring falls back under
+    ordinary physics instead of being teleported onto the ring on the
+    flip-back frame — inert in ordinary infall, where a pinned orbiter sits
+    exactly at `rh`. That teleport is the defect PR #179 correctly
+    diagnosed and fixed by RELEASING every captive on every reversed frame;
+    #179 was reverted the same day (#181, no reason recorded) and is NOT
+    relanded here — releasing also evicts blobs the flare never moved
+    (restarting their hold clock and horizon colour blend) and makes them
+    immortal, since the infall alive-test retires captives by their hold
+    clock and never free-fallers. Nothing is released by this change.
+    `blackhole1d.py` is deliberately NOT mirrored: it has no capture
+    mechanism, and his Strips entry authors `reverse: true` as its own
+    baseline, so the flare's absolute `reverse=True` write is a no-op
+    there. Evidence: `scripts/check_blackhole_reverse_fallback.py`; tests:
+    `tests/test_blackhole_reverse_fallback.py`. Not in the fork source at
+    `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
