@@ -27,6 +27,9 @@ plus DECLARED MECHANISMS:
                  firework_burst an intensity-scaled count of payoff rockets
                              explode NOW on every live fireworks effect —
                              see FlareKind's own docstring
+                 blob_rush   12 blobs appear at once, evenly spread, on
+                             every live Black Hole, past its density cap —
+                             see FlareKind's own docstring
                A momentary/permanent kind's params are ParamTarget
                expressions (absolute / offset-from-baseline / random-in-
                range — see ParamTarget); INTENSITY-DRIVEN strength is the
@@ -310,6 +313,23 @@ class FlareKind(BaseModel):
                   color_rotate, the count is computed from the fire's own
                   intensity — this type carries no jump/params/gain/
                   hold_ms of its own (see _shape below).
+      blob_rush   the BLOB RUSH flare (owner ask, 2026-08-24 —
+                  scripts/add_blob_rush_flare.py has his verbatim spec):
+                  BLOB_RUSH_BLOBS (12) blobs appear at once, spread
+                  fairly evenly around the circle, on every virtual whose
+                  live effect is a Black Hole (fx.device_model.
+                  BLOB_RUSH_EFFECTS), via the effect's own `blob_rush`
+                  key — an instant, self-resetting count, the same shape
+                  firework_burst uses. They bypass the effect's max_blobs
+                  density cap ("Override any max blob counts for this
+                  generation") without disturbing anything already on
+                  screen, and they arrive the way that mode's own blobs
+                  do: from the hex boundary in infall, from the horizon
+                  ring in reverse. A fixed count, not intensity-scaled —
+                  his number, stated — so like color_rotate and
+                  firework_burst this type carries no jump/params/gain/
+                  hold_ms of its own (see _shape below), and like
+                  firework_burst there is nothing to release.
     gain is a brightness-envelope multiplier around the carried baseline;
     params are ParamTarget expressions (absolute/offset/random — see that
     type), name-broadcast to every virtual whose live effect carries the
@@ -357,7 +377,7 @@ class FlareKind(BaseModel):
     show, not only the preview."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate",
-                  "firework_burst"]
+                  "firework_burst", "blob_rush"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
@@ -400,6 +420,17 @@ class FlareKind(BaseModel):
                     f"ramp-in, dwell, and fade-back all scale from the "
                     f"fire's own intensity (scene_response.color_rotate_* — "
                     f"see FlareKind's own docstring); params/gain/hold_ms "
+                    f"don't apply here and would silently do nothing")
+        elif self.type == "blob_rush":
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is blob_rush — jump belongs on a "
+                    f"drift_jump kind")
+            if self.params or self.gain != 1.0 or self.hold_ms is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is blob_rush — the blob count is "
+                    f"fixed (scene_response.BLOB_RUSH_BLOBS — see "
+                    f"FlareKind's own docstring); params/gain/hold_ms "
                     f"don't apply here and would silently do nothing")
         elif self.type == "firework_burst":
             if self.jump is not None:

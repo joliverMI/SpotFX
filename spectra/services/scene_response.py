@@ -134,6 +134,15 @@ Per event, fed by the bridge with the fire's intensity:
                   the jumps/glides dicts (burst_rockets is deliberately
                   unregistered, like the phase keys), so it composes
                   freely alongside every other kind in the same band.
+       blob_rush — the BLOB RUSH flare (owner ask, 2026-08-24): a FIXED
+                  BLOB_RUSH_BLOBS (12) blobs appear at once, spread
+                  fairly evenly around the circle, on every virtual whose
+                  live effect is a Black Hole — past its max_blobs
+                  density cap, without disturbing anything already on
+                  screen (see _blob_rush's own docstring). Same shape as
+                  firework_burst in every structural respect: an instant,
+                  self-resetting, deliberately-unregistered count key, no
+                  carry, no release, no lead.
   Stepped-effect entries (SceneDeviceConfig.effect_steps) and surges — the
   stated interplay, simple on purpose: EFFECT SELECTION IS FIRE-TIME ONLY.
   A surge never switches an entry's effect; dice re-rolls re-resolve the
@@ -376,6 +385,14 @@ def firework_burst_rockets(intensity: float) -> int:
     drop/explosion anchor family's own rule."""
     return int(round(_intensity_scaled(
         intensity, FIREWORK_BURST_ROCKETS_GENTLE, FIREWORK_BURST_ROCKETS_HARD)))
+
+
+# BLOB RUSH: his number, verbatim and fixed — "it just generates 12 blobs
+# all at once spread out fairly evenly". Deliberately NOT intensity-scaled
+# (unlike firework_burst's rocket count): he named one count, so there is
+# no second knob to invent. Written to every live Black Hole's own
+# `blob_rush` key (fx.device_model.BLOB_RUSH_EFFECTS).
+BLOB_RUSH_BLOBS = 12
 
 
 def color_rotate_lead_ms(scene: SceneV2, event_class: ResponseClass,
@@ -799,6 +816,7 @@ class ResponseEngine:
                    if k.type == "drift_jump" and k.jump == "color_set"]
         rotates = [(k, s) for k, s in attached if k.type == "color_rotate"]
         bursts = [(k, s) for k, s in attached if k.type == "firework_burst"]
+        rushes = [(k, s) for k, s in attached if k.type == "blob_rush"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
@@ -876,6 +894,14 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **record["firework_burst"]})
 
+        if rushes:   # one rush per fire — a rush is a rush (fixed count)
+            kind, scale = rushes[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            record["blob_rush"] = await self._blob_rush(sel_intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **record["blob_rush"]})
+
         record["kinds"] = kind_records
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p}
@@ -939,6 +965,8 @@ class ResponseEngine:
             record["color_rotate"] = await self._color_rotate(intensity)
         if kind.type == "firework_burst":
             record["firework_burst"] = await self._firework_burst(intensity)
+        if kind.type == "blob_rush":
+            record["blob_rush"] = await self._blob_rush(intensity)
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
         record["result"] = "applied"
@@ -1350,6 +1378,46 @@ class ResponseEngine:
                                      {"burst_rockets": rockets})
             targets += 1
         return {"rockets": rockets, "virtuals": targets}
+
+    async def _blob_rush(self, intensity: float) -> dict:
+        """The BLOB RUSH flare (owner ask, 2026-08-24, his verbatim spec in
+        scripts/add_blob_rush_flare.py): "it just generates 12 blobs all at
+        once spread out fairly evenly. Override any max blob counts for
+        this generation if that's easy, or remove the ones in the event
+        horizon." A FIXED BLOB_RUSH_BLOBS — he named one count, so nothing
+        here scales with intensity (the one structural difference from
+        firework_burst, whose rocket count he did scale). `intensity` is
+        accepted for symmetry with every other kind executor and recorded,
+        not consulted.
+
+        The write is one instant jump of the effect's own `blob_rush` key,
+        on every virtual whose live effect is in fx.device_model.
+        BLOB_RUSH_EFFECTS — the same membership-gate shape _drive_phase and
+        _firework_burst use. The effect edge-detects it, spawns that many
+        blobs at even angles (fx/effects/blackhole.py::_blob_rush) past
+        max_blobs via its own no-cap tag, and self-resets the key so the
+        next fire edges again. His first option was taken and his second
+        ("remove the ones in the event horizon") deliberately was not:
+        nothing already on screen is touched, so a rush never empties the
+        ring it arrives at.
+
+        Nothing carries and nothing releases — the blobs fall in (or fly
+        out, in reverse) and retire on the effect's own clock, so like
+        firework_burst there is NO release queue to drain at any of the
+        four drain points. And like the phase keys, `blob_rush` is
+        deliberately absent from the effect-parameter registry, so it can
+        never enter the param/gain kinds' shared jumps/glides dicts or a
+        band patch — concurrency with every other kind in the same band is
+        structural. LEAD: none, same reasoning as firework_burst — the
+        write is instant and the arrival is the animation."""
+        targets = 0
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.BLOB_RUSH_EFFECTS:
+                continue
+            await self.executor.jump(vid, state.effect_type,
+                                     {"blob_rush": BLOB_RUSH_BLOBS})
+            targets += 1
+        return {"blobs": BLOB_RUSH_BLOBS, "virtuals": targets}
 
     def pending_color_rotate_holds(self) -> list[float]:
         """Distinct DWELLS still pending for the colour rotate-and-back

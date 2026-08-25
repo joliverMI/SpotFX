@@ -368,6 +368,102 @@ variables named `ledfx` (the core object handle) are untouched.
     `tests/test_blackhole_reverse_fallback.py`. Not in the fork source at
     `/home/javi/ledfx-src`.
 
+19. `effects/blackhole.py`: the BLOB RUSH (NEW MECHANISM, PR
+    fm/blackhole-rush-and-charge-lull). His ask, verbatim: "add a new
+    effect that runs as a shape flare that randomly chooses between the
+    momentary reverse and this one. This one is called 'blob rush' and it
+    just generates 12 blobs all at once spread out fairly evenly. Override
+    any max blob counts for this generation if that's easy, or remove the
+    ones in the event horizon." New `blob_rush` config key (int, 0-64,
+    default 0, ADVANCED) — SpotFX's `blob_rush` flare kind writes an
+    instant "spawn this many blobs NOW" count; the effect edge-detects it
+    in `config_updated` exactly like the phase key and fireworks'
+    `burst_rockets` (#15) — a stale persisted value never fires on a fresh
+    instance — consumes it in the next draw, and self-resets the key to 0
+    via the same sanctioned in-render `_apply_config(validate=False,
+    fire_event=False)` path. `_blob_rush()` places the blobs at even
+    `2*pi/k` angles, the whole ring randomly rotated per rush, each nudged
+    by at most `BLOB_RUSH_WIGGLE_FRAC` (1/6, fireworks' own wiggle from
+    #16) of one step; `_spawn()` grew `theta=`/`ignore_cap=` keyword
+    arguments so the rush reuses the ordinary spawn's own colour/placement
+    logic — arriving just past the true per-direction hex boundary in
+    infall (#12) and from the horizon ring in reverse — while bypassing
+    `max_blobs` via the existing `p_is_burst` no-cap tag. His first
+    override option was taken and his second ("remove the ones in the
+    event horizon") deliberately was NOT: nothing already on screen is
+    touched. Purely additive: no carry, no release, no lead. Deliberately
+    NOT mirrored to `blackhole1d` — it is a 1px ring view with no hex
+    boundary to arrive from, and his ask named Black Hole's own event
+    horizon and max blob counts. Evidence: `scripts/check_blob_rush.py`
+    (his real Black Hole V2 scene, read-only, at his crystal's 72x37
+    shape); tests: `tests/test_blob_rush.py`. Not in the fork source at
+    `/home/javi/ledfx-src` (SpotFX-authored mechanism).
+
+20. `effects/blackhole.py` + `effects/blackhole1d.py`: the CHARGE/LULL
+    rework (BEHAVIOUR CHANGE, PR fm/blackhole-rush-and-charge-lull; the
+    DROP is deliberately untouched by it). His ask, verbatim: "on the drop
+    sequence, for charge: instead of the black hole expanding, accelerate
+    the number of blobs forming (up to 12/second, but not all at once),
+    ignore max counts, accelerate their fall speed, and increase the
+    thickness of the event horizon slowly. Then, on the lull, continue the
+    fast blob falling but expand the event horizon until it fills the hex
+    (i think it currently expands too far) at half way through the duration
+    of the lull. So half of the lull should be dark. Then the drop can stay
+    the same as it is now."
+
+    CHARGE: `_horizon_radius` now returns the plain audio baseline for the
+    whole build — the quadratic swallow to `r_max` is gone, and with it the
+    black disc that trailed it by `CHARGE_HALO_LEAD` (retired; `_disc_radius`
+    is now always the horizon itself). What builds instead: `_phase_halo`'s
+    ring half-thickness grows `CHARGE_HALO_W_MIN`→`_MAX` (0.05→0.34);
+    `_phase_spawn_rate()` forces blobs into being at
+    `CHARGE_SPAWN_RATE_MAX * p**CHARGE_SPAWN_CURVE` (12/s at p=1, quadratic
+    so it accelerates in rather than stepping up) through a per-frame
+    accumulator, additive to the ordinary spawn and past `max_blobs` via
+    `_spawn(ignore_cap=True)`; `_phase_speed_mult()` scales infall speed
+    1.0→`CHARGE_FALL_SPEED_MAX` (2.0) linearly in p.
+
+    LULL: the horizon expands from the baseline to `HEX_FILL_RADIUS`
+    (+`LULL_FILL_MARGIN`) at `LULL_FILL_PROGRESS` (0.5) and HOLDS, and the
+    halo stops painting once filled, so every REAL cell of his hex panel is
+    black for the second half. `HEX_FILL_RADIUS` is the measured hex
+    silhouette's own furthest vertex (1.128, computed from
+    `HEX_SPAWN_VERTS` — see deviation #12 and `.claude/skills/
+    crystal-hex-grid/SKILL.md`), NOT `r_max` (1.49 on his crystal, the
+    addressable RECTANGLE's corner): that difference is his "it currently
+    expands too far" — past the hex every further pixel of growth covers
+    dead cells. The forced formation and the fast fall CONTINUE through the
+    lull's first half; `_phase_spawn_paused` now pauses spawning only after
+    the fill, never from lull entry, and no longer has a charge clause at
+    all.
+
+    A SECOND PARTICLE FLAG: `p_nocap` (compacted and carried in the native
+    handoff snapshot like every other member) is now what the density-cap
+    arithmetic reads. `p_is_burst` keeps its narrower meaning — "a
+    drop-payoff particle", which additionally drives
+    `PHASE_BURST_SPEED_MULT` — so the charge/lull's forced blobs and the
+    blob rush (#19) bypass the cap without being mistaken for payoff
+    particles by anything that measures the explosion. Same split
+    `fireworks` made for the same reason (#17).
+
+    `blackhole1d` mirrors exactly the two halves that translate: the
+    accelerating formation (its own `_phase_spawn_rate`/`_phase_speed_mult`
+    and an `ignore_cap` on `_spawn`) and the half-way-dark lull ("fills the
+    hex" becomes "covers the strip" — it is a 1px ring view with no hex
+    silhouette of its own), with its charge halo thickening in place on the
+    sample ring instead of sweeping the strip away. Its pre-existing lull
+    phosphor dot is kept, and its drop is untouched. TIMING HONESTY: SpotFX
+    ramps `phase_progress` over ~90% of the real gap and then hangs at 1.0
+    (`scene_response._phase_ramp_ms`), so p=0.5 lands at ~45% of the lull's
+    true wall-clock duration — the closest an effect can get without being
+    told the duration. Evidence:
+    `scripts/check_blackhole_charge_lull.py` (darkness measured over
+    crystal-mapper's REAL cells, not the dummy rectangle); tests:
+    `tests/test_blackhole_charge_lull.py`, with
+    `scripts/check_drop_visible_onset.py` and
+    `tests/test_blackhole_orphan_drop_none_crash.py` re-run green for the
+    untouched drop. Not in the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

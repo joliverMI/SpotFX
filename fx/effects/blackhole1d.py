@@ -32,7 +32,23 @@ BAND_JITTER = 0.06
 # sample ring, then swallows it — the strip dims to black behind the
 # flash. The lull holds black with a phosphor dot; the drop sweeps back
 # and erupts a burst of blobs through the ring.
-CHARGE_HALO_LEAD = 1.4  # halo growth vs the swallowing disc
+# CHARGE / LULL, 2026-08-24 — the strip's mirror of the 2D Blackhole's own
+# rework (his ask, item 5; fx/effects/blackhole.py carries the verbatim
+# words and the reasoning). What maps: the charge no longer swallows the
+# strip — instead the ring's halo THICKENS and BRIGHTENS in place while
+# blob formation and fall speed accelerate; the lull then darkens the strip
+# progressively, reaching FULL BLACK at LULL_FILL_PROGRESS and holding, so
+# the second half of the lull is dark ("fills the hex" becomes "covers the
+# strip" here — the 1px ring view has no hex silhouette of its own). The
+# drop is untouched. Constants are restated rather than imported: these two
+# effect modules are independent vendored files and already restate
+# DROP_RESET_S/PHASE_BURST_N the same way.
+CHARGE_SPAWN_RATE_MAX = 12.0   # blobs/second at p=1 — his number
+CHARGE_SPAWN_CURVE = 2.0       # rate = MAX * p**CURVE, "not all at once"
+CHARGE_FALL_SPEED_MAX = 2.0    # infall speed multiplier at p=1
+CHARGE_HALO_W_MIN = 0.05       # halo half-width at p=0 …
+CHARGE_HALO_W_MAX = 0.16       # … and at p=1 (strip units, as gw below)
+LULL_FILL_PROGRESS = 0.5       # the strip is fully dark from here on
 DROP_RESET_S = 0.5      # post-burst ease of the strip back to life
 PHASE_BURST_N = 12      # blobs in the drop explosion
 
@@ -188,6 +204,9 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
         self.p_age = np.zeros(CAP, dtype=np.float32)
         self.n = 0
         self.spawn_acc = 0.0
+        # charge/lull forced-formation accumulator (_phase_spawn_rate)
+        self.phase_spawn_acc = 0.0
+        self._halo_w = None
         self.spin_total = 0.0
         self._beat_pending = False
         self.impulse = 0.0
@@ -287,10 +306,15 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
             arr[:count] = arr[: self.n][alive]
         self.n = count
 
-    def _spawn(self, count, beat_count, ring):
+    def _spawn(self, count, beat_count, ring, ignore_cap=False):
         # max_blobs is the user-facing density cap; CAP is the hard buffer
-        # cap. int(): morph smoothing can hand us float counts.
-        count = int(min(count, self.max_blobs - self.n, CAP - self.n))
+        # cap. `ignore_cap` spawns straight past max_blobs — the charge/lull
+        # forced formation ("ignore max counts"), the same override the 2D
+        # effect's own no-cap tag gives it. int(): morph smoothing can hand
+        # us float counts.
+        room = (CAP - self.n) if ignore_cap else min(
+            self.max_blobs - self.n, CAP - self.n)
+        count = int(min(count, room))
         if count <= 0:
             return
         s = slice(self.n, self.n + count)
@@ -336,7 +360,34 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
     # SpotFX writes `phase` (instant) and ramps `phase_progress` 0→1 over
     # the event's ramp. See the module constants for the strip translation.
 
+    def _phase_spawn_rate(self):
+        """Blobs per second the charge/lull FORCES into being, on top of the
+        ambient spawn — accelerating from ~0 to CHARGE_SPAWN_RATE_MAX across
+        the charge, then held through the lull until the strip is dark. The
+        2D effect's _phase_spawn_rate is the same function; its docstring
+        carries his words."""
+        phase = getattr(self, "_phase", "none")
+        p = float(np.clip(self.phase_progress, 0.0, 1.0))
+        if phase == "charge":
+            return CHARGE_SPAWN_RATE_MAX * p ** CHARGE_SPAWN_CURVE
+        if phase == "lull" and p < LULL_FILL_PROGRESS:
+            return CHARGE_SPAWN_RATE_MAX
+        return 0.0
+
+    def _phase_speed_mult(self):
+        """Fall-speed multiplier for the charge build, held through the
+        lull; 1.0 everywhere else, so the drop is untouched."""
+        phase = getattr(self, "_phase", "none")
+        if phase == "charge":
+            p = float(np.clip(self.phase_progress, 0.0, 1.0))
+            return 1.0 + (CHARGE_FALL_SPEED_MAX - 1.0) * p
+        if phase == "lull":
+            return CHARGE_FALL_SPEED_MAX
+        return 1.0
+
     def _enter_phase(self, phase):
+        self.phase_spawn_acc = 0.0
+        self._halo_w = None
         self._phase = phase
         self._phase_t = 0.0
         self._phase_done_t = None
@@ -438,13 +489,27 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
         halo_r = None
         halo_g = 0.0
         if phase == "charge":
+            # the charge no longer swallows the strip (his ask — the 2D
+            # horizon's radius holds too): the halo sits ON the sample ring
+            # and THICKENS/brightens as the build runs, and the strip stays
+            # fully lit underneath it while blobs pile in faster
             p = float(np.clip(self.phase_progress, 0.0, 1.0))
-            halo_r = min(CHARGE_HALO_LEAD * p * p, 1.0) * top
-            disc_r = p * p * top
-            mask = float(np.clip((ring + 0.04 - disc_r) / 0.12, 0.0, 1.0))
+            halo_r = ring
             halo_g = 0.25 + 0.75 * p
+            self._halo_w = CHARGE_HALO_W_MIN + (
+                CHARGE_HALO_W_MAX - CHARGE_HALO_W_MIN) * p
         elif phase == "lull":
-            mask = 0.0
+            # darken progressively, reaching FULL BLACK exactly at
+            # LULL_FILL_PROGRESS and holding — "so half of the lull should
+            # be dark" (the strip's own translation of the 2D horizon
+            # filling the hex)
+            p = float(np.clip(self.phase_progress, 0.0, 1.0))
+            fill = min(p / LULL_FILL_PROGRESS, 1.0)
+            mask = 1.0 - fill
+            if fill < 1.0:
+                halo_r = ring
+                halo_g = 1.0
+                self._halo_w = CHARGE_HALO_W_MAX
         else:  # drop — post-burst fade only (see _phase_step: the burst
                # fires on the phase's first frame, so there's no pre-burst
                # pinch state left to render here)
@@ -457,12 +522,12 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
         if halo_r is not None and halo_g > 0.0:
             # halo flash as the horizon crosses the sample ring — brighter
             # and wider as the charge builds
-            gw = 0.05 + 0.10 * halo_g
+            gw = getattr(self, "_halo_w", None) or (0.05 + 0.10 * halo_g)
             g = float(np.exp(-0.5 * ((halo_r - ring) / gw) ** 2)) * halo_g
             if g > 0.003:
                 out = np.minimum(out + np.float32(g * 235.0), 255.0)
-        if phase == "lull":
-            # lingering phosphor dot at the strip middle
+        if phase == "lull" and mask <= 0.0:
+            # lingering phosphor dot at the strip middle, once it IS dark
             mid = pixel_count // 2
             out[max(mid - 1, 0): mid + 2] = np.maximum(
                 out[max(mid - 1, 0): mid + 2], 70.0
@@ -499,7 +564,11 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
                 + (1.0 - self.edge_speed)
                 * np.clip(1.0 - r, 0.0, 1.0) ** self.accel
             )
-            v = v * (1.0 + self.speed_audio * self.impulse * 2.0)
+            v = (
+                v
+                * (1.0 + self.speed_audio * self.impulse * 2.0)
+                * self._phase_speed_mult()
+            )
             omega = np.clip(
                 self.swirl * SWIRL_DRIFT * v / np.maximum(r, R_FLOOR),
                 -OMEGA_MAX,
@@ -521,8 +590,16 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
             n = self.n
 
         # ── spawn ───────────────────────────────────────────────────────
-        # paused during the lull: the strip is black, blobs would be unseen
-        rate = 0.0 if self._phase == "lull" else self.spawn_rate * (
+        # paused only once the lull has actually gone dark (blobs would be
+        # unseen from there); through the charge and the lull's first half
+        # the ambient spawn keeps running underneath the forced formation
+        # below
+        dark = (
+            self._phase == "lull"
+            and float(np.clip(self.phase_progress, 0.0, 1.0))
+            >= LULL_FILL_PROGRESS
+        )
+        rate = 0.0 if dark else self.spawn_rate * (
             1.0 + self.spawn_audio * self.impulse * 3.0
         )
         self.spawn_acc += rate * dt
@@ -539,6 +616,16 @@ class Blackhole1d(AudioReactiveEffect, GradientEffect):
         ) % 1.0
         prev_n = self.n
         self._spawn(n_new, beat_count, ring)
+        # charge/lull forced formation: an accelerating RATE through an
+        # accumulator ("not all at once"), additive to the ambient spawn
+        # above and past max_blobs
+        forced_rate = self._phase_spawn_rate()
+        if forced_rate > 0.0:
+            self.phase_spawn_acc += forced_rate * dt
+            forced = int(self.phase_spawn_acc)
+            self.phase_spawn_acc -= forced
+            if forced:
+                self._spawn(forced, 0, ring, ignore_cap=True)
         if self.n > prev_n:
             # Fresh spawns render as stationary points this frame
             fresh = slice(prev_n, self.n)

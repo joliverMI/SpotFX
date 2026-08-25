@@ -47,6 +47,7 @@ const kindIcon = (k: FlareKind): string =>
   k.type === 'drift_jump' ? (k.jump === 'color_set' ? '🎨' : '🎲')
     : k.type === 'color_rotate' ? '🔄'
       : k.type === 'firework_burst' ? '🎆'
+      : k.type === 'blob_rush' ? '🌠'
         : k.type === 'momentary' ? '↩' : '⚓';
 
 const kindTypeLabel = (k: FlareKind): string =>
@@ -80,6 +81,7 @@ const TYPE_HINT: Record<string, string> = {
   momentary: 'Spikes and RETURNS exactly to the carried baseline (a creep\'s current wander position included) after its hold — 250 ms unless the kind sets its own hold_ms. Each param target is absolute, an offset from the carried baseline (up/down), or a fresh random draw in a range; intensity still steers strength via the band\'s ×scale.',
   permanent: 'Lands and BECOMES the new baseline drift carries from. Same target expressions as momentary (absolute / offset / random), just never released.',
   color_rotate: 'Rotates the live foreground colour\'s hue and returns it — degrees, ramp-in, dwell, and fade-back all scale from the fire\'s intensity; no knobs of its own.',
+  blob_rush: 'Twelve blobs appear at once on every live Black Hole, spread fairly evenly around the circle — arriving from the panel edge as it falls in, or leaving the event horizon while it is reversed. They ignore the effect\'s max-blob cap and disturb nothing already on screen; no knobs of its own.',
   firework_burst: 'Explodes extra payoff rockets the instant the flare fires, on every live fireworks effect — 3 rockets at intensity 0 up to 6 at intensity 1, on top of whatever the scene is already launching; no knobs of its own.',
 };
 

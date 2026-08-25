@@ -3437,6 +3437,42 @@ a later wiring stage. The Hue-DTLS / DDP single-sender exclusivity with the
 running LedFX service is resolved by the S3 ownership gate: the facade
 reaches live hardware only through the handover (see the S3 section above).
 
+## Black Hole (`fx/effects/blackhole.py`) — three things that bite
+
+Everything below is recorded in `fx/VENDOR.md` (#12, #14, #18, #19, #20)
+with the mechanism detail; this is the short list of traps.
+
+1. **`reverse` is a SPAWN-SIDE flag that also picks the sign of every live
+   blob's motion.** Nothing reverses a particle already in flight, which is
+   why flipping it back used to snap the whole outbound population around
+   in one frame. Since 2026-08-24 the True→False edge arms a real
+   turnaround (`_reverse_edge` → `_arm_reverse_fallback`, `p_turn`/`p_vr`,
+   `REVERSE_FALLBACK_TURN_S`) that merges back onto the speed curve with no
+   step at either seam; the outward eject stays instant by his own ask.
+   **Do not "fix" a horizon captive by releasing it** — PR #179 did exactly
+   that and was reverted the same day (#181, no reason recorded): a release
+   also evicts blobs the flare never moved AND makes them immortal (the
+   infall alive-test retires captives by their hold clock and never
+   free-fallers). The shipped fix instead pins a captive to the ring only
+   while it is AT the ring (`REVERSE_FALLBACK_RING_TOL`).
+2. **Two particle flags, not one.** `p_nocap` = "spawned past max_blobs"
+   (the drop payoff, the blob rush, the charge's forced formation) and is
+   what the density-cap arithmetic reads; `p_is_burst` = "a drop-payoff
+   particle" specifically, and additionally drives
+   `PHASE_BURST_SPEED_MULT`. Anything measuring the explosion filters on
+   `p_is_burst`; anything about the cap uses `p_nocap`. Conflating them
+   silently changes what the explosion measurements report.
+3. **The charge no longer swallows the panel, and the lull's fill stops at
+   the HEX bound, not `r_max`.** `HEX_FILL_RADIUS` (1.128, computed from
+   the measured `HEX_SPAWN_VERTS`) is where every real cell is already
+   covered; `r_max` (~1.49) is the addressable RECTANGLE's corner and every
+   pixel of growth past the hex covers dead cells — that gap was his "it
+   currently expands too far". Any "is the panel dark?" measurement on this
+   device must be taken over the REAL cells (the device profile's mask), not
+   the dummy rectangle a headless harness renders — see
+   `scripts/check_blackhole_charge_lull.py` for the instrument and
+   `.claude/skills/crystal-hex-grid/SKILL.md` for why.
+
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:
