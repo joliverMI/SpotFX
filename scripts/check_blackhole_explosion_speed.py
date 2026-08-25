@@ -70,11 +70,17 @@ async def _run_speed_variant(tmp_path: Path, sub: str, *, speed_mult: float,
 
         orig_spawn = effect._spawn
 
-        def logged_spawn(count, beat_count, _orig=orig_spawn):
+        def logged_spawn(count, beat_count, _orig=orig_spawn, **kw):
+            # AMBIENT spawns only: since 2026-08-24 the charge/lull also
+            # force blobs into being through this same function with
+            # ignore_cap=True (fx/effects/blackhole.py's _phase_spawn_rate),
+            # and this measurement is about the music-driven population the
+            # cap governs — counting the forced ones would silently change
+            # what this script reports.
             before = effect.n
-            _orig(count, beat_count)
+            _orig(count, beat_count, **kw)
             added = effect.n - before
-            if added > 0:
+            if added > 0 and not kw.get("ignore_cap"):
                 spawn_log.append((frame_idx[0], added))
 
         effect._spawn = logged_spawn

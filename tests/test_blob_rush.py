@@ -52,7 +52,7 @@ async def _rush(tmp_path, sub, *, config=None, prefill=0, count=12, frames=2):
         before_cap = effect.p_cap[: effect.n].copy()
         effect.update_config({"blob_rush": count})
         step(frames)
-        fresh = np.flatnonzero(effect.p_is_burst[: effect.n])
+        fresh = np.flatnonzero(effect.p_nocap[: effect.n])
         out = {
             "before_n": before_n, "n": effect.n,
             "fresh": len(fresh),
@@ -146,7 +146,7 @@ def test_the_key_self_resets_and_a_second_rush_edges(tmp_path):
                 effect.update_config({"blob_rush": 12})
                 step(1)
                 counts.append(int(np.count_nonzero(
-                    effect.p_is_burst[: effect.n])))
+                    effect.p_nocap[: effect.n])))
                 assert effect._config["blob_rush"] == 0
         await host.shutdown()
         return counts
@@ -170,7 +170,7 @@ def test_a_stale_persisted_count_never_rushes_on_a_fresh_instance(tmp_path):
                 frame = virtual.assemble_frame()
                 if frame is not None:
                     virtual.flush(frame)
-            fired = int(np.count_nonzero(effect.p_is_burst[: effect.n]))
+            fired = int(np.count_nonzero(effect.p_nocap[: effect.n]))
             key = effect._config["blob_rush"]
         await host.shutdown()
         return fired, key

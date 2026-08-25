@@ -221,7 +221,7 @@ async def section_3_to_5(scene, tmp_dir: str) -> None:
             # is a measured fact and not an empty-buffer coincidence
             frames(int(12.0 * 60))
             ambient = int(effect.n - np.count_nonzero(
-                effect.p_is_burst[: effect.n]))
+                effect.p_nocap[: effect.n]))
             # the ambient spawn holds the population right at its own
             # cap, which is what makes "past the cap" a measured fact and
             # not an empty-buffer coincidence. Spawning is then stopped so
@@ -230,7 +230,7 @@ async def section_3_to_5(scene, tmp_dir: str) -> None:
             frames(1)
             effect._spawn(64, 0)          # an ORDINARY spawn request…
             ambient = int(effect.n - np.count_nonzero(
-                effect.p_is_burst[: effect.n]))
+                effect.p_nocap[: effect.n]))
             _check(ambient == cap,
                    f"an ordinary 64-blob spawn request fills to exactly "
                    f"max_blobs={cap} and no further — the cap the rush is "
@@ -238,7 +238,7 @@ async def section_3_to_5(scene, tmp_dir: str) -> None:
 
             for probe in (0.2, 0.5, 0.9):     # one fire per energy band
                 pre = effect.n
-                pre_rush = int(np.count_nonzero(effect.p_is_burst[: effect.n]))
+                pre_rush = int(np.count_nonzero(effect.p_nocap[: effect.n]))
                 record = await responder.fire_kind(
                     next(k for k in scene.flare_kinds if k.name == KIND_NAME),
                     probe)
@@ -249,7 +249,7 @@ async def section_3_to_5(scene, tmp_dir: str) -> None:
                        "Black Hole (count does not move with intensity)")
                 frames(2)   # frame 1 lands the 1ms jump; frame 2 consumes
                 rushed = int(np.count_nonzero(
-                    effect.p_is_burst[: effect.n])) - pre_rush
+                    effect.p_nocap[: effect.n])) - pre_rush
                 _check(rushed == 12 and effect.n >= pre + 12 - 2,
                        f"  +12 no-cap blobs within two frames, from a "
                        f"population already at max_blobs={cap} "
@@ -260,7 +260,7 @@ async def section_3_to_5(scene, tmp_dir: str) -> None:
                 if probe == 0.2:
                     print("§4 spread out fairly evenly")
                 fresh_idx = np.flatnonzero(
-                    effect.p_is_burst[: effect.n])[-12:]
+                    effect.p_nocap[: effect.n])[-12:]
                 fresh = np.sort(effect.p_theta[fresh_idx] % (2 * np.pi))
                 gaps = np.diff(np.concatenate([fresh, [fresh[0] + 2 * np.pi]]))
                 step = 2 * np.pi / 12

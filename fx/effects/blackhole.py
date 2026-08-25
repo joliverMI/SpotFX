@@ -49,7 +49,52 @@ PHASE_BURST_N = 48       # blobs in the drop explosion (his ask: at least 2x
 # eruptions reuse the same out_mask/p_out mechanism but are never tagged
 # p_is_burst, so they are untouched by this multiplier.
 PHASE_BURST_SPEED_MULT = 2.0
-CHARGE_HALO_LEAD = 1.4   # halo (capture ring) growth vs the black disc
+# CHARGE / LULL (his ask, 2026-08-24, item 5 — the drop is deliberately
+# untouched by all of this): "for charge: instead of the black hole
+# expanding, accelerate the number of blobs forming (up to 12/second, but
+# not all at once), ignore max counts, accelerate their fall speed, and
+# increase the thickness of the event horizon slowly. Then, on the lull,
+# continue the fast blob falling but expand the event horizon until it
+# fills the hex (i think it currently expands too far) at half way through
+# the duration of the lull. So half of the lull should be dark."
+#
+# CHARGE: the horizon RADIUS now holds at its musical baseline for the
+# whole build (the old quadratic swallow, and the black disc that trailed
+# it by CHARGE_HALO_LEAD, are both gone) — what grows instead is the ring's
+# THICKNESS (_phase_halo's `w`, CHARGE_HALO_W_*), the blob formation RATE,
+# and the fall speed.
+CHARGE_SPAWN_RATE_MAX = 12.0   # blobs/second at p=1 — his number
+CHARGE_SPAWN_CURVE = 2.0       # rate = MAX * p**CURVE: "not all at once"
+                               # is the whole point — the rate ACCELERATES
+                               # from ~0, it never steps up
+CHARGE_FALL_SPEED_MAX = 2.0    # infall speed multiplier at p=1 (linear in
+                               # p, held through the lull)
+CHARGE_HALO_W_MIN = 0.05       # ring half-thickness at p=0 …
+CHARGE_HALO_W_MAX = 0.34       # … and at p=1 ("increase the thickness of
+                               # the event horizon slowly")
+
+# LULL: the horizon expands from its baseline to exactly FILL THE HEX at
+# this phase_progress, then HOLDS — so the rest of the lull is fully dark.
+# TIMING HONESTY: SpotFX ramps phase_progress over ~90% of the real gap and
+# then hangs at 1.0 (scene_response._phase_ramp_ms), so p=0.5 lands at
+# ~45% of the lull's true wall-clock duration, not exactly half. That is
+# the closest an effect can get to "half way through the duration of the
+# lull" without a duration it is never told.
+LULL_FILL_PROGRESS = 0.5
+# A hair past that bound, so the painted disc's own inner edge (_disc_radius
+# minus the 1-cell antialias margin draw() applies) still covers the
+# OUTERMOST real cells — the hexagon's own vertices sit exactly at
+# HEX_FILL_RADIUS, and a disc that stops exactly there leaves them lit.
+LULL_FILL_MARGIN = 0.05
+# The fill radius is the HEX SILHOUETTE's own outer bound — its furthest
+# vertex, ~1.13 normalized-r (.claude/skills/crystal-hex-grid/SKILL.md;
+# HEX_SPAWN_VERTS below is the measured silhouette). NOT r_max, which is
+# the addressable RECTANGLE's corner (~1.41 + 0.08) and is what the old
+# swallow grew to — the "it currently expands too far" he named: past the
+# hex, every further pixel of growth is over dead cells, so the panel is
+# already fully dark while the ring keeps climbing.
+# CHARGE_HALO_LEAD (the old halo-leads-the-disc head start) is retired
+# with the charge swallow it belonged to — see the block above.
 
 # reverse RELEASE fall-back (his ask, 2026-08-24: "when it reverses back to
 # normal, currently the blobs immediately change direction. I want them to
@@ -199,6 +244,9 @@ _HEX_FACES = _hex_spawn_faces()
 _HEX_FACE_NX = np.array([f[0] for f in _HEX_FACES], dtype=np.float32)
 _HEX_FACE_NY = np.array([f[1] for f in _HEX_FACES], dtype=np.float32)
 _HEX_FACE_D = np.array([f[2] for f in _HEX_FACES], dtype=np.float32)
+
+# the silhouette's furthest point from center — see LULL_FILL_PROGRESS
+HEX_FILL_RADIUS = max(math.hypot(vx, vy) for vx, vy in HEX_SPAWN_VERTS)
 
 
 def _hex_spawn_edge_radius(theta):
@@ -418,8 +466,18 @@ class Blackhole2d(Twod, GradientEffect):
         # PHASE_BURST_N can't starve the ambient/beat spawn that's supposed
         # to keep coming through the drop.
         self.p_is_burst = np.zeros(CAP, dtype=bool)
+        # True for any particle spawned PAST max_blobs — the drop payoff,
+        # the blob rush, and the charge/lull's forced formation. Kept
+        # SEPARATE from p_is_burst (which means specifically "a drop-payoff
+        # particle" and additionally drives PHASE_BURST_SPEED_MULT): every
+        # p_is_burst particle is p_nocap, but not the reverse, and the
+        # density-cap arithmetic in _spawn reads THIS one. Same split
+        # fireworks made for the same reason (fx/VENDOR.md #17's p_nocap).
+        self.p_nocap = np.zeros(CAP, dtype=bool)
         self.n = 0
         self.spawn_acc = 0.0
+        # charge/lull forced-formation accumulator (_phase_spawn_rate)
+        self.phase_spawn_acc = 0.0
         self.spin_total = 0.0
         self._beat_pending = False
         self.impulse = 0.0
@@ -607,6 +665,7 @@ class Blackhole2d(Twod, GradientEffect):
             self.p_cap,
             self.p_out,
             self.p_is_burst,
+            self.p_nocap,
             self.p_turn,
             self.p_vr,
         ):
@@ -650,7 +709,7 @@ class Blackhole2d(Twod, GradientEffect):
                     for name in (
                         "p_r", "p_theta", "p_grad", "p_bright",
                         "p_age", "p_band", "p_cap", "p_out", "p_is_burst",
-                        "p_turn", "p_vr",
+                        "p_nocap", "p_turn", "p_vr",
                     )
                 },
             },
@@ -769,6 +828,7 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_band[:k] = 0
         self.p_cap[:k] = -1.0
         self.p_is_burst[:k] = False  # adopted blobs are ordinary population
+        self.p_nocap[:k] = False
         self.p_turn[:k] = False      # ... and never mid-turnaround
         self.p_vr[:k] = 0.0
         self.n = k
@@ -872,6 +932,7 @@ class Blackhole2d(Twod, GradientEffect):
         self._phase = phase
         self._phase_t = 0.0
         self._phase_done_t = None
+        self.phase_spawn_acc = 0.0
         if phase == "charge":
             self._drop = None
             # charge always falls inward; remember the configured direction
@@ -938,6 +999,7 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_cap[s] = -1.0
         self.p_band[s] = 0
         self.p_is_burst[s] = True
+        self.p_nocap[s] = True     # the payoff must always land in full
         self.p_turn[s] = False
         self.p_vr[s] = 0.0
         if self.color_mode == "wheel":
@@ -1023,18 +1085,53 @@ class Blackhole2d(Twod, GradientEffect):
                         fire_event=False,
                     )
 
+    def _phase_spawn_rate(self):
+        """Blobs per second the charge/lull FORCES into being, on top of
+        whatever the ambient/beat spawn is already doing (his ask, 2026-08-24:
+        "accelerate the number of blobs forming (up to 12/second, but not all
+        at once), ignore max counts"). A RATE through an accumulator, never a
+        batch: it accelerates from ~0 to CHARGE_SPAWN_RATE_MAX as the charge
+        builds (p**CHARGE_SPAWN_CURVE), and the lull CONTINUES at the charge's
+        final rate until the horizon has swallowed the panel, after which
+        there is nothing left to see (_phase_spawn_paused draws the same
+        line)."""
+        phase = getattr(self, "_phase", "none")
+        p = float(np.clip(self.phase_progress, 0.0, 1.0))
+        if phase == "charge":
+            return CHARGE_SPAWN_RATE_MAX * p ** CHARGE_SPAWN_CURVE
+        if phase == "lull" and p < LULL_FILL_PROGRESS:
+            return CHARGE_SPAWN_RATE_MAX
+        return 0.0
+
+    def _phase_speed_mult(self):
+        """Fall-speed multiplier for the charge build ("accelerate their
+        fall speed") — linear in p from 1.0 to CHARGE_FALL_SPEED_MAX, then
+        HELD through the lull so the fast falling continues into the dark.
+        1.0 (inert) in every other phase, so the drop is untouched."""
+        phase = getattr(self, "_phase", "none")
+        if phase == "charge":
+            p = float(np.clip(self.phase_progress, 0.0, 1.0))
+            return 1.0 + (CHARGE_FALL_SPEED_MAX - 1.0) * p
+        if phase == "lull":
+            return CHARGE_FALL_SPEED_MAX
+        return 1.0
+
     def _phase_spawn_paused(self, rh):
-        """Ambient spawning pauses while the panel is swallowed (lull, late
-        charge). The drop clause is a defensive no-op in the current
+        """Ambient spawning pauses only while the panel is actually
+        swallowed. Since 2026-08-24 that is a LULL-ONLY, LATE-ONLY state:
+        the charge no longer swallows anything (its radius holds — see
+        _horizon_radius), and the lull only goes dark once the horizon has
+        reached the hex at LULL_FILL_PROGRESS, so blobs keep forming and
+        falling into it for the whole first half ("continue the fast blob
+        falling"). The drop clause is a defensive no-op in the current
         design (burst_t lands in the same _phase_step call that enters
         "drop" — see that method — so there is no live pre-burst window
         left to pause spawning during); kept so a future change to when
         the burst fires doesn't silently let ambient spawn clutter the
         payoff's very first frame again."""
         if self._phase == "lull":
-            return True
-        if self._phase == "charge" and rh >= 1.0:
-            return True
+            return float(np.clip(self.phase_progress, 0.0, 1.0)) >= (
+                LULL_FILL_PROGRESS)
         if self._phase == "drop":
             drop = self._drop
             return drop is None or drop["burst_t"] is None
@@ -1043,7 +1140,10 @@ class Blackhole2d(Twod, GradientEffect):
     def _horizon_radius(self):
         """Current event-horizon radius: baseline scaled by the audio impulse
         (grows with sound when horizon_audio is positive). The charge/lull/
-        drop phases override it: growth to full-panel, hold, pinch + reset."""
+        drop phases override it: charge HOLDS the baseline (only the ring's
+        thickness grows — see _phase_halo), the lull expands it to fill the
+        hex silhouette by LULL_FILL_PROGRESS and holds it there, the drop
+        pinches + resets."""
         base = float(
             np.clip(
                 self.horizon_scale * (1.0 + self.horizon_audio * self.impulse),
@@ -1054,17 +1154,22 @@ class Blackhole2d(Twod, GradientEffect):
         phase = getattr(self, "_phase", "none")
         if phase == "none":
             return base
-        top = float(getattr(self, "r_max", 1.5))
         if phase == "charge":
-            p = float(np.clip(self.phase_progress, 0.0, 1.0))
-            # quadratic swallow, with the halo (this capture ring) leading
-            # the black disc (_disc_radius) by CHARGE_HALO_LEAD — the glow
-            # sweeps the panel ahead of the dark
-            return base + (top - base) * min(
-                CHARGE_HALO_LEAD * p * p, 1.0
-            )
+            # his ask, 2026-08-24: "instead of the black hole expanding" —
+            # the radius holds at its musical baseline for the whole build.
+            # What builds instead is the ring's THICKNESS (_phase_halo), the
+            # blob formation rate and the fall speed (_phase_spawn_rate /
+            # _phase_speed_mult). The old quadratic swallow — and the black
+            # disc that trailed it by CHARGE_HALO_LEAD — are gone.
+            return base
         if phase == "lull":
-            return top
+            # expand from the baseline to exactly fill the hex silhouette at
+            # LULL_FILL_PROGRESS, then HOLD (so the rest of the lull is
+            # fully dark). HEX_FILL_RADIUS, never r_max: see that constant.
+            p = float(np.clip(self.phase_progress, 0.0, 1.0))
+            fill = min(p / LULL_FILL_PROGRESS, 1.0)
+            top = max(HEX_FILL_RADIUS + LULL_FILL_MARGIN, base)
+            return base + (top - base) * fill
         # drop: the burst fires (and the horizon starts easing back from
         # zero) on the very first frame of the phase — see _phase_step's
         # own docstring on why there is no pre-burst pinch state left to
@@ -1102,9 +1207,21 @@ class Blackhole2d(Twod, GradientEffect):
         back after the burst."""
         phase = self._phase
         if phase == "charge":
+            # "increase the thickness of the event horizon slowly" — with
+            # the radius now holding still (see _horizon_radius), this ring
+            # thickening IS the charge's own build.
             p = float(np.clip(self.phase_progress, 0.0, 1.0))
-            w = 0.05 + 0.17 * p    # half-thickness (normalized radius)
+            w = CHARGE_HALO_W_MIN + (
+                CHARGE_HALO_W_MAX - CHARGE_HALO_W_MIN) * p
             b = 0.30 + 0.70 * p    # brightness scale
+        elif phase == "lull":
+            # the ring keeps its charge-end thickness as it sweeps out to
+            # fill the hex; once filled it stops painting entirely, because
+            # "half of the lull should be dark" means nothing lights a real
+            # cell — not even this ring's own outer tail
+            p = float(np.clip(self.phase_progress, 0.0, 1.0))
+            w = CHARGE_HALO_W_MAX
+            b = 1.0 if p < LULL_FILL_PROGRESS else 0.0
         elif phase == "drop":
             # post-burst fade only — the burst fires on the phase's first
             # frame (see _phase_step), so there is no pre-burst pinch state
@@ -1127,26 +1244,18 @@ class Blackhole2d(Twod, GradientEffect):
         out += glow[..., None] * (self.horizon_rgb[None, None, :] * b)
 
     def _disc_radius(self, rh):
-        """Painted black-disc radius. Equals the horizon everywhere except
-        during a charge, where the halo (capture ring, `rh`) grows
-        quadratically with a head start and the disc follows on the plain
-        quadratic — the glowing ring visibly outruns the black."""
-        if getattr(self, "_phase", "none") != "charge":
-            return rh
-        base = float(
-            np.clip(
-                self.horizon_scale * (1.0 + self.horizon_audio * self.impulse),
-                0.02,
-                0.9,
-            )
-        )
-        top = float(getattr(self, "r_max", 1.5))
-        p = float(np.clip(self.phase_progress, 0.0, 1.0))
-        return base + (top - base) * p * p
+        """Painted black-disc radius — always the horizon itself now. The
+        charge used to grow its own black disc behind a leading halo
+        (CHARGE_HALO_LEAD); with the charge's radius holding at baseline
+        (his ask — see _horizon_radius) there is no separate curve left to
+        follow, and no expanding black disc during the build at all. The
+        lull's own expansion is the horizon's, so the disc follows it and
+        the panel goes dark exactly when the ring reaches the hex."""
+        return rh
 
     def _spawn(self, count, beat_count, *, theta=None, ignore_cap=False):
         """max_blobs is the user-facing density cap; CAP is the hard buffer
-        cap. The cap counts only ambient (non-burst) population — a drop's
+        cap. The cap counts only ambient (non-no-cap) population — a drop's
         _phase_burst blobs are excluded (see its own docstring) so a large
         surviving burst can never pause the music-driven ambient/beat
         spawn this function drives; CAP - self.n still bounds the total
@@ -1162,7 +1271,7 @@ class Blackhole2d(Twod, GradientEffect):
 
         int(): morph smoothing can hand us float counts, which numpy's rng
         size argument rejects."""
-        ambient_n = self.n - int(np.count_nonzero(self.p_is_burst[: self.n]))
+        ambient_n = self.n - int(np.count_nonzero(self.p_nocap[: self.n]))
         room = (CAP - self.n) if ignore_cap else min(
             self.max_blobs - ambient_n, CAP - self.n)
         count = int(min(count, room))
@@ -1170,7 +1279,8 @@ class Blackhole2d(Twod, GradientEffect):
             return
         s = slice(self.n, self.n + count)
         rng = self._rng
-        self.p_is_burst[s] = ignore_cap
+        self.p_is_burst[s] = False   # only _phase_burst's payoff is that
+        self.p_nocap[s] = ignore_cap
         # theta drawn first (both branches want it) — infall mode needs it
         # to look up the boundary at each particle's own spawn direction.
         theta = (
@@ -1435,7 +1545,12 @@ class Blackhole2d(Twod, GradientEffect):
                 + (1.0 - self.edge_speed)
                 * np.clip(1.0 - r, 0.0, 1.0) ** self.accel
             )
-            v = v * (1.0 + self.speed_audio * self.impulse * 2.0) * wind
+            v = (
+                v
+                * (1.0 + self.speed_audio * self.impulse * 2.0)
+                * wind
+                * self._phase_speed_mult()
+            )
             omega = np.clip(
                 self.swirl * v / np.maximum(r, R_FLOOR),
                 -OMEGA_MAX,
@@ -1592,6 +1707,28 @@ class Blackhole2d(Twod, GradientEffect):
                 fresh = slice(prev_n, self.n)
                 r0 = np.concatenate([r0, self.p_r[fresh]]) if prev_n else self.p_r[fresh].copy()
                 th0 = np.concatenate([th0, self.p_theta[fresh]]) if prev_n else self.p_theta[fresh].copy()
+
+        # ── charge/lull forced formation ────────────────────────────────
+        # An accelerating RATE, additive to the ambient spawn above and
+        # bypassing max_blobs (_spawn's no-cap tag), so a build genuinely
+        # thickens with blobs instead of stalling at the density cap.
+        # "not all at once": the accumulator turns the rate into blobs a
+        # frame at a time, never a batch.
+        if col is None and not holding:
+            rate = self._phase_spawn_rate()
+            if rate > 0.0:
+                self.phase_spawn_acc += rate * dt
+                forced = int(self.phase_spawn_acc)
+                self.phase_spawn_acc -= forced
+                if forced:
+                    prev_n = self.n
+                    self._spawn(forced, 0, ignore_cap=True)
+                    if self.n > prev_n:
+                        fresh = slice(prev_n, self.n)
+                        r0 = np.concatenate([r0, self.p_r[fresh]]) if prev_n else self.p_r[fresh].copy()
+                        th0 = np.concatenate([th0, self.p_theta[fresh]]) if prev_n else self.p_theta[fresh].copy()
+            elif self._phase == "none":
+                self.phase_spawn_acc = 0.0
 
         # ── blob rush ───────────────────────────────────────────────────
         # A flare-driven "12 blobs, now, evenly spread" write. Deliberately

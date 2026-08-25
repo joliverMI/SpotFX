@@ -71,14 +71,18 @@ class _OldCapBlackhole2d(Blackhole2d):
     """Reproduces the PRE-FIX ambient-spawn cap: gated on total live
     population (self.n), burst particles included — the formula no longer
     exists in blackhole.py, restated here only for this regression
-    comparison. Achieved by zeroing the burst tag before delegating to the
+    comparison. Achieved by zeroing the no-cap tag before delegating to the
     real (fixed) `_spawn`, so its `ambient_n = self.n -
-    count_nonzero(p_is_burst)` collapses to `ambient_n == self.n`, exactly
+    count_nonzero(p_nocap)` collapses to `ambient_n == self.n`, exactly
     the old `max_blobs - self.n` arithmetic."""
 
-    def _spawn(self, count, beat_count):
-        self.p_is_burst[: self.n] = False
-        super()._spawn(count, beat_count)
+    def _spawn(self, count, beat_count, **kw):
+        # p_nocap is the flag the cap arithmetic reads (since 2026-08-24 it
+        # is split from p_is_burst, which now means specifically "a
+        # drop-payoff particle"); zeroing it collapses `ambient_n` back to
+        # `self.n`, which is the old formula.
+        self.p_nocap[: self.n] = False
+        super()._spawn(count, beat_count, **kw)
 
 
 def _attach_custom_effect(host, virtual, effect_cls, config):
@@ -131,11 +135,17 @@ async def _run_variant(tmp_path: Path, sub: str, effect_cls, *, max_blobs=50):
 
         orig_spawn = effect._spawn
 
-        def logged_spawn(count, beat_count, _orig=orig_spawn):
+        def logged_spawn(count, beat_count, _orig=orig_spawn, **kw):
+            # AMBIENT spawns only: since 2026-08-24 the charge/lull also
+            # force blobs into being through this same function with
+            # ignore_cap=True (fx/effects/blackhole.py's _phase_spawn_rate),
+            # and this measurement is about the music-driven population the
+            # cap governs — counting the forced ones would silently change
+            # what this script reports.
             before = effect.n
-            _orig(count, beat_count)
+            _orig(count, beat_count, **kw)
             added = effect.n - before
-            if added > 0:
+            if added > 0 and not kw.get("ignore_cap"):
                 spawn_log.append((frame_idx[0], added))
 
         effect._spawn = logged_spawn
