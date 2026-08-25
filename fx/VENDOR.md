@@ -368,6 +368,37 @@ variables named `ledfx` (the core object handle) are untouched.
     `tests/test_blackhole_reverse_fallback.py`. Not in the fork source at
     `/home/javi/ledfx-src`.
 
+19. `effects/blackhole.py`: the BLOB RUSH (NEW MECHANISM, PR
+    fm/blackhole-rush-and-charge-lull). His ask, verbatim: "add a new
+    effect that runs as a shape flare that randomly chooses between the
+    momentary reverse and this one. This one is called 'blob rush' and it
+    just generates 12 blobs all at once spread out fairly evenly. Override
+    any max blob counts for this generation if that's easy, or remove the
+    ones in the event horizon." New `blob_rush` config key (int, 0-64,
+    default 0, ADVANCED) — SpotFX's `blob_rush` flare kind writes an
+    instant "spawn this many blobs NOW" count; the effect edge-detects it
+    in `config_updated` exactly like the phase key and fireworks'
+    `burst_rockets` (#15) — a stale persisted value never fires on a fresh
+    instance — consumes it in the next draw, and self-resets the key to 0
+    via the same sanctioned in-render `_apply_config(validate=False,
+    fire_event=False)` path. `_blob_rush()` places the blobs at even
+    `2*pi/k` angles, the whole ring randomly rotated per rush, each nudged
+    by at most `BLOB_RUSH_WIGGLE_FRAC` (1/6, fireworks' own wiggle from
+    #16) of one step; `_spawn()` grew `theta=`/`ignore_cap=` keyword
+    arguments so the rush reuses the ordinary spawn's own colour/placement
+    logic — arriving just past the true per-direction hex boundary in
+    infall (#12) and from the horizon ring in reverse — while bypassing
+    `max_blobs` via the existing `p_is_burst` no-cap tag. His first
+    override option was taken and his second ("remove the ones in the
+    event horizon") deliberately was NOT: nothing already on screen is
+    touched. Purely additive: no carry, no release, no lead. Deliberately
+    NOT mirrored to `blackhole1d` — it is a 1px ring view with no hex
+    boundary to arrive from, and his ask named Black Hole's own event
+    horizon and max blob counts. Evidence: `scripts/check_blob_rush.py`
+    (his real Black Hole V2 scene, read-only, at his crystal's 72x37
+    shape); tests: `tests/test_blob_rush.py`. Not in the fork source at
+    `/home/javi/ledfx-src` (SpotFX-authored mechanism).
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

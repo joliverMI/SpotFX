@@ -93,6 +93,23 @@ REVERSE_FALLBACK_TURN_S = 0.5
 # _arm_reverse_fallback's own docstring).
 REVERSE_FALLBACK_RING_TOL = 0.02
 
+# BLOB RUSH (his ask, 2026-08-24): "a new effect that runs as a shape flare
+# ... it just generates 12 blobs all at once spread out fairly evenly.
+# Override any max blob counts for this generation if that's easy". The
+# count is SpotFX's (scene_response.BLOB_RUSH_BLOBS) and arrives on the
+# `blob_rush` config key — an instant "spawn this many NOW" write,
+# edge-detected in config_updated and self-reset after firing, exactly like
+# fireworks' `burst_rockets` (fx/VENDOR.md #15) and the phase keys. "Fairly
+# evenly" is fireworks' own equidistant-rocket shape (#16): even 2*pi/k
+# spacing, the whole ring randomly rotated per rush, each blob nudged by at
+# most BLOB_RUSH_WIGGLE_FRAC of one step — so no two ever swap order and
+# the ring still reads as a ring. The cap override is the p_is_burst
+# no-cap tag the drop payoff already uses (see _spawn): rush blobs don't
+# occupy max_blobs, so a rush can never silence the ambient/beat spawn
+# underneath it — his "or remove the ones in the event horizon" alternative
+# is deliberately NOT taken, nothing already on screen is disturbed.
+BLOB_RUSH_WIGGLE_FRAC = 1.0 / 6.0   # fireworks' own wiggle (deviation #16)
+
 # infall-mode (`reverse=False`) spawn boundary, in the same normalized-r
 # units as radius_scale (r=1 sits at the panel's own rectangular edge).
 #
@@ -207,6 +224,8 @@ class Blackhole2d(Twod, GradientEffect):
     # hidden — colors update in place, recreation would kill the particles.
     # phase/phase_progress are SpotFX-driven choreography; advanced (not
     # hidden) so the arc can be hand-scrubbed in the LedFX UI for tuning.
+    # blob_rush is the same kind of key (SpotFX's blob_rush flare drives
+    # it; self-resets after firing).
     HIDDEN_KEYS = Twod.HIDDEN_KEYS + ["gradient_roll", "color_blend"]
     ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
         "accel",
@@ -215,6 +234,7 @@ class Blackhole2d(Twod, GradientEffect):
         "impulse_decay",
         "phase",
         "phase_progress",
+        "blob_rush",
         "horizon_follow_blobs",
     ]
 
@@ -361,6 +381,11 @@ class Blackhole2d(Twod, GradientEffect):
                 default=False,
             ): bool,
             vol.Optional(
+                "blob_rush",
+                description="Blobs to spawn right now, evenly spread (driven by SpotFX flares; self-resets)",
+                default=0,
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=64)),
+            vol.Optional(
                 "phase",
                 description="Charge/lull/drop choreography phase (driven by SpotFX)",
                 default="none",
@@ -497,6 +522,20 @@ class Blackhole2d(Twod, GradientEffect):
             # speed, which only the render step computes.
             if prev_reverse is not None and prev_reverse != self.reverse:
                 self._reverse_edge = "fallback" if prev_reverse else "eject"
+
+        # BLOB RUSH: edge-detect the count exactly like fireworks'
+        # burst_rockets (SpotFX writes a count, draw consumes it and
+        # self-resets the key to 0 so an identical later write edges again)
+        new_rush = int(self._config.get("blob_rush", 0))
+        if not hasattr(self, "_rush_seen"):
+            # creation baseline: a stale persisted count must never rush on
+            # a fresh instance
+            self._rush_seen = new_rush
+            self._rush_pending = 0
+        elif new_rush != self._rush_seen:
+            self._rush_seen = new_rush
+            if new_rush > 0:
+                self._rush_pending += new_rush
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -855,6 +894,31 @@ class Blackhole2d(Twod, GradientEffect):
             # sanctioned in-render config path (we're under the effect lock)
             self._apply_config(dict(saved), validate=False, fire_event=False)
 
+    def _blob_rush(self, count):
+        """BLOB RUSH: `count` blobs at once, spread fairly evenly around
+        the circle (his ask, 2026-08-24 — see BLOB_RUSH_WIGGLE_FRAC).
+        Bypasses max_blobs via _spawn's no-cap tag, so the rush never eats
+        the ambient population's budget and nothing already on screen is
+        touched. Placement follows the mode the effect is actually in: in
+        infall they arrive from the true per-direction hex boundary (the
+        same _hex_spawn_edge_radius spawn an ordinary blob uses, so a rush
+        reads as a wave arriving from the edge), in reverse they leave from
+        the horizon ring."""
+        count = int(min(count, CAP - self.n))
+        if count <= 0:
+            return 0
+        rng = self._rng
+        step = 2.0 * np.pi / count
+        theta = (
+            rng.uniform(0.0, 2.0 * np.pi)
+            + np.arange(count) * step
+            + rng.uniform(-BLOB_RUSH_WIGGLE_FRAC, BLOB_RUSH_WIGGLE_FRAC,
+                          count) * step
+        ) % (2.0 * np.pi)
+        before = self.n
+        self._spawn(count, 0, theta=theta, ignore_cap=True)
+        return self.n - before
+
     def _phase_burst(self):
         """Drop payoff: a guaranteed burst of full-bright blobs from the
         center (bypasses max_blobs — the explosion must always land).
@@ -1080,25 +1144,40 @@ class Blackhole2d(Twod, GradientEffect):
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
         return base + (top - base) * p * p
 
-    def _spawn(self, count, beat_count):
-        # max_blobs is the user-facing density cap; CAP is the hard buffer cap.
-        # The cap counts only ambient (non-burst) population — a drop's
-        # _phase_burst blobs are excluded (see its own docstring) so a large
-        # surviving burst can never pause the music-driven ambient/beat
-        # spawn this function drives; CAP - self.n still bounds the total
-        # buffer regardless of tag.
-        # int(): morph smoothing can hand us float counts, which numpy's rng
-        # size argument rejects.
+    def _spawn(self, count, beat_count, *, theta=None, ignore_cap=False):
+        """max_blobs is the user-facing density cap; CAP is the hard buffer
+        cap. The cap counts only ambient (non-burst) population — a drop's
+        _phase_burst blobs are excluded (see its own docstring) so a large
+        surviving burst can never pause the music-driven ambient/beat
+        spawn this function drives; CAP - self.n still bounds the total
+        buffer regardless of tag.
+
+        `ignore_cap` spawns straight past max_blobs and tags the result
+        p_is_burst — the same no-cap treatment, for the blob rush (his
+        "Override any max blob counts for this generation"). `theta`
+        (optional) places the new blobs at chosen angles instead of
+        uniformly random ones — the rush's even spread; colours are still
+        baked from the angle actually used, so a wheel gradient stays
+        consistent with where each blob sits.
+
+        int(): morph smoothing can hand us float counts, which numpy's rng
+        size argument rejects."""
         ambient_n = self.n - int(np.count_nonzero(self.p_is_burst[: self.n]))
-        count = int(min(count, self.max_blobs - ambient_n, CAP - self.n))
+        room = (CAP - self.n) if ignore_cap else min(
+            self.max_blobs - ambient_n, CAP - self.n)
+        count = int(min(count, room))
         if count <= 0:
             return
         s = slice(self.n, self.n + count)
         rng = self._rng
-        self.p_is_burst[s] = False
+        self.p_is_burst[s] = ignore_cap
         # theta drawn first (both branches want it) — infall mode needs it
         # to look up the boundary at each particle's own spawn direction.
-        theta = rng.uniform(0.0, 2 * np.pi, count).astype(np.float32)
+        theta = (
+            rng.uniform(0.0, 2 * np.pi, count).astype(np.float32)
+            if theta is None
+            else np.asarray(theta, dtype=np.float32)[:count]
+        )
         if self.reverse:
             # With an event horizon, eruptions come from the horizon ring.
             inner = (
@@ -1513,6 +1592,32 @@ class Blackhole2d(Twod, GradientEffect):
                 fresh = slice(prev_n, self.n)
                 r0 = np.concatenate([r0, self.p_r[fresh]]) if prev_n else self.p_r[fresh].copy()
                 th0 = np.concatenate([th0, self.p_theta[fresh]]) if prev_n else self.p_theta[fresh].copy()
+
+        # ── blob rush ───────────────────────────────────────────────────
+        # A flare-driven "12 blobs, now, evenly spread" write. Deliberately
+        # NOT gated by _phase_spawn_paused: like the firework_burst flare
+        # (fx/VENDOR.md #15) an explicitly-fired burst still lands during a
+        # swallow, the same way the drop payoff itself does. It IS gated by
+        # the collapse/hold latches, where physics is replaced wholesale and
+        # a fresh spawn would be stranded. Self-reset re-arms the edge; a
+        # stale persisted count on a fresh instance (nonzero _rush_seen with
+        # nothing pending — the creation baseline armed no spawn) is reset
+        # the same way, so the key reads 0 whenever idle.
+        if col is None and not holding and (
+            self._rush_pending or self._rush_seen
+        ):
+            pending = self._rush_pending
+            self._rush_pending = 0
+            if pending:
+                prev_n = self.n
+                self._blob_rush(pending)
+                if self.n > prev_n:
+                    fresh = slice(prev_n, self.n)
+                    r0 = np.concatenate([r0, self.p_r[fresh]]) if prev_n else self.p_r[fresh].copy()
+                    th0 = np.concatenate([th0, self.p_theta[fresh]]) if prev_n else self.p_theta[fresh].copy()
+            self._apply_config(
+                {"blob_rush": 0}, validate=False, fire_event=False
+            )
         n = self.n
 
         if self.horizon_follow_blobs:

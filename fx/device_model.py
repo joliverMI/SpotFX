@@ -196,6 +196,19 @@ PHASE_EFFECTS = frozenset({
 # never editor surfaces or band patches.
 FIREWORK_BURST_EFFECTS = frozenset({"fireworks", "fireworks1d"})
 
+# The vendored effects carrying the flare-driven BLOB RUSH: the `blob_rush`
+# config key (an instant "spawn this many blobs NOW, evenly spread" count,
+# edge-detected in config_updated, consumed per draw, self-reset to 0 after
+# firing — see fx/effects/blackhole.py's _blob_rush). Same discipline as
+# the two sets above: deliberately NOT part of the effect-parameter
+# registry below, so it rides ONLY the dedicated blob_rush flare write
+# (spectra scene_response._blob_rush), never an editor surface or a band
+# patch. 2D Blackhole only — blackhole1d is a 1px ring view of the same
+# field with no hex boundary to arrive from and its own per-strip
+# population; his ask named Black Hole's event horizon and its max blob
+# counts, and mirroring it there was not asked for.
+BLOB_RUSH_EFFECTS = frozenset({"blackhole"})
+
 
 # ── effect-parameter registry ────────────────────────────────────────────────
 
