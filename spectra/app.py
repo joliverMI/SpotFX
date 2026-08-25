@@ -36,7 +36,7 @@ from spectra.api import (av_sync, device_preview, feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
                          ownership, registry, room_controls, room_preview,
                          scenes, sequencer, settings_console, show_review,
-                         sonic_usage, spec, triggers)
+                         sonic_usage, spec, test_session, triggers)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -92,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(spec.router)
     app.include_router(gradient2d.router)
     app.include_router(av_sync.router)
+    app.include_router(test_session.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):

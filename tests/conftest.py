@@ -270,6 +270,18 @@ def _isolated_activation_report():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_test_session(tmp_path, monkeypatch):
+    """spectra/services/test_session.py (the TESTING IN PROGRESS declared-
+    take record) is a plain module-level file store with no DI seam — same
+    class as fire_history/sonic_usage above. A test that declares a take
+    would otherwise write into the real repo's storage/spectra/ and, worse,
+    leave his live bar claiming a test is running. Autouse so no individual
+    test needs to know this store exists."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "TEST_SESSION_FILE", tmp_path / "test_session.json")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_sonic_usage(tmp_path, monkeypatch):
     """spectra/services/sonic_usage.py (Sonic's durable per-call token-usage
     record, review page) is written from inside settings_agent.run_turn /

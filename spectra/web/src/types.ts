@@ -1179,3 +1179,55 @@ export interface SonicUsageSummary {
   timezone: string;
   day_boundary_hour_local: number;
 }
+
+/* ── TESTING IN PROGRESS — the room-visibility surface (his ask 2026-08-24,
+ * spectra/services/test_session.py) ── */
+
+/** One reason the bar is up. `kind` "auto" is one of the app's own test
+ * paths, folded live server-side with zero agent discipline; "declared" is
+ * a human/agent's declared take. */
+export interface TestSessionSource {
+  key: string;
+  label: string;
+  detail: string | null;
+  kind: 'auto' | 'declared';
+}
+
+export interface TestSessionDeclaration {
+  actor: string;
+  reason: string;
+  since_ms: number;
+  expires_ms: number;
+  ttl_s: number;
+}
+
+/** "no" is the ONLY value that hides the bar, and the server only ever
+ * reaches it on positive evidence of quiet — "unknown" (an unreadable
+ * store, a probe that raised) SHOWS, in its own distinct form. */
+export interface TestSessionStatus {
+  testing: 'yes' | 'no' | 'unknown';
+  sources: TestSessionSource[];
+  declared: TestSessionDeclaration | null;
+  since_ms: number | null;
+  readable: boolean;
+  now_ms: number;
+}
+
+/** GET /spectra/api/liveness — the published contract (spectra/api/
+ * ownership.py). The bar reads it for the half that matters most:
+ * OWNING the room is not the same as PAINTING it. */
+export interface LivenessVirtual {
+  active: boolean;
+  fresh: boolean;
+  age_s: number | null;
+}
+
+export interface Liveness {
+  contract: string;
+  owner: string;
+  state: string;
+  healthy: boolean;
+  stale_after_s: number;
+  virtuals: Record<string, LivenessVirtual>;
+  activation_gaps: Record<string, unknown>;
+}
