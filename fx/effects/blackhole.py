@@ -51,6 +51,48 @@ PHASE_BURST_N = 48       # blobs in the drop explosion (his ask: at least 2x
 PHASE_BURST_SPEED_MULT = 2.0
 CHARGE_HALO_LEAD = 1.4   # halo (capture ring) growth vs the black disc
 
+# reverse RELEASE fall-back (his ask, 2026-08-24: "when it reverses back to
+# normal, currently the blobs immediately change direction. I want them to
+# accelerate back to the black hole, but not immediately change direction...
+# The current setting is too jerky").
+#
+# `reverse` is a SPAWN-SIDE flag: it decides where a blob is BORN (horizon
+# ring vs the hex boundary) and which sign draw()'s `new_r = r ± v·dt` uses
+# for EVERY live blob. Nothing ever reversed the velocity of a particle
+# already in flight — so the momentary flare's release flipped the whole
+# outbound population's direction in a single frame. It is the direction
+# sign that snapped, not the speed (both directions read the same
+# per-radius speed curve).
+#
+# The fix is a real turnaround: on the True→False edge every outbound blob
+# keeps its outward velocity and decelerates under an inward acceleration
+# until its velocity has passed continuously through zero and MATCHES the
+# infall curve's own speed at its current radius, at which point it merges
+# into ordinary infall physics with no step at the seam (the trap p_out's
+# own expiry falls into — that one stalls to zero and hands the particle to
+# full-speed infall on the next frame, an instant jump the other way).
+#
+# "The acceleration value we have" is the speed curve itself (base_speed /
+# accel / edge_speed, audio boost included): the deceleration is
+# 2·v(r)/REVERSE_FALLBACK_TURN_S, where v(r) is the SAME per-particle
+# infall speed draw() already computes this frame. Expressing it relative
+# to that speed rather than as a fixed r/s² makes the turn take
+# REVERSE_FALLBACK_TURN_S regardless of base_speed, radius, or the live
+# audio boost (the boost scales v and the deceleration alike, so it
+# cancels) — one number to tune, and it means the same thing on every
+# config. Blobs past the rim (where the curve floors at
+# base_speed·edge_speed) still turn: v never reaches 0, so neither does
+# the deceleration.
+REVERSE_FALLBACK_TURN_S = 0.5
+# A horizon captive is PINNED to the ring only while it is actually within
+# this of it (normalized r). See draw()'s capture branch: this is what lets
+# a captive the outflow carried off the ring fall back under ordinary
+# physics instead of being teleported onto the ring the frame `reverse`
+# flips back — WITHOUT releasing its capture, which is the part PR #179
+# got wrong (reverted in #181, no reason recorded; see
+# _arm_reverse_fallback's own docstring).
+REVERSE_FALLBACK_RING_TOL = 0.02
+
 # infall-mode (`reverse=False`) spawn boundary, in the same normalized-r
 # units as radius_scale (r=1 sits at the panel's own rectangular edge).
 #
@@ -373,6 +415,16 @@ class Blackhole2d(Twod, GradientEffect):
         self._pacman_hold = None
         # scalar gate so p_out is only scanned while a burst is in flight
         self._out_active = False
+        # reverse-release fall-back (see REVERSE_FALLBACK_TURN_S): p_turn
+        # marks a blob mid-turnaround, p_vr is its SIGNED radial velocity
+        # while it is (+ = outward). A separate flag is load-bearing: the
+        # velocity passes through exactly 0.0 at the stall, so 0.0 cannot
+        # double as the "not turning" sentinel without reintroducing the
+        # instant-stall discontinuity this mechanism exists to remove.
+        self.p_turn = np.zeros(CAP, dtype=bool)
+        self.p_vr = np.zeros(CAP, dtype=np.float32)
+        # scalar gate so p_turn is only scanned while a turn is in flight
+        self._turn_active = False
 
         # Static dot-kernel offset table out to KERNEL_R
         span = np.arange(-KERNEL_R, KERNEL_R + 1)
@@ -386,6 +438,7 @@ class Blackhole2d(Twod, GradientEffect):
     def config_updated(self, config):
         super().config_updated(config)
         self.swirl = self._config["swirl"]
+        prev_reverse = getattr(self, "reverse", None)
         self.reverse = self._config["reverse"]
         self.radius_scale = self._config["radius_scale"]
         self.x_offset = self._config["x_offset"]
@@ -429,9 +482,21 @@ class Blackhole2d(Twod, GradientEffect):
             self._phase_saved = {}
             self._drop = None
             self._phase_done_t = None
+            # same creation baseline for the reverse edge: a stale
+            # persisted `reverse` must never turn a fresh instance's
+            # (empty) population around on its first frame
+            self._reverse_edge = None
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
+            # ... and so does a changed `reverse`, in either direction.
+            # EDGE-detected, never per-write: config_updated runs on every
+            # config patch (a gain envelope, a spawn_rate move), and only a
+            # genuine flip should touch particle motion. Only armed here —
+            # draw() consumes it, because arming needs each particle's LIVE
+            # speed, which only the render step computes.
+            if prev_reverse is not None and prev_reverse != self.reverse:
+                self._reverse_edge = "fallback" if prev_reverse else "eject"
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -503,6 +568,8 @@ class Blackhole2d(Twod, GradientEffect):
             self.p_cap,
             self.p_out,
             self.p_is_burst,
+            self.p_turn,
+            self.p_vr,
         ):
             arr[:count] = arr[: self.n][alive]
         self.n = count
@@ -544,6 +611,7 @@ class Blackhole2d(Twod, GradientEffect):
                     for name in (
                         "p_r", "p_theta", "p_grad", "p_bright",
                         "p_age", "p_band", "p_cap", "p_out", "p_is_burst",
+                        "p_turn", "p_vr",
                     )
                 },
             },
@@ -662,9 +730,65 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_band[:k] = 0
         self.p_cap[:k] = -1.0
         self.p_is_burst[:k] = False  # adopted blobs are ordinary population
+        self.p_turn[:k] = False      # ... and never mid-turnaround
+        self.p_vr[:k] = 0.0
         self.n = k
         # adopted particles wind up to full speed over handoff_ease seconds
         self._adopt_age = 0.0 if self.handoff_ease > 0.0 else None
+
+    def _arm_reverse_fallback(self, n, v_out):
+        """Consume a reverse True->False edge: every live blob was flowing
+        OUTWARD an instant ago (that is what `reverse` means for motion),
+        so each one enters the turnaround carrying exactly the outward
+        speed it had — the seam is continuous by construction, there is no
+        moment where anything is handed a velocity it did not already
+        have.
+
+        CAPTIVES ARE NOT RELEASED HERE — deliberately, and this is the
+        hazard PR #179 walked into (reverted same day by #181 with no
+        recorded reason). The defect #179 correctly diagnosed is real: a
+        horizon captive keeps `cap >= 0` while reversed (the capture
+        branch is skipped entirely in reverse), so on the flip back
+        `np.where(captured, rh, new_r)` used to teleport it from wherever
+        the outflow had carried it straight back onto the ring in ONE
+        frame. #179 fixed that by clearing EVERY captive on EVERY frame
+        while reversed, which does more than remove the teleport:
+
+          * it evicts blobs still sitting ON the ring, which the flare had
+            not moved at all — their horizon colour blend and their hold
+            clock both restart, so every flare strips and repopulates the
+            ring;
+          * an evicted captive is `cap = -1`, and a free-falling blob is
+            IMMORTAL in infall mode (the alive test retires captives by
+            their hold clock, never free-fallers) — so each flare also
+            converts the whole aged ring population back into blobs that
+            can never retire, and they re-capture with a FRESH full hold.
+            Repeated over a song, the ring stops turning over.
+
+        This mechanism releases nothing. `cap` is untouched: the fix is in
+        the capture branch, which now pins a captive to the ring only
+        while it is actually AT the ring (within REVERSE_FALLBACK_RING_TOL
+        of it). A captive the outflow carried off the ring keeps its
+        capture, its colour blend and its hold clock, turns around like
+        every other blob, and is re-pinned when it arrives back — no
+        teleport, no colour pop, no eviction, and the population turnover
+        this effect has always had is unchanged.
+        """
+        if n <= 0:
+            return
+        # an eruption/drop-burst blob is flying at its own boosted speed
+        # (draw()'s out_mask branch) — fold that ACTUAL speed into the
+        # turn, not the ambient one, or its velocity would step at the
+        # edge. p_out is then cleared: one mechanism owns the motion.
+        out_speed = np.where(
+            self.p_out[:n] > 0.0,
+            np.where(self.p_is_burst[:n], PHASE_BURST_SPEED_MULT, 1.0),
+            1.0,
+        )
+        self.p_vr[:n] = (v_out * out_speed).astype(np.float32)
+        self.p_turn[:n] = True
+        self.p_out[:n] = 0.0
+        self._turn_active = True
 
     def _erupt_burst(self, ncx, ncy):
         """Center eruption after a radial handoff: a burst of full-bright
@@ -750,6 +874,8 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_cap[s] = -1.0
         self.p_band[s] = 0
         self.p_is_burst[s] = True
+        self.p_turn[s] = False
+        self.p_vr[s] = 0.0
         if self.color_mode == "wheel":
             self.p_grad[s] = (
                 self.p_theta[s] / (2 * np.pi) - self.spin_total
@@ -993,6 +1119,8 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_age[s] = 0.0
         self.p_cap[s] = -1.0
         self.p_out[s] = 0.0
+        self.p_turn[s] = False
+        self.p_vr[s] = 0.0
 
         # spin_total is baked in at spawn: colors travel WITH the blobs, so
         # a spinning gradient shows as rotating color arms, not in-place
@@ -1052,6 +1180,10 @@ class Blackhole2d(Twod, GradientEffect):
         horizon_on = self.horizon_scale > 0.0 or self._phase != "none"
         rh = self._horizon_radius() if horizon_on else 0.0
         swirl_sign = np.sign(self.swirl) if self.swirl != 0 else 1.0
+        # Consumed unconditionally, even with no live particles: an edge
+        # left armed would fire against an unrelated population later.
+        rev_edge = self._reverse_edge
+        self._reverse_edge = None
 
         # post-adoption wind-up: motion eases from frozen to full speed so a
         # handoff reads as a morph, not an instant physics jump
@@ -1232,6 +1364,37 @@ class Blackhole2d(Twod, GradientEffect):
             )
             new_r = r + (v if self.reverse else -v) * dt
 
+            # ── reverse release: turn around, never flip ────────────────
+            if rev_edge == "fallback":
+                self._arm_reverse_fallback(n, v)
+            elif rev_edge == "eject":
+                # the flare's own outward kick is INSTANT by design (his
+                # words: "I like how on reverse, the event horizon
+                # immediately ejects blobs") — a turn in flight is
+                # abandoned to it, not eased into.
+                self.p_turn[:n] = False
+                self._turn_active = False
+            if self._turn_active:
+                turn = self.p_turn[:n]
+                if turn.any():
+                    # Decelerate under the speed curve's own scale (see
+                    # REVERSE_FALLBACK_TURN_S) and merge the instant the
+                    # velocity reaches the infall speed for this radius:
+                    # the very value the plain `-v` branch will apply on
+                    # the next frame, so the handoff has no step in it.
+                    vr = self.p_vr[:n] - (
+                        2.0 * v / REVERSE_FALLBACK_TURN_S
+                    ) * dt
+                    merged = vr <= -v
+                    vr = np.where(merged, -v, vr).astype(np.float32)
+                    self.p_vr[:n] = np.where(turn, vr, self.p_vr[:n])
+                    new_r = np.where(turn, r + vr * dt, new_r)
+                    turn = turn & ~merged
+                    self.p_turn[:n] = turn
+                    self._turn_active = bool(turn.any())
+                else:
+                    self._turn_active = False
+
             out_mask = None
             if self._out_active:
                 out_mask = self.p_out[:n] > 0.0
@@ -1262,7 +1425,23 @@ class Blackhole2d(Twod, GradientEffect):
                     free &= ~out_mask
                 cap[free] = 0.0
                 captured = cap >= 0
-                new_r = np.where(captured, rh, new_r)
+                # Pinned to the ring only while actually AT the ring. A
+                # captive the reverse flare's outflow carried off it keeps
+                # its capture (colour blend, hold clock, retirement all
+                # continue) but falls/turns back under ordinary physics
+                # instead of being teleported onto the ring — see
+                # _arm_reverse_fallback's docstring for why releasing it
+                # instead (PR #179) costs more than it fixes. In ordinary
+                # infall this is inert: a pinned orbiter sits exactly at
+                # rh, so it is always within tolerance.
+                pinned = captured & (
+                    new_r <= rh + REVERSE_FALLBACK_RING_TOL)
+                # a blob that finished its fall back into the horizon is
+                # done turning — the ring owns its radius from here
+                if self._turn_active:
+                    self.p_turn[:n] &= ~pinned
+                    self._turn_active = bool(self.p_turn[:n].any())
+                new_r = np.where(pinned, rh, new_r)
                 v_h = (
                     self.base_speed
                     * (
@@ -1280,7 +1459,11 @@ class Blackhole2d(Twod, GradientEffect):
                     -OMEGA_MAX,
                     OMEGA_MAX,
                 )
-                omega = np.where(captured, omega_h, omega)
+                # an off-ring captive swirls by its OWN radius (the plain
+                # omega above); only a pinned orbiter takes the ring's.
+                # Its hold clock keeps running either way — the capture is
+                # never interrupted, only its radius stops being forced.
+                omega = np.where(pinned, omega_h, omega)
                 cap[captured] += dt
 
             self.p_r[:n] = new_r
