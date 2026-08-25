@@ -240,6 +240,60 @@ pre-rebuild source, not what SPECTRA currently stores) — and never treat
 "migrated from legacy" alone as proof of authorship; it establishes only
 that something is old, not that he put it there.
 
+## TWO trigger copies — a Timeline save now lands in BOTH
+
+A hand-authored trigger exists TWICE and the two stores drift silently:
+the EDITOR copy `storage/profiles/*.json` (legacy `MusicTrigger`; the
+Profile Builder timeline at `/spectra/timeline` — his "Timeline of
+Spectra" — reads/writes it through the spot-effects root API, `routers/
+profiles.py` + `services/profile_manager.py`) and the FIRED copy
+`storage/spectra/triggers.json` (`spectra/services/trigger_store.py`),
+the ONLY store `spectra/services/trigger_engine.py` ever fires from.
+`spectra/services/legacy_trigger_migration.py` landed one into the other
+ONCE; nothing kept them together, so by 2026-08-24 his corpus held 623
+edited-since triggers across 11 songs that the room had never seen, plus
+128 rows whose timestamp/intensity disagreed — his report: "the system
+still fires on the old triggers, despite me being in My Triggers Only
+mode." The engine was never wrong; the data never arrived.
+
+`spectra/services/profile_trigger_sync.py` is now the reconciler (read
+its docstring for the four standing decisions — profile-wins-at-save,
+authored-only, provenance-gated deletes, unmappable-takes-its-row-with-
+it) and `POST /api/triggers/sync-from-profile` is where it runs. Two
+things to know before touching any of it:
+
+- **The seam is HTTP because it MUST be.** The save happens in the
+  spot-effects interpreter, which may not import anything under
+  `spectra/` (asserted by `scripts/check_process_split.py` §1), so
+  `services/spectra_trigger_sync_client.py` posts the whole song to
+  SPECTRA — ONE call per save, never one per trigger, and best-effort:
+  the profile is already on disk, so a SPECTRA outage reports
+  `spectra_sync.status` in the save response (a ⚠ on the timeline's
+  ModeBar) instead of failing his save. The receiving end runs on
+  `asyncio.to_thread` because the batched write is a full ~9.5MB
+  read+rewrite (`trigger_store.apply_batch`, the ONE batched write —
+  don't loop `upsert`, ~126ms each).
+- **Provenance is a SIDECAR, not a model field.** `spectra/services/
+  profile_sync_ledger.py` (`storage/spectra/profile_sync_ledger.json`,
+  `{uri: {trigger_id: legacy_event_id}}`) is what tells a
+  profile-origin trigger from one born on SPECTRA's own card — the id
+  link alone dies the moment he deletes the profile row. A fired-copy
+  authored trigger the ledger has never seen is NEVER deleted (18 of his
+  are card-born). The stored legacy `event_id` is also the only thing
+  that makes the narrow reverse direction faithful, since the forward map
+  is many-to-one (35 legacy event ids → 4 SPECTRA action shapes).
+
+Deploy-time catch-up (dry-run default, `--apply`, backs up both worlds,
+and asserts the written diff equals the PLANNED diff before claiming
+success): `scripts/reconcile_profile_triggers.py`. Known gaps, by
+design: `services/capture_alignment.py` (shifts every trigger's
+timestamp after a recapture) and `routers/ai_triggers_router.py` (bulk
+AI apply) save profiles WITHOUT the sync — the reconcile script is their
+backstop. `tests/test_legacy_trigger_migration.py::
+test_migrate_real_corpus_lands_whole_in_one_pass` asserts hardcoded
+counts against his LIVE, still-edited corpus and drifts as he authors —
+verify against pristine master before chasing it.
+
 ## SPECTRA trigger authoring (THE KEYSTONE — mid-song clock)
 
 This section and "SPECTRA transition-timing alignment" below carry the

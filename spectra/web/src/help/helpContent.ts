@@ -749,7 +749,19 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Timeline (song profiles)',
     keywords: 'timeline canvas triggers place edit profile builder song',
     intro:
-      'The song timeline from the SpotFX Profile Builder, carried into SPECTRA whole: build a song\'s lighting profile on a zoomable timeline. Arm an event on a palette key, then place triggers with the mouse; circles show intensity, triangles show timing. Reads and edits go straight to the SpotFX app\'s own APIs (same process) — profiles, waveform, librosa analysis, palettes, setlists, and the live playhead over its WebSocket.',
+      'The song timeline from the SpotFX Profile Builder, carried into SPECTRA whole: build a song\'s lighting profile on a zoomable timeline. Arm an event on a palette key, then place triggers with the mouse; circles show intensity, triangles show timing. Reads and edits go straight to the SpotFX app\'s own APIs (same process) — profiles, waveform, librosa analysis, palettes, setlists, and the live playhead over its WebSocket. Since 2026-08-24 pressing Save here ALSO updates what SPECTRA actually fires — see "Where your Timeline edits land" below.',
+    entries: [
+      {
+        id: 'builder-save-syncs-to-spectra',
+        title: 'Where your Timeline edits land',
+        keywords: 'save sync spectra triggers fired copy two copies my triggers only stale old triggers reconcile provenance profile',
+        body: [
+          'A hand-placed trigger lives in TWO places: this timeline\'s song profile (the file you edit here) and the store SPECTRA actually fires from. Pressing Save now updates both — every trigger on this timeline is written into SPECTRA\'s firing copy in the same action, so an edit takes effect on the next play instead of only after a migration. Moving a trigger, changing its intensity, disabling it or deleting it all carry across.',
+          'Three things deliberately do NOT cross. Triggers SPECTRA generated for itself from a song\'s analysis are never written back here and are never deleted by a save. Triggers you authored on the "SPECTRA Triggers" card below (rather than on this timeline) are left alone — a Timeline save can only remove what a Timeline save put there. And a trigger SPECTRA has no equivalent for — a retired event, or a mark placed slightly BEFORE the song starts — is skipped rather than guessed at: it stays exactly as you wrote it here, and simply doesn\'t fire.',
+          'If SPECTRA is restarting or unreachable when you press Save, the profile still saves normally and the response says so; the next save (or the operator\'s catch-up pass) lands the change. Note that once a song has any hand-authored trigger, the "My triggers only" scene-change setting fires YOURS exclusively for that song and silences SPECTRA\'s own analysed ones — so a song you have just hand-tuned will look different from one you have not.',
+        ],
+      },
+    ],
     subsections: [
       {
         id: 'builder-palettes',

@@ -7,14 +7,23 @@
   DELETE /api/triggers/{trigger_id}?uri=...
   POST   /api/triggers/generate?uri=<spotify_uri> — front 3's mid-song
       generation pass (spectra.services.midsong_generator), idempotent.
+  POST   /api/triggers/sync-from-profile — land ONE song's legacy profile
+      triggers in the fired copy (spectra.services.profile_trigger_sync).
+      Called by the spot-effects process on every profile save so his
+      Timeline edits reach the room; see that module's docstring for the
+      four standing decisions it applies.
 Mounted under /spectra — a different namespace from the legacy per-song
 trigger routes the ported timeline view still reads/writes."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from spectra.models.trigger import SpectraTrigger
-from spectra.services import color_sets, midsong_generator, scene_store, trigger_store
+from spectra.services import (color_sets, midsong_generator, profile_sync_ledger,
+                              profile_trigger_sync, scene_store, trigger_store)
 
 router = APIRouter(prefix="/api/triggers", tags=["spectra-triggers"])
 
@@ -62,3 +71,31 @@ async def delete_trigger(trigger_id: str, uri: str = Query(...)):
     if not trigger_store.delete(uri, trigger_id):
         raise HTTPException(404, "trigger not found")
     return {"status": "deleted"}
+
+
+class ProfileTriggerSyncRequest(BaseModel):
+    """One song's editor-copy triggers, exactly as they sit in
+    storage/profiles/*.json. RAW legacy MusicTrigger dicts, not a typed
+    model: this endpoint must accept whatever the predecessor's profile
+    schema currently holds without SPECTRA importing its models (the S3
+    import discipline — scripts/check_process_split.py section 1b), and an
+    unrecognised field is the caller's business, not a 422."""
+    spotify_uri: str = Field(min_length=1)
+    triggers: list[dict] = Field(default_factory=list)
+
+
+@router.post("/sync-from-profile")
+async def sync_from_profile(body: ProfileTriggerSyncRequest):
+    """Reconcile ONE song, editor copy -> fired copy, as a single batched
+    write. Runs off the event loop (asyncio.to_thread): the batched write is
+    a full read+rewrite of a ~9.5MB triggers.json (~126ms on his corpus), and
+    this process's bridge polls / trigger ticks / WS broadcasts must not stall
+    behind a human pressing Save."""
+    def _run() -> dict:
+        uri = body.spotify_uri
+        fired = trigger_store._load_raw().get(uri, [])
+        known = profile_sync_ledger.for_song(profile_sync_ledger.load(), uri)
+        plan = profile_trigger_sync.plan_song(uri, body.triggers, fired, known)
+        return profile_trigger_sync.apply_plan(plan)
+
+    return await asyncio.to_thread(_run)

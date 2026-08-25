@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from models.song_profile import SongProfile
 from models.state import state
+from services import spectra_trigger_sync_client
 from services.profile_manager import (
     list_profiles, load_profile_by_uri, save_profile,
 )
@@ -87,5 +88,17 @@ async def patch_profile_by_uri(uri: str, body: IntensityScalePatch):
 
 @router.post("")
 async def upsert_profile(profile: SongProfile):
+    """THE save path for the Profile Builder timeline — his "Timeline of
+    Spectra" (/spectra/timeline) and the legacy /app builder both land here.
+
+    Since 2026-08-24 the save ALSO lands this song's authored triggers in the
+    copy SPECTRA actually fires from (storage/spectra/triggers.json), which is
+    what makes an edit reach his show instead of only the editor's own file —
+    see services/spectra_trigger_sync_client.py and spectra/services/
+    profile_trigger_sync.py. Best-effort: the profile is already on disk, so a
+    SPECTRA that is down reports `spectra_sync.status != "ok"` here rather
+    than failing his save, and the deploy-time catch-up repairs it."""
     save_profile(profile)
-    return {"status": "saved", "filename": profile.filename}
+    triggers = [t.model_dump(mode="json") for t in profile.triggers]
+    sync = await spectra_trigger_sync_client.sync_song(profile.spotify_uri, triggers)
+    return {"status": "saved", "filename": profile.filename, "spectra_sync": sync}
