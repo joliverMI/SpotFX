@@ -24,6 +24,11 @@ GRADIENT2D_FILE = SPECTRA_STORAGE / "gradients2d.json"
 ROOM_COLOR_FILE = SPECTRA_STORAGE / "room_color.json"
 ROOM_CONTROLS_FILE = SPECTRA_STORAGE / "room_controls.json"
 TRIGGERS_FILE = SPECTRA_STORAGE / "triggers.json"
+# Provenance for the two trigger worlds — which fired-copy triggers came out
+# of a storage/profiles/*.json SongProfile, and from which legacy event id.
+# See spectra/services/profile_sync_ledger.py for why this is a sidecar and
+# not a field on SpectraTrigger.
+PROFILE_SYNC_LEDGER_FILE = SPECTRA_STORAGE / "profile_sync_ledger.json"
 FIRE_HISTORY_FILE = SPECTRA_STORAGE / "fire_history.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
 FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"

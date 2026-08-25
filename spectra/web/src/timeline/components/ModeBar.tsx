@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiPost } from '../../api/spotfx';
 import { useToast } from '../../components/Toast';
 import { useSticky } from '../../lib/useSticky';
+import HelpLink from '../../help/HelpLink';
 import { useBuilderStore } from '../store';
 import { useProfilesList, useSetlists } from '../queries';
 
@@ -26,6 +27,7 @@ export default function ModeBar() {
   const setManualUri = useBuilderStore((s) => s.setManualUri);
   const profile = useBuilderStore((s) => s.profile);
   const dirty = useBuilderStore((s) => s.dirty);
+  const spectraSync = useBuilderStore((s) => s.spectraSync);
   const modes = useBuilderStore((s) => s.modes);
   const slotId = useBuilderStore((s) => s.slotId);
   const setSlot = useBuilderStore((s) => s.setSlot);
@@ -146,6 +148,13 @@ export default function ModeBar() {
         <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {shownTitle ?? '—'}
           {dirty && <span title="Saving…" style={{ color: 'var(--accent2)', marginLeft: 6 }}>●</span>}
+          {spectraSync && spectraSync.status !== 'ok' && (
+            <span
+              title={`Saved to the song profile, but SPECTRA's firing copy was NOT updated (${spectraSync.status}). The room will keep firing the previous triggers until the next successful save.`}
+              style={{ color: 'var(--warn, #ffb300)', marginLeft: 6 }}
+            >⚠</span>
+          )}
+          <HelpLink topic="builder-save-syncs-to-spectra" title="Where your Timeline edits land" />
           {profile?.verified && <span title="Verified" style={{ marginLeft: 6 }}>✓</span>}
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>

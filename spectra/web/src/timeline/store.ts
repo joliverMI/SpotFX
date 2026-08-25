@@ -23,6 +23,12 @@ interface BuilderState {
 
   profile: SongProfile | null;
   dirty: boolean;
+  /** Outcome of the last save's SPECTRA trigger sync (POST /api/profiles ->
+   * services/spectra_trigger_sync_client.py). A save writes the profile AND
+   * lands its triggers in the copy SPECTRA fires from; when SPECTRA is down
+   * the profile still saves, so the failure must be VISIBLE here rather than
+   * leaving him to wonder why the room kept firing the old triggers. */
+  spectraSync: { status: string; detail?: string } | null;
   slotId: string; // '' = Default triggers; else setlist id
 
   editingTriggerId: string | null; // 'new:<ms>' opens create dialog
@@ -87,6 +93,7 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   autoWait: false,
   profile: null,
   dirty: false,
+  spectraSync: null,
   slotId: '',
   editingTriggerId: null,
   armedKey: null,
@@ -206,7 +213,9 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
     }
     set({ dirty: false });
     try {
-      await apiPost('/profiles', profile);
+      const res = await apiPost<{ spectra_sync?: { status: string; detail?: string } }>(
+        '/profiles', profile);
+      set({ spectraSync: res?.spectra_sync ?? null });
     } catch (e) {
       set({ dirty: true }); // retried on next mutation
       console.error('profile save failed', e);
