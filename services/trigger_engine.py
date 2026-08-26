@@ -3271,7 +3271,11 @@ class TriggerEngine:
     async def _auto_intensity_scale(self, profile: SongProfile) -> None:
         """Stamp a library-ranked starting intensity_scale (source="auto") on a
         song that has none. User-set values are never touched; songs that
-        can't be ranked stay unset and fall through to genre/100%."""
+        can't be ranked stay unset and fall through to genre/100%.
+
+        DELIBERATELY NOT trigger-synced (see services/
+        spectra_trigger_sync_client.py): this writes one profile-level scalar
+        and never touches `triggers`."""
         if profile.intensity_scale is not None:
             return
         try:

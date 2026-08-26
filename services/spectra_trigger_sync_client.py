@@ -70,3 +70,15 @@ async def sync_song(spotify_uri: str, triggers: list[dict]) -> dict[str, Any]:
         logger.warning("SPECTRA trigger sync for %s unreachable: %s",
                        spotify_uri, exc)
         return {"status": "unreachable", "detail": str(exc)}
+
+
+async def sync_profile(profile: Any) -> dict[str, Any]:
+    """THE call every profile-writing path makes after its save lands.
+
+    One place that knows how a SongProfile becomes the sync payload, so a
+    second writer (the analyzed-trigger import, the post-recapture realign)
+    can never serialize it differently from the Timeline save. Same
+    best-effort contract as sync_song: never raises, one call per song.
+    """
+    triggers = [t.model_dump(mode="json") for t in profile.triggers]
+    return await sync_song(profile.spotify_uri, triggers)

@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from services.ai_trigger_service import list_training_songs
+from services import spectra_trigger_sync_client
 from services.profile_manager import load_profile_by_uri, save_profile
 from services.training_profile_manager import (
     list_training_profiles,
@@ -161,7 +162,16 @@ async def generate_embedded(req: EmbeddedGenerateRequest):
     profile_obj.embedded_generated = True
     save_profile(profile_obj)
 
-    return {"applied": len(raw), "title": title, "artist": artist}
+    # An import REPLACES the song's whole trigger list, so it must reach the
+    # copy SPECTRA fires from exactly the way a Timeline save does — same
+    # client, same one-batched-call-per-song semantics, same best-effort
+    # contract (the profile is already on disk; a SPECTRA that is down is
+    # REPORTED here, not hidden). Found 2026-08-25: this path wrote the
+    # editor copy only, so an imported song's triggers never fired.
+    sync = await spectra_trigger_sync_client.sync_profile(profile_obj)
+
+    return {"applied": len(raw), "title": title, "artist": artist,
+            "spectra_sync": sync}
 
 
 # ── Analyzed trigger generation (for builder import) ──────────────────────────
