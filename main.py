@@ -192,6 +192,14 @@ async def lifespan(app: FastAPI):
     tasks.append(asyncio.create_task(
         spectra_liveness_reconciler.run_supervised(),
         name="spectra-liveness-reconciler"))
+    # Sync-as-a-property-of-writing (2026-08-25): profile_manager.save_profile
+    # marks every trigger write, this drain lands the marks in the copy
+    # SPECTRA fires from — so a writer nobody remembered to hook still
+    # reaches his show. Upsert-only; see the module docstring.
+    from services import profile_trigger_sync_queue
+    tasks.append(asyncio.create_task(
+        profile_trigger_sync_queue.run_supervised(),
+        name="profile-trigger-sync-drain"))
     # Guest source: watches the snapcast Guest/AirPlay streams and drives the
     # engine in simple-triggerless mode while a guest session owns the speakers.
     from services import guest_source

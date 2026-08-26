@@ -118,9 +118,16 @@ def test_an_import_lands_its_triggers_in_the_copy_spectra_fires_from(monkeypatch
     _run(scenario())
 
 
-def test_a_reimport_replaces_the_fired_copy_rather_than_stacking(monkeypatch):
-    """An import REPLACES the song's trigger list, so the fired copy must end
-    up holding the new list, not the old one plus the new one."""
+def test_a_reimport_updates_in_place_and_deletes_nothing(monkeypatch):
+    """OPTION C, the whole point of stable ids: re-importing a song UPDATES it.
+
+    Before this, every imported MusicTrigger carried a fresh uuid4, so a
+    re-import made 100% of the song's previously-synced rows read as
+    absent-from-the-profile — the sync deleted the lot and re-inserted them
+    under new ids. The row count came out right, which is why it went
+    unnoticed. Now the same analyzed mark computed twice is the SAME trigger
+    twice, and an automatic writer may never delete regardless.
+    """
     from config import settings
     import routers.ai_triggers_router as ai
 
@@ -134,16 +141,131 @@ def test_a_reimport_replaces_the_fired_copy_rather_than_stacking(monkeypatch):
                 {"timestamp_ms": 2000, "event_id": FLARE},
             ])
             await ai.generate_embedded(_request())
-            assert len(trigger_store.list_for_song(URI)) == 2
+            first = {t.id for t in trigger_store.list_for_song(URI)}
+            assert len(first) == 2
 
-            _stub_generation(monkeypatch, [{"timestamp_ms": 5000, "event_id": FLARE}])
+            # The identical analysis again: nothing added, nothing deleted,
+            # and the SAME ids — the churn this feature exists to stop.
             result = await ai.generate_embedded(_request())
-            assert result["spectra_sync"]["deleted"] == 2
+            assert result["spectra_sync"]["deleted"] == 0
+            assert result["spectra_sync"]["written"] == 0      # already agree
+            assert result["spectra_sync"]["unchanged"] == 2
+            assert {t.id for t in trigger_store.list_for_song(URI)} == first
+
+            # A NEW mark is added; the two existing ones are untouched.
+            _stub_generation(monkeypatch, [
+                {"timestamp_ms": 1000, "event_id": FLARE},
+                {"timestamp_ms": 2000, "event_id": FLARE},
+                {"timestamp_ms": 5000, "event_id": FLARE},
+            ])
+            result = await ai.generate_embedded(_request())
+            assert result["spectra_sync"]["deleted"] == 0
             fired = trigger_store.list_for_song(URI)
-            assert [t.timestamp_ms for t in fired] == [5000]
+            assert sorted(t.timestamp_ms for t in fired) == [1000, 2000, 5000]
+            assert first <= {t.id for t in fired}
         finally:
             server.should_exit = True
             await task
+
+    _run(scenario())
+
+
+def test_an_automatic_import_can_never_delete_a_fired_row(monkeypatch):
+    """THE GATE THAT HELD THIS BUILD: an unattended writer must not destroy.
+
+    Even when the incoming analysis no longer produces a mark at all — the
+    exact shape that used to trigger the planner's decision-3 delete — an
+    import leaves the fired row standing and REPORTS having done so. His
+    deliberate deletions still land, through an explicit Timeline save.
+    """
+    from config import settings
+    import routers.ai_triggers_router as ai
+    import routers.profiles as profiles_router
+    from models.song_profile import MusicTrigger, SongProfile
+    from services.trigger_identity import stable_trigger_id
+
+    async def scenario():
+        port = free_port()
+        server, task = await _serve(_spectra_app(), port)
+        monkeypatch.setattr(settings, "spectra_port", port)
+        try:
+            _stub_generation(monkeypatch, [
+                {"timestamp_ms": 1000, "event_id": FLARE},
+                {"timestamp_ms": 2000, "event_id": FLARE},
+            ])
+            await ai.generate_embedded(_request())
+            assert len(trigger_store.list_for_song(URI)) == 2
+
+            # An import whose analysis produces ONLY the first mark. Under the
+            # old whole-song semantics the 2000ms row would be deleted.
+            monkeypatch.setattr(settings, "trigger_import_policy", "replace")
+            _stub_generation(monkeypatch, [{"timestamp_ms": 1000, "event_id": FLARE}])
+            result = await ai.generate_embedded(_request())
+            assert result["merge"]["dropped"] == 1          # gone from the PROFILE
+            assert result["spectra_sync"]["deleted"] == 0   # but NOT from the show
+            assert result["spectra_sync"]["retained_upsert_only"] == 1
+            assert len(trigger_store.list_for_song(URI)) == 2
+
+            # ...and his own deliberate deletion, through an explicit save,
+            # still lands. Provenance survived the retention, which is what
+            # makes this possible.
+            kept_id = stable_trigger_id(FLARE, 1000)
+            saved = await profiles_router.upsert_profile(SongProfile(
+                spotify_uri=URI, title="t", artist="a", duration_ms=200_000,
+                triggers=[MusicTrigger(id=kept_id, timestamp_ms=1000,
+                                       event_id=FLARE)]))
+            assert saved["spectra_sync"]["deleted"] == 1
+            assert [t.id for t in trigger_store.list_for_song(URI)] == [kept_id]
+        finally:
+            server.should_exit = True
+            await task
+
+    _run(scenario())
+
+
+def test_the_import_policy_switches_both_behaviours_without_a_rewrite(monkeypatch):
+    """The one open trade is HIS, so both behaviours are live and switchable.
+
+    Default "protect": a mark he has hand-edited since the last import keeps
+    his edit. "replace": the fresh analysis wins. Same code either way.
+    """
+    from config import settings
+    import routers.ai_triggers_router as ai
+    from services import trigger_identity
+    from services.profile_manager import load_profile_by_uri
+
+    monkeypatch.setattr(settings, "spectra_port", free_port())   # sync half not under test
+    suggestions = [{"timestamp_ms": 1000, "event_id": FLARE, "intensity": 0.4}]
+
+    async def scenario():
+        _stub_generation(monkeypatch, suggestions)
+        await ai.generate_embedded(_request())
+
+        # He retunes that mark on the timeline (same id, new intensity).
+        profile = load_profile_by_uri(URI)
+        assert len(profile.triggers) == 1
+        profile.triggers[0].intensity = 0.95
+        from services.profile_manager import save_profile
+        save_profile(profile)
+
+        # PROTECT (the shipped default): his 0.95 survives the re-import.
+        monkeypatch.setattr(settings, "trigger_import_policy", "protect")
+        result = await ai.generate_embedded(_request())
+        assert result["import_policy"] == "protect"
+        assert result["merge"] == {"added": 0, "kept": 1, "overwritten": 0, "dropped": 0}
+        assert load_profile_by_uri(URI).triggers[0].intensity == pytest.approx(0.95)
+
+        # REPLACE: the analysis wins, same code path, one setting.
+        monkeypatch.setattr(settings, "trigger_import_policy", "replace")
+        result = await ai.generate_embedded(_request())
+        assert result["import_policy"] == "replace"
+        assert result["merge"]["overwritten"] == 1
+        assert load_profile_by_uri(URI).triggers[0].intensity == pytest.approx(0.4)
+
+        # A mistyped policy falls back to the protective one rather than
+        # silently overwriting his work.
+        monkeypatch.setattr(settings, "trigger_import_policy", "REPLCAE")
+        assert trigger_identity.import_policy() == "protect"
 
     _run(scenario())
 

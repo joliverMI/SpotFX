@@ -776,7 +776,11 @@ class AudioShapeService:
                                     from services.profile_manager import load_profile_by_uri
                                     _p = load_profile_by_uri(meta.spotify_uri)
                                     if _p is not None:
-                                        _sync = await spectra_trigger_sync_client.sync_profile(_p)
+                                        # UPSERT-ONLY: unattended, and it carries
+                                        # only shifted timestamps — it has no
+                                        # business deleting anything.
+                                        _sync = await spectra_trigger_sync_client \
+                                            .sync_profile_upsert_only(_p)
                                         logger.info(
                                             "Realign trigger sync for %s: %s",
                                             meta.spotify_uri, _sync.get("status"))
@@ -908,7 +912,7 @@ async def _auto_generate_embedded(
     """Embedded KNN path: suggest triggers and auto-apply them directly to the profile."""
     from services.embedded_trigger_service import suggest_triggers
     from services.profile_manager import load_profile_by_uri, save_profile, get_event_map
-    from models.song_profile import SongProfile, MusicTrigger
+    from models.song_profile import SongProfile
 
     all_train = training_profile.get("training_uris", []) + training_profile.get("embedded_only_uris", [])
     if not all_train:
@@ -957,19 +961,21 @@ async def _auto_generate_embedded(
         artist=artist,
         duration_ms=meta.duration_ms if meta else 0,
     )
-    profile_obj.triggers = [
-        MusicTrigger(timestamp_ms=s["timestamp_ms"], event_id=s["event_id"])
-        for s in raw
-    ]
+    # Stable ids, same as the interactive import — this path only ever runs
+    # on a song with NO triggers yet (checked above), but it must still hand
+    # out identities a later re-import can recognise rather than fresh uuids.
+    from services import trigger_identity
+    profile_obj.triggers, _merge = trigger_identity.merge_imported_triggers(
+        profile_obj.triggers, trigger_identity.build_imported_triggers(raw))
     profile_obj.embedded_generated = True
     save_profile(profile_obj)
 
-    # Same hook the Timeline save and the analyzed-trigger import run: a
-    # profile write that REPLACES the trigger list must land in the copy
-    # SPECTRA fires from, or the freshly captured song plays its old (or no)
-    # triggers. Best-effort, and reported rather than assumed.
+    # Same hook the Timeline save and the analyzed-trigger import run, so a
+    # freshly captured song does not play its old (or no) triggers.
+    # UPSERT-ONLY: this runs unattended after a capture — it may add and
+    # update, never delete. Best-effort, and reported rather than assumed.
     from services import spectra_trigger_sync_client
-    sync = await spectra_trigger_sync_client.sync_profile(profile_obj)
+    sync = await spectra_trigger_sync_client.sync_profile_upsert_only(profile_obj)
 
     await ws_manager.broadcast({
         "type": "auto_generate_complete",

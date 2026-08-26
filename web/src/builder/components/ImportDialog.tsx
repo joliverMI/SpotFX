@@ -15,8 +15,20 @@ import type { MusicTrigger, Setlist } from '../types';
 const SETLIST_SLOTS_ENABLED = false;
 
 interface AnalyzeResp {
-  triggers?: { timestamp_ms: number; event_id: string; intensity?: number | null }[];
+  triggers?: {
+    /** Stable id derived from the mark's own event + timestamp, so the same
+     *  analyzed mark is the SAME trigger on every re-import. Optional only to
+     *  stay readable against a backend that predates it. */
+    id?: string;
+    timestamp_ms: number;
+    event_id: string;
+    intensity?: number | null;
+  }[];
   training_profile?: string;
+  /** "protect" (default) keeps a trigger already on the timeline exactly as it
+   *  stands; "replace" lets the fresh analysis overwrite it. Server-owned —
+   *  settings.trigger_import_policy — never a second opinion decided here. */
+  import_policy?: 'protect' | 'replace';
 }
 
 export default function ImportDialog({
@@ -34,6 +46,8 @@ export default function ImportDialog({
   const [busy, setBusy] = useState(false);
   const [copyFrom, setCopyFrom] = useState('');
 
+  /** Merge by TIMESTAMP — the classic semantics, kept for "Copy from", where
+   *  the source triggers are another list's and carry no shared identity. */
   const mergeIn = (incoming: MusicTrigger[]) => {
     let added = 0;
     useBuilderStore.getState().mutateWorking((ts) => {
@@ -43,6 +57,31 @@ export default function ImportDialog({
       ts.splice(0, ts.length, ...[...byTs.values()].sort((a, b) => a.timestamp_ms - b.timestamp_ms));
     });
     return added;
+  };
+
+  /** Merge an ANALYSIS import by trigger IDENTITY, applying the server's own
+   *  policy. Under "protect" a mark already on the timeline is left exactly as
+   *  it stands — a trigger he moved, retuned or disabled survives every
+   *  re-import; only genuinely new marks are added. Under "replace" the fresh
+   *  analysis wins on marks it recomputes (it still never removes anything
+   *  here — deleting stays his deliberate act on the timeline). */
+  const mergeAnalyzed = (incoming: MusicTrigger[], policy: 'protect' | 'replace') => {
+    let added = 0;
+    let kept = 0;
+    useBuilderStore.getState().mutateWorking((ts) => {
+      const byId = new Map(ts.map((t) => [t.id, t]));
+      for (const t of incoming) {
+        if (byId.has(t.id)) {
+          kept += 1;
+          if (policy === 'replace') byId.set(t.id, t);
+        } else {
+          byId.set(t.id, t);
+          added += 1;
+        }
+      }
+      ts.splice(0, ts.length, ...[...byId.values()].sort((a, b) => a.timestamp_ms - b.timestamp_ms));
+    });
+    return { added, kept };
   };
 
   const pull = async (category: 'scenes' | 'flares' | 'both') => {
@@ -57,11 +96,14 @@ export default function ImportDialog({
           toast(`No ${cat} triggers generated`);
           continue;
         }
-        const added = mergeIn(resp.triggers.map((t) => ({
-          id: uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id,
+        const policy = resp.import_policy === 'replace' ? 'replace' : 'protect';
+        const { added, kept } = mergeAnalyzed(resp.triggers.map((t) => ({
+          id: t.id ?? uuid(), timestamp_ms: t.timestamp_ms, event_id: t.event_id,
           labels: [], enabled: true, intensity: t.intensity ?? 0.5,
-        })));
-        toast(`Added ${added} ${cat}${resp.training_profile ? ` (profile: ${resp.training_profile})` : ''}`,
+        })), policy);
+        const heldBack = kept && policy === 'protect' ? `, kept ${kept} already placed` : '';
+        toast(`Added ${added} ${cat}${heldBack}` +
+          `${resp.training_profile ? ` (profile: ${resp.training_profile})` : ''}`,
           'success');
       }
       onClose();

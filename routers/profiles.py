@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from models.song_profile import SongProfile
 from models.state import state
-from services import spectra_trigger_sync_client
+from services import profile_trigger_sync_queue, spectra_trigger_sync_client
 from services.profile_manager import (
     list_profiles, load_profile_by_uri, save_profile,
 )
@@ -104,5 +104,11 @@ async def upsert_profile(profile: SongProfile):
     SPECTRA that is down reports `spectra_sync.status != "ok"` here rather
     than failing his save, and the deploy-time catch-up repairs it."""
     save_profile(profile)
+    # THE ONE whole-song sync: an explicit save is his deliberate act, so his
+    # deletions land here (and only here). Every AUTOMATIC writer is
+    # upsert-only. Retiring the mark on success keeps the background drain
+    # from repeating a song this response already reported on.
     sync = await spectra_trigger_sync_client.sync_profile(profile)
+    if sync.get("status") == "ok":
+        profile_trigger_sync_queue.clear(profile.spotify_uri)
     return {"status": "saved", "filename": profile.filename, "spectra_sync": sync}

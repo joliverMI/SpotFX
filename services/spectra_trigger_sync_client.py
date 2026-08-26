@@ -47,13 +47,17 @@ def _url() -> str:
             f"/spectra/api/triggers/sync-from-profile")
 
 
-async def sync_song(spotify_uri: str, triggers: list[dict]) -> dict[str, Any]:
+async def sync_song(spotify_uri: str, triggers: list[dict],
+                    delete_missing: bool = True) -> dict[str, Any]:
     """POST one song's legacy triggers to SPECTRA. Returns the sync summary
     on success, or {"status": "unreachable"|"error", ...} — never raises, and
-    never blocks the caller for longer than REQUEST_TIMEOUT_S."""
+    never blocks the caller for longer than REQUEST_TIMEOUT_S.
+
+    `delete_missing=False` is UPSERT-ONLY — see sync_profile_upsert_only."""
     if not spotify_uri:
         return {"status": "skipped", "reason": "profile has no spotify_uri"}
-    payload = {"spotify_uri": spotify_uri, "triggers": triggers}
+    payload = {"spotify_uri": spotify_uri, "triggers": triggers,
+               "delete_missing": delete_missing}
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
             resp = await client.post(_url(), json=payload)
@@ -72,13 +76,31 @@ async def sync_song(spotify_uri: str, triggers: list[dict]) -> dict[str, Any]:
         return {"status": "unreachable", "detail": str(exc)}
 
 
-async def sync_profile(profile: Any) -> dict[str, Any]:
-    """THE call every profile-writing path makes after its save lands.
+def _payload(profile: Any) -> list[dict]:
+    """ONE place that knows how a SongProfile becomes the sync payload, so no
+    writer can serialize it differently from the Timeline save."""
+    return [t.model_dump(mode="json") for t in profile.triggers]
 
-    One place that knows how a SongProfile becomes the sync payload, so a
-    second writer (the analyzed-trigger import, the post-recapture realign)
-    can never serialize it differently from the Timeline save. Same
-    best-effort contract as sync_song: never raises, one call per song.
-    """
-    triggers = [t.model_dump(mode="json") for t in profile.triggers]
-    return await sync_song(profile.spotify_uri, triggers)
+
+async def sync_profile(profile: Any) -> dict[str, Any]:
+    """WHOLE-SONG sync — for an EXPLICIT save only (POST /api/profiles, his
+    Timeline pressing Save). The profile wins outright for that song at that
+    moment, including his deliberate deletions: a fired row he removed in the
+    editor is removed from the show. That is only safe because he did it on
+    purpose, with the result in front of him.
+
+    Every AUTOMATIC writer must call sync_profile_upsert_only instead."""
+    return await sync_song(profile.spotify_uri, _payload(profile), delete_missing=True)
+
+
+async def sync_profile_upsert_only(profile: Any) -> dict[str, Any]:
+    """UPSERT-ONLY sync — for every AUTOMATIC writer: the analyzed-trigger
+    import, the post-capture generation, the post-recapture realign.
+
+    Adds and updates by trigger identity; never deletes. An unattended write
+    can carry a partial or freshly-derived list, so letting it remove rows
+    would mean a background job silently deleting his authored work — worse
+    than the missed sync this whole seam exists to fix.
+    scripts/reconcile_profile_triggers.py stays the repair path for anything
+    a no-delete sync leaves stale."""
+    return await sync_song(profile.spotify_uri, _payload(profile), delete_missing=False)
