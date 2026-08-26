@@ -495,6 +495,66 @@ variables named `ledfx` (the core object handle) are untouched.
     Evidence: `scripts/check_fish.py` (eight measured sections on the real
     pipeline), `tests/test_fish.py`.
 
+22. `effects/radial.py`: a QUIET BASE ROTATION FLOOR (NEW PARAM +
+    BEHAVIOUR, PR fm/radial-base-rotation). His ask, verbatim: "i like the
+    current reactivity speed of the radial effect in the star scene, but I
+    want there to be some minimum absolute value for the base speed the
+    pattern rotates at. The Speed parameter in the scene definition seems
+    to be related to reactive speed (like the current settings). I want to
+    be able to define the quiet base speed of rotation as well." His
+    reading of `spin`/Speed is exactly right and already documented:
+    `docs/spectra-star-motion-audio-idle.md` — the vendored effect's ONLY
+    motion source is `audio_data_updated`'s `spin_total += impulse * spin`,
+    where `spin = nonlinear_log(spin_cfg, 2)/10` is a SQUARED GAIN on the
+    live captured lows power. A gain can never produce motion in silence at
+    any value; an additive term is the only thing that can.
+
+    New config key `base_rotation` (float, `[0.0, 2.0]`, default **0.0** —
+    every existing scene, his STAR included, renders byte-identically until
+    he sets it; `scripts/check_radial_base_rotation.py` §1 asserts the
+    frames match). It is declared on the EFFECT, not on one scene's
+    instance, so any radial entry can carry it. UNITS ARE DELIBERATELY
+    UNLIKE `spin`: `base_rotation` is LINEAR and ABSOLUTE, in REVOLUTIONS
+    PER SECOND (0.05 = one turn per 20s), where `spin` is squared and then
+    multiplied by live audio. `config/effect_params.json`'s own note and
+    help topic `radial-base-rotation` both say so in as many words.
+
+    SEMANTICS ARE A FLOOR, NOT A SUM — firstmate's pick, named rather than
+    silent: `effective rev/s = max(base_rotation, reactive rev/s)`, so a
+    base never adds anything at a peak and the existing reactivity is
+    preserved exactly wherever the music's own drive is faster. (The
+    alternative, a SUM, would speed every peak up slightly; the knob's
+    semantics make either a one-line change in `_base_rotation_step`.)
+
+    WHERE IT ADVANCES is load-bearing: the base rides the RENDER clock
+    (`draw` → `_base_rotation_step(dt)`, `dt = self.passed`), never the
+    audio callback. Audio callbacks stop entirely when the capture pipeline
+    stalls or the effect is unsubscribed — a base term living there would
+    stall in exactly the quiet case it exists for. `audio_data_updated`
+    additionally accumulates its own advance into `_reactive_advance`,
+    which `_base_rotation_step` drains (unconditionally, so it can never
+    carry a stale frame across a base=0 stretch) to know how much of this
+    frame's revolutions the audio already paid for.
+
+    INTERACTIONS PRESERVED: direction comes from the same sign ladder the
+    charge phase already used — `sign(spin)` (which is what the
+    `spin_sign`/Flip sign-control write sets), else `sign(twist)`, else
+    clockwise — so the base always follows the current direction and never
+    fights a reverse flare; `spin_total` still stays in `[0, 1)` (the `%
+    1.0` is applied on the base write too, and Python's float modulo
+    returns a positive result for a negative operand); the charge phase's
+    own `CHARGE_SPIN_REV_S` boost is unchanged and additive on top (the
+    floor is measured against the AUDIO drive only — a deliberate,
+    documented scope, since the charge is a brief authored accelerator, not
+    the quiet case); and the particle-handoff snapshot's `spin_sign` read
+    is untouched.
+
+    Evidence: `scripts/check_radial_base_rotation.py` (real `fx.headless`
+    pipeline — byte-identical frames at base=0, the measured rate in
+    silence, and the reactive rate at a peak proven identical with and
+    without a base) and `tests/test_radial_base_rotation.py`. Not in the
+    fork source at `/home/javi/ledfx-src` (SpotFX-authored mechanism).
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

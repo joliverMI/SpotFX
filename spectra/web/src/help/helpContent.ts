@@ -160,6 +160,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'radial-base-rotation',
+        title: 'STAR / Radial — Speed vs Base Speed (they scale differently)',
+        keywords: 'radial star spin speed base rotation quiet minimum floor revolutions per second rev/s silence parked audio reactive squared gain lows bass motor',
+        body: [
+          'STAR (the Radial effect) has TWO rotation controls and they are not the same kind of number. SPEED is a GAIN on the live audio: the effect squares it and multiplies it by the room\'s captured bass power, so in a quiet passage it produces exactly zero rotation at ANY setting — that is why a perfectly healthy Speed can look completely parked between bass hits, and why raising Speed from 0.55 to 0.8 barely doubles a crawl (the squaring means the top of the range is where it matters).',
+          'BASE SPEED (rev/s) is the opposite kind of number: LINEAR, absolute, and independent of the music. It is stated in revolutions per second — 0.05 is one full turn every 20 seconds, 0.25 is one every four, 1.0 is one a second. Set it and the pattern never turns slower than that, audio or no audio.',
+          'The two combine as a FLOOR, not a sum: the pattern turns at whichever is faster right now. In quiet it turns at your Base Speed; the moment the music\'s own drive is faster, the reactive Speed takes over completely unchanged — so setting a base never speeds up or alters what you already tuned at the peaks. Base Speed is left at 0 by default, which is exactly today\'s behaviour.',
+          'Direction is not a separate choice: the base follows whichever way the pattern is already turning (Speed\'s own sign, which is what the Flip control writes), so it never fights a reverse flare. And it is advanced by the render clock, not by audio frames, so it keeps turning even if the audio capture goes quiet or stalls entirely.',
+        ],
+      },
+      {
         id: 'tab-drift',
         title: 'Drift tab — declarations the engine runs',
         keywords: 'creep follow wander slow evolution profile inline live legs bounds',

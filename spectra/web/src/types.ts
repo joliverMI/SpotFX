@@ -299,6 +299,8 @@ export interface EffectParamMeta {
   options?: string[];
   options_source?: string;
   default?: number | boolean | string;
+  /** Help topic id this param's own row deep-links to (registry-declared). */
+  help_topic?: string;
 }
 
 export interface Registry {
