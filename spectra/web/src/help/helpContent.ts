@@ -10,6 +10,11 @@
  *    • `keywords` holds hidden search synonyms; search is typo-tolerant.
  *    • `id`s are deep-link targets used by <HelpLink topic="..."/> —
  *      don't rename an id without updating its callers (grep `topic="`).
+ *      One id can also be referenced from OUTSIDE the .tsx sources: an
+ *      effect param in `config/effect_params.json` may carry a
+ *      `"help_topic"`, which InitialSetTab renders as a HelpLink on that
+ *      param's row (e.g. `radial-base-rotation`). Grep the registry too
+ *      before calling such a topic orphaned or renaming its id.
  *    • Structure: top-level section per page/area → entries.
  *  ═══════════════════════════════════════════════════════════════════════ */
 
