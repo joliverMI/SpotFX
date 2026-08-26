@@ -11,17 +11,55 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ReactGPicker from 'react-gcolor-picker';
 
-/** LedFX's own gradient panel can emit a gradient with no leading angle
- * (`linear-gradient(#000 0%, #fff 100%)`). Both the vendored LedFX backend
- * (`ledfx/color.py`) and SpotFX's own `services/gradient_interpolation.py`
- * treat everything before the first comma as the angle, so an angle-less
- * value would silently swallow its first stop colour. Force one explicit
- * angle before it ever reaches state or the network — the same guard
- * LedFX's own frontend applies for the same reason. */
+/** Every linear-gradient in this app is HORIZONTAL by convention: the
+ * angle before the first comma is `90deg`, and nothing downstream reads it
+ * (SPECTRA's own `spectra/models/gradient2d.py::parse_stops` discards that
+ * head segment entirely, `spectra/services/color_rotate.py` passes it
+ * through verbatim, and the vendored render pipeline's `fx/color.py`
+ * parses it into an `angle` attribute no effect ever reads). What it DOES
+ * decide is how a value paints as CSS — including this picker's own swatch
+ * strip, which is a wide, 22px-tall bar in `GradientEditor2D`: a vertical
+ * angle paints across the bar's short axis instead of along its length.
+ *
+ * Two things this guards, both real:
+ *  - an angle-LESS gradient (`linear-gradient(#000 0%, #fff 100%)`, which
+ *    LedFX's own panel can emit) would have its first stop colour silently
+ *    swallowed by every parser above, which reads before-the-first-comma
+ *    as the angle;
+ *  - a WRONG angle. Since PR #171 hid the picker's angle dial
+ *    (`showGradientAngle={false}`), react-gcolor-picker still bakes its own
+ *    angle into everything it emits and there is no longer any control to
+ *    correct it: its built-in quick-pick gradients carry 0/45/270/315deg
+ *    (measured live against the real widget — see
+ *    `scripts/check_gradient_angle_canonicalization.mjs`), and converting a
+ *    solid to a gradient starts from its internal 180deg default. Picking
+ *    one of those used to stick, painting his edge strips vertically.
+ *
+ * So every emitted linear-gradient is CANONICALIZED to 90deg — the angle
+ * is rewritten, not merely supplied when missing. This is input
+ * canonicalization into the app's one grammar, not a reinterpretation of
+ * stored data: no stored value changes meaning, because no consumer of the
+ * angle exists. Solid colours and anything that isn't a linear-gradient
+ * pass through untouched. */
+const CANONICAL_ANGLE = '90deg';
+
+/** The head segment of a linear-gradient is a DIRECTION only when it looks
+ * like one (`45deg`, `.5turn`, `to bottom right`); otherwise it is already
+ * the first colour stop and the angle is simply missing. */
+const DIRECTION_RE = /^\s*(?:[+-]?\d*\.?\d+(?:deg|grad|rad|turn)|to\s+(?:top|bottom|left|right)(?:\s+(?:top|bottom|left|right))?)\s*$/i;
+
 export function normalizeGradientAngle(value: string): string {
   if (!value || !value.includes('linear-gradient')) return value;
-  if (/linear-gradient\s*\(\s*-?\d+deg/i.test(value)) return value;
-  return value.replace(/linear-gradient\s*\(/i, 'linear-gradient(90deg, ');
+  const open = /linear-gradient\s*\(/i.exec(value);
+  if (!open) return value;
+  const start = open.index + open[0].length;
+  const comma = value.indexOf(',', start);
+  if (comma < 0) return value;
+  const head = value.slice(start, comma);
+  if (DIRECTION_RE.test(head)) {
+    return `${value.slice(0, start)}${CANONICAL_ANGLE}${value.slice(comma)}`;
+  }
+  return `${value.slice(0, start)}${CANONICAL_ANGLE}, ${value.slice(start)}`;
 }
 
 export interface ColorGradientPickerProps {
@@ -109,7 +147,11 @@ export default function ColorGradientPicker({
         className="color-gradient-swatch"
         title={title ?? (gradient ? 'Pick a colour or build a gradient' : 'Pick a colour')}
         disabled={disabled}
-        style={{ width: swatchWidth, height: swatchHeight, background: value || '#ffffff' }}
+        // Display-only: the swatch paints a 90deg-re-angled copy of the
+        // stored value, so a strip stored with a stray vertical angle
+        // (anything saved between PR #171 and this fix) still paints ALONG
+        // this bar rather than across it — without rewriting his storage.
+        style={{ width: swatchWidth, height: swatchHeight, background: normalizeGradientAngle(value) || '#ffffff' }}
         onClick={() => setOpen((o) => !o)}
       />
       {open && createPortal(
@@ -131,7 +173,10 @@ export default function ColorGradientPicker({
           onMouseDown={(e) => e.stopPropagation()}
         >
           <ReactGPicker
-            value={value}
+            // Same display-only canonicalization as the swatch: the widget
+            // previews a value the way this app paints it. Feeding the
+            // picker a prop never writes anything back — only onChange does.
+            value={normalizeGradientAngle(value)}
             format="hex"
             showAlpha={false}
             // Linear only — no radial/linear mode toggle, no angle dial (his
