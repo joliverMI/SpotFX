@@ -212,6 +212,7 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
           <option value="">— effect —</option>
           {effectOptions.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
+        {effEffect === 'fish' && <HelpLink topic="fish-effect" />}
         {steps.length === 0 && dev.effect_type && (
           <button style={{ fontSize: 11 }} onClick={addStep}
             title="Stepped effect: switch to a DIFFERENT effect at/above an ⚡ intensity threshold">

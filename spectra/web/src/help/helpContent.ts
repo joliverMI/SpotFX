@@ -145,6 +145,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'fish-effect',
+        title: 'Fish — the effect, and every knob it adds',
+        keywords: 'fish school ripple wake flap tail turn radius oval swim pond rush orbits copy',
+        body: [
+          'Fish is Orbits\' twin: the same scene, the same flare kinds and bands, the same initial values, weightings and curves — a copy, not a re-tuning. What differs is the creature. Each one is a thin oval seen from above that POINTS the way it is swimming, its spine flaps as it goes, and it leaves an expanding ripple wake instead of Orbits\' comet smear. It turns through a real circle: nothing can spin a fish faster than its Turn Radius allows, so an about-face is always an arc and never a flip on the spot.',
+          'They do NOT avoid each other — fish swim straight through one another. That is a deliberate choice, not an omission.',
+          'Six knobs are Orbits\' own, re-read for a fish. Turn Radius (Orbits\' Orbit Radius) is the tight circle it traces when it turns — the single number that makes the turn read as a turn. Current Swirl (Ring Spin) is a steady bias making every fish curve the same way, like a slow current; Reverse flips it. Swim Speed (Orbit Speed) is how fast they cross the panel, deliberately independent of Turn Radius. Home Ring (Tether Radius) and Home Scatter place each fish\'s own loose home patch — a pull it feels only once it has wandered well away, never a tether. Fish Size (Particle Size) is how big the creature is: the oval is that size stretched along its length, so a fish covers about the area the Orbits blob of the same size would.',
+          'Body Length sets how thin and long the oval is (1.0 is literally an Orbits blob). Pond Size is how much of the panel they use before turning back — 1.0 is the panel\'s own inscribed ellipse, which on the crystal keeps them inside the lit hexagon rather than swimming into the dark corners.',
+          'Tail Flap is how far the spine throws its tail; Flap Rate is beats per second at cruise, and it rises with speed. Flap Accel is his ask made adjustable: the tail waves harder while a fish is speeding up and visibly softer while it slows.',
+          'Ripple Wake sets the wake\'s strength — always subtle against the fish itself, stronger the faster it swims, and a ripple is dropped on every tail beat, so a faster fish also ripples more often. Ripple Spread is how fast a ring opens out (capped so the wake stays fish-sized, matched to the motion that made it), Ripple Life how long it takes to fade, Ripple Width its thickness. Wake Length is separate — that is the fish\'s own smear, not the rings.',
+          'The remaining knobs shape the charge and the lull (see "Response families"): School Size, School Variation and School Turn Gap for the charge; Rush Size, Rush Time and Rush Chaos for the lull.',
+          'On the strips the scene still runs Orbits\' own 1D effect — a fish seen from above needs two dimensions, and there is no 1D fish. Every number above is a considered first guess, not a tuned value: the look is not finished until you have watched it and moved them.',
+        ],
+      },
+      {
         id: 'tab-drift',
         title: 'Drift tab — declarations the engine runs',
         keywords: 'creep follow wander slow evolution profile inline live legs bounds',
@@ -309,7 +324,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'response-families',
         title: 'Response families — what charge/lull/drop look like',
-        keywords: 'blackhole orbits radial fireworks squiggles dancer eye grammar visual',
+        keywords: 'blackhole orbits fish radial fireworks squiggles dancer eye grammar visual',
         body: [
           'Black Hole: charge — the event horizon holds its size while its ring THICKENS, blobs start forming faster and faster (up to 12 a second, past the density cap) and fall in faster with them; lull — that fast formation keeps up while the horizon expands, filling the panel exactly half way through the lull and holding there, so the second half is dark; drop — a centre explosion on the mark, then ease back. On the strips the same arc reads as a thickening halo on the ring, then the strip darkening to black half way through the lull.',
           'Orbits: charge — the population swells then sheds to a single blob; lull — its orbit collapses to a tiny centre swirl; drop — full population returns with a burst plus 2× ballistic ejecta, spin boosted and decaying.',
@@ -318,6 +333,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Squiggles: charge — walls turn solid and the figure fills with trapped scribble; lull — an old-TV switch-off to a held white dot; drop — a nine-chain fan erupts from centre.',
           'Dancers: charge — the dance intensifies as the build climbs; lull — the crew sinks into a held squat; drop — every dancer fires a stunt (breaker freeze-spin, grand jeté splits, or a huge leap), staggered.',
           'Eye: charge — the iris grows, the pupil constricts, flames stream inward; lull — the lids close with a suspense pause; drop — the eye explodes open with a flame burst.',
+          'Fish: charge — up to twelve fish swim in and lock into one heading, and the camera follows them so perfectly that the school holds station while the WATER streams past; from then on the whole school changes direction on every beat, never closer together than 400ms, each fish varying just slightly from the shared heading. Lull — they disperse one by one until a single fish is left, alone and still swimming, holding the centre of view by half way through; then a rush of up to twenty pours in from the direction that fish is heading and zooms past it for about a second, chaotically, leaving behind exactly as many fish as the scene\'s own Fish count. Drop — Orbits\' payoff unchanged: the full population bursts back out of centre plus 2× ballistic ejecta, speed boosted and decaying. The school and the rush are the only two moments a fish scene exceeds its own population limit.',
           'Effects without phase machinery simply ride the band extras. Full engineering detail: docs/SPECTRA_RESPONSES.md.',
         ],
       },

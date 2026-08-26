@@ -1352,7 +1352,7 @@
           "min": 0.02,
           "max": 0.8,
           "aspect": "shape",
-          "default": 0.53,
+          "default": 0.14,
           "note": "The tight circle a fish traces when it turns around. Nothing can turn a fish faster than this allows, which is what makes an about-face an arc instead of a flip."
         },
         "blob_size": {
