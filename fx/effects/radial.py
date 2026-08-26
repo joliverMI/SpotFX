@@ -267,6 +267,7 @@ class Radial2d(Twod):
         # from replaying the bloom
         if not snap or snap.get("src") not in (
             "orbits",
+            "fish",
             "blackhole",
             "fireworks",
             "squiggles",

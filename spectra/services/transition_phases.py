@@ -46,7 +46,14 @@ class PhasedTransition:
 
 
 # 2D particle effects that share the particle_handoff choreography.
-_PARTICLES = frozenset({"blackhole", "orbits", "fireworks"})
+# fish joins them (2026-08-25): it is Orbits' handoff protocol end to end —
+# same snapshot shape, same radial gather/bloom collapse, same pacman/dancer
+# holds — so every registered pair below applies to it identically. NOTE the
+# deliberate divergence from the legacy twin (services/transition_phases.py):
+# fish exists ONLY in the vendored fx/ pipeline, never in the LedFX service
+# the legacy registry describes, so adding it there would name a pair that
+# can't occur.
+_PARTICLES = frozenset({"blackhole", "orbits", "fireworks", "fish"})
 # squiggles shares the full choreography set: pacman two-phase morph,
 # radial implode->segment-burst, and envoy-collision->radial-bloom.
 # dancer joins it too: radial->dancer holds the body formation until the

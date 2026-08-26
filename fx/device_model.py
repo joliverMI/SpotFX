@@ -183,7 +183,7 @@ def resolve_scope(virtual_ids: list[str] = (), categories: list[str] = (),
 # dedicated phase writes, never editor surfaces or band patches.
 PHASE_EFFECTS = frozenset({
     "blackhole", "blackhole1d", "orbits", "orbits1d", "radial",
-    "fireworks", "fireworks1d", "squiggles", "dancer", "eye",
+    "fireworks", "fireworks1d", "squiggles", "dancer", "eye", "fish",
 })
 
 # The vendored effects carrying the flare-driven payoff burst: the
