@@ -1922,6 +1922,16 @@ class ResponseEngine:
         for card in color_sets.list_all():
             if card.kind != "set" or not scene.accepts_color_set(card):
                 continue
+            # DISABLED (owner ask 2026-08-25, models/color_set.py's
+            # ColorSetCard.disabled): a flare's colour jump is an
+            # AUTOMATIC pick, so a disabled set is dropped from its pool
+            # too. Checked HERE specifically — this pool is a separate
+            # function from the sequencer's own (it deliberately applies
+            # neither mode_availability nor rainbow_select), so "the
+            # family is covered" would have been the wrong assumption
+            # (the three-overlay-bypass lesson, docs/SPECTRA_SPEC.md §86).
+            if getattr(card, "disabled", False):
+                continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out
 

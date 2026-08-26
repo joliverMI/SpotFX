@@ -785,6 +785,13 @@ export interface SpotColorSetCard {
    * rainbow_select.py) — ENUMERATED, never inferred from name. See
    * RainbowToggle.tsx. Applies to both Sets and Groups. */
   is_rainbow?: boolean;
+  /** Temporary disable (owner ask 2026-08-25: "i want to be able to
+   * disable color sets like i can scenes") — the same plain reversible
+   * bool SceneV2.disabled is, no timer. Applies to both Sets and Groups:
+   * a disabled card is never CHOSEN automatically, but an explicit
+   * Preview/apply still works (and says overrode_disabled). See
+   * models/color_set.py's ColorSetCard.disabled and DisabledToggle.tsx. */
+  disabled?: boolean;
   [key: string]: unknown;
 }
 

@@ -108,6 +108,14 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
                 last colour pick: {st.color.last_pick.picked_name ?? st.color.last_pick.rung}
                 {' '}· rung {st.color.last_pick.rung}
               </summary>
+              {st.color.last_pick.pool_exhausted && (
+                <div style={{ fontSize: 11, marginTop: 4, color: 'var(--danger)' }}>
+                  ⚠ no colour set was eligible — the room kept its current colours
+                  {st.color.last_pick.pool && (
+                    <> ({st.color.last_pick.pool.disabled} of {st.color.last_pick.pool.sets} sets disabled)</>
+                  )}
+                </div>
+              )}
               <table style={{ fontSize: 11, marginTop: 4 }}>
                 <thead>
                   <tr style={{ color: 'var(--text-muted)' }}>

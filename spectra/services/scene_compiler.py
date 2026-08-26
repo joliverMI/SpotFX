@@ -228,7 +228,14 @@ def room_active_set() -> Optional[ColorSetCard]:
     bootstrap makes a transient state.
 
     THE TERMINAL FALLBACK, so only the OVERLAY resolves here, never the
-    mode gate: every other automatic choke point that fails its own
+    mode gate — and, since 2026-08-25, never the DISABLED gate either
+    (models/color_set.py's ColorSetCard.disabled). Disabling a set stops
+    it being CHOSEN; it must never yank the room's current palette
+    mid-paint, and re-checking it here would do exactly that — the room
+    would drop to no colour at all the moment he disabled whatever is
+    showing. It keeps painting until the next natural change picks
+    something else, the exact mirror of a disabled SCENE simply stopping
+    being chosen. Same structural reason as the mode gate below: every other automatic choke point that fails its own
     resolve_for_fire_mode_gated check (an explicit color_set_id, a
     resolved group member) degrades BY FALLING BACK TO THIS FUNCTION —
     see fire_scene_by_id's own docstring ("falls back to the room's

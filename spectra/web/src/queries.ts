@@ -120,6 +120,10 @@ export interface PreviewStartResult {
   virtuals: string[];
   hold: boolean;
   expires_in_s: number;
+  /** True when the previewed card is marked Disabled — the preview still
+   * ran (an explicit press always wins), and the contradiction is named
+   * rather than silent. Same shape as Force Scene's own overrode_disabled. */
+  overrode_disabled?: boolean;
 }
 export interface PreviewUpdateResult { applied: boolean; virtuals: string[]; }
 export interface PreviewReleaseResult { reverted: boolean; }
@@ -313,6 +317,13 @@ export interface SequencerStatus {
        * group defaulted to flat) — the observability the compounding
        * multiply needs so a starved set is explainable, not a mystery. */
       factors: Record<string, { curve: number; genre: number; wheel: number; group: number; score: number }>;
+      /** POOL EXHAUSTED (owner ask 2026-08-25's safety half): nothing was
+       * eligible at all, so the room KEPT its colours. The outcome is
+       * always safe (a room is never left with nothing to pick) but must
+       * never be silent — `pool` names how many of his sets are currently
+       * Disabled, the one cause he can act on. */
+      pool_exhausted?: boolean;
+      pool?: { sets: number; disabled: number; eligible: number };
     } | null;
   };
 }

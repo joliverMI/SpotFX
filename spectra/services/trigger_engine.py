@@ -1003,17 +1003,21 @@ class TriggerEngine:
         # 2026-08-17) can gate the GROUP ITSELF before any member
         # substitution — resolve_ref's own hard-fail semantics stay for a
         # genuinely unknown id; a reference that resolves fine but is
-        # currently mode-gated out (the card itself, or every member) is a
-        # quiet skip instead, matching every other automatic pick's
-        # degrade-gracefully posture.
+        # currently disabled or mode-gated out (the card itself, or every
+        # member) is a quiet skip instead, matching every other automatic
+        # pick's degrade-gracefully posture. A stored trigger firing is an
+        # AUTOMATIC path (he authored it earlier, he is not pressing a
+        # button now), so disabled gates it hard — exactly as a stored
+        # fire_scene trigger naming a disabled SCENE is gated at
+        # fire_scene_by_id.
         card = color_sets.get_by_id(set_id)
         if card is None:
             raise ValueError(f"colour set '{set_id}' not found")
         room_mode = load_room_controls().display_mode
         gated = color_set_groups.resolve_for_fire_mode_gated(card, room_mode)
         if gated is None:
-            logger.info("select_color_set trigger: '%s' unusable or "
-                       "unavailable in display_mode=%s — skipped",
+            logger.info("select_color_set trigger: '%s' disabled, unusable, "
+                       "or unavailable in display_mode=%s — skipped",
                        card.name, room_mode)
             return
         await engine.conductor.apply_set_directly(gated)

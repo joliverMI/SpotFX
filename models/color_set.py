@@ -111,6 +111,43 @@ class ColorSetCard(BaseModel):
     # scene/set-color path ignores this flag.
     scene_v2_opt_out: bool = False
 
+    # SPECTRA temporary disable (owner ask, 2026-08-25: "i want to be able
+    # to disable color sets like i can scenes") — the SAME model as
+    # spectra/models/scene.py's SceneV2.disabled, deliberately copied
+    # rather than reinvented: a plain persistent bool, no timer/expiry, he
+    # flips it back when he wants the card back. False = every existing
+    # card loads and behaves exactly as before this field existed.
+    # STRONGER than display_availability above (checked first, wins the
+    # reported reason when both apply): disabled means "don't choose this
+    # card, period," where availability only narrows which room mode it
+    # plays in.
+    #
+    # Gated at AUTOMATIC choice only — the card stops being CHOSEN
+    # (spectra/services/scene_sequencer._default_eligible_sets, its
+    # fire_scene_by_id colour resolution, color_set_groups' member pool
+    # and card gate, drift_conductor._destination_pool, scene_response's
+    # flare colour-jump pool, trigger_engine's select_color_set action).
+    # It is NEVER yanked mid-paint: scene_compiler.room_active_set (the
+    # terminal fallback) deliberately does NOT check this, so a set that
+    # is the room's active palette right now keeps painting until the next
+    # natural change picks something else — the exact mirror of "a
+    # disabled scene simply stops being chosen".
+    #
+    # A group's own `disabled` stops the GROUP being chosen as a pool. It
+    # does NOT strip the group's override entries from an enabled member
+    # fired by its own id (§10's override layer is a bulk-edit mechanism,
+    # not a choice — silently changing an enabled set's rendered colours
+    # is exactly what disabling must not do), and for the same reason it
+    # does not withdraw the group's own LIKELIHOOD CURVE from its members'
+    # scores (selection_kernel.group_curve_mult, §65/§76): both are
+    # authored weight/appearance layers on a member that is still enabled,
+    # not a statement about whether the group itself gets picked.
+    #
+    # An EXPLICIT human apply (POST /api/room-color/apply, the editor's
+    # Preview) still works and NAMES the contradiction
+    # (overrode_disabled=True), the Force-Scene precedent.
+    disabled: bool = False
+
     # SPECTRA Rainbow select (owner ask 2026-08-20): "rainbow" vs "single"
     # (default) — ENUMERATED, never inferred from name or from the wheel's
     # own chromatic-span rainbow heuristic (services/color_wheel.py). His

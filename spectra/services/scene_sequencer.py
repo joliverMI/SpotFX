@@ -56,6 +56,12 @@ logger = logging.getLogger(__name__)
 
 TRANSITION_SOURCE = "transition"
 
+# Reported in place of a selection_kernel rung when the colour-set pool is
+# EMPTY before the kernel is even consulted (every set disabled/gated out).
+# The outcome is identical to the kernel's own TERMINAL_KEEP — the room
+# keeps its colours — but the CAUSE is different and worth naming.
+POOL_EXHAUSTED = "pool_exhausted"
+
 
 async def fire_scene_by_id(scene_id: str,
                            color_set_id: Optional[str] = None,
@@ -450,6 +456,35 @@ class SceneSequencer:
         if not config.color_set_entries:
             return None
         eligible = self._eligible_sets(scene_id)
+        if not eligible:
+            # POOL EXHAUSTED — every set is currently ineligible (disabled,
+            # mode-gated, scene-rejected, or rainbow-partitioned out at
+            # this intensity). The kernel would reach TERMINAL_KEEP on its
+            # own and the room would simply keep its colours, which is the
+            # right OUTCOME (a room is never left with nothing) but a
+            # silent one: he could disable every rainbow set and never
+            # learn why colours stopped rolling above the rainbow limit.
+            # So it is named here, on the same status/pick-factors surface
+            # every other colour pick reports through.
+            diag = self._pool_diagnostic()
+            logger.warning(
+                "colour-set pool EXHAUSTED at intensity %.2f — nothing "
+                "eligible (%d of %d sets disabled); keeping the room's "
+                "current colours", intensity, diag["disabled"], diag["sets"])
+            return {
+                "picked_id": None,
+                "fire_set_id": self._active_color_set_id,
+                "position_deg": None,
+                "record": {
+                    "picked_id": None,
+                    "picked_name": None,
+                    "kept_set_id": self._active_color_set_id,
+                    "rung": POOL_EXHAUSTED,
+                    "factors": {},
+                    "pool_exhausted": True,
+                    "pool": diag,
+                },
+            }
         wheel_profile = (curves.get(config.wheel_travel_curve)
                          if config.wheel_travel_curve else None)
         wheel_points = (wheel_profile.points if wheel_profile
@@ -477,6 +512,21 @@ class SceneSequencer:
                 "factors": pick.factors,
             },
         }
+
+    def _pool_diagnostic(self) -> dict:
+        """Best-effort counts for an exhausted colour pool: how many "set"
+        cards exist and how many of them he has DISABLED — the one cause
+        of exhaustion he can act on directly. Never raises: an injected
+        fake/absent storage reports zeros rather than breaking a roll."""
+        try:
+            from spectra.services import color_sets
+            cards = [c for c in color_sets.list_all() if c.kind == "set"]
+            return {"sets": len(cards),
+                    "disabled": sum(1 for c in cards
+                                    if getattr(c, "disabled", False)),
+                    "eligible": 0}
+        except Exception:
+            return {"sets": 0, "disabled": 0, "eligible": 0}
 
     def _adopt_colors(self, color: dict) -> None:
         """Commit colour state AFTER a successful fire. Rainbow/achromatic
@@ -544,6 +594,14 @@ class SceneSequencer:
         out: dict[str, Optional[float]] = {}
         for card in color_sets.list_all():
             if card.kind != "set":
+                continue
+            # DISABLED (owner ask 2026-08-25) — checked first and
+            # independent of room mode, the same order fire_scene_by_id
+            # applies to a disabled SCENE. A disabled set simply stops
+            # being chosen; it is never yanked out of the room mid-paint
+            # (scene_compiler.room_active_set, the terminal fallback,
+            # deliberately does not check this).
+            if getattr(card, "disabled", False):
                 continue
             if scene is not None and not scene.accepts_color_set(card):
                 continue

@@ -28,6 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import CurveAttachmentEditor from '../components/CurveAttachmentEditor';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import RainbowToggle from '../components/RainbowToggle';
+import DisabledToggle from '../components/DisabledToggle';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import useIsPhone from '../lib/useIsPhone';
@@ -52,7 +53,7 @@ function newCard(kind: 'set' | 'group'): SpotColorSetCard {
   return {
     id: uuid(), name: kind === 'group' ? 'New Group' : 'New Colour Set',
     color: '#FFD700', kind, labels: [], entries: [], display_availability: 'default',
-    is_rainbow: false,
+    is_rainbow: false, disabled: false,
     ...(kind === 'group'
       ? { members: [], mode: 'cycle', cycle_behavior: 'wrap', exclude_current: true, palette_sync: false }
       : {}),
@@ -111,6 +112,13 @@ export default function ColorSetsPage() {
       if (!result.applied) {
         toast('Nothing live to preview (no device matches this card)', 'error');
         return;
+      }
+      if (result.overrode_disabled) {
+        // Contradictory input, NAMED — the Force Scene precedent. He
+        // pressed Preview on a card he has marked Disabled: it plays
+        // (an explicit press always wins) and he is told, rather than it
+        // silently working while automatic picks silently skip it.
+        toast('⚠ previewing a disabled colour set — it still never fires automatically', 'error');
       }
       setPreviewingId(target.id);
       clearPreviewTimer();
@@ -306,6 +314,12 @@ export default function ColorSetsPage() {
             border: '1px solid var(--border)', background: `hsl(${w.position_deg}, 85%, 55%)`,
           }} />
         )}
+        {c.disabled && (
+          <span className="badge badge-red" style={{ flexShrink: 0 }}
+                title="Disabled — never chosen automatically">
+            ⛔ disabled
+          </span>
+        )}
         <span style={{
           fontSize: 10, padding: '2px 6px', borderRadius: 10, flexShrink: 0,
           background: c.kind === 'group' ? 'rgba(156,39,176,0.15)' : 'rgba(33,150,243,0.15)',
@@ -439,6 +453,9 @@ export default function ColorSetsPage() {
                          textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {card.name}{drafts[card.id] ? ' •' : ''}
           </span>
+          {card.disabled && (
+            <span className="badge badge-red" style={{ flexShrink: 0 }}>⛔ disabled</span>
+          )}
           <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', flex: 'none' }}>
             colours ▾
           </span>
@@ -478,6 +495,9 @@ export default function ColorSetsPage() {
             <RainbowToggle value={card.is_rainbow ?? false}
               onChange={(v) => setCard({ ...card, is_rainbow: v })} />
             <HelpLink topic="colorsets-rainbow" title="Rainbow select" />
+            <DisabledToggle value={card.disabled ?? false} itemLabel="colour set"
+              onChange={(v) => setCard({ ...card, disabled: v })} />
+            <HelpLink topic="colorsets-disable" title="Disable" />
             <button className="danger" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => void del()}>✕ Delete</button>
           </div>
 

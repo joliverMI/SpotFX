@@ -476,13 +476,22 @@ class DriftConductor:
         {set_id: (card, wheel_position)}: an OVERRIDE picks within its own
         palette bounds (the scene's accepted sets); room custody picks from
         every set not globally opted out. Rainbow/achromatic sets are never
-        destinations — they have no wheel position to travel toward."""
+        destinations — they have no wheel position to travel toward, and a
+        DISABLED set is never a destination either (owner ask
+        2026-08-25)."""
         scene = self.scene
         override = (scene is not None
                     and scene.color_journey.mode == "override")
         pool: dict[str, tuple[Any, float]] = {}
         for card in self._set_cards():
             if getattr(card, "kind", "set") != "set":
+                continue
+            # DISABLED (owner ask 2026-08-25, models/color_set.py's
+            # ColorSetCard.disabled) — a disabled set is never chosen as a
+            # journey destination, in either custody. It keeps painting if
+            # it is the room's CURRENT set (nothing yanks it mid-paint);
+            # this only stops it being travelled TO again.
+            if getattr(card, "disabled", False):
                 continue
             if override:
                 if not scene.accepts_color_set(card):
