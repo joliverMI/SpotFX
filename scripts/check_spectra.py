@@ -2015,6 +2015,11 @@ check(any(absolute_params(eye_kinds[n]).get("flames") == 1.0
       "Eye: the top flare band is the FLAME flare (flames → 1.0)")
 
 # ── the STAR strips migration (the fold's not-foldable row, now foldable) ────
+# NOTE 2026-08-25: this section proves the effect_steps MECHANISM by applying
+# seed_star_strips.with_star_strips() to a COPY of the live scene — it never
+# reads the live entry's own steps, so it is unaffected by (and does not
+# contradict) his ruling that STAR's strips always run melt. The live step is
+# removed by scripts/star_strips_always_melt.py; do not re-run the seeder.
 star_mod = importlib.import_module("scripts.seed_star_strips")
 star_store = json.loads(live_scenes_file.read_text())
 check(star_mod.STAR_ID in star_store,

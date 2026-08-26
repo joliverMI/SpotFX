@@ -16,6 +16,15 @@ store names it STAR; a pre-rename store still says Mid Star V2; both are
 the same scene. Dry-run by default; --apply writes (atomic, whole store,
 indent=2 — the store's own format). Idempotent.
 
+SUPERSEDED FOR THE STRIPS ENTRY, 2026-08-25 — DO NOT RE-RUN --apply. His
+ruling that day, verbatim: "curently we can use the power effect on the
+strips when running star scene. I dont want that anymore, always do melt."
+scripts/star_strips_always_melt.py removes the step this seeder writes;
+re-running this one would silently put it back. The script below is kept
+for its history and because scripts/check_spectra.py still exercises
+with_star_strips() as the executable proof of the effect_steps mechanism
+itself (against a COPY, never the live store).
+
 DO NOT deliver this by re-running scripts/seed_spectra_from_v2.py: that
 seeder REBUILDS the SPECTRA store from the legacy world and would erase the
 live fold. This script is the supported migration path; running it against

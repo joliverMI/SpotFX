@@ -994,8 +994,12 @@ neutral intensity when down (stated). Its scene model (`spectra/models/scene.py`
 with value bindings (+`dice` correlation), intensity-stepped effect
 selection (`effect_steps`: a device entry resolves to a DIFFERENT effect
 at/above ⚡ thresholds, fire-time only, base = fallback — decision:
-star-fold-entry-growth; deploy migration for STAR's strips:
-`scripts/seed_star_strips.py --apply`, NEVER by re-running the v2 seeder).
+star-fold-entry-growth; deploy migration for STAR's strips was
+`scripts/seed_star_strips.py --apply`, NEVER the v2 seeder — but that one is
+SUPERSEDED as of 2026-08-25 and must not be re-run: his ruling "always do
+melt" removed STAR's Strips power step via
+`scripts/star_strips_always_melt.py`, and the seeder would silently put it
+back. The mechanism itself is unchanged and still used elsewhere).
 An effect's "accent" param (`sparks_color` on power — `"accent": true` in
 `config/effect_params.json`, looked up via `fx/device_model.
 accent_param_for`) is force-written black by `scene_compiler._entry_config`
