@@ -3541,6 +3541,32 @@ with the mechanism detail; this is the short list of traps.
    `scripts/check_blackhole_charge_lull.py` for the instrument and
    `.claude/skills/crystal-hex-grid/SKILL.md` for why.
 
+## Fish (`fx/effects/fish.py`) — Orbits' twin, different kinematics
+
+A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
+(flare kinds, bands, initial params, weightings, curves, labels — see
+`scripts/seed_fish_scene.py`, dry-run default, and `docs/SPECTRA_SPEC.md`
+§94). Three things to know before touching it:
+
+1. **It reuses Orbits' patterns, not its motion.** Each fish has its own
+   position, speed and SCREEN-space heading; the thin oval is laid out along
+   that heading (never in normalized space — that would shear it by the
+   panel's aspect). A real turn RADIUS (`orbit_radius`, re-read) caps the
+   turn rate, so an about-face is structurally an arc. Several shared param
+   keys keep their names but mean something else on a fish (`orbit_radius` →
+   turn radius, `spin` → current swirl, `horizon_scale` → home ring,
+   `base_speed` → swim speed, decoupled from the turn radius) — the registry
+   `note` on each says so; read it before assuming Orbits semantics.
+2. **The population-cap bypass is scoped to two moments**, by his own
+   decision: the charge's school and the lull's rush, via `p_nocap`. A
+   cap-exempt fish never survives the moment it was granted for, and
+   ordinary swimming always obeys `particle_count`. Don't widen this.
+3. **Mutual avoidance is deliberately absent** (his scope decision
+   2026-08-25) — fish swim through each other. It is not a gap to fill.
+
+Every new fish knob is a first guess pending his eye; the effect ships
+tunable, not tuned. Proof: `scripts/check_fish.py`, `tests/test_fish.py`.
+
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:

@@ -53,7 +53,8 @@
       "pacman",
       "squiggles",
       "dancer",
-      "eye"
+      "eye",
+      "fish"
     ],
     "aspect_labels": {
       "shape": "Shape",
@@ -1289,6 +1290,476 @@
         "background_color": "#000000",
         "background_brightness": 1.0,
         "brightness": 1.0
+      }
+    },
+    "fish": {
+      "params": {
+        "particle_count": {
+          "label": "Fish",
+          "type": "integer",
+          "smooth": false,
+          "min": 1,
+          "max": 16,
+          "aspect": "shape",
+          "note": "Number of fish kept alive on the matrix. The charge's school and the lull's rush deliberately exceed it for their own moment only.",
+          "default": 6
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape",
+          "default": 0.5
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape",
+          "default": 0.5
+        },
+        "radius_scale": {
+          "label": "Field Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.0,
+          "aspect": "shape",
+          "default": 1.8
+        },
+        "horizon_scale": {
+          "label": "Home Ring",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.8,
+          "aspect": "shape",
+          "default": 0.19,
+          "note": "Radius of the ring each fish's own home patch sits on; 0 anchors every fish to the centre. Orbits' Tether Radius, re-read as a loose home rather than a hard tether."
+        },
+        "orbit_radius": {
+          "label": "Turn Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.02,
+          "max": 0.8,
+          "aspect": "shape",
+          "default": 0.14,
+          "note": "The tight circle a fish traces when it turns around. Nothing can turn a fish faster than this allows, which is what makes an about-face an arc instead of a flip."
+        },
+        "blob_size": {
+          "label": "Fish Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 6,
+          "aspect": "shape",
+          "default": 1.0,
+          "note": "How big the creature is. The rendered half-WIDTH is this divided by sqrt(Body Length), so a fish covers about the area the Orbits blob of the same size would, stretched into an oval."
+        },
+        "spin": {
+          "label": "Current Swirl",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "default": 0.37,
+          "note": "A steady bias making every fish curve the same way, like a slow current. Orbits' Ring Spin, applied to headings instead of a tether ring."
+        },
+        "base_speed": {
+          "label": "Swim Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "default": 0.3,
+          "note": "Field radii crossed per second. Deliberately independent of Turn Radius (see fx/effects/fish.py CRUISE_K)."
+        },
+        "reverse": {
+          "label": "Reverse Spin",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "default": false
+        },
+        "jiggle": {
+          "label": "Jiggle",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "0 = clean synced orbits, 1 = independent smooth wander + fully decorrelated reactivity",
+          "default": 0.15
+        },
+        "tether_scatter": {
+          "label": "Home Scatter",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "0 = home patches perfectly equidistant around the ring, 1 = fully random placement.",
+          "default": 0.0
+        },
+        "enter_time": {
+          "label": "Enter Time",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 5,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Seconds a new or adopted fish takes to fade in. Unlike Orbits it does not set the arrival PATH - a fish swims in under its own kinematics.",
+          "default": 2.0
+        },
+        "reactivity_scale": {
+          "label": "Reactivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "note": "Master scale; multiplies speed_jump / speed_jog / brightness_audio / size_audio",
+          "default": 1.0
+        },
+        "speed_jump": {
+          "label": "Speed Jump Max",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "aspect": "reactivity",
+          "distribute": false,
+          "default": 1.0
+        },
+        "speed_jog": {
+          "label": "Speed Jump Jog",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "aspect": "reactivity",
+          "distribute": false,
+          "default": 1.0
+        },
+        "brightness_audio": {
+          "label": "Brightness Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "distribute": false,
+          "default": 0.5
+        },
+        "size_audio": {
+          "label": "Size Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "reactivity",
+          "distribute": false,
+          "default": 0.5
+        },
+        "trail_decay": {
+          "label": "Wake Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "shape",
+          "default": 0.15,
+          "note": "How long the water holds a fish's own smear. The ripple wake has its own life (Ripple Life) and is not affected."
+        },
+        "gradient_spin": {
+          "label": "Gradient Spin",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "aspect": "shape",
+          "default": 0.0
+        },
+        "color_shift": {
+          "label": "Color Jump",
+          "type": "integer",
+          "smooth": false,
+          "min": 0,
+          "max": 96,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Nudge +1 on a morph to make colors jump A,B,C -> C,A,B",
+          "default": 1
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false,
+          "default": 0.06
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 1.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 1.0
+        },
+        "body_aspect": {
+          "label": "Body Length",
+          "type": "numeric",
+          "smooth": true,
+          "min": 1.2,
+          "max": 6.0,
+          "aspect": "shape",
+          "note": "Length as a multiple of width - higher is a thinner, longer fish. 1.0 is an Orbits blob.",
+          "default": 3.0
+        },
+        "flap_amount": {
+          "label": "Tail Flap",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.5,
+          "aspect": "shape",
+          "note": "How far the spine throws its tail.",
+          "default": 0.55
+        },
+        "flap_rate": {
+          "label": "Flap Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 6.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Tail beats per second at cruise; it rises with speed. Also sets how often the wake ripples.",
+          "default": 2.2
+        },
+        "flap_accel": {
+          "label": "Flap Accel",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 3.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "How much harder the tail waves under acceleration (and softer when slowing).",
+          "default": 1.2
+        },
+        "ripple_amount": {
+          "label": "Ripple Wake",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "Wake strength. Always subtle relative to the fish; stronger the faster it swims.",
+          "default": 0.35
+        },
+        "ripple_spread": {
+          "label": "Ripple Spread",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How fast a ripple opens out, as a multiple of swim speed. Capped so the wake stays fish-sized.",
+          "default": 0.45
+        },
+        "ripple_life": {
+          "label": "Ripple Life",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "Seconds a ripple takes to fade.",
+          "default": 0.9
+        },
+        "ripple_width": {
+          "label": "Ripple Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "Ripple ring thickness in pixels.",
+          "default": 1.3
+        },
+        "roam_scale": {
+          "label": "Pond Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.3,
+          "max": 1.4,
+          "aspect": "shape",
+          "note": "How much of the panel the fish use before turning back. 1.0 is the panel's own inscribed ellipse, which on the crystal hex sits inside the lit silhouette.",
+          "default": 0.95
+        },
+        "school_count": {
+          "label": "School Size",
+          "type": "integer",
+          "smooth": false,
+          "min": 1,
+          "max": 24,
+          "aspect": "shape",
+          "note": "Fish that swim in for a CHARGE. Exceeds the population cap for that moment only.",
+          "default": 12
+        },
+        "school_variation": {
+          "label": "School Variation",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How much each fish in the school differs from the shared heading - his 'minor variation', never lockstep.",
+          "default": 0.15
+        },
+        "turn_min_time": {
+          "label": "School Turn Gap",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Minimum seconds between the school's beat-driven direction changes (his 400ms floor).",
+          "default": 0.4
+        },
+        "rush_count": {
+          "label": "Rush Size",
+          "type": "integer",
+          "smooth": false,
+          "min": 0,
+          "max": 24,
+          "aspect": "shape",
+          "note": "Fish in the LULL's rush. Exceeds the population cap for that moment only.",
+          "default": 20
+        },
+        "rush_time": {
+          "label": "Rush Time",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "Seconds the lull's rush takes to sweep past.",
+          "default": 1.0
+        },
+        "rush_chaos": {
+          "label": "Rush Chaos",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How disorderly the rush is: 0 = a clean shoal, 1 = scattered.",
+          "default": 0.5
+        }
+      },
+      "defaults": {
+        "particle_count": 6,
+        "x_offset": 0.5,
+        "y_offset": 0.5,
+        "radius_scale": 1.8,
+        "horizon_scale": 0.19,
+        "orbit_radius": 0.14,
+        "blob_size": 1.0,
+        "spin": 0.37,
+        "base_speed": 0.3,
+        "reverse": false,
+        "jiggle": 0.15,
+        "tether_scatter": 0.0,
+        "enter_time": 2.0,
+        "reactivity_scale": 1.0,
+        "speed_jump": 1.0,
+        "speed_jog": 1.0,
+        "brightness_audio": 0.5,
+        "size_audio": 0.5,
+        "trail_decay": 0.15,
+        "gradient_spin": 0.0,
+        "color_shift": 1,
+        "impulse_decay": 0.06,
+        "frequency_range": "Lows (beat+bass)",
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "background_color": "#000000",
+        "background_brightness": 1.0,
+        "brightness": 1.0,
+        "body_aspect": 3.0,
+        "flap_amount": 0.55,
+        "flap_rate": 2.2,
+        "flap_accel": 1.2,
+        "ripple_amount": 0.35,
+        "ripple_spread": 0.45,
+        "ripple_life": 0.9,
+        "ripple_width": 1.3,
+        "roam_scale": 0.95,
+        "school_count": 12,
+        "school_variation": 0.15,
+        "turn_min_time": 0.4,
+        "rush_count": 20,
+        "rush_time": 1.0,
+        "rush_chaos": 0.5
       }
     },
     "gifplayer": {

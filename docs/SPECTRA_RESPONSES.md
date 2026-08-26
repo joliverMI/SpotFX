@@ -7,11 +7,11 @@ SpotFX program and carried verbatim into `fx/effects/`. SPECTRA's response
 engine (`spectra/services/scene_response.py`) DRIVES that machinery; it
 does not re-invent it.
 
-## The universal contract (all ten phase-capable effects)
+## The universal contract (all eleven phase-capable effects)
 
 Every effect in `fx/device_model.PHASE_EFFECTS` — `blackhole`,
 `blackhole1d`, `orbits`, `orbits1d`, `radial`, `fireworks`, `fireworks1d`,
-`squiggles`, `dancer`, `eye` — carries two config params:
+`squiggles`, `dancer`, `eye`, `fish` — carries two config params:
 
 - `phase`: `"none" | "charge" | "lull" | "drop"` — edge-detected in
   `config_updated` (a stale persisted value never edge-fires on a fresh
@@ -104,6 +104,45 @@ guarded).
   missing, plus 2× population of ballistic ejecta that blast straight off
   the panel; orbital speed boosted ×3.5 decaying over 2.4 s; survivors fly
   back to their orbits in 0.4 s.
+
+### Fish (`fish.py`, no strip translation — the scene runs `orbits1d` there)
+
+Orbits' twin as a scene, but the charge and the lull are his own
+(2026-08-25, corr=6dd10a8c3c5bd72a) and are the reason the effect exists
+separately at all.
+
+- **Charge** — up to `school_count` (12) fish swim in and steer onto ONE
+  shared heading, each offset by a little `school_variation` so the school
+  is near-identical but never lockstep. The camera follows the school
+  perfectly: the fish hold station on screen and the WATER streams past
+  instead (the ripple wake is advected by minus the school's velocity).
+  Once the school has gathered (45% of the ramp, `CHARGE_FILL_AT`), every
+  beat picks a new shared heading, never closer together than
+  `turn_min_time` (his 400ms floor); the whole school banks onto it through
+  a real arc, because nothing can out-turn the turn radius.
+- **Lull** — the school disperses, furthest first, on a rank schedule so
+  everyone but ONE fish is gone by `LULL_DISPERSE_AT` (0.42). That fish —
+  the one nearest centre when the lull began — keeps swimming while a
+  ramping positional pull holds it in the middle of view, fully centred by
+  `LULL_CENTER_PROGRESS` (0.5; TIMING HONESTY: SpotFX ramps
+  `phase_progress` over ~90% of the real gap and then hangs at 1.0, so p=0.5
+  lands at ~45% of the lull's true wall clock — the same convention
+  `blackhole.py`'s `LULL_FILL_PROGRESS` records). At `LULL_RUSH_AT` (0.60)
+  a rush of `rush_count` (20) fish pours in FROM THE DIRECTION that fish is
+  heading and zooms past it with `rush_chaos` spread in heading and speed;
+  after `rush_time` (1.0s) exactly `particle_count` fish are kept (the lone
+  one counts) and the rest carry on off-panel.
+- **Drop** — Orbits' own payoff, unchanged in spirit: configured population
+  restored with a centre burst for the missing, plus 2x population of
+  ballistic ejecta that bolt straight off the panel; swim speed boosted and
+  decaying over `DROP_SETTLE_S`; the phase self-resets so an identical later
+  drop edges again.
+
+THE CAP: the charge's school and the lull's rush are the ONLY two moments a
+fish scene exceeds `particle_count`, via the `p_nocap` tag. A cap-exempt
+fish never survives the moment it was granted for — the rush's own settle
+clears the tag on the keepers and departs the rest, the drop and a return to
+`phase: none` both release any left over.
 
 ### Radial (`radial.py`)
 

@@ -1,0 +1,749 @@
+"""Frame-level proofs for the FISH effect (fx/effects/fish.py) and its
+scene seeder, on the real vendored render pipeline (fx.headless dummy
+Matrix host at his crystal-mapper's 72x37 shape, audio silenced).
+
+scripts/check_fish.py is the measured, printed version of the same runs —
+this file pins the properties his brief actually names. Mutual avoidance
+is deliberately absent from both (owner scope decision, 2026-08-25): fish
+swim through each other, so there is no separation invariant to assert.
+"""
+from __future__ import annotations
+
+import asyncio
+import copy
+import json
+import sys
+import uuid
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fx import headless
+from fx.effects import fish as FX
+
+DT = 1.0 / 60.0
+ROWS, COLS = 37, 72
+
+# his live Orbits V2 Matrix entry, at the fallbacks its bindings resolve to
+HIS_MATRIX = {
+    "particle_count": 3, "radius_scale": 1.8, "horizon_scale": 0.19,
+    "blob_size": 2.5, "x_offset": 0.5, "y_offset": 0.5, "spin": 0.37,
+    "base_speed": 0.3, "jiggle": 0.15, "tether_scatter": 0.0,
+    "reactivity_scale": 1.0, "speed_jump": 1.0, "speed_jog": 1.0,
+    "brightness_audio": 0.5, "size_audio": 0.5, "color_shift": 1,
+    "impulse_decay": 0.06, "reverse": False,
+}
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+class _Room:
+    def __init__(self, host, virtual, clock, effect, clock_cm):
+        self.host, self.virtual, self.clock = host, virtual, clock
+        self.effect, self._cm = effect, clock_cm
+        self.frame = None
+
+    def step(self, frames=1):
+        for _ in range(frames):
+            self.clock.advance(DT)
+            f = self.virtual.assemble_frame()
+            if f is not None:
+                self.virtual.flush(f)
+                self.frame = np.array(f, copy=True)
+
+    def ramp(self, phase, seconds, beats_every=None):
+        eff = self.effect
+        eff.update_config({"phase": phase, "phase_progress": 0.0})
+        frames = int(seconds / DT)
+        for i in range(1, frames + 1):
+            eff.update_config({"phase_progress": i / frames})
+            if beats_every and i % beats_every == 0:
+                eff._beat_pending = True
+            self.step(1)
+
+    def swimming(self, ordinary_only=False):
+        n = self.effect.n
+        m = self.effect.p_mode[:n] < 2
+        if ordinary_only:
+            m = m & (self.effect.p_nocap[:n] == 0)
+        return int(np.count_nonzero(m))
+
+
+async def _room(tmp_path, name, config=None, seed=5):
+    host = await headless.start_headless_host(
+        str(tmp_path / name), pixel_count=ROWS * COLS, rows=ROWS,
+        device_id=name,
+    )
+    virtual = host.virtuals.get(name)
+    cm = headless.fake_clock()
+    clock = cm.__enter__()
+    effect = headless.attach_effect(
+        host, virtual, "fish", dict(config or HIS_MATRIX)
+    )
+    effect._rng = np.random.default_rng(seed)
+    return _Room(host, virtual, clock, effect, cm)
+
+
+async def _close(room):
+    room._cm.__exit__(None, None, None)
+    await room.host.shutdown()
+
+
+# ── the buffer, and the scope of the cap bypass ─────────────────────────
+def test_buffer_headroom_holds_school_rush_and_explosion_at_once():
+    """His authorised bypass is exactly two moments; the buffer must be
+    able to hold both plus a full drop explosion without the ordinary
+    render being starved (the fireworks p_nocap lesson)."""
+    need = (
+        FX.MAX_PARTICLE_COUNT + FX.MAX_SCHOOL + FX.MAX_RUSH
+        + FX.DROP_EJECTA_X * FX.MAX_PARTICLE_COUNT
+    )
+    assert FX.CAP >= need, (
+        f"CAP={FX.CAP} cannot hold {FX.MAX_PARTICLE_COUNT} fish + a "
+        f"{FX.MAX_SCHOOL} school + a {FX.MAX_RUSH} rush + "
+        f"{FX.DROP_EJECTA_X}x ejecta ({need})"
+    )
+
+
+def test_ordinary_swimming_never_exceeds_the_parameter(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "cap", dict(
+            HIS_MATRIX, particle_count=8, school_count=12, rush_count=20
+        ), seed=17)
+        eff = room.effect
+        worst = 0
+        for _ in range(int(4.0 / DT)):
+            room.step(1)
+            worst = max(worst, room.swimming(ordinary_only=True))
+        assert worst <= 8
+        for phase, secs, beats in (("charge", 4.0, 12), ("lull", 3.5, None),
+                                   ("drop", 5.0, None)):
+            room.ramp(phase, secs, beats)
+            worst = max(worst, room.swimming(ordinary_only=True))
+            assert eff.n <= FX.CAP
+        room.step(int(3.0 / DT))
+        assert room.swimming(ordinary_only=True) == 8, (
+            "ordinary swimming must be back at the parameter once the arc "
+            "is over"
+        )
+        assert int(np.count_nonzero(eff.p_nocap[: eff.n] == 1)) == 0, (
+            "no cap-exempt fish may outlive the moment it was granted for"
+        )
+        await _close(room)
+    _run(main())
+
+
+# ── 1. the oval points where it is going ────────────────────────────────
+def test_rendered_oval_points_along_the_velocity(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "heading", dict(
+            HIS_MATRIX, particle_count=1, horizon_scale=0.0, spin=0.0,
+            jiggle=0.0, ripple_amount=0.0, trail_decay=0.0, flap_amount=0.3,
+        ))
+        errs = []
+        room.step(120)
+        for i in range(480):
+            room.step(1)
+            if i % 20:
+                continue
+            a = room.frame.astype(float).max(axis=1).reshape(ROWS, COLS)
+            ys, xs = np.nonzero(a > 6.0)
+            if len(xs) < 8:
+                continue
+            w = a[ys, xs]
+            mx = (xs * w).sum() / w.sum()
+            my = (ys * w).sum() / w.sum()
+            dx, dy = xs - mx, ys - my
+            cov = np.array([
+                [(w * dx * dx).sum(), (w * dx * dy).sum()],
+                [(w * dx * dy).sum(), (w * dy * dy).sum()],
+            ]) / w.sum()
+            _, evec = np.linalg.eigh(cov)
+            axis = np.arctan2(evec[1, -1], evec[0, -1])
+            hd = float(room.effect.p_hd[0])
+            errs.append(np.degrees(
+                abs(((axis - hd + np.pi / 2) % np.pi) - np.pi / 2)
+            ))
+        e = np.array(errs)
+        assert len(e) > 15
+        assert e.mean() < 12.0 and e.max() < 25.0, (
+            f"the rendered body's long axis must track the direction of "
+            f"travel (mean {e.mean():.1f} deg, max {e.max():.1f})"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_the_body_is_a_thin_oval_not_a_disc(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "oval")
+        eff = room.effect
+        assert eff.body_aspect >= 1.2
+        assert eff._body_len_px() > 2.5 * eff._half_width_px()
+        await _close(room)
+    _run(main())
+
+
+# ── 2. turning is an arc, never a flip ──────────────────────────────────
+def test_heading_never_flips_and_obeys_the_turn_radius(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "turn", dict(HIS_MATRIX,
+                                                  particle_count=4), seed=9)
+        eff = room.effect
+        room.step(60)
+        worst = 0.0
+        prev, prev_n = eff.p_hd[: eff.n].copy(), eff.n
+        for _ in range(1800):
+            room.step(1)
+            k = min(prev_n, eff.n)
+            if k:
+                d = np.abs(
+                    (eff.p_hd[:k] - prev[:k] + np.pi) % (2 * np.pi) - np.pi
+                )
+                worst = max(worst, float(d.max()))
+            prev, prev_n = eff.p_hd[: eff.n].copy(), eff.n
+        ceiling = float(eff.p_spd[: eff.n].max()) / eff.turn_radius_px * DT
+        assert worst < np.pi / 2, (
+            "reversing on the spot must be impossible — "
+            f"saw {np.degrees(worst):.1f} deg in one frame"
+        )
+        assert worst <= ceiling * 1.05 + 1e-6, (
+            "every turn must obey the turn-radius ceiling"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_an_about_face_takes_a_real_arc(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "arc", dict(HIS_MATRIX,
+                                                 particle_count=4), seed=9)
+        eff = room.effect
+        room.step(180)
+        start = float(eff.p_hd[0])
+        floor_s = np.pi * eff.turn_radius_px / float(eff.cruise_px)
+        turned_at = None
+        for f in range(1, 2000):
+            room.step(1)
+            if eff.n == 0:
+                break
+            d = abs((float(eff.p_hd[0]) - start + np.pi) % (2 * np.pi) - np.pi)
+            if d >= np.pi * 0.9:
+                turned_at = f * DT
+                break
+        assert turned_at is None or turned_at >= floor_s * 0.9, (
+            f"an about-face took {turned_at:.2f}s, below the half-circle "
+            f"floor {floor_s:.2f}s implied by the turn radius"
+        )
+        await _close(room)
+    _run(main())
+
+
+# ── 3. the spine flaps with acceleration ────────────────────────────────
+def _flap_scale(eff):
+    n = eff.n
+    sn = np.clip(eff.p_spd[:n] / max(eff.cruise_px, 1e-3), 0.0, 3.0)
+    an = np.clip(eff.p_acc[:n] / FX.FLAP_ACCEL_REF, -1.5, 1.5)
+    return float(np.clip(
+        FX.FLAP_BASE + FX.FLAP_SPEED_GAIN * sn + eff.flap_accel * an,
+        FX.FLAP_MIN, FX.FLAP_MAX,
+    ).mean())
+
+
+def test_tail_waves_harder_accelerating_and_subtler_slowing(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "flap", dict(
+            HIS_MATRIX, particle_count=1, horizon_scale=0.0, spin=0.0,
+            jiggle=0.0,
+        ))
+        eff = room.effect
+        room.step(180)
+        steady = _flap_scale(eff)
+        eff.update_config({"base_speed": 1.2})
+        room.step(12)
+        accel = _flap_scale(eff)
+        eff.update_config({"base_speed": 0.3})
+        room.step(102)          # cruise fast, then decelerate
+        eff.update_config({"base_speed": 0.3})
+        decel_room = _flap_scale(eff)
+        assert accel > steady * 1.4, (accel, steady)
+        assert FX.FLAP_MIN <= decel_room <= FX.FLAP_MAX
+        await _close(room)
+    _run(main())
+
+
+def test_deceleration_makes_the_flap_subtler(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "flap2", dict(
+            HIS_MATRIX, particle_count=1, horizon_scale=0.0, spin=0.0,
+            jiggle=0.0,
+        ))
+        eff = room.effect
+        room.step(180)
+        steady = _flap_scale(eff)
+        eff.update_config({"base_speed": 1.2})
+        room.step(120)
+        eff.update_config({"base_speed": 0.3})
+        room.step(12)
+        decel = _flap_scale(eff)
+        assert decel < steady * 0.6, (decel, steady)
+        await _close(room)
+    _run(main())
+
+
+# ── 4. the ripple wake ──────────────────────────────────────────────────
+def test_wake_is_always_subtle_and_stronger_on_faster(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "wake", dict(
+            HIS_MATRIX, particle_count=2, horizon_scale=0.0, spin=0.0,
+            jiggle=0.0,
+        ))
+        eff = room.effect
+        out = {}
+        for label, impulse in (("calm", 0.0), ("loud", 0.9)):
+            eff.impulse = impulse
+            room.step(240)
+            eff.rn = 0
+            room.step(60)
+            out[label] = (
+                float(eff.r_amp[: eff.rn].mean()) if eff.rn else 0.0,
+                int(eff.rn),
+            )
+        assert out["loud"][0] > out["calm"][0] * 1.5, out
+        assert 0.0 < out["loud"][0] < 0.35, (
+            "the wake must stay subtle at every speed", out
+        )
+        assert out["loud"][1] > out["calm"][1], (
+            "the flap sets the ripple cadence, so a faster fish ripples "
+            "more often", out
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_ripple_size_is_matched_to_the_size_of_the_motion(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "wake2", dict(
+            HIS_MATRIX, particle_count=1, horizon_scale=0.0, spin=0.0,
+            jiggle=0.0,
+        ))
+        eff = room.effect
+        sizes = {}
+        for label, blob in (("small", 1.0), ("big", 4.0)):
+            eff.update_config({"blob_size": blob})
+            room.step(180)
+            eff.rn = 0
+            room.step(60)
+            sizes[label] = float(eff.r_r[: eff.rn].mean()) if eff.rn else 0.0
+        assert sizes["big"] > sizes["small"] * 1.4, sizes
+        await _close(room)
+    _run(main())
+
+
+# ── 5. the charge's school ──────────────────────────────────────────────
+def test_charge_school_swims_in_in_unison_and_turns_on_the_beat(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "charge", seed=11)
+        eff = room.effect
+        room.step(240)
+        eff.update_config({"phase": "charge", "phase_progress": 0.0})
+        frames = int(4.0 / DT)
+        turns, spreads = [], []
+        last = eff._school_hd
+        peak = 0
+        for i in range(1, frames + 1):
+            eff.update_config({"phase_progress": i / frames})
+            if i % 12 == 0:          # a beat every 200ms — twice his floor
+                eff._beat_pending = True
+            room.step(1)
+            peak = max(peak, room.swimming())
+            if eff._school_hd != last:
+                turns.append(i * DT)
+                last = eff._school_hd
+            if i > frames * 0.55:
+                live = np.flatnonzero(eff.p_mode[: eff.n] == 0)
+                if live.size > 2:
+                    hs = eff.p_hd[live]
+                    c = np.arctan2(np.sin(hs).mean(), np.cos(hs).mean())
+                    spreads.append(float(np.abs(
+                        (hs - c + np.pi) % (2 * np.pi) - np.pi
+                    ).std()))
+        gaps = [turns[i + 1] - turns[i] for i in range(len(turns) - 1)]
+        assert peak <= eff.school_count, (peak, eff.school_count)
+        assert peak >= eff.school_count - 1, "the school must actually fill"
+        assert len(gaps) >= 2
+        assert min(gaps) >= eff.turn_min_time - 1e-6, (
+            f"direction changes must never be closer than "
+            f"{eff.turn_min_time}s: {gaps}"
+        )
+        spread = float(np.mean(spreads))
+        assert 0.0 < spread < 0.5, (
+            "the school moves almost identically, with minor variation — "
+            f"never lockstep, never scattered (spread {spread:.4f} rad)"
+        )
+        assert abs(eff._flow_px) + abs(eff._flow_py) > 0.0, (
+            "the water must keep streaming past while the school holds "
+            "station — that IS the camera-following-a-school illusion"
+        )
+        await _close(room)
+    _run(main())
+
+
+# ── 6. the lull ─────────────────────────────────────────────────────────
+def test_lull_leaves_one_centred_fish_then_a_rush(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "lull", seed=11)
+        eff = room.effect
+        room.step(240)
+        room.ramp("charge", 4.0, beats_every=12)
+
+        born, rush_start, rush_end = [0], [None], [None]
+        orig_spawn, orig_settle = eff._spawn_rush, eff._settle_rush
+
+        def counted(count, _o=orig_spawn):
+            before = eff.n
+            _o(count)
+            born[0] += eff.n - before
+            rush_start[0] = eff._phase_t
+        eff._spawn_rush = counted
+
+        def timed(_o=orig_settle):
+            rush_end[0] = eff._phase_t
+            _o()
+        eff._settle_rush = timed
+
+        eff.update_config({"phase": "lull", "phase_progress": 0.0})
+        frames = int(3.5 / DT)
+        at_half, chaos = None, 0.0
+        for i in range(1, frames + 1):
+            eff.update_config({"phase_progress": i / frames})
+            room.step(1)
+            rushing = np.flatnonzero(eff.p_mode[: eff.n] == 3)
+            if rushing.size > 3:
+                hs = eff.p_hd[rushing]
+                c = np.arctan2(np.sin(hs).mean(), np.cos(hs).mean())
+                chaos = max(chaos, float(np.abs(
+                    (hs - c + np.pi) % (2 * np.pi) - np.pi
+                ).std()))
+            if i == int(frames * FX.LULL_CENTER_PROGRESS):
+                lone = np.flatnonzero(eff.p_lone[: eff.n] == 1)
+                others = int(np.count_nonzero(
+                    (eff.p_mode[: eff.n] < 2) & (eff.p_lone[: eff.n] == 0)
+                ))
+                dist = float(np.hypot(
+                    eff.p_x[lone] * eff.sx, eff.p_y[lone] * eff.sy
+                )[0]) if lone.size else None
+                at_half = (dist, others, int(lone.size))
+        dist, others, lone_n = at_half
+        # his "by half way through the lull": phase_progress 0.5, which is
+        # ~45% of the lull's true wall clock — see FX.LULL_CENTER_PROGRESS
+        assert lone_n == 1
+        assert others == 0, "every other fish must have dispersed by then"
+        assert dist < 4.0, f"the lone fish must hold centre ({dist:.2f}px)"
+        assert born[0] == eff.rush_count <= FX.MAX_RUSH
+        assert abs((rush_end[0] - rush_start[0]) - eff.rush_time) < 0.1, (
+            "the rush must last about a second"
+        )
+        assert chaos > 0.1, "there must be real chaos in the zooming pool"
+        assert room.swimming(ordinary_only=True) == \
+            eff._config["particle_count"], (
+            "the rush leaves exactly the parameter's own count behind"
+        )
+        await _close(room)
+    _run(main())
+
+
+# ── 7. the drop ─────────────────────────────────────────────────────────
+def test_drop_payoff_fires_on_the_first_rendered_frame(tmp_path):
+    async def main():
+        room = await _room(tmp_path, "drop", seed=4)
+        eff = room.effect
+        born = [0]
+        orig = eff._spawn_drop_ejecta
+
+        def counted(count, _o=orig):
+            before = eff.n
+            _o(count)
+            born[0] += eff.n - before
+        eff._spawn_drop_ejecta = counted
+
+        room.step(240)
+        room.ramp("lull", 2.5)
+        eff.update_config({"phase": "drop", "phase_progress": 0.0})
+        room.step(1)
+        assert born[0] == FX.DROP_EJECTA_X * eff._config["particle_count"], (
+            "the drop's payoff must land on the phase's first rendered "
+            "frame, at Orbits' own 2x-the-population count"
+        )
+        room.step(int((FX.DROP_SETTLE_S + 0.6) / DT))
+        assert eff._phase == "none" and eff._config["phase"] == "none", (
+            "the phase must self-reset so an identical later drop edges "
+            "again"
+        )
+        assert room.swimming() == eff._config["particle_count"]
+        await _close(room)
+    _run(main())
+
+
+def test_orphaned_charge_releases_itself_without_a_none_sentinel(tmp_path):
+    """The watchdog path must never leave a half-built state observable to
+    draw() — the render-thread crash class (AGENTS.md, blackhole's own
+    burst_t=None regression)."""
+    async def main():
+        room = await _room(tmp_path, "orphan", seed=6)
+        eff = room.effect
+        room.step(120)
+        eff.update_config({"phase": "charge", "phase_progress": 1.0})
+        room.step(int(
+            (FX.particle_handoff.PHASE_GRACE_S + 4.0) / DT
+        ))
+        assert eff._phase in ("drop", "none")
+        assert eff._drop_state is None or \
+            eff._drop_state.get("burst_done") is True
+        assert int(np.count_nonzero(eff.p_nocap[: eff.n] == 1)) == 0
+        await _close(room)
+    _run(main())
+
+
+# ── handoff + wiring ────────────────────────────────────────────────────
+def test_fish_hands_off_to_and_from_orbits(tmp_path):
+    """A scene switch morphs rather than cuts, both directions, through the
+    ordinary particle_handoff store->take path (no private call)."""
+    import fx.effects.particle_handoff as ph
+
+    async def main():
+        room = await _room(tmp_path, "handoff", seed=3)
+        room.step(300)
+        snap = room.effect._handoff_snapshot()
+        assert snap["src"] == "fish"
+        assert len(snap["px"]) == room.effect.n
+        assert snap["trail"] is not None and "native" in snap
+
+        # fish -> orbits: orbits adopts on its own first draw, through the
+        # generic particle branch it already had (no orbits change needed)
+        ph.store(room.virtual.id, snap)
+        orbits = headless.attach_effect(
+            room.host, room.virtual, "orbits", {"particle_count": 4}
+        )
+        orbits._rng = np.random.default_rng(3)
+        room.step(3)
+        assert orbits.n > 0, "orbits must adopt the fish it inherited"
+
+        # orbits -> fish, same way round
+        orb_snap = orbits._handoff_snapshot()
+        assert orb_snap["src"] == "orbits"
+        ph.store(room.virtual.id, orb_snap)
+        back = headless.attach_effect(
+            room.host, room.virtual, "fish", dict(HIS_MATRIX)
+        )
+        back._rng = np.random.default_rng(3)
+        room.step(3)
+        assert back.n > 0, "fish must adopt the blobs it inherited"
+        await _close(room)
+    _run(main())
+
+
+def test_fish_is_wired_exactly_where_orbits_is():
+    from fx import device_model
+    from spectra.services import transition_phases
+
+    assert "fish" in device_model.PHASE_EFFECTS
+    registry = json.loads(
+        (Path(__file__).resolve().parent.parent
+         / "config" / "effect_params.json").read_text()
+    )
+    assert "fish" in registry["effects"]
+    assert "fish" in registry["morph"]["supported_effects"]
+    # every shared Orbits param survives with the same type and range
+    orb = registry["effects"]["orbits"]["params"]
+    fish = registry["effects"]["fish"]["params"]
+    shared = set(orb) & set(fish)
+    assert len(shared) == len(orb), (
+        f"fish must carry every Orbits param: missing {set(orb) - set(fish)}"
+    )
+    for key in shared:
+        for field in ("type", "min", "max", "aspect", "smooth"):
+            assert orb[key].get(field) == fish[key].get(field), (key, field)
+    # the phased-transition registry treats fish exactly as it treats orbits
+    for other in ("radial", "pacman", "dancer", "blackhole", "fireworks",
+                  "squiggles", "eye"):
+        assert (transition_phases.anchor_frac("fish", other)
+                == transition_phases.anchor_frac("orbits", other)), other
+        assert (transition_phases.anchor_frac(other, "fish")
+                == transition_phases.anchor_frac(other, "orbits")), other
+
+
+def test_registry_defaults_are_orbits_own_except_the_named_divergence():
+    registry = json.loads(
+        (Path(__file__).resolve().parent.parent
+         / "config" / "effect_params.json").read_text()
+    )
+    orb = registry["effects"]["orbits"]["defaults"]
+    fish = registry["effects"]["fish"]["defaults"]
+    # orbit_radius means "turn radius" on a fish, so his tuned Orbits value
+    # (an orbit radius) is deliberately NOT inherited — see the PR.
+    diverge = {"orbit_radius"}
+    for key, value in orb.items():
+        if key in diverge or key not in fish:
+            continue
+        assert fish[key] == value, (
+            f"fish default for {key!r} must be Orbits' own tuned value "
+            f"({value!r}), got {fish[key]!r}"
+        )
+
+
+# ── the seeder ──────────────────────────────────────────────────────────
+def _fake_store():
+    return {
+        "85d0724d-407f-45a0-9dac-48da21b4c5fb": {
+            "id": "85d0724d-407f-45a0-9dac-48da21b4c5fb",
+            "name": "Orbits V2",
+            "labels": ["mid-group", "star"],
+            "devices": [
+                {"id": "a-1", "target_kind": "category", "target": "Matrix",
+                 "effect_type": "orbits",
+                 "params": {"horizon_scale": 0.19, "blob_size": 2.5}},
+                {"id": "a-2", "target_kind": "category", "target": "Strips",
+                 "effect_type": "orbits1d", "params": {"x_offset": 0.5}},
+            ],
+            "flare_kinds": [
+                {"name": "Dice Re-roll", "type": "drift_jump",
+                 "jump": "dice", "params": {}, "gain": 1.0, "hold_ms": None},
+            ],
+            "responses": {"flare": {"bands": [
+                {"intensity_min": 0.0, "intensity_max": 1.0,
+                 "curve": "linear", "gain": 1.0, "param_patch": {},
+                 "kinds": {"Dice Re-roll": 1.0}},
+            ]}},
+            "accept_all_sets": True,
+            "entry_ramp_ms": 0,
+        },
+        "other-scene": {"id": "other-scene", "name": "STAR", "devices": []},
+    }
+
+
+def test_seeder_copies_orbits_wholesale_and_changes_only_ids(tmp_path):
+    import scripts.seed_fish_scene as seed
+
+    store = _fake_store()
+    src = store["85d0724d-407f-45a0-9dac-48da21b4c5fb"]
+    fish = seed.build_fish(src)
+    assert fish["name"] == "Fish"
+    assert fish["id"] != src["id"]
+    assert uuid.UUID(fish["id"])          # a real uuid, deterministic
+    assert seed.build_fish(src)["id"] == fish["id"], "ids must be stable"
+    assert fish["devices"][0]["effect_type"] == "fish"
+    assert fish["devices"][1]["effect_type"] == "orbits1d", (
+        "the Strips entry deliberately keeps orbits1d — there is no fish1d"
+    )
+    for key in ("labels", "flare_kinds", "responses", "accept_all_sets",
+                "entry_ramp_ms"):
+        assert fish[key] == src[key], f"{key} must be a verbatim copy"
+    for dev_a, dev_b in zip(src["devices"], fish["devices"]):
+        assert dev_a["params"] == dev_b["params"]
+        assert dev_a["id"] != dev_b["id"], "device ids are scene-local"
+    assert src == _fake_store()["85d0724d-407f-45a0-9dac-48da21b4c5fb"], (
+        "building the copy must not mutate the source"
+    )
+
+
+def test_seeder_leaves_every_existing_scene_byte_identical(tmp_path):
+    import scripts.seed_fish_scene as seed
+
+    scenes = tmp_path / "scenes.json"
+    sequencer = tmp_path / "sequencer.json"
+    store = _fake_store()
+    scenes.write_text(json.dumps(store, indent=2))
+    src_id = "85d0724d-407f-45a0-9dac-48da21b4c5fb"
+    sequencer.write_text(json.dumps({"config": {
+        "entries": {src_id: {"curve_ref": None,
+                             "inline_points": [{"x": 0.0, "y": 1.0}],
+                             "genre_mult": {"rock": 1.3},
+                             "dwell_weight": 2.0}},
+        "affinity": [{"from_id": src_id, "to_id": "other-scene",
+                      "weight": 0.7}],
+    }, "curves": {}}, indent=2))
+    before = copy.deepcopy(store)
+
+    argv = sys.argv
+    sys.argv = ["seed_fish_scene.py", "--apply",
+                "--scenes-file", str(scenes),
+                "--sequencer-file", str(sequencer)]
+    try:
+        seed.main()
+        after = json.loads(scenes.read_text())
+        fish_id = seed._sid("scene", "Fish")
+        assert fish_id in after
+        for sid, raw in before.items():
+            assert after[sid] == raw, f"{sid} must be untouched"
+        seq = json.loads(sequencer.read_text())
+        assert seq["config"]["entries"][fish_id] == \
+            seq["config"]["entries"][src_id], (
+            "Fish inherits Orbits' own likelihood curve, genre multipliers "
+            "and dwell weight"
+        )
+        assert len(seq["config"]["affinity"]) == 2
+        # idempotent: a second run upserts, it does not duplicate or abort
+        seed.main()
+        again = json.loads(scenes.read_text())
+        assert len(again) == len(after)
+        assert len(json.loads(sequencer.read_text())["config"]["affinity"]) \
+            == 2
+    finally:
+        sys.argv = argv
+
+
+def test_the_seeded_scene_compiles_and_fires_on_the_real_pipeline(tmp_path):
+    """End to end: the copied scene resolves through SPECTRA's own compiler
+    and its Matrix entry lands on a real fish effect."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import scene_compiler
+    from spectra.services.binding_resolver import FireContext
+    from random import Random
+    import scripts.seed_fish_scene as seed
+
+    live_path = (Path(__file__).resolve().parent.parent
+                 / "storage" / "spectra" / "scenes.json")
+    if not live_path.exists():
+        pytest.skip("no scenes store in this checkout")
+    store = json.loads(live_path.read_text())
+    src_id = seed._find_one(store, "Orbits V2")
+    scene = SceneV2(**seed.build_fish(store[src_id]))
+    resolved = scene_compiler.resolve_scene(scene, FireContext(0.9,
+                                                              rng=Random(5)))
+    dev = next(d for d in resolved.devices if d.effect_type == "fish")
+
+    async def main():
+        host = await headless.start_headless_host(
+            str(tmp_path / "seeded"), pixel_count=ROWS * COLS, rows=ROWS,
+            device_id="seeded",
+        )
+        virtual = host.virtuals.get("seeded")
+        with headless.fake_clock() as clock:
+            effect = headless.attach_effect(host, virtual, "fish",
+                                            dict(dev.params))
+            for name, value in dev.params.items():
+                got = effect._config[name]
+                if isinstance(value, (int, float)) and not isinstance(
+                        value, bool):
+                    assert float(got) == pytest.approx(float(value),
+                                                       abs=1e-6), name
+                else:
+                    assert got == value, name
+            lit = 0
+            for _ in range(300):
+                clock.advance(DT)
+                frame = virtual.assemble_frame()
+                if frame is not None:
+                    virtual.flush(frame)
+                    lit = max(lit, int(
+                        (np.array(frame).max(axis=1) > 6).sum()
+                    ))
+            assert lit > 0, "the seeded scene must actually render fish"
+        await host.shutdown()
+    _run(main())

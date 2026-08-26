@@ -464,6 +464,37 @@ variables named `ledfx` (the core object handle) are untouched.
     `tests/test_blackhole_orphan_drop_none_crash.py` re-run green for the
     untouched drop. Not in the fork source at `/home/javi/ledfx-src`.
 
+21. `effects/fish.py`: an ENTIRELY NEW, SpotFX-authored effect (PR
+    fm/fish-effect-and-scene, his ask 2026-08-25). Not in the fork source at
+    `/home/javi/ledfx-src` and not derived from any fork effect line by
+    line: it is Orbits' visual language (SoA particles, enter/leave
+    lifecycle, audio impulse plumbing, trail buffer, the twod projection,
+    the phase-key state machine, the particle-handoff protocol) carrying
+    completely different kinematics — per-fish position/velocity/heading, a
+    rate-limited turn built from a real turn RADIUS, a flapping spine
+    rendered as a chain of splats along the heading, and an expanding
+    ripple wake composited straight to the output instead of through the
+    trail buffer. Orbits itself is UNTOUCHED. Deliberately NOT modelled:
+    mutual avoidance (owner scope decision the same day — fish swim through
+    each other).
+
+    Two one-line supporting edits, both purely additive: `effects/radial.py`
+    adds `"fish"` to the src whitelist its `_adopt_handoff` gate uses (no
+    existing source's behaviour changes), and `fx/device_model.py`'s
+    `PHASE_EFFECTS` gains `"fish"` so charge/lull/drop reach it. SPECTRA's
+    own `services/transition_phases.py` adds fish to `_PARTICLES`; the
+    legacy twin (`services/transition_phases.py` at the repo root) is
+    deliberately NOT changed, because fish exists only in this vendored
+    pipeline and never in the LedFX service that registry describes.
+
+    THE POPULATION CAP: the `p_nocap` tag (the same flag #17/#20 established
+    for fireworks and blackhole) is granted at exactly two scripted moments
+    — the charge's school and the lull's rush — and never survives them.
+    `CAP` is sized so both plus a full drop explosion fit at once
+    (`tests/test_fish.py::test_buffer_headroom_holds_school_rush_and_explosion_at_once`).
+    Evidence: `scripts/check_fish.py` (eight measured sections on the real
+    pipeline), `tests/test_fish.py`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
