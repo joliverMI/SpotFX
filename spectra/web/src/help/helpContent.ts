@@ -10,6 +10,11 @@
  *    • `keywords` holds hidden search synonyms; search is typo-tolerant.
  *    • `id`s are deep-link targets used by <HelpLink topic="..."/> —
  *      don't rename an id without updating its callers (grep `topic="`).
+ *      One id can also be referenced from OUTSIDE the .tsx sources: an
+ *      effect param in `config/effect_params.json` may carry a
+ *      `"help_topic"`, which InitialSetTab renders as a HelpLink on that
+ *      param's row (e.g. `radial-base-rotation`). Grep the registry too
+ *      before calling such a topic orphaned or renaming its id.
  *    • Structure: top-level section per page/area → entries.
  *  ═══════════════════════════════════════════════════════════════════════ */
 
@@ -157,6 +162,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Ripple Wake sets the wake\'s strength — always subtle against the fish itself, stronger the faster it swims, and a ripple is dropped on every tail beat, so a faster fish also ripples more often. Ripple Spread is how fast a ring opens out (capped so the wake stays fish-sized, matched to the motion that made it), Ripple Life how long it takes to fade, Ripple Width its thickness. Wake Length is separate — that is the fish\'s own smear, not the rings.',
           'The remaining knobs shape the charge and the lull (see "Response families"): School Size, School Variation and School Turn Gap for the charge; Rush Size, Rush Time and Rush Chaos for the lull.',
           'On the strips the scene still runs Orbits\' own 1D effect — a fish seen from above needs two dimensions, and there is no 1D fish. Every number above is a considered first guess, not a tuned value: the look is not finished until you have watched it and moved them.',
+        ],
+      },
+      {
+        id: 'radial-base-rotation',
+        title: 'STAR / Radial — Speed vs Base Speed (they scale differently)',
+        keywords: 'radial star spin speed base rotation quiet minimum floor revolutions per second rev/s silence parked audio reactive squared gain lows bass motor',
+        body: [
+          'STAR (the Radial effect) has TWO rotation controls and they are not the same kind of number. SPEED is a GAIN on the live audio: the effect squares it and multiplies it by the room\'s captured bass power, so in a quiet passage it produces exactly zero rotation at ANY setting — that is why a perfectly healthy Speed can look completely parked between bass hits, and why raising Speed from 0.55 to 0.8 barely doubles a crawl (the squaring means the top of the range is where it matters).',
+          'BASE SPEED (rev/s) is the opposite kind of number: LINEAR, absolute, and independent of the music. It is stated in revolutions per second — 0.05 is one full turn every 20 seconds, 0.25 is one every four, 1.0 is one a second. Set it and the pattern never turns slower than that, audio or no audio.',
+          'The two combine as a FLOOR, not a sum: the pattern turns at whichever is faster right now. In quiet it turns at your Base Speed; the moment the music\'s own drive is faster, the reactive Speed takes over completely unchanged — so setting a base never speeds up or alters what you already tuned at the peaks. Base Speed is left at 0 by default, which is exactly today\'s behaviour.',
+          'Direction is not a separate choice: the base follows whichever way the pattern is already turning (Speed\'s own sign, which is what the Flip control writes), so it never fights a reverse flare. And it is advanced by the render clock, not by audio frames, so it keeps turning even if the audio capture goes quiet or stalls entirely.',
         ],
       },
       {

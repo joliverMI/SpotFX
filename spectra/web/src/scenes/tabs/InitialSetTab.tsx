@@ -364,6 +364,7 @@ function ParamRow({ name, meta, value, onChange }: {
         {label}
         {!on && <small> — {String(paramDefault(meta))}</small>}
       </span>
+      {meta.help_topic && <HelpLink topic={meta.help_topic} />}
       {!on && isNumeric && meta.min !== undefined && meta.max !== undefined && (
         <input type="range" min={meta.min} max={meta.max} disabled
           value={typeof meta.default === 'number' ? meta.default : meta.min} readOnly />

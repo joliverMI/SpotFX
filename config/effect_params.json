@@ -473,7 +473,8 @@
           "aspect_scale": 1.0,
           "magnitude_only": true,
           "note": "Reactivity drives the magnitude; spin_sign/Flip owns the sign (magnitude_only preserves it on write). PORTED 2026-08-20 (STAR's own reverse flares, owner ask: \"use the flip control for star\"): a FlareKind targeting spin_sign is now translated by scene_response._compute_param_moves into a signed, magnitude-preserving, FORCED-INSTANT write on this key (spin_sign's own note has the mechanism) — before that date this translation was LEGACY-ONLY (services/morph_compiler.py's _sign_control_patch, never ported), so SPECTRA wrote the raw signed value straight to this key instead; fx/effects/radial.py's own CONFIG_SCHEMA accepts spin in [-1.0, 1.0], wider than this registry's declared [0, 1] magnitude-only range. Retagged smooth=true 2026-08-17 (was false): config_updated re-derives self.spin = nonlinear_log(config['spin'], 2) via fx/utils.py on every tween frame, including mid-glide, and nonlinear_log = sign(x)*abs(x)**power is continuous through zero and negative x — verified against source, not merely matching intent. Zero live scene binds spin via signal=random, so this has no effect on _reroll's dice-glide gate; a direct (non-sign_control) ParamTarget patch on spin (scene_response._move_params) still glides or jumps per this smooth tag, unchanged — only a spin_sign-targeted patch is forced instant.",
-          "default": 0.2
+          "default": 0.2,
+          "help_topic": "radial-base-rotation"
         },
         "spin_sign": {
           "label": "Flip",
@@ -484,6 +485,17 @@
           "aspect": "shape",
           "note": "On=positive spin, Off=negative spin, Toggle=negate sign. PORTED UNDER SPECTRA 2026-08-20 (STAR's reverse flares — his words, \"use the flip control for star\", the trade told to him and taken knowingly: no pause, but an instant, more jarring turn). Before this date this was INERT: maps_to/sign_control translation existed only in legacy services/morph_compiler.py/trigger_engine.py, and fx/effects/radial.py's CONFIG_SCHEMA has no spin_sign key at all (a same-named local var in that file's particle-handoff snapshot is unrelated) — a write targeting this key would have landed as an inert extra key in the effect's _config (voluptuous extra=ALLOW_EXTRA passes it through unvalidated) that radial.py never reads, exactly legacy's own morph_compiler.py docstring's \"LedFX has no bool to receive, so writing the virtual name would be an inert no-op key.\" The port keeps that shape rather than adding a real spin_sign config key to radial.py: scene_response._compute_param_moves redirects a spin_sign-targeted ParamTarget onto `spin` itself (this param's `maps_to`) with only its sign changed, magnitude preserved from spin's own current carried value, and forces the write — departure AND release alike — through executor.jump() regardless of spin's own smooth=true tag, so the sign flip never glides through zero (the exact freeze the flip was built to avoid). One real consequence, not a bug: since the write always lands on the SAME `spin` key every other spin-targeting kind (e.g. STAR's own \"Flare/Drop patch\" kinds) already uses, the two compose by ordinary last-write-wins carry semantics — no separate spin_sign state is tracked anywhere, so there is no second, independently-stale bit that could disagree with spin's own value.",
           "default": true
+        },
+        "base_rotation": {
+          "label": "Base Speed (rev/s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "shape",
+          "help_topic": "radial-base-rotation",
+          "note": "A QUIET BASE ROTATION FLOOR, added 2026-08-25 (owner ask: \"I want there to be some minimum absolute value for the base speed the pattern rotates at\"). SCALES COMPLETELY DIFFERENTLY FROM `spin`/Speed and is not interchangeable with it: this value is LINEAR and ABSOLUTE in REVOLUTIONS PER SECOND (0.05 = one turn every 20s, 1.0 = one turn a second), whereas `spin` is a GAIN that fx/effects/radial.py squares before use (nonlinear_log(x,2)/10) and then multiplies by the LIVE captured lows power \u2014 so `spin` produces exactly zero rotation in silence at any value, which is the whole reason this param exists (docs/spectra-star-motion-audio-idle.md). SEMANTICS ARE A FLOOR, NOT A SUM: effective rev/s = max(base_rotation, reactive rev/s), so the existing reactivity is byte-unchanged whenever the music's own drive is faster. Advanced on the RENDER clock in radial.py's draw() (via _base_rotation_step), NOT in audio_data_updated \u2014 a base term in the audio callback would stall exactly when the audio does. Direction follows sign(spin) (i.e. the spin_sign/Flip machinery), else sign(twist), else clockwise; it never fights the current direction. Default 0.0 = the vendored behaviour, unchanged. fx/VENDOR.md deviation #22.",
+          "default": 0.0
         },
         "twist": {
           "label": "Twist",

@@ -3584,6 +3584,27 @@ no live access: `scripts/check_star_spin_motion.py`. Before diagnosing any
 param is an audio gain (`aspect: reactivity` in `config/effect_params.json`)
 and measure the live impulse before blaming the param value or the writer.
 
+**Since 2026-08-25 radial has a second, differently-scaled rotation control
+— don't confuse the two** (his ask, PR fm/radial-base-rotation; `fx/VENDOR.md`
+deviation #22): `base_rotation` is a QUIET FLOOR in plain REVOLUTIONS PER
+SECOND — LINEAR and absolute, never squared, never multiplied by audio —
+while `spin`/Speed stays exactly the squared audio gain above. They combine
+as `effective rev/s = max(base_rotation, reactive rev/s)`: a FLOOR, not a
+sum, so a base never adds anything at a peak and the existing reactivity is
+byte-identical wherever the music's own drive is faster (the named
+alternative, a sum, is a one-line change in `_base_rotation_step`). It
+advances on the RENDER clock (`draw` → `_base_rotation_step(self.passed)`),
+NOT in `audio_data_updated` — a base term there would stall in exactly the
+quiet case it exists for. Default `0.0`, so every pre-existing scene renders
+byte-identically until he sets one (asserted, not claimed). Proofs:
+`scripts/check_radial_base_rotation.py`, `tests/test_radial_base_rotation.py`.
+Registry-declared param help (`"help_topic"` on an entry in
+`config/effect_params.json` → a `HelpLink` on that param's row in
+`InitialSetTab.tsx`) is new with this change and is the general way to
+deep-link a param to a help topic; note such a topic id lives in the JSON
+registry, so the AGENTS.md orphan-audit grep over `.tsx`/`.ts` will not see
+it.
+
 ## `crystal-mapper` (the hex Matrix virtual) — read the skill before touching it
 
 Load `.claude/skills/crystal-hex-grid/SKILL.md` before changing any effect

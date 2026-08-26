@@ -85,6 +85,18 @@ class Radial2d(Twod):
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=-1.0, max=1.0)),
             vol.Optional(
+                "base_rotation",
+                description=(
+                    "Quiet base rotation FLOOR, in revolutions per second "
+                    "(linear and absolute — unlike Spin, which is a squared "
+                    "gain on live audio). The pattern never turns slower "
+                    "than this; whenever the audio's own drive is faster, "
+                    "the reactive spin takes over unchanged. 0 disables it "
+                    "(the vendored behaviour)."
+                ),
+                default=0.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+            vol.Optional(
                 "frequency_range",
                 description="Frequency range for the spin impulse",
                 default="Lows (beat+bass)",
@@ -111,6 +123,9 @@ class Radial2d(Twod):
         self.bar = 0
         self.virtual = None
         self.spin_total = 0.0
+        # revolutions the AUDIO callback has added since the last rendered
+        # frame — read (and zeroed) only by _base_rotation_step
+        self._reactive_advance = 0.0
         self.max_radius = None
         # particle ⇄ radial handoff state (here, NOT do_once, so it survives
         # config-patch grid rebuilds)
@@ -130,6 +145,9 @@ class Radial2d(Twod):
         self.rotation = self._config.get("rotation")
         # bring impulse spin injection into a reasonable range of control
         self.spin = nonlinear_log(self._config.get("spin"), 2) / 10.0
+        # LINEAR rev/s, deliberately NOT put through nonlinear_log: this is an
+        # absolute floor a human sets in a plain unit, not a gain to shape.
+        self.base_rotation = float(self._config.get("base_rotation", 0.0) or 0.0)
         self.power_func = AudioReactiveEffect.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
         ]
@@ -153,7 +171,9 @@ class Radial2d(Twod):
 
     def audio_data_updated(self, data):
         self.impulse = getattr(data, self.power_func)()
-        self.spin_total += self.impulse * self.spin
+        delta = self.impulse * self.spin
+        self._reactive_advance += delta
+        self.spin_total += delta
         self.spin_total %= 1.0  # keep it in [0, 1)
 
     def do_once(self):
@@ -360,6 +380,52 @@ class Radial2d(Twod):
                     fire_event=False,
                 )
 
+    def _base_rotation_step(self, dt):
+        """DEVIATION (fx/VENDOR.md #22): a quiet BASE ROTATION floor.
+
+        Semantics are a FLOOR, not a sum:
+
+            effective rev/s = max(base_rotation, reactive rev/s)
+
+        so in silence the pattern turns steadily at ``base_rotation``, and
+        the instant the audio's own drive is faster the reactive spin owns
+        the motion COMPLETELY UNCHANGED — which is what preserves the
+        existing reactivity exactly at every peak. (A summed design would
+        speed every peak up slightly; it is a one-line change here if that
+        is ever preferred.)
+
+        WHERE it advances is load-bearing: the vendored effect's only motion
+        source is ``audio_data_updated``, and audio callbacks stop entirely
+        when the capture pipeline stalls or the effect is left unsubscribed
+        — a base term living there would stall with them, which is exactly
+        the "quiet" case this exists for. So it rides the RENDER clock
+        (``self.passed``) in ``draw`` instead, and holds with zero audio
+        frames.
+
+        DIRECTION follows the current one and never fights it: the sign
+        ladder is the same one the charge phase already uses — the audio
+        spin's sign (which is what the spin_sign/Flip machinery writes),
+        else the twist's, else clockwise.
+        """
+        # drain unconditionally: the accumulator must never carry a stale
+        # frame's advance across a base_rotation=0 stretch
+        reactive = self._reactive_advance
+        self._reactive_advance = 0.0
+        if self.base_rotation <= 0.0 or dt <= 0.0:
+            return
+        sign = (
+            float(np.sign(self._config.get("spin") or 0.0))
+            or float(np.sign(self._config.get("twist") or 0.0))
+            or 1.0
+        )
+        want = self.base_rotation * dt          # revolutions owed this frame
+        got = reactive * sign                   # revolutions the audio made,
+        #                                         measured along `sign`
+        if want > got:
+            self.spin_total = (
+                self.spin_total + sign * (want - got)
+            ) % 1.0
+
     def _phase_warp(self):
         """Standalone lull implode / drop bloom warp, when no crossfade
         choreography owns the screen. Returns (warp, bg_alpha) or None."""
@@ -388,7 +454,9 @@ class Radial2d(Twod):
             self._adopt_handoff()
 
         dt = float(self.passed) if np.isfinite(self.passed) else 1.0 / 60.0
-        self._phase_step(min(max(dt, 0.0), 0.1))
+        dt = min(max(dt, 0.0), 0.1)
+        self._phase_step(dt)
+        self._base_rotation_step(dt)
 
         virtual = self._virtual
         feather = particle_handoff.REVEAL_FEATHER
