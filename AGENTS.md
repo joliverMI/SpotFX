@@ -3177,6 +3177,31 @@ verify only. Specs: `tests/test_gradient2d.py`,
 `tests/test_drift_conductor_gradient.py`, `tests/test_rainbow_select.py`,
 `tests/test_gradient_retarget_hook.py`, `tests/test_mark_rainbow_color_sets.py`.
 
+**Every linear-gradient in this app is HORIZONTAL by convention (`90deg`),
+and the angle carries NO engine meaning anywhere** — `spectra/models/
+gradient2d.py::parse_stops` discards the head segment before the first
+comma, `spectra/services/color_rotate.py` passes it through verbatim, and
+the vendored `fx/color.py` parses it into an `angle` attribute no effect
+reads (grep-confirmed). It decides only how a value PAINTS as CSS, which is
+why a stray vertical angle showed up as his 2026-08-25 report: the 2D
+gradient editor's edge strips (a wide 22px bar) painted across the bar
+instead of along it. Cause, measured live against the real widget (not
+inferred): react-gcolor-picker bakes its OWN angle into everything it emits
+— its built-in quick-pick gradients carry 0/45/270/315deg, and a
+solid→gradient conversion starts from its internal 180deg default — and
+PR #171 hid the angle dial (`showGradientAngle={false}` gates only the
+control's render, never the emit), removing the only way to correct one.
+`ColorGradientPicker.normalizeGradientAngle` therefore CANONICALIZES to
+90deg — rewriting a wrong or keyword direction, not merely supplying a
+missing one — and is applied on emit AND on display (the swatch and the
+widget both paint a re-angled copy), so a value stored vertical between
+#171 and the fix paints correctly with no data migration. Proof, extracted
+verbatim from the TSX so it can't drift: `scripts/
+check_gradient_angle_canonicalization.mjs`. `web/src/components/
+ColorGradientPicker.tsx` (the frozen SpotFX twin) deliberately does NOT
+canonicalize — its angle dial is still visible, so a rewrite there would
+silently overrule a control the user can see.
+
 **A `ColorGradientPicker` nested inside a `TopBarGroupButton` panel closed
 the WHOLE panel on TOUCH (not mouse) the instant he tapped anything inside
 the nested picker — fixed 2026-08-20.** His report on `DriftGradientBar`
