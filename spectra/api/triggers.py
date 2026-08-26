@@ -82,6 +82,13 @@ class ProfileTriggerSyncRequest(BaseModel):
     unrecognised field is the caller's business, not a 422."""
     spotify_uri: str = Field(min_length=1)
     triggers: list[dict] = Field(default_factory=list)
+    # FALSE = upsert-only: add and update, never remove. Sent by every
+    # AUTOMATIC writer (import, post-capture generation, post-recapture
+    # realign) so an unattended write can never destroy his authored rows.
+    # Absent (the default) keeps the whole-song semantics an explicit
+    # Timeline save relies on, including his deliberate deletions — an older
+    # caller that predates this field is unchanged by it.
+    delete_missing: bool = True
 
 
 @router.post("/sync-from-profile")
@@ -95,7 +102,8 @@ async def sync_from_profile(body: ProfileTriggerSyncRequest):
         uri = body.spotify_uri
         fired = trigger_store._load_raw().get(uri, [])
         known = profile_sync_ledger.for_song(profile_sync_ledger.load(), uri)
-        plan = profile_trigger_sync.plan_song(uri, body.triggers, fired, known)
+        plan = profile_trigger_sync.plan_song(uri, body.triggers, fired, known,
+                                              delete_missing=body.delete_missing)
         return profile_trigger_sync.apply_plan(plan)
 
     return await asyncio.to_thread(_run)

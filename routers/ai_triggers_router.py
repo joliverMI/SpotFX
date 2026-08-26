@@ -15,6 +15,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from services.ai_trigger_service import list_training_songs
+from services import (profile_trigger_sync_queue, spectra_trigger_sync_client,
+                      trigger_identity)
 from services.profile_manager import load_profile_by_uri, save_profile
 from services.training_profile_manager import (
     list_training_profiles,
@@ -22,7 +24,6 @@ from services.training_profile_manager import (
     delete_training_profile,
     TrainingProfile,
 )
-from models.song_profile import MusicTrigger
 from models.state import state
 
 logger = logging.getLogger(__name__)
@@ -154,14 +155,30 @@ async def generate_embedded(req: EmbeddedGenerateRequest):
         artist=artist,
         duration_ms=meta.duration_ms if meta else 0,
     )
-    profile_obj.triggers = [
-        MusicTrigger(timestamp_ms=s["timestamp_ms"], event_id=s["event_id"])
-        for s in raw
-    ]
+    # STABLE IDS + a policy-driven merge, never a wholesale replace: the same
+    # analyzed mark computed twice is the SAME trigger twice, so a re-import
+    # updates in place instead of churning the song's whole corpus under
+    # fresh uuids. Which side wins on a mark he has since hand-edited is
+    # settings.trigger_import_policy — see services/trigger_identity.py.
+    imported = trigger_identity.build_imported_triggers(raw)
+    profile_obj.triggers, merge_counts = trigger_identity.merge_imported_triggers(
+        profile_obj.triggers, imported)
     profile_obj.embedded_generated = True
     save_profile(profile_obj)
 
-    return {"applied": len(raw), "title": title, "artist": artist}
+    # The import must reach the copy SPECTRA fires from — found 2026-08-25,
+    # this path wrote the editor copy only, so an imported song's triggers
+    # never fired. UPSERT-ONLY: an import runs unattended, so it may add and
+    # update but never delete (his deliberate deletions land through an
+    # explicit Timeline save). Best-effort and REPORTED: the profile is
+    # already on disk, so a SPECTRA that is down is named here, not hidden.
+    sync = await spectra_trigger_sync_client.sync_profile_upsert_only(profile_obj)
+    if sync.get("status") == "ok":
+        profile_trigger_sync_queue.clear(profile_obj.spotify_uri)
+
+    return {"applied": len(raw), "title": title, "artist": artist,
+            "import_policy": trigger_identity.import_policy(),
+            "merge": merge_counts, "spectra_sync": sync}
 
 
 # ── Analyzed trigger generation (for builder import) ──────────────────────────
@@ -231,7 +248,7 @@ async def analyze_triggers(uri: str, category: str = "all"):
         from services import analyzed_trigger_store
         cached = [
             analyzed_trigger_store.CachedTrigger(
-                id=f"analyzed_{t['event_id']}_{t['timestamp_ms']}",
+                id=trigger_identity.stable_trigger_id(t["event_id"], t["timestamp_ms"]),
                 timestamp_ms=t["timestamp_ms"],
                 event_id=t["event_id"],
                 labels=list(t.get("labels") or []),
@@ -253,6 +270,11 @@ async def analyze_triggers(uri: str, category: str = "all"):
         if category == "flares" and role != "flare":
             continue
         results.append({
+            # THE STABLE ID, handed to the timeline so the mark it places is
+            # the SAME trigger on every re-import instead of a fresh uuid each
+            # time. Identical to the id this endpoint's own analyzed-trigger
+            # cache keys the row with, above — one identity, not two.
+            "id": trigger_identity.stable_trigger_id(t["event_id"], t["timestamp_ms"]),
             "timestamp_ms": t["timestamp_ms"],
             "event_id": t["event_id"],
             "confidence": t.get("confidence", 0.5),
@@ -265,6 +287,9 @@ async def analyze_triggers(uri: str, category: str = "all"):
         "training_profile": tp.name,
         "total": len(results),
         "category": category,
+        # The timeline applies the SAME policy this process would — one
+        # setting, not a second client-side opinion about his hand edits.
+        "import_policy": trigger_identity.import_policy(),
     }
 
 

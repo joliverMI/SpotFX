@@ -285,11 +285,54 @@ things to know before touching any of it:
 
 Deploy-time catch-up (dry-run default, `--apply`, backs up both worlds,
 and asserts the written diff equals the PLANNED diff before claiming
-success): `scripts/reconcile_profile_triggers.py`. Known gaps, by
-design: `services/capture_alignment.py` (shifts every trigger's
-timestamp after a recapture) and `routers/ai_triggers_router.py` (bulk
-AI apply) save profiles WITHOUT the sync — the reconcile script is their
-backstop. `tests/test_legacy_trigger_migration.py::
+success): `scripts/reconcile_profile_triggers.py` — still the manual
+repair path, unchanged and not weakened by the build below.
+
+**SYNC IS A PROPERTY OF WRITING HIS TRIGGERS, not a call each route
+remembers (2026-08-25, his order: "let's make sure they do" — he must
+never again ask whether his own work reached his show).** The
+per-route hook shipped 2026-08-24 covered only `POST /api/profiles`, so
+his analysed-trigger import (two songs, 238 triggers) wrote the editor
+copy and stopped. Three things now hold, and all three matter:
+
+- **The write marks; a supervised task lands.**
+  `profile_manager.save_profile` calls
+  `services/profile_trigger_sync_queue.mark_dirty()` on EVERY profile
+  write (trivial, non-failing, no event loop needed — the async HTTP
+  call cannot happen there); `run_supervised()` (wired in `main.py`'s
+  lifespan) drains the marks. A route that reports the outcome in its
+  own response syncs inline and calls `clear()`. So a NEW writer is
+  synced because it wrote, not because its author remembered.
+- **Automatic writers are UPSERT-ONLY; only an explicit save deletes.**
+  `plan_song(..., delete_missing=False)` (the wire field on
+  `POST /api/triggers/sync-from-profile`) reports what it declined to
+  remove as `retained` and CARRIES ITS PROVENANCE FORWARD — dropping
+  that would silently demote his deliberate deletions into `protected`
+  and they would then survive every future save. Use
+  `sync_profile_upsert_only`, never `sync_profile`, from anything
+  unattended.
+- **Machine-produced triggers carry STABLE IDS**
+  (`services/trigger_identity.py`, `analyzed_{event_id}_{timestamp_ms}`
+  — the shape the analyzed-trigger cache already used). `MusicTrigger.
+  id` defaults to a fresh `uuid4`, so before this every re-import made
+  100% of a song's rows read as absent-from-the-profile: the sync
+  deleted the lot and re-inserted them under new ids, and the row count
+  came out right, which is why nobody noticed. Whether a re-import
+  overwrites a mark he has hand-edited since is HIS open trade, so it is
+  parameterised (`settings.trigger_import_policy`, `"protect"` default /
+  `"replace"`), applied identically server-side and in both
+  `ImportDialog.tsx` copies from the one server-owned value.
+
+OFFLINE SCRIPTS THAT WRITE PROFILE JSON DIRECTLY bypass all of this by
+construction (no `save_profile`, nothing to mark, and often no SPECTRA
+running to reach): `scripts/backfill_trigger_intensity.py` (changes
+`intensity`, a field the fired copy carries — its docstring says so),
+plus `migrate_quiet_scene_groups.py`, `migrate_sequence_wrappers.py`,
+`migrate_remove_precmds_and_gb.py`, `migrate_intensity_scene.py`,
+`dedup_ledfx_profiles.py` (event-ref rewrites). The reconcile script is
+their catch-up — run it after any `--apply` pass.
+
+`tests/test_legacy_trigger_migration.py::
 test_migrate_real_corpus_lands_whole_in_one_pass` asserts hardcoded
 counts against his LIVE, still-edited corpus and drifts as he authors —
 verify against pristine master before chasing it.

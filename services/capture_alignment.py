@@ -199,7 +199,13 @@ def shift_offset_fields(sidecar_data: dict, old_meta: dict, shift_ms: int) -> di
 def apply_shift_to_profile(spotify_uri: str, shift_ms: int, duration_ms: int) -> tuple[int, int]:
     """Shift every trigger timestamp in the song's profile (main list and all
     per-Set-List overrides) by shift_ms, clamped to [0, duration].
-    Returns (main_triggers_shifted, setlist_triggers_shifted)."""
+    Returns (main_triggers_shifted, setlist_triggers_shifted).
+
+    THE FIRED COPY IS SYNCED BY THE CALLER, NOT HERE. This runs inside a
+    worker thread (services/audio_shape_service.py runs
+    realign_after_recapture through run_in_executor), so it cannot make the
+    async sync call itself. Its one caller does it on the event loop, keyed
+    off the returned trigger count — see that call site."""
     from services.profile_manager import load_profile_by_uri, save_profile
 
     profile = load_profile_by_uri(spotify_uri)

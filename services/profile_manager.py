@@ -90,6 +90,18 @@ def save_profile(profile: SongProfile) -> Path:
     ta_key = _title_artist_key(profile.artist or "", profile.title or "")
     if ta_key != "::":
         _titleartist_to_filename[ta_key] = profile.filename
+    # SYNC IS A PROPERTY OF WRITING (2026-08-25). Every profile write marks
+    # the song for the fired-copy sync, so a writer lands in his show because
+    # it wrote — not because its author remembered to add a call. The mark is
+    # deliberately trivial and non-failing; the landing happens on
+    # services/profile_trigger_sync_queue.py's own supervised drain, and a
+    # caller that syncs inline retires the mark itself.
+    try:
+        from services import profile_trigger_sync_queue
+        profile_trigger_sync_queue.mark_dirty(profile.spotify_uri)
+    except Exception:       # bookkeeping must never take his save down
+        logger.debug("trigger-sync mark failed for %s", profile.spotify_uri,
+                     exc_info=True)
     logger.debug("Saved profile: %s", path.name)
     return path
 

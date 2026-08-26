@@ -651,6 +651,25 @@ class Settings(BaseSettings):
     # no restart needed.
     legacy_trigger_engine_enabled: bool = False
 
+    # ── Trigger import policy ────────────────────────────────────────────────
+    # What a RE-import of a song's analyzed triggers does to triggers that are
+    # already in that song's profile. The two behaviours are switchable with
+    # no code change — this is a genuinely open product trade, put to the
+    # owner rather than baked in (see services/trigger_identity.py).
+    #
+    #   "protect" (default) — a trigger already in the profile is left exactly
+    #       as it stands; only genuinely NEW analyzed marks are added. His
+    #       hand edits (a moved mark, a retuned intensity, a disabled row)
+    #       survive every re-import. Mirrors the show side's own rule, where a
+    #       trigger authored on SPECTRA's card is never touched by a sync.
+    #   "replace" — the analyzed result wins: an existing trigger at the same
+    #       identity is overwritten with the freshly analyzed one, and marks
+    #       the new analysis no longer produces drop out of the profile.
+    #
+    # Either way an import NEVER deletes from the fired store — automatic
+    # writers sync upsert-only (services/spectra_trigger_sync_client.py).
+    trigger_import_policy: str = "protect"     # "protect" | "replace"
+
     # ── Last.fm (genre fallback / primary in LedFX mode) ─────────────────────
     lastfm_api_key: str = ""
     lastfm_username: str = ""

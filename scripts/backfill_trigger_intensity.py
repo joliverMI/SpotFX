@@ -48,6 +48,17 @@ Usage
     python3 scripts/backfill_trigger_intensity.py                  # dry run
     python3 scripts/backfill_trigger_intensity.py --apply          # write + backup
     python3 scripts/backfill_trigger_intensity.py --curve rank --apply
+
+THE FIRED COPY IS NOT UPDATED BY THIS SCRIPT. It writes profile JSON
+directly, so it never reaches services/profile_manager.save_profile and
+never marks a song for services/profile_trigger_sync_queue.py's drain — and
+it is an offline pass that may well run with SPECTRA down, with nothing to
+HTTP-sync to. `intensity` IS a field the fired copy carries, so after an
+--apply run those songs are stale in the show until
+scripts/reconcile_profile_triggers.py is run. That is deliberate (one
+operator-run repair pass beats thousands of HTTP calls from a batch job),
+not an oversight — see AGENTS.md's trigger-sync section for the full list of
+offline writers in this position.
 """
 
 from __future__ import annotations

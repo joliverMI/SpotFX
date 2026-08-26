@@ -107,6 +107,9 @@ class SyncPlan:
     unchanged: int = 0
     skipped: list[SkippedTrigger] = field(default_factory=list)
     protected: list[str] = field(default_factory=list)   # card-born, left alone
+    # Rows an UPSERT-ONLY sync declined to delete. Empty on a whole-song sync
+    # (a Timeline save), where a deletion is his deliberate act and lands.
+    retained: list[str] = field(default_factory=list)
     generated_untouched: int = 0
     # {trigger_id: legacy event_id} — this song's provenance AFTER the plan
     # lands. Written to the ledger by apply_plan.
@@ -127,6 +130,7 @@ class SyncPlan:
             "unchanged": self.unchanged,
             "skipped": by_reason,
             "protected_spectra_authored": len(self.protected),
+            "retained_upsert_only": len(self.retained),
             "generated_untouched": self.generated_untouched,
         }
 
@@ -161,7 +165,8 @@ def _carry_forward(existing: Optional[SpectraTrigger],
 def plan_song(uri: str,
               profile_triggers: list[dict],
               fired_triggers: list[dict],
-              known_profile_ids: dict[str, str]) -> SyncPlan:
+              known_profile_ids: dict[str, str],
+              delete_missing: bool = True) -> SyncPlan:
     """Pure — no I/O, no clock, no storage. `profile_triggers` are RAW legacy
     MusicTrigger dicts; `fired_triggers` are RAW rows out of triggers.json;
     `known_profile_ids` is this song's provenance ledger view
@@ -169,7 +174,23 @@ def plan_song(uri: str,
 
     Provenance grows here as well as being read: any fired-copy authored row
     whose id is present in the profile RIGHT NOW is proven profile-origin, so
-    a song never reconciled before is seeded correctly by its first sync."""
+    a song never reconciled before is seeded correctly by its first sync.
+
+    `delete_missing` is the whole-song / upsert-only switch, and it is the
+    difference between a deliberate act and an accident. TRUE (the default,
+    and what an explicit Timeline save sends) is the behaviour decisions 3
+    and 4 describe: he deleted a trigger, so its fired row goes too. FALSE is
+    what every AUTOMATIC writer sends — an import, a post-capture generation,
+    a post-recapture realign. Those run without him watching and can carry a
+    partial or freshly-derived list, so they are allowed to add and update
+    but never to remove: a row that would have been deleted is reported in
+    `retained` and left alone, and scripts/reconcile_profile_triggers.py
+    stays the repair path for anything genuinely stale.
+
+    Provenance is carried forward for every retained id, so a LATER whole-song
+    save can still delete it. Dropping it here would silently demote his
+    deliberate deletions into `protected` — the fired row would then survive
+    every future save, which is the opposite of what this switch is for."""
     plan = SyncPlan(uri=uri)
 
     fired_authored: dict[str, dict] = {}
@@ -204,7 +225,11 @@ def plan_song(uri: str,
             # Decision 4: the profile wins — a fired row we planted earlier
             # under this id must not keep firing a retired/unmappable event.
             if tid in fired_authored and tid in known_profile_ids:
-                plan.deletes.append(tid)
+                if delete_missing:
+                    plan.deletes.append(tid)
+                else:
+                    plan.retained.append(tid)
+                    plan.provenance[tid] = known_profile_ids[tid]
             continue
 
         mapped = ltm.map_trigger(raw)
@@ -236,7 +261,12 @@ def plan_song(uri: str,
         if tid in seen_profile_ids:
             continue
         if tid in known_profile_ids:
-            plan.deletes.append(tid)            # decision 3: provably his profile's
+            if delete_missing:
+                plan.deletes.append(tid)        # decision 3: provably his profile's
+            else:
+                # Upsert-only: an automatic writer may not remove his work.
+                plan.retained.append(tid)
+                plan.provenance[tid] = known_profile_ids[tid]
         else:
             plan.protected.append(tid)          # card-born (or unproven) — untouched
 

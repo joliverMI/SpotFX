@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from models.song_profile import SongProfile
 from models.state import state
-from services import spectra_trigger_sync_client
+from services import profile_trigger_sync_queue, spectra_trigger_sync_client
 from services.profile_manager import (
     list_profiles, load_profile_by_uri, save_profile,
 )
@@ -64,7 +64,12 @@ async def get_intensity_scale(uri: str):
 @router.patch("/by-uri")
 async def patch_profile_by_uri(uri: str, body: IntensityScalePatch):
     """Set (source="user") or clear the song's intensity scaler. Pokes the
-    engine's in-memory profile so it's live without waiting for a poll."""
+    engine's in-memory profile so it's live without waiting for a poll.
+
+    DELIBERATELY NOT trigger-synced: this writes ONE profile-level scalar and
+    never touches `triggers`, so the fired copy (storage/spectra/triggers.json)
+    holds nothing this edit could make stale. See upsert_profile below for the
+    hook every trigger-writing path does run."""
     profile = load_profile_by_uri(uri)
     if profile is None:
         raise HTTPException(404, "Profile not found")
@@ -99,6 +104,11 @@ async def upsert_profile(profile: SongProfile):
     SPECTRA that is down reports `spectra_sync.status != "ok"` here rather
     than failing his save, and the deploy-time catch-up repairs it."""
     save_profile(profile)
-    triggers = [t.model_dump(mode="json") for t in profile.triggers]
-    sync = await spectra_trigger_sync_client.sync_song(profile.spotify_uri, triggers)
+    # THE ONE whole-song sync: an explicit save is his deliberate act, so his
+    # deletions land here (and only here). Every AUTOMATIC writer is
+    # upsert-only. Retiring the mark on success keeps the background drain
+    # from repeating a song this response already reported on.
+    sync = await spectra_trigger_sync_client.sync_profile(profile)
+    if sync.get("status") == "ok":
+        profile_trigger_sync_queue.clear(profile.spotify_uri)
     return {"status": "saved", "filename": profile.filename, "spectra_sync": sync}

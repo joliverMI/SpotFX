@@ -758,12 +758,32 @@ class AudioShapeService:
                             try:
                                 from services.capture_alignment import realign_after_recapture
                                 _stem_r = meta.npz_file[:-4]
-                                await asyncio.get_event_loop().run_in_executor(
+                                _realign = await asyncio.get_event_loop().run_in_executor(
                                     None,
                                     lambda: realign_after_recapture(
                                         meta.spotify_uri, _stem_r, meta.duration_ms
                                     ),
                                 )
+                                # A realign REWRITES every authored trigger's
+                                # timestamp, so the fired copy is now stale by
+                                # exactly the measured shift. capture_alignment
+                                # itself runs in a worker thread and cannot make
+                                # the async call, so the hook lives here, at its
+                                # one caller, on the event loop — same client,
+                                # one batched call per song.
+                                if (_realign or {}).get("triggers"):
+                                    from services import spectra_trigger_sync_client
+                                    from services.profile_manager import load_profile_by_uri
+                                    _p = load_profile_by_uri(meta.spotify_uri)
+                                    if _p is not None:
+                                        # UPSERT-ONLY: unattended, and it carries
+                                        # only shifted timestamps — it has no
+                                        # business deleting anything.
+                                        _sync = await spectra_trigger_sync_client \
+                                            .sync_profile_upsert_only(_p)
+                                        logger.info(
+                                            "Realign trigger sync for %s: %s",
+                                            meta.spotify_uri, _sync.get("status"))
                             except Exception as exc:
                                 logger.warning("Realign failed (non-fatal): %s", exc)
                             for orig, bak in _bak_paths:
@@ -892,7 +912,7 @@ async def _auto_generate_embedded(
     """Embedded KNN path: suggest triggers and auto-apply them directly to the profile."""
     from services.embedded_trigger_service import suggest_triggers
     from services.profile_manager import load_profile_by_uri, save_profile, get_event_map
-    from models.song_profile import SongProfile, MusicTrigger
+    from models.song_profile import SongProfile
 
     all_train = training_profile.get("training_uris", []) + training_profile.get("embedded_only_uris", [])
     if not all_train:
@@ -941,12 +961,21 @@ async def _auto_generate_embedded(
         artist=artist,
         duration_ms=meta.duration_ms if meta else 0,
     )
-    profile_obj.triggers = [
-        MusicTrigger(timestamp_ms=s["timestamp_ms"], event_id=s["event_id"])
-        for s in raw
-    ]
+    # Stable ids, same as the interactive import — this path only ever runs
+    # on a song with NO triggers yet (checked above), but it must still hand
+    # out identities a later re-import can recognise rather than fresh uuids.
+    from services import trigger_identity
+    profile_obj.triggers, _merge = trigger_identity.merge_imported_triggers(
+        profile_obj.triggers, trigger_identity.build_imported_triggers(raw))
     profile_obj.embedded_generated = True
     save_profile(profile_obj)
+
+    # Same hook the Timeline save and the analyzed-trigger import run, so a
+    # freshly captured song does not play its old (or no) triggers.
+    # UPSERT-ONLY: this runs unattended after a capture — it may add and
+    # update, never delete. Best-effort, and reported rather than assumed.
+    from services import spectra_trigger_sync_client
+    sync = await spectra_trigger_sync_client.sync_profile_upsert_only(profile_obj)
 
     await ws_manager.broadcast({
         "type": "auto_generate_complete",
@@ -954,6 +983,7 @@ async def _auto_generate_embedded(
         "count": len(raw),
         "method": "embedded",
         "track_id": track_id,
+        "spectra_sync": sync.get("status"),
     })
     logger.info("Embedded auto-generated %d triggers for %s — %s", len(raw), artist, title)
 
