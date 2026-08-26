@@ -76,6 +76,11 @@ class ColorSetCard(BaseModel):
     exclude_current: bool = True
     palette_sync:    bool = False
 
+    # Temporary disable (owner ask 2026-08-25) — see models/color_set.py's
+    # ColorSetCard.disabled docstring for the full rule. Mirrored here for
+    # the same "defined TWICE" reason is_rainbow below is.
+    disabled: bool = False
+
     # Rainbow select (owner ask 2026-08-20) — see models/color_set.py's
     # ColorSetCard.is_rainbow docstring. ColorSetCard is defined TWICE
     # (that one, and this read-only projection); a field added to one and

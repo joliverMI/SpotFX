@@ -16,6 +16,9 @@ in the editor).
                                journey travels on from there. The supported
                                manual surface for the owner/fleet (owner
                                defect fix — a room must never be set-less).
+                               A Disabled card still applies here (explicit
+                               human action) but the response says so:
+                               overrode_disabled=true.
 """
 from __future__ import annotations
 
@@ -35,12 +38,25 @@ class ApplySetRequest(BaseModel):
 
 @router.post("/room-color/apply")
 async def apply_room_color(body: ApplySetRequest):
+    # The EXPLICIT manual apply. A card he has marked Disabled (owner ask
+    # 2026-08-25, models/color_set.py's ColorSetCard.disabled) still
+    # applies — he pressed the button, he means it, the same bypass a
+    # manual scene Fire already has — but applying a disabled card is
+    # contradictory input, so it is NAMED (overrode_disabled), never
+    # silently applied and never silently refused. Same badge shape as
+    # Force Scene's own overrode_disabled.
+    from spectra.services import color_sets
+    referenced = color_sets.get_by_id(body.set_id)
     try:
         card = color_set_groups.resolve_ref(body.set_id)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     from spectra.services import engine
-    return await engine.conductor.apply_set_directly(card)
+    result = await engine.conductor.apply_set_directly(card)
+    if (getattr(referenced, "disabled", False)
+            or getattr(card, "disabled", False)):
+        result["overrode_disabled"] = True
+    return result
 
 
 @router.get("/room-journey")

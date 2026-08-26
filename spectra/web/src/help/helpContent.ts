@@ -101,6 +101,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'A disabled scene never fires automatically: it\'s dropped from the sequencer\'s own rolls, a generated trigger\'s scene draw, and a hand-authored trigger\'s fire_scene action, the same central gate Mode availability already funnels through — REGARDLESS of the room\'s current display mode. Disabled is the stronger statement: "don\'t use this scene, period," where Mode availability only narrows which room mode it plays in. A scene that\'s both disabled and mode-gated reports "disabled" as the reason, not "mode availability."',
           'Two things still work on a disabled scene, deliberately: a manual Fire/test-fire from this editor (you pressed the button, you mean it — same bypass Mode availability already has), and Force Scene. Pinning a disabled scene is contradictory input, so it\'s honoured, not silently refused or silently allowed — the room bar\'s Force Scene badge says "⚠ overriding disabled scene" when this happens.',
           'The scene list, and the phone header once a scene is open, both show a red "⛔ disabled" badge — a disabled scene that stops showing up should never look indistinguishable from a broken one.',
+          'Colour Sets and Groups have the identical control, with the identical rules — see "Disable — temporarily take a colour set out of rotation" on the Colour Sets page.',
         ],
       },
       {
@@ -449,6 +450,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Each Set and Group card carries a Rainbow/Single toggle, next to Mode availability. ENUMERATED, not inferred from name or colours — only the three Hype sets, the Hype group, and Black Hole Rainbow are marked Rainbow by default; a colourful-sounding name elsewhere means nothing on its own.',
           'The room controls bar\'s drift-gradient panel (see "Drift gradient", above) carries the Rainbow select limit (default 0.9). Above that intensity, automatic colour-set selection is restricted to Rainbow-marked sets only; at or below it, to Single sets only — never both, never neither.',
+          'Because that partition is exclusive, disabling cards interacts with it: disable every Rainbow set and there is nothing legal above the limit. The room is never left with no colour — it keeps what it is already wearing — and the sequencer status strip says so. See "Disable", below.',
+        ],
+      },
+      {
+        id: 'colorsets-disable',
+        title: 'Disable — temporarily take a colour set out of rotation',
+        keywords: 'disable enable toggle off pause temporarily stop colour color set group never chosen skip skipped exhausted',
+        body: [
+          'A toggle on the colour-set toolbar, next to Rainbow select — tap to flip Disabled ⇄ Enabled. It is the same control, the same wording, and the same rules as a scene\'s Disable (Scenes page, see "Disable — temporarily take a scene out of rotation"). Nothing is deleted or lost; it\'s reversible any time, and there\'s no timer — it stays off until you turn it back on.',
+          'A disabled Set is never CHOSEN automatically: it\'s dropped from the sequencer\'s own colour roll, a colour Group\'s rotation, the drift journey\'s destinations, a flare\'s colour jump, and a hand-authored select_color_set trigger — REGARDLESS of the room\'s display mode. Disabled is the stronger statement than Mode availability, which only narrows which room mode a card plays in; a card that is both reports "disabled" as the reason.',
+          'It is never yanked mid-paint. If a set you disable is the palette the room is wearing right this second, the room keeps wearing it — the next natural colour change simply picks something else. That is exactly how disabling a scene behaves.',
+          'Groups: disabling a MEMBER takes it out of that group\'s rotation/weighted pool. Disabling the GROUP stops the group being chosen as a pool — but it does NOT strip the group\'s Overrides from an enabled member fired by its own id, because overrides are a bulk-edit layer, not a choice, and disabling must not silently change an enabled set\'s colours. A group whose members are ALL disabled is itself unusable, and says so rather than quietly resolving to something else.',
+          'Two things still work on a disabled card, deliberately: this page\'s Preview, and an explicit apply to the room. Both are you pressing a button in the moment, so they win — and because that contradicts the flag, they say so ("previewing a disabled colour set"), the same way Force Scene names an overridden disabled scene.',
+          'The card list, and the phone header once a card is open, both show a red "⛔ disabled" badge — a card that stops showing up should never look indistinguishable from a broken one.',
+          'Safety: if you disable enough cards that NOTHING is eligible at some intensity (easy to do above the Rainbow select limit, where only Rainbow sets can be picked), the room is never left with no colour — it keeps the palette it already has. That is reported, not silent: the sequencer status strip\'s "last colour pick" shows "no colour set was eligible" with how many of your sets are currently disabled.',
         ],
       },
       {

@@ -132,6 +132,34 @@ colorsets/ColorSetsPage.tsx` (`/colorsets`, nav "Colours") — writes go
 straight through spot-effects' existing `/api/color-sets` (already general;
 SPECTRA's own backend only ever reads this storage, same as before).
 
+**A Colour Set or Group can be DISABLED (2026-08-25, PR
+fm/colorset-disable, his ask: "i want to be able to disable color sets like
+i can scenes")** — `ColorSetCard.disabled`, deliberately the SAME model as
+`SceneV2.disabled` (plain persistent bool, no timer, `False` default, so
+nothing about his room changed on deploy; `color_set_store.save()` rewrites
+only the card it is handed, so the field arrives lazily per card and his
+`storage/color_sets.json` was never mass-rewritten). Added to BOTH
+`ColorSetCard` definitions (the documented "defined twice" trap). Gated at
+AUTOMATIC choice only, each choke point checked individually rather than by
+family (§86's lesson): `scene_sequencer._default_eligible_sets`,
+`color_set_groups._selectable_members` (renamed from
+`_mode_available_members`) + `resolve_for_fire_mode_gated`,
+`drift_conductor._destination_pool`, `scene_response._default_eligible_sets`.
+**`scene_compiler.room_active_set` deliberately does NOT gate** — a disabled
+set that is the room's live palette keeps painting until the next natural
+change picks something else; re-checking there would drop the room to no
+colour the instant he flipped the toggle. A disabled GROUP stops being
+chosen as a POOL but keeps contributing its override entries AND its
+likelihood curve to an enabled member fired by its own id (both are
+authoring layers on a still-enabled set, not a choice). Explicit human use
+(`POST /api/room-color/apply`, the editor's Preview) still works and NAMES
+the contradiction (`overrode_disabled`), the Force-Scene precedent. Pool
+exhaustion is safe AND loud: an empty eligible pool (easy above
+`rainbow_select_limit` if he disables the rainbows) keeps the room's current
+colours via the kernel's terminal rung and reports
+`rung="pool_exhausted"` + a disabled count on the sequencer status strip,
+never a silent keep. Spec: `tests/test_color_set_disable.py`.
+
 **Groups are now a tiered container in the UI (2026-08-17, PR
 fm/spectra-colour-groups-as-overrides), the RESOLVE mechanism unchanged.**
 His ask, verbatim: "in our color group list let's tier it, so that color

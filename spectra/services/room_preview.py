@@ -139,14 +139,23 @@ async def start(card: ColorSetCard, *, hold: bool) -> dict:
     auto-revert for TAP_HOLD_S or HOLD_HOLD_S. Returns
     {applied, virtuals, hold, expires_in_s} — applied=False (nothing to
     revert, nothing paused) when the card touches no live virtual with a
-    known effect (e.g. every virtual is down, or the card has no entries)."""
+    known effect (e.g. every virtual is down, or the card has no entries).
+
+    A DISABLED card (owner ask 2026-08-25) previews normally — an explicit
+    press in the moment always wins, the same bypass a manual scene Fire
+    already has — but the contradiction is NAMED, not silent:
+    `overrode_disabled: True` rides on the response, the Force-Scene
+    precedent (room_controls.reconcile_force_scene_if_changed)."""
     from spectra.services import fx_seam, preview_pause
     async with _lock:
         await _revert_locked()   # a prior session (if any) reverts first
         live = await fx_seam.get_virtuals()
         writes, snapshot = await _writes_for(card, live)
+        overrode_disabled = bool(getattr(card, "disabled", False))
         if not writes:
-            return {"applied": False, "virtuals": [], "hold": hold, "expires_in_s": 0}
+            return {"applied": False, "virtuals": [], "hold": hold,
+                    "expires_in_s": 0,
+                    "overrode_disabled": overrode_disabled}
         await fx_seam.apply_writes(writes, transition_ms=0)
         global _snapshot, _hold, _revert_task
         _snapshot = snapshot
@@ -155,7 +164,8 @@ async def start(card: ColorSetCard, *, hold: bool) -> dict:
         preview_pause.start(duration)
         _revert_task = asyncio.create_task(_auto_revert(duration))
         return {"applied": True, "virtuals": sorted(snapshot), "hold": hold,
-               "expires_in_s": duration}
+               "expires_in_s": duration,
+               "overrode_disabled": overrode_disabled}
 
 
 async def update(card: ColorSetCard) -> dict:

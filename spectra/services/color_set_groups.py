@@ -145,14 +145,17 @@ def _palette_sync_anchor(members: list) -> Optional[int]:
     return best
 
 
-def _mode_available_members(group: ColorSetCard) -> list:
-    """Members whose OWN set currently passes mode_availability (owner ask
-    2026-08-17, spectra/services/mode_availability.py) — filtered before
-    cycling/weighting so a light/dark-only member never lands while the
-    room's display_mode excludes it, regardless of how the group itself was
-    reached (explicit apply, trigger action, or a scene's color_set_id). A
-    member whose set id no longer resolves is kept here (unfiltered) — the
-    existing "missing member" handling in resolve_for_fire deals with
+def _selectable_members(group: ColorSetCard) -> list:
+    """Members whose OWN set is currently selectable — not DISABLED (owner
+    ask 2026-08-25, models/color_set.py's ColorSetCard.disabled) and
+    passing mode_availability (owner ask 2026-08-17, spectra/services/
+    mode_availability.py) — filtered before cycling/weighting so a
+    disabled or light/dark-only member never lands, regardless of how the
+    group itself was reached (explicit apply, trigger action, or a scene's
+    color_set_id). Disabled is checked FIRST and independently of room
+    mode, matching SceneV2.disabled's "don't use this, period" semantics.
+    A member whose set id no longer resolves is kept here (unfiltered) —
+    the existing "missing member" handling in resolve_for_fire deals with
     staleness; this filter only ever removes an otherwise-valid member."""
     from spectra.services import color_sets, mode_availability
     from spectra.services.room_controls import load_room_controls
@@ -160,7 +163,12 @@ def _mode_available_members(group: ColorSetCard) -> list:
     out = []
     for m in group.members:
         card = color_sets.get_by_id(m.color_set_id)
-        if card is None or mode_availability.available_in_room_mode(
+        if card is None:
+            out.append(m)
+            continue
+        if getattr(card, "disabled", False):
+            continue
+        if mode_availability.available_in_room_mode(
                 card.display_availability, room_mode):
             out.append(m)
     return out
@@ -170,11 +178,12 @@ def _pick_member(group: ColorSetCard) -> Optional[str]:
     """Pick one member id, advancing (and returning) the group's cursor.
     Mirrors legacy's _select_color_set_member at SPECTRA's fixed advance=1/
     direction=forward/pick_mode=default (see module docstring). The
-    candidate pool is first narrowed to mode-available members (see
-    _mode_available_members) — an empty pool (every member currently
-    gated out) is the same "no usable member" outcome an empty group
-    already has."""
-    members = _mode_available_members(group)
+    candidate pool is first narrowed to selectable members (see
+    _selectable_members) — an empty pool (every member currently disabled
+    or mode-gated out) is the same "no usable member" outcome an empty
+    group already has, reported LOUDLY by the caller rather than silently
+    resolving to something else."""
+    members = _selectable_members(group)
     if not members:
         return None
     n = len(members)
@@ -286,7 +295,13 @@ def _resolve_group_fire(card: ColorSetCard) -> Optional[ColorSetCard]:
     from spectra.services import color_sets
     chosen_id = _pick_member(card)
     if not chosen_id:
-        logger.info("colour group '%s' has no members", card.name)
+        # LOUD, not silent: a group whose members are ALL disabled (or all
+        # mode-gated out) is itself unusable — the caller falls back the
+        # same way an empty group already does, but the reason is named.
+        logger.warning("colour group '%s' has no selectable member "
+                       "(empty, or every member disabled/mode-gated) — "
+                       "callers fall back to the room's active set",
+                       card.name)
         return None
     member = color_sets.get_by_id(chosen_id)
     if member is None or member.kind != "set":
@@ -322,7 +337,7 @@ def resolve_for_fire_mode_gated(card: ColorSetCard,
     group-member substitution — a group marked light/dark-only is skipped
     as a whole, not silently resolved to a member — and the RESOLVED card
     (a member, if it was a group) is checked again, on top of
-    _mode_available_members already filtering the member pool a group
+    _selectable_members already filtering the member pool a group
     picks from. None means "nothing usable/available" — callers already
     treat resolve_for_fire's None as an unresolved reference and fall back
     to the room's active set; this is the same fallback, one more reason
@@ -330,11 +345,26 @@ def resolve_for_fire_mode_gated(card: ColorSetCard,
     trigger_engine._default_select_color_set) — manual applies call
     resolve_ref/resolve_for_fire directly and are never mode-gated."""
     from spectra.services import mode_availability
+    # DISABLED first, and independent of room mode (owner ask 2026-08-25 —
+    # models/color_set.py's ColorSetCard.disabled): the stronger statement
+    # wins the reason when both apply, mirroring scene_sequencer.
+    # fire_scene_by_id's own disabled-before-mode_availability order.
+    if getattr(card, "disabled", False):
+        logger.info("colour card '%s' is disabled — not chosen", card.name)
+        return None
     if not mode_availability.available_in_room_mode(
             card.display_availability, room_mode):
         return None
     resolved = resolve_for_fire(card)
     if resolved is None:
+        return None
+    # The resolved member is re-checked too — _selectable_members already
+    # filters a group's pool, but a DIRECT set reference reaches here
+    # having only been checked as `card` above (same card, so this is a
+    # no-op there) and a stale/odd resolution path must not slip past.
+    if getattr(resolved, "disabled", False):
+        logger.info("colour card '%s' resolved to disabled '%s' — not chosen",
+                    card.name, resolved.name)
         return None
     if not mode_availability.available_in_room_mode(
             resolved.display_availability, room_mode):
@@ -374,5 +404,8 @@ def resolve_ref(set_id: str) -> ColorSetCard:
         raise ValueError(f"colour set '{set_id}' not found")
     resolved = resolve_for_fire(card)
     if resolved is None:
-        raise ValueError(f"colour group '{card.name}' has no usable member")
+        raise ValueError(
+            f"colour group '{card.name}' has no usable member "
+            f"(empty, or every member is disabled / unavailable in the "
+            f"room's current display mode)")
     return resolved
