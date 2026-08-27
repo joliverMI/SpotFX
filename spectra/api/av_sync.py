@@ -18,6 +18,19 @@ statement; spectra/web/src/avsync/ is the phone page).
   GET  /api/av-sync/frame/latest   newest tapped frame as image/jpeg
                                    (404 when the tap is off / empty)
   GET  /api/av-sync/frame/meta     its timestamps/size, no pixels
+  GET  /api/av-sync/apply-proposal what his Apply press would write:
+                                   the live estimate (or the newest stored
+                                   run) translated into the room's
+                                   av_sync_lead_ms, with the direction
+                                   spelled out. READ-ONLY — the write
+                                   itself is his press through the
+                                   established PUT /api/room-controls,
+                                   never a bespoke writer here.
+
+The proposal endpoint refuses exactly where the instrument refuses: a
+weak/ambiguous/unstable estimate carries its own reason forward with
+applicable=False and no proposed value, so the page has nothing to offer
+rather than a guess. spectra/services/av_sync_lead.py holds the sign law.
 
 Nothing here drives lights on connect: a pattern run starts ONLY on an
 explicit `measure` message from the phone (his press), and the driver's
@@ -53,6 +66,39 @@ async def get_measurements(limit: Optional[int] = None):
     if limit:
         items = items[-int(limit):]
     return {"measurements": items, "privacy": sessions.PRIVACY_SUMMARY}
+
+
+@router.get("/av-sync/apply-proposal")
+async def get_apply_proposal():
+    """What his Apply press would write, computed SERVER-SIDE so the sign
+    translation has exactly one implementation (the page renders this, it
+    never re-derives it — the flare-preview trigger_mark_s precedent).
+
+    The estimate comes from the LIVE session when one is connected, else
+    the newest stored run, so the dialogue can never be opened against a
+    number the instrument has since walked back. Read-only."""
+    from spectra.services import av_sync_lead
+
+    measurements = sessions.load_measurements()
+    recent = av_sync_lead.recent_runs(measurements)
+    estimate: Optional[dict] = None
+    source = "none"
+    sess = sessions.current
+    if sess is not None:
+        estimate = sess.estimate().as_dict()
+        source = "live"
+    elif measurements:
+        estimate = measurements[-1]
+        source = "stored"
+    prop = av_sync_lead.proposal(estimate, av_sync_lead.current_lead_ms(),
+                                 recent=recent)
+    body = prop.as_dict()
+    body["source"] = source
+    body["spread_ms"] = av_sync_lead.spread_ms(recent)
+    body["two_runs_note"] = av_sync_lead.TWO_RUNS_NOTE
+    body["lead_min_ms"] = av_sync_lead.LEAD_MIN_MS
+    body["lead_max_ms"] = av_sync_lead.LEAD_MAX_MS
+    return body
 
 
 @router.post("/av-sync/frame-tap")

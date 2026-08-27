@@ -47,6 +47,7 @@ import logging
 
 from fx import light_ownership
 from spectra.models.scene import SceneV2
+from spectra.services import av_sync_lead
 from spectra.services.bridge import SpotEffectsBridge
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
@@ -279,12 +280,24 @@ async def _run_trigger_engine() -> None:
     timestamp (bridge.py's module docstring has the full port rationale);
     without it every migrated trigger fires late/early by that song's own
     offset (measured live: one song at +7052ms) instead of at the moment
-    it was authored against. Errors are logged and swallowed per tick —
-    one bad trigger must never stop the clock."""
+    it was authored against. His own measured A/V-sync lead
+    (RoomControlState.av_sync_lead_ms, the /avsync Apply button's target)
+    is layered on top of that here — this is its single application point.
+    Errors are logged and swallowed per tick — one bad trigger must never
+    stop the clock."""
     from spectra.services.trigger_engine import TICK_S
     while True:
         try:
-            await trigger_engine.tick(bridge.effective_position_ms())
+            # THE ONE PLACE the A/V-sync lead reaches the show (owner ask
+            # 2026-08-28). LEAD family, positive = fire EARLIER, layered on
+            # top of the xcorr correction the bridge already applied; None
+            # (never calibrated, the default) shifts nothing. Read fresh
+            # every tick like scene_change_mode beside it, so his apply
+            # takes effect without a restart. The sign law and the reason
+            # this term exists at all are in av_sync_lead.py's docstring —
+            # do NOT add a second application point.
+            await trigger_engine.tick(av_sync_lead.show_clock_ms(
+                bridge.effective_position_ms(), av_sync_lead.current_lead_ms()))
         except Exception:
             logger.exception("trigger engine: tick failed")
         await asyncio.sleep(TICK_S)

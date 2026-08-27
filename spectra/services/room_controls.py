@@ -511,6 +511,27 @@ class RoomControlState(BaseModel):
     scene_transition_ms_gentle: int = Field(default=300, ge=0, le=20000)
     scene_transition_ms_hard: int = Field(default=200, ge=0, le=20000)
     scene_change_mode: SceneChangeMode = "full"
+
+    # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
+    # fire EARLIER, negative = fire LATER. The value the /avsync
+    # instrument's Apply button writes, and the ONLY authored term in
+    # SPECTRA's fire clock. Applied at exactly one place (the trigger poll
+    # in spectra/services/engine.py, via av_sync_lead.show_clock_ms); the
+    # sign law, the add-don't-assign translation, and why the two
+    # spot-effects numbers that look like candidates are DIFFERENT JOBS
+    # rather than older values of this one all live in
+    # spectra/services/av_sync_lead.py's module docstring — read it before
+    # touching any of this.
+    #
+    # None (default) means NEVER CALIBRATED, deliberately not 0: nothing
+    # about his show changes until his first apply, and the dialogue can
+    # say "none yet" instead of a "0 ms" that would read like a measured
+    # result. Both resolve to no shift at the clock.
+    #
+    # Excluded from the settings-console registry on force_scene_*'s own
+    # precedent: a measured calibration belongs to the instrument that
+    # measured it, not to a spoken command.
+    av_sync_lead_ms: Optional[int] = Field(default=None, ge=-2000, le=2000)
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
 

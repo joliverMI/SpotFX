@@ -9,8 +9,11 @@
  * streamed to SPECTRA, which correlates them against its own two
  * references (the live audio hub, and either a flash pattern it drives
  * or the show's own writes) and answers with A NUMBER AND HOW CONFIDENT
- * IT IS (spectra/services/av_sync_session.py). Nothing measured here is
- * written into any setting — the number is presented for him to accept.
+ * IT IS (spectra/services/av_sync_session.py). Nothing is EVER written
+ * automatically: the number is presented for him to accept, and the
+ * Apply dialogue (ApplyOffsetDialog.tsx, owner ask 2026-08-28) writes the
+ * room's A/V-sync lead only on his own press, after showing him current
+ * vs proposed with the direction spelled out in words.
  *
  * Phone-first, single column. The secure-context gate is the first thing
  * on the page because it is the first thing that will stop him: camera
@@ -21,6 +24,7 @@ import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { apiGet, apiPost } from '../api/client';
 import { AvSyncClient, PhoneCapture, secureContextProblem, type Capabilities, type ServerMessage } from './capture';
+import ApplyOffsetDialog from './ApplyOffsetDialog';
 
 type LagDict = { ok: boolean; lag_ms: number | null; sigma_ms: number | null; peak_ratio: number;
   ambiguity: number; overlap_s: number; reason: string; subwindow_lags_ms: number[] };
@@ -66,6 +70,9 @@ export default function AvSyncPage() {
   const [frameTap, setFrameTap] = useState<{ enabled: boolean; fps: number; width: number } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [fpsNow, setFpsNow] = useState<number | null>(null);
+  // The apply dialogue is opened by HIS PRESS only — never from the
+  // 'estimate'/'measure_done' handlers. Hold 4 of the apply design.
+  const [applyOpen, setApplyOpen] = useState(false);
 
   const pushError = useCallback((m: string) => setErrors((e) => [...e.slice(-4), m]), []);
 
@@ -334,9 +341,28 @@ export default function AvSyncPage() {
               </ul>
               <div style={{ fontSize: 12, marginTop: 4 }}>Net: the true value could be up to {estimate.systematic_later_ms} ms further AHEAD or {estimate.systematic_earlier_ms} ms further BEHIND than shown. A difference between two runs on this phone is far tighter than either absolute number.</div>
             </details>
+
+            {/* APPLY — beside the result it applies, never a global surface.
+                Shown for every finished estimate so a refusal can EXPLAIN
+                itself in the dialogue (the reason is the answer), but the
+                Apply button inside it only enables for a number the
+                instrument stood behind. Opening it is always his press. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button className={estimate.ok ? 'primary' : undefined}
+                onClick={() => setApplyOpen(true)}>
+                Apply this to the room…
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {estimate.ok
+                  ? 'Shows current vs proposed before anything is written.'
+                  : 'No number yet — the dialogue will say why.'}
+              </span>
+            </div>
           </div>
         )}
       </div>
+
+      {applyOpen && <ApplyOffsetDialog onClose={() => setApplyOpen(false)} />}
 
       {/* Session results + history */}
       <div className="card">

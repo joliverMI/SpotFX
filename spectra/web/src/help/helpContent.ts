@@ -1438,6 +1438,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'av-sync-apply',
+        title: 'Applying the result — the "Apply this to the room" button',
+        keywords: 'apply offset button dialogue adjust update setting lead earlier later direction current proposed undo read-back av sync lead calibration',
+        body: [
+          'Measuring is one press; APPLYING is a second, separate one. Nothing is ever written when a measurement finishes — the "Apply this to the room…" button under the Result opens a dialogue that shows you what would change before anything does.',
+          'WHAT IT WRITES: SPECTRA\'s own A/V-sync lead (the room control av_sync_lead_ms). This is the only authored number in SPECTRA\'s show clock, and it is applied at exactly one place — where the clock feeds the trigger engine — so every automatic scene change, trigger and flare moves together. Until your first apply it is "none yet": the room runs exactly as it always has.',
+          'THE DIRECTION SENTENCE, and what it means: the dialogue never shows you a bare signed number to interpret. It says, in words, "Lights will fire 120 ms EARLIER than they do now" (or LATER). That sentence is the thing to read. It follows from what was measured: if the lights reached your phone BEHIND the sound, they need to fire earlier by that much; if they arrived AHEAD of it, they need to fire later.',
+          'CURRENT vs PROPOSED: both are shown side by side. The measurement is ADDED to whatever lead is already in force, never assigned over it — a measurement is taken with the current calibration already running, so a residual of +120 ms on a room already 50 ms early means 170 ms, not 120. That is what makes re-measuring after an apply do the right thing instead of undoing the first one.',
+          'NO NUMBER, NO APPLY: if the instrument refused this run (weak, ambiguous, unstable, no audio or light lock), the dialogue explains which and offers no apply path at all. It never falls back to a previous run\'s number — earlier runs are listed only so you can see how stable the room is measuring.',
+          'DECIDING: the run-to-run wobble (the ±) and the named directional systematics are shown as separate lines because they mean different things, with the recent runs and their spread beside them. Comparing two runs on the same phone is far tighter than either absolute figure — if you are chasing a change, compare runs.',
+          'AFTER YOU PRESS: the value is saved through the ordinary room-controls save path and then read back from the room; the dialogue states what was actually written, and says so plainly if the read-back disagrees. A "↺ Put back" button returns the previous value the same way for as long as the dialogue stays open.',
+          'WHAT THIS IS NOT: it is unrelated to SpotFX\'s "Audio Latency" setting (which aligns audio capture for song analysis) and to the legacy "LedFX Trigger Buffer" (which compensated a write path SPECTRA does not use, and is read only by the retired legacy engine). Those are different jobs — not earlier versions of this number — and this dialogue neither reads nor changes either of them.',
+        ],
+      },
+      {
         id: 'av-sync-frame-tap',
         title: 'Frame tap — the hook for the future camera work (not built)',
         keywords: 'aruco tags led mapping vision frames jpeg seam hook future calibration patterns',
