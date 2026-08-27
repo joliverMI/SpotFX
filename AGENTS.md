@@ -3284,8 +3284,10 @@ writes). Result: `av_offset_ms` (positive = lights BEHIND the sound,
 negative = AHEAD — the sign row is in `docs/SPECTRA_TIMING_CONVENTIONS.md`,
 it is neither LEAD nor OFFSET family, it is a MEASUREMENT) plus a
 statistical ± and NAMED systematic terms with direction; a weak/ambiguous/
-unstable correlation REFUSES by name, never guesses. Nothing measured is
-applied to any setting. Three things to know before touching it: (1) the
+unstable correlation REFUSES by name, never guesses. The measurement is
+still never applied automatically — see the APPLY section immediately
+below for the button that closes the loop on his press. Three things to
+know before touching it: (1) the
 flash pattern's RANDOM holds are load-bearing (a periodic blink is refused
 as ambiguous by design) and the light correlation is on signed EDGES, not
 levels (`av_sync_correlate.signed_edges` docstring has the measured why);
@@ -3300,6 +3302,59 @@ reason). The vision/ArUco stage is deliberately NOT built — only its seam
 (`FrameRing`, frame tap OFF by default) is. Proof without a room:
 `scripts/check_av_sync.py` (simulated rooms through the real code);
 `tests/test_av_sync_*.py`.
+
+### Applying it: `RoomControlState.av_sync_lead_ms` — the ONLY authored term in SPECTRA's fire clock
+
+Built 2026-08-28 (PR fm/avsync-apply-button, his ask: "when I run avsync
+how do I update the offset value based on that data?"). **Read
+`spectra/services/av_sync_lead.py`'s module docstring before touching
+anything here — it is the binding statement** (the sign law, the
+add-don't-assign translation, and why the two lookalike settings are
+different jobs). The short list:
+
+- **THE TARGET HAD TO BE CREATED, because it did not exist.** Before
+  this, SPECTRA's fire clock had exactly ONE correction term and it isn't
+  authored: `bridge.effective_position_ms()` = raw position +
+  `shape_offset_ms` (spot-effects' machine-learned per-song xcorr number,
+  which WANDERS mid-song). `spectra/config.py` and `RoomControlState`
+  carried no latency/offset/lead/delay field at all.
+- **The two numbers that LOOK like the target are different jobs, not
+  older values of this one** — worth knowing before anyone "reuses" one:
+  `settings.audio_latency_ms` (root, LIVE) aligns WAV capture boundaries
+  for the xcorr training corpus and is **the number he remembers as
+  "150"**; `settings.ledfx_trigger_buffer_ms` (root, LEAD family) is
+  LedFX-HTTP write-transport compensation read ONLY by the retired legacy
+  engine, and holds an inert **−800** on his box. Neither is reachable
+  from `spectra/` anyway (import discipline + the read-only bridge), and
+  nothing in the apply path may seed from either — pinned by a test.
+- **LEAD family, positive = fire EARLIER**, applied as a clock shift at
+  **exactly one place**, `spectra/services/engine.py`'s trigger poll, via
+  `av_sync_lead.show_clock_ms(...)`. A second application point is the
+  thing to never add; `tests/test_av_sync_apply.py` greps for one.
+- **`None` (default) means NEVER CALIBRATED, deliberately not `0`** —
+  identical at the light, different in the dialogue ("none yet" vs
+  "0 ms"), so nothing about his show changed on deploy and no borrowed
+  number is ever shown as a previous value of this one.
+- **The translation ADDS, never assigns**: `proposed = current +
+  round(av_offset_ms)`, because the measurement is taken with the current
+  lead already running. Assigning would undo the previous calibration on
+  every re-measure. Worked examples both directions are in the
+  `av_sync_lead_ms` row of `docs/SPECTRA_TIMING_CONVENTIONS.md`.
+- **The write is his press through `PUT /api/room-controls`** (the
+  established save path, one field, then a real GET read-back — a PUT
+  echoing its own body is not a read-back). Server-side
+  `GET /api/av-sync/apply-proposal` owns the sign translation so the page
+  renders it and never re-derives it — the flare-preview inverted-sign
+  precedent. Excluded from Sonic's registry on `force_scene_*`'s own
+  precedent. UI: `spectra/web/src/avsync/ApplyOffsetDialog.tsx`, help
+  topic `av-sync-apply` (linked, not orphaned).
+- **PROOF BAR: a setting that reads back is not evidence.**
+  `tests/test_av_sync_lead_landing.py` measures the LIGHT EDGE moving on
+  the real render pipeline (the §84 landing-instrument pattern through
+  `fx.headless`) by exactly the amount set, both directions, with an
+  uncalibrated negative control — and was verified to go RED when the
+  clock shift is removed. Any future change to how this setting reaches
+  the show must clear that bar, not a round-tripped JSON value.
 
 ## SPECTRA param orphan watchdog (the safety net under momentary releases)
 
