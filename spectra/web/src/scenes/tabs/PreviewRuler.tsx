@@ -111,8 +111,15 @@ export default function PreviewRuler({
           <rect x={sToX(b.from_s)} y={22}
             width={Math.max(1, sToX(b.to_s) - sToX(b.from_s))} height={RULER_H - 46}
             fill={TONE[b.tone ?? 'accent']} opacity={b.tone === 'muted' ? 0.1 : 0.18} />
-          {b.label && (
-            <text x={(sToX(b.from_s) + sToX(b.to_s)) / 2} y={RULER_H - 30} fontSize={9}
+          {/* Band labels sit just INSIDE the top of the band, not at its
+              foot: the foot is where the draggable trigger mark writes its
+              own label, and a crossfade band centred on the mark used to
+              print "crossfade" straight through "trigger". A band too
+              narrow for its own label is left unlabelled rather than
+              printed over its neighbour — a 278ms hang beside a 400ms drop
+              ramp is a real case, not a hypothetical. */}
+          {b.label && sToX(b.to_s) - sToX(b.from_s) >= 7 * b.label.length && (
+            <text x={(sToX(b.from_s) + sToX(b.to_s)) / 2} y={36} fontSize={9}
               fill={TONE[b.tone ?? 'accent']} textAnchor="middle" opacity={0.9}>
               {b.label}
             </text>
@@ -132,7 +139,7 @@ export default function PreviewRuler({
           <line x1={sToX(m.at_s)} x2={sToX(m.at_s)} y1={16} y2={RULER_H - 20}
             stroke={TONE[m.tone ?? 'accent']} strokeWidth={2}
             strokeDasharray={m.dashed ? '3,2' : undefined} />
-          <text x={sToX(m.at_s)} y={12} fontSize={9} fill={TONE[m.tone ?? 'accent']}
+          <text x={sToX(m.at_s)} y={13} fontSize={9} fill={TONE[m.tone ?? 'accent']}
             textAnchor="middle">{m.label}</text>
         </g>
       ))}

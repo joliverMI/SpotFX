@@ -132,5 +132,32 @@ function run(cues, durationS, { laps = 4, playheadS = 0, frameMs = 16.7, jumpAt 
     'FIVE: a 3s server-side shift moves the fire by exactly 3s');
 }
 
+// ── SIX: the TRANSITION preview's drag round-trips through the SERVER's
+//    own trigger_mark_s formula — the ONE formula, never re-derived. Both
+//    functions are copied VERBATIM: the drag from
+//    TransitionPreviewOverlay.tsx, the mark from
+//    spectra/services/flare_preview.py (which transition_preview.py CALLS).
+{
+  // verbatim from TransitionPreviewOverlay.tsx's onTriggerDragEnd
+  const offsetFromDrag = (animAnchorS, draggedMarkS) =>
+    Math.round((animAnchorS - draggedMarkS) * 1000);
+  // verbatim from flare_preview.trigger_mark_s
+  const triggerMarkS = (anchorS, offsetMs, durationS) =>
+    Math.max(0, Math.min(durationS, anchorS - offsetMs / 1000));
+
+  const anchorS = 2.75, durationS = 9.0;
+  for (const draggedTo of [0.5, 2.0, 2.75, 4.0, 8.0]) {
+    const offsetMs = offsetFromDrag(anchorS, draggedTo);
+    const back = triggerMarkS(anchorS, offsetMs, durationS);
+    check(Math.abs(back - draggedTo) < 1e-3,
+      `SIX: transition drag to ${draggedTo}s round-trips via offset=${offsetMs}ms`);
+  }
+  check(offsetFromDrag(anchorS, 4.0) < 0 && offsetFromDrag(anchorS, 1.0) > 0,
+    'SIX: HIS sign law holds for the transition drag too — RIGHT is more '
+    + 'negative (fire earlier), LEFT is positive (fire later)');
+  check(offsetFromDrag(anchorS, anchorS) === 0,
+    'SIX: landing on the anchor is exactly 0');
+}
+
 console.log('\nAll multi-cue preview loop checks passed '
   + '(pure logic, no network, no browser, no fixtures).');
