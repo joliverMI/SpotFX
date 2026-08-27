@@ -310,6 +310,9 @@ export default function AvSyncPage() {
         <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8 }}>
           The flash pattern turns every light white on/off at random for {PATTERN_DURATION_S} s while the music keeps playing, then puts the room back exactly as it was. The show&apos;s own automatic changes are paused for those seconds. Passive mode flashes nothing — it listens to the show&apos;s own changes and is much less certain; it says so.
         </div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>
+          The flash pattern measures the RAW room — it cannot show whether an applied A/V-sync lead worked, because its flashes never travel the corrected clock that lead lives on. Passive is the mode that rides it. <HelpLink topic="av-sync-pattern-vs-passive" />
+        </div>
         {measuring === 'pattern' && <div className="badge badge-amber" style={{ marginTop: 8 }}>flashing… keep the phone still{patternEdges !== null ? ` (${patternEdges} edges)` : ''}</div>}
         {measuring === 'show' && <div className="badge badge-amber" style={{ marginTop: 8 }}>listening to the show…</div>}
       </div>
