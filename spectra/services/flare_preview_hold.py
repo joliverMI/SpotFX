@@ -238,6 +238,14 @@ _session_started_at: float | None = None
 # heartbeat or a re-fire — clears it. See "MAXIMUM HOLD CEILING" above.
 _locked_until_reopen: bool = False
 _release_tasks: list["asyncio.Task"] = []
+# The STEP the pending release tasks above belong to. Cancelling a pending
+# release exists to stop a RE-FIRE of the same thing from racing its own
+# earlier release (an intensity change mid-hold). A DIFFERENT step of the
+# same program is not a re-fire — it is the next beat of one lap (charge,
+# then lull, then drop), and cancelling there would strand a momentary
+# spike from the previous phase whose authored hold outlives the gap to
+# the next one. Cleared on every revert with the rest of the session.
+_release_step: str | None = None
 
 # A revert must NOT use transition_ms=0: fx/effects/__init__.py's
 # start_param_transitions only cancels/replaces an in-flight tween on a
@@ -338,9 +346,11 @@ async def _revert_locked(reason: str = "explicit_close") -> None:
     abandoned/lapsed heartbeat leaves it free to start fresh on its own
     next open, exactly as before this ceiling existed."""
     global _snapshot, _deadline, _session_started_at, _locked_until_reopen
+    global _release_step
     for task in _release_tasks:
         task.cancel()
     _release_tasks.clear()
+    _release_step = None
     snap = _snapshot
     _snapshot = None
     _deadline = None
@@ -625,13 +635,20 @@ async def open_program_hold(program: PreviewProgram, intensity: float, *,
     yet. This is what stops a client that keeps calling /fire after the
     ceiling (the reported failure mode) from silently re-establishing a
     new hold; see the module docstring's "MAXIMUM HOLD CEILING" section."""
-    global _snapshot, _session_started_at
+    global _snapshot, _session_started_at, _release_step
     async with _lock:
         if _locked_until_reopen:
             return {"held": False, "expired": True, "reason": "max_duration"}
-        for task in _release_tasks:
-            task.cancel()
-        _release_tasks.clear()
+        # Only a RE-FIRE of the SAME step cancels its own pending releases —
+        # see _release_step's own comment for why a different step of one
+        # lap must not.
+        if _release_step == step:
+            for task in _release_tasks:
+                task.cancel()
+            _release_tasks.clear()
+        else:
+            _release_tasks[:] = [t for t in _release_tasks if not t.done()]
+        _release_step = step
         scene = program.hold_scene
         first_open = _snapshot is None
         live = await fx_seam.get_virtuals() if first_open else None

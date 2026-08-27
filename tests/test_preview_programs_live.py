@@ -362,3 +362,87 @@ def test_the_release_step_clears_the_phase_even_after_a_drop(tmp_path, monkeypat
             await host.shutdown()
 
     _run(main())
+
+
+# ═══ 3. one lap's steps do not cancel each other's pending releases ════════
+
+def test_a_later_step_does_not_strand_an_earlier_steps_momentary_release(
+        tmp_path, monkeypatch):
+    """The hold cancels pending release tasks on a re-fire so an intensity
+    change cannot race its own earlier release. A DIFFERENT step of the
+    same program is not a re-fire — it is the next beat of one lap (charge,
+    then lull, then drop) — and cancelling there would strand a momentary
+    spike from the previous phase whose authored hold outlives the gap to
+    the next one. This pins the distinction: same step cancels, different
+    step does not."""
+    from spectra.services import flare_preview_hold as fph
+    from spectra.services import phase_preview
+    _own(monkeypatch, tmp_path)
+    scene = _scene("Sequence", "blackhole", {})
+
+    async def main():
+        host, virtual = await _start_host(
+            tmp_path, "blackhole", {"background_color": "#000000"})
+        try:
+            program = phase_preview.PhaseSequenceProgram(scene)
+            await fph.open_program_hold(program, 0.8, step="charge",
+                                        heartbeat_timeout_s=30.0)
+            # stand a long-lived task in for a pending momentary release
+            held = asyncio.create_task(asyncio.sleep(30))
+            fph._release_tasks.append(held)
+
+            await fph.open_program_hold(program, 0.8, step="lull",
+                                        heartbeat_timeout_s=30.0)
+            # task.cancel() only REQUESTS cancellation — a task does not
+            # report cancelled() until it has actually processed it, so
+            # yield first. Without this the assertion passes even against
+            # the always-cancel behaviour it exists to catch.
+            await asyncio.sleep(0)
+            assert not held.cancelled() and not held.done(), (
+                "the lull step cancelled the charge step's pending release")
+
+            await fph.open_program_hold(program, 0.8, step="lull",
+                                        heartbeat_timeout_s=30.0)
+            await asyncio.sleep(0)
+            assert held.cancelled(), (
+                "a RE-FIRE of the same step must still cancel its own "
+                "pending releases — that guard is why this exists")
+        finally:
+            for t in fph._release_tasks:
+                t.cancel()
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_a_flare_refire_still_cancels_its_own_pending_release(tmp_path, monkeypatch):
+    """The flare preview has ONE step, so every /fire is a re-fire and the
+    original cancellation behaviour is unchanged — the property the
+    intensity-change race depends on."""
+    from spectra.services import flare_preview_hold as fph
+    from spectra.models.scene import (FlareKind, ParamTarget,
+                                      SceneDeviceConfig, SceneV2)
+    _own(monkeypatch, tmp_path)
+    kind = FlareKind(name="spin-flare", type="momentary",
+                     params={"spin": ParamTarget(mode="absolute", value=0.9)})
+    scene = SceneV2(name="Flare", devices=[SceneDeviceConfig(
+        id="d1", target_kind="virtual", target=VID, effect_type="radial",
+        params={"spin": 0.2})], flare_kinds=[kind])
+
+    async def main():
+        host, virtual = await _start_host(tmp_path)
+        try:
+            await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=30.0)
+            held = asyncio.create_task(asyncio.sleep(30))
+            fph._release_tasks.append(held)
+            await fph.open_hold(scene, kind, 0.4, heartbeat_timeout_s=30.0)
+            await asyncio.sleep(0)
+            assert held.cancelled()
+        finally:
+            for t in fph._release_tasks:
+                t.cancel()
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
