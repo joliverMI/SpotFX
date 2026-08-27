@@ -458,7 +458,8 @@ def list_flare_kinds(scene_id: str) -> dict:
         raise SceneOpError(f"no scene with id {scene_id!r}")
     return {"scene_id": scene.id, "name": scene.name, "flare_kinds": [
         {"name": k.name, "type": k.type, "jump": k.jump, "gain": k.gain,
-         "hold_ms": k.hold_ms, "param_names": sorted(k.params)}
+         "hold_ms": k.hold_ms, "enabled": k.enabled,
+         "param_names": sorted(k.params)}
         for k in scene.flare_kinds
     ]}
 
@@ -618,6 +619,14 @@ def _validate_set_flare_kind(scene_id: str, **kind_fields: Any) -> tuple[SceneV2
     scene = scene_store.get_by_id(scene_id)
     if scene is None:
         raise SceneOpError(f"no scene with id {scene_id!r}")
+    # `enabled` omitted means "leave it as it is" on an UPDATE (a disabled
+    # kind must round-trip intact through an unrelated edit — re-enabling
+    # his room's flares as a side effect of retuning a gain would be a
+    # silent, invisible behaviour change), and True on a CREATE.
+    if kind_fields.get("enabled") is None:
+        existing = next((k for k in scene.flare_kinds
+                         if k.name == kind_fields.get("name")), None)
+        kind_fields["enabled"] = True if existing is None else existing.enabled
     try:
         kind = FlareKind.model_validate(kind_fields)
     except ValidationError as exc:
@@ -644,10 +653,11 @@ def _validate_set_flare_kind(scene_id: str, **kind_fields: Any) -> tuple[SceneV2
 async def apply_flare_kind(scene_id: str, *, name: str, type: str,  # noqa: A002 (mirrors FlareKind.type)
                            jump: Optional[str] = None, params: Optional[dict] = None,
                            gain: float = 1.0, hold_ms: Optional[int] = None,
+                           enabled: Optional[bool] = None,
                            source: str = "agent") -> dict:
     scene, candidate, op = _validate_set_flare_kind(
         scene_id, name=name, type=type, jump=jump, params=params or {},
-        gain=gain, hold_ms=hold_ms)
+        gain=gain, hold_ms=hold_ms, enabled=enabled)
     backup = _write_and_verify_backup(scene_id, scene, op=f"flare_kind_{op}")
     scene_store.save(candidate)
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
@@ -877,11 +887,12 @@ async def _op_set_scene_setting(scene_id: str, key: str, value: Any) -> dict:
 
 async def _op_set_flare_kind(scene_id: str, name: str, type: str,  # noqa: A002
                              jump: Optional[str] = None, params: Optional[dict] = None,
-                             gain: float = 1.0, hold_ms: Optional[int] = None) -> dict:
+                             gain: float = 1.0, hold_ms: Optional[int] = None,
+                             enabled: Optional[bool] = None) -> dict:
     try:
         return await apply_flare_kind(
             scene_id, name=name, type=type, jump=jump, params=params, gain=gain,
-            hold_ms=hold_ms)
+            hold_ms=hold_ms, enabled=enabled)
     except SceneOpError as exc:
         return exc.payload()
 
@@ -1070,7 +1081,11 @@ OPERATIONS: dict[str, SonicOperation] = {
             "{mode: 'absolute'|'offset'|'random', value|offset|lo,hi}. "
             "The server re-validates the whole shape and refuses anything "
             "that would make the scene invalid — check get_flare_kind "
-            "first if you're editing rather than creating."),
+            "first if you're editing rather than creating. enabled=false "
+            "temporarily disables the kind (it stays declared and attached "
+            "but never fires automatically; an explicit preview still "
+            "works and says so) — OMIT it to leave the current setting "
+            "alone, which is what you want for any unrelated edit."),
         input_schema={
             "type": "object",
             "properties": {
@@ -1081,6 +1096,7 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "params": {"type": "object", "additionalProperties": True},
                 "gain": {"type": "number"},
                 "hold_ms": {"type": "integer"},
+                "enabled": {"type": "boolean"},
             },
             "required": ["scene_id", "name", "type"], "additionalProperties": False},
         handler=_op_set_flare_kind),

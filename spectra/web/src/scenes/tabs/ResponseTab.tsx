@@ -16,6 +16,7 @@
 import { useRef, useState } from 'react';
 import BandStrip from '../../components/BandStrip';
 import FlareLaneRack from '../../components/FlareLaneRack';
+import PowerButton from '../../components/PowerButton';
 import HelpLink from '../../help/HelpLink';
 import { useToast } from '../../components/Toast';
 import { readFlareClipboard } from '../../lib/flareClipboard';
@@ -25,7 +26,7 @@ import FlareKindEditDialog from './FlareKindEditDialog';
 import FlarePreviewOverlay from './FlarePreviewOverlay';
 import {
   bandPools, deleteFlareKind, moveKindToLane, pasteKind, prunedLanes,
-  renameFlareKind, setKindTriggerOffset,
+  renameFlareKind, setKindEnabled, setKindTriggerOffset,
 } from './flareKindOps';
 import type { LaneRef } from './flareKindOps';
 
@@ -129,7 +130,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
     if (cls === 'flare') {
       for (const [name, jump] of [['Dice Re-roll', 'dice'], ['Colour Jump', 'color_set']] as const) {
         if (!kinds.some((k) => k.name === name)) {
-          missing.push({ name, type: 'drift_jump', jump, params: {}, gain: 1, hold_ms: null, trigger_offset_ms: 0 });
+          missing.push({ name, type: 'drift_jump', jump, params: {}, gain: 1, hold_ms: null, trigger_offset_ms: 0, enabled: true });
         }
         attach[name] = 1;
       }
@@ -224,6 +225,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
       <div style={{ marginBottom: 18 }}>
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           Flare kinds <HelpLink topic="flare-kinds" />
+          <HelpLink topic="flare-disable" title="Switching a flare off" />
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
             tap/double-click a kind to rename, delete, or copy — drag it into a lane below to attach it
           </span>
@@ -245,7 +247,8 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
             <div key={k.name} className="card"
               onPointerDown={startDrag(k.name, null)}
               style={{ padding: '6px 10px', maxWidth: 260, cursor: 'grab', userSelect: 'none',
-                       touchAction: 'none', opacity: drag?.name === k.name ? 0.4 : 1 }}
+                       touchAction: 'none',
+                       opacity: drag?.name === k.name ? 0.4 : k.enabled === false ? 0.55 : 1 }}
               title={`${TYPE_HINT[k.type]}\nTap to rename/delete/copy. Drag onto a lane to attach. Type/params/gain/hold are agent-adjustable.`}>
               <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center' }}>
                 {kindIcon(k)} {k.name}
@@ -255,12 +258,17 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                     ⚓ UPDATE
                   </span>
                 )}
-                <button style={{ marginLeft: 'auto', fontSize: 11, padding: '1px 6px' }}
-                  title="Open the scrubbing preview timeline for this kind"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => { e.stopPropagation(); setPreviewingKind(k); }}>
-                  ▶ Preview
-                </button>
+                <span style={{ marginLeft: 'auto', display: 'inline-flex',
+                               alignItems: 'center', gap: 6 }}>
+                  <button style={{ fontSize: 11, padding: '1px 6px' }}
+                    title="Open the scrubbing preview timeline for this kind (a disabled kind still previews — it says so)"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); setPreviewingKind(k); }}>
+                    ▶ Preview
+                  </button>
+                  <PowerButton on={k.enabled !== false} itemLabel="flare" size={20}
+                    onChange={(on) => setScene(setKindEnabled(scene, k.name, on))} />
+                </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{kindContent(k)}</div>
             </div>
@@ -347,6 +355,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                             onStartDrag={startDrag}
                             onDetach={(name) => setBandKind(cls, i, name, null)}
                             onSetScale={(name, v) => setBandKind(cls, i, name, v)}
+                            onSetEnabled={(name, on) => setScene(setKindEnabled(scene, name, on))}
                           />
                         )}
                       </div>

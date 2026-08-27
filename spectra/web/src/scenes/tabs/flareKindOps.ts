@@ -187,6 +187,18 @@ export function setKindTriggerOffset(scene: SceneV2, name: string, ms: number): 
   };
 }
 
+/** The flare bar's power button writes here — a real scene-draft edit
+ * (Save persists it), the same shape setKindTriggerOffset uses. Stored on
+ * the KIND, not the band, so switching a kind off silences it everywhere
+ * it is attached at once — which is what "disable this flare" means. */
+export function setKindEnabled(scene: SceneV2, name: string, enabled: boolean): SceneV2 {
+  return {
+    ...scene,
+    flare_kinds: scene.flare_kinds.map((k) =>
+      k.name === name ? { ...k, enabled } : k),
+  };
+}
+
 export interface LaneRef {
   cls: ResponseClass;
   bandIdx: number;

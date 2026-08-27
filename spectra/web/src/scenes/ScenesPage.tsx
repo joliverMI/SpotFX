@@ -9,7 +9,7 @@
  * toolbar's intensity slider drives Test Fire (dry-run compile — shows
  * resolved bindings + writes) and the owner's real Fire button. */
 import { useEffect, useMemo, useState } from 'react';
-import DisabledToggle from '../components/DisabledToggle';
+import PowerButton from '../components/PowerButton';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
@@ -95,6 +95,22 @@ export default function ScenesPage() {
     }
   };
 
+  /** The selection bar's power button: an instant flip that PERSISTS —
+   * he asked to disable "straight from the selection bar", so it must
+   * take effect without opening the scene and pressing Save. When that
+   * scene has OTHER unsaved edits, the flip lands in the draft instead:
+   * committing half-finished edits as a side effect of switching a scene
+   * off would be a silent, invisible write he never asked for. */
+  const togglePower = async (s: SceneV2, on: boolean) => {
+    const next: SceneV2 = { ...s, disabled: !on };
+    if (drafts[s.id]) {
+      setScene(next);
+      toast(`${on ? 'Enabled' : 'Disabled'} in your unsaved draft — press Save`, 'success');
+      return;
+    }
+    await save(next);
+  };
+
   const del = async () => {
     if (!scene) return;
     if (!confirm(`Delete scene "${scene.name}"?`)) return;
@@ -174,6 +190,7 @@ export default function ScenesPage() {
     <>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         Scenes <HelpLink topic="scenes-page" />
+        <HelpLink topic="power-button" title="The ⏻ power button" />
         <button className="primary" style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
           onClick={() => { create(); setPickerOpen(false); }}>
           + Scene
@@ -204,10 +221,15 @@ export default function ScenesPage() {
                     {s.name}
                     {drafts[s.id] && <span title="Unsaved changes" style={{ color: 'var(--accent2)' }}> •</span>}
                   </span>
+                  {/* Glyph only in the list row — the dim power button on
+                      the same row already carries the state, and the full
+                      badge crowds a long scene name out of a 250px pane.
+                      The editor header and the phone selector keep the
+                      spelled-out badge. */}
                   {s.disabled && (
                     <span className="badge badge-red" style={{ flexShrink: 0 }}
                       title="Disabled — never fires automatically; Force Scene / Fire still work">
-                      ⛔ disabled
+                      ⛔
                     </span>
                   )}
                 </div>
@@ -217,6 +239,10 @@ export default function ScenesPage() {
                   {s.color_journey.mode === 'override' && ' · journey override'}
                 </div>
               </div>
+              {/* Straight from the selection bar (his ask) — one tap, no
+                  need to open the scene first. */}
+              <PowerButton on={!(s.disabled ?? false)} itemLabel="scene" size={24}
+                onChange={(on) => void togglePower(s, on)} />
             </div>
           );
         })}
@@ -259,6 +285,8 @@ export default function ScenesPage() {
               scenes ▾
             </span>
           </button>
+          <PowerButton on={!(scene.disabled ?? false)} itemLabel="scene" size={30}
+            onChange={(on) => void togglePower(scene, on)} />
           <HelpLink topic="phone-layout" title="Phone layout" />
         </div>
       )}
@@ -295,8 +323,8 @@ export default function ScenesPage() {
             <ModeAvailabilityToggle value={scene.display_availability ?? 'default'}
               onChange={(v) => setScene({ ...scene, display_availability: v })} />
             <HelpLink topic="mode-availability" title="Mode availability" />
-            <DisabledToggle value={scene.disabled ?? false}
-              onChange={(v) => setScene({ ...scene, disabled: v })} />
+            <PowerButton on={!(scene.disabled ?? false)} itemLabel="scene" size={30}
+              onChange={(on) => setScene({ ...scene, disabled: !on })} />
             <HelpLink topic="scene-disable" title="Disable scene" />
             <button style={{ fontSize: 12, borderColor: 'var(--accent)' }}
               title="Really fire this scene through the live LedFX service"

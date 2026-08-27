@@ -204,10 +204,14 @@ async def set_scene_setting(scene_id: str, key: _SceneKeyEnum, value: Any) -> di
 async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa: A002
                          jump: Optional[_JumpEnum] = None,
                          params: Optional[dict] = None, gain: float = 1.0,
-                         hold_ms: Optional[int] = None) -> dict:
-    """Create or update one NAMED flare kind on one scene, matched by name."""
+                         hold_ms: Optional[int] = None,
+                         enabled: Optional[bool] = None) -> dict:
+    """Create or update one NAMED flare kind on one scene, matched by name.
+    enabled=false disables it (never fires automatically); omit to leave
+    the current setting alone."""
     return await _call("set_flare_kind", scene_id=scene_id, name=name, type=type,
-                       jump=jump, params=params, gain=gain, hold_ms=hold_ms)
+                       jump=jump, params=params, gain=gain, hold_ms=hold_ms,
+                       enabled=enabled)
 
 
 @mcp.tool()

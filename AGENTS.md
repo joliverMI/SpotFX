@@ -160,6 +160,47 @@ colours via the kernel's terminal rung and reports
 `rung="pool_exhausted"` + a disabled count on the sequencer status strip,
 never a silent keep. Spec: `tests/test_color_set_disable.py`.
 
+**A FLARE KIND can be disabled too, and every enable/disable is now ONE
+⏻ POWER BUTTON (2026-08-27, PR fm/flare-power-buttons)** — his ask:
+"disable/enable flares. Replace disable/enable with a power button, and
+light it green when it is on and dim when disabled. Allow me to disable/
+enable straight from the selection bar for scenes and colorsets and from
+the flare bar for flares." Two halves:
+
+- `FlareKind.enabled` (`spectra/models/scene.py`, default `True`, gained
+  lazily — `scene_store.save` rewrites only the scene it is handed, so his
+  file was never mass-rewritten). NOTE THE POLARITY: a kind is `enabled`,
+  a scene/set is `disabled` — deliberate, because the control is a power
+  button, and every caller translates at the boundary. Gated at each
+  choke point INDIVIDUALLY (the §86 lesson): `scene_response.
+  resolve_lane_picks` (never enters its lane pool; a lane whose members
+  are ALL disabled fires nothing and SAYS so — `picked: None`,
+  `all_disabled: True` in the fire record, "⏻ lane off" in the rack),
+  `_execute_band_locked`'s own attached list, and all three forward peeks
+  (`band_trigger_offset_ms`, `momentary_switch_would_glide`,
+  `color_rotate_lead_ms` — a disabled kind's lead/offset must never steer
+  a real fire). An EXPLICIT press still works and NAMES it:
+  `ResponseEngine.fire_kind` and `flare_preview.build_timeline` both
+  report `overrode_disabled`, the Force-Scene precedent. Sonic's
+  `set_flare_kind` takes `enabled` and OMITTING it leaves the stored value
+  alone on an update (re-enabling his flares as a side effect of retuning
+  a gain would be silent). Spec: `tests/test_flare_kind_disable.py`.
+- `spectra/web/src/components/PowerButton.tsx` REPLACES
+  `DisabledToggle.tsx` (deleted) everywhere: scene list rows + phone
+  selector + scene toolbar, the tiered Colour Sets list rows + card
+  toolbar, and each flare kind (palette card AND every lane cell in
+  `FlareLaneRack`). Green (`--ok`, a new token) when on, dim when off,
+  square, fixed size via the shared `fixedSizeToggleStyle.ts`. A press on
+  a scene/colour-set LIST ROW saves immediately — unless that item already
+  has other unsaved edits, in which case the flip lands in the draft
+  (committing half-finished work as a side effect of a power toggle is
+  not what he pressed). A flare kind's flip is an ordinary scene-draft
+  edit. The list rows' "⛔ disabled" badge is now the ⛔ GLYPH ALONE
+  (wording in its tooltip): measured at his real pane widths, the full
+  badge plus the button squeezed a card NAME to zero px; editor headers
+  and the phone selector keep the spelled-out badge. Help topics:
+  `power-button`, `flare-disable` (both linked, not orphaned).
+
 **Groups are now a tiered container in the UI (2026-08-17, PR
 fm/spectra-colour-groups-as-overrides), the RESOLVE mechanism unchanged.**
 His ask, verbatim: "in our color group list let's tier it, so that color

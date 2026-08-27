@@ -202,6 +202,11 @@ export interface FlarePreviewTimeline {
    * — the loop's own modular real-time wraparound handles both, never
    * clamp this before scheduling against it. */
   fire_at_s: number;
+  /** True when this kind is switched OFF (FlareKind.enabled === false) and
+   * the preview ran it anyway — an explicit press always wins, and the
+   * contradiction is NAMED rather than silently honoured (the Force-Scene
+   * / colour-set Preview precedent). The overlay shows a banner. */
+  overrode_disabled?: boolean;
   writes: FlarePreviewWrite[];
 }
 

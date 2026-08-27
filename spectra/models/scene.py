@@ -383,6 +383,32 @@ class FlareKind(BaseModel):
     gain: float = Field(default=1.0, ge=0.0)
     hold_ms: Optional[int] = Field(default=None, ge=0, le=60_000)
     trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)
+    enabled: bool = True
+    """Temporary disable for ONE flare kind (owner ask, 2026-08-27: "disable/
+    enable flares" — the same plain, reversible, no-timer shape SceneV2.
+    disabled and ColorSetCard.disabled already have, deliberately, so the
+    three read as one idea; note the POLARITY is the opposite of those two
+    — a kind is `enabled`, a scene/set is `disabled` — because the control
+    is a POWER BUTTON, lit green when on). Default True, gained lazily
+    (scene_store.save rewrites only the scene it is handed), so nothing in
+    his room changed on deploy.
+
+    A disabled kind is dropped from every AUTOMATIC path, each choke point
+    checked individually rather than by family (three overlay bypasses were
+    once found in exactly this area — AGENTS.md's §86 lesson):
+      - resolve_lane_picks: never enters its lane's pool, so it can never
+        win a fire-time roll. A lane whose members are ALL disabled fires
+        NOTHING from that lane, and says so in the fire record's own
+        lane_picks entry (picked=None, all_disabled=True).
+      - _execute_band's attached list: dropped before ordering/execution.
+      - the forward peeks (band_trigger_offset_ms,
+        momentary_switch_would_glide, color_rotate_lead_ms): aggregate over
+        ENABLED kinds only — a disabled kind's lead/offset must never steer
+        a real fire's timing.
+    An EXPLICIT press still works and NAMES the contradiction rather than
+    silently succeeding (the Force-Scene / colour-set Preview precedent):
+    ResponseEngine.fire_kind and the flare-preview surface both fire a
+    disabled kind and report overrode_disabled=True."""
 
     @model_validator(mode="before")
     @classmethod
