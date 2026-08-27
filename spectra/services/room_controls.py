@@ -392,6 +392,19 @@ legacy picks: decision-legacy-retirement-picks.md):
                           fire_scene_by_id by design and are NOT redirected -
                           an explicit single fire is not "a scene being
                           picked."
+  force_color_enabled/    FORCE COLOUR (owner ask 2026-08-27) - Force
+  force_color_target_id   Scene's twin one axis over: the room's colour
+                          stops changing and stays on his pick, a colour
+                          SET or a colour GROUP. Every choke point it
+                          gates, the SET-vs-GROUP reading, the precedence
+                          rulings (it wins over an active 2D gradient;
+                          composes for free with Ambient), and why a
+                          disabled pin applies-and-is-named all live in
+                          spectra/services/force_color.py's module
+                          docstring - read that, not this line, before
+                          touching any colour selection path. Reconciled
+                          the same PUT-triggered way the three controls
+                          above are: reconcile_force_color_if_changed.
 
 Ambient is wired live (services/ambient.py) — the Dinner-Party half of the
 room-MODES gap (gap report §3 row 5) is a separate, still-unbuilt mode;
@@ -500,6 +513,18 @@ class RoomControlState(BaseModel):
     scene_change_mode: SceneChangeMode = "full"
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
+
+    # FORCE COLOUR (owner ask 2026-08-27, corr=dee5132bf1a25c35 item 3) —
+    # Force Scene's twin one axis over: that pins WHICH SCENE plays, this
+    # pins WHICH COLOURS it wears. The target is a ColorSetCard id, a SET
+    # or a GROUP (a Group keeps its own rotation live — pinning a pool, not
+    # freezing a member). Default off/None, so this field's arrival changes
+    # nothing. Every gate, the precedence rulings (vs. the 2D gradient, vs.
+    # Ambient), and why a disabled pin applies-and-is-named live in
+    # spectra/services/force_color.py's module docstring — read that before
+    # touching any colour choke point.
+    force_color_enabled: bool = False
+    force_color_target_id: Optional[str] = None  # colour SET or GROUP card id
 
     # Rainbow select (spectra/services/rainbow_select.py, owner ask
     # 2026-08-20): above this intensity, colour-set selection is restricted
@@ -850,4 +875,83 @@ async def reconcile_force_scene_if_changed(previous: RoomControlState,
         # 2026-08-20): the currently-active scene hadn't cleared its own
         # minimum hold yet, but the pin fires anyway — named, not silent.
         result["overrode_dwell"] = True
+    return result
+
+
+async def reconcile_force_color_if_changed(previous: RoomControlState,
+                                           new_state: RoomControlState) -> Optional[dict]:
+    """Force Colour's ACTIVE half of a room-controls save — the exact
+    reconcile_force_scene_if_changed shape one axis over (read that
+    function first; this one deliberately mirrors it rather than inventing
+    a second convention). See spectra/services/force_color.py's module
+    docstring for the feature itself.
+
+    THE PASSIVE-REDIRECT TRAP IS DOCUMENTED, SO IT IS NOT REPEATED HERE:
+    every gate force_color installs is a redirect on a choice something
+    else was already about to make. Enabling the pin while a quiet song
+    plays — no triggers, no flares, the journey held — would leave the
+    room wearing whatever it already wore, and the switch would look dead
+    exactly the way Force Scene did in 2026-08-18. So the pin is APPLIED
+    right here, immediately, the instant its own edit is what changed.
+
+    Fires only on: force_color_enabled flipping False -> True, or
+    force_color_target_id changing while already enabled. Re-saving an
+    unrelated field (a brightness nudge) while an already-enabled,
+    unchanged pin stays put must NOT re-apply — a re-apply would advance a
+    pinned GROUP's rotation cursor, rolling his colours on an edit that
+    had nothing to do with colour.
+
+    RELEASE (True -> False) intentionally does nothing live: the room keeps
+    the colours it is wearing and the next automatic change picks normally
+    again — the same "never yank a live palette mid-paint" rule
+    scene_compiler.room_active_set states for a disabled set.
+
+    Always returns a dict naming what happened — applied, or skipped/error
+    with a stated reason — never a silent no-op; None means only "this
+    edit wasn't a pin change at all"."""
+    became_enabled = new_state.force_color_enabled and not previous.force_color_enabled
+    repinned_while_enabled = (
+        new_state.force_color_enabled and previous.force_color_enabled
+        and new_state.force_color_target_id != previous.force_color_target_id
+    )
+    if not (became_enabled or repinned_while_enabled):
+        return None
+    if not new_state.force_color_target_id:
+        return {"status": "skipped", "reason": "no colour set pinned"}
+    from spectra.services import color_sets, force_color
+    referenced = color_sets.get_by_id(new_state.force_color_target_id)
+    if referenced is None:
+        return {"status": "skipped", "reason": "pinned colour set not found",
+                "target_id": new_state.force_color_target_id}
+    # Resolved with the NEW state passed explicitly — the save has landed
+    # on disk by the time the PUT handler calls this, but passing it keeps
+    # the resolution honest against the state being reconciled rather than
+    # whatever a re-read returns.
+    card = force_color.pinned_card(new_state)
+    if card is None:
+        return {"status": "skipped",
+                "reason": ("pinned colour group has no usable member "
+                           "(empty, or every member disabled)"),
+                "target_id": new_state.force_color_target_id,
+                "target_name": referenced.name}
+    from spectra.services import engine
+    try:
+        applied = await engine.conductor.apply_set_directly(card)
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc),
+                "target_id": new_state.force_color_target_id,
+                "target_name": referenced.name}
+    result = {"status": "applied",
+              "target_id": new_state.force_color_target_id,
+              "target_name": referenced.name,
+              "target_kind": referenced.kind,
+              "applied_set_id": applied.get("applied"),
+              "applied_set_name": applied.get("set_name"),
+              "virtuals": applied.get("virtuals")}
+    if getattr(referenced, "disabled", False) or getattr(card, "disabled", False):
+        # Same contradiction shape as Force Scene pinning a disabled scene
+        # (and POST /room-color/apply applying a disabled card): he marked
+        # it disabled, then pinned it anyway. The pin wins — he pressed it,
+        # he means it — but the override is NAMED, never silent.
+        result["overrode_disabled"] = True
     return result

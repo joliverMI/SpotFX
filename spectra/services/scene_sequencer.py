@@ -62,6 +62,14 @@ TRANSITION_SOURCE = "transition"
 # keeps its colours — but the CAUSE is different and worth naming.
 POOL_EXHAUSTED = "pool_exhausted"
 
+# The colour-pick rung reported when FORCE COLOUR (owner ask 2026-08-27,
+# spectra/services/force_color.py) is what stopped the roll — the room's
+# colour is pinned, so no selection ran at all. Distinct from
+# TERMINAL_KEEP/POOL_EXHAUSTED (which mean "the kernel ran and kept") for
+# exactly the reason those two are distinct from each other: same outcome,
+# different cause, and the cause is what he needs to see.
+FORCED_COLOR = "forced_color"
+
 
 async def fire_scene_by_id(scene_id: str,
                            color_set_id: Optional[str] = None,
@@ -78,6 +86,16 @@ async def fire_scene_by_id(scene_id: str,
     intensity pass through as the caller resolved them, same as legacy's
     "reassert with normal First/Rest." A forced id pointing at a missing
     scene is treated as unset (falls through to the requested scene).
+
+    FORCE COLOUR (owner ask 2026-08-27, spectra/services/force_color.py —
+    read that module's docstring for the gates and precedence) is Force
+    Scene's twin one axis over, and lands HERE too, on the other half of
+    the same call: while a colour pin is enabled, the pinned SET/GROUP
+    replaces whatever colour set this caller resolved (a sequencer roll's
+    pick, a trigger's authored color_set_id, or nothing at all), and the
+    result carries forced_color=<id> so the fire says it wore the pin. The
+    two pins are independent: either, both, or neither can be on, and
+    neither reads the other's fields.
 
     Temporary disable (SceneV2.disabled, owner ask 2026-08-18) is gated
     HERE FIRST, ahead of mode availability below — it is the stronger,
@@ -139,7 +157,7 @@ async def fire_scene_by_id(scene_id: str,
     isolated, motionless room, so adding motion here would fight the thing
     he opened the preview to see."""
     from spectra.services import (color_set_groups, color_sets, dwell,
-                                  fire_history, mode_availability,
+                                  fire_history, force_color, mode_availability,
                                   preview_pause, scene_compiler, scene_store)
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
@@ -181,19 +199,36 @@ async def fire_scene_by_id(scene_id: str,
         return {"skipped": "dwell", "scene_id": scene_id, "scene_name": scene.name,
                "remaining_dwell_s": round(remaining_dwell, 1),
                "update_result": update_result}
-    color_set = color_sets.get_by_id(color_set_id) if color_set_id else None
-    if color_set is not None:
-        # A Group reference resolves to its picked member here (§10) — a
-        # missing/unusable/mode-unavailable one falls back to the room's
-        # active set below, same as an unknown plain set id already did.
-        color_set = color_set_groups.resolve_for_fire_mode_gated(
-            color_set, controls.display_mode)
+    # FORCE COLOUR (owner ask 2026-08-27, spectra/services/force_color.py):
+    # the pin replaces whatever colour this caller resolved — a sequencer
+    # roll's pick, a trigger's authored color_set_id, or nothing at all.
+    # Resolved ONCE here, per fire, which is also what advances a pinned
+    # GROUP's own rotation exactly once per fire. A pin that fails to
+    # resolve (deleted card, group with no usable member) falls through to
+    # the caller's own choice rather than leaving the fire colourless —
+    # the same degrade-gracefully posture an unknown color_set_id has.
+    forced_color = force_color.pinned_card(controls)
+    if forced_color is not None:
+        color_set = forced_color
+        color_set_id = forced_color.id
+    else:
+        color_set = color_sets.get_by_id(color_set_id) if color_set_id else None
+        if color_set is not None:
+            # A Group reference resolves to its picked member here (§10) — a
+            # missing/unusable/mode-unavailable one falls back to the room's
+            # active set below, same as an unknown plain set id already did.
+            color_set = color_set_groups.resolve_for_fire_mode_gated(
+                color_set, controls.display_mode)
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
                                              color_set=color_set, dry_run=False)
     if overrode_disabled:
         result["overrode_disabled"] = True
     if overrode_dwell:
         result["overrode_dwell"] = True
+    if forced_color is not None:
+        # NAMED, not silent: this fire wore the pinned colours, not the
+        # ones its caller resolved.
+        result["forced_color"] = forced_color.id
     dwell.note_fired(scene, intensity)
     fire_history.record_fire("scenes", scene_id, {
         "scene_name": getattr(scene, "name", scene_id),
@@ -455,6 +490,31 @@ class SceneSequencer:
         the new scene keeps the room's palette — never forced to churn."""
         if not config.color_set_entries:
             return None
+        from spectra.services import force_color
+        # FORCE COLOUR (spectra/services/force_color.py): the pin governs,
+        # so rolling here would be pure churn — worse than pointless,
+        # since _adopt_colors would move the room's WHEEL POSITION to a
+        # set that is never going to be worn, silently re-anchoring the
+        # colour journey that resumes when he releases the pin. Reported
+        # with its own rung so the status strip's "last colour pick"
+        # breakdown says WHY nothing rolled instead of going blank.
+        # active() (not pinned_card()) deliberately: this runs on every
+        # roll and must never advance a pinned Group's rotation cursor —
+        # fire_scene_by_id does that once, at the fire itself.
+        if force_color.active():
+            return {
+                "picked_id": None,
+                "fire_set_id": self._active_color_set_id,
+                "position_deg": None,
+                "record": {
+                    "picked_id": None,
+                    "picked_name": None,
+                    "kept_set_id": self._active_color_set_id,
+                    "rung": FORCED_COLOR,
+                    "factors": {},
+                    "forced_color_id": force_color.pinned_id(),
+                },
+            }
         eligible = self._eligible_sets(scene_id)
         if not eligible:
             # POOL EXHAUSTED — every set is currently ineligible (disabled,

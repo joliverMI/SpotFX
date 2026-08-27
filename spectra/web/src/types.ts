@@ -419,6 +419,17 @@ export interface RoomControlState {
    * force_scene_scene_id instead. Does not affect manual editor test-fires. */
   force_scene_enabled: boolean;
   force_scene_scene_id: string | null;
+  /** FORCE COLOUR (owner ask 2026-08-27) — Force Scene's twin one axis
+   * over: while enabled, the room's colour stops changing and stays on the
+   * pinned colour SET or GROUP (a Group keeps its own rotation live — it
+   * pins the pool, not one member). Every gate, the precedence rulings
+   * (it wins over an active 2D gradient; composes for free with Ambient),
+   * and why a disabled pin applies-and-is-named live in
+   * spectra/services/force_color.py's module docstring. Does not affect
+   * his own explicit applies/previews, which still work and name the
+   * override. */
+  force_color_enabled: boolean;
+  force_color_target_id: string | null;
   /** Rainbow select (spectra/services/rainbow_select.py, owner ask
    * 2026-08-20): above this intensity, colour-set selection is restricted
    * to rainbow-marked cards only; at or below it, to single cards only.
@@ -556,6 +567,29 @@ export interface AmbientHueGroup {
  * silent no-op; "error" means the fire itself raised. Re-saving an
  * unrelated field with the pin unchanged reports nothing (no key on the
  * response at all) — it wasn't a pin edit. */
+/** PUT /api/room-controls' `force_color_result` — Force Colour's active
+ * half (room_controls.reconcile_force_color_if_changed): enabling the pin
+ * or repinning a different card APPLIES the pinned colours immediately,
+ * with a stated outcome, rather than waiting for an automatic colour
+ * change that may never come (the documented passive-redirect trap). */
+export interface ForceColorResult {
+  status: 'applied' | 'skipped' | 'error';
+  target_id?: string;
+  target_name?: string;
+  target_kind?: 'set' | 'group';
+  /** The concrete SET the pin resolved to — the same id for a Set pin, the
+   * rolled member for a Group pin. */
+  applied_set_id?: string;
+  applied_set_name?: string;
+  virtuals?: number;
+  reason?: string;
+  /** True only when status is 'applied' AND the pinned card (or the member
+   * it resolved to) is marked disabled — the pin still wins (an explicit
+   * press always does), but this names the contradiction instead of
+   * applying it silently. Same shape as ForceSceneResult.overrode_disabled. */
+  overrode_disabled?: boolean;
+}
+
 export interface ForceSceneResult {
   status: 'fired' | 'skipped' | 'error';
   scene_id?: string;
@@ -577,6 +611,7 @@ export interface RoomControlsSaveResult extends RoomControlState {
   ambient_result?: AmbientResult;
   dark_light_result?: DarkLightResult;
   force_scene_result?: ForceSceneResult;
+  force_color_result?: ForceColorResult;
 }
 
 /** Device-preview strip (data/spectra-device-preview-plan/report.md).

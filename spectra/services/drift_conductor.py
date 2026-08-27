@@ -27,6 +27,19 @@ Mechanisms per leg:
            reselects; the wheel + bearing persist to shared room state
            every leg, so custody transfers never move the position.
 
+  FORCE COLOUR — while room_controls.force_color_enabled pins a colour SET
+           or GROUP (owner ask 2026-08-27, spectra/services/force_color.py),
+           this conductor's colour journey HOLDS — same held shape as a
+           live rainbow palette and a gradient below, journey_rec's
+           held_for=="force_color" naming it. The pin OUTRANKS an active
+           gradient (that module's docstring carries the ruling and its
+           reasoning); the gradient's id is untouched and drives again on
+           the very next leg after release. A set-less room bootstraps to
+           the pin rather than to a selector draw, and the gradient's own
+           drop kick (on_drop_event) stands down. Every OTHER mechanism
+           here — creeps, follows, the param drift — is untouched: this
+           feature pins COLOUR, not motion.
+
   gradient drift — the two-dimensional drift gradient (owner ask
            2026-08-20, spectra/models/gradient2d.py): OFF by default
            (room_controls.RoomControlState.active_gradient_id is None,
@@ -411,8 +424,35 @@ class DriftConductor:
             bootstrap = await self._bootstrap_room_color(
                 color_journey.active_journey(self._room_load(), self.scene))
 
-        active_gradient_id = self._room_controls().active_gradient_id
-        if active_gradient_id is not None:
+        controls = self._room_controls()
+        active_gradient_id = controls.active_gradient_id
+        # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
+        # force_color.py) WINS OVER BOTH the wheel journey and an active 2D
+        # gradient — the precedence ruling is stated in that module's
+        # docstring: both a gradient and a pin are "an alternate colour
+        # source takes over", so one has to be on top, and the pin is the
+        # more explicit, more momentary statement ("stop changing"). The
+        # gradient is not torn down — active_gradient_id stays stored and
+        # the very next leg after release picks it back up.
+        #
+        # HELD, exactly the shape a live rainbow palette and a gradient
+        # already use: bearing kept, wheel not advanced, palette not
+        # rotated. Nothing re-writes the pinned colours here either — the
+        # reconcile applied them once, and every fire wears them again via
+        # scene_compiler.room_active_set; a per-leg re-assert would fight
+        # a flare's own carried baselines for no benefit.
+        #
+        # active() (never pinned_card()) because this runs every leg: a
+        # pinned GROUP's rotation must advance once per FIRE, not once per
+        # 20-second conductor tick.
+        from spectra.services import force_color
+        if force_color.active(controls):
+            journey_rec = {"custody": "room", "paused": True,
+                          "held_for": force_color.HELD_FOR,
+                          "forced_color_id": force_color.pinned_id(controls)}
+            gradient_rec = {"active": False,
+                            "held_for": force_color.HELD_FOR}
+        elif active_gradient_id is not None:
             # An active gradient REPLACES the wheel journey for set-mode
             # virtuals — held exactly like a live rainbow palette holds it
             # (a different colour source has taken over; see the module
@@ -595,13 +635,23 @@ class DriftConductor:
                 landed += 1
         return landed
 
-    async def apply_set_directly(self, card) -> dict:
+    async def apply_set_directly(self, card, *,
+                                 forced_from: Optional[str] = None) -> dict:
         """The supported manual apply-this-set surface (owner defect fix,
         part b — reached via POST /api/room-color/apply): the card becomes
         the room's active set, the wheel anchors at its position (rainbow:
         colours land but the wheel stays where it was), its colours land on
         any live set-mode virtuals, and the journey clears its bearing to
-        travel on from the new anchor."""
+        travel on from the new anchor.
+
+        forced_from names the id this apply was REDIRECTED AWAY FROM by
+        FORCE COLOUR (spectra/services/force_color.py) — a select_color_set
+        trigger asked for one card and the pin substituted another. It is
+        carried into the fire-history record and the returned dict so the
+        redirect is named there rather than looking like he authored a
+        trigger for the pinned set, exactly the way fire_scene_by_id names
+        its own forced_color. None (the default, every other caller) is
+        unchanged behaviour and writes no extra key."""
         position = self._set_position(card.id)
         landed = await self.apply_color_set(card)
         room = self._room_load()
@@ -613,13 +663,17 @@ class DriftConductor:
         logger.info("room colour set applied directly: '%s' (%d virtuals)",
                     getattr(card, "name", card.id), landed)
         from spectra.services import fire_history
-        fire_history.record_fire("color_sets", card.id, {
-            "set_name": getattr(card, "name", card.id),
-            "position_deg": position,
-        })
-        return {"applied": card.id,
-                "set_name": getattr(card, "name", card.id),
-                "position_deg": position, "virtuals": landed}
+        detail: dict[str, Any] = {"set_name": getattr(card, "name", card.id),
+                                  "position_deg": position}
+        if forced_from is not None:
+            detail["forced_from"] = forced_from
+        fire_history.record_fire("color_sets", card.id, detail)
+        result = {"applied": card.id,
+                  "set_name": getattr(card, "name", card.id),
+                  "position_deg": position, "virtuals": landed}
+        if forced_from is not None:
+            result["forced_from"] = forced_from
+        return result
 
     async def _bootstrap_room_color(
             self, journey: color_journey.EffectiveJourney) -> Optional[dict]:
@@ -631,6 +685,20 @@ class DriftConductor:
         nothing ever applies a first set (the sequencer is off, the flare
         jump can't pick from an unanchored journey) and scenes render
         effect-default LedFX wheel colours instead of the owner's sets."""
+        # FORCE COLOUR (owner ask 2026-08-27): a set-less room under a pin
+        # bootstraps TO THE PIN, never to a selector draw — the pool draw
+        # below would anchor the wheel on a set that is about to be
+        # overridden on the very next fire, and would leave active_set_id
+        # disagreeing with what the room actually wears. Checked before
+        # the pool, so an empty/unusable pool can't pre-empt it.
+        from spectra.services import force_color
+        forced = force_color.pinned_card(self._room_controls())
+        if forced is not None:
+            result = await self.apply_set_directly(forced)
+            result["rung"] = force_color.HELD_FOR
+            logger.info("room colour bootstrap: pinned set '%s' applied "
+                        "(force colour)", result["set_name"])
+            return result
         pool = self._destination_pool()
         if not pool:
             return None
@@ -843,6 +911,13 @@ class DriftConductor:
         conductor's own deferral (ambient/dinner-party/preview/force-scene)
         like every other write this class makes."""
         room_controls = self._room_controls()
+        # FORCE COLOUR outranks the gradient (see force_color.py's
+        # precedence ruling and tick() above) — while the pin is on, the
+        # gradient is not driving the room's colour at all, so its drop
+        # kick has nothing to kick. Named, not a silent no-op.
+        from spectra.services import force_color
+        if force_color.active(room_controls):
+            return {"active": False, "held_for": force_color.HELD_FOR}
         gradient_id = room_controls.active_gradient_id
         if gradient_id is None:
             return None
@@ -939,6 +1014,7 @@ class DriftConductor:
     # ── observability ────────────────────────────────────────────────────────
 
     def status(self) -> dict:
+        from spectra.services import force_color
         room = self._room_load()
         journey = color_journey.active_journey(room, self.scene)
         rainbow = (room.active_set_id is not None
@@ -962,6 +1038,12 @@ class DriftConductor:
             "mechanisms": [m.as_status() for m in self.mechanisms],
             "gradient": {
                 "active_gradient_id": self._room_controls().active_gradient_id,
+                # FORCE COLOUR (spectra/services/force_color.py) — the pin
+                # holds this journey while it's on, so the status that
+                # reports the journey must say so; a held walk with no
+                # stated reason is exactly the silence every other hold in
+                # this codebase learned to name.
+                "force_color_id": force_color.pinned_id(self._room_controls()),
                 "x": room.gradient_x, "y": room.gradient_y,
                 "target_y": room.gradient_target_y,
             },

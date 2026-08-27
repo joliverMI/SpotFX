@@ -996,8 +996,23 @@ class TriggerEngine:
         await engine.fire_scene_update_event(intensity)
 
     async def _default_select_color_set(self, set_id: str) -> None:
-        from spectra.services import color_set_groups, color_sets, engine
+        from spectra.services import (color_set_groups, color_sets, engine,
+                                      force_color)
         from spectra.services.room_controls import load_room_controls
+        # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
+        # force_color.py) redirects an automatic colour choice exactly the
+        # way Force Scene redirects an automatic scene choice — a stored
+        # trigger firing IS automatic (he authored it earlier; he is not
+        # pressing a button now), so the pin wins and the redirect is
+        # NAMED in the record (forced_from=<the id the trigger asked for>)
+        # rather than silently logging an apply of a set he never wrote.
+        # Resolved once, here, which is also the single advance of a
+        # pinned GROUP's rotation for this fire.
+        forced = force_color.pinned_card()
+        if forced is not None:
+            await engine.conductor.apply_set_directly(forced,
+                                                      forced_from=set_id)
+            return
         # §10 — a Group reference resolves to its picked member. Fetched
         # RAW (not via resolve_ref) so mode availability (owner ask
         # 2026-08-17) can gate the GROUP ITSELF before any member

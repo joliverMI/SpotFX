@@ -1636,6 +1636,55 @@ fired/skipped/error reason (`force_scene_result` in the PUT response,
 `ForceSceneResult` in `types.ts`, surfaced as a badge in
 `RoomControlsBar.tsx`) — never a silent no-op.
 
+**Force Colour** — Force Scene's twin ONE AXIS OVER (2026-08-27, his ask:
+"Add an ability to force a color set or color group, similar to force
+scene, so the color does not change and stays on a specific set. Put the
+tool in the top bar and focus on fucntion and we will work on UI later").
+Force Scene pins WHICH SCENE plays; this pins WHICH COLOURS it wears.
+`RoomControlState.force_color_enabled`/`force_color_target_id` (a colour
+SET **or** GROUP card id), default off/None so its arrival changed
+nothing. **`spectra/services/force_color.py`'s module docstring is the
+binding statement** — every gate, both precedence rulings, and the
+side-effect rule below live there; read it before touching any colour
+selection path. The short list:
+
+- **Gated at SEVEN choke points, each checked individually** (§86's
+  lesson, again): `scene_sequencer.fire_scene_by_id` (replaces the
+  caller's own colour set, result carries `forced_color`), its
+  `_roll_color_set` (short-circuits with its own `FORCED_COLOR` rung so
+  the roll never re-anchors the wheel for a pick that is about to be
+  overridden), `scene_compiler.room_active_set` (the TERMINAL fallback —
+  the path 100% of his real `fire_scene` triggers take), `drift_conductor.
+  tick`'s journey hold + `_bootstrap_room_color` + `on_drop_event`,
+  `scene_response._color_jump`, and `trigger_engine.
+  _default_select_color_set` (names the redirect via
+  `apply_set_directly(forced_from=...)`).
+- **`active()`/`pinned_id()` are side-effect-free; `pinned_card()` is
+  NOT.** Resolving a pinned GROUP advances that group's rotation cursor
+  (`color_set_groups._pick_member`), so `pinned_card()` is called exactly
+  ONCE per real fire, at the choke point about to use it — never from a
+  per-leg hold check or a status poll, which would roll his colours on
+  nothing but someone looking at the page. Proven directly in
+  `tests/test_force_color.py`.
+- **SET pin = static; GROUP pin = the POOL, rotation still live** (that is
+  what a Group is). Stated as a reading, his to tune.
+- **Precedence, named**: it WINS over an active 2D gradient (which also
+  replaces the journey) — the gradient is untouched and resumes on
+  release; it composes for free with Ambient (device-level, downstream —
+  verified, not assumed, the same orthogonality Dark/Light already has).
+  `preview_pause` still outranks everything, unchanged.
+- His EXPLICIT actions still work and NAME the override
+  (`overrode_force_color` on `POST /room-color/apply` and the editor
+  Preview); a disabled pin APPLIES and is named (`overrode_disabled`),
+  never silently refused. Sonic excluded from the registry on
+  `force_scene_*`'s own opaque-id precedent.
+
+Immediate apply on enable/repin: `room_controls.
+reconcile_force_color_if_changed`, `force_color_result` in the PUT
+response — the passive-redirect trap immediately above is documented, so
+it is not repeated. Help topic `force-color`, linked from the top bar's
+own "Colour" group button. Spec: `tests/test_force_color.py`.
+
 **Temporary scene disable** (2026-08-18, his ask: "add an ability to
 disable a scene temporarily") — `SceneV2.disabled: bool` (default False),
 a manual reversible toggle, no timer/expiry. STRONGER than mode

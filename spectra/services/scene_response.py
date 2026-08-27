@@ -1866,28 +1866,56 @@ class ResponseEngine:
         the landed targets, so releases and palette rotation measure from
         where the ramp finishes, never a mid-blend snapshot."""
         config = self._sequencer_config()
-        if not config.color_set_entries:
-            return {"result": "selector_unconfigured"}
         room = self._room_load()
-        eligible = self._eligible_sets(scene)
-        curves = self._curve_profiles()
-        wheel_profile = (curves.get(config.wheel_travel_curve)
-                         if config.wheel_travel_curve else None)
-        candidates = kernel.build_color_set_candidates(
-            config.color_set_entries, curves,
-            genre_bucket=self._genre_bucket(),
-            room_deg=room.wheel_position_deg,
-            set_positions=eligible,
-            wheel_points=(wheel_profile.points if wheel_profile
-                          else [CurvePoint(x=0.0, y=1.0)]))
-        pick = kernel.select_color_set(candidates, intensity=intensity,
-                                       rng=self._rng,
-                                       current_id=room.active_set_id)
-        if pick.picked_id is None:
-            return {"result": "kept_current", "rung": pick.rung}
-        card = self._set_card(pick.picked_id)
-        if card is None:
-            return {"result": "missing_set", "picked_id": pick.picked_id}
+        # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
+        # force_color.py): a flare's colour jump is an AUTOMATIC pick, so
+        # it DRAWS FROM THE PIN — the selector never runs. Checked before
+        # the selector-unconfigured guard on purpose: a pin must govern
+        # even on a room whose sequencer has no colour entries authored at
+        # all, which is exactly the "nothing was ever going to pick, so
+        # the redirect never got an occasion" shape Force Scene's own
+        # passive-redirect gap was.
+        #
+        # A SET pin re-asserts the same colours over this flare's own
+        # intensity-scaled ramp (visually a no-op, structurally correct —
+        # the carry still records where the ramp lands). A GROUP pin rolls
+        # its next member: a colour jump IS a colour change, and rotating
+        # within the pinned pool is precisely what pinning a pool means.
+        from spectra.services import force_color
+        forced = None
+        forced_id = force_color.pinned_id(self._room_controls())
+        if forced_id is not None:
+            forced = force_color.pinned_card(self._room_controls())
+        if forced is None and not config.color_set_entries:
+            return {"result": "selector_unconfigured"}
+        if forced is not None:
+            card = forced
+            picked_id = forced.id
+            rung = force_color.HELD_FOR
+            from spectra.services import color_wheel
+            eligible = {forced.id: color_wheel.wheel_position(forced).position_deg}
+        else:
+            eligible = self._eligible_sets(scene)
+            curves = self._curve_profiles()
+            wheel_profile = (curves.get(config.wheel_travel_curve)
+                             if config.wheel_travel_curve else None)
+            candidates = kernel.build_color_set_candidates(
+                config.color_set_entries, curves,
+                genre_bucket=self._genre_bucket(),
+                room_deg=room.wheel_position_deg,
+                set_positions=eligible,
+                wheel_points=(wheel_profile.points if wheel_profile
+                              else [CurvePoint(x=0.0, y=1.0)]))
+            pick = kernel.select_color_set(candidates, intensity=intensity,
+                                           rng=self._rng,
+                                           current_id=room.active_set_id)
+            if pick.picked_id is None:
+                return {"result": "kept_current", "rung": pick.rung}
+            picked_id = pick.picked_id
+            rung = pick.rung
+            card = self._set_card(picked_id)
+            if card is None:
+                return {"result": "missing_set", "picked_id": picked_id}
         from spectra.services import scene_compiler
         from spectra.services.room_controls import resolve_authored_bg_color
         by_vid = scene_compiler._set_entry_by_virtual(card)
@@ -1922,17 +1950,21 @@ class ResponseEngine:
                 await self.executor.glide(vid, state.effect_type, params,
                                           ramp_ms)
                 landed += 1
-        position = eligible.get(pick.picked_id)
-        update: dict[str, Any] = {"active_set_id": pick.picked_id}
+        position = eligible.get(picked_id)
+        update: dict[str, Any] = {"active_set_id": picked_id}
         if position is not None:   # rainbow/achromatic never move the wheel
             update["wheel_position_deg"] = position
             # A teleport invalidates the journey's bearing — the conductor
             # reselects a destination from the new point next leg.
             update["destination"] = None
         self._room_save(room.model_copy(update=update))
-        return {"result": "jumped", "picked_id": pick.picked_id,
-                "rung": pick.rung, "virtuals": landed,
-                "ramp_ms": ramp_ms, "wheel_position_deg": position}
+        result = {"result": "jumped", "picked_id": picked_id,
+                  "rung": rung, "virtuals": landed,
+                  "ramp_ms": ramp_ms, "wheel_position_deg": position}
+        if forced is not None:
+            # NAMED, not silent: this jump landed the pin, not a selection.
+            result["forced_color"] = forced_id
+        return result
 
     # ── production defaults (lazy imports; specs inject fakes) ───────────────
 
