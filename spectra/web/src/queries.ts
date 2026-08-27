@@ -192,6 +192,17 @@ export interface FlarePreviewTimeline {
    * for a registry-smooth momentary param glide, or the intensity-scaled
    * color_rotate ramp, never a hardcoded number. 0 for a kind with neither. */
   lead_ms: number;
+  /** Which of the three settled anchor families governs this kind's fire
+   * (scene_response.kind_anchor_rule): 'switch_end' — the momentary flare
+   * rule, the first switch's END lands on the mark, lead_ms > 0 possible;
+   * 'drop_start' — the kind is attached ONLY to drop bands, so its fire
+   * BEGINS on the mark and lead_ms is always 0. Decided by the classes the
+   * kind's bands attach it to, never by the kind's own type. */
+  anchor_rule: 'switch_end' | 'drop_start';
+  /** The response classes whose bands attach this kind — empty when it is
+   * declared but attached nowhere yet. Shown so the anchor rule above is
+   * explainable by looking rather than a mystery. */
+  attached_classes: string[];
   /** Where the live-fire loop actually issues its /fire call each cycle —
    * NOT animation_anchor_s. fire_at_s = animation_anchor_s - lead_ms/1000
    * (spectra/services/flare_preview.fire_at_s): his authored offset is

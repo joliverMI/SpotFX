@@ -229,8 +229,17 @@ tick()'s own inline comment for the exact composition
 (fire_at = trig.timestamp_ms + trig.trigger_offset_ms - lead_ms) and why
 it reduces to today's exact pre-offset behaviour whenever offset is 0
 (every one of his real fire_scene triggers, as of this field's
-introduction). The TRIGGER-level field stays scoped to fire_scene;
-select_color_set/fire_scene_update triggers still ignore offsets entirely.
+introduction). SINCE 2026-08-27 (fm/flare-preview-offsets-everywhere) the
+TRIGGER-level field is honoured on EVERY action kind, not just fire_scene:
+an offset only relocates the moment (unlike a lead, which must know what
+payoff it is aligning and how long that payoff takes), so it composes with
+an instant apply — select_color_set, fire_scene_update — exactly as it does
+with a crossfade. Where the fired CONTENT also carries an authored offset
+(today: fire_response's flare kind, below), the two ADD — both are OFFSET
+family, so summing is ordinary arithmetic, and at the untouched default of
+0 on either side the sum degrades to exactly the other one. See tick()'s
+own inline comment for why adding (rather than one overriding the other) is
+the honest composition of a per-mark correction and a per-scene one.
 
 FLARE-KIND TRIGGER OFFSET (his ask, 2026-08-21 — "make the engine read
 the offset and work with the offset like we had in spot FX"): a
@@ -635,30 +644,54 @@ class TriggerEngine:
             # target_ms is the relocated moment every "when to fire"
             # comparison below uses in place of the raw stored
             # trig.timestamp_ms. TWO authored sources, one per action kind:
-            #   - fire_scene (2026-08-21, #172): the trigger's OWN
-            #     SpectraTrigger.trigger_offset_ms — stored on the trigger,
-            #     constant, cheap (a field add, no gate needed).
-            #   - fire_response (his ask, 2026-08-21 — "make the engine
-            #     read the offset and work with the offset like we had in
-            #     spot FX"): the FLARE KIND's FlareKind.trigger_offset_ms,
-            #     the number the flare scrubbing-preview's drag writes —
-            #     read LIVE off the band the active scene would fire for
-            #     this class at this intensity (scene_response.
-            #     band_trigger_offset_ms via _default_response_offset_ms,
-            #     mirroring _response_switch_lead_ms's own live peek), only
-            #     within RESPONSE_OFFSET_HORIZON_MS of the raw mark (a
-            #     derived cost gate — see that constant). Because this
-            #     source is live (the active scene can change between
-            #     ticks), target_ms for a fire_response trigger is NOT
-            #     guaranteed constant — the fired-keys guard above and the
+            #   - THE TRIGGER'S OWN SpectraTrigger.trigger_offset_ms —
+            #     stored on the trigger, constant, cheap (a field read, no
+            #     gate needed). Applied to EVERY action kind since
+            #     2026-08-27 (fm/flare-preview-offsets-everywhere). #172
+            #     originally wired it for fire_scene ONLY, leaving it
+            #     silently inert on the other three — a trap its own model
+            #     docstring named ("fire_response/select_color_set/
+            #     fire_scene_update triggers still ignore it") against an
+            #     ask that did not scope itself that way ("do events like
+            #     flares and scene changes carry an offset value... they
+            #     need to"). Nothing about an OFFSET is action-kind
+            #     specific: unlike a LEAD (which must know what payoff it
+            #     is aligning and how long that payoff takes to arrive),
+            #     an offset only RELOCATES the moment, so it composes
+            #     with any action — an instant apply included — by
+            #     construction.
+            #   - THE CONTENT'S OWN authored offset, where the content has
+            #     one. Today that is fire_response's FLARE KIND offset
+            #     (his ask, 2026-08-21 — "make the engine read the offset
+            #     and work with the offset like we had in spot FX"): the
+            #     FlareKind.trigger_offset_ms the flare scrubbing-preview's
+            #     drag writes, read LIVE off the band the active scene
+            #     would fire for this class at this intensity
+            #     (scene_response.band_trigger_offset_ms via
+            #     _default_response_offset_ms, mirroring
+            #     _response_switch_lead_ms's own live peek), only within
+            #     RESPONSE_OFFSET_HORIZON_MS of the raw mark (a derived
+            #     cost gate — see that constant). Because this source is
+            #     live (the active scene can change between ticks),
+            #     target_ms for a fire_response trigger is NOT guaranteed
+            #     constant — the fired-keys guard above and the
             #     stranded-target net below are what keep "at most once,
-            #     never dropped" true anyway. select_color_set/
-            #     fire_scene_update triggers keep firing at their raw
-            #     stored timestamp (nothing to align — instant applies);
-            #     a fire_response trigger's own trigger-level
-            #     trigger_offset_ms field ALSO stays inert (#172's own
-            #     scoping, unchanged by this build — the kind's field is
-            #     the one his preview drag writes).
+            #     never dropped" true anyway.
+            #
+            # THE TWO SOURCES ADD, and that is legal precisely because they
+            # are BOTH in the OFFSET family (docs/SPECTRA_TIMING_
+            # CONVENTIONS.md's master table): same unit, same sign, same
+            # meaning of "later". Summing two same-family quantities is
+            # ordinary arithmetic; it is only the LEAD family below that
+            # must never be added to either of them. They are independent
+            # corrections to the same moment and neither subsumes the
+            # other: the trigger's own offset is a property of THIS MARK IN
+            # THIS SONG (this beat sits a hair off where the analysis put
+            # it), the kind's is a property of THE SCENE'S OWN FLARE
+            # (this animation needs a head start wherever it fires). An
+            # override rule would silently discard whichever he authored
+            # second; adding honours both, and at the untouched default of
+            # 0 on either side the sum degrades to exactly the other one.
             #
             # THE SIGN COMPOSITION WITH _lead_ms, STATED EXPLICITLY (a wrong
             # sign here is invisible to a naive test and has cost hours
@@ -687,13 +720,10 @@ class TriggerEngine:
             # and all 61 of his real flare kinds carried offset=0 when
             # this shipped (re-verified live), so it too is a no-op on
             # everything currently stored.
-            if trig.action.kind == "fire_scene":
-                target_ms = trig.timestamp_ms + trig.trigger_offset_ms
-            elif (trig.action.kind == "fire_response"
+            target_ms = trig.timestamp_ms + trig.trigger_offset_ms
+            if (trig.action.kind == "fire_response"
                     and abs(trig.timestamp_ms - last) <= RESPONSE_OFFSET_HORIZON_MS):
-                target_ms = trig.timestamp_ms + self._response_offset_ms(trig.action)
-            else:
-                target_ms = trig.timestamp_ms
+                target_ms += self._response_offset_ms(trig.action)
             # TRANSITION/FLARE LEAD-TIME ALIGNMENT (his ask, 2026-08-19):
             # fire up to lead_ms EARLY so a scene transition's mid-point (or
             # a registered phased effect's own payoff — see

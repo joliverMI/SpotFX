@@ -441,6 +441,13 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
                 white playhead to reach the accent-coloured "start" line before it fires, every
                 loop{timeline?.lead_ms ? <> — {timeline.lead_ms}ms earlier than the trigger mark
                 itself, the same automatic lead a real trigger fire would apply for this kind</> : null}.
+                {timeline?.anchor_rule === 'drop_start' && (
+                  <> <br />
+                    <strong>Drop rule:</strong> this kind is attached only to a <b>drop</b> band, so
+                    it <b>begins</b> on the trigger mark and never fires early — no lead, whatever
+                    its params would otherwise need. That is the settled anchor for an explosion.
+                  </>
+                )}
               </div>
             )}
 

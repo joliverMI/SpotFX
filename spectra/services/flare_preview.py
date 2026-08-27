@@ -91,6 +91,25 @@ formula or meaning — the drawn mark still reflects only his authored
 offset — it only moves WHEN THE WRITE ACTUALLY HAPPENS, closer to the
 mark by however long this kind's own switch/ramp needs to complete before
 landing there, same as a real trigger fire would.
+
+WHICH ANCHOR RULE (2026-08-27, fm/flare-preview-offsets-everywhere): the
+lead above is only the MOMENTARY-FLARE family's answer — one of the three
+settled anchor families (his ruling 2026-08-20: a momentary flare anchors
+its first switch's END to the mark, a scene transition its MIDDLE, a drop
+its START). Which one governs a fire is decided by the fire's EVENT CLASS,
+not by the kind's type: trigger_engine._response_switch_lead_ms returns 0
+unconditionally for `event_class == "drop"`, ahead of every other branch.
+kind_lead_ms is class-blind by construction (it answers "what would this
+kind need under the momentary rule"), so this module resolves the rule
+itself — scene_response.kind_anchor_rule, from the classes the kind's
+bands actually attach it to — and reports it as `anchor_rule` alongside
+`attached_classes`. A kind attached ONLY to drop bands previews with
+lead 0 and says so; before this it previewed a DICE_REROLL_GLIDE_MS head
+start production would never have taken, which is precisely the preview
+lying about when his flare lands. Latent rather than live in his stored
+data (no real drop band attaches a qualifying kind today) — closed for the
+same reason _response_switch_lead_ms made its own drop branch
+unconditional rather than resting on that fact.
 """
 from __future__ import annotations
 
@@ -102,7 +121,9 @@ from spectra.services import room_controls, scene_compiler
 from spectra.services.binding_resolver import FireContext
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
-from spectra.services.scene_response import ResponseEngine, kind_lead_ms
+from spectra.services.scene_response import (ANCHOR_DROP_START, ResponseEngine,
+                                             kind_anchor_rule,
+                                             kind_attached_classes, kind_lead_ms)
 
 # A scrub timeline must never look shorter than his own worked example (a
 # 6s timeline holding a 3s effect) even when a kind's own computed shape is
@@ -240,7 +261,22 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     # compute for this exact kind (scene_response.kind_lead_ms — reused
     # verbatim, see this module's own "FIRE-TIME LEAD" docstring section),
     # read against the SAME conductor.virtuals this fire just ran against.
-    lead_ms = kind_lead_ms(kind, intensity, conductor.virtuals)
+    #
+    # ANCHOR RULE (2026-08-27, fm/flare-preview-offsets-everywhere): which
+    # of the three settled anchor families governs is decided by the
+    # CLASSES this kind's bands attach it to, not by the kind's own type —
+    # a momentary kind attached only to DROP bands fires under the drop
+    # rule (START on the mark, lead 0, trigger_engine._response_switch_
+    # lead_ms's own unconditional branch) and previewing it at
+    # kind_lead_ms's class-blind number would have the preview claim a
+    # head start production never takes. See scene_response.
+    # kind_anchor_rule for the full statement and why kind_lead_ms's own
+    # "previewed in isolation is never a drop" reasoning was about the
+    # kind's TYPE and therefore answered a different question.
+    anchor_rule = kind_anchor_rule(scene, kind)
+    attached_classes = sorted(kind_attached_classes(scene, kind.name))
+    lead_ms = (0 if anchor_rule == ANCHOR_DROP_START
+               else kind_lead_ms(kind, intensity, conductor.virtuals))
 
     writes = list(responder.executor.writes)
     if not writes:
@@ -255,6 +291,8 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
             "trigger_mark_s": round(
                 trigger_mark_s(anchor_s, kind.trigger_offset_ms, MIN_TIMELINE_S), 4),
             "lead_ms": lead_ms,
+            "anchor_rule": anchor_rule,
+            "attached_classes": attached_classes,
             "fire_at_s": round(fire_at_s(anchor_s, lead_ms), 4),
             "writes": [],
         }
@@ -274,6 +312,8 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         "trigger_mark_s": round(
             trigger_mark_s(anchor_s, kind.trigger_offset_ms, duration_s), 4),
         "lead_ms": lead_ms,
+        "anchor_rule": anchor_rule,
+        "attached_classes": attached_classes,
         "fire_at_s": round(fire_at_s(anchor_s, lead_ms), 4),
         "writes": [
             {

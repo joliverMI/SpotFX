@@ -666,6 +666,68 @@ def kind_lead_ms(kind: FlareKind, intensity: float, virtuals: dict) -> int:
     return lead
 
 
+# The three anchor families (his ruling, settled 2026-08-20, data/drops-
+# still-fire-early-star-does-not-explode — never reinvented, only applied):
+# a MOMENTARY FLARE anchors its first switch's END to the mark; a SCENE
+# TRANSITION anchors its MIDDLE; a DROP/explosion anchors its START and
+# therefore takes NO lead at all. These are the names this codebase uses
+# for them wherever a surface has to report which one is in force.
+ANCHOR_SWITCH_END = "switch_end"
+ANCHOR_TRANSITION_MIDDLE = "transition_middle"
+ANCHOR_DROP_START = "drop_start"
+
+
+def kind_attached_classes(scene: SceneV2, kind_name: str) -> set[str]:
+    """Every response class whose bands attach `kind_name`. A kind is
+    declared once per scene (scene.flare_kinds) and attached to any number
+    of bands across any number of classes, so "which anchor rule governs
+    this kind" is a question about its ATTACHMENTS, never about its own
+    `type` — see kind_anchor_rule below for why that distinction is
+    load-bearing rather than pedantic. Empty means declared but attached
+    nowhere (his data's common case: a script declares a kind, a human
+    attaches it later from the lane rack)."""
+    classes: set[str] = set()
+    for event_class, spec in (scene.responses or {}).items():
+        for band in (spec.bands if spec else []):
+            if kind_name in band.kinds:
+                classes.add(event_class)
+    return classes
+
+
+def kind_anchor_rule(scene: SceneV2, kind: FlareKind) -> str:
+    """Which of the anchor families above governs a fire of THIS kind, from
+    the classes its bands actually attach it to.
+
+    The distinction this exists to make: trigger_engine._response_switch_
+    lead_ms decides the anchor from the EVENT CLASS of the fire
+    (`event_class == "drop"` returns 0 unconditionally, ahead of every
+    other branch), while kind_lead_ms above is class-BLIND — it answers
+    "what would this kind need if the momentary END-anchor rule applied."
+    kind_lead_ms's own docstring justified that with "a flare kind
+    previewed in isolation is never a drop/explosion, only ever the
+    momentary/permanent/dice/gain/color_rotate family" — true of the kind's
+    TYPE and irrelevant to the question, because a momentary kind attached
+    to a DROP band fires under the drop rule. Before 2026-08-27 the flare
+    scrubbing-preview took kind_lead_ms unconditionally, so such a kind
+    previewed as firing DICE_REROLL_GLIDE_MS early while production fired
+    it with zero lead: the preview lying about when his flare lands, which
+    is the one thing the preview exists not to do. Latent rather than
+    live in his stored data (no real drop band attaches a qualifying kind
+    today) — closed here for the same reason _response_switch_lead_ms made
+    its own drop branch unconditional rather than resting on that fact.
+
+    ONLY-drop attachments take the drop rule; any non-drop attachment (and
+    "attached nowhere", the isolated case) keeps the momentary END-anchor
+    rule, which is the conservative reading: a mixed kind really does fire
+    early under its flare/charge/lull bands, and reporting the lead it
+    takes there is honest as long as the drop exception is named alongside
+    it (spectra/services/flare_preview.py reports both fields)."""
+    classes = kind_attached_classes(scene, kind.name)
+    if classes and classes == {"drop"}:
+        return ANCHOR_DROP_START
+    return ANCHOR_SWITCH_END
+
+
 class ResponseEngine:
     def __init__(
         self, *,
