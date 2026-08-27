@@ -74,6 +74,7 @@ scfg.TRAINING_PROFILES_FILE = td / "training_profiles.json"
 
 from spectra.models.scene import SceneDeviceConfig, SceneV2
 from spectra.models.trigger import (FireResponseAction, FireSceneAction,
+                                    FireSceneUpdateAction,
                                     SelectColorSetAction, SpectraTrigger)
 from spectra.services import scene_store, trigger_store
 
@@ -1525,27 +1526,55 @@ check(len(asyncio.run(composed_engine.tick(3700))) == 1 and offset_calls == [off
       "systems compose by each acting in its OWN native direction "
       "against a shared base, never by adding/subtracting the same sign")
 
-# SCOPE: a fire_response trigger's own TRIGGER-LEVEL trigger_offset_ms is
-# still ignored (this task's own ask was scoped to scene-change/fire_scene
-# triggers) — fires at its raw stored timestamp regardless of a nonzero
-# offset on the TRIGGER. The FLARE KIND's own trigger_offset_ms is a
-# different field and IS honoured for fire_response triggers since
-# 2026-08-21 — see section 11 below; the engine here has no active scene,
-# so the kind peek resolves 0 and this proof isolates the trigger-level
-# field's continued inertness.
+# SCOPE WIDENED 2026-08-27 (fm/flare-preview-offsets-everywhere): the
+# TRIGGER-LEVEL trigger_offset_ms is now honoured on EVERY action kind, not
+# just fire_scene. #172 wired it for fire_scene alone and this section used
+# to prove the other three IGNORED it — a silently-inert field is a trap,
+# and an OFFSET has no action-kind-specific meaning to justify one (unlike
+# a LEAD, which must know what payoff it aligns and how long that payoff
+# takes, an offset only RELOCATES the moment). The engine here has no
+# active scene, so the FLARE KIND peek resolves 0 and this proof isolates
+# the trigger-level field on a fire_response trigger; section 11 below
+# proves the kind's own field, and the two ADD (both OFFSET family).
 response_trig = SpectraTrigger(timestamp_ms=5000, trigger_offset_ms=-1000,
                                action=FireResponseAction(event_class="flare",
                                                          intensity=0.5))
 response_engine = _offset_engine(response_trig)
 asyncio.run(response_engine.on_track_state("song:offset-response"))
-check(asyncio.run(response_engine.tick(4999)) == [],
-      "a fire_response trigger's offset is inert: nothing fires early at "
-      "4000 (timestamp - 1000) the way a fire_scene trigger would")
-check(len(asyncio.run(response_engine.tick(5000))) == 1
+check(asyncio.run(response_engine.tick(3999)) == [],
+      "a fire_response trigger's TRIGGER-LEVEL offset: nothing fires one ms "
+      "before the relocated target")
+check(len(asyncio.run(response_engine.tick(4000))) == 1
      and offset_response_calls == ["flare"],
-      "a fire_response trigger still fires at its raw, un-relocated "
-      "stored timestamp — trigger_offset_ms stays scoped to fire_scene "
-      "until a future ask widens it")
+      "a fire_response trigger fires at timestamp(5000) + offset(-1000) = "
+      "4000 — the trigger-level field is no longer scoped to fire_scene")
+
+# ...and the same on the two INSTANT-APPLY kinds, which have no lead to
+# align and therefore fire exactly at the relocated moment.
+for _label, _action, _calls in (
+        ("select_color_set", SelectColorSetAction(set_id="set-offset"), []),
+        ("fire_scene_update", FireSceneUpdateAction(intensity=0.5), [])):
+    _seen = []
+
+    async def _fire_set(set_id, _seen=_seen):
+        _seen.append(("color_set", set_id))
+
+    async def _fire_update(intensity, _seen=_seen):
+        _seen.append(("update", intensity))
+
+    _trig = SpectraTrigger(timestamp_ms=5000, trigger_offset_ms=-1000,
+                           action=_action)
+    _eng = TriggerEngine(
+        list_triggers=lambda uri, _t=_trig: [_t],
+        select_color_set=_fire_set, fire_scene_update=_fire_update,
+        scene_change_mode=lambda: "full", render_intensity=lambda raw: raw,
+        sequencer_enabled=lambda: False)
+    asyncio.run(_eng.on_track_state(f"song:offset-{_label}"))
+    check(asyncio.run(_eng.tick(3999)) == [],
+          f"{_label}: nothing fires before the relocated target")
+    check(len(asyncio.run(_eng.tick(4000))) == 1 and len(_seen) == 1,
+          f"{_label}: an instant apply honours the offset too — fires at "
+          f"timestamp(5000) + offset(-1000) = 4000")
 
 # ═══ 11. FLARE-KIND TRIGGER OFFSET ON THE FIRING PATH (2026-08-21) ══════════
 # His ask: "make the engine read the offset and work with the offset like

@@ -781,6 +781,43 @@ class SceneV2(BaseModel):
     # see fx_executor's crossfade-branch note). 0 = today's unchanged
     # instant-jump behaviour.
     entry_ramp_ms: int = Field(default=0, ge=0, le=20000)
+    # THE SCENE'S OWN AUTHORED TRIGGER OFFSET (2026-08-27,
+    # fm/flare-preview-offsets-everywhere) — the scene-transition member of
+    # the same family as FlareKind.trigger_offset_ms above and
+    # SpectraTrigger.trigger_offset_ms (models/trigger.py): same unit, same
+    # clamp, same sign law — NEGATIVE = fire EARLIER, positive = later,
+    # 0 = land exactly on the mark. Authored the same way too: by dragging
+    # the trigger-alignment marker in the TRANSITION scrubbing preview
+    # (spectra/services/transition_preview.py, the scene-to-scene sibling
+    # of the flare preview his own sequencing deferred — "start with the
+    # flares, then we will do lull charge drop"), so the marker's own
+    # position IS the offset and there is no second number to keep in sync.
+    #
+    # WHERE IT LANDS: trigger_engine.tick() adds it to a fire_scene
+    # trigger's target alongside the TRIGGER's own offset, the same
+    # trigger-plus-content sum a fire_response trigger already makes with
+    # its band's flare-kind offset. Both are OFFSET family, so the sum is
+    # ordinary arithmetic; it is the oppositely-signed LEAD that must never
+    # be added to either (docs/SPECTRA_TIMING_CONVENTIONS.md).
+    #
+    # WHAT IT IS NOT: the transition's own automatic lead. That is
+    # anchor_frac x crossfade (spectra/services/scene_transition_lead.py),
+    # computed, never authored — it exists to land the crossfade's MIDDLE
+    # on the mark. This field moves the mark itself. A scene with the
+    # default 0 is byte-identical to every fire before this field existed.
+    #
+    # ONE HONEST BOUND, recorded rather than hidden: for a trigger that
+    # NAMES its scene the offset is read at any distance, but 100% of his
+    # real fire_scene triggers leave scene_id None and are resolved by
+    # LOOKAHEAD's early pin — so on those the scene isn't known until the
+    # pin commits, LOOKAHEAD_HORIZON_MS (5s) ahead of the target. An
+    # authored offset inside that horizon lands normally; one more negative
+    # than it degrades to firing at the un-relocated mark (late, never
+    # wrong — the same posture _scene_transition_lead_ms's own "no lead
+    # rather than a wrong one" rule takes). A ruler drag cannot reach that
+    # far in practice; the clamp stays the family's own +/-60s rather than
+    # inventing a second, narrower one.
+    trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)
     # accept_all_sets=True: every set not globally opted out is eligible;
     # False narrows to accepted_set_ids.
     accept_all_sets:  bool = True

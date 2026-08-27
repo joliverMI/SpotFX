@@ -23,7 +23,7 @@ whoever is reading this.
 | Family | Positive means | Negative means | Composed as | Members |
 |---|---|---|---|---|
 | **LEAD** ("how early to start so the payoff lands on the mark") | **EARLIER** | later | `fire_at = target − lead` (subtracted from the target, or equivalently added to the running clock: `effective_now = now + offset`) | `lead_ms` (SPECTRA, all variants below), legacy's `ledfx_trigger_buffer_ms` + `effective_offset_ms` + `shape_offset_ms` |
-| **OFFSET** ("where the owner dragged the mark / authored the moment") | **LATER** | earlier | `target = timestamp + offset` (added directly to the stored moment) | `FlareKind.trigger_offset_ms`, `SpectraTrigger.trigger_offset_ms` (SPECTRA); `MusicEvent.event_offset_ms`, `MorphLane.offset_ms`, `ParallelChild.offset_ms` (predecessor, currently dark) |
+| **OFFSET** ("where the owner dragged the mark / authored the moment") | **LATER** | earlier | `target = timestamp + offset` (added directly to the stored moment; two OFFSET terms may be SUMMED — see below) | `FlareKind.trigger_offset_ms`, `SceneV2.trigger_offset_ms`, `SpectraTrigger.trigger_offset_ms` (SPECTRA); `MusicEvent.event_offset_ms`, `MorphLane.offset_ms`, `ParallelChild.offset_ms` (predecessor, currently dark) |
 
 Both families are live simultaneously in SPECTRA's own trigger engine and
 **compose in the same function**
@@ -49,8 +49,13 @@ in root `spotfx` code and was never ported to `spectra/` at all.
 
 | Quantity | Unit | Sign convention | Owning engine | Status | Source |
 |---|---|---|---|---|---|
-| `SpectraTrigger.trigger_offset_ms` | ms | OFFSET: negative=earlier, positive=later, 0=unchanged | SPECTRA trigger engine (`fire_scene` only) | **Live** | `spectra/models/trigger.py:170,175-191` |
+| `SpectraTrigger.trigger_offset_ms` | ms | OFFSET: negative=earlier, positive=later, 0=unchanged | SPECTRA trigger engine — **every action kind** since 2026-08-27 (was `fire_scene` only) | **Live** | `spectra/models/trigger.py` (the field), `spectra/services/trigger_engine.py::tick()` |
 | `FlareKind.trigger_offset_ms` | ms | OFFSET: negative=earlier, positive=later, 0=coincident with the trigger mark | SPECTRA response engine / flare preview | **Live** | `spectra/models/scene.py:307-338,345` |
+| `SceneV2.trigger_offset_ms` | ms | OFFSET: negative=earlier, positive=later, 0=on the mark | SPECTRA trigger engine (`fire_scene`) / transition preview | **Live** (2026-08-27) | `spectra/models/scene.py` (`SceneV2.trigger_offset_ms`), read by `spectra/services/trigger_engine.py::_scene_offset_ms` |
+| `transition_preview.build_timeline`'s `trigger_mark_s` / `fire_at_s` | s | Same two formulas as the flare preview's — `flare_preview.trigger_mark_s` / `fire_at_s`, CALLED not copied | SPECTRA transition scrubbing-preview | **Live** (2026-08-27) | `spectra/services/transition_preview.py` |
+| `phase_preview` marks' `mark_ms` / `fire_at_s` | ms / s | `mark = slot + band_trigger_offset_ms` (OFFSET), then `fire_at = mark − lead` (LEAD) — the same two-sign composition `tick()` makes | SPECTRA drop-sequence scrubbing-preview | **Live** (2026-08-27) | `spectra/services/phase_preview.py` |
+| `scene_transition_lead.{crossfade_ms_for,anchor_frac_for,lead_ms_for}` | ms / fraction / ms | LEAD: `lead = anchor_frac × crossfade`, capped at `MAX_LEAD_MS`. The ONE definition, called by both `trigger_engine._scene_transition_lead_ms_for` and the transition preview | SPECTRA (shared) | **Live** (2026-08-27) | `spectra/services/scene_transition_lead.py` |
+| `phase_preview.DEFAULT_GAP_MS` (charge 4444, lull 2778) | ms | Not signed — DERIVED, not tuned: `PHASE_RAMP_MS[cls] / (1 − PHASE_RAMP_HANG_FRACTION)`, i.e. the gap that reproduces the class's own unknown-gap fallback ramp exactly. A preview opens showing the shape the show falls back to. | SPECTRA drop-sequence preview | **Live** (2026-08-27) | `spectra/services/phase_preview.py` |
 | `flare_preview.trigger_mark_s(anchor, offset, duration)` | s | `T = anchor − offset_ms/1000` — same OFFSET convention, expressed as a draw position | SPECTRA flare scrubbing-preview | **Live** | `spectra/services/flare_preview.py:127-138` |
 | Flare-preview drag handler (`onTriggerOffsetChange`) | ms | `offset = round((animAnchorS − markS) × 1000)` — dragging the mark RIGHT → more negative | SPECTRA flare-preview UI | **Live** | `spectra/web/src/scenes/tabs/FlarePreviewOverlay.tsx:280-299` |
 | `band_trigger_offset_ms(scene, class, intensity)` | ms | Same OFFSET convention; aggregates a band's attached kinds as `min()` over the nonzero values (earliest ask wins, untouched-default kinds never veto) | SPECTRA response engine, read by `tick()` for `fire_response` | **Live** | `spectra/services/scene_response.py:460-504` |
@@ -112,6 +117,27 @@ fire_at   = target_ms - lead_ms                             # LEAD: opposite sig
 - `lead_ms` (**positive = earlier**) then pulls the relocated moment
   earlier still, if the fire needs a head start to land its payoff on the
   mark.
+
+**Since 2026-08-27 the OFFSET half of that composition is a SUM of two
+same-family terms, and the LEAD half is unchanged:**
+
+```
+target_ms = trig.timestamp_ms                # the stored mark
+          + trig.trigger_offset_ms           # OFFSET: THIS MARK IN THIS SONG
+          + <the fired CONTENT's own offset> # OFFSET: THE SCENE / THE FLARE
+fire_at   = target_ms - lead_ms              # LEAD: opposite sign, applied last
+```
+
+The content term is `SceneV2.trigger_offset_ms` for a `fire_scene` trigger
+and `scene_response.band_trigger_offset_ms` (the fired band's flare kinds)
+for a `fire_response` one; both default 0. **Adding two OFFSET-family
+terms is legal — same unit, same sign, same meaning of "later"; adding a
+LEAD to either is the thing that must never happen.** The trigger's own
+field is honoured on every action kind now, instruments included: an
+offset only relocates a moment, so it composes with an instant apply
+(`select_color_set`, `fire_scene_update`) exactly as with a crossfade,
+where a LEAD could not (a lead has to know what payoff it aligns and how
+long that payoff takes to arrive).
 
 The code's own comment states the danger plainly: *"a wrong sign here is
 invisible to a naive test and has cost hours twice... must never be added

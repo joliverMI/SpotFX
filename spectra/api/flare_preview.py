@@ -135,22 +135,22 @@ async def fire_preview(body: OpenRequest):
     return hold
 
 
+# HEARTBEAT AND CLOSE ARE SHARED WITH EVERY OTHER PREVIEW, because the
+# HOLD is shared (one room, one Admiral, one hold at a time — spectra/
+# services/flare_preview_hold.py). Since 2026-08-27 they live in
+# spectra/api/preview.py alongside the transition and drop-sequence
+# previews, and these are thin aliases onto the SAME functions so no
+# client has to know which preview armed the hold it is keeping alive, and
+# nothing that already calls these paths had to change.
+
+
 @router.post("/heartbeat")
 async def heartbeat_preview():
-    if flare_preview_hold.locked_until_reopen():
-        return {"active": False, "remaining_s": 0.0,
-               "expired": True, "reason": "max_duration"}
-    capped = flare_preview_hold.capped_pause_s(HEARTBEAT_TIMEOUT_S)
-    if capped <= 0:
-        return {"active": False, "remaining_s": 0.0,
-               "expired": True, "reason": "max_duration"}
-    preview_pause.start(capped)
-    await flare_preview_hold.touch(HEARTBEAT_TIMEOUT_S)
-    return {"active": True, "remaining_s": preview_pause.remaining_s()}
+    from spectra.api import preview as preview_api
+    return await preview_api.heartbeat_preview()
 
 
 @router.post("/close")
 async def close_preview():
-    preview_pause.clear()
-    release = await flare_preview_hold.close_hold()
-    return {"active": False, "live": release}
+    from spectra.api import preview as preview_api
+    return await preview_api.close_preview()

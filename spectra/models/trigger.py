@@ -179,13 +179,20 @@ class SpectraTrigger(BaseModel):
     # earlier, positive = fire later, 0 = coincident with timestamp_ms) —
     # one vocabulary for "how far from the marked moment should this
     # actually land" across both the thing a preview fires and the thing
-    # a song trigger fires. HONOURED for fire_scene triggers since the
-    # same-day follow-up (spectra/services/trigger_engine.py's tick() —
-    # see its own SCENE-CHANGE TRIGGER OFFSET docstring section for the
-    # exact composition with the pre-existing, oppositely-signed lead-time
-    # alignment system); fire_response/select_color_set/fire_scene_update
-    # triggers still ignore it, and there is still no authoring UI (his
-    # scene-change equivalent of the flare preview's drag-the-marker
-    # gesture remains future work). Default 0 keeps every existing
-    # trigger (all ~22k of his real fire_scene triggers) unaffected.
+    # a song trigger fires. HONOURED ON EVERY ACTION KIND since 2026-08-27
+    # (fm/flare-preview-offsets-everywhere) — spectra/services/
+    # trigger_engine.py's tick(), see its own SCENE-CHANGE TRIGGER OFFSET
+    # docstring section for the exact composition with the pre-existing,
+    # oppositely-signed lead-time alignment system. #172 originally wired
+    # it for fire_scene alone and this field's own docstring then had to
+    # say the other three "still ignore it" — a silently-inert field is a
+    # trap, and an OFFSET has no action-kind-specific meaning to justify
+    # one: it only RELOCATES the moment (a LEAD is the quantity that has to
+    # know what payoff it aligns and how long that payoff takes), so it
+    # composes with an instant apply exactly as it does with a crossfade.
+    # On a fire_response trigger it ADDS to the fired band's own
+    # FlareKind.trigger_offset_ms — both OFFSET family, so the sum is
+    # ordinary arithmetic and either side at its 0 default degrades to the
+    # other. Default 0 keeps every existing trigger (all ~22k of his real
+    # fire_scene triggers) unaffected.
     trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)
