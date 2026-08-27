@@ -134,6 +134,14 @@ export interface FlareKind {
   gain: number;
   hold_ms: number | null;
   trigger_offset_ms: number;
+  /** Temporary disable for ONE kind (owner ask 2026-08-27) — the power
+   * button on the flare bar (components/PowerButton.tsx). Optional here
+   * only because a kind stored before this field existed carries no value;
+   * treat `undefined` as true, exactly as the server does. Disabled = never
+   * enters a lane's fire-time pool, never executes, never contributes its
+   * lead/offset to a real fire; an explicit ▶ Preview still runs it and
+   * says so (models/scene.py FlareKind.enabled). */
+  enabled?: boolean;
 }
 
 export interface FlareBand {
@@ -232,7 +240,7 @@ export interface SceneV2 {
    * display_mode is explicitly set to the opposite mode, which always
    * wins over the scene's preference. */
   preferred_color_set_mode: DisplayAvailability;
-  /** Temporary disable (owner ask 2026-08-18) — see DisabledToggle.tsx.
+  /** Temporary disable (owner ask 2026-08-18) — the power button, PowerButton.tsx.
    * A manual, reversible toggle, not a timer: false (default) is unchanged
    * behaviour. Stronger than display_availability above — a disabled scene
    * is dropped from every automatic pick (sequencer roll, generated-trigger
@@ -790,7 +798,7 @@ export interface SpotColorSetCard {
    * bool SceneV2.disabled is, no timer. Applies to both Sets and Groups:
    * a disabled card is never CHOSEN automatically, but an explicit
    * Preview/apply still works (and says overrode_disabled). See
-   * models/color_set.py's ColorSetCard.disabled and DisabledToggle.tsx. */
+   * models/color_set.py's ColorSetCard.disabled and PowerButton.tsx. */
   disabled?: boolean;
   [key: string]: unknown;
 }

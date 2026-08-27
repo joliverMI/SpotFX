@@ -430,7 +430,7 @@ def color_rotate_lead_ms(scene: SceneV2, event_class: ResponseClass,
     lead = 0
     for name, scale in band.kinds.items():
         kind = declared.get(name)
-        if kind is not None and kind.type == "color_rotate":
+        if kind is not None and kind.enabled and kind.type == "color_rotate":
             sel_intensity = max(0.0, min(1.0, intensity * scale))
             lead = max(lead, color_rotate_ramp_ms(sel_intensity))
     return lead
@@ -511,7 +511,9 @@ def select_band(bands: list[FlareBand], intensity: float) -> Optional[FlareBand]
 
 
 def resolve_lane_picks(band: FlareBand,
-                       rng: Random) -> tuple[list[str], list[dict]]:
+                       rng: Random,
+                       declared: Optional[dict[str, FlareKind]] = None,
+                       ) -> tuple[list[str], list[dict]]:
     """LANES (owner ask, 2026-08-21): which of a fired band's attached kinds
     actually run THIS fire. band.kind_lanes (models/scene.py FlareBand — its
     field comment has his verbatim words and the zero-migration default)
@@ -539,14 +541,31 @@ def resolve_lane_picks(band: FlareBand,
         # for the implicit solo pools.
         pools.setdefault(lane if lane is not None else f"\x00solo:{name}",
                          []).append(name)
+
+    def _enabled(name: str) -> bool:
+        if declared is None:
+            return True
+        kind = declared.get(name)
+        return kind is None or kind.enabled
+
     picked: set[str] = set()
     records: list[dict] = []
     for lane_key, members in pools.items():
-        choice = members[0] if len(members) == 1 else rng.choice(members)
+        live = [n for n in members if _enabled(n)]
+        if not live:
+            # EVERY member of this lane is disabled: the lane fires nothing
+            # this time — never a silent substitution of a disabled member,
+            # and never a silent nothing either (the record says so, so
+            # "why did that lane go quiet" is a log lookup).
+            records.append({"lane": lane_key, "picked": None,
+                            "pool": list(members), "all_disabled": True})
+            continue
+        choice = live[0] if len(live) == 1 else rng.choice(live)
         picked.add(choice)
         if len(members) > 1:
             records.append({"lane": lane_key, "picked": choice,
-                            "pool": list(members)})
+                            "pool": list(members),
+                            **({"eligible": live} if len(live) != len(members) else {})})
     return [n for n in band.kinds if n in picked], records
 
 
@@ -592,7 +611,7 @@ def momentary_switch_would_glide(scene: SceneV2, event_class: ResponseClass,
     declared = {k.name: k for k in scene.flare_kinds}
     for name in band.kinds:
         kind = declared.get(name)
-        if kind is not None and _kind_would_glide(kind, virtuals):
+        if kind is not None and kind.enabled and _kind_would_glide(kind, virtuals):
             return True
     return False
 
@@ -640,7 +659,8 @@ def band_trigger_offset_ms(scene: SceneV2, event_class: ResponseClass,
         return 0
     declared = {k.name: k for k in scene.flare_kinds}
     offsets = [declared[n].trigger_offset_ms for n in band.kinds
-               if n in declared and declared[n].trigger_offset_ms != 0]
+               if n in declared and declared[n].enabled
+               and declared[n].trigger_offset_ms != 0]
     return min(offsets) if offsets else 0
 
 
@@ -790,10 +810,15 @@ class ResponseEngine:
     async def _execute_band_locked(self, scene: SceneV2, band: FlareBand,
                                    intensity: float, record: dict[str, Any]) -> None:
         declared = {k.name: k for k in scene.flare_kinds}
-        picked_names, lane_picks = resolve_lane_picks(band, self._rng)
+        picked_names, lane_picks = resolve_lane_picks(band, self._rng, declared)
         if lane_picks:
             record["lane_picks"] = lane_picks
-        attached = [(declared[n], band.kinds[n]) for n in picked_names]
+        # Second, independent gate: resolve_lane_picks already dropped every
+        # disabled kind from its pool, but this list is what actually runs —
+        # checked here on its own rather than trusted to the pick above
+        # (the "check each choke point individually, never by family" rule).
+        attached = [(declared[n], band.kinds[n]) for n in picked_names
+                    if declared[n].enabled]
         # Fixed execution order (the legacy reroll → patch → gain → colour
         # pass, generalized): dice first so explicit param kinds override
         # same-key rolls; permanent params before momentary so a spike on
@@ -925,6 +950,12 @@ class ResponseEngine:
         record: dict[str, Any] = {
             "at": self._clock(), "kind": kind.name, "type": kind.type,
             "intensity": round(intensity, 4)}
+        if not kind.enabled:
+            # An explicit press always wins (the Force-Scene / colour-set
+            # Preview precedent) — but the contradiction is NAMED, never
+            # silently honoured: he is previewing a kind his own bands will
+            # not fire.
+            record["overrode_disabled"] = True
         if scene is None:
             record["result"] = "no_active_scene"
             return record

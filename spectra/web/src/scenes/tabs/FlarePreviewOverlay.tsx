@@ -360,6 +360,17 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
         {error && <div style={{ color: 'var(--danger, #f66)', fontSize: 12 }}>{error}</div>}
         {!timeline && !error && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Computing…</div>}
 
+        {/* An explicit press always wins — but he is told he is looking at a
+            flare his own bands will never fire (models/scene.py
+            FlareKind.enabled; the Force-Scene precedent). */}
+        {timeline?.overrode_disabled && (
+          <div style={{ fontSize: 12, color: 'var(--warning)' }}>
+            ⚠ This flare is switched OFF — it never fires automatically. Previewing it
+            anyway (an explicit press always wins); tap its ⏻ power button to turn it
+            back on.
+          </div>
+        )}
+
         {timeline && timeline.writes.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             This kind produces no writes at this intensity — {timeline.result === 'no_visible_effect'

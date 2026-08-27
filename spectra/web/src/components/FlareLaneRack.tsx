@@ -16,6 +16,7 @@
  *     same-param precedence (flareKindOps.ts header).
  * Purely presentational: all pointer tracking and the actual scene mutation
  * live in ResponseTab.tsx / flareKindOps.moveKindToLane. */
+import PowerButton from './PowerButton';
 import { NumberInput } from './inputs';
 import { bandPools } from '../scenes/tabs/flareKindOps';
 import type { FlareBand, FlareKind, ResponseClass } from '../types';
@@ -32,7 +33,7 @@ export interface RackDropTarget { mode: 'insert' | 'join'; anchor: string | null
 export default function FlareLaneRack({
   cls, bandIdx, band, visibleLanes, canAddLane, kindsByName,
   draggingName, overTarget,
-  onAddLane, onStartDrag, onDetach, onSetScale,
+  onAddLane, onStartDrag, onDetach, onSetScale, onSetEnabled,
 }: {
   cls: ResponseClass;
   bandIdx: number;
@@ -47,6 +48,11 @@ export default function FlareLaneRack({
     (e: React.PointerEvent) => void;
   onDetach: (name: string) => void;
   onSetScale: (name: string, value: number) => void;
+  /** The power button on each lane cell (owner ask 2026-08-27: disable a
+   * flare "from the flare bar"). Writes FlareKind.enabled — a scene-draft
+   * edit, so it silences the kind in EVERY band it is attached to, not
+   * just this one. */
+  onSetEnabled: (name: string, enabled: boolean) => void;
 }) {
   const pools = bandPools(band);
   const emptySlots = Math.max(0, visibleLanes - pools.length);
@@ -99,9 +105,21 @@ export default function FlareLaneRack({
                 </span>
               )}
             </div>
+            {/* A lane whose members are ALL switched off fires nothing at
+                all this band — the engine says the same thing in its own
+                fire record (scene_response.resolve_lane_picks), so the
+                rack must not quietly look normal. */}
+            {pool.members.length > 0
+              && pool.members.every((n) => kindsByName[n] && kindsByName[n].enabled === false) && (
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: '11px' }}
+                title="Every kind in this lane is switched off — this lane fires nothing">
+                ⏻ lane off
+              </div>
+            )}
             {pool.members.map((name, mi) => {
               const kind = kindsByName[name];
               if (!kind) return null;
+              const kindOn = kind.enabled !== false;
               return [
                 mi > 0 && (
                   <div key={`or-${name}`} style={{ fontSize: 9, color: 'var(--text-muted)',
@@ -113,16 +131,19 @@ export default function FlareLaneRack({
                   style={{ display: 'flex', flexDirection: 'column', gap: 6,
                            flex: pool.members.length === 1 ? 1 : undefined,
                            justifyContent: 'space-between',
-                           opacity: draggingName === name ? 0.35 : 1 }}>
+                           opacity: draggingName === name ? 0.35 : kindOn ? 1 : 0.5 }}>
                   <div
                     onPointerDown={onStartDrag(name, { cls, bandIdx })}
-                    style={{ fontSize: 11, fontWeight: 600, cursor: 'grab', userSelect: 'none' }}
+                    style={{ fontSize: 11, fontWeight: 600, cursor: 'grab', userSelect: 'none',
+                             textDecoration: kindOn ? undefined : 'line-through' }}
                     title={`${name} — drag to move to another lane (drop ON a lane to pool with it, on the slim gap before one for a lane of its own), tap to edit`}>
                     {kindIcon(kind)} {name}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <PowerButton on={kindOn} itemLabel="flare" size={20}
+                      onChange={(on) => onSetEnabled(name, on)} />
                     <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>×</span>
-                    <NumberInput value={band.kinds[name]} min={0} step={0.1} width={44}
+                    <NumberInput value={band.kinds[name]} min={0} step={0.1} width={40}
                       onChange={(v) => onSetScale(name, v ?? 1)} />
                     <button style={{ fontSize: 10, padding: '1px 5px', marginLeft: 'auto' }}
                       title="Detach from this band"

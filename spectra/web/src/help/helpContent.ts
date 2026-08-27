@@ -93,15 +93,27 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'power-button',
+        title: 'The ⏻ power button — one control for every enable/disable',
+        keywords: 'power button green dim lit on off enable disable toggle switch selection bar list row flare colour set scene',
+        body: [
+          'Everything in SPECTRA that can be switched off uses the SAME control: a round ⏻ power button, LIT GREEN when the thing is on and DIM when it is off. One tap flips it, immediately — there is no confirm and no second step.',
+          'WHERE IT IS. On the Scenes page: on every row of the scene list, on the phone\'s scene selector bar, and on the open scene\'s own toolbar. On the Colour Sets page: on every row of the tiered Sets & Groups list (Groups and their members alike) and on the open card\'s toolbar. On the Flares and Charges/Lulls/Drops tabs: on every flare kind card, and on every kind inside a lane in the rack below the bands.',
+          'STRAIGHT FROM THE LIST. Pressing the power button on a scene or colour-set LIST ROW takes effect at once — it saves by itself, so you never have to open the item first. The one exception: if that item already has other unsaved edits pending, the flip lands in your draft alongside them and the toast says so, rather than committing half-finished work you had not decided to save yet. A flare kind\'s power button is a scene edit like any other field — it lives in the draft until you press Save.',
+          'The button never changes size when it flips, at any of the sizes it appears in, so a list row can never jump under your thumb on a phone.',
+          'WHAT "OFF" MEANS is the same idea in all three places and is spelled out per item below: never chosen automatically, always still reachable by an explicit press in the moment — and when you do press it, the contradiction is named rather than quietly honoured. See "Disable — temporarily take a scene out of rotation" (below), "Disable — temporarily take a colour set out of rotation" (Colour Sets page), and "Switching a flare off" (Flares tab).',
+        ],
+      },
+      {
         id: 'scene-disable',
         title: 'Disable — temporarily take a scene out of rotation',
-        keywords: 'disable enable toggle off pause temporarily stop scene never fires skip skipped',
+        keywords: 'disable enable toggle off pause temporarily stop scene never fires skip skipped power button green dim',
         body: [
-          'A second toggle on the scene toolbar, next to Mode availability — tap to flip Disabled ⇄ Enabled. Nothing is deleted or lost; it\'s reversible any time, and there\'s no timer — it stays off until you turn it back on.',
+          'The ⏻ power button on the scene toolbar, next to Mode availability — and on every row of the scene list, and on the phone\'s scene selector, so you can switch a scene off without opening it. Green = on, dim = off; one tap flips it. Nothing is deleted or lost; it\'s reversible any time, and there\'s no timer — it stays off until you turn it back on. See "The ⏻ power button" for the shared control.',
           'A disabled scene never fires automatically: it\'s dropped from the sequencer\'s own rolls, a generated trigger\'s scene draw, and a hand-authored trigger\'s fire_scene action, the same central gate Mode availability already funnels through — REGARDLESS of the room\'s current display mode. Disabled is the stronger statement: "don\'t use this scene, period," where Mode availability only narrows which room mode it plays in. A scene that\'s both disabled and mode-gated reports "disabled" as the reason, not "mode availability."',
           'Two things still work on a disabled scene, deliberately: a manual Fire/test-fire from this editor (you pressed the button, you mean it — same bypass Mode availability already has), and Force Scene. Pinning a disabled scene is contradictory input, so it\'s honoured, not silently refused or silently allowed — the room bar\'s Force Scene badge says "⚠ overriding disabled scene" when this happens.',
-          'The scene list, and the phone header once a scene is open, both show a red "⛔ disabled" badge — a disabled scene that stops showing up should never look indistinguishable from a broken one.',
-          'Colour Sets and Groups have the identical control, with the identical rules — see "Disable — temporarily take a colour set out of rotation" on the Colour Sets page.',
+          'A disabled scene is marked wherever it shows: a red ⛔ marker beside its name in the scene list (its power button on the same row is dim), and the spelled-out "⛔ disabled" badge on the phone header once the scene is open — a disabled scene that stops showing up should never look indistinguishable from a broken one.',
+          'Colour Sets and Groups have the identical control, with the identical rules — see "Disable — temporarily take a colour set out of rotation" on the Colour Sets page. Individual FLARE KINDS have it too — see "Switching a flare off" on the Flares tab.',
         ],
       },
       {
@@ -220,6 +232,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'RENAME updates the kind\'s name everywhere it\'s referenced within this scene — every band that attached it, and this scene\'s Update kind if it names this kind — so a save never leaves a dangling reference.',
           'DELETE removes the kind from the scene entirely; the confirm states how many bands it\'s currently attached in, since those attachments detach along with it.',
           'COPY puts the kind\'s own declaration — type, params, gain, hold — on a small clipboard (works across scenes and page reloads). A "📋 Paste" button then appears on every scene\'s Flares/Charges-Lulls-Drops tab. PASTE IS A PORT, NOT A LINK: it creates a brand new, independent kind on whichever scene you paste into (a name collision gets a "(2)" suffix, same as the engine\'s own auto-naming) — never attached to any band yet, and never tied back to the original. Editing or deleting either copy afterward never touches the other. A flare kind\'s identity is scoped to the one scene that declares it; there is no shared cross-scene kind to reference, so a paste is the only way to reuse one elsewhere. A pasted kind may name a param this scene\'s devices don\'t have — harmless: the engine only ever lands a param on a virtual whose live effect actually carries it.',
+        ],
+      },
+      {
+        id: 'flare-disable',
+        title: 'Switching a flare off — the ⏻ power button on a flare kind',
+        keywords: 'disable enable flare kind off power button green dim lane pool silence mute skip never fires',
+        body: [
+          'Every flare kind carries a ⏻ power button — on its card in the palette above the bands, and on the kind itself inside each lane of the rack below them. Green = on, dim = off; one tap flips it. It is the same control scenes and colour sets use (see "The ⏻ power button"). Nothing is deleted and nothing detaches: the kind stays declared and stays attached to exactly the bands it was attached to, it simply stops firing. There is no timer — it stays off until you turn it back on. Like every other field on this page, the flip lives in the scene draft until you press Save.',
+          'The flag is on the KIND, not on one band\'s attachment: switching a kind off silences it in EVERY band that attaches it at once, in this scene. That is what "disable this flare" means — if you only want it out of one band, detach it there (✕) instead.',
+          'A disabled kind is dropped from every automatic path: it never enters its lane\'s pick-one pool (so it can never win a fire-time roll), it never executes when a band fires, and — this is the easy one to miss — it no longer contributes its own trigger offset or its automatic head-start to the fire\'s timing. A flare you have switched off cannot retime a fire it is not part of.',
+          'A LANE WHOSE KINDS ARE ALL SWITCHED OFF fires nothing at all — no substitution, no fallback to another lane\'s member. That is deliberate and it is stated rather than silent: the lane shows "⏻ lane off" in the rack, and the fire record says so too, so a lane that has gone quiet never looks the same as a broken one.',
+          'ONE thing still works, deliberately: ▶ Preview. You pressed the button, so it runs the kind for real on your fixtures — and because that contradicts the flag, the preview panel says so ("this flare is switched OFF"), the same way Force Scene names an overridden disabled scene and a colour-set Preview names a disabled card.',
         ],
       },
       {
@@ -456,14 +480,14 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'colorsets-disable',
         title: 'Disable — temporarily take a colour set out of rotation',
-        keywords: 'disable enable toggle off pause temporarily stop colour color set group never chosen skip skipped exhausted',
+        keywords: 'disable enable toggle off pause temporarily stop colour color set group never chosen skip skipped exhausted power button green dim',
         body: [
-          'A toggle on the colour-set toolbar, next to Rainbow select — tap to flip Disabled ⇄ Enabled. It is the same control, the same wording, and the same rules as a scene\'s Disable (Scenes page, see "Disable — temporarily take a scene out of rotation"). Nothing is deleted or lost; it\'s reversible any time, and there\'s no timer — it stays off until you turn it back on.',
+          'The ⏻ power button on the colour-set toolbar, next to Rainbow select — and on every row of the tiered Sets & Groups list, so you can switch a card off without opening it. Green = on, dim = off; one tap flips it, and from a list row it saves by itself. It is the same control, the same wording, and the same rules as a scene\'s Disable (Scenes page, see "Disable — temporarily take a scene out of rotation"). Nothing is deleted or lost; it\'s reversible any time, and there\'s no timer — it stays off until you turn it back on.',
           'A disabled Set is never CHOSEN automatically: it\'s dropped from the sequencer\'s own colour roll, a colour Group\'s rotation, the drift journey\'s destinations, a flare\'s colour jump, and a hand-authored select_color_set trigger — REGARDLESS of the room\'s display mode. Disabled is the stronger statement than Mode availability, which only narrows which room mode a card plays in; a card that is both reports "disabled" as the reason.',
           'It is never yanked mid-paint. If a set you disable is the palette the room is wearing right this second, the room keeps wearing it — the next natural colour change simply picks something else. That is exactly how disabling a scene behaves.',
           'Groups: disabling a MEMBER takes it out of that group\'s rotation/weighted pool. Disabling the GROUP stops the group being chosen as a pool — but it does NOT strip the group\'s Overrides from an enabled member fired by its own id, because overrides are a bulk-edit layer, not a choice, and disabling must not silently change an enabled set\'s colours. A group whose members are ALL disabled is itself unusable, and says so rather than quietly resolving to something else.',
           'Two things still work on a disabled card, deliberately: this page\'s Preview, and an explicit apply to the room. Both are you pressing a button in the moment, so they win — and because that contradicts the flag, they say so ("previewing a disabled colour set"), the same way Force Scene names an overridden disabled scene.',
-          'The card list, and the phone header once a card is open, both show a red "⛔ disabled" badge — a card that stops showing up should never look indistinguishable from a broken one.',
+          'A disabled card is marked wherever it shows: a red ⛔ marker beside its name in the tiered list (its power button on the same row is dim), and the spelled-out "⛔ disabled" badge on the header once the card is open — a card that stops showing up should never look indistinguishable from a broken one.',
           'Safety: if you disable enough cards that NOTHING is eligible at some intensity (easy to do above the Rainbow select limit, where only Rainbow sets can be picked), the room is never left with no colour — it keeps the palette it already has. That is reported, not silent: the sequencer status strip\'s "last colour pick" shows "no colour set was eligible" with how many of your sets are currently disabled.',
         ],
       },

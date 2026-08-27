@@ -10,6 +10,10 @@
   --text:       #ece7f7;
   --text-muted: #9585b5;
   --danger:     #f87171;
+  /* The power button's LIT green (components/PowerButton.tsx) — the one
+     "this is on" colour, so scenes, colour sets and flares all read the
+     same at a glance. */
+  --ok:         #4ade80;
   --warning:    #d9a441;
   --radius:     8px;
   --font:       'Inter', system-ui, sans-serif;

@@ -28,7 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import CurveAttachmentEditor from '../components/CurveAttachmentEditor';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
 import RainbowToggle from '../components/RainbowToggle';
-import DisabledToggle from '../components/DisabledToggle';
+import PowerButton from '../components/PowerButton';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import useIsPhone from '../lib/useIsPhone';
@@ -234,6 +234,21 @@ export default function ColorSetsPage() {
     }
   };
 
+  /** The tiered list's power button: an instant flip that PERSISTS — he
+   * asked to disable "straight from the selection bar", so it must take
+   * effect without opening the card and pressing Save. With OTHER unsaved
+   * edits pending on that card the flip lands in the draft instead, rather
+   * than committing half-finished colour edits as a side effect. */
+  const togglePower = async (c: SpotColorSetCard, on: boolean) => {
+    const next: SpotColorSetCard = { ...c, disabled: !on };
+    if (drafts[c.id]) {
+      setDrafts((d) => ({ ...d, [c.id]: next }));
+      toast(`${on ? 'Enabled' : 'Disabled'} in your unsaved draft — press Save`, 'success');
+      return;
+    }
+    await save(next);
+  };
+
   const del = async () => {
     if (!card) return;
     if (!confirm(`Delete "${card.name}"? This cannot be undone.`)) return;
@@ -314,12 +329,23 @@ export default function ColorSetsPage() {
             border: '1px solid var(--border)', background: `hsl(${w.position_deg}, 85%, 55%)`,
           }} />
         )}
+        {/* The list row's marker is the ⛔ GLYPH ALONE, not the full
+            "⛔ disabled" badge the editor header carries: the dim power
+            button beside it already says "off" in words-free form, and at
+            this pane's 260px both the badge and the button squeezed the
+            card NAME to literally zero width (measured, not guessed). The
+            red marker and its wording survive in the tooltip. */}
         {c.disabled && (
           <span className="badge badge-red" style={{ flexShrink: 0 }}
                 title="Disabled — never chosen automatically">
-            ⛔ disabled
+            ⛔
           </span>
         )}
+        {/* Straight from the selection bar (his ask) — one tap, no need to
+            open the card first. */}
+        <PowerButton on={!(c.disabled ?? false)}
+          itemLabel={c.kind === 'group' ? 'colour group' : 'colour set'} size={22}
+          onChange={(on) => void togglePower(c, on)} />
         <span style={{
           fontSize: 10, padding: '2px 6px', borderRadius: 10, flexShrink: 0,
           background: c.kind === 'group' ? 'rgba(156,39,176,0.15)' : 'rgba(33,150,243,0.15)',
@@ -339,6 +365,7 @@ export default function ColorSetsPage() {
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         Colour Sets & Groups <HelpLink topic="colorsets-groups" title="Colour Sets & Groups page" />
         <HelpLink topic="colorsets-groups-page" title="Sets vs Groups, and the tiered list" />
+        <HelpLink topic="power-button" title="The ⏻ power button" />
         {isPhone && pickerOpen && (
           <button style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => setPickerOpen(false)}>✕</button>
         )}
@@ -495,8 +522,8 @@ export default function ColorSetsPage() {
             <RainbowToggle value={card.is_rainbow ?? false}
               onChange={(v) => setCard({ ...card, is_rainbow: v })} />
             <HelpLink topic="colorsets-rainbow" title="Rainbow select" />
-            <DisabledToggle value={card.disabled ?? false} itemLabel="colour set"
-              onChange={(v) => setCard({ ...card, disabled: v })} />
+            <PowerButton on={!(card.disabled ?? false)} itemLabel="colour set" size={30}
+              onChange={(on) => setCard({ ...card, disabled: !on })} />
             <HelpLink topic="colorsets-disable" title="Disable" />
             <button className="danger" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => void del()}>✕ Delete</button>
           </div>
