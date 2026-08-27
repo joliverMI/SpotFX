@@ -121,6 +121,21 @@ Three named failure cases, each with its own answer:
      (its own process is what would have been keeping it alive) and
      always gets landed back, never treated as "maybe still in progress."
 
+ONE HOLD, MANY PROGRAMS (2026-08-27, fm/flare-preview-offsets-everywhere).
+His own sequencing for this system was "start with the flares, then we will
+do lull charge drop", and the second half adds two more previews that must
+hold his room: a scene-to-scene TRANSITION and the charge/lull/drop
+SEQUENCE. Everything genuinely hard here — the once-per-session snapshot,
+the deadline that lapses on its own, the independent sweep, the absolute
+ceiling a heartbeating client cannot push out, the persisted snapshot a
+restart lands back, both release queues, the 1ms tween-safe revert — was
+learned expensively (13m54s of his room, 85 refused scene changes) and
+stays in ONE implementation. What varies is factored into PreviewProgram
+below: which scene backs the hold, which extra virtuals it may touch, and
+what each named STEP does. open_hold() is now the thinnest such program
+(FlareKindProgram) and is byte-identical in behaviour to what it always
+did. A new preview supplies a program; it never supplies a second hold.
+
 THE PROOF BAR: firing + reverting must be proven against a REAL headless
 render pipeline (fx.headless + fx.facade, ownership=spectra — the same rig
 test_room_preview.py already uses) — a written config value on a live
@@ -488,11 +503,102 @@ async def _release_color_rotates_after_dwell(responder, dwell_s: float) -> None:
     await responder.flush_color_rotates(dwell_s)
 
 
-async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
-                    heartbeat_timeout_s: float) -> dict:
-    """Fire `scene` live (the "call the scene" step) then `kind` live on
-    top of it, against a scratch pair seeded fresh every call — a later
-    call in the SAME session (an intensity-slider change) re-fires both at
+class PreviewContext:
+    """What a preview program is handed for one step. Everything expensive
+    or dangerous — the scratch conductor/responder pair, the compiled
+    writes, the live-write seam — is built ONCE by the hold and passed in,
+    so a program never opens its own path to his fixtures and can never
+    acquire one this module's revert doesn't know how to undo."""
+
+    def __init__(self, *, conductor, responder, writes: list[dict],
+                 intensity: float, entry_ramp_ms: int, first_open: bool) -> None:
+        self.conductor = conductor
+        self.responder = responder
+        self.writes = writes
+        self.intensity = intensity
+        self.entry_ramp_ms = entry_ramp_ms
+        self.first_open = first_open
+
+    async def apply_scene(self, writes: list[dict] | None = None,
+                          transition_ms: int | None = None) -> None:
+        """Land the held scene's compiled writes (or another set of writes
+        the program compiled itself — a transition's incoming scene) at the
+        real blend duration. The ONE way a program reaches the lights."""
+        payload = self.writes if writes is None else writes
+        if not payload:
+            return
+        await fx_seam.apply_writes(
+            payload,
+            transition_ms=(self.entry_ramp_ms if transition_ms is None
+                           else transition_ms))
+
+
+class PreviewProgram:
+    """WHAT a preview hold actually does when it fires, factored out of the
+    hold itself (2026-08-27, fm/flare-preview-offsets-everywhere).
+
+    THE RULE THIS EXISTS TO KEEP: never a second bespoke hold. Everything
+    genuinely hard about holding his room live — the snapshot taken once
+    per session, the deadline that lapses on its own, the independent sweep
+    that reverts a hold nobody closed, the absolute 3-minute ceiling a
+    heartbeating client cannot push out, the persisted snapshot a service
+    restart lands back, the two release queues, the 1ms tween-safe revert —
+    was learned the expensive way (see this module's own docstring: a real
+    13m54s hold on his room, 85 refused scene changes) and belongs to ONE
+    implementation. A new kind of preview supplies only the part that is
+    genuinely new: which scene backs the hold, which virtuals it may touch,
+    and what happens on each named step.
+
+    STEPS. A program declares the cues its frontend will schedule
+    (`steps`), and the SERVER decides when each one fires — the frontend
+    only ever schedules against times the server returned. The flare
+    preview has one step ("fire"); a transition has two (put the room back
+    at the outgoing scene, then cross to the incoming one); a drop sequence
+    has four (charge, lull, drop, release). The hold neither knows nor
+    cares what they mean."""
+
+    #: the scene held live — its compiled writes are the snapshot basis and
+    #: what apply_scene() lands by default
+    hold_scene: SceneV2
+    #: the cue names execute() accepts, in ruler order
+    steps: tuple[str, ...] = ("fire",)
+
+    def extra_snapshot_writes(self, intensity: float) -> list[dict]:
+        """Writes this program may land on virtuals the held scene never
+        touches (a transition's INCOMING scene is the real case). Their
+        pre-preview state has to enter the snapshot too, or closing the
+        preview leaves those virtuals wherever the program left them —
+        the exact "what we take, we give back" contract room_preview.py
+        states and this module inherits."""
+        return []
+
+    async def execute(self, step: str, ctx: PreviewContext) -> dict:
+        raise NotImplementedError
+
+
+class FlareKindProgram(PreviewProgram):
+    """The original program, unchanged in behaviour: hold the scene, fire
+    ONE declared flare kind on top of it. Every /fire re-lands the scene
+    first, which is what lets a mid-session intensity change re-fire both
+    at the new value (see open_hold's docstring)."""
+
+    steps = ("fire",)
+
+    def __init__(self, scene: SceneV2, kind: FlareKind) -> None:
+        self.hold_scene = scene
+        self.kind = kind
+
+    async def execute(self, step: str, ctx: PreviewContext) -> dict:
+        await ctx.apply_scene()
+        return await ctx.responder.fire_kind(self.kind, ctx.intensity)
+
+
+async def open_program_hold(program: PreviewProgram, intensity: float, *,
+                            step: str = "fire",
+                            heartbeat_timeout_s: float) -> dict:
+    """Run one named STEP of `program` live, against a scratch pair seeded
+    fresh every call from the program's own held scene — a later
+    call in the SAME session (an intensity-slider change) re-runs the step at
     the new value, matching flare_preview.build_timeline's own "call again
     whenever the intensity changes" contract, but only SNAPSHOTS on the
     first call of a session: the pre-preview live bytes, read once via
@@ -526,6 +632,7 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
         for task in _release_tasks:
             task.cancel()
         _release_tasks.clear()
+        scene = program.hold_scene
         first_open = _snapshot is None
         live = await fx_seam.get_virtuals() if first_open else None
         clock = time.monotonic
@@ -537,8 +644,15 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
             return {"held": False, "fire_record": {"result": "no_writes"}}
         if first_open:
             snapshot: dict[str, dict] = {}
-            for w in writes:
+            # The held scene's own writes PLUS anything else the program
+            # may land (a transition's incoming scene can reach virtuals
+            # the outgoing one never touches) — the snapshot must cover
+            # every virtual the session could move, or close() hands some
+            # of them back and silently keeps the rest.
+            for w in list(writes) + program.extra_snapshot_writes(intensity):
                 vid = w["virtual_id"]
+                if vid in snapshot:
+                    continue
                 effect = (live.get(vid) or {}).get("effect") or {}
                 effect_type = effect.get("type")
                 if not effect_type:
@@ -551,8 +665,10 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
         room = room_controls.load_room_controls()
         entry_ramp_ms = (scene.entry_ramp_ms or room.global_transition_ms
                         or room_controls.scene_transition_ms(room, intensity))
-        await fx_seam.apply_writes(writes, transition_ms=entry_ramp_ms)
-        fire_record = await responder.fire_kind(kind, intensity)
+        ctx = PreviewContext(conductor=conductor, responder=responder,
+                             writes=writes, intensity=intensity,
+                             entry_ramp_ms=entry_ramp_ms, first_open=first_open)
+        fire_record = await program.execute(step, ctx)
         for group in responder.take_release_schedule():
             _release_tasks.append(asyncio.create_task(
                 _release_group(responder, group)))
@@ -560,7 +676,21 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
             _release_tasks.append(asyncio.create_task(
                 _release_color_rotates_after_dwell(responder, dwell_s)))
         _rearm(heartbeat_timeout_s)
-        return {"held": True, "first_open": first_open, "fire_record": fire_record}
+        return {"held": True, "first_open": first_open, "step": step,
+                "fire_record": fire_record}
+
+
+async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
+                    heartbeat_timeout_s: float) -> dict:
+    """The FLARE preview's entry point — hold `scene`, fire `kind` on top.
+    Unchanged in behaviour; it is now the thinnest possible program
+    (FlareKindProgram) over the general hold above, so the flare preview,
+    the transition preview and the drop-sequence preview share ONE
+    snapshot/deadline/sweep/ceiling/restart-recovery implementation rather
+    than growing a second bespoke hold each."""
+    return await open_program_hold(
+        FlareKindProgram(scene, kind), intensity, step="fire",
+        heartbeat_timeout_s=heartbeat_timeout_s)
 
 
 async def touch(heartbeat_timeout_s: float) -> None:

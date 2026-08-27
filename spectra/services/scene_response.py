@@ -1865,15 +1865,27 @@ class ResponseEngine:
                                  else None)
         return {"targets": targets, "ramp_ms": ramp_ms, "gap_ms": gap_ms}
 
-    async def release_phases(self) -> int:
+    async def release_phases(self, *, force: bool = False) -> int:
         """The lifecycle guard carried from the original program
         (trigger_engine cleared _phase_armed on track change): a charge or
         lull armed mid-song must not linger into the next track — release
         every phase-capable virtual with an instant phase "none" write.
         The effects would eventually free themselves anyway (the shared
         orphan watchdog: 12 s grace / 60 s cap) — this is the deliberate
-        release, not the safety net."""
-        if self._phase_armed is None:
+        release, not the safety net.
+
+        force=True skips the armed guard (2026-08-27, the drop-sequence
+        scrubbing preview — spectra/services/phase_preview.py). Two reasons
+        that guard cannot serve a preview's own per-lap release, neither of
+        them a defect in it: a preview step runs on a FRESH scratch
+        conductor/responder pair every call (flare_preview._scratch_engine,
+        so an intensity change re-seeds cleanly), so no _phase_armed state
+        survives from the step that armed it; and a DROP deliberately arms
+        nothing (_drive_phase sets _phase_armed only for charge/lull —
+        a drop is one-shot), so the end of a sequence is precisely when the
+        guard says there is nothing to release. Every PRODUCTION call site
+        is unchanged and still guarded."""
+        if self._phase_armed is None and not force:
             return 0
         self._phase_armed = None
         count = 0

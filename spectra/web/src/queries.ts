@@ -253,6 +253,117 @@ export const closeFlarePreview = () =>
 
 /** Tab-close/reload release — same sendBeacon-over-fetch rationale as
  * releasePreviewBeacon above. */
+/* ── transition + drop-sequence previews (2026-08-27) ──
+ *
+ * Same shape as the flare preview above, deliberately: /open computes a
+ * timeline and arms the pause (no light changes), /fire runs ONE named
+ * STEP live. Every time in these responses is computed server-side — the
+ * overlay schedules against `cues[].at_s` and draws against the marker
+ * fields; it never derives a moment of its own. heartbeat/close are the
+ * SHARED ones (the hold is shared: one room, one hold at a time), so the
+ * flare preview's heartbeatFlarePreview/closeFlarePreview keep working
+ * unchanged for every preview.
+ */
+
+export interface PreviewCue {
+  /** The step name to POST back to /fire when the playhead crosses at_s. */
+  step: string;
+  at_s: number;
+  label: string;
+}
+
+export interface TransitionPreviewTimeline {
+  from_scene_id: string;
+  from_scene_name: string;
+  to_scene_id: string;
+  to_scene_name: string;
+  intensity: number;
+  duration_s: number;
+  /** The transition's REAL, intensity-scaled crossfade — the same
+   * entry_ramp_ms / global_transition_ms / scene_transition_ms chain
+   * scene_compiler.fire_scene resolves. */
+  crossfade_ms: number;
+  /** WHERE in that crossfade the payoff lands: 0.5 for an ordinary pair
+   * (his own midpoint generalization), a registered phased pair's own
+   * 0.45 where one applies. */
+  anchor_frac: number;
+  anchor_source: 'midpoint' | 'phased_pair';
+  /** A scene transition anchors its MIDDLE — the settled family. */
+  anchor_rule: 'transition_middle';
+  /** LEAD family: positive = EARLIER. anchor_frac x crossfade_ms. */
+  lead_ms: number;
+  animation_anchor_s: number;
+  trigger_mark_s: number;
+  fire_at_s: number;
+  animation_start_s: number;
+  animation_end_s: number;
+  cues: PreviewCue[];
+  target_writes: { virtual_id: string; effect_type: string }[];
+}
+
+export interface PhasePreviewMark {
+  event_class: 'charge' | 'lull' | 'drop';
+  mark_s: number;
+  fire_at_s: number;
+  ramp_start_s: number;
+  ramp_end_s: number;
+  hang_end_s: number;
+  ramp_ms: number;
+  /** What is left of the gap once the ramp finishes — his own spec, "hang
+   * for just a moment, maybe 10% of the lull time". Always 0 for a drop. */
+  hang_ms: number;
+  gap_ms: number | null;
+  stretched: boolean;
+  /** The band's authored FlareKind.trigger_offset_ms, aggregated (min over
+   * the nonzero values). Read-only here — a band's offset is an aggregate
+   * over however many kinds it attaches, so dragging would have to pick
+   * one to write to; a kind's own offset is authored per-kind in the flare
+   * preview's own marker. */
+  trigger_offset_ms: number;
+  lead_ms: number;
+  anchor_rule: 'switch_end' | 'drop_start';
+}
+
+export interface PhasePreviewTimeline {
+  scene_id: string;
+  scene_name: string;
+  intensity: number;
+  duration_s: number;
+  gaps: { charge: number; lull: number };
+  hang_fraction: number;
+  marks: PhasePreviewMark[];
+  cues: PreviewCue[];
+  /** Virtuals the vendored phase machinery will actually reach. Empty
+   * means this scene has no phase-capable effect live and the sequence
+   * would drive nothing — say so rather than loop an invisible preview. */
+  phase_targets: string[];
+}
+
+export interface PreviewFireResult extends FlarePreviewFireResult {
+  step?: string;
+}
+
+export const openTransitionPreview = (
+  toSceneId: string, fromSceneId: string | null, intensity: number) =>
+  apiPost<TransitionPreviewTimeline>('/preview/transition/open',
+    { to_scene_id: toSceneId, from_scene_id: fromSceneId, intensity });
+
+export const fireTransitionPreview = (
+  toSceneId: string, fromSceneId: string | null, intensity: number, step: string) =>
+  apiPost<PreviewFireResult>('/preview/transition/fire',
+    { to_scene_id: toSceneId, from_scene_id: fromSceneId, intensity, step });
+
+export const openSequencePreview = (
+  sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number) =>
+  apiPost<PhasePreviewTimeline>('/preview/sequence/open',
+    { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs, lull_gap_ms: lullGapMs });
+
+export const fireSequencePreview = (
+  sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number, step: string) =>
+  apiPost<PreviewFireResult>('/preview/sequence/fire',
+    { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs,
+      lull_gap_ms: lullGapMs, step });
+
 export const closeFlarePreviewBeacon = (): void => {
   try {
     navigator.sendBeacon('/spectra/api/flare-preview/close',

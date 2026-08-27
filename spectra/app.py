@@ -34,7 +34,8 @@ from spectra import config
 from spectra.api import engine as engine_api
 from spectra.api import (av_sync, device_preview, feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
-                         ownership, registry, room_controls, room_preview,
+                         ownership, preview, registry, room_controls,
+                         room_preview,
                          scenes, sequencer, settings_console, show_review,
                          sonic_usage, spec, test_session, triggers)
 
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(journey.router)
     app.include_router(room_preview.router)
     app.include_router(flare_preview.router)
+    app.include_router(preview.router)
     app.include_router(engine_api.router)
     app.include_router(ownership.router)
     app.include_router(room_controls.router)

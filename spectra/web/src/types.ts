@@ -214,6 +214,16 @@ export interface SceneV2 {
    * writes in over this ramp (ms) instead of an instant jump when it
    * fires live. 0 = today's unchanged instant-jump behaviour. */
   entry_ramp_ms: number;
+  /** THE SCENE'S OWN AUTHORED TRIGGER OFFSET (2026-08-27) — the
+   * scene-transition member of the same family as
+   * FlareKind.trigger_offset_ms: same unit, same clamp, same sign law
+   * (NEGATIVE = fire EARLIER, positive = later, 0 = on the mark).
+   * Authored by dragging the trigger marker in the TRANSITION scrubbing
+   * preview, and honoured on the firing path by trigger_engine.tick() for
+   * a fire_scene trigger, where it ADDS to the trigger's own offset.
+   * NOT the transition's automatic lead — that is anchor_frac x crossfade,
+   * computed, never authored. */
+  trigger_offset_ms: number;
   accept_all_sets: boolean;
   accepted_set_ids: string[];
   /** Per-scene mode availability (owner ask 2026-08-17) — see
@@ -844,6 +854,7 @@ export function newScene(id: string): SceneV2 {
     color_journey: { mode: 'inherit', pace_factor: 1, journey: null },
     choreography: { enabled: false, transition_ms: 800, transition_mode: 'Add', anchor_frac: 0.45 },
     entry_ramp_ms: 0,
+    trigger_offset_ms: 0,
     accept_all_sets: true,
     accepted_set_ids: [],
     display_availability: 'default',

@@ -322,7 +322,9 @@ export default function ScenesPage() {
           {tab === 'Flares' && (
             <ResponseTab scene={scene} setScene={setScene} classes={['flare']} helpTopic="tab-flares" />
           )}
-          {tab === 'Phase Choreography' && <PhaseTab scene={scene} />}
+          {tab === 'Phase Choreography' && (
+            <PhaseTab scene={scene} setScene={setScene} scenes={scenes} />
+          )}
           {tab === 'Sequencing' && <SequencingTab scene={scene} scenes={scenes} />}
           {tab === 'Colour Sets' && <ColorSetsTab scene={scene} setScene={setScene} />}
           {tab === 'Charges/Lulls/Drops' && (

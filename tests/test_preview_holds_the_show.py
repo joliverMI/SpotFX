@@ -102,9 +102,14 @@ class _SeamRecorder:
                                 "transition_ms": transition_ms})
 
     async def get_virtuals(self) -> dict:
-        return {VID: {"effect": {"type": "radial",
-                                 "config": {"spin": 0.1,
-                                            "background_color": "#111111"}}}}
+        # Two live virtuals: the snapshot must be able to cover a virtual
+        # that only an INCOMING scene touches (see the transition revert
+        # test below). A virtual with no live effect is deliberately
+        # unsnapshotable — there is nothing to give back.
+        effect = {"type": "radial",
+                  "config": {"spin": 0.1, "background_color": "#111111"}}
+        return {VID: {"effect": dict(effect, config=dict(effect["config"]))},
+                "v2": {"effect": dict(effect, config=dict(effect["config"]))}}
 
     def reset(self) -> None:
         self.writes.clear()
@@ -338,5 +343,137 @@ def test_an_abandoned_hold_gives_the_show_back_on_its_own(monkeypatch, seam):
         assert freed["engine_fired"] == 4
         assert freed["seam_writes"] > 0
         assert freed["new_deferred_preview"] == 0
+
+    asyncio.run(main())
+
+
+# ═══ 4. the TRANSITION hold: same measurement, same silence ════════════════
+
+def test_transition_hold_silences_every_trigger_and_says_so(monkeypatch, seam):
+    """The transition preview is a NEW hold-user (2026-08-27) — and a new
+    hold-user is exactly what leaked last time. It is held to the same
+    show-side bar, not to "it reuses the shared hold, so it must be fine."
+    """
+    from spectra.services import flare_preview_hold as fph
+    from spectra.services import preview_pause, transition_preview
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    scene, _kind = _scene_and_kind("Transition From")
+    _seed_scene(scene)
+    to_scene = SceneV2(
+        name="Transition To", entry_ramp_ms=1200,
+        devices=[SceneDeviceConfig(id="d1", target_kind="virtual", target=VID,
+                                   effect_type="radial", params={"spin": 0.8})])
+    _seed_scene(to_scene)
+    responder, executor = _install_scratch_responder(monkeypatch, scene)
+    program = transition_preview.TransitionProgram(scene, to_scene)
+
+    async def main():
+        assert await fph.open_program_hold(
+            program, 1.0, step="fire", heartbeat_timeout_s=60.0)
+        preview_pause.start(60.0)
+        held = await _measure_show(_engine(_corpus(scene.id)), responder,
+                                   executor, seam, "song:transition-held")
+        assert held["engine_fired"] == 4, held
+        assert held["seam_writes"] == 0, (
+            f"the transition preview let his show write: {seam.writes}")
+        assert held["new_surges"] == 0
+        assert held["new_deferred_preview"] >= 1, "held, but silently"
+
+        preview_pause.clear()
+        await fph.close_hold()
+        freed = await _measure_show(_engine(_corpus(scene.id)), responder,
+                                    executor, seam, "song:transition-freed")
+        assert freed["engine_fired"] == 4 and freed["seam_writes"] > 0
+
+    asyncio.run(main())
+
+
+def test_the_transition_hold_reverts_every_virtual_it_touched(monkeypatch, seam):
+    """The snapshot has to cover the INCOMING scene's virtuals too — it can
+    reach ones the outgoing scene never touches, and a snapshot taken from
+    the held scene alone would hand some virtuals back and silently keep
+    the rest."""
+    from spectra.services import flare_preview_hold as fph
+    from spectra.services import transition_preview
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from_scene = SceneV2(
+        name="Only v1",
+        devices=[SceneDeviceConfig(id="d1", target_kind="virtual", target=VID,
+                                   effect_type="radial", params={"spin": 0.2})])
+    to_scene = SceneV2(
+        name="v1 and v2", entry_ramp_ms=800,
+        devices=[SceneDeviceConfig(id="d1", target_kind="virtual", target=VID,
+                                   effect_type="radial", params={"spin": 0.9}),
+                 SceneDeviceConfig(id="d2", target_kind="virtual", target="v2",
+                                   effect_type="radial", params={"spin": 0.9})])
+
+    async def main():
+        program = transition_preview.TransitionProgram(from_scene, to_scene)
+        await fph.open_program_hold(program, 1.0, step="fire",
+                                   heartbeat_timeout_s=60.0)
+        assert set(fph._snapshot or {}) >= {VID, "v2"}, (
+            "a virtual only the INCOMING scene touches was left out of the "
+            f"snapshot: {sorted(fph._snapshot or {})}")
+        seam.reset()
+        await fph.close_hold()
+        reverted = {w["virtual_id"] for w in seam.writes}
+        assert reverted >= {VID, "v2"}, (
+            f"close() handed back only {sorted(reverted)}")
+
+    asyncio.run(main())
+
+
+# ═══ 5. the DROP SEQUENCE hold: same measurement, same silence ═════════════
+
+def test_drop_sequence_hold_silences_every_trigger_and_says_so(monkeypatch, seam):
+    from spectra.services import flare_preview_hold as fph
+    from spectra.services import phase_preview, preview_pause
+    scene, _kind = _scene_and_kind("Sequence Scene")
+    _seed_scene(scene)
+    responder, executor = _install_scratch_responder(monkeypatch, scene)
+    program = phase_preview.PhaseSequenceProgram(scene)
+
+    async def main():
+        for step in ("charge", "lull", "drop"):
+            assert await fph.open_program_hold(
+                program, 1.0, step=step, heartbeat_timeout_s=60.0)
+        preview_pause.start(60.0)
+        held = await _measure_show(_engine(_corpus(scene.id)), responder,
+                                   executor, seam, "song:sequence-held")
+        assert held["engine_fired"] == 4, held
+        assert held["seam_writes"] == 0, (
+            f"the drop-sequence preview let his show write: {seam.writes}")
+        assert held["new_surges"] == 0
+        assert held["new_deferred_preview"] >= 1, "held, but silently"
+
+        preview_pause.clear()
+        await fph.close_hold()
+        freed = await _measure_show(_engine(_corpus(scene.id)), responder,
+                                    executor, seam, "song:sequence-freed")
+        assert freed["engine_fired"] == 4 and freed["seam_writes"] > 0
+
+    asyncio.run(main())
+
+
+def test_every_new_hold_user_obeys_the_absolute_ceiling(monkeypatch, seam):
+    """The 13m54s incident's fix is a property of the HOLD, not of the
+    flare route that happened to be written first — so a transition and a
+    drop sequence must both refuse once the ceiling has fired, however
+    hard their client keeps calling /fire."""
+    from spectra.services import flare_preview_hold as fph
+    from spectra.services import phase_preview, transition_preview
+    scene, _kind = _scene_and_kind("Ceiling Scene")
+    _seed_scene(scene)
+
+    async def main():
+        for program in (transition_preview.TransitionProgram(scene, scene),
+                        phase_preview.PhaseSequenceProgram(scene)):
+            fph._locked_until_reopen = True
+            got = await fph.open_program_hold(
+                program, 1.0, step=program.steps[0], heartbeat_timeout_s=60.0)
+            assert got == {"held": False, "expired": True,
+                           "reason": "max_duration"}, got
+            assert fph.capped_pause_s(15.0) == 0.0
+            fph.clear_ceiling_lock()
 
     asyncio.run(main())

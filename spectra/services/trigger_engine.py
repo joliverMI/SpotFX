@@ -661,9 +661,15 @@ class TriggerEngine:
             #     with any action — an instant apply included — by
             #     construction.
             #   - THE CONTENT'S OWN authored offset, where the content has
-            #     one. Today that is fire_response's FLARE KIND offset
-            #     (his ask, 2026-08-21 — "make the engine read the offset
-            #     and work with the offset like we had in spot FX"): the
+            #     one. TWO sources, one per action kind, both authored by
+            #     dragging a scrubbing preview's trigger-alignment marker:
+            #     fire_scene reads the TARGET SCENE's own
+            #     SceneV2.trigger_offset_ms (2026-08-27, the transition
+            #     preview's drag — _scene_offset_ms below, and see that
+            #     field's docstring for the one honest bound on an
+            #     unresolved pick), fire_response reads the FLARE KIND
+            #     offset (his ask, 2026-08-21 — "make the engine read the
+            #     offset and work with the offset like we had in spot FX"): the
             #     FlareKind.trigger_offset_ms the flare scrubbing-preview's
             #     drag writes, read LIVE off the band the active scene
             #     would fire for this class at this intensity
@@ -721,9 +727,11 @@ class TriggerEngine:
             # this shipped (re-verified live), so it too is a no-op on
             # everything currently stored.
             target_ms = trig.timestamp_ms + trig.trigger_offset_ms
-            if (trig.action.kind == "fire_response"
-                    and abs(trig.timestamp_ms - last) <= RESPONSE_OFFSET_HORIZON_MS):
-                target_ms += self._response_offset_ms(trig.action)
+            if abs(trig.timestamp_ms - last) <= RESPONSE_OFFSET_HORIZON_MS:
+                if trig.action.kind == "fire_response":
+                    target_ms += self._response_offset_ms(trig.action)
+                elif trig.action.kind == "fire_scene":
+                    target_ms += self._scene_offset_ms(trig)
             # TRANSITION/FLARE LEAD-TIME ALIGNMENT (his ask, 2026-08-19):
             # fire up to lead_ms EARLY so a scene transition's mid-point (or
             # a registered phased effect's own payoff — see
@@ -1113,7 +1121,8 @@ class TriggerEngine:
         Peeks Force Scene's redirect (room_controls) so the lead matches
         whatever will actually fire, same as legacy's own plan-time member
         peeking for scene_group redirects."""
-        from spectra.services import room_controls, scene_compiler, scene_store
+        from spectra.services import (room_controls, scene_compiler,
+                                      scene_store, scene_transition_lead)
         from spectra.services.binding_resolver import FireContext
 
         controls = room_controls.load_room_controls()
@@ -1124,26 +1133,22 @@ class TriggerEngine:
         if scene is None:
             return 0
         intensity = self._render_intensity(raw_intensity)
-        crossfade_ms = (scene.entry_ramp_ms or controls.global_transition_ms
-                        or room_controls.scene_transition_ms(controls, intensity))
+        # ONE definition of crossfade/anchor/lead, shared verbatim with the
+        # transition scrubbing-preview (spectra/services/
+        # scene_transition_lead.py — see its docstring for why a preview
+        # that re-derives production's timing is a preview that can lie).
+        # The 0.5-midpoint fallback and the max-across-virtuals rule both
+        # live there now; this function's job is supplying the LIVE inputs.
+        crossfade_ms = scene_transition_lead.crossfade_ms_for(
+            scene, controls, intensity)
         if crossfade_ms <= 0:
             return 0
         resolved = scene_compiler.resolve_scene(scene, FireContext(intensity, rng=self._rng))
         writes = scene_compiler.compile_scene(resolved, color_set=None)
-        virtuals = self._live_virtuals()
-        # Multiple matching switches take the max anchor (legacy's own
-        # rule: the dominant transition lands on the trigger, shorter ones
-        # bloom a hair early). 0.0 (nothing registered on any write) falls
-        # back to the 0.5 midpoint — the one behaviour this build adds on
-        # top of the ported registry itself.
-        anchor = 0.0
-        for w in writes:
-            cur = virtuals.get(w["virtual_id"])
-            cur_type = cur.effect_type if cur is not None else None
-            anchor = max(anchor, transition_phases.anchor_frac(cur_type, w["effect_type"]))
-        if anchor == 0.0:
-            anchor = 0.5
-        return min(round(anchor * crossfade_ms), transition_phases.MAX_LEAD_MS)
+        current_types = {vid: getattr(st, "effect_type", None)
+                         for vid, st in self._live_virtuals().items()}
+        anchor = scene_transition_lead.anchor_frac_for(current_types, writes)
+        return scene_transition_lead.lead_ms_for(anchor, crossfade_ms)
 
     # ── LOOKAHEAD: early scene-pick commitment (his ask, 2026-08-19) ────────
     #
@@ -1294,6 +1299,50 @@ class TriggerEngine:
             return 0
         return band_trigger_offset_ms(scene, a.event_class,
                                       self._render_intensity(a.intensity))
+
+    def _scene_offset_ms(self, trig: SpectraTrigger) -> int:
+        """A fire_scene trigger's SCENE-side authored offset — the
+        SceneV2.trigger_offset_ms of the scene this trigger will actually
+        fire, HIS sign convention (negative = earlier). The scene-transition
+        twin of _default_response_offset_ms above, authored by dragging the
+        TRANSITION scrubbing-preview's marker, and summed with the
+        trigger's own field by tick() exactly the way the flare-kind offset
+        already is.
+
+        ONLY CONSULTED FOR A SCENE THAT IS ALREADY KNOWN — a named
+        scene_id, or a LOOKAHEAD pin that has already committed. This is a
+        deliberate bound, not an oversight: an unresolved pick has no scene
+        to read an offset from until _pin_for draws one, and forcing that
+        draw here (from the much wider RESPONSE_OFFSET_HORIZON_MS gate
+        tick() uses for offset peeks) would commit the pin up to 65s early
+        instead of LOOKAHEAD_HORIZON_MS's 5s — widening the window a pin's
+        validity can drift before it fires, which is the exact risk
+        _pin_still_valid exists to contain. So the pin keeps its own
+        horizon and an offset simply becomes visible once it commits: an
+        authored offset inside that 5s horizon lands normally, one more
+        negative than it degrades to firing at the un-relocated mark —
+        late, never wrong, the same posture _scene_transition_lead_ms's own
+        "no lead rather than a wrong one" rule already takes.
+
+        Force Scene is deliberately NOT peeked here, unlike
+        _scene_transition_lead_ms_for's own redirect peek. A redirect
+        changes WHICH scene's crossfade the LEAD is describing (a timing
+        quality question about a computed number); an offset is HIS
+        AUTHORED alignment for the scene he was looking at, and silently
+        swapping in a pinned override scene's alignment instead would
+        retime his marks for a reason he never authored. A forced scene
+        keeps its own offset only when it is genuinely the trigger's target.
+        """
+        from spectra.services import scene_store
+        a = trig.action
+        scene_id = a.scene_id
+        if scene_id is None:
+            pin = self._pins.get(trig.id)
+            if pin is None:
+                return 0
+            scene_id = pin.scene_id
+        scene = scene_store.get_by_id(scene_id)
+        return getattr(scene, "trigger_offset_ms", 0) if scene is not None else 0
 
     @staticmethod
     def _live_virtuals() -> dict:
