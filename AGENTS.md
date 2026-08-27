@@ -2678,13 +2678,17 @@ promised. `dwell.py` and `_phase_ramp_ms`'s own docstrings both spell out
 why these are genuinely different gaps (not a shared formula that could
 drift) and why predicting the other side isn't attempted — see either.
 
-## SPECTRA flare scrubbing-preview timeline (flares first — charge/lull/drop is next, not built)
+## SPECTRA scrubbing previews — flares, TRANSITIONS and the DROP SEQUENCE
 
 Owner ask 2026-08-20, `data/timeline-preview-scrub-flares-and-drop-
 sequences/HIS-VERBATIM-WORDS.md`, his own sequencing: "start with the
-flares, then we will do lull charge drop" — do NOT extend this to
-charge/lull/drop or scene transitions without a fresh ask; the design
-below is scoped to a single isolated `FlareKind` on purpose.
+flares, then we will do lull charge drop". **The second half is now built
+(2026-08-27, fm/flare-preview-offsets-everywhere, his order: "get it
+finished and tested, then push it to transitions and to the drop
+sequence") — see "THE OTHER TWO PREVIEWS" at the end of this section.**
+The flare design below is still scoped to a single isolated `FlareKind`;
+the other two are separate programs over the SAME hold, never second
+holds.
 
 `ResponseEngine.fire_kind(kind, intensity)` (`spectra/services/
 scene_response.py`) fires ONE declared kind in isolation, bypassing band
@@ -2927,9 +2931,19 @@ shape).
 **His scene-change/trigger-level equivalent, `SpectraTrigger.
 trigger_offset_ms` (`spectra/models/trigger.py`, same field/units/sign),
 is HONOURED too now (2026-08-21, PR fm/scene-changes-honour-trigger-
-offset)** — `trigger_engine.py`'s `tick()` reads it for `fire_scene`
-triggers (fire_response/select_color_set/fire_scene_update still ignore
-it; no authoring UI yet either way). The care here: `tick()` already had
+offset)** — and since 2026-08-27 (fm/flare-preview-offsets-everywhere) on
+EVERY action kind, not just `fire_scene`. A silently-inert field is a
+trap, and an OFFSET has no action-kind-specific meaning to justify one: it
+only RELOCATES the moment, where a LEAD has to know what payoff it aligns
+and how long that payoff takes, so an offset composes with an instant
+apply (`select_color_set`, `fire_scene_update`) exactly as with a
+crossfade. **Where the fired CONTENT also carries an authored offset, the
+two ADD** — `SceneV2.trigger_offset_ms` for `fire_scene`,
+`band_trigger_offset_ms` for `fire_response` — legal because both are
+OFFSET family (same unit, same sign); it is only the oppositely-signed
+LEAD that must never be added to either. An override rule was rejected: it
+would silently discard whichever he authored second. Both default 0, so
+this is provably inert against everything on disk. The care here: `tick()` already had
 a lead-time system (`_lead_ms`, the three-anchor alignment above) whose
 sign is the OPPOSITE of his — there, a POSITIVE lead means fire EARLIER
 (`fire_at = target - lead`); his offset is NEGATIVE for earlier. The two
@@ -3077,6 +3091,94 @@ pre-existing abandonment bound, not this one):
 `tests/test_flare_preview_hold.py` (real headless fixture) +
 `tests/test_flare_preview_api.py` (the `preview_pause` capping, route
 wiring).
+
+**THE OTHER TWO PREVIEWS (2026-08-27, fm/flare-preview-offsets-everywhere;
+`docs/SPECTRA_SPEC.md` §95).** Both live on the Scenes page's Phase
+Choreography tab — the tab that already describes in words exactly what
+they show — and both run on the ONE hold above, never a second one.
+
+- **ONE HOLD, MANY PROGRAMS.** `flare_preview_hold.PreviewProgram` is the
+  seam: a program supplies its held scene, any EXTRA virtuals it may touch
+  (a transition's incoming scene can reach virtuals the outgoing one never
+  does — leave them out of the snapshot and `close()` hands some back and
+  silently keeps the rest), and what each named STEP does.
+  `open_program_hold(program, intensity, step=...)` is the general entry;
+  `open_hold(scene, kind, ...)` is now the thinnest program
+  (`FlareKindProgram`) over it and is unchanged in behaviour. Everything
+  hard — snapshot, deadline, sweep, 3-minute ceiling, restart recovery,
+  both release queues, the 1ms tween-safe revert — stays in one place. A
+  new preview supplies a program; **it never supplies a second hold.**
+  `heartbeat`/`close` moved to `spectra/api/preview.py` (`/api/preview`)
+  with the flare paths as thin aliases: the hold is shared, so its
+  keep-alive is too.
+- **TRANSITIONS** — `spectra/services/transition_preview.py`,
+  `POST /api/preview/transition/{open,fire}`, `TransitionPreviewOverlay.tsx`.
+  A scene transition anchors its MIDDLE (the settled family). The
+  crossfade, the anchor fraction and the lead all come from
+  `spectra/services/scene_transition_lead.py` — a NEW module that
+  `trigger_engine._scene_transition_lead_ms_for` now CALLS, so the preview
+  asks production's own function instead of re-deriving it. **The drag
+  writes `SceneV2.trigger_offset_ms`** (new field, same family/clamp/sign
+  as `FlareKind.trigger_offset_ms`), read on the firing path by
+  `tick()`'s `_scene_offset_ms`. Its one honest bound, recorded rather
+  than discovered: for an UNRESOLVED `fire_scene` pick (100% of his real
+  triggers) the scene isn't known until the LOOKAHEAD pin commits
+  `LOOKAHEAD_HORIZON_MS` (5s) ahead, so an offset inside that window lands
+  and a larger negative one degrades to the un-relocated mark — late,
+  never wrong. Forcing the pin earlier from the wider offset gate was
+  considered and rejected: it would widen the window a pin's validity can
+  drift, the exact risk `_pin_still_valid` exists to contain.
+- **THE DROP SEQUENCE** — `spectra/services/phase_preview.py`,
+  `POST /api/preview/sequence/{open,fire}`, `SequencePreviewOverlay.tsx`.
+  Every ramp is `scene_response._phase_ramp_ms` (the show's own function),
+  so the dynamic stretch to ~90% of the real gap is what the ruler draws,
+  with the remaining ~10% as a separate HANG band — his spec verbatim, and
+  the reason two gap sliders exist: the hang is a thing to SEE, not a
+  number to set. Drop is never stretched and BEGINS on its mark. **Marks
+  are deliberately not draggable** — a band's offset is an aggregate over
+  its attached kinds (`band_trigger_offset_ms`, min over nonzero), so a
+  drag would have to pick one; the per-kind flare preview already authors
+  it and the panel says so. `release_phases()` gained `force=` for the
+  per-lap release (each step runs on a FRESH scratch pair, and a drop arms
+  nothing by production's own rule — exactly when a sequence ends); every
+  production call site keeps the guard.
+- **Server computes every anchor and fire moment**; the frontend schedules
+  against `cues[].at_s` and draws against returned markers.
+  `PreviewRuler.tsx`/`usePreviewLoop.ts` are shared so all three previews
+  draw one instrument. Offline proof of the multi-cue scheduling (formulas
+  extracted VERBATIM, fake clock, no network):
+  `scripts/check_preview_cue_loop.mjs`.
+
+**PROVE EVERY HOLD FROM THE SHOW SIDE, not the preview side.** The
+founding defect of this whole system was a hold that REPORTED itself as
+set — the UI even said "deferred by preview" — while his triggers kept
+firing underneath, because `fire_scene_by_id` never consulted
+`preview_pause`; every test that existed asked the preview side and passed
+throughout. `tests/test_preview_holds_the_show.py` is the standing bar for
+any hold, new ones included: drive the REAL trigger engine over a real
+position feed with a four-action-kind corpus while the hold is open and
+measure THE ENGINE'S output — zero writes at `fx_seam` (the one seam a
+light byte leaves SPECTRA through), zero response surges, and the
+deferrals present and NAMED in `fire_history` (a held room and a broken
+room must not look the same in the log) — then replay the same sweep after
+release to prove the corpus was live. It includes a test that re-creates
+the ungated pre-fix world and proves the harness goes RED on it: a proof
+bar that cannot fail on the defect it was written for is decoration.
+
+**§84's missing instrument is BUILT, offline** —
+`scripts/check_scene_entry_ramp_landing.py` +
+`tests/test_scene_entry_ramp_landing.py`. It runs the whole production
+chain and then WATCHES the ramp with the mechanism the light itself is
+driven by (`Effect._advance_tweens`, one step per rendered frame through
+`fx.headless`'s real pipeline), with song position and wall clock 1:1.
+Measured: the crossfade's midpoint lands +16.7 ms (one frame) of a 4000 ms
+mark, for a named scene AND for the LOOKAHEAD-pinned shape all his real
+triggers have; with the lead disabled it misses by +616.7 ms, exactly half
+the crossfade. Not a room proof and not claimed as one. **Note for anyone
+writing a similar instrument: `dwell` is process-global by design, so each
+observation must reset it the way a song change would — otherwise the
+second fire in one process is legitimately deferred by the first one's
+dwell floor and renders nothing at all.**
 
 ## SPECTRA phone A/V-sync instrument (`/avsync`) — MEASURE the audio/visual offset, don't argue it
 
