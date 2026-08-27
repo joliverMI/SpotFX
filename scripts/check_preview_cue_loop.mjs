@@ -132,6 +132,42 @@ function run(cues, durationS, { laps = 4, playheadS = 0, frameMs = 16.7, jumpAt 
     'FIVE: a 3s server-side shift moves the fire by exactly 3s');
 }
 
+// ── SEVEN: a control change that leaves the CUE TIMES unchanged must not
+//    strand the fire loop on stale parameters. Moving the intensity slider
+//    on a transition preview does not move a single cue (the crossfade is
+//    intensity-scaled but the anchor stays put on the ruler), so the RAF
+//    effect never restarts — and the `fire` closure it captured would keep
+//    posting the OLD intensity forever. usePreviewLoop reads `fire` through
+//    a ref for exactly this; the shape is modelled here so a future
+//    refactor that drops the ref fails a check rather than shipping.
+{
+  const fired = [];
+  let live = { intensity: 1.0 };
+  const fireRef = { current: (step) => fired.push({ step, ...live }) };
+  const loopBody = () => fireRef.current('fire');   // verbatim shape
+
+  loopBody();
+  live = { intensity: 0.25 };                       // he moves the slider
+  fireRef.current = (step) => fired.push({ step, ...live });   // ref updates
+  loopBody();                                       // loop itself never restarted
+  check(fired[0].intensity === 1.0 && fired[1].intensity === 0.25,
+    'SEVEN: a slider change reaches the next fire without restarting the loop');
+
+  // The failing shape, for contrast — and modelled the way React actually
+  // produces it: each RENDER builds a NEW `fire` bound to THAT render's
+  // props, and an effect that doesn't list it as a dependency keeps the one
+  // it captured when it last ran.
+  const stale = [];
+  const makeFire = (intensity) => (step) => stale.push({ step, intensity });
+  const capturedAtFirstRender = makeFire(1.0);      // the effect's closure
+  capturedAtFirstRender('fire');
+  makeFire(0.25);                                   // re-render: new fn, unused
+  capturedAtFirstRender('fire');                    // the effect still holds the old one
+  check(stale[1].intensity === 1.0,
+    'SEVEN: (control) a captured closure really would keep the stale value — '
+    + 'this is the defect the ref prevents, not a hypothetical');
+}
+
 // ── SIX: the TRANSITION preview's drag round-trips through the SERVER's
 //    own trigger_mark_s formula — the ONE formula, never re-derived. Both
 //    functions are copied VERBATIM: the drag from

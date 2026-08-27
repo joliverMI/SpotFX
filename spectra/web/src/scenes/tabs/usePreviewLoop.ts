@@ -74,6 +74,17 @@ export function useCueLoop({ timeline, fire }: {
 
   const durationS = timeline?.duration_s ?? 0;
   const cuesKey = timeline ? JSON.stringify(timeline.cues) : '';
+  // `fire` closes over the CURRENT intensity / gap sliders / scene ids, and
+  // is a fresh function every render — but the RAF effect below must not
+  // list it as a dependency, or every keystroke on a slider would tear down
+  // and reseed the fire schedule (the same reason FlarePreviewOverlay keeps
+  // its own fireParamsRef). Reading it through a ref instead gives the loop
+  // the latest values without restarting it. Without this, a control change
+  // that leaves the cue TIMES unchanged — moving the intensity slider, which
+  // does not move a transition's cues at all — would keep firing at the
+  // stale value captured when the loop last started.
+  const fireRef = useRef(fire);
+  useEffect(() => { fireRef.current = fire; });
 
   // A fresh timeline resets the playhead so the first fire waits for its
   // own mark, exactly like a fresh open — never an immediate catch-up
@@ -114,7 +125,7 @@ export function useCueLoop({ timeline, fire }: {
       for (const cue of timeline.cues) {
         const due = nextFireRef.current[cue.step];
         if (due != null && now >= due) {
-          void fire(cue.step);
+          void fireRef.current(cue.step);
           // Advance by WHOLE laps, so a backgrounded tab that produced one
           // huge frame delta never issues a burst of catch-up fires.
           let next = due;
