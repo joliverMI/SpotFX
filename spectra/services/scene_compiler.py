@@ -250,7 +250,24 @@ def room_active_set() -> Optional[ColorSetCard]:
     group overlay (found missing 2026-08-19: every trigger-driven fire
     goes through this exact fallback, since none of his 22,013 fire_scene
     triggers carry an explicit color_set_id)."""
-    from spectra.services import color_journey, color_set_groups, color_sets
+    from spectra.services import (color_journey, color_set_groups, color_sets,
+                                  force_color)
+    # FORCE COLOUR (owner ask 2026-08-27, spectra/services/force_color.py)
+    # — this terminal fallback is the path 100% of his real fire_scene
+    # triggers actually take (none carry an explicit color_set_id), so a
+    # pin that did not reach here would be invisible on the fires that
+    # matter most. Checked BEFORE the room's own active set: the pin is
+    # what the room wears while it is on.
+    #
+    # Deliberately unlike the disabled/mode gates this function's docstring
+    # refuses above — those are FILTERS that could leave the fallback with
+    # nothing, which is why they belong further up. A pin is a
+    # SUBSTITUTION: it either resolves to a real card or falls through to
+    # exactly today's behaviour, so it can never turn the terminal
+    # fallback into a dead end.
+    forced = force_color.pinned_card()
+    if forced is not None:
+        return forced
     set_id = color_journey.load_room().active_set_id
     if set_id is None:
         return None

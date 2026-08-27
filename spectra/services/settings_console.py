@@ -14,7 +14,11 @@ global transition default, and the scene-change tier. force_scene_* is
 deliberately excluded: it targets a scene by opaque id, which is a poor
 fit for "set this setting to this value" (a picker action, not a voice
 setting) — left for a later, deliberate registry extension, not silently
-included because the field exists.
+included because the field exists. force_color_* (owner ask 2026-08-27,
+spectra/services/force_color.py) is excluded for the IDENTICAL reason and
+by that same precedent — it names a colour SET or GROUP card by opaque id,
+which a spoken instruction cannot produce and a mis-transcription would
+silently mispoint at the wrong palette.
 
 REGISTRY = the declared data. Bounds/choices are NOT re-typed here — they
 are read live off RoomControlState's own pydantic Field(ge=, le=)

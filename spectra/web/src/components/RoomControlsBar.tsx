@@ -38,10 +38,11 @@ import HelpLink from '../help/HelpLink';
 import { useDebouncedApply } from '../lib/useDebouncedApply';
 import {
   useAmbientHueGroups, useEngineStatus, useRoomControls, useSaveRoomControls, useScenes,
+  useSpotColorSets,
 } from '../queries';
 import type {
-  AmbientMode, AmbientResult, DarkLightResult, DisplayMode, ForceSceneResult, RoomControlState,
-  SceneChangeMode,
+  AmbientMode, AmbientResult, DarkLightResult, DisplayMode, ForceColorResult, ForceSceneResult,
+  RoomControlState, SceneChangeMode,
 } from '../types';
 import SearchSelect from './forms/SearchSelect';
 
@@ -162,6 +163,8 @@ export default function RoomControlsBar() {
   const [ambientResult, setAmbientResult] = useState<AmbientResult | null>(null);
   const [darkLightResult, setDarkLightResult] = useState<DarkLightResult | null>(null);
   const [forceSceneResult, setForceSceneResult] = useState<ForceSceneResult | null>(null);
+  const [forceColorResult, setForceColorResult] = useState<ForceColorResult | null>(null);
+  const { data: colorCards } = useSpotColorSets();
   const [hueGroupsResetKey, setHueGroupsResetKey] = useState(0);
   const localRef = useRef<RoomControlState | null>(null);
   const lastOnAmbientModeRef = useRef<AmbientMode>('auto');
@@ -176,6 +179,20 @@ export default function RoomControlsBar() {
     [scenes],
   );
 
+  // FORCE COLOUR's picker (owner ask 2026-08-27) — SETS AND GROUPS in one
+  // list, because the pin genuinely accepts either (a Group pins the pool
+  // and keeps its own rotation live; see spectra/services/force_color.py).
+  // Groups are prefixed rather than split into a second control: this is
+  // the deliberately minimal functional control he asked for ("focus on
+  // fucntion and we will work on UI later"), not the finished shape.
+  const colorTargetOptions = useMemo(
+    () => (colorCards ?? []).map((c) => ({
+      value: c.id,
+      label: `${c.disabled ? '⛔ ' : ''}${c.kind === 'group' ? '▤ ' : ''}${c.name}`,
+    })),
+    [colorCards],
+  );
+
   // Hoisted function declaration (not a `const`) so it's fully defined
   // for every render's closures — including modeApply's callback below,
   // which is created before local's null-check and must never reference
@@ -188,6 +205,7 @@ export default function RoomControlsBar() {
         setAmbientResult(res.ambient_result ?? null);
         setDarkLightResult(res.dark_light_result ?? null);
         setForceSceneResult(res.force_scene_result ?? null);
+        setForceColorResult(res.force_color_result ?? null);
       },
     });
   }
@@ -531,6 +549,80 @@ export default function RoomControlsBar() {
           {SCENE_CHANGE_MODES.find((m) => m.value === local.scene_change_mode)?.label ?? local.scene_change_mode}
         </span>
         {local.force_scene_enabled && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-purple" title="Force Scene is on" />}
+      </TopBarGroupButton>
+
+      {/* FORCE COLOUR (owner ask 2026-08-27) — the deliberately MINIMAL
+        * functional control he asked for: a picker and an on/off, in the
+        * top bar, nothing pretty ("focus on fucntion and we will work on
+        * UI later"). Its own group button rather than a row inside
+        * Scenes: it pins COLOUR, not scenes, and the two pins are
+        * independent (either, both, or neither). */}
+      <TopBarGroupButton
+        className={`scenes-group-btn${local.force_color_enabled ? ' scenes-group-btn-forced' : ''}`}
+        title="Force Colour — pin the room's colour set or group, tap to open"
+        holdToExpand={false}
+        panelTitle="Colour"
+        panel={(
+          <>
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={local.force_color_enabled}
+                  onChange={(e) => commit({ ...local, force_color_enabled: e.target.checked })}
+                />
+                Force Colour
+              </label>
+              <HelpLink topic="force-color" />
+            </div>
+            {local.force_color_enabled && (
+              <div className="top-bar-group-field">
+                <SearchSelect value={local.force_color_target_id ?? ''} options={colorTargetOptions}
+                  width={180} placeholder="— pick colour set —" allowEmpty={false}
+                  onChange={(v) => commit({ ...local, force_color_target_id: v })} />
+              </div>
+            )}
+            {forceColorResult?.status === 'applied' && (
+              <span className="badge badge-gray"
+                title="Applied immediately on this pin — not waiting for the next automatic colour change">
+                applied: {forceColorResult.applied_set_name ?? forceColorResult.target_name}
+                {forceColorResult.target_kind === 'group'
+                  && ` (from ${forceColorResult.target_name})`}
+              </span>
+            )}
+            {forceColorResult?.status === 'applied' && forceColorResult.overrode_disabled && (
+              <span className="badge badge-red"
+                title="This colour set is marked Disabled on the Colours page — the pin still applied it, since you pressed the button, but it won't be picked automatically again while disabled">
+                ⚠ overriding disabled colour set
+              </span>
+            )}
+            {forceColorResult?.status === 'skipped' && (
+              <span className="badge badge-red" title="Force Colour did not apply — nothing changed">
+                not applied: {forceColorResult.reason}
+              </span>
+            )}
+            {forceColorResult?.status === 'error' && (
+              <span className="badge badge-red" title={forceColorResult.reason}>
+                apply failed: {forceColorResult.reason}
+              </span>
+            )}
+            {local.force_color_enabled && local.active_gradient_id && (
+              <span className="badge badge-gray"
+                title="Force Colour outranks an active drift gradient while it's on — the gradient is untouched and resumes the moment you release the pin">
+                gradient paused by the pin
+              </span>
+            )}
+          </>
+        )}
+      >
+        <span className="top-bar-group-btn-label">Colour</span>
+        <span className="top-bar-group-btn-value">
+          {local.force_color_enabled
+            ? (colorTargetOptions.find((o) => o.value === local.force_color_target_id)?.label
+               ?? 'none picked')
+            : 'free'}
+        </span>
+        {local.force_color_enabled && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-purple" title="Force Colour is on" />}
       </TopBarGroupButton>
 
       <DriftGradientBar />

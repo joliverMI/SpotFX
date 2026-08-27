@@ -19,6 +19,11 @@ in the editor).
                                A Disabled card still applies here (explicit
                                human action) but the response says so:
                                overrode_disabled=true.
+                               Likewise while FORCE COLOUR is pinning the
+                               room's colour: the apply still lands (an
+                               explicit press wins) but the response says
+                               overrode_force_color=<pinned id>, and the
+                               pin reasserts on the next automatic change.
 """
 from __future__ import annotations
 
@@ -56,6 +61,17 @@ async def apply_room_color(body: ApplySetRequest):
     if (getattr(referenced, "disabled", False)
             or getattr(card, "disabled", False)):
         result["overrode_disabled"] = True
+    # FORCE COLOUR (owner ask 2026-08-27, spectra/services/force_color.py):
+    # an explicit human apply still works while a colour pin is on — this
+    # is a button he just pressed, and the pin gates AUTOMATIC choices, not
+    # him. But it IS a contradiction (the pin will reassert on the very
+    # next automatic colour change, and this apply does not clear it), so
+    # it is NAMED, never silently applied under a pin he may have
+    # forgotten is on. Same discipline as overrode_disabled above.
+    from spectra.services import force_color
+    forced_id = force_color.pinned_id()
+    if forced_id is not None:
+        result["overrode_force_color"] = forced_id
     return result
 
 

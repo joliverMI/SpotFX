@@ -790,6 +790,22 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Pinning a scene you\'ve marked Disabled (see "Disable" on the Scenes page) still fires it — you pressed the button, you mean it — but the badge adds a second line, "⚠ overriding disabled scene," so the contradiction is visible instead of silent.',
         ],
       },
+      {
+        id: 'force-color',
+        title: 'Force Colour — hold one colour set',
+        keywords: 'force colour color set group pin lock hold stay same palette stop changing freeze rotation gradient drift journey',
+        body: [
+          'The "Colour" button in the top bar. Force Scene\'s twin one axis over: that one pins WHICH SCENE plays, this pins WHICH COLOURS it wears. They are independent — turn on either, both, or neither.',
+          'Turning it on (or picking a different colour set while it\'s already on) applies those colours to the room IMMEDIATELY — you don\'t wait for the next scene change or flare. From then on it holds: every colour the room would otherwise pick for itself wears the pinned one instead. That covers a scene fire\'s colours, the sequencer\'s own colour roll, a flare\'s colour jump, and a trigger that selects a colour set. The slow colour drift around the wheel stops walking too, and stays where the pin put it.',
+          'Pinning a SET holds exactly those colours, every time. Pinning a GROUP holds the POOL, not one member — the group keeps rotating through its own members on each colour change, exactly as it does normally. That is what a group is; if you want one fixed palette, pin a set.',
+          'It beats the drift Gradient while it is on. The gradient isn\'t changed or cleared — a badge says "gradient paused by the pin", and it picks up again on its own the moment you turn the pin off.',
+          'Ambient is unaffected either way: a Hue light being held at the ambient colour is driven straight from the bridge, so a colour pin neither reaches it while it is held nor is blocked by it once it isn\'t.',
+          'Your own explicit actions still work — applying a set from the Colours page, or its ▶ Preview. They land as normal, but the response names the contradiction ("overrode force colour") and does NOT clear the pin, so the pinned colours come back on the next automatic change.',
+          'If nothing happens, look for the badge under the picker — it always says why: "applied" names the set that just landed (and, for a group, which member it rolled); "not applied" means nothing was pinned yet, the pinned card no longer exists, or a pinned group has no usable member left (every one of them disabled).',
+          'Pinning a colour set you\'ve marked Disabled still applies it — you pressed the button, you mean it — but the badge adds "⚠ overriding disabled colour set", the same way Force Scene names a disabled scene.',
+          'Turn it off to let the room choose freely again — nothing about the colour set you were holding is changed; the room simply keeps the colours it is wearing and picks normally from the next change onward.',
+        ],
+      },
     ],
   },
   {

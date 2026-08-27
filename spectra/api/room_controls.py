@@ -24,6 +24,16 @@ fire_scene_by_id, AND (2026-08-18) fire the pinned scene immediately on
 the edit that pins/repins it (room_controls.reconcile_force_scene_if_changed)
 — see that function's own docstring for why the redirect alone isn't
 enough. Folded into the response as `force_scene_result`.
+
+force_color_enabled/force_color_target_id — FORCE COLOUR (owner ask
+2026-08-27), Force Scene's twin one axis over: the room's colour stops
+changing and stays on the pinned colour SET or GROUP. Same active half for
+the same reason — every gate it installs is a redirect on a choice
+something else was about to make, so enabling/repinning applies the pinned
+colours immediately (room_controls.reconcile_force_color_if_changed) rather
+than waiting for an occasion that may never come. Folded into the response
+as `force_color_result`. See spectra/services/force_color.py's module
+docstring for the gates and the precedence rulings.
 ambient_hue_group_ids — WHICH Hue entertainment areas Ambient reaches
 (services/ambient.py, "Hue entertainment-area selection"); [] = every
 live Hue device (today's unmodified default).
@@ -67,4 +77,7 @@ async def put_room_controls(state: RoomControlState):
     force_scene_result = await room_controls.reconcile_force_scene_if_changed(previous, state)
     if force_scene_result is not None:
         response["force_scene_result"] = force_scene_result
+    force_color_result = await room_controls.reconcile_force_color_if_changed(previous, state)
+    if force_color_result is not None:
+        response["force_color_result"] = force_color_result
     return response
