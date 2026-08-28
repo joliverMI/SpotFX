@@ -8,7 +8,11 @@ controls, the four things the window has to be true about.
      frames master renders — not approximately, bit for bit. Master's own
      `fx/effects/fish.py` is read straight out of git and loaded as a second
      effect, so this compares against the real predecessor rather than
-     against this file with a term switched off.
+     against this file with a term switched off. NOTE: an inert-at-zero
+     identity claim must compare against the predecessor's own module from
+     git at a PINNED merge-base commit, never a moving ref (post-merge
+     `master` IS the camera code, which false-alarms at its own default)
+     and never this file with the term switched off.
   2  THE POINT OF THE FEATURE, measured and reported honestly. The charge
      ALREADY streamed the water past on master — its clamp subtracted the
      school's whole velocity from every fish, which is a window locked
@@ -28,6 +32,7 @@ state (jiggle 0.5, roam_scale 0.75, particle_count over its intensity-bound
 1-8 range).
 
     .venv/bin/python scripts/check_fish_camera.py
+    .venv/bin/python scripts/check_fish_camera.py --baseline <git-ref>
 """
 from __future__ import annotations
 
@@ -46,6 +51,15 @@ from fx import headless  # noqa: E402
 from fx.effects import fish as FX  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
+
+# The PRE-CAMERA BASELINE: the last commit before `camera_follow` existed
+# ("Fish: mutual collision avoidance, and a beat that actually lunges").
+# Pinned deliberately. A moving ref like `master` named the true predecessor
+# only while this lived on a feature branch; once the camera merged, `master`
+# IS the camera code and its instance runs at its own schema default
+# camera_follow=0.8 against the knob-0 run, so section 1 false-alarms on
+# every run. Override with --baseline <ref> only to reproduce that.
+BASELINE_REF = "c1f32a0143fc1f127528b81c37c1baec2ebf02c3"
 DT = 1.0 / 60.0
 ROWS, COLS = 37, 72
 
@@ -109,21 +123,23 @@ async def close(r):
 
 
 # ── 1. byte-identity against the real master module ─────────────────────
-def load_master_effect(name="fish_master"):
-    """Load master's own fish.py as a SECOND registered effect.
+def load_master_effect(name="fish_master", ref=None):
+    """Load the pre-camera baseline's fish.py as a SECOND registered effect.
 
     An Effect subclass registers itself under its module's last name
     segment, so importing master's file under a different module name puts
     it in the registry beside the current one and `create(type=...)` reaches
-    it. Returns the registry key, or None if git cannot produce master.
+    it. Returns the registry key, or None if git cannot produce the ref
+    (a STATED skip — never a silent pass).
     """
+    ref = ref or BASELINE_REF
     try:
         src = subprocess.run(
-            ["git", "show", "master:fx/effects/fish.py"],
+            ["git", "show", f"{ref}:fx/effects/fish.py"],
             cwd=REPO, capture_output=True, text=True, check=True,
         ).stdout
     except Exception as exc:                       # noqa: BLE001
-        print(f"  (skipped: cannot read master's fish.py — {exc})")
+        print(f"  (skipped: cannot read {ref}:fx/effects/fish.py — {exc})")
         return None
     path = Path(tempfile.mkdtemp()) / f"{name}.py"
     path.write_text(src)
@@ -162,9 +178,10 @@ SCRIPT = [
 ]
 
 
-def section_one():
-    print("\n1  BYTE-IDENTITY  camera_follow=0 vs master's own module")
-    master = load_master_effect()
+def section_one(ref=None):
+    ref = ref or BASELINE_REF
+    print(f"\n1  BYTE-IDENTITY  camera_follow=0 vs baseline {ref[:12]}")
+    master = load_master_effect(ref=ref)
     if master is None:
         return
     for seed in (3, 5, 11, 17):
@@ -355,8 +372,11 @@ def section_five():
 
 
 if __name__ == "__main__":
+    _baseline = BASELINE_REF
+    if "--baseline" in sys.argv:
+        _baseline = sys.argv[sys.argv.index("--baseline") + 1]
     print("FISH CAMERA WINDOW — measured, offline, against his own state")
-    section_one()
+    section_one(_baseline)
     section_two()
     section_three()
     section_four()
