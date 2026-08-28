@@ -25,6 +25,7 @@ import { useToast } from '../components/Toast';
 import { apiGet, apiPost } from '../api/client';
 import { AvSyncClient, PhoneCapture, secureContextProblem, type Capabilities, type ServerMessage } from './capture';
 import ApplyOffsetDialog from './ApplyOffsetDialog';
+import DeviceEqualization from './DeviceEqualization';
 
 type LagDict = { ok: boolean; lag_ms: number | null; sigma_ms: number | null; peak_ratio: number;
   ambiguity: number; overlap_s: number; reason: string; subwindow_lags_ms: number[] };
@@ -195,8 +196,12 @@ export default function AvSyncPage() {
     setPhase('live');
   }, [problem, handleMessage, pushError]);
 
-  const measure = (mode: 'pattern' | 'show') => {
-    clientRef.current?.send({ type: 'measure', mode, duration_s: PATTERN_DURATION_S });
+  const measure = (mode: 'pattern' | 'show', deviceId?: string) => {
+    // A device_id narrows the flash to the virtuals that ONE device backs —
+    // everything else keeps playing the show. The measurement itself is
+    // identical, which is what makes two per-device runs comparable.
+    clientRef.current?.send({ type: 'measure', mode, duration_s: PATTERN_DURATION_S,
+                              ...(deviceId ? { device_id: deviceId } : {}) });
   };
   const stopMeasure = () => clientRef.current?.send({ type: 'stop' });
 
@@ -316,6 +321,11 @@ export default function AvSyncPage() {
         {measuring === 'pattern' && <div className="badge badge-amber" style={{ marginTop: 8 }}>flashing… keep the phone still{patternEdges !== null ? ` (${patternEdges} edges)` : ''}</div>}
         {measuring === 'show' && <div className="badge badge-amber" style={{ marginTop: 8 }}>listening to the show…</div>}
       </div>
+
+      <DeviceEqualization
+        canMeasure={phase === 'live' && connected}
+        measuring={measuring}
+        onMeasure={(deviceId) => measure('pattern', deviceId)} />
 
       {/* The number */}
       <div className="card">

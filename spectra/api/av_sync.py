@@ -4,7 +4,10 @@ statement; spectra/web/src/avsync/ is the phone page).
 
   WS   /api/av-sync/ws             the phone's session. Phone → server:
                                    hello / pong / audio / video / frame /
-                                   measure {mode, duration_s} / stop.
+                                   measure {mode, duration_s, device_id?} /
+                                   stop. `device_id` narrows a pattern run
+                                   to the virtuals ONE device backs — the
+                                   per-device latency mode.
                                    Server → phone: welcome / hello_ack /
                                    ping / estimate / measure_started /
                                    measure_done / config / error.
@@ -18,6 +21,14 @@ statement; spectra/web/src/avsync/ is the phone page).
   GET  /api/av-sync/frame/latest   newest tapped frame as image/jpeg
                                    (404 when the tap is off / empty)
   GET  /api/av-sync/frame/meta     its timestamps/size, no pixels
+  GET  /api/av-sync/device-proposal the PER-DEVICE equalization: what each
+                                   device measured on its own, and the
+                                   per-device timing offsets that would
+                                   make them land together (slowest device
+                                   = reference, so every proposal is a
+                                   wait). READ-ONLY — applying is his
+                                   press, per device, through
+                                   PUT /api/devices/{id}/timing.
   GET  /api/av-sync/apply-proposal what his Apply press would write:
                                    the live estimate (or the newest stored
                                    run) translated into the room's
@@ -98,6 +109,41 @@ async def get_apply_proposal():
     body["two_runs_note"] = av_sync_lead.TWO_RUNS_NOTE
     body["lead_min_ms"] = av_sync_lead.LEAD_MIN_MS
     body["lead_max_ms"] = av_sync_lead.LEAD_MAX_MS
+    return body
+
+
+@router.get("/av-sync/device-proposal")
+async def get_device_proposal():
+    """The PER-DEVICE equalization, computed SERVER-SIDE so the sign
+    translation has exactly one implementation (the page renders this and
+    never re-derives it — the flare-preview trigger_mark_s precedent).
+
+    Reads the stored per-device measurements and the offsets currently
+    authored, and returns each device's measured offset, its intrinsic
+    arrival with today's delay subtracted back out, and the offset that
+    would line it up with the slowest device. Read-only: nothing is
+    written here, and nothing is written anywhere without his press.
+    `after_note` states, in words, that the global shift equalizing
+    introduces is absorbed by the existing room re-measure + apply loop.
+
+    Devices are named as well as identified: a proposal a human reads
+    should say "Hue Lounge", not an opaque id."""
+    from spectra.services import device_console, device_equalization, device_settings
+
+    offsets = {did: rec.timing_offset_ms
+               for did, rec in device_settings.load_all().items()}
+    prop = device_equalization.proposal(sessions.load_measurements(), offsets)
+    body = prop.as_dict()
+    try:
+        listing = await device_console.list_devices()
+        names = {d["id"]: d["name"] for d in listing.get("devices") or []}
+    except Exception:
+        names = {}
+    for row in body["proposals"]:
+        row["device_name"] = names.get(row["device_id"], row["device_id"])
+    for row in body["measured"]:
+        row["device_name"] = names.get(row["device_id"], row["device_id"])
+    body["offset_limit_ms"] = device_equalization.OFFSET_LIMIT_MS
     return body
 
 

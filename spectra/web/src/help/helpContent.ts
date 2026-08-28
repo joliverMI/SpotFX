@@ -1468,6 +1468,20 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'av-sync-per-device',
+        title: 'Per-device — lining the fixtures up with each other',
+        keywords: 'per device latency hue wled strip slower faster equalize equalise timing offset difference reference slowest measure one device apply',
+        body: [
+          'Different fixtures reach the light at different times — a Hue bulb over the bridge, a WLED over wifi, a strip on the desk. This panel measures each one on its own and then tells you what would make them land together.',
+          'MEASURING ONE DEVICE: press "⚡ Measure <name>" and only that device flashes; everything else keeps playing the show. Point the phone at that fixture and keep still, exactly as for a whole-room run. Do the same for each device you care about. Repeat runs on the same device are welcome — the panel takes the middle value and shows you how much they scattered.',
+          'WHY THE DIFFERENCE IS THE REAL ANSWER: every run measures (this light\'s lag) minus (the sound\'s lag), and the sound\'s lag is the same in every run — the same microphone, the same speakers, the same audio path. Subtract one device\'s run from another\'s and all of that cancels, along with the camera and phone uncertainties the two runs share. So the DIFFERENCES between devices are much tighter than any single absolute figure, and they are all the equalization needs.',
+          'THE PROPOSAL: the SLOWEST device — the one whose light arrives latest — sets the pace and is left alone; every other device is asked to WAIT for it. That is not a preference, it is the only physically possible direction: nothing can send a frame to a light before the picture has been drawn. So every proposed offset is zero or positive (later), never negative.',
+          'APPLYING is one press per device, and nothing is written until you press it. The proposal already accounts for offsets you applied earlier — a measurement is taken with those delays in the light path, so they are subtracted back out. That means re-measuring after applying proposes keeping what you set, not doubling it.',
+          'AFTERWARDS THE WHOLE ROOM SITS LATER, by exactly the spread you closed — that is what holding the fast fixtures back does. That global shift is not this panel\'s job: go back to the whole-room measurement, run it again, and apply the room A/V sync lead. Per-device offsets line the fixtures up with each other; the room lead puts the agreed-on room where the music is.',
+          'A NOTE ON EXPECTATIONS: whether the Hue lights really are slower than the WLEDs is exactly what this measures. Nothing in it assumes anything about device types — the ordering comes out of the numbers.',
+        ],
+      },
+      {
         id: 'av-sync-frame-tap',
         title: 'Frame tap — the hook for the future camera work (not built)',
         keywords: 'aruco tags led mapping vision frames jpeg seam hook future calibration patterns',

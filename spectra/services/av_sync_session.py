@@ -412,6 +412,7 @@ class Session:
         self.clockmap = ClockMap()
         self.hello: dict = {}
         self.mode: Optional[str] = None           # "pattern" | "show"
+        self.device_id: Optional[str] = None      # set while a PER-DEVICE run is live
         self.light_ref: PatternReference | ShowReference | None = None
         self.frames = FrameRing()
         self.audio_probe: deque[tuple[float, float]] = deque()       # (t_server, dB)
@@ -509,7 +510,9 @@ class Session:
             self._ingest_frame(msg)
         elif kind == "measure":
             await self.start_measure(mode=str(msg.get("mode") or "pattern"),
-                                    duration_s=float(msg.get("duration_s") or 0) or None)
+                                    duration_s=float(msg.get("duration_s") or 0) or None,
+                                    device_id=(str(msg["device_id"])
+                                               if msg.get("device_id") else None))
         elif kind == "stop":
             await self.stop_measure()
         else:
@@ -574,9 +577,22 @@ class Session:
         return float(lat) if isinstance(lat, (int, float)) and 0 <= lat < 1.0 else 0.0
 
     # ── measuring ─────────────────────────────────────────────────────────
-    async def start_measure(self, *, mode: str = "pattern", duration_s: float | None = None) -> None:
+    async def start_measure(self, *, mode: str = "pattern", duration_s: float | None = None,
+                            device_id: str | None = None) -> None:
+        """`device_id` narrows a PATTERN run to the virtuals one device
+        backs — the per-device latency mode. Everything else about the
+        measurement is unchanged, which is the point: the audio side, the
+        correlator and the confidence statement are identical, so two
+        per-device runs are directly comparable and their DIFFERENCE is the
+        relative latency (the shared audio path cancels)."""
         if mode not in ("pattern", "show"):
             await self.send({"type": "error", "message": f"unknown mode {mode!r}"})
+            return
+        if device_id and mode != "pattern":
+            await self.send({"type": "error",
+                             "message": "a per-device measurement needs the flash "
+                                        "pattern — passive mode watches the whole "
+                                        "show, so it cannot isolate one device"})
             return
         if not self._audio_ref_started:
             self._audio_ref_started = self.audio_ref.start()
@@ -586,12 +602,14 @@ class Session:
                 return
             try:
                 run = await self.pattern.start(
-                    duration_s=duration_s or 12.0, on_done=self._pattern_done)
+                    duration_s=duration_s or 12.0, device_id=device_id,
+                    on_done=self._pattern_done)
             except Exception as exc:
                 await self.send({"type": "error", "message": f"pattern refused: {exc}"})
                 return
             self.light_ref = PatternReference(run, self._clock)
             self.mode = "pattern"
+            self.device_id = device_id
             await self.send({"type": "measure_started", "mode": mode, **run.as_dict()})
         else:
             self.light_ref = ShowReference(self._show_writes, self._clock)
@@ -617,6 +635,7 @@ class Session:
         self.last_estimate = est
         record = self._record(est, final=True)
         self.mode = None
+        self.device_id = None
         try:
             await self.send({"type": "measure_done", "mode": "pattern", "aborted": run.aborted,
                              "estimate": est.as_dict(), "measurement": record})
@@ -766,6 +785,7 @@ class Session:
             "session_id": self.id,
             "at_iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "mode": self.mode,
+            "device_id": self.device_id,
             "final": final,
             "ok": est.ok,
             "av_offset_ms": est.as_dict()["av_offset_ms"],
@@ -790,7 +810,8 @@ class Session:
 
     def status(self) -> dict:
         return {
-            "session_id": self.id, "mode": self.mode, "closed": self.closed,
+            "session_id": self.id, "mode": self.mode, "device_id": self.device_id,
+            "closed": self.closed,
             "clock": self.clockmap.as_dict(), "counts": dict(self.counts),
             "audio_ref": self.audio_ref.stats(),
             "light_ref": self.light_ref.describe() if self.light_ref else None,

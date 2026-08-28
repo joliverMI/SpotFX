@@ -3335,6 +3335,26 @@ Groupings are the shared category registry, which maps a CATEGORY to
 VIRTUAL ids, so a device's grouping is its virtuals' membership; a category
 is never invented from a typed name.
 
+**Measuring it: `/avsync`'s PER-DEVICE mode** (`av_sync_pattern.
+PatternDriver.start(device_id=...)` narrows the flash to the virtuals ONE
+device backs and leaves every other virtual playing the show — the
+"later per-category selector" that module's docstring always flagged).
+`spectra/services/device_equalization.py` turns a set of those runs into
+proposed offsets and is the binding statement: the shared audio path
+cancels in the BETWEEN-DEVICE differences, so those are the answer; the
+SLOWEST device is the reference, so every proposal is a WAIT (>= 0,
+positive = later) and nothing is asked to fire before its frame exists;
+and **today's applied delay is subtracted back out of each measurement**
+(`intrinsic = av_offset - applied_delay`) — the per-device analogue of the
+room lead's add-don't-assign rule, without which every re-measure would
+chase its own tail. It NEVER writes: `GET /api/av-sync/device-proposal` is
+read-only and applying is his press per device through
+`PUT /api/devices/{id}/timing`. Equalizing moves the whole room later by
+the spread; that global shift is absorbed by the EXISTING room
+re-measure + apply loop, and every result says so (`after_note`). His
+Hue-slower-than-WLED belief is a hypothesis this measures — nothing in the
+arithmetic knows a device's type.
+
 **`storage/device_categories.json` IS NOT UNDER `SPECTRA_STORAGE`** —
 `fx.device_model.CATEGORIES_FILE` is a fixed repo-relative path, so
 `SPECTRA_STORAGE_DIR` does NOT repoint it. An isolated instance run for a

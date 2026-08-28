@@ -42,11 +42,20 @@ recorded is the midpoint of [before the write call, after it returned];
 the half-width is kept per edge (`write_half_width_s`) and folded into
 the confidence statement as the write-landing uncertainty.
 
-Which virtuals: every virtual fx_seam.get_virtuals() reports ACTIVE with
-an effect — the phone only measures what its camera can see, so flashing
-the whole room and letting him AIM is the feature (point at the crystal,
-point at the sconces). A later per-category selector is a one-line
-filter here if he asks.
+Which virtuals: by default every virtual fx_seam.get_virtuals() reports
+ACTIVE with an effect — the phone only measures what its camera can see,
+so flashing the whole room and letting him AIM is the feature (point at
+the crystal, point at the sconces).
+
+PER-DEVICE TARGETING (2026-08-28, the per-device latency measurement): a
+run can be narrowed to ONE device with `device_id=` — the driver resolves
+it to the virtuals whose segments name that device and flashes only
+those, with every other virtual left ALONE (not snapshotted, not written,
+not reverted; it keeps playing the show). That makes a run measure one
+fixture's own path, and the DIFFERENCE between two devices' runs is their
+relative latency, because the whole shared audio path cancels in the
+subtraction. This is the "later per-category selector" the original note
+called a one-line filter here — taken.
 """
 from __future__ import annotations
 
@@ -80,6 +89,7 @@ class PatternRun:
     started_at: float                     # server monotonic, first write
     duration_s: float
     virtual_ids: list[str]
+    device_id: Optional[str] = None       # set when this run flashed ONE device
     edges: list[tuple[float, int]] = field(default_factory=list)   # (t_server, state)
     write_half_width_s: list[float] = field(default_factory=list)
     finished_at: Optional[float] = None
@@ -93,6 +103,7 @@ class PatternRun:
         return {
             "seed": self.seed, "started_at": self.started_at,
             "duration_s": self.duration_s, "virtual_ids": list(self.virtual_ids),
+            "device_id": self.device_id,
             "edge_count": len(self.edges), "done": self.done, "aborted": self.aborted,
             "max_write_half_width_ms": (round(max(self.write_half_width_s) * 1000, 1)
                                         if self.write_half_width_s else None),
@@ -147,8 +158,13 @@ class PatternDriver:
 
     # ── start / stop ──────────────────────────────────────────────────────
     async def start(self, *, duration_s: float = DEFAULT_DURATION_S, seed: int | None = None,
+                    device_id: str | None = None,
                     on_edge: Callable[[float, int], None] | None = None,
                     on_done: Callable[[PatternRun], None] | None = None) -> PatternRun:
+        """Flash the room, or — with device_id — only the virtuals that one
+        device backs. A narrowed run touches nothing else: the snapshot,
+        the writes and the revert all cover exactly the virtuals in scope,
+        so the rest of the room keeps playing the show."""
         duration_s = float(min(max(1.0, duration_s), MAX_DURATION_S))
         seed = int(seed if seed is not None else (time.time_ns() % (2 ** 31)))
         # a live run is cancelled OUTSIDE the lock: its own finally block
@@ -160,15 +176,27 @@ class PatternDriver:
             if self._snapshot is not None:
                 await self._revert_locked("restart")
             live = await self._virtuals()
+            in_scope: Optional[set[str]] = None
+            if device_id is not None:
+                in_scope = set(await virtuals_for_device(device_id))
+                if not in_scope:
+                    raise RuntimeError(
+                        f"device {device_id!r} has no virtual rendering onto "
+                        f"it — nothing to flash")
             snapshot: dict[str, dict] = {}
             for vid, v in (live or {}).items():
+                if in_scope is not None and vid not in in_scope:
+                    continue
                 eff = (v or {}).get("effect") or {}
                 if not (v or {}).get("active", True) or not eff.get("type"):
                     continue
                 snapshot[vid] = {"type": eff["type"], "config": dict(eff.get("config") or {})}
             if not snapshot:
-                raise RuntimeError("no active virtual with an effect to flash — "
-                                   "is SPECTRA driving the room?")
+                raise RuntimeError(
+                    (f"device {device_id!r} is not rendering anything right "
+                     f"now — nothing to flash") if device_id is not None else
+                    "no active virtual with an effect to flash — "
+                    "is SPECTRA driving the room?")
             self._snapshot = snapshot
             _save_snapshot(snapshot)
             from spectra.services import preview_pause
@@ -176,7 +204,7 @@ class PatternDriver:
             self._on_edge = on_edge
             self._on_done = on_done
             self._run = PatternRun(seed=seed, started_at=self._clock(), duration_s=duration_s,
-                                   virtual_ids=sorted(snapshot))
+                                   virtual_ids=sorted(snapshot), device_id=device_id)
             self._task = asyncio.create_task(self._drive(self._run),
                                              name="spectra-av-sync-pattern")
             return self._run
@@ -271,6 +299,21 @@ class PatternDriver:
         except Exception:
             logger.exception("av_sync pattern: revert (%s) failed for %s", reason, sorted(snap))
         logger.info("av_sync pattern: reverted %d virtual(s) (%s)", len(snap), reason)
+
+
+# ── device -> virtuals (the per-device targeting) ─────────────────────────
+
+async def virtuals_for_device(device_id: str) -> list[str]:
+    """The virtual ids whose segments name this device — resolved through
+    the device console so there is ONE definition of that mapping (the same
+    one the device page shows), and so it answers with the room up or
+    down."""
+    from spectra.services import device_console
+    listing = await device_console.list_devices()
+    for entry in listing.get("devices") or []:
+        if entry.get("id") == device_id:
+            return list(entry.get("virtuals") or [])
+    return []
 
 
 # ── snapshot persistence (restart safety) ─────────────────────────────────
