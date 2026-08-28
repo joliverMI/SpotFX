@@ -3837,9 +3837,10 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    `base_speed` → swim speed, decoupled from the turn radius) — the registry
    `note` on each says so; read it before assuming Orbits semantics.
 2. **The population-cap bypass is scoped to two moments**, by his own
-   decision: the charge's school and the lull's rush, via `p_nocap`. A
-   cap-exempt fish never survives the moment it was granted for, and
-   ordinary swimming always obeys `particle_count`. Don't widen this.
+   decision: the charge's school and the DROP's rush, via `p_nocap` (the
+   rush was the lull's until 2026-08-28 — see 6 below). A cap-exempt fish
+   never survives the moment it was granted for, and ordinary swimming
+   always obeys `particle_count`. Don't widen this.
 3. **Mutual avoidance is STEERING ONLY** (`avoid_strength`, 2026-08-28 —
    his own 2026-08-25 deferral un-parked). It adds one more weighted term
    to the desired-heading sum and is bounded by the SAME turn-rate clamp as
@@ -3897,10 +3898,54 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    there is the shoal moving, not the water starting to):
    `scripts/check_fish_camera.py`.
 
+6. **THE WAKE, THE CHARGE'S SPREAD AND THE LULL CLOCK were all replaced
+   2026-08-28** (`fm/fish-ripples-charge-lull-rework`), on his word. Do not
+   restore any of the three out of loyalty to what was there before.
+   * **The wake is Orbits' trail, plus expansion.** One persistent
+     accumulation buffer (`self.wake`) decayed exponentially AND diffused
+     outward every frame; deposits are soft FILLED splats at the tail, laid
+     every frame through the same `_splat_many` each body segment uses.
+     There is no ripple ring buffer, no radius, no outline — his objection
+     was the visible circle line. Energy still rides speed x flap, never a
+     beat value. It is SCREEN space but WORLD anchored: rolled each frame
+     by exactly the displacement the world->screen mapping moved, with the
+     sub-pixel remainder carried; what rolls off an edge is dropped, never
+     wrapped. **Its colour rule is stated in the module and read off the
+     RESOLVED gradient curve, never the config string** — a real gradient
+     gives the wake a different colour (`WAKE_GRAD_OFFSET`, a half turn); a
+     solid palette gives it substantially less brightness
+     (`WAKE_SOLID_DIM`). Measured proof: `scripts/check_fish_wake.py`.
+   * **The charge spreads.** An even (low-discrepancy) spawn plus an
+     omnidirectional separation steer (`SCHOOL_SPACING_W`), weighted well
+     under `SCHOOL_W` so the shared heading still governs the unison
+     arrival. `avoid_strength`'s forward-arc dodge is still OFF in a
+     school; these are different terms. Before/after against the merge-base:
+     `scripts/check_fish_charge_spread.py`.
+   * **The lull is a CLOCK in thirds of its own (dynamic) duration**: every
+     fish gone by 1/3 — no lone fish, no survivor, with a hard backstop, not
+     just a schedule; ripples only to 2/3; fully dark after (the wake is
+     RAMPED to zero, because a half-life never reaches it). The window eases
+     home once there is nothing left to follow. **The lull's rush MOVED INTO
+     THE DROP** (his addendum): it rushes in at the drop instant, swirls for
+     the drop's duration (`RUSH_SWIRL_W`), and `particle_count` of them stay
+     behind — read ONCE at the settle, after which the ordinary
+     intensity-driven count owns the population again through the normal
+     entry/exit paths (`_settle_rush`'s docstring is the binding statement).
+     With `rush_count` at 0 the drop is exactly what it was.
+   * **`scripts/check_fish_camera.py::BASELINE_REF` moved forward** to that
+     PR's merge-base, because the old "camera_follow=0 IS the pre-camera
+     commit, bit for bit" claim needs a reference differing ONLY by the
+     camera, and the wake changes the render at knob zero. What it asserts
+     now: the window origin is EXACTLY zero at knob 0 across the whole arc,
+     and ordinary swimming with the wake off is byte-identical to the
+     merge-base. If you change ordinary swimming, that second one goes red —
+     which is the point.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
-`scripts/check_fish_camera.py`, `tests/test_fish.py`,
+`scripts/check_fish_camera.py`, `scripts/check_fish_wake.py`,
+`scripts/check_fish_charge_spread.py`, `tests/test_fish.py`,
 `tests/test_fish_camera.py`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked

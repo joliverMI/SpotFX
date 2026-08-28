@@ -349,6 +349,11 @@ def observe(cf, seed, phase, seconds, beats=None, count=3, settle=4.0,
 
 
 def section_two():
+    print("\n   NOTE: under his 2026-08-28 lull clock every fish is gone by "
+          "the lull's\n   first third, so a lull has no school to follow and "
+          "its rows read zero.\n   That is the feature, not a dead "
+          "instrument — the window's lull job is\n   now to ease home "
+          "(scripts/check_fish.py section 6 measures that).")
     print("\n2  WHAT MOVES  (px over the phase; his state, seed 5, 3 fish)")
     for phase, secs, beats in (("charge", 4.0, 12), ("lull", 3.5, None)):
         print(f"\n   {phase.upper()}  ({secs:.1f}s)")

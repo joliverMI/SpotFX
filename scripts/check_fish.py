@@ -23,13 +23,19 @@ silenced), never a re-derivation of the effect's own arithmetic:
      changing directions on every beat, minimum 400ms in unison. Fish in
      school should move almost identically, but should have some minor
      variation."
-  6. LULL: "Fish start dispersing until the center one is all alone,
+  6. LULL (his 2026-08-28 ruling, REPLACING the lone-fish version): every
+     fish is gone by 1/3 of the lull, ripples only to 2/3, dark after that
+     until the drop. The rush moved into the DROP — see section 7.
+     SUPERSEDED: "Fish start dispersing until the center one is all alone,
      swimming but staying in center of view by half way through the lull.
      A rush of fish come in ... up to 20 and zoom past ... It should last
      a second and there should be some chaos to the zooming pool."
-  7. DROP: Orbits' own payoff, unchanged in spirit.
+  7. DROP: Orbits' own payoff, unchanged in spirit — plus his 2026-08-28
+     addendum, "I want the rush to be part of the drop. All the fish rush
+     in, swirl around and some stay behind per the blob count parameter
+     after the drop is done."
   8. The population cap: the `p_nocap` bypass is scoped to exactly the
-     charge school and the lull rush, and the buffer holds both plus a
+     charge school and the DROP's rush, and the buffer holds both plus a
      full drop explosion.
 
 Read-only: no live storage, no network, no live instance. Collision
@@ -365,10 +371,12 @@ async def section_charge(stack):
     await _close(room)
 
 
-# ── 6. the lull ─────────────────────────────────────────────────────────
+# ── 6. the lull clock ───────────────────────────────────────────────────
 async def section_lull(stack):
-    print("\n6. LULL — one fish alone in the centre, then the rush")
-    room = await _room(stack, "lull", dict(HIS_MATRIX), seed=11)
+    print("\n6. LULL — his clock, in thirds: gone by 1/3, ripples to 2/3, "
+          "dark after")
+    room = await _room(stack, "lull", dict(HIS_MATRIX, camera_follow=0.8),
+                       seed=11)
     eff = room.effect
     room.step(240)
     # charge first, exactly as a real arc arrives
@@ -379,85 +387,62 @@ async def section_lull(stack):
         if i % 12 == 0:
             eff._beat_pending = True
         room.step(1)
+    cam_away = float(np.hypot(eff.cam_px, eff.cam_py))
 
     eff.update_config({"phase": "lull", "phase_progress": 0.0})
-    lf = int(3.5 / DT)
-    at_half = None
-    rush_born = 0
-    rush_alive_peak = 0
-    rush_start = None
-    rush_end = None
-    spawn_rush = eff._spawn_rush
-
-    def counted_rush(count, _orig=spawn_rush):
-        nonlocal rush_born, rush_start
-        before = eff.n
-        _orig(count)
-        rush_born += eff.n - before
-        rush_start = eff._phase_t
-    eff._spawn_rush = counted_rush
-    settle = eff._settle_rush
-
-    def timed_settle(_orig=settle):
-        nonlocal rush_end
-        rush_end = eff._phase_t
-        _orig()
-    eff._settle_rush = timed_settle
-
-    chaos_spread = 0.0
+    lf = int(3.6 / DT)
+    marks = []
     for i in range(1, lf + 1):
-        eff.update_config({"phase_progress": i / lf})
+        f = i / lf
+        eff.update_config({"phase_progress": f})
         room.step(1)
-        rushing = np.flatnonzero(eff.p_mode[: eff.n] == 3)
-        rush_alive_peak = max(rush_alive_peak, rushing.size)
-        if rushing.size > 3:
-            hs = eff.p_hd[rushing]
-            c = np.arctan2(np.sin(hs).mean(), np.cos(hs).mean())
-            chaos_spread = max(chaos_spread, float(np.abs(
-                (hs - c + np.pi) % (2 * np.pi) - np.pi
-            ).std()))
-        if i == int(lf * FX.LULL_CENTER_PROGRESS):
-            lone = np.flatnonzero(eff.p_lone[: eff.n] == 1)
-            others = int(np.count_nonzero(
-                (eff.p_mode[: eff.n] < 2) & (eff.p_lone[: eff.n] == 0)
-            ))
-            d = float(np.hypot(
-                eff.p_x[lone] * eff.sx, eff.p_y[lone] * eff.sy
-            )[0]) if lone.size else None
-            at_half = (d, others, int(lone.size))
-    dist, others, lone_n = at_half
-    print(f"     at phase_progress={FX.LULL_CENTER_PROGRESS} (~45% of the "
-          f"lull's wall clock — see LULL_CENTER_PROGRESS): the lone fish "
-          f"is {dist:.2f}px from centre, {others} other fish still "
-          f"swimming")
-    check(lone_n == 1, "exactly one fish is the lone one")
-    check(others == 0, "every other fish has dispersed by half way")
-    check(dist is not None and dist < 4.0,
-          "the lone fish is holding the centre of view", f"{dist:.2f}px")
-    print(f"     rush: {rush_born} fish born, {rush_alive_peak} on screen "
-          f"at once, {rush_end - rush_start:.2f}s from entry to settle")
-    check(rush_born == eff.rush_count,
-          "the rush is the configured count", f"{rush_born}")
-    check(rush_born <= FX.MAX_RUSH, "and never more than the schema allows")
-    check(abs((rush_end - rush_start) - eff.rush_time) < 0.1,
-          "the rush lasts about a second", f"{rush_end - rush_start:.2f}s "
-          f"vs rush_time={eff.rush_time}s")
-    check(chaos_spread > 0.1,
-          "there is real chaos in the zooming pool",
-          f"heading spread {chaos_spread:.3f} rad "
-          f"({np.degrees(chaos_spread):.1f} deg)")
-    left = int(np.count_nonzero(
-        (eff.p_mode[: eff.n] < 2) & (eff.p_nocap[: eff.n] == 0)
-    ))
-    check(left == eff._config["particle_count"],
-          "the rush leaves exactly the parameter's own count behind",
-          f"{left} == particle_count {eff._config['particle_count']}")
+        marks.append((
+            f,
+            int(np.count_nonzero(eff.p_mode[: eff.n] < 2)),
+            float(np.asarray(eff.matrix, dtype=np.float32).max()),
+            float(eff.wake.max()),
+        ))
+    cam_home = float(np.hypot(eff.cam_px, eff.cam_py))
+
+    def at(frac):
+        return min(marks, key=lambda m: abs(m[0] - frac))
+
+    print("     progress   alive   brightest px   wake peak")
+    for frac in (0.10, 0.25, FX.LULL_GONE_AT, 0.5, FX.LULL_DARK_AT, 0.85,
+                 1.00):
+        f, alive, lit, wk = at(frac)
+        print(f"       {f:5.2f}    {alive:>5}      {lit:9.2f}   {wk:9.2f}")
+
+    check(at(0.10)[1] > 0, "the lull starts with fish in it")
+    gone = [m for m in marks if m[0] >= FX.LULL_GONE_AT]
+    check(all(m[1] == 0 for m in gone),
+          "every fish is GONE by the first third — no lone fish, no "
+          "survivor of any kind",
+          f"worst {max(m[1] for m in gone)} alive after "
+          f"progress {FX.LULL_GONE_AT:.2f}")
+    mid = [m for m in marks
+           if FX.LULL_GONE_AT < m[0] < FX.LULL_DARK_AT * 0.95]
+    check(any(m[3] > 0.0 for m in mid) and all(m[1] == 0 for m in mid),
+          "between the thirds it is ripples ONLY — the wake still there, "
+          "no fish anywhere",
+          f"peak wake {max(m[3] for m in mid):.2f} with "
+          f"{max(m[1] for m in mid)} fish")
+    last = [m for m in marks if m[0] >= FX.LULL_DARK_AT]
+    check(max(m[2] for m in last) == 0.0,
+          "the last third is fully DARK, until the drop",
+          f"brightest pixel {max(m[2] for m in last):.2f}")
+    print(f"     the window: {cam_away:.1f}px out of home at the end of the "
+          f"charge -> {cam_home:.1f}px at the end of the lull")
+    check(cam_away > 2.0 and cam_home < cam_away * 0.5,
+          "with no school left to follow, the window eases home",
+          f"{cam_away:.1f}px -> {cam_home:.1f}px")
     await _close(room)
 
 
 # ── 7. the drop ─────────────────────────────────────────────────────────
 async def section_drop(stack):
-    print("\n7. DROP — Orbits' own payoff, unchanged in spirit")
+    print("\n7. DROP — Orbits' own payoff, unchanged in spirit, plus his "
+          "rush")
     room = await _room(stack, "drop", dict(HIS_MATRIX), seed=4)
     eff = room.effect
     room.step(240)
@@ -475,6 +460,15 @@ async def section_drop(stack):
     for i in range(1, lf + 1):
         eff.update_config({"phase_progress": i / lf})
         room.step(1)
+    rush_born = [0]
+    orig_rush = eff._spawn_rush
+
+    def counted_rush(count, _orig=orig_rush):
+        before = eff.n
+        _orig(count)
+        rush_born[0] += eff.n - before
+    eff._spawn_rush = counted_rush
+
     eff.update_config({"phase": "drop", "phase_progress": 0.0})
     room.step(1)
     check(born[0] > 0,
@@ -484,19 +478,54 @@ async def section_drop(stack):
           "ejecta count is Orbits' own 2x the population",
           f"{born[0]} == {FX.DROP_EJECTA_X} x "
           f"{eff._config['particle_count']}")
-    room.step(int((FX.DROP_SETTLE_S + 0.6) / DT))
+    check(rush_born[0] == eff.rush_count,
+          "HIS ADDENDUM, beat 1 — the whole rush arrives at the drop "
+          "instant", f"{rush_born[0]} == rush_count {eff.rush_count}")
+    # beat 2 — the swirl, measured as angular travel around the view centre
+    def rush_angles():
+        idx = np.flatnonzero(
+            (eff.p_mode[: eff.n] == 3) & (eff.p_nocap[: eff.n] == 1)
+        )
+        return idx, np.arctan2(
+            (eff.p_y[idx] - eff.cam_ny) * eff.sy,
+            (eff.p_x[idx] - eff.cam_nx) * eff.sx,
+        )
+
+    idx0, ang0 = rush_angles()
+    prev = dict(zip(idx0.tolist(), ang0.tolist()))
+    swept = np.zeros(FX.CAP)
+    peak_swirl = 0.0
+    for _ in range(int(1.6 / DT)):
+        room.step(1)
+        peak_swirl = max(peak_swirl, float(eff._rush_swirl))
+        idx, ang = rush_angles()
+        for k, a in zip(idx.tolist(), ang.tolist()):
+            if k in prev:
+                swept[k] += abs((a - prev[k] + np.pi) % (2 * np.pi) - np.pi)
+            prev[k] = a
+    check(peak_swirl > 0.0 and float(np.max(swept)) > 1.0,
+          "beat 2 — they swirl around the centre of view through the drop",
+          f"worst-case angular travel {float(np.max(swept)):.2f} rad, "
+          f"peak swirl weight {peak_swirl:.2f}")
+    room.step(int((FX.DROP_SETTLE_S + 1.0) / DT))
     check(eff._config["phase"] == "none" and eff._phase == "none",
           "the phase self-resets so an identical later drop edges again")
-    swimming = int(np.count_nonzero(eff.p_mode[: eff.n] < 2))
+    swimming = int(np.count_nonzero(
+        (eff.p_mode[: eff.n] < 2) & (eff.p_nocap[: eff.n] == 0)
+    ))
     check(swimming == eff._config["particle_count"],
-          "the population is back to the parameter",
-          f"{swimming}")
+          "beat 3 — exactly the blob count stays behind (and from the next "
+          "frame the intensity-driven count owns it — see _settle_rush)",
+          f"{swimming} == particle_count {eff._config['particle_count']}")
+    check(int(np.count_nonzero(eff.p_nocap[: eff.n] == 1)) == 0,
+          "no cap-exempt fish outlives the drop")
     await _close(room)
 
 
 # ── 8. the cap ──────────────────────────────────────────────────────────
 async def section_cap(stack):
-    print("\n8. POPULATION CAP — the bypass is scoped to two moments only")
+    print("\n8. POPULATION CAP — the bypass is scoped to two moments only "
+          "(the charge's school, the drop's rush)")
     need = (
         FX.MAX_PARTICLE_COUNT + FX.MAX_SCHOOL + FX.MAX_RUSH
         + FX.DROP_EJECTA_X * FX.MAX_PARTICLE_COUNT

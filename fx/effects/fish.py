@@ -15,7 +15,8 @@ _LOGGER = logging.getLogger(__name__)
 # ── buffer capacity ─────────────────────────────────────────────────────────
 # Ordinary swimming is ALWAYS bounded by the `particle_count` parameter. The
 # density cap is bypassed at exactly two scripted moments — the charge's
-# school (`school_count`) and the lull's rush (`rush_count`) — via the
+# school (`school_count`) and the DROP's rush (`rush_count`, which was the
+# lull's until his 2026-08-28 addendum moved it) — via the
 # `p_nocap` tag, the same shape blackhole's blob rush / fireworks' payoff
 # already use. CAP is sized so those two moments plus a full drop explosion
 # can never starve the ordinary render (see MAX_* below and
@@ -142,6 +143,9 @@ SCHOOL_W = 14.0         # alignment dominates while a school is formed
 #     under SCHOOL_W, so the shared heading still dominates and the school
 #     still arrives together — the spacing only bends it.
 SCHOOL_SPACING_W = 6.5
+RUSH_SWIRL_W = 9.0      # the drop's rush swirling around the centre of
+                        # view: a TANGENTIAL steering weight, bounded by
+                        # the same turn-rate clamp as everything else
 SCHOOL_SEP_BODIES = 3.0  # target spacing, in BODY LENGTHS — derived from the
                          # fish's own size for the same reason
                          # AVOID_SEP_BODIES is, never a second knob
@@ -151,7 +155,6 @@ SCHOOL_SEP_BODIES = 3.0  # target spacing, in BODY LENGTHS — derived from the
 # first and only look even once the last fish arrived.
 SCHOOL_PHI_LAT = 0.6180339887   # golden ratio, lateral
 SCHOOL_PHI_DEPTH = 0.7548776662  # plastic number, depth
-CENTER_W = 10.0         # the lull's lone fish holding centre
 
 # ── the wake ──────────────────────────────────────────────
 # HIS ASK (2026-08-28): "the ripples ... more like the trails in Orbits, but
@@ -284,10 +287,33 @@ CHARGE_TURN_MIN = (np.pi / 3.0, 2.2)  # turn magnitude range, radians
 # true wall-clock duration, not exactly half. That is the closest an effect
 # can get to his "by half way through the lull" without ever being told the
 # duration.
-LULL_CENTER_PROGRESS = 0.5
-LULL_CENTER_PULL = 9.0   # 1/s positional pull toward centre at p >= 0.5
-LULL_DISPERSE_AT = 0.42  # every non-lone fish has left by this progress
-LULL_RUSH_AT = 0.60      # the rush enters here
+# HIS LULL CLOCK (2026-08-28), in THIRDS of the lull's own duration — and
+# the duration is the dynamic ramp gap SpotFX drives `phase_progress` over,
+# never a wall-clock constant:
+#   0 -> 1/3    every fish disperses and is GONE by the end of it. None
+#               survive: no lone fish, no exceptions, and a hard backstop
+#               retires anything the paced dispersal has not already sent
+#               away.
+#   1/3 -> 2/3  ripples only. The wake buffer keeps expanding and fading
+#               with no fish anywhere.
+#   2/3 -> end  fully dark, until the drop.
+# SUPERSEDED, on his own instruction, by the above: the lull used to
+# disperse down to ONE fish held at the centre of view by half way through
+# (LULL_CENTER_PROGRESS / LULL_CENTER_PULL / CENTER_W / `p_lone`), and its
+# RUSH used to arrive at 60% of the lull. The lone hold is gone outright.
+# The rush is NOT gone — it MOVED INTO THE DROP (see _drop_step), which is
+# where he asked for it: "I want the rush to be part of the drop."
+LULL_GONE_AT = 1.0 / 3.0
+LULL_DARK_AT = 2.0 / 3.0
+LULL_DEPART_SPAN = 0.55  # departures are scheduled across this fraction of
+                         # the first third, so the LAST one's own fade still
+                         # finishes inside it — "gone by 1/3" is about being
+                         # invisible, not about having been told to leave
+LULL_DEPART_FADE_S = 0.5  # ... and that fade is short for the same reason
+LULL_DARK_FROM = 0.5     # the wake is ramped to nothing between here and
+                         # LULL_DARK_AT, so the last third is genuinely dark
+                         # rather than "decayed enough": a half-life alone
+                         # can never reach zero, and his ask is DARK
 LULL_FALL_S = 3.0        # wall-clock fallback when no lull ramp arrives
 DROP_FLY_S = 0.4
 DROP_SETTLE_S = 4.2      # drop boost decay / phase auto-reset horizon
@@ -297,7 +323,7 @@ DROP_EJECTA_SPEED = (1.6, 2.9)  # ejecta speed, multiples of cruise
 # Every per-fish SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
 _SOA_NAMES = (
-    "p_mode", "p_nocap", "p_lone", "p_disp", "p_slot", "p_slot_frac",
+    "p_mode", "p_nocap", "p_disp", "p_slot", "p_slot_frac",
     "p_x", "p_y", "p_x0", "p_y0", "p_hd", "p_spd", "p_acc",
     "p_flap", "p_jog", "p_ro", "p_lun", "p_lun_t", "p_var",
     "p_enter", "p_erate", "p_leave", "p_lfade",
@@ -332,6 +358,11 @@ class Fish2d(Twod, GradientEffect):
     — that mapping is the identity, so the effect is exactly what it was
     before the window existed. See the camera-window block at the top of
     this module for what it replaces and why.
+
+    The lull is HIS CLOCK (2026-08-28): every fish gone by a third of it,
+    ripples only to two thirds, dark after that until the drop — and the
+    drop is what brings the room back, with the rush that used to belong to
+    the lull. See the LULL_* block and `_drop_step`.
 
     Mutual avoidance (`avoid_strength`, added 2026-08-28) is STEERING ONLY:
     it contributes one more term to the desired-heading vector sum below and
@@ -551,17 +582,17 @@ class Fish2d(Twod, GradientEffect):
             ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
             vol.Optional(
                 "rush_count",
-                description="Fish in the lull's rush (ignores the population cap)",
+                description="Fish in the drop's rush (ignores the population cap)",
                 default=20,
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RUSH)),
             vol.Optional(
                 "rush_time",
-                description="Seconds the lull's rush takes to sweep past",
+                description="Seconds the drop's rush sweeps inward before it starts to swirl",
                 default=1.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=3.0)),
             vol.Optional(
                 "rush_chaos",
-                description="How disorderly the rush is: 0 = a clean shoal, 1 = scattered",
+                description="How disorderly the drop's rush is: 0 = a clean ring, 1 = scattered",
                 default=0.5,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             # ── SpotFX-driven choreography ───────────────────────────────
@@ -584,7 +615,6 @@ class Fish2d(Twod, GradientEffect):
         # patches — do_once re-runs on every config change.
         self.p_mode = np.zeros(CAP, dtype=np.int8)   # 0 swim 1 enter 2 leave 3 rush
         self.p_nocap = np.zeros(CAP, dtype=np.int8)  # spawned past the cap
-        self.p_lone = np.zeros(CAP, dtype=np.int8)   # the lull's lone fish
         # the lull's dispersal RANK (NaN = not scheduled). A rank, not an
         # index: _compact() reshuffles slots whenever a fish retires, so a
         # queue of indices silently disperses the wrong fish (or nobody).
@@ -648,6 +678,7 @@ class Fish2d(Twod, GradientEffect):
         # charge/lull state that must survive a config patch
         self._school_hd = 0.0
         self._school_on = False
+        self._rush_swirl = 0.0   # the drop's swirl, 0..1
         self._school_turn_t = 0.0
         # the water's own current, world px/s: whatever fraction of the
         # school's travel the clamp still removes from the fish is expressed
@@ -742,7 +773,6 @@ class Fish2d(Twod, GradientEffect):
             self._lull_state = None
             self._charge_n0 = 1
             self._speed_scale = 1.0
-            self._center_pull = 0.0
             self._phase_done_t = None
         else:
             self._phase_pending = (
@@ -856,7 +886,6 @@ class Fish2d(Twod, GradientEffect):
         rng = self._rng
         self.p_mode[s] = mode
         self.p_nocap[s] = 1 if nocap else 0
-        self.p_lone[s] = 0
         self.p_disp[s] = np.nan
         self.p_enter[s] = 0.0 if mode == 1 else 1.0
         self.p_erate[s] = 1.0
@@ -967,7 +996,6 @@ class Fish2d(Twod, GradientEffect):
         self.p_mode[idx] = 2
         self.p_leave[idx] = 0.0
         self.p_nocap[idx] = 0
-        self.p_lone[idx] = 0
         if fade is not None:
             self.p_lfade[idx] = fade
 
@@ -1235,17 +1263,21 @@ class Fish2d(Twod, GradientEffect):
         self.p_erate[s] = max(1.0, self.enter_time / HANDOFF_ENTER_S)
 
     def _spawn_rush(self, count):
-        """The lull's rush: fish pour in FROM THE DIRECTION the lone fish is
-        heading and zoom past it, with chaos. Tagged `p_nocap` — the ONE
-        lull-scoped bypass of the population cap."""
-        lone = np.flatnonzero(self.p_lone[: self.n] == 1)
-        if lone.size:
-            hd = float(self.p_hd[lone[0]])
-            ox = float(self.p_x[lone[0]])
-            oy = float(self.p_y[lone[0]])
-        else:
-            hd = self._mean_heading()
-            ox, oy = self.cam_nx, self.cam_ny
+        """THE DROP'S RUSH (his 2026-08-28 addendum: "I want the rush to be
+        part of the drop. All the fish rush in, swirl around and some stay
+        behind per the blob count parameter after the drop is done").
+
+        It used to be the lull's, entering at 60% of the lull behind the
+        lone fish. His lull clock has no fish left to enter behind, so the
+        rush moved WHOLE to the drop instead of being dropped: same
+        population, same chaos knob, same `p_nocap` cap exemption, and the
+        same `_settle_rush` handing the survivors to the ordinary
+        population. What changed is only WHERE they come from — every
+        direction, converging on the centre of view — because the drop is
+        an explosion at the centre, not a shoal sweeping past one fish.
+
+        Tagged `p_nocap` — the ONE drop-scoped bypass of the population cap.
+        """
         base = self.n
         s = self._spawn(count, mode=3, nocap=True)
         k = self.n - base
@@ -1253,18 +1285,24 @@ class Fish2d(Twod, GradientEffect):
             return
         rng = self._rng
         chaos = float(self.rush_chaos)
-        # enter ahead of the lone fish, spread across its path, travelling
-        # back past it
-        lateral = rng.uniform(-1.0, 1.0, k) * self.roam_bound * (
-            0.5 + 0.9 * chaos
+        # in from every side, evenly around the ring so the surge does not
+        # arrive as one clump (the same reason the charge's school spawns on
+        # an even spread — see SCHOOL_SPACING_W)
+        ang = (
+            (np.arange(k, dtype=np.float32) + rng.random(k, dtype=np.float32)
+             * chaos) / max(k, 1) * 2 * np.pi
         )
-        ahead = self.entry_radius + rng.uniform(0.0, 0.3 + 0.9 * chaos, k)
-        self.p_x[s] = ox + np.cos(hd) * ahead - np.sin(hd) * lateral
-        self.p_y[s] = oy + np.sin(hd) * ahead + np.cos(hd) * lateral
+        # just off-panel, never far beyond it: a rush fish that spawns
+        # outside the off-panel retirement bound is retired on the very
+        # frame it was born and is never seen at all
+        out = self.entry_radius + rng.uniform(0.0, 0.15 + 0.35 * chaos, k)
+        self.p_x[s] = self.cam_nx + np.cos(ang) * out
+        self.p_y[s] = self.cam_ny + np.sin(ang) * out
         self.p_x0[s] = self.p_x[s]
         self.p_y0[s] = self.p_y[s]
+        # heading inward, jittered by the chaos knob
         self.p_hd[s] = (
-            hd + np.pi + rng.uniform(-1.0, 1.0, k) * chaos * (np.pi / 3.0)
+            ang + np.pi + rng.uniform(-1.0, 1.0, k) * chaos * (np.pi / 3.0)
         )
         self.p_spd[s] = self.cruise_px * (
             2.2 + rng.uniform(-1.0, 1.0, k) * chaos * 1.1
@@ -1276,7 +1314,6 @@ class Fish2d(Twod, GradientEffect):
         self._phase = phase
         self._phase_t = 0.0
         self._phase_done_t = None
-        self._center_pull = 0.0
         if phase == "charge":
             n = self.n
             self._charge_n0 = int(np.count_nonzero(self.p_mode[:n] < 2)) or 1
@@ -1302,42 +1339,41 @@ class Fish2d(Twod, GradientEffect):
             self._release_nocap()
 
     def _start_lull(self):
-        """Pick the fish nearest the centre as the lone one; every other
-        swimmer is scheduled to disperse across the first part of the lull."""
+        """Schedule EVERY fish to disperse across the lull's first third.
+
+        His 2026-08-28 ruling replaced the old lull outright: there is no
+        lone fish and no survivor of any kind. The rank spread here is what
+        paces the exodus; `_lull_step`'s backstop is what guarantees it.
+        """
         n = self.n
-        self.p_lone[:n] = 0
         self.p_disp[:n] = np.nan
-        self._lull_state = {"rushed": False, "rush_t": None}
+        self._lull_state = {"dark": 1.0}
         live = np.flatnonzero(self.p_mode[:n] < 2)
         if live.size == 0:
             return
+        # furthest from the centre of view leaves first, so the panel
+        # empties inward rather than in a random order
         d = np.hypot(
             (self.p_x[live] - self.cam_nx) * self.sx,
             (self.p_y[live] - self.cam_ny) * self.sy,
         )
-        order = live[np.argsort(d)]
-        self.p_lone[order[0]] = 1
-        # the lone fish is the one that STAYS, so it rejoins the ordinary
-        # population here — a charge-school fish that happens to be nearest
-        # centre must not carry its cap exemption out of the lull.
-        self.p_nocap[order[0]] = 0
-        rest = order[1:][::-1]          # furthest leaves first
-        if rest.size:
-            self.p_disp[rest] = (
-                np.arange(1, rest.size + 1, dtype=np.float32) / rest.size
-            )
+        order = live[np.argsort(d)][::-1]
+        self.p_disp[order] = (
+            np.arange(1, order.size + 1, dtype=np.float32) / order.size
+        )
 
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw,
         before population management; sets the per-frame overrides
-        (_speed_scale, _center_pull, particle_count, school state)."""
+        (_speed_scale, particle_count, school/rush state)."""
         pend = self._phase_pending
         if pend is not None:
             self._phase_pending = None
             if pend != self._phase:
                 self._enter_phase(pend)
         self._speed_scale = 1.0
-        self._center_pull = 0.0
+        if self._phase != "drop":
+            self._rush_swirl = 0.0
         if self._phase == "none":
             return
         self._phase_t += dt
@@ -1361,7 +1397,7 @@ class Fish2d(Twod, GradientEffect):
             # every sentinel this branch sets is a concrete value: nothing
             # downstream can observe a half-built drop state (the render-
             # thread crash class, AGENTS.md)
-            self._drop_state = {"burst_done": True}
+            self._drop_state = {"burst_done": True, "settled": True}
             self._release_nocap()
             return
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
@@ -1404,10 +1440,17 @@ class Fish2d(Twod, GradientEffect):
                 )
 
     def _lull_step(self, p, dt):
-        """His words: fish disperse until the centre one is all alone,
-        swimming but staying in the centre of view by half way through the
-        lull; then a rush comes in from the direction it is heading, zooms
-        past, and leaves the parameter's own count behind."""
+        """His clock, in thirds of the lull's own duration: everything gone
+        by 1/3, ripples only to 2/3, dark after that until the drop.
+
+        The thirds are of `phase_progress`, which SpotFX ramps over the real
+        gap to the next trigger (`scene_response._phase_ramp_ms`) — so they
+        are thirds of the DYNAMIC lull, never of a wall-clock constant. The
+        same honesty note the charge carries applies: that ramp covers ~90%
+        of the true gap and then hangs at 1.0, so 1/3 lands a little before
+        a third of the wall clock. That is the closest an effect can get
+        without ever being told the duration.
+        """
         st = self._lull_state
         if st is None:
             self._start_lull()
@@ -1415,45 +1458,55 @@ class Fish2d(Twod, GradientEffect):
         # progress-driven once the ramp moves (hand-scrubbable in the LedFX
         # UI); the wall-clock fallback only runs while progress sits at 0
         f = p if p > 0.0 else min(self._phase_t / LULL_FALL_S, 1.0)
-        # dispersal: everyone but the lone fish is gone by LULL_DISPERSE_AT
         n = self.n
-        frac = min(f / max(LULL_DISPERSE_AT, 1e-3), 1.0)
+
+        # ── 0 -> 1/3: everybody disperses, paced ────────────────────────
+        span = max(LULL_GONE_AT * LULL_DEPART_SPAN, 1e-3)
+        frac = min(f / span, 1.0)
         due = np.flatnonzero(
             np.isfinite(self.p_disp[:n])
             & (self.p_disp[:n] <= frac)
             & (self.p_mode[:n] < 2)
         )
         if due.size:
-            self._depart(due)
+            self._depart(due, fade=LULL_DEPART_FADE_S)
             self.p_disp[due] = np.nan
-        # the lone fish holds centre: full pull by LULL_CENTER_PROGRESS
-        self._center_pull = LULL_CENTER_PULL * min(
-            f / max(LULL_CENTER_PROGRESS, 1e-3), 1.0
-        )
-        # the rush
-        if not st["rushed"] and f >= LULL_RUSH_AT:
-            st["rushed"] = True
-            st["rush_t"] = 0.0
-            if self.rush_count > 0:
-                self._spawn_rush(int(self.rush_count))
-        if st.get("rush_t") is not None:
-            st["rush_t"] += dt
-            if st["rush_t"] >= max(self.rush_time, 0.05):
-                st["rush_t"] = None
-                self._settle_rush()
-        # Hold the population manager to whatever is actually still
-        # swimming, so the PACED dispersal above is the only thing that
-        # removes a fish and nothing is ever re-spawned mid-lull.
-        n = self.n
-        self.particle_count = max(1, int(np.count_nonzero(
-            (self.p_mode[:n] < 2) & (self.p_nocap[:n] == 0)
-        )))
+        # ... and the backstop that makes "gone by 1/3" a guarantee rather
+        # than a schedule: past the third, nothing is left alive at all.
+        if f >= LULL_GONE_AT and n:
+            self._compact(np.zeros(n, dtype=bool))
+
+        # ── 1/3 -> 2/3 ripples only, then dark ──────────────────────────
+        # A half-life alone can never reach zero, and his ask is DARK — so
+        # the wake is RAMPED out across [LULL_DARK_FROM, LULL_DARK_AT] and
+        # held at nothing for the last third.
+        st["dark"] = float(np.clip(
+            (LULL_DARK_AT - f) / max(LULL_DARK_AT - LULL_DARK_FROM, 1e-3),
+            0.0, 1.0,
+        ))
+
+        # nothing is ever re-spawned mid-lull: the paced dispersal above is
+        # the only thing that moves the population, and it only removes
+        self.particle_count = 0
 
     def _settle_rush(self):
-        """The rush is over: keep exactly as many fish as the parameter
-        asks for (the lone fish counts toward it) and send the rest on
-        their way. This is what puts the population back under its own cap
-        — the nocap tag never outlives the moment it was granted for."""
+        """The rush is over: keep exactly as many fish as the blob-count
+        parameter asks for and send the rest on their way. This is what puts
+        the population back under its own cap — the nocap tag never outlives
+        the moment it was granted for.
+
+        HOW THE STAY-BEHIND HANDS OVER TO THE INTENSITY-DRIVEN COUNT (his
+        addendum's own open question). `particle_count` is written live by
+        SpotFX and is intensity-bound (1-8 in his scene). The stay-behind
+        reads it ONCE, here, at the instant the drop settles — so the number
+        that survives is whatever the room's intensity was asking for right
+        then. From the very next frame the ordinary population manager
+        governs again, unchanged: a later rise lets fish swim in through the
+        normal entry path, a later fall departs the excess through the
+        normal exit path. There is no special case and nothing to fight —
+        the rush sets the population once, at the handover, and the
+        intensity-driven count owns it from there.
+        """
         n = self.n
         rushing = np.flatnonzero(
             (self.p_mode[:n] == 3) & (self.p_nocap[:n] == 1)
@@ -1484,13 +1537,17 @@ class Fish2d(Twod, GradientEffect):
         n = self.n
         extra = np.flatnonzero((self.p_nocap[:n] == 1) & (self.p_mode[:n] < 2))
         self._depart(extra, fade=HANDOFF_LEAVE_S)
-        self.p_lone[:n] = 0
         self.p_disp[:n] = np.nan
 
     def _drop_step(self):
+        """The drop he likes, plus his addendum's three beats — RUSH IN,
+        SWIRL AROUND, STAY BEHIND. Nothing about the existing payoff (the
+        boost, the ejecta explosion, the settle horizon, the self-reset)
+        is changed; the rush is laid on top of it."""
         drop = self._drop_state
         if drop is None:
-            drop = self._drop_state = {"burst_done": False}
+            drop = self._drop_state = {"burst_done": False, "settled": False}
+        drop.setdefault("settled", False)
         if not drop["burst_done"]:
             drop["burst_done"] = True
             self._release_nocap()
@@ -1500,7 +1557,15 @@ class Fish2d(Twod, GradientEffect):
                 (self.p_mode[:n] < 2) & (self.p_nocap[:n] == 0)
             ))
             missing = self.particle_count - tracked
-            if missing > 0:
+            rush = int(min(self.rush_count, MAX_RUSH))
+            if rush > 0:
+                # BEAT 1 — RUSH IN. The rush is now what repopulates a drop
+                # (his "the scene exits a drop already populated instead of
+                # repopulating from nothing"), so the centre burst stands
+                # down while it runs. With the rush turned off the drop is
+                # exactly what it was.
+                self._spawn_rush(rush)
+            elif missing > 0:
                 self._spawn_center_burst(
                     self.cam_nx, self.cam_ny, missing
                 )
@@ -1510,7 +1575,22 @@ class Fish2d(Twod, GradientEffect):
         self._speed_scale = 1.0 + DROP_BOOST * max(
             1.0 - self._phase_t / DROP_SETTLE_S, 0.0
         )
+        # BEAT 2 — SWIRL AROUND, for the drop's own duration. `_rush_swirl`
+        # is read by the steering block; it is a tangential bias on the
+        # rush fish only, bounded by the same turn-rate clamp as every other
+        # steering term, so it can never flip one on the spot.
+        surge = min(self._phase_t / max(self.rush_time, 0.05), 1.0)
+        self._rush_swirl = surge * (
+            1.0 - min(self._phase_t / DROP_SETTLE_S, 1.0)
+        )
         if self._phase_t >= DROP_SETTLE_S:
+            if not drop["settled"]:
+                # BEAT 3 — STAY BEHIND, per the blob count. See
+                # _settle_rush for how that hands over to the
+                # intensity-driven count.
+                drop["settled"] = True
+                self._rush_swirl = 0.0
+                self._settle_rush()
             self._phase = "none"
             self._drop_state = None
             self._speed_scale = 1.0
@@ -1544,8 +1624,17 @@ class Fish2d(Twod, GradientEffect):
         self._cam_py_prev = self.cam_py
         if self.camera_follow <= 0.0:
             return
-        # ONLY the charge and the lull move the window.
+        # ONLY the charge and the lull move the window — and a lull only
+        # while there is still a school in it. Under his 2026-08-28 lull
+        # clock every fish is gone by the first third, so from there on
+        # there is nothing to follow and the window EASES HOME instead of
+        # holding wherever it had got to; the ripples then stream past a
+        # settling view for the rest of the lull.
         active = self._phase in ("charge", "lull")
+        if active and self._phase == "lull" and not np.any(
+            self.p_mode[: self.n] < 2
+        ):
+            active = False
         n = self.n
         # The school is the fish that have ARRIVED. A charge spawns its
         # shoal a whole entry radius behind the window and they swim in
@@ -2240,12 +2329,19 @@ class Fish2d(Twod, GradientEffect):
                 desired_x += add_x
                 desired_y += add_y
 
-        # the lull's lone fish keeps to the centre of view
-        lone = self.p_lone[:n] == 1
-        if self._center_pull > 0.0 and lone.any():
-            w_center = np.where(lone & swimming, CENTER_W, 0.0)
-            desired_x += np.cos(inward) * w_center
-            desired_y += np.sin(inward) * w_center
+        # THE DROP'S SWIRL (his addendum, beat 2): the rush fish swirl
+        # around the centre of view for the drop's own duration. A
+        # TANGENTIAL bias only — it is summed into the desired heading like
+        # every other steering term and is then bounded by the same
+        # turn-rate clamp, so it can never flip a fish on the spot.
+        if self._rush_swirl > 0.0:
+            rushers = (mode == 3) & (self.p_nocap[:n] == 1)
+            if rushers.any():
+                tangent = inward + np.pi / 2.0
+                w_swirl = np.where(rushers, RUSH_SWIRL_W * self._rush_swirl,
+                                   0.0)
+                desired_x += np.cos(tangent) * w_swirl
+                desired_y += np.sin(tangent) * w_swirl
 
         desired = np.arctan2(desired_y, desired_x)
         d_hd = _wrap_pi(desired - hd)
@@ -2305,18 +2401,6 @@ class Fish2d(Twod, GradientEffect):
             self._flow_py = -sch[1]
         self.p_x[:n] += vx_px * dt / self.sx
         self.p_y[:n] += vy_px * dt / self.sy
-
-        if self._center_pull > 0.0 and lone.any():
-            # his words: the lone fish stays "in the centre of VIEW" — so
-            # the pull is toward the window's centre, which is the same
-            # world point it always was whenever the window is at rest.
-            pull = np.float32(min(self._center_pull * dt, 1.0))
-            self.p_x[:n] = np.where(
-                lone, cnx + (self.p_x[:n] - cnx) * (1.0 - pull), self.p_x[:n]
-            )
-            self.p_y[:n] = np.where(
-                lone, cny + (self.p_y[:n] - cny) * (1.0 - pull), self.p_y[:n]
-            )
 
         entering = mode == 1
         if entering.any():
@@ -2459,6 +2543,7 @@ class Fish2d(Twod, GradientEffect):
                 tail_px, tail_py, amp, sizes, self.p_grad[:n][laying]
             )
         self._step_wake(dt)
+        self._apply_lull_dark()
 
         # ── render ──────────────────────────────────────────────────────
         half_life = 0.02 + self.trail_decay * 0.5
@@ -2499,13 +2584,35 @@ class Fish2d(Twod, GradientEffect):
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )
 
+    def _apply_lull_dark(self):
+        """HIS LULL CLOCK's last two thirds: ripples only, then DARK.
+
+        An exponential half-life can never reach zero and his ask is DARK,
+        so the wake (and the body trail under it) is ramped out across
+        [LULL_DARK_FROM, LULL_DARK_AT] and held at nothing until the drop.
+        See _lull_step.
+        """
+        if self._phase != "lull" or self._lull_state is None:
+            return
+        dark = np.float32(self._lull_state.get("dark", 1.0))
+        if dark >= 1.0:
+            return
+        if self.wake is not None:
+            self.wake *= dark
+        if self.trail is not None:
+            self.trail *= dark
+
     def _fade_only(self, dt):
         """Decay the trail AND the wake, and composite — the held-transition
         path. The wake is a live buffer, so leaving it out here would park a
         frozen smear on the panel for the whole hold."""
         half_life = 0.02 + self.trail_decay * 0.5
         self.trail *= np.float32(0.5 ** (dt / half_life))
+        # An empty panel is exactly when the lull's last two thirds run, so
+        # the window still has to ease home and the clock still has to run.
+        self._step_camera(dt, self.cruise_px)
         self._step_wake(dt)
+        self._apply_lull_dark()
         out = np.asarray(self.matrix, dtype=np.float32) + self.trail
         if self.wake is not None:
             out = out + self.wake

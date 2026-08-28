@@ -361,6 +361,7 @@ def test_the_window_moves_only_during_a_charge_or_a_lull(tmp_path):
         home_after_charge = ease_home("charge")
         room.step(int(4.0 / DT), watch=watcher("roam-after-charge"))
         room.ramp("lull", 3.5, watch=watcher("lull"))
+        lull_end = (eff.cam_px, eff.cam_py)
         home_after_lull = ease_home("lull")
         room.step(int(4.0 / DT), watch=watcher("roam-after-lull"))
         await _close(room)
@@ -369,11 +370,17 @@ def test_the_window_moves_only_during_a_charge_or_a_lull(tmp_path):
                 f"the window moved while just roaming ({quiet}): "
                 f"{moved[quiet]['sum']:.4f}px"
             )
-        for phase in ("charge", "lull"):
-            assert moved[phase]["sum"] > 5.0, (
-                f"the window barely moved during the {phase}: "
-                f"{moved[phase]['sum']:.4f}px"
-            )
+        assert moved["charge"]["sum"] > 5.0, (
+            f"the window barely moved during the charge: "
+            f"{moved['charge']['sum']:.4f}px"
+        )
+        # THE LULL NO LONGER HAS A SCHOOL TO FOLLOW. Under his 2026-08-28
+        # clock every fish is gone by the first third, so the window's whole
+        # job there is to ease home — asserting travel would be asserting
+        # the superseded lull. It must simply END at rest.
+        assert float(np.hypot(*lull_end)) < 1.0, (
+            f"the window did not settle during the lull: {lull_end}"
+        )
         assert home_after_charge < 15.0 and home_after_lull < 15.0, (
             f"the ease home dragged: {home_after_charge:.1f}s / "
             f"{home_after_lull:.1f}s"
@@ -529,7 +536,14 @@ def test_the_school_never_leaves_the_window(tmp_path, seed):
     panel by construction and only the lag can put the school off-centre.
     Measured per AXIS against that axis's own half-extent — the panel is
     72x37, so a radial number against the short axis would call a
-    perfectly visible sideways offset 'lost'."""
+    perfectly visible sideways offset 'lost'.
+
+    Scoped to the CHARGE: under his 2026-08-28 lull clock there is no
+    school in a lull to lose — every fish disperses and is gone by the
+    first third, which is what the fish there are SUPPOSED to do. The
+    window's lull behaviour is pinned by
+    tests/test_fish.py::test_the_lull_window_eases_home_once_there_is_
+    nothing_to_follow instead."""
     async def main():
         room = await _room(tmp_path, f"lost{seed}",
                            dict(HIS, particle_count=8, camera_follow=0.8),
@@ -549,7 +563,6 @@ def test_the_school_never_leaves_the_window(tmp_path, seed):
 
         room.step(int(4.0 / DT))
         room.ramp("charge", 4.0, beats_every=12, watch=watch)
-        room.ramp("lull", 3.5, watch=watch)
         await _close(room)
         assert worst[0] < 1.0, (
             "the school's centroid left the window: "

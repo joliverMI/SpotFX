@@ -561,69 +561,89 @@ def test_the_charge_school_does_not_clump(tmp_path):
     _run(main())
 
 
-# ── 6. the lull ─────────────────────────────────────────────────────────
-def test_lull_leaves_one_centred_fish_then_a_rush(tmp_path):
+# ── 6. the lull clock ───────────────────────────────────────────────────
+def _lull_clock(room, eff, seconds=3.6):
+    """Drive a full lull and report what was alive and lit at each third."""
+    eff.update_config({"phase": "lull", "phase_progress": 0.0})
+    frames = int(seconds / DT)
+    marks = {}
+    for i in range(1, frames + 1):
+        f = i / frames
+        eff.update_config({"phase_progress": f})
+        room.step(1)
+        alive = int(np.count_nonzero(eff.p_mode[: eff.n] < 2))
+        lit = float(np.asarray(eff.matrix, dtype=np.float32).max())
+        wake = float(eff.wake.max())
+        marks[i] = (f, alive, lit, wake)
+    at = lambda frac: marks[max(1, int(frames * frac))]      # noqa: E731
+    return marks, at
+
+
+def test_the_lull_clock_empties_then_ripples_then_goes_dark(tmp_path):
+    """His 2026-08-28 ruling, in thirds of the lull's own duration:
+
+        0 -> 1/3    every fish disperses and is GONE by the end of it
+        1/3 -> 2/3  ripples only — the wake, with no fish anywhere
+        2/3 -> end  fully dark, until the drop
+
+    This REPLACES the old lull (disperse to one fish, held at the centre by
+    half way, then a rush at 60%). That behaviour is superseded, not
+    weakened: there is no lone fish and no survivor of any kind, and the
+    rush moved into the drop.
+    """
     async def main():
-        room = await _room(tmp_path, "lull", seed=11)
+        room = await _room(tmp_path, "lullclock", seed=11)
         eff = room.effect
         room.step(240)
         room.ramp("charge", 4.0, beats_every=12)
+        marks, at = _lull_clock(room, eff)
 
-        born, rush_start, rush_end = [0], [None], [None]
-        orig_spawn, orig_settle = eff._spawn_rush, eff._settle_rush
+        # 0 -> 1/3: gone. No exceptions.
+        assert at(0.10)[1] > 0, "the lull must start with fish in it"
+        for frac in (FX.LULL_GONE_AT, 0.5, FX.LULL_DARK_AT, 0.9, 1.0):
+            f, alive, _lit, _w = at(frac)
+            assert alive == 0, (
+                f"a fish survived past the first third (progress {f:.2f}, "
+                f"{alive} alive)"
+            )
 
-        def counted(count, _o=orig_spawn):
-            before = eff.n
-            _o(count)
-            born[0] += eff.n - before
-            rush_start[0] = eff._phase_t
-        eff._spawn_rush = counted
-
-        def timed(_o=orig_settle):
-            rush_end[0] = eff._phase_t
-            _o()
-        eff._settle_rush = timed
-
-        eff.update_config({"phase": "lull", "phase_progress": 0.0})
-        frames = int(3.5 / DT)
-        at_half, chaos = None, 0.0
-        for i in range(1, frames + 1):
-            eff.update_config({"phase_progress": i / frames})
-            room.step(1)
-            rushing = np.flatnonzero(eff.p_mode[: eff.n] == 3)
-            if rushing.size > 3:
-                hs = eff.p_hd[rushing]
-                c = np.arctan2(np.sin(hs).mean(), np.cos(hs).mean())
-                chaos = max(chaos, float(np.abs(
-                    (hs - c + np.pi) % (2 * np.pi) - np.pi
-                ).std()))
-            if i == int(frames * FX.LULL_CENTER_PROGRESS):
-                lone = np.flatnonzero(eff.p_lone[: eff.n] == 1)
-                others = int(np.count_nonzero(
-                    (eff.p_mode[: eff.n] < 2) & (eff.p_lone[: eff.n] == 0)
-                ))
-                # "the centre" is the centre of VIEW — measured against
-                # the window, which is the world origin exactly whenever
-                # the window is at rest (camera_follow 0).
-                dist = float(np.hypot(
-                    eff.p_x[lone] * eff.sx - eff.cam_px,
-                    eff.p_y[lone] * eff.sy - eff.cam_py,
-                )[0]) if lone.size else None
-                at_half = (dist, others, int(lone.size))
-        dist, others, lone_n = at_half
-        # his "by half way through the lull": phase_progress 0.5, which is
-        # ~45% of the lull's true wall clock — see FX.LULL_CENTER_PROGRESS
-        assert lone_n == 1
-        assert others == 0, "every other fish must have dispersed by then"
-        assert dist < 4.0, f"the lone fish must hold centre ({dist:.2f}px)"
-        assert born[0] == eff.rush_count <= FX.MAX_RUSH
-        assert abs((rush_end[0] - rush_start[0]) - eff.rush_time) < 0.1, (
-            "the rush must last about a second"
+        # 1/3 -> 2/3: ripples only — something is still lit, and it is wake
+        mid = [
+            v for v in marks.values()
+            if FX.LULL_GONE_AT < v[0] < FX.LULL_DARK_AT * 0.95
+        ]
+        assert any(v[3] > 0.0 for v in mid), (
+            "the wake must still be there between the thirds"
         )
-        assert chaos > 0.1, "there must be real chaos in the zooming pool"
-        assert room.swimming(ordinary_only=True) == \
-            eff._config["particle_count"], (
-            "the rush leaves exactly the parameter's own count behind"
+        assert all(v[1] == 0 for v in mid), "... with no fish anywhere"
+
+        # 2/3 -> end: dark
+        last = [v for v in marks.values() if v[0] >= FX.LULL_DARK_AT]
+        assert last, "the lull never reached its final third"
+        assert max(v[2] for v in last) == 0.0, (
+            "the last third must be fully dark: brightest pixel "
+            f"{max(v[2] for v in last):.2f}"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_the_lull_window_eases_home_once_there_is_nothing_to_follow(tmp_path):
+    """With no fish after the first third there is no school to follow, so
+    the window must ease home rather than hold wherever it had got to."""
+    async def main():
+        room = await _room(tmp_path, "lullcam",
+                           dict(HIS_MATRIX, camera_follow=0.8), seed=11)
+        eff = room.effect
+        room.step(240)
+        room.ramp("charge", 4.0, beats_every=12)
+        away = float(np.hypot(eff.cam_px, eff.cam_py))
+        _marks, at = _lull_clock(room, eff, seconds=4.0)
+        home = float(np.hypot(eff.cam_px, eff.cam_py))
+        assert away > 2.0, ("the charge must have moved the window at all",
+                            away)
+        assert home < away * 0.5, (
+            f"the window did not ease home: {away:.1f}px -> {home:.1f}px"
         )
         await _close(room)
     _run(main())
@@ -657,6 +677,124 @@ def test_drop_payoff_fires_on_the_first_rendered_frame(tmp_path):
             "again"
         )
         assert room.swimming() == eff._config["particle_count"]
+        await _close(room)
+    _run(main())
+
+
+def test_the_drop_rushes_in_swirls_and_leaves_the_blob_count_behind(tmp_path):
+    """His 2026-08-28 addendum, verbatim: "I want the rush to be part of the
+    drop. All the fish rush in, swirl around and some stay behind per the
+    blob count parameter after the drop is done."
+
+    Three beats, on the drop he already likes:
+      1. RUSH IN   — the rush population enters at the drop instant
+      2. SWIRL     — through the drop's own duration
+      3. STAY BEHIND — `particle_count` of them become the ordinary
+                       population when the drop finishes
+    """
+    async def main():
+        room = await _room(tmp_path, "droprush", seed=4)
+        eff = room.effect
+        room.step(240)
+        # the lull leaves NOTHING behind now, so the drop is what has to
+        # bring the room back
+        room.ramp("lull", 3.0)
+        assert eff.n == 0, "the lull must have emptied the panel"
+
+        born = [0]
+        orig = eff._spawn_rush
+
+        def counted(count, _o=orig):
+            before = eff.n
+            _o(count)
+            born[0] += eff.n - before
+        eff._spawn_rush = counted
+
+        eff.update_config({"phase": "drop", "phase_progress": 0.0})
+        room.step(1)
+        assert born[0] == eff.rush_count, (
+            "the whole rush must arrive on the drop's first rendered frame",
+            born[0], eff.rush_count,
+        )
+        rushers = np.flatnonzero(
+            (eff.p_mode[: eff.n] == 3) & (eff.p_nocap[: eff.n] == 1)
+        )
+        assert rushers.size == eff.rush_count
+        assert eff._rush_swirl >= 0.0
+
+        # BEAT 2: they swirl — angular travel around the centre of view,
+        # measured on the rush fish themselves
+        def angles():
+            idx = np.flatnonzero(
+                (eff.p_mode[: eff.n] == 3) & (eff.p_nocap[: eff.n] == 1)
+            )
+            return idx, np.arctan2(
+                (eff.p_y[idx] - eff.cam_ny) * eff.sy,
+                (eff.p_x[idx] - eff.cam_nx) * eff.sx,
+            )
+
+        i0, a0 = angles()
+        swept = np.zeros(eff.n)
+        prev = dict(zip(i0.tolist(), a0.tolist()))
+        peak_swirl = 0.0
+        for _ in range(int(1.6 / DT)):
+            room.step(1)
+            peak_swirl = max(peak_swirl, float(eff._rush_swirl))
+            idx, ang = angles()
+            for k, a in zip(idx.tolist(), ang.tolist()):
+                if k in prev:
+                    swept[k] += abs(
+                        (a - prev[k] + np.pi) % (2 * np.pi) - np.pi
+                    )
+                prev[k] = a
+        assert peak_swirl > 0.0, "the swirl never engaged"
+        assert float(np.max(swept)) > 1.0, (
+            "the rush must actually swirl around the centre: worst-case "
+            f"angular travel {float(np.max(swept)):.2f} rad"
+        )
+
+        # BEAT 3: the blob count stays behind
+        room.step(int((FX.DROP_SETTLE_S + 1.5) / DT))
+        assert eff._phase == "none"
+        assert room.swimming(ordinary_only=True) == \
+            eff._config["particle_count"], (
+            "exactly the blob count must stay behind after the drop"
+        )
+        assert int(np.count_nonzero(eff.p_nocap[: eff.n] == 1)) == 0, (
+            "no cap-exempt fish may outlive the drop"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_the_drop_is_unchanged_when_the_rush_is_switched_off(tmp_path):
+    """The rush is an ADDITION to the drop, not a redesign of it: with
+    `rush_count` at 0 the drop repopulates from its own centre burst
+    exactly as it always did."""
+    async def main():
+        room = await _room(tmp_path, "droprush0",
+                           dict(HIS_MATRIX, rush_count=0), seed=4)
+        eff = room.effect
+        room.step(240)
+        room.ramp("lull", 3.0)
+        burst = [0]
+        orig = eff._spawn_center_burst
+
+        def counted(ncx, ncy, count, _o=orig):
+            before = eff.n
+            _o(ncx, ncy, count)
+            burst[0] += eff.n - before
+        eff._spawn_center_burst = counted
+
+        eff.update_config({"phase": "drop", "phase_progress": 0.0})
+        room.step(1)
+        assert burst[0] == eff._config["particle_count"], (
+            "with no rush, the centre burst must still repopulate the drop",
+            burst[0],
+        )
+        room.step(int((FX.DROP_SETTLE_S + 1.0) / DT))
+        assert room.swimming(ordinary_only=True) == \
+            eff._config["particle_count"]
         await _close(room)
     _run(main())
 
