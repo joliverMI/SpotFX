@@ -127,6 +127,30 @@ AVOID_SEP_BODIES = 1.6  # separation radius as a multiple of BODY LENGTH — the
                         # construction, and a blob_size/body_aspect edit can
                         # never leave the avoidance mis-scaled.
 SCHOOL_W = 14.0         # alignment dominates while a school is formed
+# HIS ASK (2026-08-28): "in the charge, I don't want the fish to clump so
+# much and I want them evenly distributed across the screen" — while still
+# arriving together. Two things do it, and neither touches the shared
+# heading that IS the unison:
+#   * they SPAWN on an even lateral spread instead of a uniform-random one
+#     (see _spawn_school: a random spread has clusters and gaps by
+#     construction, and equal speeds on a shared heading preserve whatever
+#     spread they started with, so a clumpy start stays clumpy);
+#   * and a SEPARATION steer keeps them apart once formed. This is not the
+#     forward-arc dodge `avoid_strength` runs (still off in a school): every
+#     close neighbour pushes, whichever side it is on, so a converging pair
+#     opens out whether it is head-on or side by side. Its weight sits well
+#     under SCHOOL_W, so the shared heading still dominates and the school
+#     still arrives together — the spacing only bends it.
+SCHOOL_SPACING_W = 6.5
+SCHOOL_SEP_BODIES = 3.0  # target spacing, in BODY LENGTHS — derived from the
+                         # fish's own size for the same reason
+                         # AVOID_SEP_BODIES is, never a second knob
+# Low-discrepancy spawn offsets: any PREFIX of these sequences is already
+# evenly spread, which matters because a school fills progressively (see
+# _charge_step) — an in-order even spread would fill one side of the panel
+# first and only look even once the last fish arrived.
+SCHOOL_PHI_LAT = 0.6180339887   # golden ratio, lateral
+SCHOOL_PHI_DEPTH = 0.7548776662  # plastic number, depth
 CENTER_W = 10.0         # the lull's lone fish holding centre
 
 # ── the wake ──────────────────────────────────────────────
@@ -1174,10 +1198,18 @@ class Fish2d(Twod, GradientEffect):
             np.sin(self.p_hd[live]).mean(), np.cos(self.p_hd[live]).mean()
         ))
 
-    def _spawn_school(self, count):
+    def _spawn_school(self, count, slot0=0):
         """The charge's school: fish swim in from behind the shared heading
         so they arrive already travelling with the shoal. Tagged `p_nocap`
-        — the ONE charge-scoped bypass of the population cap."""
+        — the ONE charge-scoped bypass of the population cap.
+
+        Placement is an EVEN spread, not a uniform-random one (his ask, see
+        SCHOOL_SPACING_W above): each fish takes the next slot on a
+        low-discrepancy sequence across the school's width and depth, so a
+        half-filled school is already spread across the panel rather than
+        clustered wherever the dice fell. `slot0` continues that sequence
+        across the several calls a progressive fill makes.
+        """
         base = self.n
         s = self._spawn(count, mode=1, nocap=True)
         k = self.n - base
@@ -1185,9 +1217,16 @@ class Fish2d(Twod, GradientEffect):
             return
         rng = self._rng
         hd = self._school_hd
-        # spread across the width behind the school
-        lateral = rng.uniform(-1.0, 1.0, k) * self.roam_bound
-        back = self.entry_radius + rng.uniform(0.0, 0.5, k)
+        slot = np.arange(slot0, slot0 + k, dtype=np.float32)
+        # an even spread across the width behind the school, jittered by the
+        # school's own variation knob so it never reads as a drawn rank
+        jitter = rng.uniform(-1.0, 1.0, k) * 0.5 * self.school_variation
+        lateral = np.clip(
+            2.0 * ((slot * SCHOOL_PHI_LAT) % 1.0) - 1.0 + jitter, -1.0, 1.0
+        ) * self.roam_bound
+        back = self.entry_radius + (
+            (slot * SCHOOL_PHI_DEPTH) % 1.0
+        ) * 0.5
         self.p_x[s] = self.cam_nx - np.cos(hd) * back - np.sin(hd) * lateral
         self.p_y[s] = self.cam_ny - np.sin(hd) * back + np.cos(hd) * lateral
         self.p_x0[s] = self.p_x[s]
@@ -1345,7 +1384,10 @@ class Fish2d(Twod, GradientEffect):
         n = self.n
         have = int(np.count_nonzero(self.p_mode[:n] < 2))
         if have < target:
-            self._spawn_school(target - have)
+            # the slot base is what has ALREADY arrived, so the even
+            # spread continues across a progressive fill instead of
+            # restarting (and stacking) on every call
+            self._spawn_school(target - have, slot0=have)
         self._school_turn_t += self.passed_dt
         # beat turns arm only once the school has gathered; the flag is
         # consumed either way so a beat during the gather can't latch and
@@ -2172,6 +2214,31 @@ class Fish2d(Twod, GradientEffect):
             w_school = np.where(swimming, SCHOOL_W, 0.0)
             desired_x += np.cos(school_hd) * w_school
             desired_y += np.sin(school_hd) * w_school
+            # ... and they must not CLUMP while they do it. See
+            # SCHOOL_SPACING_W: omnidirectional separation, weighted well
+            # under the shared heading, so unison survives the spread.
+            sidx = np.flatnonzero(swimming)
+            if sidx.size > 1:
+                sx_px = self.p_x[:n][sidx] * self.sx
+                sy_px = self.p_y[:n][sidx] * self.sy
+                dx = sx_px[:, None] - sx_px[None, :]   # neighbour -> me
+                dy = sy_px[:, None] - sy_px[None, :]
+                d = np.hypot(dx, dy)
+                np.fill_diagonal(d, np.inf)
+                sep = max(SCHOOL_SEP_BODIES * self._body_len_px(), 1e-3)
+                close = np.clip(1.0 - d / sep, 0.0, 1.0)
+                inv = 1.0 / np.maximum(d, 1e-3)
+                push_x = (dx * inv * close).sum(axis=1)
+                push_y = (dy * inv * close).sum(axis=1)
+                mag = np.hypot(push_x, push_y)
+                keep = mag > 1e-6
+                add_x = np.zeros(n, dtype=np.float32)
+                add_y = np.zeros(n, dtype=np.float32)
+                w_sep = SCHOOL_SPACING_W * np.minimum(mag[keep], 1.0)
+                add_x[sidx[keep]] = push_x[keep] / mag[keep] * w_sep
+                add_y[sidx[keep]] = push_y[keep] / mag[keep] * w_sep
+                desired_x += add_x
+                desired_y += add_y
 
         # the lull's lone fish keeps to the centre of view
         lone = self.p_lone[:n] == 1

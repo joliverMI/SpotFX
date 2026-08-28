@@ -490,6 +490,77 @@ def test_charge_school_swims_in_in_unison_and_turns_on_the_beat(tmp_path):
     _run(main())
 
 
+def test_the_charge_school_does_not_clump(tmp_path):
+    """His ask (2026-08-28): "in the charge, I don't want the fish to clump
+    so much and I want them evenly distributed across the screen" — while
+    still arriving together.
+
+    Measured against the same run with the separation steer switched off,
+    which is the state this replaced. scripts/check_fish_charge_spread.py
+    is the merge-base before/after; this pins the property.
+    """
+    def spread(eff, panel):
+        rows, cols = panel
+        n = eff.n
+        m = np.flatnonzero(eff.p_mode[:n] == 0)
+        if m.size < 3:
+            return None
+        x = eff.p_x[m] * eff.sx - eff.cam_px + eff.cx
+        y = eff.p_y[m] * eff.sy - eff.cam_py + eff.cy
+        on = (x >= 0) & (x < cols) & (y >= 0) & (y < rows)
+        x, y = x[on], y[on]
+        if x.size < 3:
+            return None
+        d = np.hypot(x[None, :] - x[:, None], y[None, :] - y[:, None])
+        np.fill_diagonal(d, np.inf)
+        gx = np.clip((x / cols * 6).astype(int), 0, 5)
+        gy = np.clip((y / rows * 3).astype(int), 0, 2)
+        cells = len(set(zip(gx.tolist(), gy.tolist())))
+        return float(d.min(axis=1).mean()), cells / x.size
+
+    async def run(weight):
+        orig = FX.SCHOOL_SPACING_W
+        FX.SCHOOL_SPACING_W = weight
+        try:
+            room = await _room(tmp_path, f"clump{weight}", seed=5)
+            eff = room.effect
+            room.step(240)
+            panel = (eff.r_height, eff.r_width)
+            eff.update_config({"phase": "charge", "phase_progress": 0.0})
+            frames = int(4.0 / DT)
+            seen = []
+            for i in range(1, frames + 1):
+                eff.update_config({"phase_progress": i / frames})
+                room.step(1)
+                if i > frames * 0.5:
+                    got = spread(eff, panel)
+                    if got:
+                        seen.append(got)
+            hd = eff.p_hd[np.flatnonzero(eff.p_mode[: eff.n] == 0)]
+            c = np.arctan2(np.sin(hd).mean(), np.cos(hd).mean())
+            unison = float(np.abs(
+                (hd - c + np.pi) % (2 * np.pi) - np.pi
+            ).std())
+            await _close(room)
+            assert seen, "no charge school was ever measured"
+            return (float(np.mean([a for a, _ in seen])),
+                    float(np.mean([b for _, b in seen])),
+                    unison)
+        finally:
+            FX.SCHOOL_SPACING_W = orig
+
+    async def main():
+        off = await run(0.0)
+        on = await run(FX.SCHOOL_SPACING_W)
+        assert on[0] > off[0] * 1.25, (
+            "the school must sit further apart", off, on)
+        assert on[1] > off[1] * 1.1, (
+            "... and reach more of the panel per fish on it", off, on)
+        # ARRIVING TOGETHER is the half that must NOT be traded away
+        assert on[2] < 0.5, ("the school stopped moving in unison", on)
+    _run(main())
+
+
 # ── 6. the lull ─────────────────────────────────────────────────────────
 def test_lull_leaves_one_centred_fish_then_a_rush(tmp_path):
     async def main():
@@ -982,31 +1053,48 @@ def test_avoidance_reduces_crossings_at_his_values(tmp_path):
 
 
 def test_school_still_swims_in_unison_with_avoidance_on(tmp_path):
-    """The charge's school moves 'almost identically' and the lull's rush
-    is deliberately chaotic — both are authored, not crowds to fix.
-    Avoidance is off while a school is formed, so unison is untouched."""
+    """The charge's school moves 'almost identically' and the lull's rush is
+    deliberately chaotic — both are authored, not crowds to fix. Avoidance
+    is off while a school is formed, so it can contribute NOTHING there.
+
+    Proven structurally: both runs settle identically with avoidance off,
+    the knob is then changed immediately before the charge, and the school's
+    headings must come out bit for bit the same. (Comparing two rooms
+    configured differently from birth cannot prove this — their fish are
+    already in different places by the time the charge starts, and the
+    school's own separation steer, added 2026-08-28, reads those positions.)
+    """
     async def main():
-        spread = {}
+        headings = {}
         for strength in (0.0, 1.0):
             room = await _room(
                 tmp_path, f"av-s{strength}",
-                dict(HIS_CROWD, avoid_strength=strength), seed=9,
+                dict(HIS_CROWD, avoid_strength=0.0), seed=9,
             )
+            room.step(240)                      # identical settle, both runs
+            room.effect.update_config({"avoid_strength": strength})
             room.ramp("charge", 2.5)
             eff = room.effect
-            n = eff.n
-            live = eff.p_mode[:n] < 2
-            hd = eff.p_hd[:n][live]
-            mean = np.arctan2(np.sin(hd).mean(), np.cos(hd).mean())
-            spread[strength] = float(
-                np.abs((hd - mean + np.pi) % (2 * np.pi) - np.pi).max()
-            )
             assert eff._school_on, "the charge must have formed a school"
+            assert eff.avoid_strength == strength
+            live = eff.p_mode[: eff.n] < 2
+            headings[strength] = eff.p_hd[: eff.n][live].copy()
+            mean = np.arctan2(
+                np.sin(headings[strength]).mean(),
+                np.cos(headings[strength]).mean(),
+            )
+            spread = float(np.abs(
+                (headings[strength] - mean + np.pi) % (2 * np.pi) - np.pi
+            ).max())
+            assert spread < 0.5, (
+                "the school must still move almost identically "
+                f"(spread {np.degrees(spread):.1f} deg at "
+                f"avoid_strength {strength})"
+            )
             await _close(room)
-        assert spread[1.0] <= spread[0.0] + 1e-5, (
-            "full-strength avoidance must not loosen the school's unison: "
-            f"spread {np.degrees(spread[0.0]):.2f} -> "
-            f"{np.degrees(spread[1.0]):.2f} deg"
+        assert np.array_equal(headings[0.0], headings[1.0]), (
+            "avoidance changed the school's headings — it must be off "
+            "entirely while a school is formed"
         )
     _run(main())
 
