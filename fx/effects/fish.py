@@ -95,6 +95,19 @@ BOUND_W = 8.0           # inward steer weight relative to wander/home
 HOME_W = 0.35
 HOME_FREE = 0.5         # no home pull inside this fraction of the pond
 WANDER_W = 1.0
+AVOID_W = 6.0           # mutual-avoidance steer weight at avoid_strength 1,
+                        # relative to wander/home. Below BOUND_W on purpose:
+                        # dodging a neighbour must never win against the pond
+                        # edge, or a crowd would push a fish out of the water.
+AVOID_MAX_TURN = np.pi / 2.5  # the widest a swerve ever ASKS for, before
+                        # the turn-rate clamp has its say. A quarter-turn
+                        # aside clears a neighbour; asking for more only
+                        # spends arc the fish does not have.
+AVOID_SEP_BODIES = 1.6  # separation radius as a multiple of BODY LENGTH — the
+                        # radius is DERIVED from the fish's own size, never a
+                        # second knob: bigger fish need more room by
+                        # construction, and a blob_size/body_aspect edit can
+                        # never leave the avoidance mis-scaled.
 SCHOOL_W = 14.0         # alignment dominates while a school is formed
 CENTER_W = 10.0         # the lull's lone fish holding centre
 
@@ -167,8 +180,11 @@ class Fish2d(Twod, GradientEffect):
     radius_scale projection) but headings and body geometry are SCREEN-space,
     so the oval is never sheared by the panel's aspect.
 
-    Deliberately NOT modelled: mutual avoidance. Fish swim through each
-    other (owner's scope decision, 2026-08-25).
+    Mutual avoidance (`avoid_strength`, added 2026-08-28) is STEERING ONLY:
+    it contributes one more term to the desired-heading vector sum below and
+    is then bounded by the same turn-rate clamp as every other term, so the
+    two fish laws hold structurally — no fish ever reverses on the spot, and
+    every about-face stays a clear arc. It never writes a position.
     """
 
     NAME = "Fish"
@@ -351,6 +367,11 @@ class Fish2d(Twod, GradientEffect):
                 default=1.3,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=4.0)),
             vol.Optional(
+                "avoid_strength",
+                description="How hard they avoid each other; 0 = they swim straight through",
+                default=0.45,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
                 "roam_scale",
                 description="Pond size as a fraction of the panel; fish turn back at its edge",
                 default=0.95,
@@ -523,6 +544,7 @@ class Fish2d(Twod, GradientEffect):
         self.ripple_spread = self._config["ripple_spread"]
         self.ripple_life = self._config["ripple_life"]
         self.ripple_width = self._config["ripple_width"]
+        self.avoid_strength = self._config["avoid_strength"]
         self.roam_scale = self._config["roam_scale"]
         self.school_count = self._config["school_count"]
         self.school_variation = self._config["school_variation"]
@@ -1751,6 +1773,53 @@ class Fish2d(Twod, GradientEffect):
         )
         desired_x += np.cos(inward) * w_bound
         desired_y += np.sin(inward) * w_bound
+
+        # mutual avoidance: a turn-away term, and ONLY a turn-away term.
+        # It lands in the same desired-heading sum as every other steer and
+        # is bounded by the same turn-rate clamp below, so it can never
+        # reverse a fish on the spot, exceed the turn circle, or move one.
+        #
+        # A real fish swerves around what is IN FRONT of it — it does not
+        # brake for something behind. So only neighbours inside the forward
+        # arc count, and the answer is a lateral SWERVE (pick the side that
+        # clears them), never a "point away from it" vector: pointing away
+        # from a fish dead ahead asks for a 180, which the turn clamp then
+        # spends a whole arc serving while the crossing happens anyway.
+        #
+        # SCOPE, deliberate: only ordinary swimming fish (mode < 2) steer
+        # here AND only they count as neighbours, and the whole term is off
+        # while a school is formed. The charge's school moves "almost
+        # identically" and the lull's rush is deliberately chaotic — both are
+        # authored choreography, not crowds to fix — so avoidance is never
+        # allowed to argue with either.
+        if self.avoid_strength > 0.0 and n > 1 and not self._school_on:
+            idx = np.flatnonzero(swimming)
+            if idx.size > 1:
+                ax_px = self.p_x[:n][idx] * self.sx
+                ay_px = self.p_y[:n][idx] * self.sy
+                dx = ax_px[None, :] - ax_px[:, None]   # me -> neighbour
+                dy = ay_px[None, :] - ay_px[:, None]
+                d = np.hypot(dx, dy)
+                np.fill_diagonal(d, np.inf)
+                sep = max(AVOID_SEP_BODIES * self._body_len_px(), 1e-3)
+                close = np.clip(1.0 - d / sep, 0.0, 1.0)
+                inv = 1.0 / np.maximum(d, 1e-3)
+                ux, uy = dx * inv, dy * inv
+                hx_ = np.cos(hd[idx])[:, None]
+                hy_ = np.sin(hd[idx])[:, None]
+                ahead = np.clip(hx_ * ux + hy_ * uy, 0.0, 1.0)
+                side = np.sign(hx_ * uy - hy_ * ux)  # +1 = on my left
+                w = close * ahead
+                bias = -(side * w).sum(axis=1)       # + = swerve left
+                strength = np.minimum(np.abs(bias), 1.0)
+                swerve = hd[idx] + np.sign(bias) * strength * AVOID_MAX_TURN
+                w_avoid = AVOID_W * self.avoid_strength * strength
+                add_x = np.zeros(n, dtype=np.float32)
+                add_y = np.zeros(n, dtype=np.float32)
+                add_x[idx] = np.cos(swerve) * w_avoid
+                add_y[idx] = np.sin(swerve) * w_avoid
+                desired_x += add_x
+                desired_y += add_y
 
         # the school: everyone on the shared heading, plus minor variation
         if self._school_on:

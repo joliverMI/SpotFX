@@ -3840,8 +3840,17 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    decision: the charge's school and the lull's rush, via `p_nocap`. A
    cap-exempt fish never survives the moment it was granted for, and
    ordinary swimming always obeys `particle_count`. Don't widen this.
-3. **Mutual avoidance is deliberately absent** (his scope decision
-   2026-08-25) — fish swim through each other. It is not a gap to fill.
+3. **Mutual avoidance is STEERING ONLY** (`avoid_strength`, 2026-08-28 —
+   his own 2026-08-25 deferral un-parked). It adds one more weighted term
+   to the desired-heading sum and is bounded by the SAME turn-rate clamp as
+   every other steer, which is what makes both fish laws structural rather
+   than best-effort. Three things not to undo: only neighbours in the
+   FORWARD arc count and the answer is a lateral swerve (a point-away
+   vector asks for a 180 and measurably made crossings WORSE); the
+   separation radius is DERIVED from body length, never a second knob; and
+   it is off during the charge's school and the lull's rush, which are
+   authored choreography, not crowds to fix. Sweep + tuned default:
+   `scripts/check_fish_avoidance.py`.
 
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`, `tests/test_fish.py`.

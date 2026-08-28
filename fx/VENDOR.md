@@ -474,9 +474,27 @@ variables named `ledfx` (the core object handle) are untouched.
     rate-limited turn built from a real turn RADIUS, a flapping spine
     rendered as a chain of splats along the heading, and an expanding
     ripple wake composited straight to the output instead of through the
-    trail buffer. Orbits itself is UNTOUCHED. Deliberately NOT modelled:
-    mutual avoidance (owner scope decision the same day — fish swim through
-    each other).
+    trail buffer. Orbits itself is UNTOUCHED.
+
+    Mutual avoidance (`avoid_strength`, added 2026-08-28, PR
+    fm/fish-collision-avoidance — his own deferral un-parked: "add the
+    collision") is STEERING ONLY, by construction: it contributes one more
+    weighted term to the desired-heading vector sum and is then bounded by
+    the same turn-rate clamp as every other steer, so neither fish law can
+    be broken — no reverse on the spot, no turn tighter than the radius, and
+    never a written position. Only neighbours inside the forward arc count
+    and the answer is a lateral SWERVE, not a point-away vector (pointing
+    away from a fish dead ahead asks for a 180 the clamp then spends a whole
+    arc serving, while the crossing happens anyway — measured: the
+    point-away form RAISED crossings and clamp saturation). The separation
+    radius is DERIVED from body length (`AVOID_SEP_BODIES`), never a second
+    knob. Off entirely while a school is formed, and rushing fish neither
+    steer nor count as neighbours: the charge's school moves "almost
+    identically" and the lull's rush is deliberately chaotic — authored
+    choreography, not crowds to fix. `avoid_strength=0` is byte-identical to
+    the pre-feature effect (asserted, not claimed). Default 0.45, tuned at
+    HIS live state (jiggle 0.5, roam_scale 0.75) —
+    `scripts/check_fish_avoidance.py` prints the sweep.
 
     Two one-line supporting edits, both purely additive: `effects/radial.py`
     adds `"fish"` to the src whitelist its `_adopt_handoff` gate uses (no
@@ -493,7 +511,7 @@ variables named `ledfx` (the core object handle) are untouched.
     `CAP` is sized so both plus a full drop explosion fit at once
     (`tests/test_fish.py::test_buffer_headroom_holds_school_rush_and_explosion_at_once`).
     Evidence: `scripts/check_fish.py` (eight measured sections on the real
-    pipeline), `tests/test_fish.py`.
+    pipeline), `scripts/check_fish_avoidance.py`, `tests/test_fish.py`.
 
 22. `effects/radial.py`: a QUIET BASE ROTATION FLOOR (NEW PARAM +
     BEHAVIOUR, PR fm/radial-base-rotation). His ask, verbatim: "i like the
