@@ -34,8 +34,9 @@ CAP = (
 SUBSTEPS = 2        # path sub-samples per frame (gap-free smear)
 DT_MAX = 0.1
 KERNEL_R = 8        # max body-segment radius the offset table supports
-RIPPLE_KERNEL_R = 16  # max ripple radius the offset table supports
-RIPPLE_CAP = 96     # live ripple ring buffer
+SPLAT_KERNEL_R = 16  # the shared splat offset table's own span, in px:
+                    # every soft dot (a body segment, a wake deposit) is
+                    # stamped from it and filtered by its own radius
 
 LEAVE_FADE_S = 1.2   # fade-out horizon for departing fish
 HANDOFF_ENTER_S = 0.65
@@ -128,11 +129,35 @@ AVOID_SEP_BODIES = 1.6  # separation radius as a multiple of BODY LENGTH — the
 SCHOOL_W = 14.0         # alignment dominates while a school is formed
 CENTER_W = 10.0         # the lull's lone fish holding centre
 
-# ── ripples ─────────────────────────────────────────────────────────────────
-# Ripples are drawn STRAIGHT TO THE OUTPUT, never into the persistent trail
-# buffer — a max-blended ring would smear into a haze and stop reading as a
-# ripple at all. Their only fade is their own life curve, which is what makes
-# this wake "clearly different" from Orbits' comet smear.
+# ── the wake ──────────────────────────────────────────────
+# HIS ASK (2026-08-28): "the ripples ... more like the trails in Orbits, but
+# ... expand and fade instead of just fading. I don't like the circles that
+# form because the circle line is kind of messy."
+#
+# So there is no ripple any more — no radius, no ring, no outline to read as
+# messy. The wake is ORBITS' OWN MECHANISM: a persistent accumulation buffer
+# decayed exponentially every frame (`buf *= 0.5 ** (dt / half_life)`, the
+# same shape `self.trail` already uses for the bodies), with ONE addition —
+# the buffer also DIFFUSES outward every frame, so what was deposited opens
+# out as it dims. Deposits are soft FILLED splats laid at the tail every
+# frame, never stamped shapes.
+#
+# The energy still scales off REAL MOTION (swim speed x the tail's own
+# throw), never a bare beat value, so the lunge's longer travel lays down a
+# longer smear for free.
+WAKE_HALF_LIFE_X = 0.42   # wake half-life as a fraction of `ripple_life`,
+                          # so the knob keeps meaning "seconds to fade"
+WAKE_EXPAND_K = 2.6       # diffusion blend per second per unit of
+                          # `ripple_spread` — THE expand half of his ask
+WAKE_EXPAND_MAX = 0.85    # ... and the most of one frame it may ever be, so
+                          # a long frame can never flatten the buffer in one
+                          # step (the diffusion kernel is a 3-tap average;
+                          # blending it in fully is still a real blur, but
+                          # more than that is not defined)
+WAKE_DEPOSIT_HZ = 26.0    # deposits are per-frame and scaled by dt x this,
+                          # so the wake is frame-rate independent and its
+                          # steady state is set here rather than emerging
+                          # from whatever frame rate the host happens to run
 RIPPLE_BASE = 0.08      # brightness floor: "the trail is always subtle"
 RIPPLE_SPEED_GAIN = 0.55  # ... "but stronger on faster" — measured against
                         # the fish's OWN cruise, so "faster" means this fish
@@ -140,12 +165,36 @@ RIPPLE_SPEED_GAIN = 0.55  # ... "but stronger on faster" — measured against
                         # differently-tuned scene
 RIPPLE_SPEED_FLOOR = 0.5  # cruise sits this far up the speed ramp …
 RIPPLE_SPEED_SPAN = 1.5   # … which tops out this far above it
-RIPPLE_R0_BODY = 0.30   # initial radius from the body's own length …
-RIPPLE_R0_FLAP = 0.60   # … plus this much of the tail's lateral throw
-RIPPLE_MAX_BODY = 2.2   # … and a ripple never opens wider than this many
-                        # body lengths ("try to match the size of the motion
-                        # to the ripple" — the wake is fish-sized, not
-                        # panel-sized)
+WAKE_FLAP_FLOOR = 0.55  # the deposit pulses with the tail: this much always,
+WAKE_FLAP_GAIN = 0.45   # ... plus this much on the throw's own |sin|. The
+                        # flap is what used to set the ripple CADENCE; it now
+                        # sets the deposit's own texture instead, which keeps
+                        # the wake tied to the body's real motion without
+                        # anything being stamped.
+WAKE_R0_BODY = 0.30     # splat radius from the body's own length …
+WAKE_R0_FLAP = 0.60     # … plus this much of the tail's lateral throw
+WAKE_R_MAX_BODY = 1.1   # … and a deposit is never wider than this many body
+                        # lengths ("match the size of the motion to the
+                        # ripple" — the wake is fish-sized, not panel-sized;
+                        # the DIFFUSION is what opens it out past this, not
+                        # the deposit)
+
+# COLOUR — the rule, stated (his ask: "a different color from the fish if
+# there is a gradient to work with, or if it's a solid/uniform color, at
+# least substantially less bright than the fish").
+#
+# THE DECISION RULE, read off the RESOLVED gradient curve and not the config
+# string: sample the built curve end to end; if every channel's spread
+# across those samples is within WAKE_SOLID_TOL, the palette is SOLID.
+#   * SOLID  → the wake wears the fish's own colour at WAKE_SOLID_DIM of its
+#              amplitude. Distinctness is a BRIGHTNESS ratio.
+#   * GRADIENT → the wake samples the gradient WAKE_GRAD_OFFSET further along
+#              than the fish that made it — deterministic, and a half turn is
+#              the furthest apart two points on a wrapped gradient can be.
+#              Distinctness is a COLOUR distance.
+WAKE_SOLID_TOL = 8.0 / 255.0
+WAKE_SOLID_DIM = 0.35
+WAKE_GRAD_OFFSET = 0.5
 
 # ── the camera window ───────────────────────────────────────────────────────
 # The panel is a WINDOW onto a larger body of water, not the whole of it.
@@ -190,12 +239,15 @@ CAM_LEASH = 0.55        # ... and however far it lags, catching up becomes
 CAM_REST_EPS = 1e-3     # px: below this, and not following, the camera IS
                         # zero — the identity mapping is restored exactly,
                         # never left sitting on a residue.
-RIPPLE_CULL_PAD = RIPPLE_KERNEL_R + 6   # px past the panel edge beyond
-                        # which a ripple cannot light a single pixel, so a
-                        # ripple the window has left far behind is DROPPED,
-                        # never wrapped. Only applied while the world window
-                        # is on (`camera_follow > 0`): at 0 the ripple ring
-                        # buffer must keep the exact contents master's did.
+WAKE_SHIFT_EPS = 1e-6   # The wake buffer is SCREEN space but WORLD
+                        # anchored: every frame it is rolled by exactly the
+                        # displacement the world->screen mapping moved (the
+                        # current's own flow, minus the window's own step),
+                        # with the sub-pixel remainder carried across frames.
+                        # Content rolled off an edge is DROPPED, never
+                        # wrapped — that is the cull, and it needs no pad,
+                        # because a pixel outside the buffer cannot light
+                        # anything. Below this the shift is not worth a roll.
 
 # ── charge / lull / drop choreography ───────────────────────────────────────
 # SpotFX writes `phase` (instant) and ramps `phase_progress` 0->1 over the
@@ -223,7 +275,7 @@ DROP_EJECTA_SPEED = (1.6, 2.9)  # ejecta speed, multiples of cruise
 _SOA_NAMES = (
     "p_mode", "p_nocap", "p_lone", "p_disp", "p_slot", "p_slot_frac",
     "p_x", "p_y", "p_x0", "p_y0", "p_hd", "p_spd", "p_acc",
-    "p_flap", "p_beat", "p_jog", "p_ro", "p_lun", "p_lun_t", "p_var",
+    "p_flap", "p_jog", "p_ro", "p_lun", "p_lun_t", "p_var",
     "p_enter", "p_erate", "p_leave", "p_lfade",
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_grad_from", "p_scatter", "p_bright",
@@ -240,8 +292,11 @@ class Fish2d(Twod, GradientEffect):
 
     Each particle is a thin oval swimming under its own heading and speed:
     it POINTS the way it is going, its spine flaps (harder under
-    acceleration, subtler when slowing), and it leaves an expanding ripple
-    wake instead of a comet smear. Turning is rate-limited by a real turn
+    acceleration, subtler when slowing), and it leaves a wake: Orbits' own
+    decaying accumulation buffer, which also EXPANDS every frame, so the
+    smear opens out as it dims. Nothing is stamped as a shape — see the
+    wake block at the top of this module, including the stated rule for
+    what colour the wake takes against the fish's own. Turning is rate-limited by a real turn
     RADIUS, so a fish can never reverse on the spot — every about-face is an
     arc. Physics runs in Orbits' normalized space (same x_offset/y_offset/
     radius_scale projection) but headings and body geometry are SCREEN-space,
@@ -422,22 +477,22 @@ class Fish2d(Twod, GradientEffect):
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
             vol.Optional(
                 "ripple_amount",
-                description="Ripple wake strength",
+                description="Wake strength: how much smear a fish lays down",
                 default=0.35,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             vol.Optional(
                 "ripple_spread",
-                description="How fast a ripple opens out, as a multiple of swim speed",
+                description="How fast the wake opens outward as it fades",
                 default=0.45,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
             vol.Optional(
                 "ripple_life",
-                description="Seconds a ripple takes to fade",
+                description="Seconds the wake takes to fade",
                 default=0.9,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=4.0)),
             vol.Optional(
                 "ripple_width",
-                description="Ripple ring thickness in pixels",
+                description="Wake thickness: the size of each deposit, relative to the fish",
                 default=1.3,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=4.0)),
             vol.Optional(
@@ -520,7 +575,6 @@ class Fish2d(Twod, GradientEffect):
         self.p_spd = np.zeros(CAP, dtype=np.float32)  # px/s
         self.p_acc = np.zeros(CAP, dtype=np.float32)  # smoothed px/s^2
         self.p_flap = np.zeros(CAP, dtype=np.float32)
-        self.p_beat = np.zeros(CAP, dtype=np.float32)  # last tail-beat index
         self.p_jog = np.zeros(CAP, dtype=np.float32)   # turn kick, rad/s
         self.p_ro = np.zeros(CAP, dtype=np.float32)    # speed kick, fraction
         self.p_lun = np.zeros(CAP, dtype=np.float32)   # lunge boost, fraction
@@ -545,20 +599,12 @@ class Fish2d(Twod, GradientEffect):
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
 
-        # ripple ring buffer (own lifecycle, own compaction)
-        self.r_x = np.zeros(RIPPLE_CAP, dtype=np.float32)   # pixel space
-        self.r_y = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self.r_r = np.zeros(RIPPLE_CAP, dtype=np.float32)   # radius, px
-        self.r_gr = np.zeros(RIPPLE_CAP, dtype=np.float32)  # growth, px/s
-        self.r_age = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self.r_life = np.ones(RIPPLE_CAP, dtype=np.float32)
-        self.r_amp = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self.r_grad = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self._ripple_soa = (
-            self.r_x, self.r_y, self.r_r, self.r_gr,
-            self.r_age, self.r_life, self.r_amp, self.r_grad,
-        )
-        self.rn = 0
+        # THE WAKE: one persistent accumulation buffer, allocated with the
+        # body trail in do_once (it is panel-shaped, and the panel is not
+        # known here yet).
+        self.wake = None
+        self._wake_ox = 0.0     # sub-pixel world-anchoring remainder
+        self._wake_oy = 0.0
 
         self._booted = False
         self._handoff_pending = True
@@ -593,7 +639,7 @@ class Fish2d(Twod, GradientEffect):
         self._cam_px_prev = 0.0
         self._cam_py_prev = 0.0
 
-        span = np.arange(-RIPPLE_KERNEL_R, RIPPLE_KERNEL_R + 1)
+        span = np.arange(-SPLAT_KERNEL_R, SPLAT_KERNEL_R + 1)
         kdx, kdy = np.meshgrid(span, span)
         kdist = np.sqrt(kdx**2 + kdy**2).ravel()
         self.k_dx = kdx.ravel().astype(np.int32)
@@ -710,6 +756,14 @@ class Fish2d(Twod, GradientEffect):
             self.trail = np.zeros(
                 (self.r_height, self.r_width, 3), dtype=np.float32
             )
+        if self.wake is None or self.wake.shape[:2] != (
+            self.r_height,
+            self.r_width,
+        ):
+            self.wake = np.zeros(
+                (self.r_height, self.r_width, 3), dtype=np.float32
+            )
+            self._wake_ox = self._wake_oy = 0.0
 
     # ── derived geometry ────────────────────────────────────────────────
     @property
@@ -792,7 +846,6 @@ class Fish2d(Twod, GradientEffect):
         # the one it arrived with
         self.p_grad[s] = rng.random(count, dtype=np.float32)
         self.p_flap[s] = rng.uniform(0.0, 2 * np.pi, count)
-        self.p_beat[s] = np.floor(self.p_flap[s] / np.pi)
         self.p_jog[s] = 0.0
         self.p_ro[s] = 0.0
         self.p_lun[s] = 0.0
@@ -1579,105 +1632,103 @@ class Fish2d(Twod, GradientEffect):
                 idx, weights=w * cw, minlength=cells
             ).reshape(self.r_height, self.r_width)
 
-    def _draw_ripples(self, buf):
-        """Expanding rings, drawn from the same offset table as the bodies —
-        weight peaks on the ring's own radius instead of at its centre."""
-        m = self.rn
-        if m == 0:
+    # ── the wake ────────────────────────────────────────────────────────
+    def _wake_palette(self):
+        """Resolve the wake's colour rule for the CURRENT gradient.
+
+        Returns `(is_solid, grad_offset, dim)`. The decision is read off the
+        BUILT gradient curve, never the config string, so a "gradient" whose
+        stops all resolve to one colour is correctly treated as solid — see
+        the WAKE_SOLID_* block at the top of this module for the rule.
+        """
+        self._assert_gradient()
+        curve = self._gradient_curve
+        if curve is None or curve.size == 0:
+            return True, 0.0, WAKE_SOLID_DIM
+        spread = float(
+            np.max(np.max(curve, axis=1) - np.min(curve, axis=1))
+        ) / 255.0
+        if spread <= WAKE_SOLID_TOL:
+            return True, 0.0, WAKE_SOLID_DIM
+        return False, WAKE_GRAD_OFFSET, 1.0
+
+    def _step_wake(self, dt):
+        """Decay, EXPAND, and carry the buffer with the water.
+
+        Three things happen, in this order and no other:
+
+        1. WORLD ANCHORING. The buffer is screen space; the water is not.
+           Every frame it is rolled by exactly the displacement the
+           world->screen mapping moved — the current's own flow, minus the
+           window's own step — with the sub-pixel remainder carried. What
+           rolls off an edge is dropped, never wrapped.
+        2. DECAY, exactly Orbits' trail: an exponential half-life.
+        3. EXPANSION, the half of his ask a decaying buffer alone cannot
+           give: a 3-tap separable blur blended in at a rate set by
+           `ripple_spread`, so every deposit opens outward as it dims. This
+           is why nothing needs to draw a growing shape, and why there is no
+           outline left to read as a messy circle.
+        """
+        if self.wake is None:
             return
-        life = np.maximum(self.r_life[:m], 1e-3)
-        fade = np.clip(1.0 - self.r_age[:m] / life, 0.0, 1.0)
-        amp = self.r_amp[:m] * fade * fade
-        live = amp > 0.004
-        if not live.any():
+        shift_x = self._flow_px * dt - (self.cam_px - self._cam_px_prev)
+        shift_y = self._flow_py * dt - (self.cam_py - self._cam_py_prev)
+        self._wake_ox += shift_x
+        self._wake_oy += shift_y
+        rx = int(self._wake_ox)
+        ry = int(self._wake_oy)
+        if rx:
+            self._wake_ox -= rx
+            self.wake = np.roll(self.wake, rx, axis=1)
+            if rx > 0:
+                self.wake[:, :rx, :] = 0.0
+            else:
+                self.wake[:, rx:, :] = 0.0
+        if ry:
+            self._wake_oy -= ry
+            self.wake = np.roll(self.wake, ry, axis=0)
+            if ry > 0:
+                self.wake[:ry, :, :] = 0.0
+            else:
+                self.wake[ry:, :, :] = 0.0
+
+        half_life = max(float(self.ripple_life) * WAKE_HALF_LIFE_X, 0.02)
+        self.wake *= np.float32(0.5 ** (dt / half_life))
+
+        a = float(np.clip(
+            WAKE_EXPAND_K * float(self.ripple_spread) * dt,
+            0.0, WAKE_EXPAND_MAX,
+        ))
+        if a > 0.0:
+            w = self.wake
+            blur = (w + np.roll(w, 1, axis=1) + np.roll(w, -1, axis=1)) / 3.0
+            blur = (
+                blur + np.roll(blur, 1, axis=0) + np.roll(blur, -1, axis=0)
+            ) / 3.0
+            # the wrapped rows/columns a roll brings back are not water:
+            # zero them so the smear never re-enters from the far edge
+            blur[0, :, :] = 0.0
+            blur[-1, :, :] = 0.0
+            blur[:, 0, :] = 0.0
+            blur[:, -1, :] = 0.0
+            self.wake *= np.float32(1.0 - a)
+            self.wake += (blur * np.float32(a)).astype(np.float32)
+
+    def _deposit_wake(self, xs, ys, amp, sizes, grad):
+        """Lay this frame's soft splats into the wake buffer.
+
+        A FILLED dot with a linear falloff (`_splat_many`, the same primitive
+        every body segment uses), never a ring — his "the circle line is kind
+        of messy" is answered by there being no line at all.
+        """
+        if self.wake is None or xs.size == 0:
             return
-        rr = self.r_r[:m][live]
-        amp = amp[live]
-        # ripples are anchored to the WATER: their stored position is world
-        # px and the window is subtracted here, so a moving window streams
-        # them past and away instead of carrying them along with it.
-        cx = self.r_x[:m][live] - self.cam_px
-        cy = self.r_y[:m][live] - self.cam_py
-        grad = self.r_grad[:m][live]
-        width = max(float(self.ripple_width), 0.5)
-        reach = float(np.max(rr)) + width
-        keep = self.k_dist <= reach
-        k_dx = self.k_dx[keep]
-        k_dy = self.k_dy[keep]
-        k_dist = self.k_dist[keep]
-        if k_dx.size == 0:
-            return
-        xi = np.round(cx).astype(np.int32)
-        yi = np.round(cy).astype(np.int32)
-        px = (xi[:, None] + k_dx[None, :]).ravel()
-        py = (yi[:, None] + k_dy[None, :]).ravel()
-        ring = np.clip(
-            1.0 - np.abs(k_dist[None, :] - rr[:, None]) / width, 0.0, 1.0
-        )
-        w = (ring * amp[:, None]).ravel()
-        valid = (
-            (px >= 0) & (px < self.r_width)
-            & (py >= 0) & (py < self.r_height)
-            & (w > 0.0)
-        )
-        if not valid.any():
-            return
-        idx = (py * self.r_width + px)[valid]
-        w = w[valid]
+        is_solid, offset, dim = self._wake_palette()
+        if not is_solid:
+            grad = (grad + offset) % 1.0
         rgb = self.get_gradient_color_vectorized1d(grad).astype(np.float32)
-        cells = self.r_width * self.r_height
-        for channel in range(3):
-            cw = np.repeat(rgb[:, channel], k_dx.size)[valid]
-            buf[..., channel] += np.bincount(
-                idx, weights=w * cw, minlength=cells
-            ).reshape(self.r_height, self.r_width)
-
-    def _step_ripples(self, dt):
-        m = self.rn
-        if m == 0:
-            return
-        self.r_age[:m] += dt
-        self.r_r[:m] += self.r_gr[:m] * dt
-        # camera-follow drift: while the school is held on screen the water
-        # streams past instead
-        if self._flow_px or self._flow_py:
-            self.r_x[:m] += self._flow_px * dt
-            self.r_y[:m] += self._flow_py * dt
-        alive = (self.r_age[:m] < self.r_life[:m]) & (
-            self.r_r[:m] <= RIPPLE_KERNEL_R + self.ripple_width
-        )
-        if self.camera_follow > 0.0:
-            # a ripple the window has left far behind cannot light a pixel;
-            # drop it rather than carrying it (and never wrap it around).
-            sx_ = self.r_x[:m] - self.cam_px
-            sy_ = self.r_y[:m] - self.cam_py
-            alive &= (
-                (sx_ > -RIPPLE_CULL_PAD)
-                & (sx_ < self.r_width + RIPPLE_CULL_PAD)
-                & (sy_ > -RIPPLE_CULL_PAD)
-                & (sy_ < self.r_height + RIPPLE_CULL_PAD)
-            )
-        count = int(np.count_nonzero(alive))
-        if count != m:
-            for arr in self._ripple_soa:
-                arr[:count] = arr[:m][alive]
-            self.rn = count
-
-    def _emit_ripples(self, idx, px, py, amp, radius, grow, grad):
-        """Append one ripple per entry in `idx` (already filtered)."""
-        k = int(min(len(idx), RIPPLE_CAP - self.rn))
-        if k <= 0:
-            return
-        s = slice(self.rn, self.rn + k)
-        self.r_x[s] = px[:k]
-        self.r_y[s] = py[:k]
-        self.r_r[s] = radius[:k]
-        self.r_gr[s] = grow[:k]
-        self.r_age[s] = 0.0
-        self.r_life[s] = max(float(self.ripple_life), 0.05)
-        self.r_amp[s] = amp[:k]
-        self.r_grad[s] = grad[:k]
-        self.rn += k
+        rgb = rgb * (amp * dim)[:, None]
+        self._splat_many(self.wake, xs, ys, rgb, sizes)
 
     # ── outgoing collapse (radial incoming) ─────────────────────────────
     def _draw_collapse(self, dt):
@@ -2292,50 +2343,55 @@ class Fish2d(Twod, GradientEffect):
         bright = bright * fade_in * fade_out
         self.p_bright[:n] = bright
 
-        # ── ripple emission (one per tail beat) ─────────────────────────
-        beat_idx = np.floor(self.p_flap[:n] / np.pi)
-        beat_fired = (beat_idx > self.p_beat[:n]) & (bright > 0.02)
-        self.p_beat[:n] = beat_idx
-        fired = np.flatnonzero(beat_fired)
-        if fired.size and self.ripple_amount > 0.0:
-            body_len = half_w[fired] * 2.0 * self.body_aspect
-            # the ripple is born at the tail, sized by the motion that made
+        # ── wake deposit (every frame, off real motion) ─────────────────
+        # Continuous, like Orbits' own body splats — there is no per-beat
+        # stamp any more. The flap still shapes it: it modulates the deposit
+        # (see WAKE_FLAP_*), so the wake keeps the body's own texture without
+        # anything being drawn as a shape.
+        laying = np.flatnonzero(bright > 0.02)
+        if laying.size and self.ripple_amount > 0.0 and self.wake is not None:
+            body_len = half_w[laying] * 2.0 * self.body_aspect
+            # the deposit is laid at the tail, sized by the motion that made
             # it: the body's own length and the tail's lateral throw
             tail_px = (
-                self.cx + self.p_x[:n][fired] * self.sx
-                - np.cos(hd[fired]) * body_len * 0.5
+                self.cx + self.p_x[:n][laying] * self.sx
+                - np.cos(hd[laying]) * body_len * 0.5
             )
             tail_py = (
-                self.cy + self.p_y[:n][fired] * self.sy
-                - np.sin(hd[fired]) * body_len * 0.5
+                self.cy + self.p_y[:n][laying] * self.sy
+                - np.sin(hd[laying]) * body_len * 0.5
             )
-            r0 = np.clip(
-                RIPPLE_R0_BODY * body_len
-                + RIPPLE_R0_FLAP * flap_amp[fired],
-                0.6, float(RIPPLE_KERNEL_R) * 0.5,
+            sizes = np.minimum(
+                WAKE_R0_BODY * body_len + WAKE_R0_FLAP * flap_amp[laying],
+                WAKE_R_MAX_BODY * body_len,
             )
-            grow = self.ripple_spread * np.maximum(
-                self.p_spd[:n][fired], cruise * 0.15
+            sizes = np.clip(
+                sizes * max(float(self.ripple_width), 0.5),
+                0.6, float(SPLAT_KERNEL_R) * 0.5,
+            ).astype(np.float32)
+            pulse = (
+                WAKE_FLAP_FLOOR
+                + WAKE_FLAP_GAIN * np.abs(np.sin(self.p_flap[:n][laying]))
             )
-            # the wake stays matched to the fish that made it
-            r_cap = np.minimum(
-                RIPPLE_MAX_BODY * body_len, float(RIPPLE_KERNEL_R)
-            )
-            life = max(float(self.ripple_life), 0.05)
-            grow = np.minimum(grow, np.maximum(r_cap - r0, 0.0) / life)
-            amp = self.ripple_amount * (
-                RIPPLE_BASE
-                + RIPPLE_SPEED_GAIN
-                * np.clip(
-                    (speed_norm[fired] - RIPPLE_SPEED_FLOOR)
-                    / RIPPLE_SPEED_SPAN,
-                    0.0, 1.0,
+            amp = (
+                self.ripple_amount
+                * (
+                    RIPPLE_BASE
+                    + RIPPLE_SPEED_GAIN
+                    * np.clip(
+                        (speed_norm[laying] - RIPPLE_SPEED_FLOOR)
+                        / RIPPLE_SPEED_SPAN,
+                        0.0, 1.0,
+                    )
                 )
-            ) * bright[fired]
-            self._emit_ripples(
-                fired, tail_px, tail_py, amp, r0, grow, self.p_grad[:n][fired]
+                * pulse
+                * bright[laying]
+                * min(dt * WAKE_DEPOSIT_HZ, 1.0)
+            ).astype(np.float32)
+            self._deposit_wake(
+                tail_px, tail_py, amp, sizes, self.p_grad[:n][laying]
             )
-        self._step_ripples(dt)
+        self._step_wake(dt)
 
         # ── render ──────────────────────────────────────────────────────
         half_life = 0.02 + self.trail_decay * 0.5
@@ -2351,9 +2407,6 @@ class Fish2d(Twod, GradientEffect):
                 flap_amp[visible], self.p_grad[:n][visible],
             )
         np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
-        # the wake is composited fresh every frame — see RIPPLE_BASE above
-        wake = np.zeros_like(self.trail)
-        self._draw_ripples(wake)
 
         self.p_x0[:n] = self.p_x[:n]
         self.p_y0[:n] = self.p_y[:n]
@@ -2372,16 +2425,23 @@ class Fish2d(Twod, GradientEffect):
             if dead.any():
                 self._compact(~dead)
 
-        out = np.asarray(self.matrix, dtype=np.float32) + self.trail + wake
+        out = np.asarray(self.matrix, dtype=np.float32) + self.trail
+        if self.wake is not None:
+            out = out + self.wake
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )
 
     def _fade_only(self, dt):
-        """Decay the wake and composite — the held-transition path."""
+        """Decay the trail AND the wake, and composite — the held-transition
+        path. The wake is a live buffer, so leaving it out here would park a
+        frozen smear on the panel for the whole hold."""
         half_life = 0.02 + self.trail_decay * 0.5
         self.trail *= np.float32(0.5 ** (dt / half_life))
+        self._step_wake(dt)
         out = np.asarray(self.matrix, dtype=np.float32) + self.trail
+        if self.wake is not None:
+            out = out + self.wake
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )

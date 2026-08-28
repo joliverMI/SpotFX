@@ -15,8 +15,10 @@ silenced), never a re-derivation of the effect's own arithmetic:
         arc a full about-face actually traces.
   3. "its spine should flap as it moves ... When it accelerates it waves
      its tail harder, and when it slows it is more subtle"
-  4. "it should leave a ripple trail ... always subtle, but stronger on
-     faster. Try to match the size of the motion to the ripple"
+  4. "it should leave a ... trail ... always subtle, but stronger on
+     faster. Try to match the size of the motion" — since 2026-08-28 that
+     wake is an expanding, fading smear (Orbits' own buffer), never a ring;
+     scripts/check_fish_wake.py carries that ask's own proof
   5. CHARGE: "up to 12 fish come in, all moving in unison, and then start
      changing directions on every beat, minimum 400ms in unison. Fish in
      school should move almost identically, but should have some minor
@@ -255,53 +257,57 @@ async def section_flap(stack):
     await _close(room)
 
 
-# ── 4. the ripple wake ──────────────────────────────────────────────────
+# ── 4. the wake ─────────────────────────────────────────────────────────
 async def section_ripples(stack):
-    print("\n4. RIPPLE TRAIL — always subtle, stronger on faster, "
-          "sized to the motion")
+    print("\n4. WAKE — an expanding, fading smear; subtle, stronger on "
+          "faster, sized to the motion")
+    print("     (his 2026-08-28 ask replaced the stamped rings; the full "
+          "colour/expansion proof is scripts/check_fish_wake.py)")
     cfg = dict(HIS_MATRIX, particle_count=2, horizon_scale=0.0, spin=0.0,
                jiggle=0.0)
     room = await _room(stack, "ripple", cfg)
     eff = room.effect
     out = {}
     for label, impulse in (("calm", 0.0), ("loud", 0.9)):
-        eff.impulse = impulse
         room.step(240)
-        eff.rn = 0            # only measure ripples born from here on
-        room.step(60)
+        eff.wake[:] = 0.0
+        eff.impulse = impulse
+        eff.slow = 0.25 * impulse
+        room.step(120)
         out[label] = (
             float(eff.p_spd[: eff.n].mean()),
-            float(eff.r_amp[: eff.rn].mean()) if eff.rn else 0.0,
-            int(eff.rn),
+            float(eff.wake.sum()),
+            float(eff.wake.max()),
         )
         print(f"     {label:<5} speed {out[label][0]:6.2f} px/s   "
-              f"wake strength {out[label][1]:.4f}   "
-              f"ripples/s {out[label][2]:.0f}")
+              f"wake energy {out[label][1]:10.0f}   "
+              f"peak {out[label][2]:6.2f}")
     check(out["loud"][1] > out["calm"][1] * 1.5,
           "the wake is stronger on faster",
-          f"{out['calm'][1]:.4f} -> {out['loud'][1]:.4f}")
-    check(out["calm"][1] > 0.0 and out["loud"][1] < 0.35,
+          f"{out['calm'][1]:.0f} -> {out['loud'][1]:.0f}")
+    fish_peak = float(eff.trail.max())
+    check(out["calm"][1] > 0.0 and out["loud"][2] < 0.6 * fish_peak,
           "the wake is always subtle, at every speed",
-          f"max strength {out['loud'][1]:.3f} against a body at ~0.8")
-    check(out["loud"][2] > out["calm"][2],
-          "faster fish leave ripples more often (the flap sets the cadence)",
-          f"{out['calm'][2]} -> {out['loud'][2]}")
+          f"peak {out['loud'][2]:.1f} against a body at {fish_peak:.1f}")
 
-    # ripple size follows the size of the motion: a bigger fish makes a
-    # bigger ripple, at the same speed
+    # deposit size follows the size of the motion: a bigger fish lays down a
+    # bigger splat, at the same speed
     sizes = {}
     for label, blob in (("small", 1.0), ("big", 4.0)):
         eff.impulse = 0.0
+        eff.slow = 0.0
         eff.update_config({"blob_size": blob})
         room.step(180)
-        eff.rn = 0
-        room.step(60)
-        sizes[label] = float(eff.r_r[: eff.rn].mean()) if eff.rn else 0.0
+        eff.wake[:] = 0.0
+        room.step(1)
+        w = eff.wake.sum(axis=2)
+        thr = 0.02 * float(w.max()) if w.max() > 0 else 1.0
+        sizes[label] = float(np.count_nonzero(w > thr))
         print(f"     {label:<5} body {eff._body_len_px():5.2f}px  "
-              f"-> ripple radius {sizes[label]:5.2f}px")
+              f"-> one deposit lights {sizes[label]:5.0f} cells")
     check(sizes["big"] > sizes["small"] * 1.4,
-          "ripple size is matched to the size of the motion",
-          f"{sizes['small']:.2f}px -> {sizes['big']:.2f}px")
+          "wake size is matched to the size of the motion",
+          f"{sizes['small']:.0f} -> {sizes['big']:.0f} cells")
     await _close(room)
 
 

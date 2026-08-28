@@ -5,17 +5,20 @@ Matrix host at his crystal-mapper's 72x37 shape, audio silenced).
 scripts/check_fish_camera.py is the measured, printed version of the same
 runs — this file pins the properties the build has to hold:
 
-  * `camera_follow = 0` renders what the PRE-CAMERA BASELINE renders, bit
-    for bit. Not this file with a term switched off — the pinned
-    predecessor commit's own `fx/effects/fish.py`, read out of git and
-    loaded as a second registered effect, so the control is the real
-    predecessor. That ref is PINNED and IMPORTED, never a moving branch:
-    see `_load_master` below for how a moving ref silently retired this
-    proof once, and why a skip was the wrong answer to it.
+  * `camera_follow = 0` never moves the window off the origin — the
+    identity claim, proven within-branch and exactly, across the whole arc;
+  * ORDINARY SWIMMING with the wake off is byte-identical to the PINNED
+    merge-base, so a change to the wake or the phases provably did not
+    leak into the fish's own kinematics or body render. That ref is PINNED
+    and IMPORTED, never a moving branch: see `_load_master` below for how a
+    moving ref silently retired the earlier version of this proof once, and
+    why a skip was the wrong answer to it. It was MOVED FORWARD (2026-08-28)
+    when the wake rework broke the older, stronger claim's premise — see
+    scripts/check_fish_camera.py::BASELINE_REF for that reasoning.
   * the window at rest is the identity mapping, and it is at rest whenever
     the phase is not a charge or a lull;
-  * ripples are anchored to the WATER: a moving window streams them past
-    and away, and one far off-window is culled rather than wrapped;
+  * the wake is anchored to the WATER: a moving window streams it past and
+    away, and what rolls off an edge is dropped rather than wrapped;
   * every per-frame window step is inside its own cap, across seeds and
     across both charge->roam and lull->roam transitions;
   * the school is never lost.
@@ -155,11 +158,15 @@ def _load_master(name="fish_master_probe"):
         # clone) is fine — unlike the silent one this replaced, it names a
         # missing input rather than retiring the proof.
         pytest.skip(f"cannot read {ref}:fx/effects/fish.py out of git: {exc}")
-    # The baseline is PRE-camera by definition. If the window is in it, the
-    # pin is wrong or the imported constant drifted — that is a loud
-    # FAILURE, never a skip.
-    assert "camera_follow" not in src, (
-        f"the pinned baseline {ref} already carries `camera_follow` — the "
+    # The baseline must genuinely PREDATE this PR: it still has to carry
+    # the camera (it is post-#210) and must NOT carry the wake rework. If
+    # either is wrong the pin has drifted — a loud FAILURE, never a skip.
+    assert "camera_follow" in src, (
+        f"the pinned baseline {ref} predates the camera — the pin in "
+        "scripts/check_fish_camera.py::BASELINE_REF has slipped backwards"
+    )
+    assert "_step_wake" not in src, (
+        f"the pinned baseline {ref} already carries the wake rework — the "
         "pin in scripts/check_fish_camera.py::BASELINE_REF is wrong; this "
         "proof must fail loudly rather than skip itself into silence"
     )
@@ -183,7 +190,7 @@ _SCRIPT = (
 )
 
 
-async def _frames(tmp_path, tag, cfg, seed, effect_type):
+async def _frames(tmp_path, tag, cfg, seed, effect_type, script=None):
     room = await _room(tmp_path, tag, cfg, seed=seed, effect_type=effect_type)
     seq = []
 
@@ -191,7 +198,7 @@ async def _frames(tmp_path, tag, cfg, seed, effect_type):
         if room.frame is not None:
             seq.append(room.frame)
 
-    for kind, secs, beats in _SCRIPT:
+    for kind, secs, beats in (script or _SCRIPT):
         if kind == "swim":
             room.step(int(secs / DT), watch=grab)
         else:
@@ -200,35 +207,105 @@ async def _frames(tmp_path, tag, cfg, seed, effect_type):
     return np.array(seq)
 
 
-# ── 1. THE NEGATIVE CONTROL: camera_follow 0 IS THE BASELINE ───────────
+# ── 1. THE IDENTITY CLAIM, and what this PR provably did not touch ─────
+_SWIM_ONLY = (("swim", 6.0, None),)
+
+
 @pytest.mark.parametrize("seed", (3, 5, 11, 17))
-def test_camera_follow_zero_is_master_bit_for_bit(tmp_path, seed):
-    """The window at rest is the identity mapping, so at 0 every expression
-    it touches must reduce to the one it replaced. Proven against the
-    PINNED pre-camera commit's OWN module — not this file with a constant
-    zeroed, and not a moving branch ref — over the whole arc.
-    """
+def test_the_window_at_zero_never_leaves_the_origin(tmp_path, seed):
+    """The window at rest is the identity mapping (screen == world), so at
+    `camera_follow = 0` the origin and its velocity must be EXACTLY zero on
+    every frame of the whole arc — charge, lull, drop and roam alike, not
+    "small"."""
+    async def main():
+        room = await _room(tmp_path, f"origin{seed}",
+                           dict(HIS, particle_count=6, camera_follow=0.0),
+                           seed=seed)
+        worst = {"cam": 0.0, "vel": 0.0, "frames": 0}
+
+        def grab(_eff=None):
+            worst["cam"] = max(worst["cam"], abs(room.effect.cam_px),
+                               abs(room.effect.cam_py))
+            worst["vel"] = max(worst["vel"], abs(room.effect.cam_vx),
+                               abs(room.effect.cam_vy))
+            worst["frames"] += 1
+
+        for kind, secs, beats in _SCRIPT:
+            if kind == "swim":
+                room.step(int(secs / DT), watch=grab)
+            else:
+                room.ramp(kind, secs, beats_every=beats, watch=grab)
+        await _close(room)
+        assert worst["frames"] > 500
+        assert worst["cam"] == 0.0 and worst["vel"] == 0.0, worst
+    _run(main())
+
+
+def test_the_origin_trace_can_see_a_window_that_moves(tmp_path):
+    """... and the trace above is not blind: at the shipped default the
+    window really does leave the origin."""
+    async def main():
+        room = await _room(tmp_path, "origin-on",
+                           dict(HIS, particle_count=6, camera_follow=0.8),
+                           seed=5)
+        worst = [0.0]
+
+        def grab(_eff=None):
+            worst[0] = max(worst[0], abs(room.effect.cam_px),
+                           abs(room.effect.cam_py))
+
+        room.ramp("charge", 4.0, beats_every=12, watch=grab)
+        await _close(room)
+        assert worst[0] > 1.0, worst
+    _run(main())
+
+
+@pytest.mark.parametrize("seed", (3, 5, 11, 17))
+def test_swimming_with_the_wake_off_is_the_merge_base_bit_for_bit(
+    tmp_path, seed
+):
+    """This PR reworks the wake and the two phases. Ordinary swimming, with
+    the wake switched off, must therefore render EXACTLY what the pinned
+    merge-base rendered — proven against that commit's OWN module, read out
+    of git and registered beside this one, not against this file with a
+    constant zeroed."""
     master = _load_master()
+    cfg = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
 
     async def main():
-        a = await _frames(tmp_path, f"m{seed}", dict(HIS, particle_count=6),
-                          seed, master)
-        b = await _frames(tmp_path, f"z{seed}",
-                          dict(HIS, particle_count=6, camera_follow=0.0),
-                          seed, "fish")
+        a = await _frames(tmp_path, f"m{seed}", cfg, seed, master,
+                          script=_SWIM_ONLY)
+        b = await _frames(tmp_path, f"z{seed}", cfg, seed, "fish",
+                          script=_SWIM_ONLY)
         assert a.shape == b.shape and a.size, (a.shape, b.shape)
         assert np.array_equal(a, b), (
-            "camera_follow=0 must render exactly what the pre-camera "
-            "baseline rendered: "
+            "this PR changed ordinary swimming, which it must not: "
             f"{int(np.count_nonzero((a != b).any(axis=(1, 2))))} of "
             f"{a.shape[0]} frames differ"
         )
     _run(main())
 
 
+def test_that_identity_is_not_vacuous_the_wake_is_what_changed(tmp_path):
+    """... and with the wake ON, the same run must DIFFER from the
+    merge-base, or the comparison above is comparing two blank runs."""
+    master = _load_master()
+    cfg = dict(HIS, particle_count=6, camera_follow=0.0)
+
+    async def main():
+        a = await _frames(tmp_path, "m-wake", cfg, 5, master,
+                          script=_SWIM_ONLY)
+        b = await _frames(tmp_path, "z-wake", cfg, 5, "fish",
+                          script=_SWIM_ONLY)
+        assert not np.array_equal(a, b), (
+            "the wake rework rendered nothing new against the merge-base"
+        )
+    _run(main())
+
+
 def test_the_byte_identity_proof_is_not_vacuous(tmp_path):
     """... and the window must actually do something at the shipped
-    default, or the proof above says nothing."""
+    default, or the identity proof above says nothing."""
     async def main():
         off = await _frames(tmp_path, "v-off",
                             dict(HIS, particle_count=6, camera_follow=0.0),
@@ -238,31 +315,8 @@ def test_the_byte_identity_proof_is_not_vacuous(tmp_path):
                            5, "fish")
         assert not np.array_equal(off, on), (
             "camera_follow=0.8 rendered the same frames as 0 — the window "
-            "never moved"
+            "is doing nothing"
         )
-    _run(main())
-
-
-def test_the_window_never_leaves_the_origin_at_zero(tmp_path):
-    """Structural, alongside the frames: at 0 the camera is not merely
-    small, it is exactly zero, so the mapping is the identity and not an
-    approximation of one."""
-    async def main():
-        room = await _room(tmp_path, "cam0",
-                           dict(HIS, camera_follow=0.0), seed=5)
-        eff = room.effect
-        worst = [0.0]
-
-        def watch(e):
-            worst[0] = max(worst[0], abs(e.cam_px), abs(e.cam_py),
-                           abs(e.cam_vx), abs(e.cam_vy))
-
-        room.step(int(3.0 / DT), watch=watch)
-        room.ramp("charge", 4.0, beats_every=12, watch=watch)
-        room.ramp("lull", 3.5, watch=watch)
-        assert worst[0] == 0.0, f"the window moved at camera_follow=0: {worst[0]}"
-        assert eff.cam_px == 0.0 and eff.cam_py == 0.0
-        await _close(room)
     _run(main())
 
 
@@ -327,96 +381,107 @@ def test_the_window_moves_only_during_a_charge_or_a_lull(tmp_path):
     _run(main())
 
 
-# ── 3. ripples are anchored to the WATER ────────────────────────────────
-def test_ripples_stream_past_the_window_and_are_never_carried(tmp_path):
-    """The whole reason the world frame exists. A ring's STORED position is
-    world, so when the window pans it is LEFT BEHIND in the water and its
-    screen position moves by the window's own travel — never carried along
+# ── 3. the wake is anchored to the WATER ────────────────────────────────
+def _wake_centroid(eff):
+    w = eff.wake.sum(axis=2)
+    tot = float(w.sum())
+    if tot <= 0.0:
+        return None
+    ys, xs = np.mgrid[0:w.shape[0], 0:w.shape[1]]
+    return float((xs * w).sum() / tot), float((ys * w).sum() / tot)
+
+
+def test_the_wake_streams_past_the_window_and_is_never_carried(tmp_path):
+    """The whole reason the world frame exists. The wake buffer is SCREEN
+    space, so it is rolled every frame by exactly the displacement the
+    world->screen mapping moved: a smear is LEFT BEHIND in the water and its
+    screen position travels by the window's own travel, never carried along
     with the view.
 
-    Followed by planting one ring with a sentinel colour and finding it
-    again each frame: the ripple buffer emits and compacts constantly, so
-    matching by index would silently compare two different rings.
+    Measured on a PLANTED patch with deposits switched off, so nothing new
+    lands in the buffer to drag the centroid around.
     """
     async def main():
         room = await _room(tmp_path, "wake",
-                           dict(HIS, camera_follow=1.0, ripple_life=4.0),
+                           dict(HIS, camera_follow=1.0, ripple_life=4.0,
+                                ripple_amount=0.0, ripple_spread=0.0),
                            seed=5)
         eff = room.effect
         room.step(int(4.0 / DT))
-        mark = np.float32(0.123456)
-        eff._emit_ripples(
-            [0], np.array([eff.cx], dtype=np.float32),
-            np.array([eff.cy], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([2.0], dtype=np.float32),
-            np.array([0.0], dtype=np.float32),
-            np.array([mark], dtype=np.float32),
-        )
-        track = {"w": None, "s": None, "world": 0.0, "screen": 0.0,
-                 "frames": 0}
+        eff.wake[:] = 0.0
+        cx, cy = eff.r_width // 2, eff.r_height // 2
+        eff.wake[cy - 1:cy + 2, cx - 1:cx + 2, :] = 200.0
+
+        track = {"first_s": None, "first_w": None, "last_s": None,
+                 "last_w": None, "frames": 0}
 
         def watch(e):
-            hit = np.flatnonzero(e.r_grad[: e.rn] == mark)
-            if hit.size != 1:
+            c = _wake_centroid(e)
+            if c is None:
                 return
-            i = int(hit[0])
-            w = (float(e.r_x[i]), float(e.r_y[i]))
-            sc = (w[0] - e.cam_px, w[1] - e.cam_py)
-            if track["w"] is not None:
-                track["world"] += float(np.hypot(
-                    w[0] - track["w"][0], w[1] - track["w"][1]))
-                track["screen"] += float(np.hypot(
-                    sc[0] - track["s"][0], sc[1] - track["s"][1]))
-                track["frames"] += 1
-            track["w"], track["s"] = w, sc
+            w = (c[0] + e.cam_px, c[1] + e.cam_py)
+            if track["first_s"] is None:
+                track["first_s"], track["first_w"] = c, w
+            track["last_s"], track["last_w"] = c, w
+            track["frames"] += 1
 
-        room.ramp("charge", 4.0, beats_every=12, watch=watch)
+        room.ramp("charge", 2.5, beats_every=12, watch=watch)
         await _close(room)
         assert track["frames"] > 100, (
-            f"the marked ring was not followed long enough "
-            f"({track['frames']} frames)"
+            f"the patch was not followed long enough ({track['frames']})"
         )
-        # at camera_follow=1 nothing pushes the water at all: the ring sits
-        # exactly where it was dropped, for its whole life
-        assert track["world"] == 0.0, (
-            "a ripple moved through the water — it must be anchored to it: "
-            f"{track['world']:.4f}px"
-        )
-        assert track["screen"] > 10.0, (
+        # NET displacement, not path length: the roll is integer with a
+        # sub-pixel remainder carried, so a per-frame path length is all
+        # quantization jitter and says nothing about where the smear ended
+        # up.
+        screen = float(np.hypot(
+            track["last_s"][0] - track["first_s"][0],
+            track["last_s"][1] - track["first_s"][1]))
+        world = float(np.hypot(
+            track["last_w"][0] - track["first_w"][0],
+            track["last_w"][1] - track["first_w"][1]))
+        assert screen > 10.0, (
             "the wake never streamed past the window: "
-            f"{track['screen']:.4f}px of screen travel"
+            f"{screen:.2f}px of screen travel"
+        )
+        assert world < 1.5, (
+            "the wake was carried along with the view instead of being left "
+            f"in the water: it moved {world:.2f}px through the water while "
+            f"travelling {screen:.2f}px across the panel"
         )
     _run(main())
 
 
-def test_a_ripple_far_off_window_is_culled_not_wrapped(tmp_path):
-    """No wraparound artifacts. A ring the window has left far behind is
-    dropped from the buffer; nothing folds it back on the other side."""
+def test_wake_rolled_off_an_edge_is_dropped_not_wrapped(tmp_path):
+    """No wraparound artifacts. What the roll pushes past an edge is zeroed,
+    so nothing folds back in on the other side — that IS the cull, and it
+    needs no pad, because a pixel outside the buffer cannot light anything.
+    """
     async def main():
         room = await _room(tmp_path, "cull",
-                           dict(HIS, camera_follow=1.0, ripple_life=4.0),
+                           dict(HIS, camera_follow=1.0, ripple_life=4.0,
+                                ripple_amount=0.0, ripple_spread=0.0),
                            seed=5)
         eff = room.effect
-        room.step(int(4.0 / DT))
-        # plant a ring far outside any window this run can reach
-        far = eff.r_width * 40.0
-        eff._emit_ripples(
-            [0], np.array([far], dtype=np.float32),
-            np.array([0.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([2.0], dtype=np.float32),
-            np.array([0.0], dtype=np.float32),
-            np.array([0.5], dtype=np.float32),
+        room.step(int(2.0 / DT))
+        eff.wake[:] = 0.0
+        eff.wake[:, 1, :] = 200.0          # one bright column, near the edge
+        before = float(eff.wake.sum())
+        assert before > 0.0
+        far_edge_before = float(eff.wake[:, -3:, :].sum())
+        # push the water hard to the LEFT for a few frames
+        eff._flow_px = -600.0
+        eff._flow_py = 0.0
+        eff._cam_px_prev = eff.cam_px
+        eff._cam_py_prev = eff.cam_py
+        for _ in range(3):
+            eff._step_wake(DT)
+        assert float(eff.wake.sum()) < before * 0.02, (
+            "the column survived being pushed off the edge"
         )
-        assert np.any(np.isclose(eff.r_x[: eff.rn], far))
-        room.step(2)
-        assert not np.any(np.isclose(eff.r_x[: eff.rn], far)), (
-            "an off-window ripple survived — it must be culled"
+        assert float(eff.wake[:, -3:, :].sum()) <= far_edge_before + 1e-6, (
+            "content reappeared on the far side — it must never wrap"
         )
-        # ... and nothing reappeared on the other side
-        screen = eff.r_x[: eff.rn] - eff.cam_px
-        assert np.all(np.abs(screen) < eff.r_width + FX.RIPPLE_CULL_PAD + 1)
         await _close(room)
     _run(main())
 

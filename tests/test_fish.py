@@ -298,7 +298,7 @@ def test_deceleration_makes_the_flap_subtler(tmp_path):
     _run(main())
 
 
-# ── 4. the ripple wake ──────────────────────────────────────────────────
+# ── 4. the wake ─────────────────────────────────────────────────────────
 def test_wake_is_always_subtle_and_stronger_on_faster(tmp_path):
     async def main():
         room = await _room(tmp_path, "wake", dict(
@@ -308,42 +308,136 @@ def test_wake_is_always_subtle_and_stronger_on_faster(tmp_path):
         eff = room.effect
         out = {}
         for label, impulse in (("calm", 0.0), ("loud", 0.9)):
-            eff.impulse = impulse
             room.step(240)
-            eff.rn = 0
-            room.step(60)
-            out[label] = (
-                float(eff.r_amp[: eff.rn].mean()) if eff.rn else 0.0,
-                int(eff.rn),
-            )
+            eff.wake[:] = 0.0
+            eff.impulse = impulse
+            eff.slow = 0.25 * impulse
+            room.step(120)
+            out[label] = (float(eff.wake.sum()), float(eff.wake.max()))
         assert out["loud"][0] > out["calm"][0] * 1.5, out
-        assert 0.0 < out["loud"][0] < 0.35, (
+        # "always subtle": the wake never approaches the fish's own peak
+        assert 0.0 < out["loud"][1] < 0.6 * float(eff.trail.max()), (
             "the wake must stay subtle at every speed", out
-        )
-        assert out["loud"][1] > out["calm"][1], (
-            "the flap sets the ripple cadence, so a faster fish ripples "
-            "more often", out
         )
         await _close(room)
     _run(main())
 
 
-def test_ripple_size_is_matched_to_the_size_of_the_motion(tmp_path):
+def test_wake_expands_as_well_as_fading(tmp_path):
+    """His ask, verbatim: 'expand and fade instead of just fading'. A buffer
+    that only decayed would keep the same footprint and dim; this one has to
+    cover MORE cells as its peak falls."""
     async def main():
-        room = await _room(tmp_path, "wake2", dict(
+        room = await _room(tmp_path, "wake-expand", dict(
             HIS_MATRIX, particle_count=1, horizon_scale=0.0, spin=0.0,
             jiggle=0.0,
         ))
         eff = room.effect
-        sizes = {}
-        for label, blob in (("small", 1.0), ("big", 4.0)):
-            eff.update_config({"blob_size": blob})
-            room.step(180)
-            eff.rn = 0
-            room.step(60)
-            sizes[label] = float(eff.r_r[: eff.rn].mean()) if eff.rn else 0.0
-        assert sizes["big"] > sizes["small"] * 1.4, sizes
+        room.step(240)
+        eff.wake[:] = 0.0
+        room.step(1)
+        eff.update_config({"ripple_amount": 0.0})   # stop depositing
+
+        def shot():
+            w = eff.wake.sum(axis=2)
+            thr = 0.02 * float(w.max()) if w.max() > 0 else 1.0
+            return float(w.max()), int((w > thr).sum())
+
+        peak0, cells0 = shot()
+        room.step(18)
+        peak1, cells1 = shot()
+        assert peak0 > 0.0, "nothing was deposited"
+        assert cells1 > cells0, ("the wake must EXPAND", cells0, cells1)
+        assert peak1 < peak0, ("... while it fades", peak0, peak1)
         await _close(room)
+    _run(main())
+
+
+def test_a_deposit_is_a_filled_smear_never_a_ring(tmp_path):
+    """His objection was the OUTLINE: 'the circle line is kind of messy'. A
+    ring peaks off its own centre; a filled smear peaks at it."""
+    async def main():
+        room = await _room(tmp_path, "wake-ring", dict(
+            HIS_MATRIX, particle_count=1, horizon_scale=0.0, spin=0.0,
+            jiggle=0.0,
+        ))
+        eff = room.effect
+        room.step(240)
+        eff.wake[:] = 0.0
+        room.step(1)
+        w = eff.wake.sum(axis=2)
+        assert w.max() > 0.0
+        cy, cx = np.unravel_index(int(np.argmax(w)), w.shape)
+        ys, xs = np.mgrid[0:w.shape[0], 0:w.shape[1]]
+        d = np.hypot(xs - cx, ys - cy)
+        prof = [
+            float(w[(d >= r) & (d < r + 1)].mean())
+            for r in range(6)
+        ]
+        assert int(np.argmax(prof)) == 0, ("peaks off centre = a ring", prof)
+        assert all(prof[i] >= prof[i + 1] - 1e-6 for i in range(5)), prof
+        await _close(room)
+    _run(main())
+
+
+def test_wake_colour_is_distinct_from_the_fish_both_ways(tmp_path):
+    """The stated rule (fx/effects/fish.py, WAKE_SOLID_* / WAKE_GRAD_OFFSET):
+    a real gradient gives the wake a DIFFERENT COLOUR; a solid palette gives
+    it substantially LESS BRIGHTNESS. Measured on the two real buffers."""
+    SOLID = "linear-gradient(90deg, #22aaff 0.00%,#22aaff 100.00%)"
+
+    def unit(rgb):
+        n = np.linalg.norm(rgb, axis=1, keepdims=True)
+        return rgb / np.maximum(n, 1e-6)
+
+    def split(eff):
+        fl = eff.trail.sum(axis=2)
+        wl = eff.wake.sum(axis=2)
+        fish_m = fl > 0.5 * fl.max()
+        wake_m = (wl > 0.25 * wl.max()) & (fl < 0.05 * max(fl.max(), 1e-6))
+        return eff.trail[fish_m], eff.wake[wake_m]
+
+    async def main():
+        one = dict(HIS_MATRIX, particle_count=1, horizon_scale=0.0,
+                   spin=0.0, jiggle=0.0)
+        # GRADIENT: his default rainbow
+        room = await _room(tmp_path, "wake-grad", one)
+        room.step(600)
+        f, w = split(room.effect)
+        dist = float(np.linalg.norm(
+            unit(f).mean(axis=0) - unit(w).mean(axis=0)
+        ))
+        await _close(room)
+        # the negative control: with the offset removed the wake wears the
+        # fish's own colour, so the distance must collapse
+        orig = FX.WAKE_GRAD_OFFSET
+        FX.WAKE_GRAD_OFFSET = 0.0
+        try:
+            room = await _room(tmp_path, "wake-grad-ctl", one)
+            room.step(600)
+            f0, w0 = split(room.effect)
+            dist0 = float(np.linalg.norm(
+                unit(f0).mean(axis=0) - unit(w0).mean(axis=0)
+            ))
+            await _close(room)
+        finally:
+            FX.WAKE_GRAD_OFFSET = orig
+        assert dist > 0.5, ("the gradient wake must be a different colour",
+                            dist)
+        assert dist > dist0 * 3.0, ("... and the offset is what does it",
+                                    dist, dist0)
+
+        # SOLID: same colour, substantially dimmer
+        room = await _room(tmp_path, "wake-solid", dict(one, gradient=SOLID))
+        room.step(600)
+        ratio = float(room.effect.wake.max()) / max(
+            float(room.effect.trail.max()), 1e-6
+        )
+        await _close(room)
+        assert 0.0 < ratio < 0.45, (
+            "a solid palette must render the wake substantially dimmer than "
+            "the fish, but still visible", ratio,
+        )
     _run(main())
 
 
