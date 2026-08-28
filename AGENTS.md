@@ -3363,6 +3363,27 @@ the device page's grouping controls (found doing exactly that, 2026-08-28 —
 one virtual silently left a category). Set `device_model.CATEGORIES_FILE`
 explicitly, or check the file back afterwards.
 
+**ONLY THE DEVICES HE USES ARE LISTED BY DEFAULT** (2026-08-28, his ask:
+"only devices i use should be visible on default. can show more with
+expansion tab"). `spectra/services/device_usage.py` is the rule and the
+binding statement: a device is IN USE iff it backs a virtual in
+`room_topology.genuinely_driven_virtual_ids()` — the compiler's own ground
+truth, computed AT REQUEST TIME and never stored, so adding a device to a
+grouping or a scene moves it into the default view on the next load with
+nothing to migrate. Type is never consulted: 2 of his 10 in-use devices are
+DUMMIES (`gap-crystal-mapper` in the mapper chain, `radial-dummy`) and 11 of
+21 are LedFX-seed machinery (gap placeholders, mask/foreground/background
+layer dummies) plus one genuine duplicate. An EMPTY ground truth means NO
+restriction (a fresh install shows everything, never an empty page). The
+listing still returns EVERY device with `in_use`/`duplicate_of` stamped on
+it — hiding is the page's default view, not a server-side omission — and
+`usage` carries the counts so the expansion control can name the hidden
+number. Duplicates (same name + same type + backing nothing) are FLAGGED,
+never deleted; the page deliberately has no delete. `/devices` and
+`/avsync`'s per-device rows share the one server flag. Help: `devices-in-use`.
+Spec: `tests/test_device_usage.py` (his real 21-device config shape, the
+10/11 split, and the liveness proof).
+
 **Sonic parity**: a `device` domain (`device_console.OPERATIONS`, 7 ops)
 merged into `settings_agent.ALL_OPERATIONS` — remember the hand-written
 `settings_mcp_server.py` wrapper per op AND the CLI fixture manifests

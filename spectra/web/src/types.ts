@@ -1331,6 +1331,13 @@ export interface DeviceRecord {
   categories: Record<string, string[]>;
   /** OFFSET family: NEGATIVE = this device fires EARLIER. Relative only. */
   timing_offset_ms: number;
+  /** Does this device back a virtual the room's scene engine can address?
+   * Computed server-side at request time from the compiler's own ground
+   * truth — never a stored list, never re-derived here. */
+  in_use: boolean;
+  /** Same name + same type as another device, and backing nothing itself —
+   * the id of the one it duplicates, else null. Flagged, never deleted. */
+  duplicate_of: string | null;
 }
 
 export interface DeviceListing {
@@ -1338,6 +1345,9 @@ export interface DeviceListing {
    * 'stored' = it is not, and an edit lands at the next activation. */
   source: 'live' | 'stored';
   devices: DeviceRecord[];
+  /** Counts for the expansion control, so a hidden device is visible as a
+   * number rather than a silent absence. */
+  usage: { in_use: number; not_in_use: number; rule: string };
   types: string[];
   fields: Record<string, DeviceField[]>;
   category_names: string[];

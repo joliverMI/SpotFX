@@ -1496,7 +1496,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Devices — create and edit the lights themselves',
     keywords: 'device devices create edit add new wled hue e131 ddp udp dummy ip address pixel count refresh rate name rename grouping category timing offset parameters ledfx settings',
     intro:
-      'One page for the fixtures: every device the room has, every parameter its driver actually accepts, its name, which groupings its virtuals belong to, and its timing offset. Everything for a device is on ONE tab — grouped inside it, never behind sub-tabs.',
+      'One page for the fixtures: every device the room has, every parameter its driver actually accepts, its name, which groupings its virtuals belong to, and its timing offset. Everything for a device is on ONE tab — grouped inside it, never behind sub-tabs. The list shows only the devices the room actually uses; "Show all devices" reveals the rest.',
     entries: [
       {
         id: 'devices-live-or-stored',
@@ -1506,6 +1506,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The banner at the top of the page says one of two things, and it changes what a save does.',
           'THE ROOM IS RUNNING — SPECTRA owns the lights and the light stack is up. A save goes straight through to the running device AND is written to the config in one step; the fixture follows immediately.',
           'THE ROOM IS NOT RUNNING — nothing is driving the lights right now. A save is still kept: it is validated the same way and written into SPECTRA\'s own light config, and it comes up the next time the room is taken back. The page says so on every save. An edit made while the room is dark is never lost, and never claimed to have reached a fixture when it did not.',
+        ],
+      },
+      {
+        id: 'devices-in-use',
+        title: 'Only the devices you use are listed — showing the rest',
+        keywords: 'in use unused hidden show all devices expansion expand duplicate gap dummy mask foreground background clean up list clutter',
+        body: [
+          'The list shows, by default, only the devices the room can actually light. Press "Show all devices" to reveal the rest; the button says how many there are, so a hidden device is a number you can see rather than a silent absence. The list starts collapsed every time you open the page.',
+          'WHAT COUNTS AS IN USE: a device is in use when it backs a virtual the scene engine can actually address — one that belongs to a grouping, or that a saved scene names directly. Nothing else is consulted; in particular the device\'s TYPE is not. Two of the dummies are genuinely in use because real rendering runs through them, and several real-looking entries are not.',
+          'THE REST are mostly machinery inherited from the old LedFX setup: gap placeholders, and the mask / foreground / background layers that belong to a mapped virtual. They are not broken and nothing is wrong with them — they simply are not something a scene points at.',
+          'IT IS LIVE, NOT A LIST. The split is worked out fresh every time the page loads. Put a device\'s virtual in a grouping, or save a scene that targets it, and it appears in the default view the next time you open the page — there is nothing to tidy or migrate.',
+          'DUPLICATES are flagged, not removed: a device with the same name and the same type as another one, backing nothing itself, is marked "duplicate of ..." in the expanded list. There is no delete on this page — removing a device would tear down its virtuals and rewrite scenes — so naming it is deliberately the whole of it.',
         ],
       },
       {
