@@ -654,6 +654,44 @@ variables named `ledfx` (the core object handle) are untouched.
     and `tests/test_fish_camera.py`. Not in the fork source at
     `/home/javi/ledfx-src` (SpotFX-authored mechanism).
 
+24. `devices/__init__.py`: THE PER-DEVICE TIMING SEAM (NEW MECHANISM,
+    SpotFX-authored — owner ask 2026-08-28, "different devices seem to have
+    different network and physical latencies... add an ability to tune the
+    per device settings so that they are timed equally"). `Device.
+    update_pixels`'s two inline statements — `self.flush(frame)` and the
+    `DeviceUpdateEvent` fire — move into `_emit_frame()`, and the call site
+    becomes `self._flush_timed(frame)`. `_flush_timed` reads this device's
+    delay from `fx/device_timing.py` (a new SpotFX-authored module, not
+    fork code) on every frame; at 0 — the shipped default for every device
+    — it calls `_emit_frame` directly, so the path is byte-identical to the
+    fork's. Above 0 the frame is COPIED (the fork's `assemble_frame` can
+    hand back `self._pixels` itself, which the next frame overwrites in
+    place) into a per-device deque and released on the arrival of a later
+    frame once its deadline has passed — no timer, no thread added to the
+    write path; the release granularity is one frame interval. A CHANGED
+    delay drains everything already held first, so held frames can never be
+    reordered by an edit, and the deque is bounded
+    (`MAX_BUFFERED_FRAMES`), releasing the oldest on overflow.
+
+    This is the ONE application point for the whole feature: `update_pixels`
+    is the only live-path caller of `self.flush()`, so every driver's own
+    transport is covered by it — Hue's entertainment DTLS stream
+    (`devices/hue.py`), WLED via its DDP/UDP subdevice (`devices/wled.py` ->
+    `devices/ddp.py` / `devices/udp.py`), e131, ddp, udp, dummy.
+    `E131Device.deactivate()`'s direct `self.flush()` of a blackout frame is
+    deliberately NOT routed through the seam: a teardown blackout must land
+    immediately on a device that is about to stop.
+
+    `timing_offset_ms` is OFFSET family (negative = earlier) and RELATIVE
+    only — the arithmetic subtracts the smallest authored offset, so the
+    earliest device is delayed by exactly nothing and no combination of
+    values can shift the room. Evidence:
+    `tests/test_device_timing_landing.py` (two devices on the real
+    pipeline, both light edges measured AT THE TRANSPORT, byte-identity
+    negative control, and a test that proves the harness goes red when the
+    seam is bypassed) and `tests/test_device_settings_store.py`. Not in the
+    fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
