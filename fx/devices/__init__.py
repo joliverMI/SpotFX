@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import logging
 import socket
 import threading
@@ -183,15 +184,90 @@ class Device(BaseRegistry):
             if virtual_id == self.priority_virtual.id:
                 # Priority virtual flushes after all virtuals have updated their pixels
                 frame = self.assemble_frame()
-                self.flush(frame)
-
-                self._ledfx.events.fire_event(
-                    DeviceUpdateEvent(self.id, frame)
-                )
+                # SpotFX deviation: the ONE per-device timing-equalization
+                # seam. With no offsets set (the shipped default) this is
+                # the two lines it replaced, in the same order — see
+                # _flush_timed.
+                self._flush_timed(frame)
         else:
             _LOGGER.warning(
                 "Flush skipped as %s has no priority_virtual", self.id
             )
+
+    # ── SpotFX: per-device timing equalization (the ONE application
+    #    point; fx/device_timing.py holds the arithmetic and the sign law)
+    #
+    # THIS IS THE DEVICE FLUSH LAYER, and it is the only place a frame
+    # leaves the render pipeline for a transport: update_pixels() above is
+    # the sole caller of self.flush() on the live path, and every vendored
+    # driver's flush() is reached through it —
+    #   HueDevice.flush        (fx/devices/hue.py)   the entertainment
+    #                          DTLS stream's per-frame send
+    #   WLEDDevice.flush       (fx/devices/wled.py)  delegates to its DDP or
+    #                          UDP subdevice's own flush (ddp.py / udp.py)
+    #   DDPDevice.flush / UDPDevice.flush / E131Device.flush / DummyDevice.flush
+    # so one seam here covers every device type, Hue and WLED alike.
+    #
+    # (E131Device.deactivate() calls self.flush() directly with a blackout
+    # frame — deliberately NOT routed through here: a teardown blackout must
+    # land immediately, not be held behind a delay on a device that is about
+    # to stop.)
+    _timing_buffer = None       # deque[(due_monotonic_s, frame_copy)]
+    _timing_delay_s = 0.0
+
+    def _emit_frame(self, frame):
+        """Hand one frame to the transport and announce it. The two
+        statements this method holds are exactly what update_pixels ran
+        inline before the timing seam existed, in the same order."""
+        self.flush(frame)
+        self._ledfx.events.fire_event(DeviceUpdateEvent(self.id, frame))
+
+    def _flush_timed(self, frame):
+        """Release `frame` to the transport now, or hold it back by this
+        device's equalization delay.
+
+        The delay is read LIVE from fx.device_timing on every frame, so an
+        edit through the device page takes effect on the next rendered
+        frame with nothing to restart. With no offsets authored anywhere —
+        the shipped default, and the state every existing installation is
+        in — delay_s() short-circuits on an empty map and this is a dict
+        check plus the two statements of _emit_frame: byte-identical
+        pacing, asserted in tests/test_device_timing_landing.py.
+
+        Held frames are released on the ARRIVAL of a later frame, not by a
+        timer: the render loop flushes continuously at the virtual's own
+        refresh rate, so the release granularity is one frame interval —
+        the light's own granularity — and no thread is introduced into the
+        write path. A CHANGED delay drains everything already held first,
+        so held frames can never be reordered by an edit.
+        """
+        from fx import device_timing
+
+        delay = device_timing.delay_s(self.id)
+        buffer = self._timing_buffer
+        if delay <= 0.0 and not buffer:
+            self._timing_delay_s = 0.0
+            self._emit_frame(frame)
+            return
+
+        if buffer is None:
+            buffer = self._timing_buffer = collections.deque()
+        if delay != self._timing_delay_s:
+            while buffer:
+                self._emit_frame(buffer.popleft()[1])
+            self._timing_delay_s = delay
+        if delay <= 0.0:
+            self._emit_frame(frame)
+            return
+
+        now = device_timing.now()
+        # assemble_frame() may hand back self._pixels itself, which the next
+        # update_pixels overwrites in place — a held frame must be a copy.
+        buffer.append((now + delay, np.array(frame, copy=True)))
+        while len(buffer) > device_timing.MAX_BUFFERED_FRAMES:
+            self._emit_frame(buffer.popleft()[1])
+        while buffer and buffer[0][0] <= now:
+            self._emit_frame(buffer.popleft()[1])
 
     def assemble_frame(self):
         """

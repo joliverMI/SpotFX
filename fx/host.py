@@ -54,7 +54,16 @@ SAFE_DEVICE_TYPES = frozenset({"dummy"})
 # readiness checks a virtual is only usable if a device of one of THESE types
 # backs it. Kept in lockstep with the fx/devices/ package contents; the
 # fx-live seeder and the handover readiness gate both read this set.
-VENDORED_DEVICE_TYPES = frozenset({"dummy", "ddp", "wled", "e131", "hue"})
+#
+# `udp` (fx/devices/udp.py, registered as "udp" by UDPRealtimeDevice) was
+# missing here until 2026-08-28 while its driver was vendored, registered,
+# and reachable — a WLED device with sync_mode="UDP" already runs on it as a
+# subdevice. It is added now because the device edit/create page offers it
+# (fx/device_schema.py reads this set), and offering a type the readiness
+# gate would then refuse to count as usable is a trap. A udp-backed virtual
+# now counts toward readiness exactly like a ddp-backed one, which is what
+# the set's own "lockstep with the package contents" rule always said.
+VENDORED_DEVICE_TYPES = frozenset({"dummy", "ddp", "udp", "wled", "e131", "hue"})
 
 
 class FxHost:

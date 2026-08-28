@@ -293,6 +293,31 @@ def _isolated_sonic_usage(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_device_timing(tmp_path, monkeypatch):
+    """Two no-DI-seam globals in one fixture, same class as
+    _isolated_fire_history: the per-device settings STORE
+    (config.DEVICE_SETTINGS_FILE, a real write path under storage/spectra/)
+    and fx.device_timing's process-global delay map + clock, which the
+    device flush layer reads on every rendered frame. A leaked delay map
+    would silently change the pacing of a later test's render, and a leaked
+    fake clock would freeze it."""
+    from fx import device_timing
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "DEVICE_SETTINGS_FILE",
+                        tmp_path / "device_settings.json")
+    # FX_LIVE_CONFIG_DIR is a READ path here, but a load-bearing one: with
+    # the stack down, device_settings.resolve_offsets takes the room's
+    # roster from that config, so a real fx-live config left in a worktree
+    # would silently put his device ids into the delay map mid-test.
+    monkeypatch.setattr(scfg, "FX_LIVE_CONFIG_DIR", tmp_path / "fx-live")
+    device_timing.clear()
+    device_timing.set_clock(None)
+    yield
+    device_timing.clear()
+    device_timing.set_clock(None)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_ambient_music_gate():
     """spectra/services/ambient_music_gate.py tracks the live Ambient hold
     (_held/_held_color/_last_result/_apply_lock, the status-honesty verify

@@ -476,6 +476,33 @@ def test_parse_transcript_catches_a_fabricated_restore_claim():
         "the point is that `changes` doesn't believe it"
 
 
+def test_a_device_domain_write_parses_from_its_structured_tool_result():
+    """The DEVICE widening (2026-08-28) gets its own explicitly-synthetic
+    fixture on the CURRENT manifest, the same way each earlier widening
+    did — so this file proves the new surface parses, not just that the
+    old ones went stale. `changes` comes from the structured tool_result
+    the real handler wrote, never the reply prose."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(_load("cli_transcript_synthetic_device_applied.json"))
+    assert [c["device_id"] for c in result["changes"]] == ["hue-lounge"]
+    assert result["changes"][0]["timing_offset_ms"] == -80
+    assert "earlier" in result["changes"][0]["summary"]
+
+
+def test_every_declared_operation_including_the_device_domain_is_in_the_manifest():
+    """--allowedTools and the live manifest check are both derived from
+    ALL_OPERATIONS, so a new domain cannot be added without its tools
+    becoming reachable AND checked. Adding an operation without an MCP
+    wrapper fails test_settings_mcp_server_starts_from_a_clean_cwd; this
+    catches the other half."""
+    from spectra.services import device_console
+    from spectra.services import settings_agent_cli as sac
+
+    for name in device_console.OPERATIONS:
+        assert f"mcp__{sac.MCP_SERVER_NAME}__{name}" in sac.TOOL_NAMES
+
+
 # ═══ 6. live smoke test (skipped: no CLAUDE_CODE_OAUTH_TOKEN here, and ═══
 # this suite never mints one -- see module docstring) ═══════════════════
 

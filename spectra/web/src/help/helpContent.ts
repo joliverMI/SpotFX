@@ -1468,11 +1468,95 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'av-sync-per-device',
+        title: 'Per-device — lining the fixtures up with each other',
+        keywords: 'per device latency hue wled strip slower faster equalize equalise timing offset difference reference slowest measure one device apply',
+        body: [
+          'Different fixtures reach the light at different times — a Hue bulb over the bridge, a WLED over wifi, a strip on the desk. This panel measures each one on its own and then tells you what would make them land together.',
+          'MEASURING ONE DEVICE: press "⚡ Measure <name>" and only that device flashes; everything else keeps playing the show. Point the phone at that fixture and keep still, exactly as for a whole-room run. Do the same for each device you care about. Repeat runs on the same device are welcome — the panel takes the middle value and shows you how much they scattered.',
+          'WHY THE DIFFERENCE IS THE REAL ANSWER: every run measures (this light\'s lag) minus (the sound\'s lag), and the sound\'s lag is the same in every run — the same microphone, the same speakers, the same audio path. Subtract one device\'s run from another\'s and all of that cancels, along with the camera and phone uncertainties the two runs share. So the DIFFERENCES between devices are much tighter than any single absolute figure, and they are all the equalization needs.',
+          'THE PROPOSAL: the SLOWEST device — the one whose light arrives latest — sets the pace and is left alone; every other device is asked to WAIT for it. That is not a preference, it is the only physically possible direction: nothing can send a frame to a light before the picture has been drawn. So every proposed offset is zero or positive (later), never negative.',
+          'APPLYING is one press per device, and nothing is written until you press it. The proposal already accounts for offsets you applied earlier — a measurement is taken with those delays in the light path, so they are subtracted back out. That means re-measuring after applying proposes keeping what you set, not doubling it.',
+          'AFTERWARDS THE WHOLE ROOM SITS LATER, by exactly the spread you closed — that is what holding the fast fixtures back does. That global shift is not this panel\'s job: go back to the whole-room measurement, run it again, and apply the room A/V sync lead. Per-device offsets line the fixtures up with each other; the room lead puts the agreed-on room where the music is.',
+          'A NOTE ON EXPECTATIONS: whether the Hue lights really are slower than the WLEDs is exactly what this measures. Nothing in it assumes anything about device types — the ordering comes out of the numbers.',
+        ],
+      },
+      {
         id: 'av-sync-frame-tap',
         title: 'Frame tap — the hook for the future camera work (not built)',
         keywords: 'aruco tags led mapping vision frames jpeg seam hook future calibration patterns',
         body: [
           'The later ArUco-tag / LED-position / ambient-effect mapping work is NOT built here — on purpose. What is prepared is the seam it will plug into: with the frame tap switched on (Privacy card, off by default), the phone sends small JPEG stills of what the camera sees, each stamped with its capture time, to SPECTRA\'s memory only (GET /spectra/api/av-sync/frame/latest shows the newest; at most 8 are held; cleared on disconnect; nothing on disk). Nothing in SPECTRA inspects or recognises anything in a frame today.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'devices-page',
+    title: 'Devices — create and edit the lights themselves',
+    keywords: 'device devices create edit add new wled hue e131 ddp udp dummy ip address pixel count refresh rate name rename grouping category timing offset parameters ledfx settings',
+    intro:
+      'One page for the fixtures: every device the room has, every parameter its driver actually accepts, its name, which groupings its virtuals belong to, and its timing offset. Everything for a device is on ONE tab — grouped inside it, never behind sub-tabs.',
+    entries: [
+      {
+        id: 'devices-live-or-stored',
+        title: 'Read the banner first: is the room running?',
+        keywords: 'live stored running not running activation applies now later ownership handover',
+        body: [
+          'The banner at the top of the page says one of two things, and it changes what a save does.',
+          'THE ROOM IS RUNNING — SPECTRA owns the lights and the light stack is up. A save goes straight through to the running device AND is written to the config in one step; the fixture follows immediately.',
+          'THE ROOM IS NOT RUNNING — nothing is driving the lights right now. A save is still kept: it is validated the same way and written into SPECTRA\'s own light config, and it comes up the next time the room is taken back. The page says so on every save. An edit made while the room is dark is never lost, and never claimed to have reached a fixture when it did not.',
+        ],
+      },
+      {
+        id: 'devices-parameters',
+        title: 'The parameters, and why the list is always right',
+        keywords: 'parameters fields schema validator required default range choices ledfx tunable base type',
+        body: [
+          'The fields you see are not a list someone typed here — they are read off each device driver\'s own definition, the same definition that decides whether a value is accepted. So the page can never offer a parameter that does not exist, or hide one that does, and a value it lets you enter is a value the device will take. Each field carries the driver\'s own description underneath it.',
+          'BASE is what every device type shares: name, icon, centre offset, refresh rate and (for networked devices) the IP address or hostname. The section under it is what THAT type adds — a WLED\'s sync mode and timeout, a Hue\'s entertainment group name and port, an E1.31\'s universe and priority, a DDP\'s destination id, a UDP device\'s packet type. A field marked * is required.',
+          'Six device types are offered: wled, hue, e131, ddp, udp and dummy. Those are the drivers this app actually ships. LedFX has more; their code is not here, so a device of one of those types could never come up — offering it would be offering something that cannot work. Serial devices (com port, baud rate) are absent for the same reason.',
+          'A save sends only the fields you changed; everything else is left exactly as it was. If the driver refuses a value, the page shows the driver\'s own reason rather than a generic failure.',
+        ],
+      },
+      {
+        id: 'devices-groupings',
+        title: 'Groupings and naming',
+        keywords: 'grouping groupings category categories name rename virtual matrix strips singles hue',
+        body: [
+          'NAMING is the "name" field in the Base section — the friendly name shown everywhere else in SPECTRA. Renaming changes only that: the device\'s identity, its virtuals and its groupings all stay put.',
+          'GROUPINGS are the categories (Matrix, Strips, Singles, Hue, …) that scenes and effects address. They belong to VIRTUALS — the things that render onto a device — so the page lists each of the device\'s virtuals with a tick box per category. Tick and untick freely; a change saves immediately.',
+          'Only categories that already exist are offered. The page will never create one from a typed name, because a mistyped category would file a light somewhere nothing ever looks for it.',
+        ],
+      },
+      {
+        id: 'device-timing-offset',
+        title: 'Timing offset — making the fixtures land together',
+        keywords: 'timing offset latency network delay earlier later equalize equalise per device sign convention negative ms sync align',
+        body: [
+          'Different fixtures reach the light at different times: a Hue bulb over the bridge, a WLED over wifi and a strip on the desk do not all change at the same instant. This field is how you pull them into line.',
+          'THE SIGN: NEGATIVE means this device fires EARLIER; positive means later; 0 leaves it where it is. That is the same convention as every other offset you drag in SPECTRA (a flare\'s mark, a trigger\'s mark) — negative is earlier.',
+          'ONLY DIFFERENCES MATTER. A fixture can only ever be made to WAIT — nothing can send a frame to a light before the picture has been drawn — so asking for one device to be earlier is carried out by delaying all the others. The earliest device is never delayed at all. That has a consequence worth knowing: shifting EVERY device by the same amount changes nothing whatsoever, and no combination of these numbers can move the whole room against the music.',
+          'MOVING THE WHOLE ROOM is a different setting: the A/V sync lead on the AV Sync page, which has the OPPOSITE sign (there, positive means earlier). Use these per-device offsets to make the fixtures agree with each other, then measure the room once more and apply the room lead to put the agreed-on room where the music is.',
+          'The page shows, under the field, how long this device is actually being held back right now to match the rest of the room. A change takes effect on the next rendered frame — nothing to restart.',
+        ],
+      },
+      {
+        id: 'devices-create',
+        title: 'Creating a device',
+        keywords: 'create new add device wled hue ddp e131 udp dummy required fields virtual segment',
+        body: [
+          'Press "+ New", pick a type, and fill in the fields; the required ones are marked *. Every type needs a name; networked types need an address; most need a pixel count.',
+          'Creating a device also creates the virtual that renders onto it, covering the whole device, so it is usable straight away. With the room running the device comes up immediately; with the room down it comes up the next time the room is taken back.',
+          'There is no delete. Removing a device would tear down its virtuals and rewrite the scenes that address them, which is a bigger and less reversible action than this page is for.',
+        ],
+      },
+      {
+        id: 'devices-sonic',
+        title: 'Talking to Sonic about devices',
+        keywords: 'sonic agent chat voice device rename timing offset grouping create settings console',
+        body: [
+          'Everything this page can set, Sonic can set too — "make the hue lights fire 80 ms earlier", "rename the back strip to Sofa", "put the tv mapper in Strips", "what parameters does a wled device have". Sonic reads the same driver definitions and writes through the same checks, and reports back whether the change reached the running room or was stored for the next activation.',
         ],
       },
     ],

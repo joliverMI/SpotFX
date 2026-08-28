@@ -172,6 +172,16 @@ class LiveLights:
             _config_expected_active_ids(host.config))
         await host.start()        # deactivates through us
         self.freshness.attach(host)
+        # His per-device timing equalization: install the stored offsets
+        # against the ids this host actually holds, so the anchoring
+        # minimum is taken over the REAL room (see
+        # spectra/services/device_settings.py). Never fatal — a stack that
+        # came up must not be refused over a settings file.
+        try:
+            from spectra.services import device_settings
+            device_settings.push_offsets([d.id for d in host.devices.values()])
+        except Exception:
+            logger.exception("live stack: per-device timing offsets not applied")
 
         if open_audio:
             self.hub = AudioIngestHub()
@@ -213,6 +223,10 @@ class LiveLights:
             host, self.host = self.host, None
             await host.shutdown()
         self.expected_active_ids = set()
+        # Nothing is rendering any more; a stale delay map must not survive
+        # into whatever comes up next (a re-activation re-pushes above).
+        from fx import device_timing
+        device_timing.clear()
         logger.warning("SPECTRA live stack deactivated — dark")
 
     # ── verification (the same signal the liveness endpoint serves) ─────────

@@ -1,6 +1,6 @@
 """ONE declaration shape for every operation Sonic — the settings-console
-chat agent, standing order 5 — can perform, across both domains it is
-authorized in (settings, scene). Per the Admiral's own architecture ruling
+chat agent, standing order 5 — can perform, across every domain it is
+authorized in (settings, scene, device). Per the Admiral's own architecture ruling
 (corr, 2026-08-15, "we need to build good infrastructure ... helping the
 Sonic agent find possible things to change ... adding some level of
 programmatic access"):
@@ -47,7 +47,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
-OperationDomain = Literal["settings", "scene", "meta"]
+OperationDomain = Literal["settings", "scene", "device", "meta"]
 OperationKind = Literal["read", "write"]
 
 

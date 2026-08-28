@@ -52,6 +52,13 @@ SCENE_GENESIS_FILE = SPECTRA_STORAGE / "scene_genesis.json"
 # The device-preview strip's favourites + pause state (spectra/services/
 # device_preview.py) — same small-store shape as ROOM_CONTROLS_FILE.
 DEVICE_PREVIEW_FILE = SPECTRA_STORAGE / "device_preview.json"
+
+# DEVICE_SETTINGS_FILE is SPECTRA's own per-device record store — settings a
+# device carries that the vendored LedFX device config has no place for
+# (today: timing_offset_ms, the per-device timing equalization). Same
+# small-store shape as ROOM_CONTROLS_FILE; see
+# spectra/services/device_settings.py.
+DEVICE_SETTINGS_FILE = SPECTRA_STORAGE / "device_settings.json"
 INTENSITY_SCALE_CACHE_FILE = SPECTRA_STORAGE / "intensity_scale_features.json"
 INTENSITY_SCALE_MARKS_FILE = SPECTRA_STORAGE / "intensity_scale_marks.json"
 # Per-virtual pre-dark effect snapshot (spectra/services/dark_light.py) — the

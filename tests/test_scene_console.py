@@ -317,7 +317,12 @@ def test_operation_outside_the_set_is_rejected_without_touching_storage():
     _seed_his_real_scenes()
     before = scfg.SCENES_FILE.read_bytes()
 
-    for name in ("delete_scene", "list_devices", "set_device_effect"):
+    # `list_devices` used to stand here as an example of an operation that
+    # does not exist; it does now (the device domain, 2026-08-28), so it is
+    # replaced by `delete_device` — deliberately NOT built, because he asked
+    # to edit and create devices, and deleting one tears down its virtuals
+    # and rewrites his scenes.
+    for name in ("delete_scene", "delete_device", "set_device_effect"):
         result = _run(sa._dispatch(name, {"scene_id": "whatever"}))
         assert result == {"status": "rejected", "reason": f"no such operation: {name!r}"}
 
@@ -373,7 +378,9 @@ def test_dispatch_recognizes_exactly_the_declared_operation_set():
     from spectra.services import settings_console as stc
     from spectra.services import settings_agent as sa
 
-    expected = {"list_operations", *stc.OPERATIONS, *sc.OPERATIONS}
+    from spectra.services import device_console as dc
+
+    expected = {"list_operations", *stc.OPERATIONS, *sc.OPERATIONS, *dc.OPERATIONS}
     assert {t["name"] for t in sa.TOOLS} == expected
     assert set(sa.ALL_OPERATIONS) == expected
 
