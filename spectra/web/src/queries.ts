@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spotfxPost } from './api/client';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
-  AmbientHueGroup, ColorWheelPosition, DevicePreviewFavorites, DevicePreviewStatus, DriftProfile,
+  AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
+  DeviceWriteResult, DriftProfile,
   EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark, Registry,
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
@@ -1032,4 +1033,45 @@ export function useLiveness() {
     refetchInterval: 3000,
     retry: false,
   });
+}
+
+/* ── devices (the device edit/create page) ── */
+
+export function useDevices() {
+  return useQuery({
+    queryKey: ['spectra-devices'],
+    queryFn: () => apiGet<DeviceListing>('/devices'),
+  });
+}
+
+function useDeviceMutation<V>(fn: (v: V) => Promise<DeviceWriteResult>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['spectra-devices'] }); },
+  });
+}
+
+export function useCreateDevice() {
+  return useDeviceMutation<{ type: string; config: Record<string, unknown> }>(
+    (v) => apiPost<DeviceWriteResult>('/devices', v));
+}
+
+export function useUpdateDevice() {
+  return useDeviceMutation<{ deviceId: string; config: Record<string, unknown> }>(
+    (v) => apiPut<DeviceWriteResult>(`/devices/${encodeURIComponent(v.deviceId)}`,
+                                     { config: v.config }));
+}
+
+export function useSetDeviceTiming() {
+  return useDeviceMutation<{ deviceId: string; timingOffsetMs: number }>(
+    (v) => apiPut<DeviceWriteResult>(`/devices/${encodeURIComponent(v.deviceId)}/timing`,
+                                     { timing_offset_ms: v.timingOffsetMs }));
+}
+
+export function useSetDeviceCategories() {
+  return useDeviceMutation<{ virtualId: string; categories: string[] }>(
+    (v) => apiPut<DeviceWriteResult>(
+      `/devices/virtuals/${encodeURIComponent(v.virtualId)}/categories`,
+      { categories: v.categories }));
 }

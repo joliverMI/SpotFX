@@ -708,6 +708,70 @@ async def _freeze_put(host, device_id: str, body: dict) -> FacadeResponse:
                 "payload": {"id": device_id, "frozen": bool(frozen)}})
 
 
+# ── /api/devices list / create / update (SpotFX-authored, for the SPECTRA
+#    device edit page — the fork's own api/devices.py + api/device.py PUT are
+#    not vendored). DELETE is deliberately NOT offered: the owner asked to
+#    "edit and create devices", and removing a device tears down its virtuals
+#    and rewrites his scenes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _device_entry(host, device) -> dict:
+    """One device as the page reads it: identity, type, live config, and the
+    virtuals whose segments name it (that mapping is what the per-device
+    flash measurement and the category editor both need)."""
+    virtual_ids = sorted(
+        v.id for v in host.virtuals.values()
+        if any(seg[0] == device.id for seg in (getattr(v, "_segments", None) or []))
+    )
+    return {"id": device.id, "type": device.type,
+            "config": dict(device.config), "online": device.is_online(),
+            "active": device.is_active(), "virtuals": virtual_ids}
+
+
+async def _devices_get(host) -> FacadeResponse:
+    return _ok({"devices": {d.id: _device_entry(host, d)
+                            for d in host.devices.values()}})
+
+
+async def _devices_post(host, body: dict) -> FacadeResponse:
+    """Create through the vendored Devices.add_new_device — the same call the
+    fork's own create endpoint makes, so the device, its virtual, its segment
+    and the persisted config all land the one way that is known to work."""
+    device_type = body.get("type")
+    config = body.get("config")
+    if not device_type or not isinstance(config, dict):
+        return _invalid("Required attributes 'type' and 'config' were not provided")
+    try:
+        device = await host.devices.add_new_device(device_type, dict(config))
+    except Exception as e:
+        return _invalid(f"device creation failed: {e}")
+    if device is None:
+        return _invalid("device creation failed: the address could not be resolved")
+    return _ok({"status": "success", "device": _device_entry(host, device)})
+
+
+async def _device_put(host, device_id: str, body: dict) -> FacadeResponse:
+    """Update one device's config in place and persist it — the vendored
+    update_config revalidates against the driver's own schema, re-segments
+    its virtuals and re-activates them, exactly as the fork's PUT does."""
+    device = host.devices.get(device_id)
+    if device is None:
+        return _invalid(f"Device {device_id} was not found")
+    config = body.get("config")
+    if not isinstance(config, dict):
+        return _invalid("Required attribute 'config' was not provided")
+    try:
+        device.update_config(dict(config))
+    except Exception as e:
+        return _invalid(f"device config rejected: {e}")
+    for entry in host.config["devices"]:
+        if entry["id"] == device_id:
+            entry["config"] = device.config
+            break
+    save_config(config=host.config, config_dir=host.config_dir)
+    return _ok({"status": "success", "device": _device_entry(host, device)})
+
+
 # ── /api/assets + /api/get_gif_frames (ports of api/assets.py,
 #    api/get_gif_frames.py) ────────────────────────────────────────────────────
 
@@ -805,8 +869,14 @@ async def handle(
             return await _shape_get(host, vid)
         case ("PUT", ["virtuals", vid, "shape"]):
             return await _shape_put(host, vid, body)
+        case ("GET", ["devices"]):
+            return await _devices_get(host)
+        case ("POST", ["devices"]):
+            return await _devices_post(host, body)
         case ("GET", ["devices", did]):
             return await _device_get(host, did)
+        case ("PUT", ["devices", did]):
+            return await _device_put(host, did, body)
         case ("GET", ["devices", did, "freeze"]):
             return await _freeze_get(host, did)
         case ("PUT", ["devices", did, "freeze"]):

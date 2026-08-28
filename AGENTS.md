@@ -3270,6 +3270,87 @@ observation must reset it the way a song change would — otherwise the
 second fire in one process is legitimately deferred by the first one's
 dwell floor and renders nothing at all.**
 
+## Per-device timing equalization + the device page (`/devices`)
+
+His ask (2026-08-28): "Different devices seem to have different network and
+physical latencies... tune the per device settings so that they are timed
+equally... negative is that it fires earlier", and "we need a device edit
+page to edit and create devices... all the parameters that were tunable in
+ledfx on one tab, as well as the groupings and namings".
+
+**`DeviceSettings.timing_offset_ms` is OFFSET family (negative = EARLIER)
+and RELATIVE ONLY — it can never move the room.** `spectra/models/
+device_settings.py` is the field + sign law; `docs/SPECTRA_TIMING_
+CONVENTIONS.md` carries its row against every other timing quantity. The
+translation is `delay_i = offset_i - min_j(offset_j)`, always >= 0: a
+fixture can only be made to WAIT, so "A earlier" is implemented as delay
+for everyone else and the earliest device is delayed by exactly nothing.
+All-offsets-equal (including the shipped all-zero default) is byte-identical
+pacing to before the field existed — asserted at the transport, not claimed.
+**Absolute alignment against the sound is still `av_sync_lead_ms`'s job**
+(LEAD family, positive = earlier, applied at the trigger poll); the two are
+never added with the same sign.
+
+**ONE application point: `fx/devices/__init__.py::_flush_timed`** (the
+device flush layer, `fx/VENDOR.md` deviation #24). `Device.update_pixels`
+is the only live-path caller of `self.flush()`, so every driver's transport
+is covered by it — Hue's entertainment DTLS stream, WLED via its DDP/UDP
+subdevice, e131/ddp/udp/dummy. `E131Device.deactivate()`'s own direct
+`flush()` of a blackout frame is deliberately NOT routed through it. Held
+frames are COPIED (`assemble_frame` can hand back the device's own buffer)
+into a bounded deque and released on the next frame's arrival once due — no
+timer, no thread in the write path. `fx/device_timing.py` holds the
+arithmetic and the process-global delay map; **`fx/` may not import
+`spectra/`**, so SPECTRA PUSHES (`device_settings.push_offsets`, called on
+every save and at `live_host.activate` against the host's own roster) and
+fx never pulls. Proof: `tests/test_device_timing_landing.py` — two dummy
+devices on the real pipeline, both light edges measured AT THE TRANSPORT,
+byte-identity negative control, and a test that goes red when the seam is
+bypassed.
+
+**The device page (`/devices`, `spectra/web/src/devices/DevicesPage.tsx`)
+renders a field list it does not own.** `fx/device_schema.py` introspects
+each vendored driver's OWN merged `CONFIG_SCHEMA` — the exact validator
+`Device.update_config` runs — so the page cannot drift from what the driver
+accepts; 19 distinct config keys across the six vendored types, plus the
+timing field. ONE TAB (his hard constraint), grouped within it as Base /
+Type / Groupings & naming / Timing, where the Base/Type split is derived
+from the class hierarchy, not a second list. **`udp` was missing from
+`fx.host.VENDORED_DEVICE_TYPES` while its driver was vendored and
+registered** — added 2026-08-28, because that set gates the handover
+readiness check and offering a type it would refuse to count is a trap.
+
+**TWO WRITE BRANCHES, mutually exclusive by construction** (`spectra/
+services/device_console.py`'s docstring is the binding statement): SPECTRA
+owns AND the stack is up → every write goes through `fx.facade` (new routes
+`GET/POST /api/devices`, `PUT /api/devices/{id}`), which runs the vendored
+create/`update_config` and `save_config` in one call; otherwise → the same
+validated entry written atomically into `storage/spectra/fx-live/config.json`,
+the file the go-day seeder owns and nothing else is writing while the stack
+is down. Both branches STATE which ran (`applied: "live" | "stored"`), so an
+edit made while the room is dark is never lost and never claimed live.
+**DELETE is deliberately not built** — he asked to edit and create, and
+removing a device tears down its virtuals and rewrites his scenes.
+Groupings are the shared category registry, which maps a CATEGORY to
+VIRTUAL ids, so a device's grouping is its virtuals' membership; a category
+is never invented from a typed name.
+
+**`storage/device_categories.json` IS NOT UNDER `SPECTRA_STORAGE`** —
+`fx.device_model.CATEGORIES_FILE` is a fixed repo-relative path, so
+`SPECTRA_STORAGE_DIR` does NOT repoint it. An isolated instance run for a
+screenshot writes the WORKTREE'S REAL registry the moment anything touches
+the device page's grouping controls (found doing exactly that, 2026-08-28 —
+one virtual silently left a category). Set `device_model.CATEGORIES_FILE`
+explicitly, or check the file back afterwards.
+
+**Sonic parity**: a `device` domain (`device_console.OPERATIONS`, 7 ops)
+merged into `settings_agent.ALL_OPERATIONS` — remember the hand-written
+`settings_mcp_server.py` wrapper per op AND the CLI fixture manifests
+(`tests/fixtures/cli_transcript_synthetic_*.json`), where the three
+`_scene_*` and the three original real captures are DELIBERATELY STALE
+(tests assert they are refused) and must not be "fixed". Help:
+`devices-page` (+ `device-timing-offset`, linked from the page).
+
 ## SPECTRA phone A/V-sync instrument (`/avsync`) — MEASURE the audio/visual offset, don't argue it
 
 `spectra/services/av_sync_{correlate,audio_ref,pattern,session}.py` +

@@ -1297,3 +1297,64 @@ export interface Liveness {
   virtuals: Record<string, LivenessVirtual>;
   activation_gaps: Record<string, unknown>;
 }
+
+/* ── devices (the device edit/create page, /devices) ──────────────────────
+ * GET /api/devices returns the room's devices plus the COMPLETE per-type
+ * parameter list, read server-side off each vendored driver's own
+ * CONFIG_SCHEMA (fx/device_schema.py) — the page renders whatever comes
+ * back rather than carrying a second copy of the field list, so it cannot
+ * drift from the real validator. */
+
+export interface DeviceField {
+  name: string;
+  /** 'base' = keys every device type shares; 'type' = what this driver adds.
+   * The page's one-tab grouping is exactly this split. */
+  group: 'base' | 'type';
+  kind: 'text' | 'integer' | 'number' | 'boolean' | 'enum';
+  required: boolean;
+  default: unknown;
+  description: string;
+  min?: number;
+  max?: number;
+  choices?: string[];
+}
+
+export interface DeviceRecord {
+  id: string;
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+  online: boolean | null;
+  active: boolean | null;
+  virtuals: string[];
+  /** virtual id → the category names it belongs to (the "groupings"). */
+  categories: Record<string, string[]>;
+  /** OFFSET family: NEGATIVE = this device fires EARLIER. Relative only. */
+  timing_offset_ms: number;
+}
+
+export interface DeviceListing {
+  /** 'live' = the room is running and an edit reaches the fixtures now;
+   * 'stored' = it is not, and an edit lands at the next activation. */
+  source: 'live' | 'stored';
+  devices: DeviceRecord[];
+  types: string[];
+  fields: Record<string, DeviceField[]>;
+  category_names: string[];
+  timing: {
+    offset_limit_ms: number;
+    convention: string;
+    /** device id → the delay actually being applied right now, in ms. */
+    applied_delay_ms: Record<string, number>;
+  };
+}
+
+export interface DeviceWriteResult {
+  status: string;
+  applied?: 'live' | 'stored';
+  summary: string;
+  device_id?: string;
+  device?: { id: string };
+  timing_offset_ms?: number;
+  categories?: string[];
+}

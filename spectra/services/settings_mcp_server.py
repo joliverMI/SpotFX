@@ -89,12 +89,19 @@ if str(_REPO_ROOT) not in sys.path:
 
 from mcp.server import MCPServer  # noqa: E402
 
-from spectra.services import scene_console, settings_agent, settings_console  # noqa: E402
+from spectra.services import (  # noqa: E402
+    device_console,
+    scene_console,
+    settings_agent,
+    settings_console,
+)
+from fx import device_schema  # noqa: E402
 
 _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
 _SceneKeyEnum = Literal[tuple(sorted(scene_console.SCENE_SETTINGS_REGISTRY))]
 _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent"]
 _JumpEnum = Literal["color_set", "dice"]
+_DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
 
 mcp = MCPServer("settings-console")
 
@@ -126,7 +133,7 @@ async def _call(op_name: str, /, **kwargs: Any) -> dict:
 @mcp.tool()
 async def list_operations(domain: Optional[str] = None, name: Optional[str] = None) -> dict:
     """Discover what Sonic can currently do -- every declared operation
-    across both domains (settings, scene), or full detail for one named
+    across every domain (settings, scene, device), or full detail for one named
     operation. Call first if unsure what's available or how to call it."""
     return await _call("list_operations", domain=domain, name=name)
 
@@ -258,6 +265,62 @@ async def undo_last_scene_change() -> dict:
     """Undo the single most recent scene edit Sonic made, across any
     scene -- one action, no scene_id needed."""
     return await _call("undo_last_scene_change")
+
+
+@mcp.tool()
+async def list_devices() -> dict:
+    """Every device in the room -- type, full config, the virtuals it
+    renders, their groupings, and its timing offset. `source` says whether
+    the room is running ('live', edits reach the fixtures now) or not
+    ('stored', edits land at the next activation)."""
+    return await _call("list_devices")
+
+
+@mcp.tool()
+async def get_device_params(device_type: _DeviceTypeEnum) -> dict:
+    """The full tunable parameter list for one device TYPE, read off the
+    driver's own schema -- kind, required, default, bounds/choices and the
+    driver's own description for each."""
+    return await _call("get_device_params", device_type=device_type)
+
+
+@mcp.tool()
+async def create_device(type: _DeviceTypeEnum, config: dict) -> dict:  # noqa: A002
+    """Create a new device (and the virtual that renders onto it). Call
+    get_device_params first and supply every required field; the server
+    re-validates against the driver's own schema."""
+    return await _call("create_device", type=type, config=config)
+
+
+@mcp.tool()
+async def update_device(device_id: str, config: dict) -> dict:
+    """Change one or more config values on one existing device. config is a
+    PARTIAL patch -- only the keys named change."""
+    return await _call("update_device", device_id=device_id, config=config)
+
+
+@mcp.tool()
+async def rename_device(device_id: str, name: str) -> dict:
+    """Rename one device (its friendly name). Its id, virtuals and
+    groupings are untouched."""
+    return await _call("rename_device", device_id=device_id, name=name)
+
+
+@mcp.tool()
+async def set_device_timing_offset(device_id: str, timing_offset_ms: int) -> dict:
+    """Set one device's timing offset in milliseconds. NEGATIVE MEANS IT
+    FIRES EARLIER, positive later, 0 unchanged. Only differences between
+    devices matter -- this can never move the room as a whole."""
+    return await _call("set_device_timing_offset", device_id=device_id,
+                       timing_offset_ms=timing_offset_ms)
+
+
+@mcp.tool()
+async def set_device_categories(virtual_id: str, categories: list[str]) -> dict:
+    """Set exactly which groupings one VIRTUAL belongs to. Pass the complete
+    list; anything omitted is removed. Every name must already exist."""
+    return await _call("set_device_categories", virtual_id=virtual_id,
+                       categories=categories)
 
 
 if __name__ == "__main__":

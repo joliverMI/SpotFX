@@ -28,9 +28,13 @@ offset across the devices handed to fx.device_timing.apply_offsets, so the
 set matters. With the live stack up, that set is the HOST'S OWN device ids
 with 0 filled in for every device with no stored record — which is what
 makes a single device authored at -100 delay every OTHER real fixture by
-100 ms rather than delaying nothing. With the stack down there is no such
-list, so only the stored ids participate; the next activation re-pushes
-against the real one (live_host.LiveLights.activate calls this).
+100 ms rather than delaying nothing. With the stack down the roster comes
+from the fx-live config instead (the same file the go-day seeder writes),
+so the numbers the device page reports are the ones the next activation
+will install; live_host.LiveLights.activate re-pushes against the real host
+roster when it comes up. Stored ids are folded in either way, so an offset
+authored for a device that has since left the roster is never silently
+dropped from his spacing.
 """
 from __future__ import annotations
 
@@ -116,14 +120,34 @@ def _host_device_ids() -> list[str]:
         return []
 
 
+def _configured_device_ids() -> list[str]:
+    """Every device id the fx-live config declares — the room's roster when
+    the stack is down. Read straight off the file (never through
+    device_console, which imports this module) so there is no cycle."""
+    try:
+        path = config.FX_LIVE_CONFIG_DIR / "config.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return [d["id"] for d in (raw.get("devices") or []) if d.get("id")]
+
+
 def resolve_offsets(device_ids: list[str] | None = None) -> dict[str, int]:
     """The map handed to fx.device_timing: every participating device id
     with its authored offset, 0 where unset. See the module docstring for
-    which ids participate."""
+    which ids participate — the live host's roster when it is up, the
+    fx-live config's when it is not, and the stored ids as a last resort so
+    an offset is never silently dropped for want of a roster."""
     records = load_all()
     ids = list(device_ids) if device_ids is not None else _host_device_ids()
     if not ids:
+        ids = _configured_device_ids()
+    if not ids:
         ids = list(records)
+    else:
+        # never lose an authored offset just because its device has since
+        # left the roster — it participates, so his spacing is preserved
+        ids = list(dict.fromkeys([*ids, *records]))
     return {did: (records.get(did) or DeviceSettings()).timing_offset_ms
             for did in ids}
 

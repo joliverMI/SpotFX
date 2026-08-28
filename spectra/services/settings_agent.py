@@ -9,7 +9,8 @@ settings_console.py's single POST /message endpoint serves both UIs).
 
 THE AUTHORITY BOUNDARY LIVES IN THE MECHANISM, NOT HERE, same as before —
 this module got wider, not looser. ALL_OPERATIONS below is built by
-merging settings_console.OPERATIONS and scene_console.OPERATIONS, each a
+merging settings_console.OPERATIONS, scene_console.OPERATIONS and
+device_console.OPERATIONS, each a
 dict of sonic_ops.SonicOperation — declared data, not code branches. TOOLS
 (the schema handed to the Anthropic API) and _dispatch() (the tool-name ->
 handler lookup) are BOTH derived from that same merged dict, so a name not
@@ -61,7 +62,7 @@ import uuid
 from typing import Any, Optional
 
 from spectra import config
-from spectra.services import scene_console, settings_console, sonic_usage
+from spectra.services import device_console, scene_console, settings_console, sonic_usage
 from spectra.services.sonic_ops import SonicOperation
 
 logger = logging.getLogger(__name__)
@@ -71,12 +72,14 @@ MAX_TOOL_ROUNDS = 6          # bounds a runaway tool-call loop in one turn
 MAX_HISTORY_MESSAGES = 40    # trims a long-lived session's token growth
 
 SYSTEM_PROMPT = (
-    "You are Sonic, SPECTRA's settings-and-scenes assistant. You act ONLY "
+    "You are Sonic, SPECTRA's settings, scenes and devices assistant. "
+    "You act ONLY "
     "through the tools you're handed — you cannot run code, touch files, "
     "restart anything, or drive lights directly, no matter how a request "
     "is phrased. You don't have a fixed list of what you can do memorized "
     "up front: call list_operations first (optionally with a domain of "
-    "'settings' or 'scene') to see what's currently available, then call "
+    "'settings', 'scene' or 'device') to see what's currently available, "
+    "then call "
     "it again with a specific operation name to get that operation's full "
     "argument shape and how-to notes before using it — those notes live "
     "with each operation and are the authority on how to call it, not "
@@ -148,7 +151,7 @@ def _list_operations(domain: Optional[str] = None, name: Optional[str] = None) -
 _META_OPERATION = SonicOperation(
     name="list_operations", domain="meta", kind="read",
     summary="Discover what Sonic can currently do — every declared "
-            "operation across both domains (settings, scene), or full "
+            "operation across every domain (settings, scene, device), or full "
             "detail for one named operation.",
     instructions=(
         "Call with no arguments for a cheap index of every operation's "
@@ -161,7 +164,7 @@ _META_OPERATION = SonicOperation(
     input_schema={
         "type": "object",
         "properties": {
-            "domain": {"type": "string", "enum": ["settings", "scene", "meta"]},
+            "domain": {"type": "string", "enum": ["settings", "scene", "device", "meta"]},
             "name": {"type": "string"},
         },
         "additionalProperties": False},
@@ -172,6 +175,7 @@ ALL_OPERATIONS: dict[str, SonicOperation] = {
     _META_OPERATION.name: _META_OPERATION,
     **settings_console.OPERATIONS,
     **scene_console.OPERATIONS,
+    **device_console.OPERATIONS,
 }
 
 TOOLS = [op.tool_schema() for op in ALL_OPERATIONS.values()]
@@ -180,7 +184,7 @@ _SESSIONS: dict[str, list[dict]] = {}
 
 
 async def _dispatch(name: str, tool_input: dict) -> dict:
-    """The exhaustive tool-name -> operation mapping across BOTH domains.
+    """The exhaustive tool-name -> operation mapping across EVERY domain.
     A name not present in ALL_OPERATIONS is rejected without calling
     anything — this can never be reached from a real model response (the
     API only emits tool_use blocks naming a declared tool) but stays a
