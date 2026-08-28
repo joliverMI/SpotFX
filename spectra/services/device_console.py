@@ -41,6 +41,12 @@ is written and pushed into the render pipeline whether the stack is up or
 not — pushing is a dict swap — and takes effect on the next rendered frame
 with nothing to restart.
 
+IN USE vs NOT IN USE is a third read, computed at request time and never
+stored: spectra/services/device_usage.py stamps `in_use` and `duplicate_of`
+onto every entry from the room's own ground truth, so the page's default
+view can show only the devices a scene could actually light. See that
+module for the rule.
+
 GROUPINGS are the shared category registry (fx/device_model, backed by
 storage/device_categories.json), which maps a CATEGORY to VIRTUAL ids. A
 device's grouping is therefore its virtuals' membership, edited here in
@@ -57,7 +63,7 @@ from typing import Any, Optional
 
 from fx import device_model, device_schema
 from spectra.models.device_settings import OFFSET_LIMIT_MS, DeviceSettings
-from spectra.services import device_settings
+from spectra.services import device_settings, device_usage
 from spectra.services.sonic_ops import SonicOperation
 
 logger = logging.getLogger(__name__)
@@ -223,7 +229,12 @@ async def list_devices() -> dict:
     stored fx-live config when it is not — with its type, its full config,
     the virtuals its segments back, their category membership, and its
     SPECTRA timing offset. `source` says which branch answered, so the page
-    can say plainly whether it is looking at a running room."""
+    can say plainly whether it is looking at a running room.
+
+    Each device also carries `in_use` and `duplicate_of`, computed HERE at
+    request time from the room's own ground truth (device_usage.py) — the
+    page's default view shows only the in-use ones and never re-derives
+    topology client-side."""
     settings = device_settings.load_all()
     host = _live_host()
     if host is not None:
@@ -231,11 +242,9 @@ async def list_devices() -> dict:
         resp = await facade.handle("GET", "/api/devices")
         if resp.status_code == 200:
             devices = resp.json().get("devices") or {}
-            return {"source": "live",
-                    "devices": [_decorate(d, settings)
-                                for d in sorted(devices.values(),
-                                                key=lambda d: d["id"])],
-                    **_catalogue()}
+            entries = [_decorate(d, settings)
+                       for d in sorted(devices.values(), key=lambda d: d["id"])]
+            return _listing("live", entries)
         logger.warning("device console: live device read failed (%s) — "
                        "falling back to the stored config", resp.status_code)
     raw = _read_stored_config()
@@ -246,10 +255,15 @@ async def list_devices() -> dict:
          "virtuals": _virtual_ids_for(d.get("id"), virtuals)}
         for d in raw.get("devices") or [] if d.get("id")
     ]
-    return {"source": "stored",
-            "devices": [_decorate(e, settings)
-                        for e in sorted(entries, key=lambda e: e["id"])],
-            **_catalogue()}
+    entries = [_decorate(e, settings)
+               for e in sorted(entries, key=lambda e: e["id"])]
+    return _listing("stored", entries)
+
+
+def _listing(source: str, entries: list[dict]) -> dict:
+    annotated = device_usage.annotate(entries)
+    return {"source": source, "devices": annotated,
+            "usage": device_usage.summary(annotated), **_catalogue()}
 
 
 def _catalogue() -> dict:

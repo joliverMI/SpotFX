@@ -15,6 +15,15 @@
  * FUNCTION FIRST, his standing order — plain layout, complete and correct,
  * no polish pass.
  *
+ * ONLY THE DEVICES HE USES are listed by default, his own ask ("only
+ * devices i use should be visible on default. can show more with expansion
+ * tab"). The used/not-used split arrives on the listing as a per-device
+ * `in_use` flag computed server-side from the room's own ground truth
+ * (spectra/services/device_usage.py) — this page never re-derives topology.
+ * The expansion control names the hidden COUNT, so an absent device is a
+ * number he can see, never a silent omission, and a duplicate is flagged in
+ * the expanded list rather than removed (the page has no delete, by design).
+ *
  * The banner at the top is load-bearing, not decoration: `source` says
  * whether the room is RUNNING (edits reach the fixtures now) or not (edits
  * are written to the fx-live config and land at the next activation). A
@@ -149,6 +158,15 @@ function EditDevice({ device, fields, categoryNames, appliedDelayMs, offsetLimit
       <div className="card-title">
         {device.name} <span style={{ opacity: 0.6, fontWeight: 400 }}>({device.type} · {device.id})</span>
       </div>
+      {!device.in_use && (
+        <div style={{ marginBottom: 8 }}>
+          <span className="badge badge-gray">
+            Not in use — no scene can currently light this device
+            {device.duplicate_of ? ` · duplicate of ${device.duplicate_of}` : ''}
+          </span>
+          {' '}<HelpLink topic="devices-in-use" />
+        </div>
+      )}
 
       <div className="card-subtitle">
         Base <HelpLink topic="devices-parameters" />
@@ -305,9 +323,17 @@ export default function DevicesPage() {
   const { data, isLoading, error } = useDevices();
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Collapsed on every load, deliberately — not remembered. The default
+  // view IS the answer to his ask; a sticky expansion would quietly undo it.
+  const [showAll, setShowAll] = useState(false);
 
   const devices = data?.devices ?? [];
-  const current = devices.find((d) => d.id === selected) ?? devices[0] ?? null;
+  const hidden = devices.filter((d) => !d.in_use).length;
+  const shown = showAll ? devices : devices.filter((d) => d.in_use);
+  // A device selected while expanded stays selected if he collapses again;
+  // otherwise the first SHOWN device is the one being edited.
+  const current = devices.find((d) => d.id === selected)
+    ?? shown[0] ?? devices[0] ?? null;
 
   return (
     <div>
@@ -330,19 +356,43 @@ export default function DevicesPage() {
               {' '}<HelpLink topic="devices-live-or-stored" />
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {devices.map((d) => (
+              {shown.map((d) => (
                 <button key={d.id}
                         onClick={() => { setSelected(d.id); setCreating(false); }}
-                        className={current?.id === d.id && !creating ? 'active' : ''}>
+                        className={current?.id === d.id && !creating ? 'active' : ''}
+                        title={d.duplicate_of
+                          ? `Not in use — duplicate of ${d.duplicate_of}`
+                          : d.in_use ? undefined : 'Not in use — no scene can light this device'}>
+                  {!d.in_use && <span style={{ opacity: 0.7 }}>◦ </span>}
                   {d.name}
                   <span style={{ opacity: 0.6 }}> · {d.type}</span>
                   {d.timing_offset_ms !== 0 && (
                     <span style={{ opacity: 0.8 }}> · {d.timing_offset_ms > 0 ? '+' : ''}{d.timing_offset_ms}ms</span>
                   )}
+                  {d.duplicate_of && (
+                    <span style={{ opacity: 0.8 }}> · duplicate of {d.duplicate_of}</span>
+                  )}
                 </button>
               ))}
               <button onClick={() => setCreating(true)} className={creating ? 'active' : ''}>+ New</button>
             </div>
+            {hidden > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <button onClick={() => setShowAll(!showAll)}>
+                  {showAll
+                    ? `Hide ${hidden} not in use`
+                    : `Show all devices — ${hidden} more not in use`}
+                </button>
+                {' '}<HelpLink topic="devices-in-use" />
+                {showAll && (
+                  <div style={{ fontSize: 11, opacity: 0.75, marginTop: 4 }}>
+                    A device marked <strong>◦</strong> backs no virtual the room&apos;s scene
+                    engine can address, so no scene can currently light it. It is hidden,
+                    never deleted — {data.usage.rule}
+                  </div>
+                )}
+              </div>
+            )}
             {devices.length === 0 && !creating && (
               <div className="empty-note">No devices yet — press “+ New”.</div>
             )}

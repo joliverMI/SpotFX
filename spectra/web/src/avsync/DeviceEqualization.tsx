@@ -50,6 +50,10 @@ export default function DeviceEqualization({ canMeasure, measuring, onMeasure }:
   const [devices, setDevices] = useState<DeviceListing | null>(null);
   const [prop, setProp] = useState<DeviceProposal | null>(null);
   const [applying, setApplying] = useState<string | null>(null);
+  // Same default as /devices: only the devices the room actually uses, with
+  // one expansion for the rest. Same server-computed `in_use` flag, so the
+  // two surfaces cannot disagree about what "used" means.
+  const [showAll, setShowAll] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -84,6 +88,9 @@ export default function DeviceEqualization({ canMeasure, measuring, onMeasure }:
   };
 
   const measuredById = new Map((prop?.measured ?? []).map((m) => [m.device_id, m]));
+  const allDevices = devices?.devices ?? [];
+  const hidden = allDevices.filter((d) => !d.in_use).length;
+  const shownDevices = showAll ? allDevices : allDevices.filter((d) => d.in_use);
 
   return (
     <div className="card">
@@ -99,10 +106,10 @@ export default function DeviceEqualization({ canMeasure, measuring, onMeasure }:
       </div>
 
       {!devices && <div className="empty-note">Loading devices…</div>}
-      {devices && devices.devices.length === 0 && (
+      {devices && allDevices.length === 0 && (
         <div className="empty-note">No devices to measure.</div>
       )}
-      {devices && devices.devices.map((d) => {
+      {devices && shownDevices.map((d) => {
         const m = measuredById.get(d.id);
         return (
           <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
@@ -122,6 +129,15 @@ export default function DeviceEqualization({ canMeasure, measuring, onMeasure }:
           </div>
         );
       })}
+
+      {hidden > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <button onClick={() => setShowAll(!showAll)}>
+            {showAll ? `Hide ${hidden} not in use` : `Show all devices — ${hidden} more not in use`}
+          </button>
+          {' '}<HelpLink topic="devices-in-use" />
+        </div>
+      )}
 
       <div className="card-subtitle" style={{ marginTop: 14 }}>Proposed equalization</div>
       {!prop && <div className="empty-note">Loading…</div>}
