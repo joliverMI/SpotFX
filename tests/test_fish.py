@@ -4,8 +4,10 @@ Matrix host at his crystal-mapper's 72x37 shape, audio silenced).
 
 scripts/check_fish.py is the measured, printed version of the same runs —
 this file pins the properties his brief actually names. Mutual avoidance
-is deliberately absent from both (owner scope decision, 2026-08-25): fish
-swim through each other, so there is no separation invariant to assert.
+(`avoid_strength`, 2026-08-28) un-parks his own deferral and is pinned here
+too: the structural half (it can only ever steer, never move a fish or beat
+the turn cap) and the measured half (crossings actually drop at his values).
+scripts/check_fish_avoidance.py is its printed, tuned counterpart.
 """
 from __future__ import annotations
 
@@ -746,4 +748,263 @@ def test_the_seeded_scene_compiles_and_fires_on_the_real_pipeline(tmp_path):
                     ))
             assert lit > 0, "the seeded scene must actually render fish"
         await host.shutdown()
+    _run(main())
+
+
+# ── mutual avoidance: steering only, and it actually works ──────────────
+HIS_CROWD = dict(
+    HIS_MATRIX, jiggle=0.5, roam_scale=0.75, particle_count=10,
+)
+
+
+def _crowd_stats(eff):
+    """(overlap pairs this frame, live pair count) at one body length."""
+    n = eff.n
+    live = np.flatnonzero(eff.p_mode[:n] < 2)
+    if live.size < 2:
+        return 0, 0
+    x = eff.p_x[:n][live] * eff.sx
+    y = eff.p_y[:n][live] * eff.sy
+    d = np.hypot(x[None, :] - x[:, None], y[None, :] - y[:, None])
+    np.fill_diagonal(d, np.inf)
+    return (int(np.count_nonzero(d < eff._body_len_px())) // 2,
+            live.size * (live.size - 1) // 2)
+
+
+def test_avoidance_at_zero_is_the_untouched_effect(tmp_path):
+    """THE NEGATIVE CONTROL. avoid_strength 0 must render exactly what the
+    effect rendered before this feature existed — proven by running the
+    same seed with the steer's own weight zeroed (the only thing avoidance
+    can do is add that weighted term; at zero weight it is inert, consumes
+    no RNG and touches nothing else) and demanding bit-equal frames."""
+    async def main():
+        frames = {}
+        for tag, cfg, w in (
+            ("off", dict(HIS_CROWD, avoid_strength=0.0), FX.AVOID_W),
+            ("inert", dict(HIS_CROWD, avoid_strength=0.45), 0.0),
+            ("on", dict(HIS_CROWD, avoid_strength=0.45), FX.AVOID_W),
+        ):
+            orig = FX.AVOID_W
+            FX.AVOID_W = w
+            try:
+                room = await _room(tmp_path, f"av-{tag}", cfg, seed=7)
+                seq = []
+                for _ in range(600):
+                    room.step(1)
+                    seq.append(room.frame)
+                frames[tag] = np.array([f for f in seq if f is not None])
+                await _close(room)
+            finally:
+                FX.AVOID_W = orig
+        assert np.array_equal(frames["off"], frames["inert"]), (
+            "avoid_strength=0 must be byte-identical to the effect with no "
+            "avoidance term at all"
+        )
+        assert not np.array_equal(frames["off"], frames["on"]), (
+            "the byte-identity proof would be vacuous if avoidance never "
+            "changed anything"
+        )
+    _run(main())
+
+
+def test_avoidance_can_never_beat_the_turn_cap_or_move_a_fish(tmp_path):
+    """HIS TWO LAWS, under a forced crowd: never a reverse on the spot, and
+    a turn is always a clear circle. Avoidance is one more term in the
+    desired-heading sum, so both hold structurally — assert it anyway,
+    against the tightest crowd the effect allows, at full strength."""
+    async def main():
+        room = await _room(
+            tmp_path, "av-cap",
+            dict(HIS_CROWD, particle_count=FX.MAX_PARTICLE_COUNT,
+                 avoid_strength=1.0, roam_scale=0.3),
+            seed=3,
+        )
+        eff = room.effect
+        room.step(120)
+        worst_turn, worst_jump = 0.0, 0.0
+        prev_hd = eff.p_hd[: eff.n].copy()
+        prev_x = eff.p_x[: eff.n].copy() * eff.sx
+        prev_y = eff.p_y[: eff.n].copy() * eff.sy
+        prev_n = eff.n
+        for _ in range(1800):
+            room.step(1)
+            k = min(prev_n, eff.n)
+            if k:
+                dh = np.abs(
+                    (eff.p_hd[:k] - prev_hd[:k] + np.pi) % (2 * np.pi) - np.pi
+                )
+                ceil = eff.p_spd[:k] / eff.turn_radius_px * DT
+                worst_turn = max(worst_turn, float((dh - ceil).max()))
+                step = np.hypot(eff.p_x[:k] * eff.sx - prev_x[:k],
+                                eff.p_y[:k] * eff.sy - prev_y[:k])
+                allowed = eff.p_spd[:k] * DT
+                worst_jump = max(worst_jump, float((step - allowed).max()))
+            prev_hd = eff.p_hd[: eff.n].copy()
+            prev_x = eff.p_x[: eff.n].copy() * eff.sx
+            prev_y = eff.p_y[: eff.n].copy() * eff.sy
+            prev_n = eff.n
+        assert worst_turn <= 1e-4, (
+            "a crowded fish turned faster than its own turn radius allows: "
+            f"{np.degrees(worst_turn):.3f} deg past the cap in one frame"
+        )
+        assert worst_jump <= 1e-3, (
+            "avoidance steers headings only — it must never write a "
+            f"position: saw a {worst_jump:.4f}px jump past the speed budget"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_avoidance_reduces_crossings_at_his_values(tmp_path):
+    """The measured half, at the state he is watching (jiggle 0.5,
+    roam_scale 0.75). Time spent overlapping is the quantity the eye
+    reads; scripts/check_fish_avoidance.py prints the full sweep."""
+    async def main():
+        got = {}
+        for strength in (0.0, 0.45):
+            room = await _room(
+                tmp_path, f"av-x{strength}",
+                dict(HIS_CROWD, avoid_strength=strength), seed=5,
+            )
+            room.step(120)
+            hits = pairs = 0
+            for _ in range(1800):
+                room.step(1)
+                h, p = _crowd_stats(room.effect)
+                hits += h
+                pairs += p
+            got[strength] = hits / max(pairs, 1)
+            await _close(room)
+        assert got[0.45] < got[0.0] * 0.75, (
+            f"avoidance must visibly reduce crossings: overlap "
+            f"{got[0.0]:.1%} off -> {got[0.45]:.1%} on (negative control "
+            f"{got[0.0]:.1%})"
+        )
+    _run(main())
+
+
+def test_school_still_swims_in_unison_with_avoidance_on(tmp_path):
+    """The charge's school moves 'almost identically' and the lull's rush
+    is deliberately chaotic — both are authored, not crowds to fix.
+    Avoidance is off while a school is formed, so unison is untouched."""
+    async def main():
+        spread = {}
+        for strength in (0.0, 1.0):
+            room = await _room(
+                tmp_path, f"av-s{strength}",
+                dict(HIS_CROWD, avoid_strength=strength), seed=9,
+            )
+            room.ramp("charge", 2.5)
+            eff = room.effect
+            n = eff.n
+            live = eff.p_mode[:n] < 2
+            hd = eff.p_hd[:n][live]
+            mean = np.arctan2(np.sin(hd).mean(), np.cos(hd).mean())
+            spread[strength] = float(
+                np.abs((hd - mean + np.pi) % (2 * np.pi) - np.pi).max()
+            )
+            assert eff._school_on, "the charge must have formed a school"
+            await _close(room)
+        assert spread[1.0] <= spread[0.0] + 1e-5, (
+            "full-strength avoidance must not loosen the school's unison: "
+            f"spread {np.degrees(spread[0.0]):.2f} -> "
+            f"{np.degrees(spread[1.0]):.2f} deg"
+        )
+    _run(main())
+
+
+# ── the lunge: a strong beat is a real dash, not a blip ─────────────────
+def _beat_envelope(room, on):
+    """Drive the two signals draw() reads so a beat's spike reaches 1.0 the
+    way it does in a real room (headless audio is silenced, so an
+    undriven beat caps at draw()'s own 0.4 floor)."""
+    eff = room.effect
+    eff.impulse = float(on)
+    eff.slow = 0.30 * float(on)
+
+
+def _travel_after_beat(room, seconds=1.0, loud=True):
+    """Mean path length each fish covers, in body lengths."""
+    eff = room.effect
+    eff._beat_pending = True
+    env = 1.0
+    n = eff.n
+    px = eff.p_x[:n].copy() * eff.sx
+    py = eff.p_y[:n].copy() * eff.sy
+    dist = np.zeros(n)
+    for _ in range(int(seconds / DT)):
+        if loud:
+            _beat_envelope(room, env)
+            env *= 0.5 ** (DT / 0.25)
+        room.step(1)
+        k = min(n, eff.n)
+        nx = eff.p_x[:k] * eff.sx
+        ny = eff.p_y[:k] * eff.sy
+        dist[:k] += np.hypot(nx - px[:k], ny - py[:k])
+        px[:k], py[:k] = nx, ny
+    return float(dist[: eff.n].mean()) / eff._body_len_px()
+
+
+def test_a_strong_beat_covers_several_body_lengths(tmp_path):
+    """His diagnosis: the ripple correctly sized itself off real speed and
+    flap, but the beat's speed boost decayed within tens of ms, so a big
+    ring rode a tiny travel. The lunge holds the boost, so a strong beat is
+    a real dash. Measured in body lengths, against the pre-lunge control.
+    scripts/check_fish_lunge.py prints the full sweep."""
+    async def main():
+        got = {}
+        for tag, gain in (("off", 0.0), ("on", FX.LUNGE_GAIN)):
+            orig = FX.LUNGE_GAIN
+            FX.LUNGE_GAIN = gain
+            try:
+                room = await _room(tmp_path, f"lunge-{tag}",
+                                   dict(HIS_CROWD, particle_count=4), seed=5)
+                room.step(180)
+                got[tag] = _travel_after_beat(room)
+                await _close(room)
+            finally:
+                FX.LUNGE_GAIN = orig
+        assert got["on"] >= got["off"] * 1.5, (
+            "a strong beat must cover a real dash: "
+            f"{got['off']:.2f} -> {got['on']:.2f} body lengths in 1s "
+            f"(negative control {got['off']:.2f})"
+        )
+        assert got["on"] >= 3.0, (
+            f"a strong beat should cover several body lengths, saw "
+            f"{got['on']:.2f}"
+        )
+    _run(main())
+
+
+def test_quiet_swimming_is_untouched_by_the_lunge(tmp_path):
+    """The envelope arms only above LUNGE_SPIKE_MIN, so at zero impulse
+    nothing is armed, nothing decays, and cruise is bit-for-bit what it
+    always was."""
+    async def main():
+        frames, speeds = {}, {}
+        for tag, gain in (("off", 0.0), ("on", FX.LUNGE_GAIN)):
+            orig = FX.LUNGE_GAIN
+            FX.LUNGE_GAIN = gain
+            try:
+                room = await _room(tmp_path, f"calm-{tag}",
+                                   dict(HIS_CROWD, particle_count=4), seed=5)
+                seq = []
+                for _ in range(900):
+                    room.step(1)
+                    seq.append(room.frame)
+                eff = room.effect
+                assert not np.any(eff.p_lun[: eff.n]), (
+                    "no beat, no impulse — the lunge must never arm"
+                )
+                speeds[tag] = float(eff.p_spd[: eff.n].mean())
+                frames[tag] = np.array([f for f in seq if f is not None])
+                await _close(room)
+            finally:
+                FX.LUNGE_GAIN = orig
+        assert np.array_equal(frames["off"], frames["on"]), (
+            "quiet swimming must be byte-identical with and without the lunge"
+        )
+        assert abs(speeds["on"] - speeds["off"]) < 1e-9, (
+            f"cruise moved at zero impulse: {speeds['off']} -> {speeds['on']}"
+        )
     _run(main())

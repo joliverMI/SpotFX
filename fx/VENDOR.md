@@ -474,9 +474,27 @@ variables named `ledfx` (the core object handle) are untouched.
     rate-limited turn built from a real turn RADIUS, a flapping spine
     rendered as a chain of splats along the heading, and an expanding
     ripple wake composited straight to the output instead of through the
-    trail buffer. Orbits itself is UNTOUCHED. Deliberately NOT modelled:
-    mutual avoidance (owner scope decision the same day — fish swim through
-    each other).
+    trail buffer. Orbits itself is UNTOUCHED.
+
+    Mutual avoidance (`avoid_strength`, added 2026-08-28, PR
+    fm/fish-collision-avoidance — his own deferral un-parked: "add the
+    collision") is STEERING ONLY, by construction: it contributes one more
+    weighted term to the desired-heading vector sum and is then bounded by
+    the same turn-rate clamp as every other steer, so neither fish law can
+    be broken — no reverse on the spot, no turn tighter than the radius, and
+    never a written position. Only neighbours inside the forward arc count
+    and the answer is a lateral SWERVE, not a point-away vector (pointing
+    away from a fish dead ahead asks for a 180 the clamp then spends a whole
+    arc serving, while the crossing happens anyway — measured: the
+    point-away form RAISED crossings and clamp saturation). The separation
+    radius is DERIVED from body length (`AVOID_SEP_BODIES`), never a second
+    knob. Off entirely while a school is formed, and rushing fish neither
+    steer nor count as neighbours: the charge's school moves "almost
+    identically" and the lull's rush is deliberately chaotic — authored
+    choreography, not crowds to fix. `avoid_strength=0` is byte-identical to
+    the pre-feature effect (asserted, not claimed). Default 0.45, tuned at
+    HIS live state (jiggle 0.5, roam_scale 0.75) —
+    `scripts/check_fish_avoidance.py` prints the sweep.
 
     Two one-line supporting edits, both purely additive: `effects/radial.py`
     adds `"fish"` to the src whitelist its `_adopt_handoff` gate uses (no
@@ -492,8 +510,23 @@ variables named `ledfx` (the core object handle) are untouched.
     — the charge's school and the lull's rush — and never survives them.
     `CAP` is sized so both plus a full drop explosion fit at once
     (`tests/test_fish.py::test_buffer_headroom_holds_school_rush_and_explosion_at_once`).
+    THE LUNGE (`LUNGE_*`, 2026-08-28, same PR — his own live diagnosis):
+    the ripple correctly scales off real speed and flap, but the beat speed
+    boost decayed within tens of milliseconds, so a big ring rode a tiny
+    travel. A spike at or above `LUNGE_SPIKE_MIN` now arms a per-fish
+    envelope that HOLDS the boost near full for `LUNGE_HOLD_S` (0.6 s)
+    before releasing on `LUNGE_FALL_S`. Motion side ONLY — the wake is
+    untouched and self-heals once the travel widens. Magnitude keeps riding
+    `speed_jump` x the existing spike signal, so the menu gains no knob, and
+    below the threshold nothing arms and nothing decays: quiet swimming is
+    byte-identical (asserted). Measured, 4 seeds, distance covered in the
+    1 s after a strong beat under a real music envelope: 2.98 -> 5.55 body
+    lengths (+86%); the hold is what does it (hold 0 s -> 4.82).
+    `scripts/check_fish_lunge.py` prints the sweep.
+
     Evidence: `scripts/check_fish.py` (eight measured sections on the real
-    pipeline), `tests/test_fish.py`.
+    pipeline), `scripts/check_fish_avoidance.py`,
+    `scripts/check_fish_lunge.py`, `tests/test_fish.py`.
 
 22. `effects/radial.py`: a QUIET BASE ROTATION FLOOR (NEW PARAM +
     BEHAVIOUR, PR fm/radial-base-rotation). His ask, verbatim: "i like the
