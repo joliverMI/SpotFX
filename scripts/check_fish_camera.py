@@ -52,14 +52,26 @@ from fx.effects import fish as FX  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 
-# The PRE-CAMERA BASELINE: the last commit before `camera_follow` existed
-# ("Fish: mutual collision avoidance, and a beat that actually lunges").
-# Pinned deliberately. A moving ref like `master` named the true predecessor
-# only while this lived on a feature branch; once the camera merged, `master`
-# IS the camera code and its instance runs at its own schema default
-# camera_follow=0.8 against the knob-0 run, so section 1 false-alarms on
-# every run. Override with --baseline <ref> only to reproduce that.
-BASELINE_REF = "c1f32a0143fc1f127528b81c37c1baec2ebf02c3"
+# THE PINNED PREDECESSOR — moved forward 2026-08-28 by
+# fm/fish-ripples-charge-lull-rework, and here is why it had to move.
+#
+# It used to be the PRE-CAMERA commit c1f32a0, and section 1 asserted that
+# `camera_follow=0` rendered that commit's frames bit for bit. That claim
+# needed a reference differing from this file ONLY by the camera. The wake
+# rework changes the render at knob zero (the ripples are a different
+# mechanism now) and the charge/lull rework changes those phases, so no such
+# reference exists any more: left alone, the instrument would have
+# false-alarmed on every run the moment this merged.
+#
+# So the pin moves to THIS PR's own merge-base, and section 1's claim is
+# restated to the two things that ARE still provable and can still fail:
+#   1a. the window at rest never leaves the origin — within-branch, exact,
+#       across the whole arc (that IS the identity claim);
+#   1b. ORDINARY SWIMMING with the wake off is byte-identical to the
+#       merge-base — so this PR provably changed nothing about the fish's
+#       kinematics or its body render, only the wake and the two phases.
+# Both keep the same negative controls. Override with --baseline <ref>.
+BASELINE_REF = "801ad9395b618af4681c94c812ea1b47d69b3921"
 DT = 1.0 / 60.0
 ROWS, COLS = 37, 72
 
@@ -178,32 +190,83 @@ SCRIPT = [
 ]
 
 
+SWIM_ONLY = [("swim", 6.0, None)]
+
+
 def section_one(ref=None):
+    """1a: the window at rest never leaves the origin (the identity claim).
+    1b: ordinary swimming with the wake OFF is byte-identical to the
+        merge-base — so this PR touched the wake and the two phases, and
+        nothing about the fish's own kinematics or body render.
+    """
     ref = ref or BASELINE_REF
-    print(f"\n1  BYTE-IDENTITY  camera_follow=0 vs baseline {ref[:12]}")
+    print("\n1a WINDOW AT REST — camera_follow=0 never leaves the origin")
+    residues = []
+    for seed in (3, 5, 11, 17):
+        rec = camera_origin_trace(seed)
+        residues.append(rec)
+        print(f"   seed {seed:>2}: {rec['frames']:>4} frames  "
+              f"max |cam| = {rec['max']:.3g}  "
+              f"max |cam_v| = {rec['maxv']:.3g}")
+        if rec["max"] != 0.0 or rec["maxv"] != 0.0:
+            raise SystemExit("the window moved at camera_follow=0")
+    # the proof must not be vacuous
+    on = camera_origin_trace(5, cf=0.8)
+    print(f"   control: camera_follow=0.8 -> max |cam| = {on['max']:.2f}px "
+          f"(so the trace can see movement)")
+    if on["max"] <= 0.0:
+        raise SystemExit("the origin trace is blind")
+
+    print(f"\n1b SWIMMING, WAKE OFF  vs merge-base {ref[:12]}")
     master = load_master_effect(ref=ref)
     if master is None:
         return
+    off = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
     for seed in (3, 5, 11, 17):
-        cfg = dict(HIS, particle_count=6)
-        a = asyncio.run(frames_of(
-            f"m{seed}", cfg, seed, master, SCRIPT))
-        b = asyncio.run(frames_of(
-            f"z{seed}", dict(cfg, camera_follow=0.0), seed, "fish", SCRIPT))
+        a = asyncio.run(frames_of(f"m{seed}", off, seed, master, SWIM_ONLY))
+        b = asyncio.run(frames_of(f"z{seed}", off, seed, "fish", SWIM_ONLY))
         same = a.shape == b.shape and np.array_equal(a, b)
         print(f"   seed {seed:>2}: {a.shape[0]:>4} frames  "
               f"{'IDENTICAL' if same else 'DIFFER'}")
         if not same:
-            raise SystemExit("camera_follow=0 is NOT master")
-    # the proof must not be vacuous
-    on = asyncio.run(frames_of(
-        "v-on", dict(HIS, particle_count=6, camera_follow=0.8), 5, "fish",
-        SCRIPT))
-    off = asyncio.run(frames_of(
-        "v-off", dict(HIS, particle_count=6, camera_follow=0.0), 5, "fish",
-        SCRIPT))
-    print(f"   control: camera_follow=0.8 differs from 0.0 -> "
-          f"{not np.array_equal(on, off)}")
+            raise SystemExit(
+                "this PR changed ordinary swimming — it must not"
+            )
+    # ... and the wake IS what changed, or the comparison above is vacuous
+    on_cfg = dict(HIS, particle_count=6, camera_follow=0.0)
+    a = asyncio.run(frames_of("m-wake", on_cfg, 5, master, SWIM_ONLY))
+    b = asyncio.run(frames_of("z-wake", on_cfg, 5, "fish", SWIM_ONLY))
+    print(f"   control: with the wake ON, the same run differs from the "
+          f"merge-base -> {not np.array_equal(a, b)}")
+    if np.array_equal(a, b):
+        raise SystemExit("the wake rework rendered nothing new")
+
+
+def camera_origin_trace(seed, cf=0.0):
+    """Run the whole arc and report the largest window origin/velocity seen."""
+    async def main():
+        r = await room(f"origin-{cf}-{seed}",
+                       dict(HIS, particle_count=6, camera_follow=cf),
+                       seed=seed)
+        rec = {"max": 0.0, "maxv": 0.0, "frames": 0}
+
+        def grab(_e=None):
+            rec["max"] = max(
+                rec["max"], abs(r.effect.cam_px), abs(r.effect.cam_py))
+            rec["maxv"] = max(
+                rec["maxv"], abs(r.effect.cam_vx), abs(r.effect.cam_vy))
+            rec["frames"] += 1
+
+        for kind, arg, beats in SCRIPT:
+            if kind == "swim":
+                for _ in range(int(arg / DT)):
+                    r.step(1)
+                    grab()
+            else:
+                r.phase(kind, arg, beats_every=beats, watch=grab)
+        await close(r)
+        return rec
+    return asyncio.run(main())
 
 
 # ── 2/3/4. what the window actually does ────────────────────────────────
@@ -286,6 +349,11 @@ def observe(cf, seed, phase, seconds, beats=None, count=3, settle=4.0,
 
 
 def section_two():
+    print("\n   NOTE: under his 2026-08-28 lull clock every fish is gone by "
+          "the lull's\n   first third, so a lull has no school to follow and "
+          "its rows read zero.\n   That is the feature, not a dead "
+          "instrument — the window's lull job is\n   now to ease home "
+          "(scripts/check_fish.py section 6 measures that).")
     print("\n2  WHAT MOVES  (px over the phase; his state, seed 5, 3 fish)")
     for phase, secs, beats in (("charge", 4.0, 12), ("lull", 3.5, None)):
         print(f"\n   {phase.upper()}  ({secs:.1f}s)")

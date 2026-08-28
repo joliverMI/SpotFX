@@ -15,7 +15,8 @@ _LOGGER = logging.getLogger(__name__)
 # ── buffer capacity ─────────────────────────────────────────────────────────
 # Ordinary swimming is ALWAYS bounded by the `particle_count` parameter. The
 # density cap is bypassed at exactly two scripted moments — the charge's
-# school (`school_count`) and the lull's rush (`rush_count`) — via the
+# school (`school_count`) and the DROP's rush (`rush_count`, which was the
+# lull's until his 2026-08-28 addendum moved it) — via the
 # `p_nocap` tag, the same shape blackhole's blob rush / fireworks' payoff
 # already use. CAP is sized so those two moments plus a full drop explosion
 # can never starve the ordinary render (see MAX_* below and
@@ -34,8 +35,9 @@ CAP = (
 SUBSTEPS = 2        # path sub-samples per frame (gap-free smear)
 DT_MAX = 0.1
 KERNEL_R = 8        # max body-segment radius the offset table supports
-RIPPLE_KERNEL_R = 16  # max ripple radius the offset table supports
-RIPPLE_CAP = 96     # live ripple ring buffer
+SPLAT_KERNEL_R = 16  # the shared splat offset table's own span, in px:
+                    # every soft dot (a body segment, a wake deposit) is
+                    # stamped from it and filtered by its own radius
 
 LEAVE_FADE_S = 1.2   # fade-out horizon for departing fish
 HANDOFF_ENTER_S = 0.65
@@ -126,13 +128,63 @@ AVOID_SEP_BODIES = 1.6  # separation radius as a multiple of BODY LENGTH — the
                         # construction, and a blob_size/body_aspect edit can
                         # never leave the avoidance mis-scaled.
 SCHOOL_W = 14.0         # alignment dominates while a school is formed
-CENTER_W = 10.0         # the lull's lone fish holding centre
+# HIS ASK (2026-08-28): "in the charge, I don't want the fish to clump so
+# much and I want them evenly distributed across the screen" — while still
+# arriving together. Two things do it, and neither touches the shared
+# heading that IS the unison:
+#   * they SPAWN on an even lateral spread instead of a uniform-random one
+#     (see _spawn_school: a random spread has clusters and gaps by
+#     construction, and equal speeds on a shared heading preserve whatever
+#     spread they started with, so a clumpy start stays clumpy);
+#   * and a SEPARATION steer keeps them apart once formed. This is not the
+#     forward-arc dodge `avoid_strength` runs (still off in a school): every
+#     close neighbour pushes, whichever side it is on, so a converging pair
+#     opens out whether it is head-on or side by side. Its weight sits well
+#     under SCHOOL_W, so the shared heading still dominates and the school
+#     still arrives together — the spacing only bends it.
+SCHOOL_SPACING_W = 6.5
+RUSH_SWIRL_W = 9.0      # the drop's rush swirling around the centre of
+                        # view: a TANGENTIAL steering weight, bounded by
+                        # the same turn-rate clamp as everything else
+SCHOOL_SEP_BODIES = 3.0  # target spacing, in BODY LENGTHS — derived from the
+                         # fish's own size for the same reason
+                         # AVOID_SEP_BODIES is, never a second knob
+# Low-discrepancy spawn offsets: any PREFIX of these sequences is already
+# evenly spread, which matters because a school fills progressively (see
+# _charge_step) — an in-order even spread would fill one side of the panel
+# first and only look even once the last fish arrived.
+SCHOOL_PHI_LAT = 0.6180339887   # golden ratio, lateral
+SCHOOL_PHI_DEPTH = 0.7548776662  # plastic number, depth
 
-# ── ripples ─────────────────────────────────────────────────────────────────
-# Ripples are drawn STRAIGHT TO THE OUTPUT, never into the persistent trail
-# buffer — a max-blended ring would smear into a haze and stop reading as a
-# ripple at all. Their only fade is their own life curve, which is what makes
-# this wake "clearly different" from Orbits' comet smear.
+# ── the wake ──────────────────────────────────────────────
+# HIS ASK (2026-08-28): "the ripples ... more like the trails in Orbits, but
+# ... expand and fade instead of just fading. I don't like the circles that
+# form because the circle line is kind of messy."
+#
+# So there is no ripple any more — no radius, no ring, no outline to read as
+# messy. The wake is ORBITS' OWN MECHANISM: a persistent accumulation buffer
+# decayed exponentially every frame (`buf *= 0.5 ** (dt / half_life)`, the
+# same shape `self.trail` already uses for the bodies), with ONE addition —
+# the buffer also DIFFUSES outward every frame, so what was deposited opens
+# out as it dims. Deposits are soft FILLED splats laid at the tail every
+# frame, never stamped shapes.
+#
+# The energy still scales off REAL MOTION (swim speed x the tail's own
+# throw), never a bare beat value, so the lunge's longer travel lays down a
+# longer smear for free.
+WAKE_HALF_LIFE_X = 0.42   # wake half-life as a fraction of `ripple_life`,
+                          # so the knob keeps meaning "seconds to fade"
+WAKE_EXPAND_K = 2.6       # diffusion blend per second per unit of
+                          # `ripple_spread` — THE expand half of his ask
+WAKE_EXPAND_MAX = 0.85    # ... and the most of one frame it may ever be, so
+                          # a long frame can never flatten the buffer in one
+                          # step (the diffusion kernel is a 3-tap average;
+                          # blending it in fully is still a real blur, but
+                          # more than that is not defined)
+WAKE_DEPOSIT_HZ = 26.0    # deposits are per-frame and scaled by dt x this,
+                          # so the wake is frame-rate independent and its
+                          # steady state is set here rather than emerging
+                          # from whatever frame rate the host happens to run
 RIPPLE_BASE = 0.08      # brightness floor: "the trail is always subtle"
 RIPPLE_SPEED_GAIN = 0.55  # ... "but stronger on faster" — measured against
                         # the fish's OWN cruise, so "faster" means this fish
@@ -140,12 +192,36 @@ RIPPLE_SPEED_GAIN = 0.55  # ... "but stronger on faster" — measured against
                         # differently-tuned scene
 RIPPLE_SPEED_FLOOR = 0.5  # cruise sits this far up the speed ramp …
 RIPPLE_SPEED_SPAN = 1.5   # … which tops out this far above it
-RIPPLE_R0_BODY = 0.30   # initial radius from the body's own length …
-RIPPLE_R0_FLAP = 0.60   # … plus this much of the tail's lateral throw
-RIPPLE_MAX_BODY = 2.2   # … and a ripple never opens wider than this many
-                        # body lengths ("try to match the size of the motion
-                        # to the ripple" — the wake is fish-sized, not
-                        # panel-sized)
+WAKE_FLAP_FLOOR = 0.55  # the deposit pulses with the tail: this much always,
+WAKE_FLAP_GAIN = 0.45   # ... plus this much on the throw's own |sin|. The
+                        # flap is what used to set the ripple CADENCE; it now
+                        # sets the deposit's own texture instead, which keeps
+                        # the wake tied to the body's real motion without
+                        # anything being stamped.
+WAKE_R0_BODY = 0.30     # splat radius from the body's own length …
+WAKE_R0_FLAP = 0.60     # … plus this much of the tail's lateral throw
+WAKE_R_MAX_BODY = 1.1   # … and a deposit is never wider than this many body
+                        # lengths ("match the size of the motion to the
+                        # ripple" — the wake is fish-sized, not panel-sized;
+                        # the DIFFUSION is what opens it out past this, not
+                        # the deposit)
+
+# COLOUR — the rule, stated (his ask: "a different color from the fish if
+# there is a gradient to work with, or if it's a solid/uniform color, at
+# least substantially less bright than the fish").
+#
+# THE DECISION RULE, read off the RESOLVED gradient curve and not the config
+# string: sample the built curve end to end; if every channel's spread
+# across those samples is within WAKE_SOLID_TOL, the palette is SOLID.
+#   * SOLID  → the wake wears the fish's own colour at WAKE_SOLID_DIM of its
+#              amplitude. Distinctness is a BRIGHTNESS ratio.
+#   * GRADIENT → the wake samples the gradient WAKE_GRAD_OFFSET further along
+#              than the fish that made it — deterministic, and a half turn is
+#              the furthest apart two points on a wrapped gradient can be.
+#              Distinctness is a COLOUR distance.
+WAKE_SOLID_TOL = 8.0 / 255.0
+WAKE_SOLID_DIM = 0.35
+WAKE_GRAD_OFFSET = 0.5
 
 # ── the camera window ───────────────────────────────────────────────────────
 # The panel is a WINDOW onto a larger body of water, not the whole of it.
@@ -190,12 +266,15 @@ CAM_LEASH = 0.55        # ... and however far it lags, catching up becomes
 CAM_REST_EPS = 1e-3     # px: below this, and not following, the camera IS
                         # zero — the identity mapping is restored exactly,
                         # never left sitting on a residue.
-RIPPLE_CULL_PAD = RIPPLE_KERNEL_R + 6   # px past the panel edge beyond
-                        # which a ripple cannot light a single pixel, so a
-                        # ripple the window has left far behind is DROPPED,
-                        # never wrapped. Only applied while the world window
-                        # is on (`camera_follow > 0`): at 0 the ripple ring
-                        # buffer must keep the exact contents master's did.
+WAKE_SHIFT_EPS = 1e-6   # The wake buffer is SCREEN space but WORLD
+                        # anchored: every frame it is rolled by exactly the
+                        # displacement the world->screen mapping moved (the
+                        # current's own flow, minus the window's own step),
+                        # with the sub-pixel remainder carried across frames.
+                        # Content rolled off an edge is DROPPED, never
+                        # wrapped — that is the cull, and it needs no pad,
+                        # because a pixel outside the buffer cannot light
+                        # anything. Below this the shift is not worth a roll.
 
 # ── charge / lull / drop choreography ───────────────────────────────────────
 # SpotFX writes `phase` (instant) and ramps `phase_progress` 0->1 over the
@@ -208,10 +287,33 @@ CHARGE_TURN_MIN = (np.pi / 3.0, 2.2)  # turn magnitude range, radians
 # true wall-clock duration, not exactly half. That is the closest an effect
 # can get to his "by half way through the lull" without ever being told the
 # duration.
-LULL_CENTER_PROGRESS = 0.5
-LULL_CENTER_PULL = 9.0   # 1/s positional pull toward centre at p >= 0.5
-LULL_DISPERSE_AT = 0.42  # every non-lone fish has left by this progress
-LULL_RUSH_AT = 0.60      # the rush enters here
+# HIS LULL CLOCK (2026-08-28), in THIRDS of the lull's own duration — and
+# the duration is the dynamic ramp gap SpotFX drives `phase_progress` over,
+# never a wall-clock constant:
+#   0 -> 1/3    every fish disperses and is GONE by the end of it. None
+#               survive: no lone fish, no exceptions, and a hard backstop
+#               retires anything the paced dispersal has not already sent
+#               away.
+#   1/3 -> 2/3  ripples only. The wake buffer keeps expanding and fading
+#               with no fish anywhere.
+#   2/3 -> end  fully dark, until the drop.
+# SUPERSEDED, on his own instruction, by the above: the lull used to
+# disperse down to ONE fish held at the centre of view by half way through
+# (LULL_CENTER_PROGRESS / LULL_CENTER_PULL / CENTER_W / `p_lone`), and its
+# RUSH used to arrive at 60% of the lull. The lone hold is gone outright.
+# The rush is NOT gone — it MOVED INTO THE DROP (see _drop_step), which is
+# where he asked for it: "I want the rush to be part of the drop."
+LULL_GONE_AT = 1.0 / 3.0
+LULL_DARK_AT = 2.0 / 3.0
+LULL_DEPART_SPAN = 0.55  # departures are scheduled across this fraction of
+                         # the first third, so the LAST one's own fade still
+                         # finishes inside it — "gone by 1/3" is about being
+                         # invisible, not about having been told to leave
+LULL_DEPART_FADE_S = 0.5  # ... and that fade is short for the same reason
+LULL_DARK_FROM = 0.5     # the wake is ramped to nothing between here and
+                         # LULL_DARK_AT, so the last third is genuinely dark
+                         # rather than "decayed enough": a half-life alone
+                         # can never reach zero, and his ask is DARK
 LULL_FALL_S = 3.0        # wall-clock fallback when no lull ramp arrives
 DROP_FLY_S = 0.4
 DROP_SETTLE_S = 4.2      # drop boost decay / phase auto-reset horizon
@@ -221,9 +323,9 @@ DROP_EJECTA_SPEED = (1.6, 2.9)  # ejecta speed, multiples of cruise
 # Every per-fish SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
 _SOA_NAMES = (
-    "p_mode", "p_nocap", "p_lone", "p_disp", "p_slot", "p_slot_frac",
+    "p_mode", "p_nocap", "p_disp", "p_slot", "p_slot_frac",
     "p_x", "p_y", "p_x0", "p_y0", "p_hd", "p_spd", "p_acc",
-    "p_flap", "p_beat", "p_jog", "p_ro", "p_lun", "p_lun_t", "p_var",
+    "p_flap", "p_jog", "p_ro", "p_lun", "p_lun_t", "p_var",
     "p_enter", "p_erate", "p_leave", "p_lfade",
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_grad_from", "p_scatter", "p_bright",
@@ -240,8 +342,11 @@ class Fish2d(Twod, GradientEffect):
 
     Each particle is a thin oval swimming under its own heading and speed:
     it POINTS the way it is going, its spine flaps (harder under
-    acceleration, subtler when slowing), and it leaves an expanding ripple
-    wake instead of a comet smear. Turning is rate-limited by a real turn
+    acceleration, subtler when slowing), and it leaves a wake: Orbits' own
+    decaying accumulation buffer, which also EXPANDS every frame, so the
+    smear opens out as it dims. Nothing is stamped as a shape — see the
+    wake block at the top of this module, including the stated rule for
+    what colour the wake takes against the fish's own. Turning is rate-limited by a real turn
     RADIUS, so a fish can never reverse on the spot — every about-face is an
     arc. Physics runs in Orbits' normalized space (same x_offset/y_offset/
     radius_scale projection) but headings and body geometry are SCREEN-space,
@@ -253,6 +358,11 @@ class Fish2d(Twod, GradientEffect):
     — that mapping is the identity, so the effect is exactly what it was
     before the window existed. See the camera-window block at the top of
     this module for what it replaces and why.
+
+    The lull is HIS CLOCK (2026-08-28): every fish gone by a third of it,
+    ripples only to two thirds, dark after that until the drop — and the
+    drop is what brings the room back, with the rush that used to belong to
+    the lull. See the LULL_* block and `_drop_step`.
 
     Mutual avoidance (`avoid_strength`, added 2026-08-28) is STEERING ONLY:
     it contributes one more term to the desired-heading vector sum below and
@@ -422,22 +532,22 @@ class Fish2d(Twod, GradientEffect):
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
             vol.Optional(
                 "ripple_amount",
-                description="Ripple wake strength",
+                description="Wake strength: how much smear a fish lays down",
                 default=0.35,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             vol.Optional(
                 "ripple_spread",
-                description="How fast a ripple opens out, as a multiple of swim speed",
+                description="How fast the wake opens outward as it fades",
                 default=0.45,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
             vol.Optional(
                 "ripple_life",
-                description="Seconds a ripple takes to fade",
+                description="Seconds the wake takes to fade",
                 default=0.9,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=4.0)),
             vol.Optional(
                 "ripple_width",
-                description="Ripple ring thickness in pixels",
+                description="Wake thickness: the size of each deposit, relative to the fish",
                 default=1.3,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=4.0)),
             vol.Optional(
@@ -472,17 +582,17 @@ class Fish2d(Twod, GradientEffect):
             ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
             vol.Optional(
                 "rush_count",
-                description="Fish in the lull's rush (ignores the population cap)",
+                description="Fish in the drop's rush (ignores the population cap)",
                 default=20,
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RUSH)),
             vol.Optional(
                 "rush_time",
-                description="Seconds the lull's rush takes to sweep past",
+                description="Seconds the drop's rush sweeps inward before it starts to swirl",
                 default=1.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=3.0)),
             vol.Optional(
                 "rush_chaos",
-                description="How disorderly the rush is: 0 = a clean shoal, 1 = scattered",
+                description="How disorderly the drop's rush is: 0 = a clean ring, 1 = scattered",
                 default=0.5,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             # ── SpotFX-driven choreography ───────────────────────────────
@@ -505,7 +615,6 @@ class Fish2d(Twod, GradientEffect):
         # patches — do_once re-runs on every config change.
         self.p_mode = np.zeros(CAP, dtype=np.int8)   # 0 swim 1 enter 2 leave 3 rush
         self.p_nocap = np.zeros(CAP, dtype=np.int8)  # spawned past the cap
-        self.p_lone = np.zeros(CAP, dtype=np.int8)   # the lull's lone fish
         # the lull's dispersal RANK (NaN = not scheduled). A rank, not an
         # index: _compact() reshuffles slots whenever a fish retires, so a
         # queue of indices silently disperses the wrong fish (or nobody).
@@ -520,7 +629,6 @@ class Fish2d(Twod, GradientEffect):
         self.p_spd = np.zeros(CAP, dtype=np.float32)  # px/s
         self.p_acc = np.zeros(CAP, dtype=np.float32)  # smoothed px/s^2
         self.p_flap = np.zeros(CAP, dtype=np.float32)
-        self.p_beat = np.zeros(CAP, dtype=np.float32)  # last tail-beat index
         self.p_jog = np.zeros(CAP, dtype=np.float32)   # turn kick, rad/s
         self.p_ro = np.zeros(CAP, dtype=np.float32)    # speed kick, fraction
         self.p_lun = np.zeros(CAP, dtype=np.float32)   # lunge boost, fraction
@@ -545,20 +653,12 @@ class Fish2d(Twod, GradientEffect):
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
 
-        # ripple ring buffer (own lifecycle, own compaction)
-        self.r_x = np.zeros(RIPPLE_CAP, dtype=np.float32)   # pixel space
-        self.r_y = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self.r_r = np.zeros(RIPPLE_CAP, dtype=np.float32)   # radius, px
-        self.r_gr = np.zeros(RIPPLE_CAP, dtype=np.float32)  # growth, px/s
-        self.r_age = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self.r_life = np.ones(RIPPLE_CAP, dtype=np.float32)
-        self.r_amp = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self.r_grad = np.zeros(RIPPLE_CAP, dtype=np.float32)
-        self._ripple_soa = (
-            self.r_x, self.r_y, self.r_r, self.r_gr,
-            self.r_age, self.r_life, self.r_amp, self.r_grad,
-        )
-        self.rn = 0
+        # THE WAKE: one persistent accumulation buffer, allocated with the
+        # body trail in do_once (it is panel-shaped, and the panel is not
+        # known here yet).
+        self.wake = None
+        self._wake_ox = 0.0     # sub-pixel world-anchoring remainder
+        self._wake_oy = 0.0
 
         self._booted = False
         self._handoff_pending = True
@@ -578,6 +678,7 @@ class Fish2d(Twod, GradientEffect):
         # charge/lull state that must survive a config patch
         self._school_hd = 0.0
         self._school_on = False
+        self._rush_swirl = 0.0   # the drop's swirl, 0..1
         self._school_turn_t = 0.0
         # the water's own current, world px/s: whatever fraction of the
         # school's travel the clamp still removes from the fish is expressed
@@ -593,7 +694,7 @@ class Fish2d(Twod, GradientEffect):
         self._cam_px_prev = 0.0
         self._cam_py_prev = 0.0
 
-        span = np.arange(-RIPPLE_KERNEL_R, RIPPLE_KERNEL_R + 1)
+        span = np.arange(-SPLAT_KERNEL_R, SPLAT_KERNEL_R + 1)
         kdx, kdy = np.meshgrid(span, span)
         kdist = np.sqrt(kdx**2 + kdy**2).ravel()
         self.k_dx = kdx.ravel().astype(np.int32)
@@ -672,7 +773,6 @@ class Fish2d(Twod, GradientEffect):
             self._lull_state = None
             self._charge_n0 = 1
             self._speed_scale = 1.0
-            self._center_pull = 0.0
             self._phase_done_t = None
         else:
             self._phase_pending = (
@@ -710,6 +810,14 @@ class Fish2d(Twod, GradientEffect):
             self.trail = np.zeros(
                 (self.r_height, self.r_width, 3), dtype=np.float32
             )
+        if self.wake is None or self.wake.shape[:2] != (
+            self.r_height,
+            self.r_width,
+        ):
+            self.wake = np.zeros(
+                (self.r_height, self.r_width, 3), dtype=np.float32
+            )
+            self._wake_ox = self._wake_oy = 0.0
 
     # ── derived geometry ────────────────────────────────────────────────
     @property
@@ -778,7 +886,6 @@ class Fish2d(Twod, GradientEffect):
         rng = self._rng
         self.p_mode[s] = mode
         self.p_nocap[s] = 1 if nocap else 0
-        self.p_lone[s] = 0
         self.p_disp[s] = np.nan
         self.p_enter[s] = 0.0 if mode == 1 else 1.0
         self.p_erate[s] = 1.0
@@ -792,7 +899,6 @@ class Fish2d(Twod, GradientEffect):
         # the one it arrived with
         self.p_grad[s] = rng.random(count, dtype=np.float32)
         self.p_flap[s] = rng.uniform(0.0, 2 * np.pi, count)
-        self.p_beat[s] = np.floor(self.p_flap[s] / np.pi)
         self.p_jog[s] = 0.0
         self.p_ro[s] = 0.0
         self.p_lun[s] = 0.0
@@ -890,7 +996,6 @@ class Fish2d(Twod, GradientEffect):
         self.p_mode[idx] = 2
         self.p_leave[idx] = 0.0
         self.p_nocap[idx] = 0
-        self.p_lone[idx] = 0
         if fade is not None:
             self.p_lfade[idx] = fade
 
@@ -1121,10 +1226,18 @@ class Fish2d(Twod, GradientEffect):
             np.sin(self.p_hd[live]).mean(), np.cos(self.p_hd[live]).mean()
         ))
 
-    def _spawn_school(self, count):
+    def _spawn_school(self, count, slot0=0):
         """The charge's school: fish swim in from behind the shared heading
         so they arrive already travelling with the shoal. Tagged `p_nocap`
-        — the ONE charge-scoped bypass of the population cap."""
+        — the ONE charge-scoped bypass of the population cap.
+
+        Placement is an EVEN spread, not a uniform-random one (his ask, see
+        SCHOOL_SPACING_W above): each fish takes the next slot on a
+        low-discrepancy sequence across the school's width and depth, so a
+        half-filled school is already spread across the panel rather than
+        clustered wherever the dice fell. `slot0` continues that sequence
+        across the several calls a progressive fill makes.
+        """
         base = self.n
         s = self._spawn(count, mode=1, nocap=True)
         k = self.n - base
@@ -1132,9 +1245,16 @@ class Fish2d(Twod, GradientEffect):
             return
         rng = self._rng
         hd = self._school_hd
-        # spread across the width behind the school
-        lateral = rng.uniform(-1.0, 1.0, k) * self.roam_bound
-        back = self.entry_radius + rng.uniform(0.0, 0.5, k)
+        slot = np.arange(slot0, slot0 + k, dtype=np.float32)
+        # an even spread across the width behind the school, jittered by the
+        # school's own variation knob so it never reads as a drawn rank
+        jitter = rng.uniform(-1.0, 1.0, k) * 0.5 * self.school_variation
+        lateral = np.clip(
+            2.0 * ((slot * SCHOOL_PHI_LAT) % 1.0) - 1.0 + jitter, -1.0, 1.0
+        ) * self.roam_bound
+        back = self.entry_radius + (
+            (slot * SCHOOL_PHI_DEPTH) % 1.0
+        ) * 0.5
         self.p_x[s] = self.cam_nx - np.cos(hd) * back - np.sin(hd) * lateral
         self.p_y[s] = self.cam_ny - np.sin(hd) * back + np.cos(hd) * lateral
         self.p_x0[s] = self.p_x[s]
@@ -1143,17 +1263,21 @@ class Fish2d(Twod, GradientEffect):
         self.p_erate[s] = max(1.0, self.enter_time / HANDOFF_ENTER_S)
 
     def _spawn_rush(self, count):
-        """The lull's rush: fish pour in FROM THE DIRECTION the lone fish is
-        heading and zoom past it, with chaos. Tagged `p_nocap` — the ONE
-        lull-scoped bypass of the population cap."""
-        lone = np.flatnonzero(self.p_lone[: self.n] == 1)
-        if lone.size:
-            hd = float(self.p_hd[lone[0]])
-            ox = float(self.p_x[lone[0]])
-            oy = float(self.p_y[lone[0]])
-        else:
-            hd = self._mean_heading()
-            ox, oy = self.cam_nx, self.cam_ny
+        """THE DROP'S RUSH (his 2026-08-28 addendum: "I want the rush to be
+        part of the drop. All the fish rush in, swirl around and some stay
+        behind per the blob count parameter after the drop is done").
+
+        It used to be the lull's, entering at 60% of the lull behind the
+        lone fish. His lull clock has no fish left to enter behind, so the
+        rush moved WHOLE to the drop instead of being dropped: same
+        population, same chaos knob, same `p_nocap` cap exemption, and the
+        same `_settle_rush` handing the survivors to the ordinary
+        population. What changed is only WHERE they come from — every
+        direction, converging on the centre of view — because the drop is
+        an explosion at the centre, not a shoal sweeping past one fish.
+
+        Tagged `p_nocap` — the ONE drop-scoped bypass of the population cap.
+        """
         base = self.n
         s = self._spawn(count, mode=3, nocap=True)
         k = self.n - base
@@ -1161,18 +1285,24 @@ class Fish2d(Twod, GradientEffect):
             return
         rng = self._rng
         chaos = float(self.rush_chaos)
-        # enter ahead of the lone fish, spread across its path, travelling
-        # back past it
-        lateral = rng.uniform(-1.0, 1.0, k) * self.roam_bound * (
-            0.5 + 0.9 * chaos
+        # in from every side, evenly around the ring so the surge does not
+        # arrive as one clump (the same reason the charge's school spawns on
+        # an even spread — see SCHOOL_SPACING_W)
+        ang = (
+            (np.arange(k, dtype=np.float32) + rng.random(k, dtype=np.float32)
+             * chaos) / max(k, 1) * 2 * np.pi
         )
-        ahead = self.entry_radius + rng.uniform(0.0, 0.3 + 0.9 * chaos, k)
-        self.p_x[s] = ox + np.cos(hd) * ahead - np.sin(hd) * lateral
-        self.p_y[s] = oy + np.sin(hd) * ahead + np.cos(hd) * lateral
+        # just off-panel, never far beyond it: a rush fish that spawns
+        # outside the off-panel retirement bound is retired on the very
+        # frame it was born and is never seen at all
+        out = self.entry_radius + rng.uniform(0.0, 0.15 + 0.35 * chaos, k)
+        self.p_x[s] = self.cam_nx + np.cos(ang) * out
+        self.p_y[s] = self.cam_ny + np.sin(ang) * out
         self.p_x0[s] = self.p_x[s]
         self.p_y0[s] = self.p_y[s]
+        # heading inward, jittered by the chaos knob
         self.p_hd[s] = (
-            hd + np.pi + rng.uniform(-1.0, 1.0, k) * chaos * (np.pi / 3.0)
+            ang + np.pi + rng.uniform(-1.0, 1.0, k) * chaos * (np.pi / 3.0)
         )
         self.p_spd[s] = self.cruise_px * (
             2.2 + rng.uniform(-1.0, 1.0, k) * chaos * 1.1
@@ -1184,7 +1314,6 @@ class Fish2d(Twod, GradientEffect):
         self._phase = phase
         self._phase_t = 0.0
         self._phase_done_t = None
-        self._center_pull = 0.0
         if phase == "charge":
             n = self.n
             self._charge_n0 = int(np.count_nonzero(self.p_mode[:n] < 2)) or 1
@@ -1210,42 +1339,41 @@ class Fish2d(Twod, GradientEffect):
             self._release_nocap()
 
     def _start_lull(self):
-        """Pick the fish nearest the centre as the lone one; every other
-        swimmer is scheduled to disperse across the first part of the lull."""
+        """Schedule EVERY fish to disperse across the lull's first third.
+
+        His 2026-08-28 ruling replaced the old lull outright: there is no
+        lone fish and no survivor of any kind. The rank spread here is what
+        paces the exodus; `_lull_step`'s backstop is what guarantees it.
+        """
         n = self.n
-        self.p_lone[:n] = 0
         self.p_disp[:n] = np.nan
-        self._lull_state = {"rushed": False, "rush_t": None}
+        self._lull_state = {"dark": 1.0}
         live = np.flatnonzero(self.p_mode[:n] < 2)
         if live.size == 0:
             return
+        # furthest from the centre of view leaves first, so the panel
+        # empties inward rather than in a random order
         d = np.hypot(
             (self.p_x[live] - self.cam_nx) * self.sx,
             (self.p_y[live] - self.cam_ny) * self.sy,
         )
-        order = live[np.argsort(d)]
-        self.p_lone[order[0]] = 1
-        # the lone fish is the one that STAYS, so it rejoins the ordinary
-        # population here — a charge-school fish that happens to be nearest
-        # centre must not carry its cap exemption out of the lull.
-        self.p_nocap[order[0]] = 0
-        rest = order[1:][::-1]          # furthest leaves first
-        if rest.size:
-            self.p_disp[rest] = (
-                np.arange(1, rest.size + 1, dtype=np.float32) / rest.size
-            )
+        order = live[np.argsort(d)][::-1]
+        self.p_disp[order] = (
+            np.arange(1, order.size + 1, dtype=np.float32) / order.size
+        )
 
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw,
         before population management; sets the per-frame overrides
-        (_speed_scale, _center_pull, particle_count, school state)."""
+        (_speed_scale, particle_count, school/rush state)."""
         pend = self._phase_pending
         if pend is not None:
             self._phase_pending = None
             if pend != self._phase:
                 self._enter_phase(pend)
         self._speed_scale = 1.0
-        self._center_pull = 0.0
+        if self._phase != "drop":
+            self._rush_swirl = 0.0
         if self._phase == "none":
             return
         self._phase_t += dt
@@ -1269,7 +1397,7 @@ class Fish2d(Twod, GradientEffect):
             # every sentinel this branch sets is a concrete value: nothing
             # downstream can observe a half-built drop state (the render-
             # thread crash class, AGENTS.md)
-            self._drop_state = {"burst_done": True}
+            self._drop_state = {"burst_done": True, "settled": True}
             self._release_nocap()
             return
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
@@ -1292,7 +1420,10 @@ class Fish2d(Twod, GradientEffect):
         n = self.n
         have = int(np.count_nonzero(self.p_mode[:n] < 2))
         if have < target:
-            self._spawn_school(target - have)
+            # the slot base is what has ALREADY arrived, so the even
+            # spread continues across a progressive fill instead of
+            # restarting (and stacking) on every call
+            self._spawn_school(target - have, slot0=have)
         self._school_turn_t += self.passed_dt
         # beat turns arm only once the school has gathered; the flag is
         # consumed either way so a beat during the gather can't latch and
@@ -1309,10 +1440,17 @@ class Fish2d(Twod, GradientEffect):
                 )
 
     def _lull_step(self, p, dt):
-        """His words: fish disperse until the centre one is all alone,
-        swimming but staying in the centre of view by half way through the
-        lull; then a rush comes in from the direction it is heading, zooms
-        past, and leaves the parameter's own count behind."""
+        """His clock, in thirds of the lull's own duration: everything gone
+        by 1/3, ripples only to 2/3, dark after that until the drop.
+
+        The thirds are of `phase_progress`, which SpotFX ramps over the real
+        gap to the next trigger (`scene_response._phase_ramp_ms`) — so they
+        are thirds of the DYNAMIC lull, never of a wall-clock constant. The
+        same honesty note the charge carries applies: that ramp covers ~90%
+        of the true gap and then hangs at 1.0, so 1/3 lands a little before
+        a third of the wall clock. That is the closest an effect can get
+        without ever being told the duration.
+        """
         st = self._lull_state
         if st is None:
             self._start_lull()
@@ -1320,45 +1458,55 @@ class Fish2d(Twod, GradientEffect):
         # progress-driven once the ramp moves (hand-scrubbable in the LedFX
         # UI); the wall-clock fallback only runs while progress sits at 0
         f = p if p > 0.0 else min(self._phase_t / LULL_FALL_S, 1.0)
-        # dispersal: everyone but the lone fish is gone by LULL_DISPERSE_AT
         n = self.n
-        frac = min(f / max(LULL_DISPERSE_AT, 1e-3), 1.0)
+
+        # ── 0 -> 1/3: everybody disperses, paced ────────────────────────
+        span = max(LULL_GONE_AT * LULL_DEPART_SPAN, 1e-3)
+        frac = min(f / span, 1.0)
         due = np.flatnonzero(
             np.isfinite(self.p_disp[:n])
             & (self.p_disp[:n] <= frac)
             & (self.p_mode[:n] < 2)
         )
         if due.size:
-            self._depart(due)
+            self._depart(due, fade=LULL_DEPART_FADE_S)
             self.p_disp[due] = np.nan
-        # the lone fish holds centre: full pull by LULL_CENTER_PROGRESS
-        self._center_pull = LULL_CENTER_PULL * min(
-            f / max(LULL_CENTER_PROGRESS, 1e-3), 1.0
-        )
-        # the rush
-        if not st["rushed"] and f >= LULL_RUSH_AT:
-            st["rushed"] = True
-            st["rush_t"] = 0.0
-            if self.rush_count > 0:
-                self._spawn_rush(int(self.rush_count))
-        if st.get("rush_t") is not None:
-            st["rush_t"] += dt
-            if st["rush_t"] >= max(self.rush_time, 0.05):
-                st["rush_t"] = None
-                self._settle_rush()
-        # Hold the population manager to whatever is actually still
-        # swimming, so the PACED dispersal above is the only thing that
-        # removes a fish and nothing is ever re-spawned mid-lull.
-        n = self.n
-        self.particle_count = max(1, int(np.count_nonzero(
-            (self.p_mode[:n] < 2) & (self.p_nocap[:n] == 0)
-        )))
+        # ... and the backstop that makes "gone by 1/3" a guarantee rather
+        # than a schedule: past the third, nothing is left alive at all.
+        if f >= LULL_GONE_AT and n:
+            self._compact(np.zeros(n, dtype=bool))
+
+        # ── 1/3 -> 2/3 ripples only, then dark ──────────────────────────
+        # A half-life alone can never reach zero, and his ask is DARK — so
+        # the wake is RAMPED out across [LULL_DARK_FROM, LULL_DARK_AT] and
+        # held at nothing for the last third.
+        st["dark"] = float(np.clip(
+            (LULL_DARK_AT - f) / max(LULL_DARK_AT - LULL_DARK_FROM, 1e-3),
+            0.0, 1.0,
+        ))
+
+        # nothing is ever re-spawned mid-lull: the paced dispersal above is
+        # the only thing that moves the population, and it only removes
+        self.particle_count = 0
 
     def _settle_rush(self):
-        """The rush is over: keep exactly as many fish as the parameter
-        asks for (the lone fish counts toward it) and send the rest on
-        their way. This is what puts the population back under its own cap
-        — the nocap tag never outlives the moment it was granted for."""
+        """The rush is over: keep exactly as many fish as the blob-count
+        parameter asks for and send the rest on their way. This is what puts
+        the population back under its own cap — the nocap tag never outlives
+        the moment it was granted for.
+
+        HOW THE STAY-BEHIND HANDS OVER TO THE INTENSITY-DRIVEN COUNT (his
+        addendum's own open question). `particle_count` is written live by
+        SpotFX and is intensity-bound (1-8 in his scene). The stay-behind
+        reads it ONCE, here, at the instant the drop settles — so the number
+        that survives is whatever the room's intensity was asking for right
+        then. From the very next frame the ordinary population manager
+        governs again, unchanged: a later rise lets fish swim in through the
+        normal entry path, a later fall departs the excess through the
+        normal exit path. There is no special case and nothing to fight —
+        the rush sets the population once, at the handover, and the
+        intensity-driven count owns it from there.
+        """
         n = self.n
         rushing = np.flatnonzero(
             (self.p_mode[:n] == 3) & (self.p_nocap[:n] == 1)
@@ -1389,13 +1537,17 @@ class Fish2d(Twod, GradientEffect):
         n = self.n
         extra = np.flatnonzero((self.p_nocap[:n] == 1) & (self.p_mode[:n] < 2))
         self._depart(extra, fade=HANDOFF_LEAVE_S)
-        self.p_lone[:n] = 0
         self.p_disp[:n] = np.nan
 
     def _drop_step(self):
+        """The drop he likes, plus his addendum's three beats — RUSH IN,
+        SWIRL AROUND, STAY BEHIND. Nothing about the existing payoff (the
+        boost, the ejecta explosion, the settle horizon, the self-reset)
+        is changed; the rush is laid on top of it."""
         drop = self._drop_state
         if drop is None:
-            drop = self._drop_state = {"burst_done": False}
+            drop = self._drop_state = {"burst_done": False, "settled": False}
+        drop.setdefault("settled", False)
         if not drop["burst_done"]:
             drop["burst_done"] = True
             self._release_nocap()
@@ -1405,7 +1557,15 @@ class Fish2d(Twod, GradientEffect):
                 (self.p_mode[:n] < 2) & (self.p_nocap[:n] == 0)
             ))
             missing = self.particle_count - tracked
-            if missing > 0:
+            rush = int(min(self.rush_count, MAX_RUSH))
+            if rush > 0:
+                # BEAT 1 — RUSH IN. The rush is now what repopulates a drop
+                # (his "the scene exits a drop already populated instead of
+                # repopulating from nothing"), so the centre burst stands
+                # down while it runs. With the rush turned off the drop is
+                # exactly what it was.
+                self._spawn_rush(rush)
+            elif missing > 0:
                 self._spawn_center_burst(
                     self.cam_nx, self.cam_ny, missing
                 )
@@ -1415,7 +1575,22 @@ class Fish2d(Twod, GradientEffect):
         self._speed_scale = 1.0 + DROP_BOOST * max(
             1.0 - self._phase_t / DROP_SETTLE_S, 0.0
         )
+        # BEAT 2 — SWIRL AROUND, for the drop's own duration. `_rush_swirl`
+        # is read by the steering block; it is a tangential bias on the
+        # rush fish only, bounded by the same turn-rate clamp as every other
+        # steering term, so it can never flip one on the spot.
+        surge = min(self._phase_t / max(self.rush_time, 0.05), 1.0)
+        self._rush_swirl = surge * (
+            1.0 - min(self._phase_t / DROP_SETTLE_S, 1.0)
+        )
         if self._phase_t >= DROP_SETTLE_S:
+            if not drop["settled"]:
+                # BEAT 3 — STAY BEHIND, per the blob count. See
+                # _settle_rush for how that hands over to the
+                # intensity-driven count.
+                drop["settled"] = True
+                self._rush_swirl = 0.0
+                self._settle_rush()
             self._phase = "none"
             self._drop_state = None
             self._speed_scale = 1.0
@@ -1449,8 +1624,17 @@ class Fish2d(Twod, GradientEffect):
         self._cam_py_prev = self.cam_py
         if self.camera_follow <= 0.0:
             return
-        # ONLY the charge and the lull move the window.
+        # ONLY the charge and the lull move the window — and a lull only
+        # while there is still a school in it. Under his 2026-08-28 lull
+        # clock every fish is gone by the first third, so from there on
+        # there is nothing to follow and the window EASES HOME instead of
+        # holding wherever it had got to; the ripples then stream past a
+        # settling view for the rest of the lull.
         active = self._phase in ("charge", "lull")
+        if active and self._phase == "lull" and not np.any(
+            self.p_mode[: self.n] < 2
+        ):
+            active = False
         n = self.n
         # The school is the fish that have ARRIVED. A charge spawns its
         # shoal a whole entry radius behind the window and they swim in
@@ -1579,105 +1763,103 @@ class Fish2d(Twod, GradientEffect):
                 idx, weights=w * cw, minlength=cells
             ).reshape(self.r_height, self.r_width)
 
-    def _draw_ripples(self, buf):
-        """Expanding rings, drawn from the same offset table as the bodies —
-        weight peaks on the ring's own radius instead of at its centre."""
-        m = self.rn
-        if m == 0:
+    # ── the wake ────────────────────────────────────────────────────────
+    def _wake_palette(self):
+        """Resolve the wake's colour rule for the CURRENT gradient.
+
+        Returns `(is_solid, grad_offset, dim)`. The decision is read off the
+        BUILT gradient curve, never the config string, so a "gradient" whose
+        stops all resolve to one colour is correctly treated as solid — see
+        the WAKE_SOLID_* block at the top of this module for the rule.
+        """
+        self._assert_gradient()
+        curve = self._gradient_curve
+        if curve is None or curve.size == 0:
+            return True, 0.0, WAKE_SOLID_DIM
+        spread = float(
+            np.max(np.max(curve, axis=1) - np.min(curve, axis=1))
+        ) / 255.0
+        if spread <= WAKE_SOLID_TOL:
+            return True, 0.0, WAKE_SOLID_DIM
+        return False, WAKE_GRAD_OFFSET, 1.0
+
+    def _step_wake(self, dt):
+        """Decay, EXPAND, and carry the buffer with the water.
+
+        Three things happen, in this order and no other:
+
+        1. WORLD ANCHORING. The buffer is screen space; the water is not.
+           Every frame it is rolled by exactly the displacement the
+           world->screen mapping moved — the current's own flow, minus the
+           window's own step — with the sub-pixel remainder carried. What
+           rolls off an edge is dropped, never wrapped.
+        2. DECAY, exactly Orbits' trail: an exponential half-life.
+        3. EXPANSION, the half of his ask a decaying buffer alone cannot
+           give: a 3-tap separable blur blended in at a rate set by
+           `ripple_spread`, so every deposit opens outward as it dims. This
+           is why nothing needs to draw a growing shape, and why there is no
+           outline left to read as a messy circle.
+        """
+        if self.wake is None:
             return
-        life = np.maximum(self.r_life[:m], 1e-3)
-        fade = np.clip(1.0 - self.r_age[:m] / life, 0.0, 1.0)
-        amp = self.r_amp[:m] * fade * fade
-        live = amp > 0.004
-        if not live.any():
+        shift_x = self._flow_px * dt - (self.cam_px - self._cam_px_prev)
+        shift_y = self._flow_py * dt - (self.cam_py - self._cam_py_prev)
+        self._wake_ox += shift_x
+        self._wake_oy += shift_y
+        rx = int(self._wake_ox)
+        ry = int(self._wake_oy)
+        if rx:
+            self._wake_ox -= rx
+            self.wake = np.roll(self.wake, rx, axis=1)
+            if rx > 0:
+                self.wake[:, :rx, :] = 0.0
+            else:
+                self.wake[:, rx:, :] = 0.0
+        if ry:
+            self._wake_oy -= ry
+            self.wake = np.roll(self.wake, ry, axis=0)
+            if ry > 0:
+                self.wake[:ry, :, :] = 0.0
+            else:
+                self.wake[ry:, :, :] = 0.0
+
+        half_life = max(float(self.ripple_life) * WAKE_HALF_LIFE_X, 0.02)
+        self.wake *= np.float32(0.5 ** (dt / half_life))
+
+        a = float(np.clip(
+            WAKE_EXPAND_K * float(self.ripple_spread) * dt,
+            0.0, WAKE_EXPAND_MAX,
+        ))
+        if a > 0.0:
+            w = self.wake
+            blur = (w + np.roll(w, 1, axis=1) + np.roll(w, -1, axis=1)) / 3.0
+            blur = (
+                blur + np.roll(blur, 1, axis=0) + np.roll(blur, -1, axis=0)
+            ) / 3.0
+            # the wrapped rows/columns a roll brings back are not water:
+            # zero them so the smear never re-enters from the far edge
+            blur[0, :, :] = 0.0
+            blur[-1, :, :] = 0.0
+            blur[:, 0, :] = 0.0
+            blur[:, -1, :] = 0.0
+            self.wake *= np.float32(1.0 - a)
+            self.wake += (blur * np.float32(a)).astype(np.float32)
+
+    def _deposit_wake(self, xs, ys, amp, sizes, grad):
+        """Lay this frame's soft splats into the wake buffer.
+
+        A FILLED dot with a linear falloff (`_splat_many`, the same primitive
+        every body segment uses), never a ring — his "the circle line is kind
+        of messy" is answered by there being no line at all.
+        """
+        if self.wake is None or xs.size == 0:
             return
-        rr = self.r_r[:m][live]
-        amp = amp[live]
-        # ripples are anchored to the WATER: their stored position is world
-        # px and the window is subtracted here, so a moving window streams
-        # them past and away instead of carrying them along with it.
-        cx = self.r_x[:m][live] - self.cam_px
-        cy = self.r_y[:m][live] - self.cam_py
-        grad = self.r_grad[:m][live]
-        width = max(float(self.ripple_width), 0.5)
-        reach = float(np.max(rr)) + width
-        keep = self.k_dist <= reach
-        k_dx = self.k_dx[keep]
-        k_dy = self.k_dy[keep]
-        k_dist = self.k_dist[keep]
-        if k_dx.size == 0:
-            return
-        xi = np.round(cx).astype(np.int32)
-        yi = np.round(cy).astype(np.int32)
-        px = (xi[:, None] + k_dx[None, :]).ravel()
-        py = (yi[:, None] + k_dy[None, :]).ravel()
-        ring = np.clip(
-            1.0 - np.abs(k_dist[None, :] - rr[:, None]) / width, 0.0, 1.0
-        )
-        w = (ring * amp[:, None]).ravel()
-        valid = (
-            (px >= 0) & (px < self.r_width)
-            & (py >= 0) & (py < self.r_height)
-            & (w > 0.0)
-        )
-        if not valid.any():
-            return
-        idx = (py * self.r_width + px)[valid]
-        w = w[valid]
+        is_solid, offset, dim = self._wake_palette()
+        if not is_solid:
+            grad = (grad + offset) % 1.0
         rgb = self.get_gradient_color_vectorized1d(grad).astype(np.float32)
-        cells = self.r_width * self.r_height
-        for channel in range(3):
-            cw = np.repeat(rgb[:, channel], k_dx.size)[valid]
-            buf[..., channel] += np.bincount(
-                idx, weights=w * cw, minlength=cells
-            ).reshape(self.r_height, self.r_width)
-
-    def _step_ripples(self, dt):
-        m = self.rn
-        if m == 0:
-            return
-        self.r_age[:m] += dt
-        self.r_r[:m] += self.r_gr[:m] * dt
-        # camera-follow drift: while the school is held on screen the water
-        # streams past instead
-        if self._flow_px or self._flow_py:
-            self.r_x[:m] += self._flow_px * dt
-            self.r_y[:m] += self._flow_py * dt
-        alive = (self.r_age[:m] < self.r_life[:m]) & (
-            self.r_r[:m] <= RIPPLE_KERNEL_R + self.ripple_width
-        )
-        if self.camera_follow > 0.0:
-            # a ripple the window has left far behind cannot light a pixel;
-            # drop it rather than carrying it (and never wrap it around).
-            sx_ = self.r_x[:m] - self.cam_px
-            sy_ = self.r_y[:m] - self.cam_py
-            alive &= (
-                (sx_ > -RIPPLE_CULL_PAD)
-                & (sx_ < self.r_width + RIPPLE_CULL_PAD)
-                & (sy_ > -RIPPLE_CULL_PAD)
-                & (sy_ < self.r_height + RIPPLE_CULL_PAD)
-            )
-        count = int(np.count_nonzero(alive))
-        if count != m:
-            for arr in self._ripple_soa:
-                arr[:count] = arr[:m][alive]
-            self.rn = count
-
-    def _emit_ripples(self, idx, px, py, amp, radius, grow, grad):
-        """Append one ripple per entry in `idx` (already filtered)."""
-        k = int(min(len(idx), RIPPLE_CAP - self.rn))
-        if k <= 0:
-            return
-        s = slice(self.rn, self.rn + k)
-        self.r_x[s] = px[:k]
-        self.r_y[s] = py[:k]
-        self.r_r[s] = radius[:k]
-        self.r_gr[s] = grow[:k]
-        self.r_age[s] = 0.0
-        self.r_life[s] = max(float(self.ripple_life), 0.05)
-        self.r_amp[s] = amp[:k]
-        self.r_grad[s] = grad[:k]
-        self.rn += k
+        rgb = rgb * (amp * dim)[:, None]
+        self._splat_many(self.wake, xs, ys, rgb, sizes)
 
     # ── outgoing collapse (radial incoming) ─────────────────────────────
     def _draw_collapse(self, dt):
@@ -2121,13 +2303,45 @@ class Fish2d(Twod, GradientEffect):
             w_school = np.where(swimming, SCHOOL_W, 0.0)
             desired_x += np.cos(school_hd) * w_school
             desired_y += np.sin(school_hd) * w_school
+            # ... and they must not CLUMP while they do it. See
+            # SCHOOL_SPACING_W: omnidirectional separation, weighted well
+            # under the shared heading, so unison survives the spread.
+            sidx = np.flatnonzero(swimming)
+            if sidx.size > 1:
+                sx_px = self.p_x[:n][sidx] * self.sx
+                sy_px = self.p_y[:n][sidx] * self.sy
+                dx = sx_px[:, None] - sx_px[None, :]   # neighbour -> me
+                dy = sy_px[:, None] - sy_px[None, :]
+                d = np.hypot(dx, dy)
+                np.fill_diagonal(d, np.inf)
+                sep = max(SCHOOL_SEP_BODIES * self._body_len_px(), 1e-3)
+                close = np.clip(1.0 - d / sep, 0.0, 1.0)
+                inv = 1.0 / np.maximum(d, 1e-3)
+                push_x = (dx * inv * close).sum(axis=1)
+                push_y = (dy * inv * close).sum(axis=1)
+                mag = np.hypot(push_x, push_y)
+                keep = mag > 1e-6
+                add_x = np.zeros(n, dtype=np.float32)
+                add_y = np.zeros(n, dtype=np.float32)
+                w_sep = SCHOOL_SPACING_W * np.minimum(mag[keep], 1.0)
+                add_x[sidx[keep]] = push_x[keep] / mag[keep] * w_sep
+                add_y[sidx[keep]] = push_y[keep] / mag[keep] * w_sep
+                desired_x += add_x
+                desired_y += add_y
 
-        # the lull's lone fish keeps to the centre of view
-        lone = self.p_lone[:n] == 1
-        if self._center_pull > 0.0 and lone.any():
-            w_center = np.where(lone & swimming, CENTER_W, 0.0)
-            desired_x += np.cos(inward) * w_center
-            desired_y += np.sin(inward) * w_center
+        # THE DROP'S SWIRL (his addendum, beat 2): the rush fish swirl
+        # around the centre of view for the drop's own duration. A
+        # TANGENTIAL bias only — it is summed into the desired heading like
+        # every other steering term and is then bounded by the same
+        # turn-rate clamp, so it can never flip a fish on the spot.
+        if self._rush_swirl > 0.0:
+            rushers = (mode == 3) & (self.p_nocap[:n] == 1)
+            if rushers.any():
+                tangent = inward + np.pi / 2.0
+                w_swirl = np.where(rushers, RUSH_SWIRL_W * self._rush_swirl,
+                                   0.0)
+                desired_x += np.cos(tangent) * w_swirl
+                desired_y += np.sin(tangent) * w_swirl
 
         desired = np.arctan2(desired_y, desired_x)
         d_hd = _wrap_pi(desired - hd)
@@ -2187,18 +2401,6 @@ class Fish2d(Twod, GradientEffect):
             self._flow_py = -sch[1]
         self.p_x[:n] += vx_px * dt / self.sx
         self.p_y[:n] += vy_px * dt / self.sy
-
-        if self._center_pull > 0.0 and lone.any():
-            # his words: the lone fish stays "in the centre of VIEW" — so
-            # the pull is toward the window's centre, which is the same
-            # world point it always was whenever the window is at rest.
-            pull = np.float32(min(self._center_pull * dt, 1.0))
-            self.p_x[:n] = np.where(
-                lone, cnx + (self.p_x[:n] - cnx) * (1.0 - pull), self.p_x[:n]
-            )
-            self.p_y[:n] = np.where(
-                lone, cny + (self.p_y[:n] - cny) * (1.0 - pull), self.p_y[:n]
-            )
 
         entering = mode == 1
         if entering.any():
@@ -2292,50 +2494,56 @@ class Fish2d(Twod, GradientEffect):
         bright = bright * fade_in * fade_out
         self.p_bright[:n] = bright
 
-        # ── ripple emission (one per tail beat) ─────────────────────────
-        beat_idx = np.floor(self.p_flap[:n] / np.pi)
-        beat_fired = (beat_idx > self.p_beat[:n]) & (bright > 0.02)
-        self.p_beat[:n] = beat_idx
-        fired = np.flatnonzero(beat_fired)
-        if fired.size and self.ripple_amount > 0.0:
-            body_len = half_w[fired] * 2.0 * self.body_aspect
-            # the ripple is born at the tail, sized by the motion that made
+        # ── wake deposit (every frame, off real motion) ─────────────────
+        # Continuous, like Orbits' own body splats — there is no per-beat
+        # stamp any more. The flap still shapes it: it modulates the deposit
+        # (see WAKE_FLAP_*), so the wake keeps the body's own texture without
+        # anything being drawn as a shape.
+        laying = np.flatnonzero(bright > 0.02)
+        if laying.size and self.ripple_amount > 0.0 and self.wake is not None:
+            body_len = half_w[laying] * 2.0 * self.body_aspect
+            # the deposit is laid at the tail, sized by the motion that made
             # it: the body's own length and the tail's lateral throw
             tail_px = (
-                self.cx + self.p_x[:n][fired] * self.sx
-                - np.cos(hd[fired]) * body_len * 0.5
+                self.cx + self.p_x[:n][laying] * self.sx
+                - np.cos(hd[laying]) * body_len * 0.5
             )
             tail_py = (
-                self.cy + self.p_y[:n][fired] * self.sy
-                - np.sin(hd[fired]) * body_len * 0.5
+                self.cy + self.p_y[:n][laying] * self.sy
+                - np.sin(hd[laying]) * body_len * 0.5
             )
-            r0 = np.clip(
-                RIPPLE_R0_BODY * body_len
-                + RIPPLE_R0_FLAP * flap_amp[fired],
-                0.6, float(RIPPLE_KERNEL_R) * 0.5,
+            sizes = np.minimum(
+                WAKE_R0_BODY * body_len + WAKE_R0_FLAP * flap_amp[laying],
+                WAKE_R_MAX_BODY * body_len,
             )
-            grow = self.ripple_spread * np.maximum(
-                self.p_spd[:n][fired], cruise * 0.15
+            sizes = np.clip(
+                sizes * max(float(self.ripple_width), 0.5),
+                0.6, float(SPLAT_KERNEL_R) * 0.5,
+            ).astype(np.float32)
+            pulse = (
+                WAKE_FLAP_FLOOR
+                + WAKE_FLAP_GAIN * np.abs(np.sin(self.p_flap[:n][laying]))
             )
-            # the wake stays matched to the fish that made it
-            r_cap = np.minimum(
-                RIPPLE_MAX_BODY * body_len, float(RIPPLE_KERNEL_R)
-            )
-            life = max(float(self.ripple_life), 0.05)
-            grow = np.minimum(grow, np.maximum(r_cap - r0, 0.0) / life)
-            amp = self.ripple_amount * (
-                RIPPLE_BASE
-                + RIPPLE_SPEED_GAIN
-                * np.clip(
-                    (speed_norm[fired] - RIPPLE_SPEED_FLOOR)
-                    / RIPPLE_SPEED_SPAN,
-                    0.0, 1.0,
+            amp = (
+                self.ripple_amount
+                * (
+                    RIPPLE_BASE
+                    + RIPPLE_SPEED_GAIN
+                    * np.clip(
+                        (speed_norm[laying] - RIPPLE_SPEED_FLOOR)
+                        / RIPPLE_SPEED_SPAN,
+                        0.0, 1.0,
+                    )
                 )
-            ) * bright[fired]
-            self._emit_ripples(
-                fired, tail_px, tail_py, amp, r0, grow, self.p_grad[:n][fired]
+                * pulse
+                * bright[laying]
+                * min(dt * WAKE_DEPOSIT_HZ, 1.0)
+            ).astype(np.float32)
+            self._deposit_wake(
+                tail_px, tail_py, amp, sizes, self.p_grad[:n][laying]
             )
-        self._step_ripples(dt)
+        self._step_wake(dt)
+        self._apply_lull_dark()
 
         # ── render ──────────────────────────────────────────────────────
         half_life = 0.02 + self.trail_decay * 0.5
@@ -2351,9 +2559,6 @@ class Fish2d(Twod, GradientEffect):
                 flap_amp[visible], self.p_grad[:n][visible],
             )
         np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
-        # the wake is composited fresh every frame — see RIPPLE_BASE above
-        wake = np.zeros_like(self.trail)
-        self._draw_ripples(wake)
 
         self.p_x0[:n] = self.p_x[:n]
         self.p_y0[:n] = self.p_y[:n]
@@ -2372,16 +2577,45 @@ class Fish2d(Twod, GradientEffect):
             if dead.any():
                 self._compact(~dead)
 
-        out = np.asarray(self.matrix, dtype=np.float32) + self.trail + wake
+        out = np.asarray(self.matrix, dtype=np.float32) + self.trail
+        if self.wake is not None:
+            out = out + self.wake
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )
 
+    def _apply_lull_dark(self):
+        """HIS LULL CLOCK's last two thirds: ripples only, then DARK.
+
+        An exponential half-life can never reach zero and his ask is DARK,
+        so the wake (and the body trail under it) is ramped out across
+        [LULL_DARK_FROM, LULL_DARK_AT] and held at nothing until the drop.
+        See _lull_step.
+        """
+        if self._phase != "lull" or self._lull_state is None:
+            return
+        dark = np.float32(self._lull_state.get("dark", 1.0))
+        if dark >= 1.0:
+            return
+        if self.wake is not None:
+            self.wake *= dark
+        if self.trail is not None:
+            self.trail *= dark
+
     def _fade_only(self, dt):
-        """Decay the wake and composite — the held-transition path."""
+        """Decay the trail AND the wake, and composite — the held-transition
+        path. The wake is a live buffer, so leaving it out here would park a
+        frozen smear on the panel for the whole hold."""
         half_life = 0.02 + self.trail_decay * 0.5
         self.trail *= np.float32(0.5 ** (dt / half_life))
+        # An empty panel is exactly when the lull's last two thirds run, so
+        # the window still has to ease home and the clock still has to run.
+        self._step_camera(dt, self.cruise_px)
+        self._step_wake(dt)
+        self._apply_lull_dark()
         out = np.asarray(self.matrix, dtype=np.float32) + self.trail
+        if self.wake is not None:
+            out = out + self.wake
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )
