@@ -3866,9 +3866,16 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    (`camera_follow`, 2026-08-28): the render subtracts a camera origin
    (screen = world - cam), and AT REST THAT MAPPING IS THE IDENTITY — which
    is why `camera_follow=0` is byte-identical to the pre-window effect, not
-   merely close (`tests/test_fish_camera.py` proves it against master's own
-   module, loaded out of git as a second registered effect — reuse that
-   trick for any future byte-identity claim in `fx/`). What the knob
+   merely close (`tests/test_fish_camera.py` proves it against the
+   PRE-CAMERA BASELINE's own module, loaded out of git as a second
+   registered effect — reuse that trick for any future byte-identity claim
+   in `fx/`). That baseline ref is PINNED, and imported from
+   `scripts/check_fish_camera.py::BASELINE_REF` rather than copied: it was
+   originally the moving ref `master`, which silently retired the whole
+   proof to `pytest.skip` the moment the camera merged. **A false alarm is
+   loud and gets fixed; a permanent skip is silent and reads as green** —
+   when an instrument's reference moves out from under it, pin the
+   reference, never silence the instrument. What the knob
    actually does is UNDO A CLAMP: the charge already held the school on
    screen by subtracting the school's own velocity from every swimming fish
    — a window locked rigidly to the shoal — so `camera_follow` is the

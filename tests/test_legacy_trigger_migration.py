@@ -416,6 +416,21 @@ def test_migrate_flags_invalid_timestamp_without_crashing(tmp_path):
     assert written_ids == {"normal-1"}
 
 
+# EXPECTED TO DRIFT RED — READ THIS BEFORE "FIXING" ANYTHING.
+#
+# The test below asserts HARDCODED COUNTS against the Admiral's LIVE,
+# still-edited trigger corpus (/home/javi/SpotFX/storage/profiles). Every
+# time he authors, edits or deletes a trigger, those numbers move and this
+# test goes red — by construction, not by regression. A red here is
+# ordinarily EVIDENCE OF HIS WORK, not evidence of a bug in this repo.
+#
+# OPERATIONAL RULE: verify against pristine master FIRST. If the same
+# assertion fails identically on an unmodified master checkout, the corpus
+# moved — update the pinned counts (or leave them) and move on. Do NOT
+# spend an evening "fixing" his data, and never edit storage/profiles to
+# make this test pass.
+#
+# (Also recorded in AGENTS.md; it belongs here too, where the red lands.)
 def test_migrate_real_corpus_lands_whole_in_one_pass():
     """The real corpus, dry-run, read-only: every trigger is either mapped
     or a deliberate exclusion (retired / invalid timestamp) — zero
