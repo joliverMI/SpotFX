@@ -3862,10 +3862,39 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    above `LUNGE_SPIKE_MIN` so quiet swimming stays byte-identical. Sweep:
    `scripts/check_fish_lunge.py`.
 
+5. **Positions are a WORLD FRAME and the panel is a WINDOW onto it**
+   (`camera_follow`, 2026-08-28): the render subtracts a camera origin
+   (screen = world - cam), and AT REST THAT MAPPING IS THE IDENTITY — which
+   is why `camera_follow=0` is byte-identical to the pre-window effect, not
+   merely close (`tests/test_fish_camera.py` proves it against master's own
+   module, loaded out of git as a second registered effect — reuse that
+   trick for any future byte-identity claim in `fx/`). What the knob
+   actually does is UNDO A CLAMP: the charge already held the school on
+   screen by subtracting the school's own velocity from every swimming fish
+   — a window locked rigidly to the shoal — so `camera_follow` is the
+   fraction of that travel handed back to the fish, with the window
+   following at its own lagging, speed-capped pace. Three things not to
+   undo: the window moves ONLY during the charge and the lull; it follows
+   only fish it can currently SEE (which is what makes "the school is never
+   lost" structural rather than tuned, and what stops a rush stayer
+   converted far off-window from dragging it away); and ripples are stored
+   in WORLD px so they are left behind in the water, with anything far
+   off-window CULLED, never wrapped. Everything naming the visible water —
+   pond bound, home ring, "inward", the lull's centre pull, where arrivals
+   and the drop's burst appear — is measured from the window, not a fixed
+   world point, or the school would just circle a stationary pond. The lull's
+   own centre pull is deliberately left WHOLE (it is what holds his "stays in
+   the centre of view" to 4px); relaxing it with `camera_follow` is a design
+   fork, not taken. Measured basis for the 0.8 default, and the honest
+   surprise that the CHARGE's wake already streamed on master (so the gain
+   there is the shoal moving, not the water starting to):
+   `scripts/check_fish_camera.py`.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
-`tests/test_fish.py`.
+`scripts/check_fish_camera.py`, `tests/test_fish.py`,
+`tests/test_fish_camera.py`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

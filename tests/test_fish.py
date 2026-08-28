@@ -437,8 +437,12 @@ def test_lull_leaves_one_centred_fish_then_a_rush(tmp_path):
                 others = int(np.count_nonzero(
                     (eff.p_mode[: eff.n] < 2) & (eff.p_lone[: eff.n] == 0)
                 ))
+                # "the centre" is the centre of VIEW — measured against
+                # the window, which is the world origin exactly whenever
+                # the window is at rest (camera_follow 0).
                 dist = float(np.hypot(
-                    eff.p_x[lone] * eff.sx, eff.p_y[lone] * eff.sy
+                    eff.p_x[lone] * eff.sx - eff.cam_px,
+                    eff.p_y[lone] * eff.sy - eff.cam_py,
                 )[0]) if lone.size else None
                 at_half = (dist, others, int(lone.size))
         dist, others, lone_n = at_half
