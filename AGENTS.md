@@ -3852,8 +3852,20 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    authored choreography, not crowds to fix. Sweep + tuned default:
    `scripts/check_fish_avoidance.py`.
 
+4. **A strong beat LUNGES** (`LUNGE_*`, 2026-08-28) — his live diagnosis:
+   the ripple scales off real speed and flap correctly, but the beat speed
+   boost used to decay within tens of ms, so big ripples rode tiny travel.
+   The envelope holds the boost near full for `LUNGE_HOLD_S` so a beat
+   covers several body lengths. Motion side only; the wake was deliberately
+   NOT touched (it self-heals once the travel widens). It rides
+   `speed_jump` x the existing spike signal and adds NO knob, and arms only
+   above `LUNGE_SPIKE_MIN` so quiet swimming stays byte-identical. Sweep:
+   `scripts/check_fish_lunge.py`.
+
 Every new fish knob is a first guess pending his eye; the effect ships
-tunable, not tuned. Proof: `scripts/check_fish.py`, `tests/test_fish.py`.
+tunable, not tuned. Proof: `scripts/check_fish.py`,
+`scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
+`tests/test_fish.py`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

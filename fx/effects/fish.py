@@ -42,6 +42,23 @@ HANDOFF_ENTER_S = 0.65
 HANDOFF_LEAVE_S = 0.55
 SLOT_EASE_S = 0.6    # home-anchor re-spacing ease time constant
 SPIKE_COOL_S = 0.12  # min gap between beat turn-kicks
+
+# ── the lunge ───────────────────────────────────────────────────────────────
+# A strong beat used to raise the swim speed for tens of milliseconds — the
+# ripple correctly sized itself off that speed, so a big ring rode a tiny
+# travel. The lunge holds the boost near full for a real fraction of a second
+# so a strong beat covers several body lengths and the ripple's own scaling
+# self-heals. It is a MOTION change only: nothing about the wake is touched.
+# Magnitude keeps riding `speed_jump` x the existing spike signal (which is
+# itself impulse-derived), so the menu gains no knob.
+LUNGE_SPIKE_MIN = 0.35   # only a STRONG spike lunges; below this, nothing
+                         # happens at all and quiet swimming is untouched
+LUNGE_HOLD_S = 0.6       # ... and it holds near full for this long, measured
+                         # by distance covered (see
+                         # scripts/check_fish_lunge.py), not chosen by feel
+LUNGE_FALL_S = 0.35      # half-life of the release after the hold
+LUNGE_GAIN = 1.0         # boost as a fraction of cruise, per unit of
+                         # speed_jump x spike
 ENTRY_MARGIN = 0.32  # how far OUTSIDE the pond new fish appear (normalized).
                      # Unlike Orbits, a fish is not lerped in from its entry
                      # point — it SWIMS in under its own kinematics, so the
@@ -156,7 +173,7 @@ DROP_EJECTA_SPEED = (1.6, 2.9)  # ejecta speed, multiples of cruise
 _SOA_NAMES = (
     "p_mode", "p_nocap", "p_lone", "p_disp", "p_slot", "p_slot_frac",
     "p_x", "p_y", "p_x0", "p_y0", "p_hd", "p_spd", "p_acc",
-    "p_flap", "p_beat", "p_jog", "p_ro", "p_var",
+    "p_flap", "p_beat", "p_jog", "p_ro", "p_lun", "p_lun_t", "p_var",
     "p_enter", "p_erate", "p_leave", "p_lfade",
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_grad_from", "p_scatter", "p_bright",
@@ -444,6 +461,8 @@ class Fish2d(Twod, GradientEffect):
         self.p_beat = np.zeros(CAP, dtype=np.float32)  # last tail-beat index
         self.p_jog = np.zeros(CAP, dtype=np.float32)   # turn kick, rad/s
         self.p_ro = np.zeros(CAP, dtype=np.float32)    # speed kick, fraction
+        self.p_lun = np.zeros(CAP, dtype=np.float32)   # lunge boost, fraction
+        self.p_lun_t = np.zeros(CAP, dtype=np.float32)  # ... hold left, s
         self.p_var = np.zeros(CAP, dtype=np.float32)   # school variation, -1..1
         self.p_enter = np.zeros(CAP, dtype=np.float32)
         self.p_erate = np.ones(CAP, dtype=np.float32)
@@ -690,6 +709,8 @@ class Fish2d(Twod, GradientEffect):
         self.p_beat[s] = np.floor(self.p_flap[s] / np.pi)
         self.p_jog[s] = 0.0
         self.p_ro[s] = 0.0
+        self.p_lun[s] = 0.0
+        self.p_lun_t[s] = 0.0
         self.p_var[s] = rng.uniform(-1.0, 1.0, count)
         self.p_acc[s] = 0.0
         self.p_spd[s] = self.cruise_px
@@ -1687,12 +1708,31 @@ class Fish2d(Twod, GradientEffect):
             )
         )
 
-        # ── speed ───────────────────────────────────────────────────────
+        # ── the lunge ───────────────────────────────────────────────────
+        # A strong spike arms a per-fish envelope that HOLDS the boost near
+        # full for LUNGE_HOLD_S before releasing, so a beat is a real dash
+        # of several body lengths instead of a blip the ripple outruns.
+        # Below LUNGE_SPIKE_MIN nothing is armed and nothing decays, so
+        # quiet swimming is bit-for-bit the plain cruise.
         jump_eff = self.speed_jump * rscale
+        if spike >= LUNGE_SPIKE_MIN and jump_eff > 0.0:
+            mag = LUNGE_GAIN * jump_eff * float(spike)
+            self.p_lun[:n] = np.maximum(self.p_lun[:n], mag)
+            self.p_lun_t[:n] = LUNGE_HOLD_S
+        held = self.p_lun_t[:n] > 0.0
+        if held.any():
+            self.p_lun_t[:n] = np.maximum(self.p_lun_t[:n] - dt, 0.0)
+        self.p_lun[:n] = np.where(
+            held, self.p_lun[:n],
+            self.p_lun[:n] * np.float32(0.5 ** (dt / LUNGE_FALL_S)),
+        )
+
+        # ── speed ───────────────────────────────────────────────────────
         cruise = self.cruise_px
         want = (
             cruise
             * (1.0 + jump_eff * impulse * gain)
+            * (1.0 + self.p_lun[:n])
             * (1.0 + 0.25 * jiggle * n_r)
             * (1.0 + self.p_ro[:n])
             * self._speed_scale

@@ -510,8 +510,23 @@ variables named `ledfx` (the core object handle) are untouched.
     — the charge's school and the lull's rush — and never survives them.
     `CAP` is sized so both plus a full drop explosion fit at once
     (`tests/test_fish.py::test_buffer_headroom_holds_school_rush_and_explosion_at_once`).
+    THE LUNGE (`LUNGE_*`, 2026-08-28, same PR — his own live diagnosis):
+    the ripple correctly scales off real speed and flap, but the beat speed
+    boost decayed within tens of milliseconds, so a big ring rode a tiny
+    travel. A spike at or above `LUNGE_SPIKE_MIN` now arms a per-fish
+    envelope that HOLDS the boost near full for `LUNGE_HOLD_S` (0.6 s)
+    before releasing on `LUNGE_FALL_S`. Motion side ONLY — the wake is
+    untouched and self-heals once the travel widens. Magnitude keeps riding
+    `speed_jump` x the existing spike signal, so the menu gains no knob, and
+    below the threshold nothing arms and nothing decays: quiet swimming is
+    byte-identical (asserted). Measured, 4 seeds, distance covered in the
+    1 s after a strong beat under a real music envelope: 2.98 -> 5.55 body
+    lengths (+86%); the hold is what does it (hold 0 s -> 4.82).
+    `scripts/check_fish_lunge.py` prints the sweep.
+
     Evidence: `scripts/check_fish.py` (eight measured sections on the real
-    pipeline), `scripts/check_fish_avoidance.py`, `tests/test_fish.py`.
+    pipeline), `scripts/check_fish_avoidance.py`,
+    `scripts/check_fish_lunge.py`, `tests/test_fish.py`.
 
 22. `effects/radial.py`: a QUIET BASE ROTATION FLOOR (NEW PARAM +
     BEHAVIOUR, PR fm/radial-base-rotation). His ask, verbatim: "i like the

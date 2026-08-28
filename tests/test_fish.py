@@ -911,3 +911,100 @@ def test_school_still_swims_in_unison_with_avoidance_on(tmp_path):
             f"{np.degrees(spread[1.0]):.2f} deg"
         )
     _run(main())
+
+
+# ── the lunge: a strong beat is a real dash, not a blip ─────────────────
+def _beat_envelope(room, on):
+    """Drive the two signals draw() reads so a beat's spike reaches 1.0 the
+    way it does in a real room (headless audio is silenced, so an
+    undriven beat caps at draw()'s own 0.4 floor)."""
+    eff = room.effect
+    eff.impulse = float(on)
+    eff.slow = 0.30 * float(on)
+
+
+def _travel_after_beat(room, seconds=1.0, loud=True):
+    """Mean path length each fish covers, in body lengths."""
+    eff = room.effect
+    eff._beat_pending = True
+    env = 1.0
+    n = eff.n
+    px = eff.p_x[:n].copy() * eff.sx
+    py = eff.p_y[:n].copy() * eff.sy
+    dist = np.zeros(n)
+    for _ in range(int(seconds / DT)):
+        if loud:
+            _beat_envelope(room, env)
+            env *= 0.5 ** (DT / 0.25)
+        room.step(1)
+        k = min(n, eff.n)
+        nx = eff.p_x[:k] * eff.sx
+        ny = eff.p_y[:k] * eff.sy
+        dist[:k] += np.hypot(nx - px[:k], ny - py[:k])
+        px[:k], py[:k] = nx, ny
+    return float(dist[: eff.n].mean()) / eff._body_len_px()
+
+
+def test_a_strong_beat_covers_several_body_lengths(tmp_path):
+    """His diagnosis: the ripple correctly sized itself off real speed and
+    flap, but the beat's speed boost decayed within tens of ms, so a big
+    ring rode a tiny travel. The lunge holds the boost, so a strong beat is
+    a real dash. Measured in body lengths, against the pre-lunge control.
+    scripts/check_fish_lunge.py prints the full sweep."""
+    async def main():
+        got = {}
+        for tag, gain in (("off", 0.0), ("on", FX.LUNGE_GAIN)):
+            orig = FX.LUNGE_GAIN
+            FX.LUNGE_GAIN = gain
+            try:
+                room = await _room(tmp_path, f"lunge-{tag}",
+                                   dict(HIS_CROWD, particle_count=4), seed=5)
+                room.step(180)
+                got[tag] = _travel_after_beat(room)
+                await _close(room)
+            finally:
+                FX.LUNGE_GAIN = orig
+        assert got["on"] >= got["off"] * 1.5, (
+            "a strong beat must cover a real dash: "
+            f"{got['off']:.2f} -> {got['on']:.2f} body lengths in 1s "
+            f"(negative control {got['off']:.2f})"
+        )
+        assert got["on"] >= 3.0, (
+            f"a strong beat should cover several body lengths, saw "
+            f"{got['on']:.2f}"
+        )
+    _run(main())
+
+
+def test_quiet_swimming_is_untouched_by_the_lunge(tmp_path):
+    """The envelope arms only above LUNGE_SPIKE_MIN, so at zero impulse
+    nothing is armed, nothing decays, and cruise is bit-for-bit what it
+    always was."""
+    async def main():
+        frames, speeds = {}, {}
+        for tag, gain in (("off", 0.0), ("on", FX.LUNGE_GAIN)):
+            orig = FX.LUNGE_GAIN
+            FX.LUNGE_GAIN = gain
+            try:
+                room = await _room(tmp_path, f"calm-{tag}",
+                                   dict(HIS_CROWD, particle_count=4), seed=5)
+                seq = []
+                for _ in range(900):
+                    room.step(1)
+                    seq.append(room.frame)
+                eff = room.effect
+                assert not np.any(eff.p_lun[: eff.n]), (
+                    "no beat, no impulse — the lunge must never arm"
+                )
+                speeds[tag] = float(eff.p_spd[: eff.n].mean())
+                frames[tag] = np.array([f for f in seq if f is not None])
+                await _close(room)
+            finally:
+                FX.LUNGE_GAIN = orig
+        assert np.array_equal(frames["off"], frames["on"]), (
+            "quiet swimming must be byte-identical with and without the lunge"
+        )
+        assert abs(speeds["on"] - speeds["off"]) < 1e-9, (
+            f"cruise moved at zero impulse: {speeds['off']} -> {speeds['on']}"
+        )
+    _run(main())
