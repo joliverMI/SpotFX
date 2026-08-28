@@ -588,6 +588,72 @@ variables named `ledfx` (the core object handle) are untouched.
     without a base) and `tests/test_radial_base_rotation.py`. Not in the
     fork source at `/home/javi/ledfx-src` (SpotFX-authored mechanism).
 
+23. `effects/fish.py`: a WORLD FRAME AND A CAMERA WINDOW (NEW PARAM +
+    NEW MECHANISM, PR fm/fish-camera-window, 2026-08-28). Owner ask: make
+    the school's charge and lull TRAVEL visible by moving the VIEW through
+    a larger body of water, with the ripples anchored to the water so they
+    scroll past and away — "the window has its own speed distinct from fish
+    speed", and it "moves ONLY during charge and lull".
+
+    Fish positions and ripple centres are now WORLD coordinates and the
+    render subtracts a camera origin (`cam_px`/`cam_py`, world px): screen
+    = world - cam. AT REST THE MAPPING IS THE IDENTITY, so every expression
+    it touches reduces to the one it replaced. New config key
+    `camera_follow` (float `[0, 1]`, default **0.8**); at **0** the window
+    never leaves the origin and the effect is byte-identical to master —
+    proven by loading master's own `fish.py` out of git as a second
+    registered effect and comparing 1,170-frame sequences across four
+    seeds through a full swim/charge/lull/drop/swim script
+    (`scripts/check_fish_camera.py` §1, `tests/test_fish_camera.py`).
+
+    WHAT IT REPLACES, precisely: the charge already held the school on
+    screen by SUBTRACTING the school's own velocity from every swimming
+    fish and pushing the same amount through the ripples — that is a window
+    locked RIGIDLY to the shoal, so the shoal could not move within it and
+    the water streamed at exactly the swim speed. `camera_follow` is the
+    fraction of that travel handed back to the fish as real world travel;
+    `1 - camera_follow` stays in the old clamp, which is why 0 is master.
+    The window then follows with a LAG (`CAM_TAU`), an eased velocity
+    (`CAM_VEL_TAU`) and a hard speed cap (`CAM_MAX_SPEED_X` x cruise), so
+    it has its own speed rather than the fish's.
+
+    THE LULL had no window motion at all before this — its wake sat dead
+    still on screen. It moves now, and its own centre-pull is deliberately
+    left WHOLE (it is what satisfies his "the lone fish stays in the centre
+    of view" within 4px, pinned by
+    `tests/test_fish.py::test_lull_leaves_one_centred_fish_then_a_rush`);
+    relaxing it as `camera_follow` rises is a design fork, not taken here.
+
+    THE WINDOW IS THE POND. Everything that names the visible water — the
+    pond bound, the home ring, "inward", the lull's centre pull, where new
+    fish and the drop's burst appear, and which fish is "nearest the
+    centre" — is measured from the window, not from a fixed world point.
+    Without that, the school would simply circle inside a stationary pond
+    and there would be no travel to follow. All of it is the same
+    expression at rest.
+
+    BOUNDS, all measured not asserted (`scripts/check_fish_camera.py`
+    §3/§4): one per-frame step cap covers the pursuit AND the leash, so
+    nothing can teleport; the window follows only the fish it can currently
+    SEE, which makes "the school is never lost" structural (the target is
+    inside the panel by construction) — worst centroid offset over four
+    seeds x two phases is 0.24-0.82 of the panel's own half-extent,
+    BETTER-centred than master's own 0.75-0.85 over the same sweep; and a
+    ripple far off-window is CULLED, never wrapped (only while
+    `camera_follow > 0`, so the ring buffer's contents at 0 are master's
+    exactly).
+
+    The camera rides the particle-handoff native snapshot: the SoA holds
+    WORLD positions, so a successor that reset the window to zero would
+    inherit a shoal parked wherever the window had got to.
+
+    Evidence: `scripts/check_fish_camera.py` (byte-identity against
+    master's real module, what moves during each phase with
+    `camera_follow=0` as the control, the step cap across seeds and both
+    phase->roam transitions, and the sweep the 0.8 default was picked from)
+    and `tests/test_fish_camera.py`. Not in the fork source at
+    `/home/javi/ledfx-src` (SpotFX-authored mechanism).
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

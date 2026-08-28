@@ -179,6 +179,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'fish-camera-window',
+        title: 'Fish — Window Travel (the view moves through the water)',
+        keywords: 'fish camera window travel view pan world water ripple scroll stream charge lull school follow wake anchored',
+        body: [
+          'Window Travel makes the panel a WINDOW onto a larger body of water rather than the whole of it. Turn it up and, during a charge or a lull, the school really travels — through water that extends past the edges of the panel — and the view follows it. Turn it to 0 and you get exactly the effect as it was before this existed, down to the pixel.',
+          'What changes is which things move. Before this, a charge held the school still and pushed the water past it at exactly the swim speed: one motion, and the shoal itself pinned. Now the window has its OWN speed — slower than the fish, because it lags behind them on purpose — so the shoal visibly crosses the view AND the wake streams past it, at two different rates. Measured at his own scene state over a four-second charge: the school covers about 51px across the window at 0 and about 61px at the shipped 0.8, while the window itself pans at about 11px/s against a swim speed of 17.5px/s. A lull had no view motion at all before this; it now streams about 15px of water past in three and a half seconds.',
+          'Ripples are anchored to the WATER, not to the screen. A ring is dropped where the fish dropped it and stays there, so once the window moves on it scrolls away behind and is gone — it is never carried along with the view, and one that ends up far off-window is dropped rather than wrapping round.',
+          'The view only ever moves during a charge or a lull; the rest of the time it eases back to rest and ordinary roaming is centred exactly as it always was. It only ever FOLLOWS the fish it can currently see, its pan speed is capped at well under twice the swim speed, and a leash keeps the school from ever drifting out of the window — so a rush, a beat turn or a lunge can never whip the view, and the school is never lost. scripts/check_fish_camera.py is the measured version of every number here.',
+        ],
+      },
+      {
         id: 'radial-base-rotation',
         title: 'STAR / Radial — Speed vs Base Speed (they scale differently)',
         keywords: 'radial star spin speed base rotation quiet minimum floor revolutions per second rev/s silence parked audio reactive squared gain lows bass motor',

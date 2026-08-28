@@ -147,6 +147,56 @@ RIPPLE_MAX_BODY = 2.2   # … and a ripple never opens wider than this many
                         # to the ripple" — the wake is fish-sized, not
                         # panel-sized)
 
+# ── the camera window ───────────────────────────────────────────────────────
+# The panel is a WINDOW onto a larger body of water, not the whole of it.
+# Fish and ripples live in WORLD pixels; the camera is an origin that maps
+# world -> screen (screen = world - cam). AT REST THE MAPPING IS THE
+# IDENTITY, so every expression downstream reduces to exactly what it was
+# before this existed — which is what makes `camera_follow = 0` byte-
+# identical rather than merely close.
+#
+# What it replaces: the charge used to hold the school on screen by
+# SUBTRACTING the school's own velocity from every swimming fish (the
+# "clamp" below). That is a window locked rigidly to the shoal — the shoal
+# cannot move within it, and the water streams past at exactly the swim
+# speed, one motion, not two. `camera_follow` hands that travel back to the
+# fish and gives the window its own, slower, LAGGING speed instead: the
+# school crosses the panel AND the water streams past it, at two different
+# rates. The lull had no window motion at all before this, so its wake was
+# dead still on screen; it moves now too.
+#
+# The window moves ONLY during the charge and the lull. Everywhere else it
+# eases back to rest at the same bounded rate, and the home-ring tether
+# keeps ordinary roaming centred exactly as it always did.
+CAM_TAU = 0.55          # s: how hard the window pulls toward the school.
+                        # A LAG, on purpose — a window that tracked
+                        # perfectly would pin the school again and show
+                        # nothing, which is the state this replaces.
+CAM_VEL_TAU = 0.35      # s: the window's own acceleration ease, so a beat
+                        # turn cannot snap the view. The old clamp had
+                        # exactly that snap: the water changed direction
+                        # the instant `_school_hd` did.
+CAM_MAX_SPEED_X = 1.4   # the window can never pan faster than this
+                        # multiple of cruise. A rush fish runs at 2.2-3.3x
+                        # cruise and a lunge adds more again; neither can
+                        # whip the view.
+CAM_LEASH = 0.55        # ... and however far it lags, catching up becomes
+                        # the whole job once the school's centroid is this
+                        # far from the middle of the window — as a fraction
+                        # of the panel's SHORT half-axis, so the bound means
+                        # the same thing whichever way the school travels.
+                        # The correction is a position nudge folded into the
+                        # SAME per-frame step cap, so it can never teleport.
+CAM_REST_EPS = 1e-3     # px: below this, and not following, the camera IS
+                        # zero — the identity mapping is restored exactly,
+                        # never left sitting on a residue.
+RIPPLE_CULL_PAD = RIPPLE_KERNEL_R + 6   # px past the panel edge beyond
+                        # which a ripple cannot light a single pixel, so a
+                        # ripple the window has left far behind is DROPPED,
+                        # never wrapped. Only applied while the world window
+                        # is on (`camera_follow > 0`): at 0 the ripple ring
+                        # buffer must keep the exact contents master's did.
+
 # ── charge / lull / drop choreography ───────────────────────────────────────
 # SpotFX writes `phase` (instant) and ramps `phase_progress` 0->1 over the
 # event's ramp; see _phase_step.
@@ -196,6 +246,13 @@ class Fish2d(Twod, GradientEffect):
     arc. Physics runs in Orbits' normalized space (same x_offset/y_offset/
     radius_scale projection) but headings and body geometry are SCREEN-space,
     so the oval is never sheared by the panel's aspect.
+
+    Positions are WORLD coordinates and the panel is a WINDOW onto them
+    (`camera_follow`, added 2026-08-28): the render subtracts a camera
+    origin, and at rest — which is every moment outside a charge or a lull
+    — that mapping is the identity, so the effect is exactly what it was
+    before the window existed. See the camera-window block at the top of
+    this module for what it replaces and why.
 
     Mutual avoidance (`avoid_strength`, added 2026-08-28) is STEERING ONLY:
     it contributes one more term to the desired-heading vector sum below and
@@ -394,6 +451,11 @@ class Fish2d(Twod, GradientEffect):
                 default=0.95,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.3, max=1.4)),
             vol.Optional(
+                "camera_follow",
+                description="How far the view travels with the school during a charge or lull; 0 pins the window to the shoal",
+                default=0.8,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
                 "school_count",
                 description="Fish that swim in for the charge's school (ignores the population cap)",
                 default=12,
@@ -517,8 +579,19 @@ class Fish2d(Twod, GradientEffect):
         self._school_hd = 0.0
         self._school_on = False
         self._school_turn_t = 0.0
-        self._flow_px = 0.0   # camera-follow drift applied to ripples
+        # the water's own current, world px/s: whatever fraction of the
+        # school's travel the clamp still removes from the fish is expressed
+        # here instead, so the wake and the shoal never disagree about which
+        # way the water is going.
+        self._flow_px = 0.0
         self._flow_py = 0.0
+        # the window. World px; screen = world - cam. Zero is the identity.
+        self.cam_px = 0.0
+        self.cam_py = 0.0
+        self.cam_vx = 0.0
+        self.cam_vy = 0.0
+        self._cam_px_prev = 0.0
+        self._cam_py_prev = 0.0
 
         span = np.arange(-RIPPLE_KERNEL_R, RIPPLE_KERNEL_R + 1)
         kdx, kdy = np.meshgrid(span, span)
@@ -565,6 +638,7 @@ class Fish2d(Twod, GradientEffect):
         self.ripple_width = self._config["ripple_width"]
         self.avoid_strength = self._config["avoid_strength"]
         self.roam_scale = self._config["roam_scale"]
+        self.camera_follow = self._config["camera_follow"]
         self.school_count = self._config["school_count"]
         self.school_variation = self._config["school_variation"]
         self.turn_min_time = self._config["turn_min_time"]
@@ -657,6 +731,18 @@ class Fish2d(Twod, GradientEffect):
         .claude/skills/crystal-hex-grid/SKILL.md)."""
         return max(self.roam_scale / max(self.radius_scale, 1e-6), 1e-3)
 
+    @property
+    def cam_nx(self):
+        """The window's centre in NORMALIZED world units — the space every
+        fish position, the pond and the home ring live in. Zero when the
+        window is at rest, which is what makes each of those reduce to its
+        pre-camera form exactly."""
+        return self.cam_px / max(getattr(self, "sx", 1.0), 1e-6)
+
+    @property
+    def cam_ny(self):
+        return self.cam_py / max(getattr(self, "sy", 1.0), 1e-6)
+
     def _half_width_px(self, blob_size=None):
         """Rendered half-WIDTH. `blob_size` keeps meaning "how big is this
         creature" rather than "how wide": the width is divided by
@@ -740,20 +826,24 @@ class Fish2d(Twod, GradientEffect):
             return s
         rng = self._rng
         ang = rng.uniform(0.0, 2 * np.pi, k)
+        # the pond is wherever the WINDOW is: fish appear just off the view,
+        # not just off a fixed patch of a much larger sea.
+        cnx, cny = self.cam_nx, self.cam_ny
         if active:
             rr = rng.uniform(0.0, self.roam_bound * 0.9, k)
-            self.p_x[s] = rr * np.cos(ang)
-            self.p_y[s] = rr * np.sin(ang)
+            self.p_x[s] = cnx + rr * np.cos(ang)
+            self.p_y[s] = cny + rr * np.sin(ang)
             self.p_hd[s] = rng.uniform(0.0, 2 * np.pi, k)
             self.p_enter[s] = 1.0
         else:
             er = self.entry_radius
-            self.p_x[s] = er * np.cos(ang)
-            self.p_y[s] = er * np.sin(ang)
+            self.p_x[s] = cnx + er * np.cos(ang)
+            self.p_y[s] = cny + er * np.sin(ang)
             # head for the pond, with a little splay so arrivals aren't a
             # perfect radial star
             inward = np.arctan2(
-                -self.p_y[s] * self.sy, -self.p_x[s] * self.sx
+                (cny - self.p_y[s]) * self.sy,
+                (cnx - self.p_x[s]) * self.sx,
             )
             self.p_hd[s] = inward + rng.uniform(-0.5, 0.5, k)
         return s
@@ -809,8 +899,8 @@ class Fish2d(Twod, GradientEffect):
         if getattr(self, "r_width", None) is None or self.trail is None:
             return None
         n = self.n
-        px = self.cx + self.p_x[:n] * self.sx
-        py = self.cy + self.p_y[:n] * self.sy
+        px = self.cx + self.p_x[:n] * self.sx - self.cam_px
+        py = self.cy + self.p_y[:n] * self.sy - self.cam_py
         px = np.where(np.isfinite(px), px, self.cx)
         py = np.where(np.isfinite(py), py, self.cy)
         return {
@@ -829,6 +919,11 @@ class Fish2d(Twod, GradientEffect):
                 "n": n,
                 "t": self.t,
                 "roll_total": self.roll_total,
+                # the window travels with the fish: the SoA holds WORLD
+                # positions, so a successor that reset the camera to zero
+                # would inherit a shoal parked wherever the window had got
+                # to and never see it again.
+                "cam": (self.cam_px, self.cam_py, self.cam_vx, self.cam_vy),
                 "arrays": {
                     name: getattr(self, name)[:n].copy()
                     for name in _SOA_NAMES
@@ -890,6 +985,12 @@ class Fish2d(Twod, GradientEffect):
             self.n = k
             self.t = float(native.get("t", 0.0))
             self.roll_total = float(native.get("roll_total", 0.0))
+            cam = native.get("cam") or (0.0, 0.0, 0.0, 0.0)
+            (
+                self.cam_px, self.cam_py, self.cam_vx, self.cam_vy
+            ) = (float(v) for v in cam)
+            self._cam_px_prev = self.cam_px
+            self._cam_py_prev = self.cam_py
             self._booted = True
             return
         # cross-type: carry the predecessor's gradient and swirl sign so
@@ -910,8 +1011,12 @@ class Fish2d(Twod, GradientEffect):
             self._size_age = 0.0
         c_px = snap.get("center_px")
         if c_px:
-            ncx = (float(c_px[0]) - self.cx) / max(self.sx, 1e-6)
-            ncy = (float(c_px[1]) - self.cy) / max(self.sy, 1e-6)
+            ncx = (
+                float(c_px[0]) - self.cx + self.cam_px
+            ) / max(self.sx, 1e-6)
+            ncy = (
+                float(c_px[1]) - self.cy + self.cam_py
+            ) / max(self.sy, 1e-6)
         else:
             ncx = ncy = 0.0
         if snap["src"] == "radial":
@@ -943,8 +1048,12 @@ class Fish2d(Twod, GradientEffect):
             got = self.n - base
             if got > 0:
                 idx = order[:got]
-                ex = (snap["px"][idx] - self.cx) / max(self.sx, 1e-6)
-                ey = (snap["py"][idx] - self.cy) / max(self.sy, 1e-6)
+                ex = (
+                    snap["px"][idx] - self.cx + self.cam_px
+                ) / max(self.sx, 1e-6)
+                ey = (
+                    snap["py"][idx] - self.cy + self.cam_py
+                ) / max(self.sy, 1e-6)
                 self.p_x[s] = ex
                 self.p_y[s] = ey
                 self.p_x0[s] = ex
@@ -993,8 +1102,8 @@ class Fish2d(Twod, GradientEffect):
         rng = self._rng
         ang = rng.uniform(0.0, 2 * np.pi, k)
         jr = rng.uniform(0.0, 0.06, k)
-        self.p_x[s] = jr * np.cos(ang)
-        self.p_y[s] = jr * np.sin(ang)
+        self.p_x[s] = self.cam_nx + jr * np.cos(ang)
+        self.p_y[s] = self.cam_ny + jr * np.sin(ang)
         self.p_x0[s] = self.p_x[s]
         self.p_y0[s] = self.p_y[s]
         self.p_hd[s] = ang
@@ -1026,8 +1135,8 @@ class Fish2d(Twod, GradientEffect):
         # spread across the width behind the school
         lateral = rng.uniform(-1.0, 1.0, k) * self.roam_bound
         back = self.entry_radius + rng.uniform(0.0, 0.5, k)
-        self.p_x[s] = -np.cos(hd) * back - np.sin(hd) * lateral
-        self.p_y[s] = -np.sin(hd) * back + np.cos(hd) * lateral
+        self.p_x[s] = self.cam_nx - np.cos(hd) * back - np.sin(hd) * lateral
+        self.p_y[s] = self.cam_ny - np.sin(hd) * back + np.cos(hd) * lateral
         self.p_x0[s] = self.p_x[s]
         self.p_y0[s] = self.p_y[s]
         self.p_hd[s] = hd + self.p_var[s] * self.school_variation
@@ -1043,7 +1152,8 @@ class Fish2d(Twod, GradientEffect):
             ox = float(self.p_x[lone[0]])
             oy = float(self.p_y[lone[0]])
         else:
-            hd, ox, oy = self._mean_heading(), 0.0, 0.0
+            hd = self._mean_heading()
+            ox, oy = self.cam_nx, self.cam_ny
         base = self.n
         s = self._spawn(count, mode=3, nocap=True)
         k = self.n - base
@@ -1109,7 +1219,10 @@ class Fish2d(Twod, GradientEffect):
         live = np.flatnonzero(self.p_mode[:n] < 2)
         if live.size == 0:
             return
-        d = np.hypot(self.p_x[live] * self.sx, self.p_y[live] * self.sy)
+        d = np.hypot(
+            (self.p_x[live] - self.cam_nx) * self.sx,
+            (self.p_y[live] - self.cam_ny) * self.sy,
+        )
         order = live[np.argsort(d)]
         self.p_lone[order[0]] = 1
         # the lone fish is the one that STAYS, so it rejoins the ordinary
@@ -1258,7 +1371,8 @@ class Fish2d(Twod, GradientEffect):
         if keep:
             # the ones still inside the pond are the natural stayers
             d = np.hypot(
-                self.p_x[rushing] * self.sx, self.p_y[rushing] * self.sy
+                (self.p_x[rushing] - self.cam_nx) * self.sx,
+                (self.p_y[rushing] - self.cam_ny) * self.sy,
             )
             stay = rushing[np.argsort(d)][:keep]
             self.p_mode[stay] = 0
@@ -1292,7 +1406,9 @@ class Fish2d(Twod, GradientEffect):
             ))
             missing = self.particle_count - tracked
             if missing > 0:
-                self._spawn_center_burst(0.0, 0.0, missing)
+                self._spawn_center_burst(
+                    self.cam_nx, self.cam_ny, missing
+                )
             # the explosion: 2x more fish that DON'T stay — they bolt
             # straight off the panel during the boost window
             self._spawn_drop_ejecta(DROP_EJECTA_X * self.particle_count)
@@ -1310,6 +1426,117 @@ class Fish2d(Twod, GradientEffect):
                 validate=False,
                 fire_event=False,
             )
+
+    # ── the window ──────────────────────────────────────────────────────
+    def _step_camera(self, dt, cruise):
+        """Move the window toward the school, or ease it back to rest.
+
+        Three bounds hold structurally, not by tuning:
+
+        * it only ever FOLLOWS — the target is the school's own centroid, so
+          the window has no motion of its own to invent;
+        * its velocity is eased (`CAM_VEL_TAU`) and capped
+          (`CAM_MAX_SPEED_X` x cruise), so no beat turn, rush or lunge can
+          whip the view;
+        * the whole frame's movement, leash correction included, is capped
+          to that same speed x dt, so there is one number bounding a
+          per-frame step and nothing can teleport.
+
+        `camera_follow = 0` returns before touching anything: the window
+        never leaves the origin, and world == screen.
+        """
+        self._cam_px_prev = self.cam_px
+        self._cam_py_prev = self.cam_py
+        if self.camera_follow <= 0.0:
+            return
+        # ONLY the charge and the lull move the window.
+        active = self._phase in ("charge", "lull")
+        n = self.n
+        # The school is the fish that have ARRIVED. A charge spawns its
+        # shoal a whole entry radius behind the window and they swim in
+        # over a second or more; counting them would drag the target out
+        # to where they are, not to where the school is.
+        live = np.empty(0, dtype=np.int64)
+        if active:
+            live = np.flatnonzero(self.p_mode[:n] == 0)
+            if live.size:
+                # ... and, of those, THE ONES IT CAN SEE. A rush stayer
+                # converted from mode 3 lands wherever it had got to, a
+                # whole entry radius off-window; letting it into the mean
+                # would send the window off after it. Following only what
+                # is on the panel also makes "the school is never lost"
+                # structural: the target is inside the window by
+                # construction, so the lag is the only thing that can put
+                # the school off-centre, and the lag is capped.
+                seen = live[
+                    (np.abs(self.p_x[live] * self.sx - self.cam_px)
+                     <= (self.r_width - 1) / 2.0)
+                    & (np.abs(self.p_y[live] * self.sy - self.cam_py)
+                       <= (self.r_height - 1) / 2.0)
+                ]
+                if seen.size:
+                    live = seen
+            else:
+                live = np.flatnonzero(self.p_mode[:n] < 2)
+        if active and live.size:
+            tx = float(np.mean(self.p_x[live])) * self.sx
+            ty = float(np.mean(self.p_y[live])) * self.sy
+        elif active:
+            tx, ty = self.cam_px, self.cam_py     # nothing to follow: hold
+        else:
+            tx = ty = 0.0                          # ease home
+
+        cap = max(CAM_MAX_SPEED_X * cruise, 1e-3)
+        want_vx = (tx - self.cam_px) / max(CAM_TAU, 1e-3)
+        want_vy = (ty - self.cam_py) / max(CAM_TAU, 1e-3)
+        sp = float(np.hypot(want_vx, want_vy))
+        if sp > cap:
+            want_vx *= cap / sp
+            want_vy *= cap / sp
+        ease = min(1.0, dt / max(CAM_VEL_TAU, 1e-3))
+        self.cam_vx += (want_vx - self.cam_vx) * ease
+        self.cam_vy += (want_vy - self.cam_vy) * ease
+        sp = float(np.hypot(self.cam_vx, self.cam_vy))
+        if sp > cap:
+            self.cam_vx *= cap / sp
+            self.cam_vy *= cap / sp
+        cam_x = self.cam_px + self.cam_vx * dt
+        cam_y = self.cam_py + self.cam_vy * dt
+
+        # the leash: the window may lag as far as it likes, but it may never
+        # LOSE the school. This only ever reduces the error, and it is capped
+        # with everything else immediately below.
+        if active and live.size:
+            # radial, against the panel's SHORT half-axis, so the bound
+            # means the same thing whichever way the school travels
+            leash = CAM_LEASH * min(
+                (self.r_width - 1) / 2.0, (self.r_height - 1) / 2.0
+            )
+            ox, oy = tx - cam_x, ty - cam_y
+            off = float(np.hypot(ox, oy))
+            if off > leash:
+                k = (off - leash) / off
+                cam_x += ox * k
+                cam_y += oy * k
+
+        step_cap = cap * dt
+        dxp = cam_x - self.cam_px
+        dyp = cam_y - self.cam_py
+        step = float(np.hypot(dxp, dyp))
+        if step > step_cap:
+            k = step_cap / step
+            cam_x = self.cam_px + dxp * k
+            cam_y = self.cam_py + dyp * k
+        self.cam_px = float(cam_x)
+        self.cam_py = float(cam_y)
+        if (
+            not active
+            and abs(self.cam_px) < CAM_REST_EPS
+            and abs(self.cam_py) < CAM_REST_EPS
+        ):
+            # back to rest EXACTLY, never on a residue
+            self.cam_px = self.cam_py = 0.0
+            self.cam_vx = self.cam_vy = 0.0
 
     # ── render primitives ───────────────────────────────────────────────
     def _splat_many(self, buf, xs, ys, rgb, sizes):
@@ -1366,8 +1593,11 @@ class Fish2d(Twod, GradientEffect):
             return
         rr = self.r_r[:m][live]
         amp = amp[live]
-        cx = self.r_x[:m][live]
-        cy = self.r_y[:m][live]
+        # ripples are anchored to the WATER: their stored position is world
+        # px and the window is subtracted here, so a moving window streams
+        # them past and away instead of carrying them along with it.
+        cx = self.r_x[:m][live] - self.cam_px
+        cy = self.r_y[:m][live] - self.cam_py
         grad = self.r_grad[:m][live]
         width = max(float(self.ripple_width), 0.5)
         reach = float(np.max(rr)) + width
@@ -1416,6 +1646,17 @@ class Fish2d(Twod, GradientEffect):
         alive = (self.r_age[:m] < self.r_life[:m]) & (
             self.r_r[:m] <= RIPPLE_KERNEL_R + self.ripple_width
         )
+        if self.camera_follow > 0.0:
+            # a ripple the window has left far behind cannot light a pixel;
+            # drop it rather than carrying it (and never wrap it around).
+            sx_ = self.r_x[:m] - self.cam_px
+            sy_ = self.r_y[:m] - self.cam_py
+            alive &= (
+                (sx_ > -RIPPLE_CULL_PAD)
+                & (sx_ < self.r_width + RIPPLE_CULL_PAD)
+                & (sy_ > -RIPPLE_CULL_PAD)
+                & (sy_ < self.r_height + RIPPLE_CULL_PAD)
+            )
         count = int(np.count_nonzero(alive))
         if count != m:
             for arr in self._ripple_soa:
@@ -1516,8 +1757,8 @@ class Fish2d(Twod, GradientEffect):
         k = len(idx)
         if k == 0:
             return
-        px = self.cx + x * self.sx
-        py = self.cy + y * self.sy
+        px = self.cx + x * self.sx - self.cam_px
+        py = self.cy + y * self.sy - self.cam_py
         length = half_w * 2.0 * self.body_aspect
         cos_h = np.cos(hd)
         sin_h = np.sin(hd)
@@ -1539,10 +1780,17 @@ class Fish2d(Twod, GradientEffect):
         rgb = self.get_gradient_color_vectorized1d(grad).astype(np.float32)
         # a substep smear along the frame's own travel keeps fast fish
         # continuous instead of dotted
-        dx = px - np.where(np.isfinite(self.p_x0[idx]),
-                           self.cx + self.p_x0[idx] * self.sx, px)
-        dy = py - np.where(np.isfinite(self.p_y0[idx]),
-                           self.cy + self.p_y0[idx] * self.sy, py)
+        # ... measured on SCREEN, so the smear follows the window's own
+        # travel too: a fish holding station in the water still streaks when
+        # the view pans past it.
+        dx = px - np.where(
+            np.isfinite(self.p_x0[idx]),
+            self.cx + self.p_x0[idx] * self.sx - self._cam_px_prev, px,
+        )
+        dy = py - np.where(
+            np.isfinite(self.p_y0[idx]),
+            self.cy + self.p_y0[idx] * self.sy - self._cam_py_prev, py,
+        )
         pts_x = []
         pts_y = []
         pts_rgb = []
@@ -1641,8 +1889,8 @@ class Fish2d(Twod, GradientEffect):
                 n0 = self.n
                 t_px = self.r_width * float(inc._config.get("x_offset", 0.5))
                 t_py = self.r_height * float(inc._config.get("y_offset", 0.5))
-                tx = (t_px - self.cx) / max(self.sx, 1e-6)
-                ty = (t_py - self.cy) / max(self.sy, 1e-6)
+                tx = (t_px - self.cx + self.cam_px) / max(self.sx, 1e-6)
+                ty = (t_py - self.cy + self.cam_py) / max(self.sy, 1e-6)
                 px = np.where(np.isfinite(self.p_x[:n0]), self.p_x[:n0], 0.0)
                 py = np.where(np.isfinite(self.p_y[:n0]), self.p_y[:n0], 0.0)
                 self._collapse = {
@@ -1759,6 +2007,14 @@ class Fish2d(Twod, GradientEffect):
         desired_x += np.cos(wander) * w_wander
         desired_y += np.sin(wander) * w_wander
 
+        # Everything below that names the pond, the home ring or "inward"
+        # is a fact about the VISIBLE water, so it is measured from the
+        # window's own centre. At rest cam_nx/cam_ny are zero and each of
+        # these is exactly the expression it was before the window existed.
+        cnx, cny = self.cam_nx, self.cam_ny
+        rel_x = self.p_x[:n] - cnx
+        rel_y = self.p_y[:n] - cny
+
         # home anchors: a gentle pull back toward each fish's own patch
         ring_frac = self.p_slot_frac[:n]
         if self.tether_scatter > 0.0:
@@ -1767,8 +2023,8 @@ class Fish2d(Twod, GradientEffect):
             ) % 1.0 - 0.5
             ring_frac = ring_frac + scatter_diff * self.tether_scatter
         ring_ang = ring_frac * 2 * np.pi
-        hx = self.horizon_scale * np.cos(ring_ang)
-        hy = self.horizon_scale * np.sin(ring_ang)
+        hx = cnx + self.horizon_scale * np.cos(ring_ang)
+        hy = cny + self.horizon_scale * np.sin(ring_ang)
         to_home = np.arctan2(
             (hy - self.p_y[:n]) * self.sy, (hx - self.p_x[:n]) * self.sx
         )
@@ -1795,8 +2051,8 @@ class Fish2d(Twod, GradientEffect):
         dxn = np.cos(hd) * spd / self.sx
         dyn = np.sin(hd) * spd / self.sy
         aa = dxn * dxn + dyn * dyn
-        bb = self.p_x[:n] * dxn + self.p_y[:n] * dyn
-        cc = self.p_x[:n] ** 2 + self.p_y[:n] ** 2 - bound * bound
+        bb = rel_x * dxn + rel_y * dyn
+        cc = rel_x ** 2 + rel_y ** 2 - bound * bound
         disc = np.maximum(bb * bb - aa * cc, 0.0)
         t_hit = np.where(
             cc >= 0.0, 0.0, (-bb + np.sqrt(disc)) / np.maximum(aa, 1e-12)
@@ -1808,9 +2064,7 @@ class Fish2d(Twod, GradientEffect):
             0.0, 1.0,
         ) * BOUND_W
         w_bound = np.where(swimming, w_bound, 0.0)
-        inward = np.arctan2(
-            -self.p_y[:n] * self.sy, -self.p_x[:n] * self.sx
-        )
+        inward = np.arctan2(-rel_y * self.sy, -rel_x * self.sx)
         desired_x += np.cos(inward) * w_bound
         desired_y += np.sin(inward) * w_bound
 
@@ -1913,10 +2167,20 @@ class Fish2d(Twod, GradientEffect):
         vy_px = np.sin(hd) * self.p_spd[:n]
         self._flow_px = 0.0
         self._flow_py = 0.0
-        if self._school_on:
-            # camera-follow: we track the school perfectly, so the shoal
-            # holds station and the WATER streams past instead
-            sch = np.cos(self._school_hd) * cruise, np.sin(self._school_hd) * cruise
+        # THE CLAMP, and what `camera_follow` does to it. Before the window
+        # existed this removed the school's whole travel from every swimming
+        # fish and pushed the same amount through the water instead: the
+        # shoal was pinned and the wake streamed at exactly the swim speed.
+        # `camera_follow` hands that travel back — the fish keep this
+        # fraction of it as REAL world travel and the window follows them
+        # for it, at its own lagging pace. At 0 the clamp is whole and the
+        # window never moves, which is master, expression for expression.
+        hold = float(np.clip(1.0 - self.camera_follow, 0.0, 1.0))
+        if self._school_on and hold > 0.0:
+            sch = (
+                np.cos(self._school_hd) * cruise * hold,
+                np.sin(self._school_hd) * cruise * hold,
+            )
             vx_px = np.where(swimming, vx_px - sch[0], vx_px)
             vy_px = np.where(swimming, vy_px - sch[1], vy_px)
             self._flow_px = -sch[0]
@@ -1925,11 +2189,16 @@ class Fish2d(Twod, GradientEffect):
         self.p_y[:n] += vy_px * dt / self.sy
 
         if self._center_pull > 0.0 and lone.any():
+            # his words: the lone fish stays "in the centre of VIEW" — so
+            # the pull is toward the window's centre, which is the same
+            # world point it always was whenever the window is at rest.
             pull = np.float32(min(self._center_pull * dt, 1.0))
-            self.p_x[:n] = np.where(lone, self.p_x[:n] * (1.0 - pull),
-                                    self.p_x[:n])
-            self.p_y[:n] = np.where(lone, self.p_y[:n] * (1.0 - pull),
-                                    self.p_y[:n])
+            self.p_x[:n] = np.where(
+                lone, cnx + (self.p_x[:n] - cnx) * (1.0 - pull), self.p_x[:n]
+            )
+            self.p_y[:n] = np.where(
+                lone, cny + (self.p_y[:n] - cny) * (1.0 - pull), self.p_y[:n]
+            )
 
         entering = mode == 1
         if entering.any():
@@ -1939,7 +2208,9 @@ class Fish2d(Twod, GradientEffect):
                 + dt * self.p_erate[:n] / max(self.enter_time, 0.05),
                 self.p_enter[:n],
             )
-            inside = np.hypot(self.p_x[:n], self.p_y[:n]) <= bound
+            inside = np.hypot(
+                self.p_x[:n] - cnx, self.p_y[:n] - cny
+            ) <= bound
             arrived = np.flatnonzero(
                 entering & inside & (self.p_enter[:n] >= 1.0)
             )
@@ -1948,6 +2219,9 @@ class Fish2d(Twod, GradientEffect):
         leaving = mode == 2
         if leaving.any():
             self.p_leave[:n] += np.where(leaving, dt, 0.0)
+
+        # the window moves last, once the water it is looking at has moved
+        self._step_camera(dt, cruise)
 
         # ── flap ────────────────────────────────────────────────────────
         speed_norm = np.clip(self.p_spd[:n] / max(cruise, 1e-3), 0.0, 3.0)
@@ -2087,8 +2361,8 @@ class Fish2d(Twod, GradientEffect):
         # retire departed fish once fully off-panel or faded
         gone = leaving | rushing
         if gone.any():
-            px = self.cx + self.p_x[:n] * self.sx
-            py = self.cy + self.p_y[:n] * self.sy
+            px = self.cx + self.p_x[:n] * self.sx - self.cam_px
+            py = self.cy + self.p_y[:n] * self.sy - self.cam_py
             off = (
                 (np.abs(px - self.cx) > (self.r_width + 12))
                 | (np.abs(py - self.cy) > (self.r_height + 12))
