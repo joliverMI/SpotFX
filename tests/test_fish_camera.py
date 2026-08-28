@@ -5,10 +5,13 @@ Matrix host at his crystal-mapper's 72x37 shape, audio silenced).
 scripts/check_fish_camera.py is the measured, printed version of the same
 runs — this file pins the properties the build has to hold:
 
-  * `camera_follow = 0` renders what MASTER renders, bit for bit. Not this
-    file with a term switched off — master's own `fx/effects/fish.py`, read
-    out of git and loaded as a second registered effect, so the control is
-    the real predecessor.
+  * `camera_follow = 0` renders what the PRE-CAMERA BASELINE renders, bit
+    for bit. Not this file with a term switched off — the pinned
+    predecessor commit's own `fx/effects/fish.py`, read out of git and
+    loaded as a second registered effect, so the control is the real
+    predecessor. That ref is PINNED and IMPORTED, never a moving branch:
+    see `_load_master` below for how a moving ref silently retired this
+    proof once, and why a skip was the wrong answer to it.
   * the window at rest is the identity mapping, and it is at rest whenever
     the phase is not a charge or a lull;
   * ripples are anchored to the WATER: a moving window streams them past
@@ -100,25 +103,66 @@ async def _close(room):
     await room.host.shutdown()
 
 
-# ── master, loaded as a second effect ───────────────────────────────────
+# ── the pre-camera baseline, loaded as a second effect ─────────────────
+# WHY THIS IS PINNED, AND WHY IT IS NOT A SKIP (Admiral's ruling, recorded
+# here where the pin lives, not only in the PR):
+#
+#   This loader used to read the MOVING ref `master` and, on finding the
+#   camera already there, call `pytest.skip("nothing to compare")`. That
+#   named the true predecessor only while the camera lived on a feature
+#   branch. Once it merged, the guard fired on EVERY run, forever — the
+#   suite read "4 skipped, 0 failed", nobody looked twice, and the
+#   guarantee that no edit can leak camera terms into the knob-zero path
+#   was simply gone while everything looked healthy.
+#
+#   A FALSE ALARM IS LOUD AND GETS FIXED; A PERMANENT SKIP IS SILENT AND
+#   READS AS GREEN. The skip was the safer-LOOKING choice and the worse
+#   outcome. The instinct was reasonable — no blame — but the shape is
+#   recorded so it is not repeated: when an instrument's reference moves
+#   out from under it, PIN the reference; never silence the instrument.
+#
+#   The pin itself is IMPORTED from scripts/check_fish_camera.py's own
+#   BASELINE_REF — never a second literal of the commit hash. One
+#   baseline, one place; two copies drift apart and rebuild the same fault
+#   in a new shape.
+def _baseline_ref():
+    """The pinned pre-camera commit, read from the check script itself."""
+    path = REPO / "scripts" / "check_fish_camera.py"
+    spec = importlib.util.spec_from_file_location("_fish_camera_check", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.BASELINE_REF
+
+
 def _load_master(name="fish_master_probe"):
-    """Register master's own fish.py beside the current one.
+    """Register the PINNED pre-camera fish.py beside the current one.
 
     An Effect subclass registers itself under its module's last name
-    segment, so importing master's file under a different module name puts
-    it in the registry next to `fish` and `create(type=...)` reaches it.
+    segment, so importing the baseline file under a different module name
+    puts it in the registry next to `fish` and `create(type=...)` reaches
+    it.
     """
     if name in sys.modules:
         return name
+    ref = _baseline_ref()
     try:
         src = subprocess.run(
-            ["git", "show", "master:fx/effects/fish.py"],
+            ["git", "show", f"{ref}:fx/effects/fish.py"],
             cwd=REPO, capture_output=True, text=True, check=True, timeout=60,
         ).stdout
     except Exception as exc:                        # noqa: BLE001
-        pytest.skip(f"cannot read master's fish.py out of git: {exc}")
-    if "camera_follow" in src:
-        pytest.skip("master already carries the window; nothing to compare")
+        # A stated skip for a genuinely unavailable input (offline, shallow
+        # clone) is fine — unlike the silent one this replaced, it names a
+        # missing input rather than retiring the proof.
+        pytest.skip(f"cannot read {ref}:fx/effects/fish.py out of git: {exc}")
+    # The baseline is PRE-camera by definition. If the window is in it, the
+    # pin is wrong or the imported constant drifted — that is a loud
+    # FAILURE, never a skip.
+    assert "camera_follow" not in src, (
+        f"the pinned baseline {ref} already carries `camera_follow` — the "
+        "pin in scripts/check_fish_camera.py::BASELINE_REF is wrong; this "
+        "proof must fail loudly rather than skip itself into silence"
+    )
     path = Path(tempfile.mkdtemp()) / f"{name}.py"
     path.write_text(src)
     spec = importlib.util.spec_from_file_location(name, path)
@@ -156,12 +200,13 @@ async def _frames(tmp_path, tag, cfg, seed, effect_type):
     return np.array(seq)
 
 
-# ── 1. THE NEGATIVE CONTROL: camera_follow 0 IS master ──────────────────
+# ── 1. THE NEGATIVE CONTROL: camera_follow 0 IS THE BASELINE ───────────
 @pytest.mark.parametrize("seed", (3, 5, 11, 17))
 def test_camera_follow_zero_is_master_bit_for_bit(tmp_path, seed):
     """The window at rest is the identity mapping, so at 0 every expression
-    it touches must reduce to the one it replaced. Proven against master's
-    OWN module — not this file with a constant zeroed — over the whole arc.
+    it touches must reduce to the one it replaced. Proven against the
+    PINNED pre-camera commit's OWN module — not this file with a constant
+    zeroed, and not a moving branch ref — over the whole arc.
     """
     master = _load_master()
 
@@ -173,7 +218,8 @@ def test_camera_follow_zero_is_master_bit_for_bit(tmp_path, seed):
                           seed, "fish")
         assert a.shape == b.shape and a.size, (a.shape, b.shape)
         assert np.array_equal(a, b), (
-            "camera_follow=0 must render exactly what master rendered: "
+            "camera_follow=0 must render exactly what the pre-camera "
+            "baseline rendered: "
             f"{int(np.count_nonzero((a != b).any(axis=(1, 2))))} of "
             f"{a.shape[0]} frames differ"
         )
