@@ -62,32 +62,46 @@ def test_room_controls_store_round_trips(tmp_path):
 
     assert rc.load_room_controls() == rc.RoomControlState(), \
         "no file yet — defaults (multiplier 1.0, no room dimming)"
-    state = rc.RoomControlState(brightness_multiplier=0.6, ambient_mode="always",
+    state = rc.RoomControlState(brightness_multiplier=0.6, ambient_enabled=True,
                                 ambient_color="#ff8800", global_transition_ms=1200)
     rc.save_room_controls(state)
     assert rc.load_room_controls() == state
 
 
-def test_ambient_enabled_migrates_to_ambient_mode(tmp_path, monkeypatch):
-    """One-way migration from the pre-2026-08-15 ambient_enabled bool (§52's
-    own field, never merged to master under that name) to the three-setting
-    ambient_mode — True maps to "auto" (what True was built and proven to
-    mean throughout §52's lifetime), False to "off"."""
+def test_ambient_mode_migrates_to_the_binary_toggle(tmp_path, monkeypatch):
+    """PROOF BAR (d): each of the three retired ambient_mode values loads to
+    the specified (ambient_enabled, ambient_on_music_pause) pair, and every
+    other key in the file survives byte-for-byte.
+
+    "always" is the only mode that held the room regardless of playback, so
+    it is the only one that maps to enabled=True. "auto" maps to
+    enabled=False — its automatic half now lives in ambient_on_music_pause,
+    which ships False on EVERY migration by his explicit word ("set it to
+    false for now")."""
     import json
     from spectra import config as scfg
     from spectra.services import room_controls as rc
     path = tmp_path / "room_controls.json"
     monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", path)
 
-    path.write_text(json.dumps({"ambient_enabled": True, "ambient_color": "#f5da8c"}))
-    assert rc.load_room_controls().ambient_mode == "auto"
+    others = {"ambient_color": "#f5da8c", "ambient_color_dark": "#8b7e53",
+              "brightness_multiplier": 0.6, "display_mode": "dark",
+              "global_transition_ms": 1200, "scene_change_mode": "triggers_only",
+              "ambient_hue_group_ids": ["dining-hues"], "av_sync_lead_ms": -40}
+    for mode, expected_enabled in (("always", True), ("off", False), ("auto", False)):
+        path.write_text(json.dumps({"ambient_mode": mode, **others}))
+        loaded = rc.load_room_controls()
+        assert loaded.ambient_enabled is expected_enabled, mode
+        assert loaded.ambient_on_music_pause is False, (
+            f"{mode!r} must ship the music-pause switch OFF — his explicit "
+            "'set it to false for now', including for 'auto'")
+        for key, value in others.items():
+            assert getattr(loaded, key) == value, (mode, key)
 
-    path.write_text(json.dumps({"ambient_enabled": False}))
-    assert rc.load_room_controls().ambient_mode == "off"
-
-    # A file already on the new field is never touched by the migration.
-    path.write_text(json.dumps({"ambient_mode": "always"}))
-    assert rc.load_room_controls().ambient_mode == "always"
+    # A file already on the new fields is never touched by the migration.
+    path.write_text(json.dumps({"ambient_enabled": True, "ambient_on_music_pause": True}))
+    loaded = rc.load_room_controls()
+    assert loaded.ambient_enabled is True and loaded.ambient_on_music_pause is True
 
 
 def test_effective_ambient_color_defers_to_normal_until_dark_colour_authored():
@@ -141,7 +155,7 @@ def test_old_room_controls_file_without_dark_colour_loads_with_default_none(tmp_
     path = tmp_path / "room_controls.json"
     monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", path)
 
-    path.write_text(json.dumps({"ambient_mode": "always", "ambient_color": "#f5da8c"}))
+    path.write_text(json.dumps({"ambient_enabled": True, "ambient_color": "#f5da8c"}))
     loaded = rc.load_room_controls()
     assert loaded.ambient_color_dark is None
     assert rc.effective_ambient_color(loaded) == "#f5da8c"
@@ -155,12 +169,12 @@ def test_reconcile_ambient_if_changed_fires_on_dark_colour_edit_while_dark(monke
 
     calls = []
 
-    async def fake_reconcile_now():
+    async def fake_reconcile_now(**_kw):
         calls.append(True)
         return {"status": "on"}
     monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
 
-    previous = rc.RoomControlState(ambient_mode="always", display_mode="dark",
+    previous = rc.RoomControlState(ambient_enabled=True, display_mode="dark",
                                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     new_state = previous.model_copy(update={"ambient_color_dark": "#220044"})
     result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
@@ -175,12 +189,12 @@ def test_reconcile_ambient_if_changed_ignores_dark_colour_edit_while_not_dark(mo
 
     calls = []
 
-    async def fake_reconcile_now():
+    async def fake_reconcile_now(**_kw):
         calls.append(True)
         return {"status": "on"}
     monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
 
-    previous = rc.RoomControlState(ambient_mode="always", display_mode="default",
+    previous = rc.RoomControlState(ambient_enabled=True, display_mode="default",
                                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     new_state = previous.model_copy(update={"ambient_color_dark": "#220044"})
     result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
@@ -191,10 +205,10 @@ def test_reconcile_ambient_if_changed_ignores_dark_colour_edit_while_not_dark(mo
 def test_reconcile_ambient_if_changed_fires_when_dark_mode_toggles_while_holding():
     """Toggling dark mode itself, with distinct colours authored, changes
     the effective held colour — reconcile_ambient_if_changed must catch
-    this even though ambient_mode/ambient_color themselves didn't move."""
+    this even though the ambient toggle/colour themselves didn't move."""
     from spectra.services import room_controls as rc
 
-    previous = rc.RoomControlState(ambient_mode="always", display_mode="default",
+    previous = rc.RoomControlState(ambient_enabled=True, display_mode="default",
                                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     new_state = previous.model_copy(update={"display_mode": "dark"})
     assert rc.effective_ambient_color(previous) != rc.effective_ambient_color(new_state)
@@ -202,7 +216,7 @@ def test_reconcile_ambient_if_changed_fires_when_dark_mode_toggles_while_holding
     # Same field values, but the dark colour has never been authored (still
     # None) — toggling dark mode changes nothing effective, so this must
     # NOT fire, matching "make them the same for now."
-    same_previous = rc.RoomControlState(ambient_mode="always", display_mode="default",
+    same_previous = rc.RoomControlState(ambient_enabled=True, display_mode="default",
                                         ambient_color="#f5da8c")
     same_new = same_previous.model_copy(update={"display_mode": "dark"})
     assert rc.effective_ambient_color(same_previous) == rc.effective_ambient_color(same_new)
@@ -493,12 +507,12 @@ def test_reconcile_ambient_if_changed_fires_on_group_selection_edit_while_holdin
 
     calls = []
 
-    async def fake_reconcile_now():
+    async def fake_reconcile_now(**_kw):
         calls.append(True)
         return {"status": "on"}
     monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
 
-    previous = rc.RoomControlState(ambient_mode="always", ambient_color="#f5da8c",
+    previous = rc.RoomControlState(ambient_enabled=True, ambient_color="#f5da8c",
                                    ambient_hue_group_ids=[])
     new_state = previous.model_copy(update={"ambient_hue_group_ids": ["hue-lights"]})
     result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
@@ -513,12 +527,12 @@ def test_reconcile_ambient_if_changed_ignores_group_reorder(monkeypatch):
 
     calls = []
 
-    async def fake_reconcile_now():
+    async def fake_reconcile_now(**_kw):
         calls.append(True)
         return {"status": "on"}
     monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
 
-    previous = rc.RoomControlState(ambient_mode="always", ambient_color="#f5da8c",
+    previous = rc.RoomControlState(ambient_enabled=True, ambient_color="#f5da8c",
                                    ambient_hue_group_ids=["hue-lights", "dining-hues"])
     new_state = previous.model_copy(update={"ambient_hue_group_ids": ["dining-hues", "hue-lights"]})
     result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
@@ -527,18 +541,18 @@ def test_reconcile_ambient_if_changed_ignores_group_reorder(monkeypatch):
 
 
 def test_reconcile_ambient_if_changed_ignores_group_edit_while_off(monkeypatch):
-    """Editing the selection while ambient_mode is 'off' changes nothing
+    """Editing the selection while Ambient is off changes nothing
     currently held — no reconcile should fire."""
     from spectra.services import room_controls as rc
 
     calls = []
 
-    async def fake_reconcile_now():
+    async def fake_reconcile_now(**_kw):
         calls.append(True)
         return {"status": "off"}
     monkeypatch.setattr("spectra.services.ambient_music_gate.reconcile_now", fake_reconcile_now)
 
-    previous = rc.RoomControlState(ambient_mode="off", ambient_hue_group_ids=[])
+    previous = rc.RoomControlState(ambient_enabled=False, ambient_hue_group_ids=[])
     new_state = previous.model_copy(update={"ambient_hue_group_ids": ["hue-lights"]})
     result = _run(rc.reconcile_ambient_if_changed(previous, new_state))
     assert result is None

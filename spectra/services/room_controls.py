@@ -48,45 +48,55 @@ legacy picks: decision-legacy-retirement-picks.md):
                           scene_compiler for scene-fire writes), never the
                           conductor's own carried baseline: the authored
                           "look" stays intact, only the OUTPUT is scaled.
-  ambient_mode/_color     the legacy ledfx_ambient / ledfx_ambient_color
-                          action equivalents, extended 2026-08-15 to the
-                          Admiral's own three settings (his words: "it needs
-                          to be a third setting where ambient mode can still
-                          come into play when the music is still playing"):
-                            "off"    — Ambient never holds. The whole room
-                                       performs, Hue included. Today's
-                                       unmodified default.
-                            "always" — Hue is held lit at ambient_color
-                                       UNCONDITIONALLY, music playing or
-                                       not — his own request, not the
-                                       precedence bug: "my Hue Lights are
-                                       lit and bright but the other lights
-                                       are still running the show." Every
-                                       non-Hue device is architecturally
-                                       untouched by Ambient regardless
-                                       (services/ambient.py's device filter
-                                       is Hue-only), so this mode composes
-                                       for free with scene selection — no
-                                       code path in selection_kernel.py/
+  ambient_enabled         the legacy ledfx_ambient action equivalent, and
+  ambient_on_music_pause  since 2026-08-30 A PLAIN BINARY TOGGLE again (his
+                          own ruling: "let's only ever toggle between Off
+                          and On"), replacing the three-value ambient_mode
+                          ("off"/"always"/"auto") this surface carried from
+                          2026-08-15 to 2026-08-30:
+                            ambient_enabled=True  — Hue is held lit at the
+                                       ambient colour, music playing or not
+                                       (the old "always"). Every non-Hue
+                                       device is architecturally untouched
+                                       by Ambient regardless (services/
+                                       ambient.py's device filter is
+                                       Hue-only), so this composes for free
+                                       with scene selection — no code path
+                                       in selection_kernel.py/
                                        scene_sequencer.py/trigger_engine.py
                                        even references ambient state
-                                       (grep-confirmed), so holding Hue can
-                                       never double-penalise or starve the
-                                       show elsewhere.
-                            "auto"   — the 2026-08-15 music-precedence fix
-                                       (§52): holds only when playback is
-                                       CONFIRMED not-playing, releases the
-                                       instant it's confirmed playing,
-                                       carries an unresolved read forward
-                                       rather than guessing either way.
+                                       (grep-confirmed).
+                            ambient_enabled=False — Ambient does not hold,
+                                       UNLESS ambient_on_music_pause is on.
+                            ambient_on_music_pause — the old "auto"
+                                       BEHAVIOUR, preserved in code and
+                                       gated behind its own setting rather
+                                       than deleted: while Ambient is off, a
+                                       CONFIRMED not-playing read turns the
+                                       hold on and a confirmed playing read
+                                       releases it; an unresolved read never
+                                       actively changes anything (see
+                                       ambient_music_gate._desired_hold).
+                                       SHIPS FALSE — his explicit "set it to
+                                       false for now" — in EVERY migration
+                                       case, including from "auto", so the
+                                       automatic behaviour is disabled on
+                                       deploy and he turns it back on
+                                       deliberately if he wants it.
+                          Migration (load_room_controls below): "always" ->
+                          enabled True, "off"/"auto" -> enabled False, with
+                          ambient_on_music_pause False either way. Nothing
+                          else in the stored file is touched.
                           This state is the durable record; the live
                           takeover itself (freezing the room's Hue devices,
                           holding them at ambient_color over direct bridge
                           REST) is driven by services/ambient.py via
-                          services/ambient_music_gate.py (the mode
-                          precedence gate), reconciled from
-                          api/room_controls.py's PUT handler whenever these
-                          fields change.
+                          services/ambient_music_gate.py — which since the
+                          same rework owns the CANCELLABLE transition task,
+                          its generation counter, and the frozen intent/
+                          phase contract River and Home Assistant read.
+                          Reconciled from api/room_controls.py's PUT
+                          handler whenever these fields change.
   ambient_brightness_note Brightness is DERIVED from whichever hex is in
                           effect (ambient_color or ambient_color_dark, via
                           effective_ambient_color below) — not a stored
@@ -140,7 +150,7 @@ legacy picks: decision-legacy-retirement-picks.md):
                           different dark colour; see effective_ambient_color
                           below, the one place this fallback is resolved.
                           display_mode == "dark" (above) is the only switch
-                          between the two — ambient_mode/_color themselves
+                          between the two — the ambient toggle/colour
                           don't change meaning, "normal ambient colour"
                           still covers both his non-dark ("default"/hybrid)
                           and "light" cases.
@@ -408,7 +418,7 @@ legacy picks: decision-legacy-retirement-picks.md):
 
 Ambient is wired live (services/ambient.py) — the Dinner-Party half of the
 room-MODES gap (gap report §3 row 5) is a separate, still-unbuilt mode;
-ambient_mode/_color here are Ambient's alone.
+ambient_enabled/_color here are Ambient's alone.
 
 Storage: storage/spectra/room_controls.json — same atomic tmp+replace
 discipline as color_journey.py's room_color.json.
@@ -464,7 +474,6 @@ from pydantic import BaseModel, Field, field_validator
 from spectra import config
 
 SceneChangeMode = Literal["transitions", "analysed", "triggers_only", "full"]
-AmbientMode = Literal["off", "always", "auto"]
 DisplayMode = Literal["default", "dark", "light"]
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -490,7 +499,13 @@ class RoomControlState(BaseModel):
     dark_light_shield_categories: list[str] = Field(default_factory=lambda: ["Singles"])
     dark_light_shield_virtuals: list[str] = Field(default_factory=list)
     brightness_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
-    ambient_mode: AmbientMode = "off"
+    # THE AMBIENT TOGGLE — binary since 2026-08-30 (his ruling, see the
+    # module docstring's ambient_enabled/ambient_on_music_pause entry).
+    # `ambient_enabled` is the whole toggle; `ambient_on_music_pause` is the
+    # retired "auto" behaviour kept alive behind its own switch, shipped
+    # False on every migration by his explicit word.
+    ambient_enabled: bool = False
+    ambient_on_music_pause: bool = False
     ambient_color: Optional[str] = None   # hex; None = no colour authored yet
     # Second colour, for dark mode (see the module docstring's ambient_color_dark
     # entry). None = defer to ambient_color, not a frozen copy of it.
@@ -700,16 +715,32 @@ def load_room_controls() -> RoomControlState:
                                         else "transitions")
         else:
             raw.pop("midsong_triggers_enabled", None)
-        # One-way migration from the pre-2026-08-15 ambient_enabled bool
-        # (§52's own field, PR #73, never merged to master under this name)
-        # to the three-setting ambient_mode — True mapped to "auto" (the
-        # closest match: that's exactly what True was BUILT and PROVEN to
-        # mean throughout §52's lifetime, the music-precedence gate), False
-        # to "off" (unchanged meaning either way).
-        if "ambient_mode" not in raw and "ambient_enabled" in raw:
-            raw["ambient_mode"] = "auto" if raw.pop("ambient_enabled") else "off"
-        else:
-            raw.pop("ambient_enabled", None)
+        # One-way migration from the three-setting ambient_mode
+        # ("off"/"always"/"auto", 2026-08-15 to 2026-08-30) back to the
+        # binary toggle plus its own separate music-pause switch — his
+        # ruling, see the module docstring's ambient_enabled entry.
+        #
+        # "always" is the only mode that held the room regardless of
+        # playback, so it is the only one that maps to enabled=True.
+        # "auto" maps to enabled=False, NOT True: under "auto" the room was
+        # held only while confirmed quiet, and its automatic half now lives
+        # in ambient_on_music_pause — which he explicitly ordered shipped
+        # FALSE ("set it to false for now"), so an "auto" room deploys
+        # quiet in both halves rather than silently keeping an automatic
+        # behaviour he is trying to stop being surprised by.
+        #
+        # The presence of "ambient_mode" is what identifies a pre-rework
+        # file; such a file cannot carry either new key, so writing both
+        # unconditionally here loses nothing. A file WITHOUT "ambient_mode"
+        # is already the new shape and is left exactly as it is — note that
+        # the key name "ambient_enabled" was also used, very briefly, by
+        # §52's own pre-2026-08-15 bool (PR #73, never merged to master
+        # under that name) where True meant what became "auto"; a file that
+        # old is indistinguishable from a new one by shape alone, so the
+        # forward reading wins and the old one is not chased.
+        if "ambient_mode" in raw:
+            raw["ambient_enabled"] = raw.pop("ambient_mode") == "always"
+            raw["ambient_on_music_pause"] = False
         # One-way migration from the retired dark_mode_enabled bool (the
         # original two-state build) to the three-state display_mode — LOAD
         # BEARING, see the module docstring's "THREE-STATE REBUILD" note.
@@ -756,38 +787,51 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     ambient fields actually changed, else None (no reconnect churn on an
     unrelated field's change).
 
+    DOES NOT WAIT for the room to finish moving (2026-08-30). It STARTS the
+    transition and returns the immediate {"status": "turning_on"/
+    "turning_off", "intent", "phase"} shape instead — his whole complaint
+    ("there is a lag between when i turn it on and when it finishes, so I
+    don't know if it has started or not, and I keep accidentally toggling
+    it multiple times") begins with this PUT having blocked for the entire
+    15-22s sequence. The honest final outcome still reaches him: the gate
+    pushes a status broadcast at every start/end/cancel and folds the same
+    numbers into GET /api/engine/status's `ambient` key.
+
     Routes through services.ambient_music_gate rather than calling
-    services.ambient directly — "auto" must NOT freeze the room's Hue
-    devices while music is playing (the music-precedence rule, see
-    ambient_music_gate's module docstring); this is the manual-toggle path
-    that rule has to cover too, not just the automatic one. "always" is
-    unconditional by design (mode 2) — the gate still owns the actual
-    write, this is just the "did anything change" gate for whether to
-    bother calling it at all.
+    services.ambient directly — the music-pause branch must not freeze the
+    room's Hue devices while music is playing (see that module's docstring);
+    this is the manual-toggle path that rule has to cover too, not just the
+    automatic one. A plain enabled=True is unconditional by design — the
+    gate still owns the actual write, this is just the "did anything
+    change" gate for whether to bother calling it at all.
 
     Compares effective_ambient_color (above), not the bare ambient_color
     field, so this one condition also covers: an ambient_color_dark edit
-    while dark mode is on, and dark_mode_enabled itself flipping while
-    ambient is holding — both change what's ACTUALLY held even though
-    ambient_mode/ambient_color themselves didn't move. Editing the field
+    while dark mode is on, and display_mode itself flipping while ambient
+    is holding — both change what's ACTUALLY held even though
+    ambient_enabled/ambient_color themselves didn't move. Editing the field
     that ISN'T currently in effect (e.g. the normal colour while dark mode
     is on and a dark colour is already authored) correctly reports no
-    change — nothing live needs to move for that edit. Since 2026-08-16,
-    brightness is DERIVED from this same resolved hex (services.ambient's
+    change — nothing live needs to move for that edit. Brightness is
+    DERIVED from this same resolved hex (services.ambient's
     `_hsv_value_pct` — see the class docstring's ambient_brightness_note
-    entry), so a same-hue-different-lightness edit (e.g. his cream to a
-    darker cream) is ALSO a resolved-colour change and correctly reaches
-    this same condition — no separate brightness comparison needed.
+    entry), so a same-hue-different-lightness edit is ALSO a resolved-colour
+    change and correctly reaches this same condition.
 
-    Also fires on an ambient_hue_group_ids edit while ambient isn't "off" —
+    Also fires on an ambient_hue_group_ids edit while ambient is on —
     picking a different Hue area (or adding/dropping one) while Ambient is
     already engaged must reconcile immediately (release the deselected
-    group, hold the newly-selected one), not wait for a colour/mode edit
+    group, hold the newly-selected one), not wait for a colour/toggle edit
     that happens to touch this same PUT. Compared as sets so a reordered
-    (but otherwise identical) list doesn't trigger a no-op reconcile."""
+    (but otherwise identical) list doesn't trigger a no-op reconcile.
+
+    ambient_on_music_pause is its own trigger: turning it on while the room
+    is quiet must engage the hold on that press, not on the next bridge
+    broadcast."""
     changed = (
-        previous.ambient_mode != new_state.ambient_mode
-        or (new_state.ambient_mode != "off" and (
+        previous.ambient_enabled != new_state.ambient_enabled
+        or previous.ambient_on_music_pause != new_state.ambient_on_music_pause
+        or (new_state.ambient_enabled and (
             effective_ambient_color(previous) != effective_ambient_color(new_state)
             or set(previous.ambient_hue_group_ids) != set(new_state.ambient_hue_group_ids)
         ))
@@ -795,7 +839,7 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     if not changed:
         return None
     from spectra.services import ambient_music_gate
-    return await ambient_music_gate.reconcile_now()
+    return await ambient_music_gate.reconcile_now(wait=False)
 
 
 async def reconcile_dark_light_if_changed(previous: RoomControlState,

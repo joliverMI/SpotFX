@@ -742,9 +742,9 @@ def test_reconcile_off_catchup_payload_targets_the_live_colour(monkeypatch, brid
     captured = []
     orig_apply = ambient._apply_hue
 
-    async def spy(dev, body):
+    async def spy(dev, body, token=None):
         captured.append(body)
-        return await orig_apply(dev, body)
+        return await orig_apply(dev, body, token)
 
     monkeypatch.setattr(ambient, "_apply_hue", spy)
     dev = FakeHueDevice("10.0.0.1", bridge, live_frame=[(0.0, 0.0, 255.0)])

@@ -7,13 +7,18 @@ room-wide switches with a compact UI control on the room bar:
 
 See services/room_controls.py for what each field means and where it's
 applied (fx_executor + scene_compiler write seams for brightness_multiplier;
-global_transition_ms is state-only). ambient_mode/_color drive the live
-Hue takeover in services/ambient.py via services/ambient_music_gate.py —
-PUT reconciles it (only when the ambient fields actually changed, to
-avoid re-triggering a stream reconnect on every unrelated slider commit)
-and folds the outcome
-into the response as `ambient_result` so the caller can tell a live takeover
-from a state-only save (SPECTRA dark, or no Hue devices in the room).
+global_transition_ms is state-only). ambient_enabled/ambient_on_music_pause/
+_color drive the live Hue takeover in services/ambient.py via services/
+ambient_music_gate.py — PUT reconciles it (only when the ambient fields
+actually changed, to avoid re-triggering a stream reconnect on every
+unrelated slider commit) and folds the outcome into the response as
+`ambient_result`. Since 2026-08-30 that outcome is the START of the
+transition, not its end — `{"status": "turning_on"/"turning_off", "intent",
+"phase"}` — because blocking his press for the whole 15-22s sequence is
+where "I don't know if it has started" began. The finished outcome arrives
+on the pushed ambient_status websocket message and on GET /api/engine/
+status's `ambient` key; a state-only save (SPECTRA dark, or no Hue devices
+in the room) still says so there.
 display_mode/display_light_bg_*/dark_light_shield_* — the legacy global
 Default/Dark/Light mode (services/dark_light.py) — PUT reconciles it the
 same way (only when it actually changed) and folds the outcome into the

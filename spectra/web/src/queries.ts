@@ -1,6 +1,8 @@
 /** Data hooks for the SPECTRA app (react-query). */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spotfxPost } from './api/client';
+import { onSpectraMessage } from './api/spectraWs';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
@@ -678,6 +680,24 @@ export function useEngineStatus() {
     queryFn: () => apiGet<EngineStatus>('/engine/status'),
     refetchInterval: 3000,
   });
+}
+
+/** Ambient's PUSHED phase (spectra/services/ambient_music_gate.py's
+ * contract: intent/phase must update within 1s of any change, which the 3s
+ * poll above cannot promise). The gate broadcasts {type: "ambient_status",
+ * ...} — the identical payload the poll's own `ambient` key carries — at
+ * every transition start, end and cancel; this folds it straight into the
+ * SAME query cache entry, so every existing reader of useEngineStatus()
+ * sees the new phase immediately and there is no second source of truth to
+ * keep in sync. Mount once, high in the tree. */
+export function useAmbientStatusPush() {
+  const qc = useQueryClient();
+  useEffect(() => onSpectraMessage((msg) => {
+    if (msg.type !== 'ambient_status') return;
+    const { type: _type, ...ambient } = msg as Record<string, unknown>;
+    qc.setQueryData<EngineStatus>(['spectra-engine-status'], (prev) => (
+      prev ? { ...prev, ambient: ambient as unknown as EngineStatus['ambient'] } : prev));
+  }), [qc]);
 }
 
 /* ── status ── */

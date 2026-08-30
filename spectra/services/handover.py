@@ -315,6 +315,21 @@ async def run_handover(
     record = light_ownership.commit(handover.token, detail=commit_detail)
     logger.warning("handover: %s owns the lights%s", to_side.name,
                    " (PARTIAL — see activation report)" if partial else "")
+    if to_world == light_ownership.SPECTRA:
+        # THE STORED AMBIENT INTENT (spectra/services/ambient_music_gate.py's
+        # "THE RELEASED ROOM"): a press while the room was released reports
+        # phase "unavailable" and saves the intent — this is where it is
+        # actually applied. Same shape app.py's startup lifespan already
+        # uses, so a take-back and a restart land the same way rather than
+        # only one of them honouring it. Best-effort and never awaited into
+        # the commit's own success: the record has already moved, and a Hue
+        # bridge being slow must not turn a good take-back into a failure.
+        try:
+            from spectra.services import ambient_music_gate
+            await ambient_music_gate.reconcile_now(wait=False)
+        except Exception:
+            logger.exception("handover: could not start the ambient take-back "
+                             "reconcile (the take-back itself is committed)")
     return record
 
 

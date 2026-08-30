@@ -344,10 +344,11 @@ export interface RoomColorState {
 /** Room-control surface (spectra-kept-equivalents): the legacy Brightness
  * Multiplier / ledfx_ambient / ledfx_ambient_color / ledfx_global_transition
  * action equivalents. brightness_multiplier is wired at a write seam
- * (fx_executor + scene_compiler); ambient_mode/_color drives a live
- * Hue takeover (spectra/services/ambient.py via ambient_music_gate.py)
- * reconciled on every PUT that changes them; global_transition_ms is
- * state-only.
+ * (fx_executor + scene_compiler); ambient_enabled/ambient_on_music_pause/
+ * _color drive a live Hue takeover (spectra/services/ambient.py via
+ * ambient_music_gate.py) reconciled on every PUT that changes them — the
+ * PUT STARTS that transition and returns immediately, it does not wait for
+ * the room to finish moving; global_transition_ms is state-only.
  * scene_change_mode is the Admiral's settings model (spectra/services/
  * room_controls.py's own docstring has the full reasoning): "transitions" =
  * a scene change on every song transition only; "analysed" = transitions +
@@ -361,12 +362,14 @@ export interface RoomColorState {
  * Default "full". */
 export type SceneChangeMode = 'transitions' | 'analysed' | 'triggers_only' | 'full';
 
-/** Ambient's own three settings, in the Admiral's own language
- * (spectra/services/ambient_music_gate.py) — "off" never holds; "always"
- * holds Hue lit at ambient_color unconditionally while every other device
- * keeps running the show; "auto" holds only while nothing is playing and
- * releases the instant music starts, returning on its own when it stops. */
-export type AmbientMode = 'off' | 'always' | 'auto';
+/** The FROZEN ambient phase vocabulary (spectra/services/
+ * ambient_music_gate.py's module docstring) — Home Assistant is built
+ * against these exact values by another captain, so do not rename or extend
+ * them here. "unavailable" means the room is released or owned by
+ * spot-effects: a press stores the intent and applies it on the next
+ * take-back, but nothing physical can move right now. */
+export type AmbientPhase = 'on' | 'off' | 'turning_on' | 'turning_off' | 'unavailable';
+export type AmbientIntent = 'on' | 'off';
 
 /** Legacy's Default/Dark/Light display-mode cycle, all three states
  * (spectra/services/dark_light.py). "default" is his word "hybrid" — defer
@@ -393,7 +396,16 @@ export interface RoomControlState {
   dark_light_shield_categories: string[];
   dark_light_shield_virtuals: string[];
   brightness_multiplier: number;
-  ambient_mode: AmbientMode;
+  /** THE Ambient toggle — binary since 2026-08-30 (his ruling: "let's only
+   * ever toggle between Off and On"), replacing the retired three-value
+   * ambient_mode. On holds the room's live Hue devices lit at ambient_color,
+   * music playing or not, while every other device keeps running the show. */
+  ambient_enabled: boolean;
+  /** The retired "auto-return" BEHAVIOUR, kept alive behind its own switch
+   * and shipped OFF by his explicit word ("set it to false for now"): while
+   * the toggle above is OFF, Ambient turns itself on whenever music is
+   * confirmed stopped and releases the instant it starts. */
+  ambient_on_music_pause: boolean;
   ambient_color: string | null;
   /** The SECOND ambient colour, held while dark mode is on (his ruling:
    * "one color for regular ambient light mode or hybrid mode and then one
@@ -499,9 +511,24 @@ export interface DarkLightResult {
  * read-back confirmation) — the room bar surfaces all of these so the
  * control never silently lies about having done something. `lights_set` is
  * a CONFIRMED count (read back from the bridge), not merely attempted;
- * `lights_total` is how many lights were targeted. */
+ * `lights_total` is how many lights were targeted.
+ *
+ * Since 2026-08-30 a PUT that actually starts a transition returns
+ * "turning_on"/"turning_off" INSTEAD of waiting out the 15-22s sequence —
+ * the finished outcome (the "on"/"partial"/"failed" shapes above) arrives on
+ * the pushed ambient_status message and on GET /api/engine/status's own
+ * `ambient` key. A "dark" result now also carries phase "unavailable" and
+ * `stored: true`: the room isn't SPECTRA's to drive, the intent is saved,
+ * and it applies on the next take-back. */
 export interface AmbientResult {
-  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed' | 'partial' | 'yielding';
+  status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed' | 'partial' | 'yielding'
+    | 'turning_on' | 'turning_off' | 'superseded';
+  intent?: AmbientIntent;
+  phase?: AmbientPhase;
+  /** "dark" only — the intent is durable and applies on the next take-back. */
+  stored?: boolean;
+  generation?: number;
+  snap?: boolean;
   devices?: string[];
   lights_set?: number;
   lights_total?: number;
@@ -514,16 +541,24 @@ export interface AmbientResult {
 
 /** spectra/services/ambient_music_gate.py's status() — the room's honest,
  * always-live read of what Ambient is ACTUALLY doing, distinct from
- * AmbientResult above (a one-shot save outcome). `setting` is the chosen
- * AmbientMode (what the control says); `mode` is the LIVE reality: "off"
- * (setting is off), "holding" (every claimed light CONFIRMED lit at
- * ambient_color right now — true throughout "always", and only while
- * confirmed-quiet under "auto"), "partial" (Ambient believes it should be
- * holding but the last check — write or periodic — found at least one
- * light not actually lit, or found nothing left to hold at all), "yielding"
- * (setting isn't off, but standing aside for music or an unresolved
- * playback read — only reachable under "auto"), "transitioning" (a
- * hold/release is physically in flight). `held` is gated on that same
+ * AmbientResult above (a one-shot save outcome).
+ *
+ * `intent` and `phase` are the FROZEN contract (see AmbientPhase above):
+ * where the room is being driven, and where it is on the way there. They
+ * arrive both on the 3s engine-status poll AND pushed over the SPECTRA
+ * websocket as {type: "ambient_status", ...} at every transition start, end
+ * and cancel — so a button can say "Turning on…" within a second of the
+ * press instead of up to a poll later.
+ *
+ * Everything else is SPECTRA's own richer detail. `mode` is the live
+ * reality for the room bar's badge: "off" (both switches off), "holding"
+ * (every claimed light CONFIRMED lit at ambient_color right now),
+ * "partial" (something wants a hold but the last check found at least one
+ * light not actually lit, or found nothing left to hold at all — including
+ * a room that isn't SPECTRA's to drive), "yielding" (the music-pause
+ * switch is standing aside for music or an unresolved playback read),
+ * "transitioning" (a hold/release is physically in flight). `held` is
+ * gated on that same
  * confirmation, not a bare write-intent flag — it can never read true for
  * a light that's actually off (fixed 2026-08-15 after his room sat
  * reporting `held: true` all night while every bulb was off). `verify` is
@@ -542,9 +577,20 @@ export interface AmbientVerify {
 }
 
 export interface AmbientGateStatus {
-  setting: AmbientMode;
+  /** FROZEN contract — see AmbientPhase. */
+  intent: AmbientIntent;
+  phase: AmbientPhase;
+  /** The two stored switches, echoed so a consumer never has to fetch
+   * room-controls just to render the toggle. */
+  enabled: boolean;
+  on_music_pause: boolean;
   mode: 'off' | 'holding' | 'partial' | 'yielding' | 'transitioning';
   held: boolean;
+  /** Present only while a transition is in flight: its generation counter,
+   * and whether it SNAPPED (it superseded another, so every ramp was
+   * dropped). */
+  generation?: number;
+  snap?: boolean;
   /** The RESOLVED device ids currently held — [] when not held, or when
    * the selection is "every live Hue device" (ambient_hue_group_ids: []),
    * the default — see spectra/services/ambient_music_gate.py's status(). */

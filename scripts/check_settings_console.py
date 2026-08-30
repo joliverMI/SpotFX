@@ -117,8 +117,12 @@ from spectra.services import settings_console as sc
 check(set(sc.SETTINGS_REGISTRY) == {
     "brightness_multiplier", "global_transition_ms",
     "scene_transition_ms_gentle", "scene_transition_ms_hard",
-    "ambient_mode", "ambient_color", "scene_change_mode",
-}, "registry is the deliberate seven-key allowlist")
+    "ambient_enabled", "ambient_on_music_pause", "ambient_color",
+    "scene_change_mode",
+}, "registry is the deliberate eight-key allowlist")
+check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
+      and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
+      "the ambient toggle is binary to Sonic too — no mode string to mis-say")
 check("force_scene_enabled" not in sc.SETTINGS_REGISTRY,
       "force_scene_* deliberately excluded (opaque scene id, not voice-shaped)")
 check(rc.field_bounds("brightness_multiplier") ==
@@ -308,7 +312,7 @@ from spectra.app import create_app
 client = TestClient(create_app())
 
 r = client.get("/api/settings-console/registry")
-check(r.status_code == 200 and len(r.json()["settings"]) == 7, "GET /registry responds")
+check(r.status_code == 200 and len(r.json()["settings"]) == 8, "GET /registry responds")
 
 scfg.SETTINGS_LOG_FILE.unlink(missing_ok=True)  # back to a clean, empty log for this check
 r = client.post("/api/settings-console/undo")

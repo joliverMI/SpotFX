@@ -143,14 +143,20 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "Scene-entry crossfade time in milliseconds used at intensity 1.0 "
         "(the hard end) — see scene_transition_ms_gentle. Convert spoken "
         "seconds to ms."),
-    "ambient_mode": _spec(
-        "ambient_mode", "Ambient",
-        "Ambient mode for the room's live Hue devices, one of three: "
-        "'off' (never holds, the whole room performs), 'always' (Hue held "
-        "lit at ambient_color at all times, other devices keep running "
-        "the show regardless), 'auto' (Hue holds only while nothing is "
-        "playing, releases the instant music starts, and returns on its "
-        "own when it stops)."),
+    "ambient_enabled": _spec(
+        "ambient_enabled", "Ambient",
+        "THE Ambient toggle, on or off — on holds the room's live Hue "
+        "devices lit at ambient_color, music playing or not, while every "
+        "other device keeps running the show. Turning it on or off starts "
+        "a transition that takes several seconds; changing your mind "
+        "mid-transition is allowed and snaps the room straight to the new "
+        "state."),
+    "ambient_on_music_pause": _spec(
+        "ambient_on_music_pause", "Ambient when music pauses",
+        "Off by default. When on, and the Ambient toggle itself is OFF, "
+        "Ambient turns itself on whenever the music is confirmed stopped "
+        "and releases again the instant it starts — the old 'auto-return' "
+        "behaviour, now its own separate switch."),
     "ambient_color": _spec(
         "ambient_color", "Ambient colour",
         "The ambient-mode hex colour, #rrggbb — translate a named colour "

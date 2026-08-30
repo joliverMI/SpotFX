@@ -91,10 +91,10 @@ def _save_controls(**kwargs):
 
 def test_desired_hold_auto_confirmed_reads_always_win():
     from spectra.services.ambient_music_gate import _desired_hold
-    assert _desired_hold("auto", False, currently_held=False) is True
-    assert _desired_hold("auto", False, currently_held=True) is True
-    assert _desired_hold("auto", True, currently_held=False) is False
-    assert _desired_hold("auto", True, currently_held=True) is False, \
+    assert _desired_hold(False, True, False, currently_held=False) is True
+    assert _desired_hold(False, True, False, currently_held=True) is True
+    assert _desired_hold(False, True, True, currently_held=False) is False
+    assert _desired_hold(False, True, True, currently_held=True) is False, \
         "a confirmed-playing read releases an already-held room"
 
 
@@ -103,25 +103,25 @@ def test_desired_hold_auto_unknown_never_actively_changes_anything():
     quiet room, and must not spuriously start holding one that was never
     confirmed quiet — it simply carries the current state forward."""
     from spectra.services.ambient_music_gate import _desired_hold
-    assert _desired_hold("auto", None, currently_held=True) is True
-    assert _desired_hold("auto", None, currently_held=False) is False
+    assert _desired_hold(False, True, None, currently_held=True) is True
+    assert _desired_hold(False, True, None, currently_held=False) is False
 
 
 def test_desired_hold_off_always_wins():
     from spectra.services.ambient_music_gate import _desired_hold
-    assert _desired_hold("off", False, currently_held=True) is False
-    assert _desired_hold("off", None, currently_held=True) is False
-    assert _desired_hold("off", True, currently_held=True) is False
+    assert _desired_hold(False, False, False, currently_held=True) is False
+    assert _desired_hold(False, False, None, currently_held=True) is False
+    assert _desired_hold(False, False, True, currently_held=True) is False
 
 
 def test_desired_hold_always_holds_unconditionally():
     """Mode 2, his own request: Hue held lit regardless of playback — not
     the precedence bug, a deliberate third setting."""
     from spectra.services.ambient_music_gate import _desired_hold
-    assert _desired_hold("always", True, currently_held=False) is True, \
+    assert _desired_hold(True, False, True, currently_held=False) is True, \
         "must hold even while music is confirmed playing"
-    assert _desired_hold("always", False, currently_held=False) is True
-    assert _desired_hold("always", None, currently_held=False) is True
+    assert _desired_hold(True, False, False, currently_held=False) is True
+    assert _desired_hold(True, False, None, currently_held=False) is True
 
 
 # ── reconcile(): drives services.ambient, the same path a human PUT uses ───
@@ -208,7 +208,7 @@ def hue_room(monkeypatch):
 def test_reconcile_holds_when_enabled_and_confirmed_not_playing(hue_room):
     from spectra.services.ambient_music_gate import reconcile, status
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     result = _run(reconcile(False))
 
@@ -223,7 +223,7 @@ def test_reconcile_does_not_hold_while_music_is_playing(hue_room):
     devices while a track is genuinely playing."""
     from spectra.services.ambient_music_gate import reconcile, status
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     result = _run(reconcile(True))
 
@@ -240,7 +240,7 @@ def test_reconcile_does_not_hold_on_first_unknown_playback(hue_room):
     module docstring)."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     result = _run(reconcile(None))
 
@@ -254,7 +254,7 @@ def test_reconcile_unknown_playback_does_not_release_an_existing_hold(hue_room):
     NOT release it — only a CONFIRMED playing read may do that."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     _run(reconcile(False))
     assert dev.frozen is True
@@ -273,7 +273,7 @@ def test_reconcile_releases_when_music_starts_after_holding(hue_room):
     thing that must survive 'unharmed')."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     held = _run(reconcile(False))
     assert held["status"] == "on"
@@ -290,7 +290,7 @@ def test_reconcile_resumes_ambient_when_music_stops(hue_room):
     on its own — no manual re-toggle needed."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     _run(reconcile(True))     # playing — yields
     assert dev.frozen is None
@@ -303,7 +303,7 @@ def test_reconcile_resumes_ambient_when_music_stops(hue_room):
 def test_reconcile_disabled_never_holds_regardless_of_playback(hue_room):
     from spectra.services.ambient_music_gate import reconcile, status
     dev, calls = hue_room
-    _save_controls(ambient_mode="off", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_color="#f5da8c")
 
     result = _run(reconcile(False))
 
@@ -317,7 +317,7 @@ def test_reconcile_is_a_no_op_when_desired_state_unchanged(hue_room):
     not re-fire redundant Hue writes."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     _run(reconcile(False))
     calls_after_first = len(calls)
@@ -330,11 +330,11 @@ def test_reconcile_is_a_no_op_when_desired_state_unchanged(hue_room):
 def test_reconcile_reapplies_when_colour_changes_while_holding(hue_room):
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
     _run(reconcile(False))
     calls_after_first = len(calls)
 
-    _save_controls(ambient_mode="auto", ambient_color="#ff0000")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#ff0000")
     result = _run(reconcile(False))
 
     assert result["status"] == "on"
@@ -348,7 +348,7 @@ def test_reconcile_holds_the_dark_colour_when_dark_mode_is_on(hue_room):
     not the normal one."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", display_mode="dark",
+    _save_controls(ambient_enabled=True, display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
 
     result = _run(reconcile(None))
@@ -366,13 +366,13 @@ def test_dark_mode_toggle_reapplies_ambient_at_the_resolved_colour(hue_room):
     AMBIENT_TRANSITION_MS bridge-side ramp, exercised identically here)."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", display_mode="default",
+    _save_controls(ambient_enabled=True, display_mode="default",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     held = _run(reconcile(None))
     assert held["status"] == "on"
     calls_after_first = len(calls)
 
-    _save_controls(ambient_mode="always", display_mode="dark",
+    _save_controls(ambient_enabled=True, display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     result = _run(reconcile(None))
 
@@ -387,11 +387,11 @@ def test_dark_mode_toggle_is_a_no_op_when_the_two_colours_still_match(hue_room):
     nothing effective changed."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", display_mode="default", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, display_mode="default", ambient_color="#f5da8c")
     _run(reconcile(None))
     calls_after_first = len(calls)
 
-    _save_controls(ambient_mode="always", display_mode="dark", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, display_mode="dark", ambient_color="#f5da8c")
     result = _run(reconcile(None))
 
     assert result["status"] == "on"
@@ -405,7 +405,7 @@ def test_verify_now_checks_the_dark_colour_while_dark_mode_is_on(hue_room):
     genuinely-correct dark hold would misreport as 'partial' forever."""
     from spectra.services.ambient_music_gate import status, verify_now
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", display_mode="dark",
+    _save_controls(ambient_enabled=True, display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     from spectra.services.ambient_music_gate import reconcile
     _run(reconcile(None))
@@ -422,7 +422,7 @@ def test_failed_reconcile_does_not_mark_held_and_retries_next_call(monkeypatch, 
     from spectra.services import ambient
     from spectra.services.ambient_music_gate import reconcile, status
     dev, calls = hue_room
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
 
     async def fail(*args, **kwargs):
         return {"status": "failed", "devices": [], "lights_set": 0}
@@ -432,7 +432,7 @@ def test_failed_reconcile_does_not_mark_held_and_retries_next_call(monkeypatch, 
     assert first["status"] == "failed"
     assert status()["held"] is False, "a failed reconcile must not be recorded as held"
 
-    async def ok(enabled, color, group_ids=None):
+    async def ok(enabled, color, group_ids=None, token=None, snap=False):
         return {"status": "on", "devices": ["hue-lights"], "lights_set": 1, "lights_total": 1}
     monkeypatch.setattr(ambient, "reconcile", ok)
 
@@ -449,7 +449,7 @@ def test_always_holds_even_while_music_is_confirmed_playing(hue_room):
     bright'. This must NOT be gated by is_playing at all."""
     from spectra.services.ambient_music_gate import reconcile, status
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
 
     result = _run(reconcile(True))   # music genuinely playing
 
@@ -463,7 +463,7 @@ def test_always_holds_on_unknown_playback_too():
     """Unlike "auto", "always" never consults is_playing — an unresolved
     read must not delay the hold."""
     from spectra.services.ambient_music_gate import _desired_hold
-    assert _desired_hold("always", None, currently_held=False) is True
+    assert _desired_hold(True, False, None, currently_held=False) is True
 
 
 def test_always_never_releases_when_playback_changes(hue_room):
@@ -471,7 +471,7 @@ def test_always_never_releases_when_playback_changes(hue_room):
     must not release it — only switching the setting itself can."""
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
 
     _run(reconcile(False))
     assert dev.frozen is True
@@ -487,11 +487,11 @@ def test_always_never_releases_when_playback_changes(hue_room):
 def test_switching_from_always_to_off_releases_regardless_of_playback(hue_room):
     from spectra.services.ambient_music_gate import reconcile
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
     _run(reconcile(True))
     assert dev.frozen is True
 
-    _save_controls(ambient_mode="off", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_color="#f5da8c")
     result = _run(reconcile(True))   # still playing — "off" must still release
 
     assert result["status"] == "off"
@@ -502,30 +502,34 @@ def test_switching_from_always_to_off_releases_regardless_of_playback(hue_room):
 
 def test_status_off_when_ambient_disabled():
     from spectra.services.ambient_music_gate import status
-    _save_controls(ambient_mode="off")
-    assert status() == {"setting": "off", "mode": "off", "held": False, "groups": []}
+    _save_controls(ambient_enabled=False)
+    st = status()
+    assert st["enabled"] is False and st["on_music_pause"] is False
+    assert st["mode"] == "off" and st["held"] is False and st["groups"] == []
+    assert st["intent"] == "off"
 
 
 def test_status_yielding_when_enabled_but_not_held():
     from spectra.services.ambient_music_gate import status
-    _save_controls(ambient_mode="auto", ambient_color="#ffffff")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#ffffff")
     st = status()
-    assert st["setting"] == "auto"
+    assert st["enabled"] is False and st["on_music_pause"] is True
     assert st["mode"] == "yielding"
 
 
-def test_status_setting_reflects_always_while_holding(hue_room):
+def test_status_setting_reflects_the_toggle_while_holding(hue_room):
     from spectra.services.ambient_music_gate import reconcile, status
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
     _run(reconcile(True))
     st = status()
-    assert st["setting"] == "always"
+    assert st["enabled"] is True
     assert st["mode"] == "holding"
+    assert st["intent"] == "on" and st["phase"] == "on"
 
 
 def test_status_holding_after_a_successful_hold(hue_room):
     from spectra.services.ambient_music_gate import reconcile, status
-    _save_controls(ambient_mode="auto", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=False, ambient_on_music_pause=True, ambient_color="#f5da8c")
     _run(reconcile(False))
     assert status()["mode"] == "holding"
 
@@ -538,7 +542,7 @@ def test_status_carries_verify_age_and_detail_right_after_a_hold(hue_room, monke
     """A write's own read-back IS a fresh confirmation — status() must
     reflect it immediately, not wait for the next periodic tick."""
     from spectra.services import ambient_music_gate as gate
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
     clock = {"t": 100.0}
     monkeypatch.setattr(gate.time, "monotonic", lambda: clock["t"])
 
@@ -560,7 +564,7 @@ def test_repeated_identical_reconcile_does_not_refresh_verify_age(hue_room, monk
     identical read) must not masquerade as a fresh confirmation either —
     the age should reflect the last REAL check, not the last call."""
     from spectra.services import ambient_music_gate as gate
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
     clock = {"t": 100.0}
     monkeypatch.setattr(gate.time, "monotonic", lambda: clock["t"])
     _run(gate.reconcile(True))
@@ -573,29 +577,33 @@ def test_repeated_identical_reconcile_does_not_refresh_verify_age(hue_room, monk
 
 def test_verify_now_is_a_noop_when_nothing_is_currently_held():
     from spectra.services.ambient_music_gate import verify_now, status
-    _save_controls(ambient_mode="off")
+    _save_controls(ambient_enabled=False)
 
     result = _run(verify_now())
 
     assert result == {}
-    assert status() == {"setting": "off", "mode": "off", "held": False, "groups": []}
+    st = status()
+    assert st["mode"] == "off" and st["held"] is False and st["groups"] == []
 
 
-def test_verify_now_skips_while_a_write_is_in_flight(hue_room):
+def test_verify_now_skips_while_a_transition_is_in_flight(hue_room):
     """The verifier must never race a real write — the write's own
-    read-back is already fresher than anything a concurrent GET adds."""
-    from spectra.services.ambient_music_gate import reconcile, verify_now, _get_apply_lock
+    read-back is already fresher than anything a concurrent GET adds, and
+    reading bridge state mid-transition only reports a room that is
+    deliberately moving."""
+    from spectra.services import ambient_music_gate as gate
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
-    _run(reconcile(True))
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
+    _run(gate.reconcile(True))
 
     async def scenario():
-        lock = _get_apply_lock()
-        await lock.acquire()
-        try:
-            return await verify_now()
-        finally:
-            lock.release()
+        # Start a real transition (off) and check verify_now() while its
+        # task is still pending, without letting it finish first.
+        started = gate._start_transition((False, None, frozenset()))
+        assert gate.transition_in_flight()
+        result = await gate.verify_now()
+        await started.task
+        return result
 
     assert _run(scenario()) == {}
 
@@ -608,7 +616,7 @@ def test_verify_now_downgrades_held_when_a_light_is_found_off(hue_room):
     from spectra.services import ambient
     from spectra.services.ambient_music_gate import reconcile, verify_now, status
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
 
     held = _run(reconcile(True))
     assert held["status"] == "on"
@@ -643,7 +651,7 @@ def test_verify_now_repairs_an_on_but_wrong_colour_straggler(hue_room):
     from spectra.services import ambient
     from spectra.services.ambient_music_gate import reconcile, verify_now, status
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
 
     held = _run(reconcile(True))
     assert held["status"] == "on"
@@ -681,7 +689,7 @@ def test_verify_now_repairs_a_straggler_to_the_dark_colour_not_the_normal_one(hu
     from spectra.services import ambient
     from spectra.services.ambient_music_gate import reconcile, verify_now
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", display_mode="dark",
+    _save_controls(ambient_enabled=True, display_mode="dark",
                    ambient_color="#f5da8c", ambient_color_dark="#001133")
     held = _run(reconcile(None))
     assert held["status"] == "on"
@@ -718,7 +726,7 @@ def test_verify_now_downgrades_held_when_live_stack_no_longer_active(hue_room, m
     from spectra.services.ambient_music_gate import reconcile, verify_now, status
     from spectra.services.live_host import live
     dev, calls = hue_room
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
     _run(reconcile(True))
     assert status()["held"] is True
 
@@ -740,11 +748,15 @@ def test_write_time_dark_result_does_not_report_held(monkeypatch):
     from spectra.services.ambient_music_gate import reconcile, status
     from spectra.services.live_host import live
     monkeypatch.setattr(live, "host", None)
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
 
     result = _run(reconcile(True))
 
-    assert result == {"status": "dark"}
+    assert result["status"] == "dark"
+    assert result["phase"] == "unavailable", (
+        "since 2026-08-30 the caller is told WHY nothing happened — the room "
+        "isn't ours — and that the intent is stored for the next take-back")
+    assert result["stored"] is True
     st = status()
     assert st["held"] is False
     assert st["mode"] == "partial"
@@ -812,7 +824,7 @@ def two_hue_rooms(monkeypatch):
 def test_reconcile_holds_only_the_configured_hue_group(two_hue_rooms):
     from spectra.services.ambient_music_gate import reconcile, status
     hl, dh, calls = two_hue_rooms
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c",
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c",
                    ambient_hue_group_ids=["hue-lights"])
 
     result = _run(reconcile(True))
@@ -832,12 +844,12 @@ def test_group_selection_edit_alone_reconciles_while_still_held(two_hue_rooms):
     newly-selected one (module docstring's short-circuit note)."""
     from spectra.services.ambient_music_gate import reconcile, status
     hl, dh, calls = two_hue_rooms
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c", ambient_hue_group_ids=[])
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c", ambient_hue_group_ids=[])
     first = _run(reconcile(True))
     assert sorted(first["devices"]) == ["dining-hues", "hue-lights"]
     assert hl.frozen is True and dh.frozen is True
 
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c",
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c",
                    ambient_hue_group_ids=["hue-lights"])
     second = _run(reconcile(True))
 
@@ -854,7 +866,7 @@ def test_status_groups_names_every_device_under_the_default_selection(two_hue_ro
     not just a hand-picked subset."""
     from spectra.services.ambient_music_gate import reconcile, status
     hl, dh, calls = two_hue_rooms
-    _save_controls(ambient_mode="always", ambient_color="#f5da8c")
+    _save_controls(ambient_enabled=True, ambient_color="#f5da8c")
 
     _run(reconcile(True))
 

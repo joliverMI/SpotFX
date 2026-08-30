@@ -1726,10 +1726,67 @@ Deliberately did NOT extend the same naming treatment to Force Scene's
 pre-existing SILENT bypass of mode availability (§9/§31 above) — a
 different, already-shipped behaviour this task wasn't asked to touch.
 
-**Ambient's mode precedence gate** — three settings, in the Admiral's own
-language (`RoomControlState.ambient_mode: "off"|"always"|"auto"`,
-`spectra/services/ambient_music_gate.py`, UI a `RoomControlsBar.tsx`
-dropdown, not the old checkbox). Origin: found live 2026-08-15,
+**AMBIENT IS ONE BINARY TOGGLE (2026-08-30, PR fm/ambient-binary-clarity;
+`docs/SPECTRA_SPEC.md` §96) — read `spectra/services/ambient_music_gate.py`'s
+module docstring before touching anything here, it is the binding
+statement.** His ruling: "let's only ever toggle between Off and On."
+`RoomControlState.ambient_mode` (`"off"|"always"|"auto"`) is RETIRED for
+`ambient_enabled: bool` + `ambient_on_music_pause: bool`. Migration on load:
+`"always"` → enabled True, `"off"`/`"auto"` → enabled False, and
+`ambient_on_music_pause` **False in every case** (his explicit "set it to
+false for now"), every other key byte-preserved. The "auto" BEHAVIOUR is
+preserved verbatim in `_desired_hold` and gated behind the new switch —
+disabled, not removed. Four things ride with it, and all four have bitten
+before:
+
+- **THE PHASE CONTRACT IS FROZEN** — another captain builds Home Assistant
+  against it. The `ambient` key on `GET /api/engine/status` and on the
+  SPECTRA websocket (`{"type": "ambient_status", ...}`) carries
+  `intent: "on"|"off"` and `phase: "on"|"off"|"turning_on"|"turning_off"|
+  "unavailable"`. Do not rename or extend those value sets without going
+  back to him. `phase` updates within 1s because the gate PUSHES at every
+  transition start/end/cancel; the 3s poll is the backstop, not the
+  mechanism (`spectra/web/src/api/spectraWs.ts` folds the push into the
+  SAME react-query cache entry the poll writes — never a second source of
+  truth). `phase` reports the TRANSITION's outcome, not the bulbs': a hold
+  broken out of band still reads `on`, and the pre-existing `held`/`mode`/
+  `verify`/`verified_age_s` keys keep carrying that honesty.
+- **INTERRUPTION SNAPS, and the boundary matters.** Measured live before
+  the rework: turn-OFF 22.6s, turn-ON ~15s across his 17 bulbs, and a press
+  MID-transition took **38s** to win because it queued behind
+  `services.ambient`'s own I/O lock. Now at most ONE generation-stamped
+  transition task exists; a new intent cancels the in-flight one at its next
+  safe write boundary (never mid-write to one bulb — `ambient.CancelToken`
+  owns where those are, and its interruptible `sleep` is what lets a RAMP be
+  abandoned instead of waited out) and applies the new end state with every
+  ramp DROPPED (`snap=True`). **The 300ms write stagger STAYS — that is
+  zigbee physics; the ramps are choreography.** A superseded run never
+  writes again and never touches the landed-state bookkeeping (guarded on
+  `_transition is tr`), or a slow cancelled turn-off would flip `_held` back
+  while the room is genuinely lit. An UNINTERRUPTED turn-off keeps its full
+  two-phase ease — his complaint was the interruption, not the fade.
+- **The press does not block.** `reconcile_ambient_if_changed` STARTS the
+  transition and returns `{"status": "turning_on"/"turning_off", intent,
+  phase}`; the PUT blocking for the whole sequence is where "I don't know if
+  it has started" began. Every automatic caller still uses `wait=True`.
+- **A press while the room is not ours is never a silent nothing**: it
+  starts no transition and records NOTHING as landed (recording it is what
+  would make the take-back short-circuit and swallow his intent), returns
+  `{"status": "dark", "phase": "unavailable", "stored": true}`, and applies
+  on the next take-back — app.py's startup/resume, and now
+  `handover.run_handover`'s own commit when SPECTRA becomes owner.
+
+Spec: `tests/test_ambient_transition.py` (a timestamping mock bridge at his
+real bulb count, pacing scaled 1/20th so a sequence still has real duration
+to interrupt — the 38s shape is reproduced RED against the pre-rework call
+shape before the new owner is proven green) +
+`tests/test_room_controls.py::test_ambient_mode_migrates_to_the_binary_toggle`.
+
+Everything below this paragraph is the history of the retired three-setting
+gate, kept because its reasoning still governs the music-pause branch and
+because the composition facts it establishes are unchanged.
+
+Origin: found live 2026-08-15,
 `ambient_enabled: true` (the old bool) + a real track playing + an active
 scene + firing triggers = all 19 Hue bulbs sat frozen at ambient cream,
 following none of it — a second, independent cause of his "no scene
