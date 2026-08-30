@@ -63,7 +63,8 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
     assert set(sc.SETTINGS_REGISTRY) == {
         "brightness_multiplier", "global_transition_ms",
         "scene_transition_ms_gentle", "scene_transition_ms_hard",
-        "ambient_mode", "ambient_color", "scene_change_mode",
+        "ambient_enabled", "ambient_on_music_pause", "ambient_color",
+        "scene_change_mode",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY
@@ -145,18 +146,18 @@ def test_apply_change_reconciles_ambient_only_on_ambient_fields():
     assert "ambient_result" not in result, \
         "unrelated field change must not trigger a reconnect"
 
-    result = _run(sc.apply_change("ambient_mode", "auto"))
-    assert result["ambient_result"]["status"] == "yielding", \
-        ("no bridge signal in tests (services/ambient_music_gate.py's "
-         "fail-safe: an unresolved playback read never starts a blind "
-         "hold) — the same safe no-op PUT gets, whether or not a live "
-         "stack is even owned")
-
-    result = _run(sc.apply_change("ambient_mode", "always"))
-    assert result["ambient_result"]["status"] == "dark", \
-        ('"always" never consults playback at all, so it actually attempts '
-         "the hold — 'dark' is services.ambient's own honest report that "
-         "no live stack is owned in tests, not the gate declining to act")
+    for key, value in (("ambient_on_music_pause", True), ("ambient_enabled", True)):
+        result = _run(sc.apply_change(key, value))
+        assert result["ambient_result"]["status"] == "dark", \
+            (f"{key} is an ambient field, so it reconciles — 'dark' is the "
+             "gate's own honest report that no live stack is owned in tests, "
+             "not the gate declining to act")
+        assert result["ambient_result"]["phase"] == "unavailable", \
+            "and it names WHY, rather than reporting a settled state"
+        assert result["ambient_result"]["stored"] is True, \
+            ("the intent is durable and applies on the next take-back — "
+             "never a silent nothing (services/ambient_music_gate.py, "
+             "'THE RELEASED ROOM')")
 
 
 def test_undo_reverts_through_the_validated_path():

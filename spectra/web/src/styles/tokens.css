@@ -285,6 +285,24 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 
 .ambient-group-btn { font-size: 18px; }
 .ambient-group-btn.ambient-group-btn-off { opacity: 0.5; filter: grayscale(1); }
+/* "Turning on…" / "Turning off…" — the in-flight label (his ask: the button
+ * must say which way it is going, because the transition takes 15-22s on
+ * his real room). nowrap so it can never wrap the button taller, the same
+ * lesson fixedSizeToggleStyle.ts exists for. */
+.ambient-group-btn-phase { white-space: nowrap; font-size: 8px; }
+/* The panel's own copy of the toggle, so the state is readable as words and
+ * not only as the button's dimming. */
+.ambient-toggle-btn {
+  padding: 3px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
 
 .scenes-group-btn.scenes-group-btn-forced { border-color: var(--accent2); }
 

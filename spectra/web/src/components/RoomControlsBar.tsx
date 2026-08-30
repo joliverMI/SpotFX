@@ -37,11 +37,12 @@ import TopBarGroupButton from './TopBarGroupButton';
 import HelpLink from '../help/HelpLink';
 import { useDebouncedApply } from '../lib/useDebouncedApply';
 import {
-  useAmbientHueGroups, useEngineStatus, useRoomControls, useSaveRoomControls, useScenes,
+  useAmbientHueGroups, useAmbientStatusPush, useEngineStatus, useRoomControls,
+  useSaveRoomControls, useScenes,
   useSpotColorSets,
 } from '../queries';
 import type {
-  AmbientMode, AmbientResult, DarkLightResult, DisplayMode, ForceColorResult, ForceSceneResult,
+  AmbientPhase, AmbientResult, DarkLightResult, DisplayMode, ForceColorResult, ForceSceneResult,
   RoomControlState, SceneChangeMode,
 } from '../types';
 import SearchSelect from './forms/SearchSelect';
@@ -66,35 +67,41 @@ const AMBIENT_NOTE: Record<string, string> = {
   failed: 'every live Hue device rejected the change (bridge unreachable?) — saved, but the room may not match this switch',
 };
 
-/** His own three settings (spectra/services/ambient_music_gate.py). */
-const AMBIENT_MODES: { value: AmbientMode; label: string; title: string }[] = [
-  { value: 'off', label: 'Off',
-    title: 'Ambient never holds — the whole room performs, Hue included.' },
-  { value: 'always', label: 'On during music',
-    title: 'Hue held lit at the ambient colour at all times, music playing or not — '
-      + 'every other device keeps running the show regardless.' },
-  { value: 'auto', label: 'Auto-return',
-    title: 'Hue holds only while nothing is playing; releases the instant music starts, '
-      + 'and returns on its own — with the same eased release — when it stops.' },
-];
+/** The FROZEN phase contract, rendered (spectra/services/
+ * ambient_music_gate.py). A transition takes 15-22s on his real room, so
+ * the button MUST say which way it is going — that lag with no feedback is
+ * the whole reason he kept pressing it again. The button is NEVER disabled
+ * while in flight: a press during a transition is the INTERRUPT (it snaps
+ * the room to the new state), not a no-op to be prevented. */
+const AMBIENT_PHASE_LABEL: Partial<Record<AmbientPhase, string>> = {
+  turning_on: 'Turning on…',
+  turning_off: 'Turning off…',
+};
+const AMBIENT_PHASE_TITLE: Record<AmbientPhase, string> = {
+  on: 'Ambient is on — tap to turn off, hold for options',
+  off: 'Ambient is off — tap to turn on, hold for options',
+  turning_on: 'Turning on… — tap again to snap it straight back off',
+  turning_off: 'Turning off… — tap again to snap it straight back to full brightness',
+  unavailable: "SPECTRA isn't driving the lights right now — your choice is saved and "
+    + 'applies the moment the room comes back',
+};
 
-/** The live mode (spectra/services/ambient_music_gate.py's status(), polled
- * every 3s via useEngineStatus — NOT the one-shot PUT outcome below). This
- * is the honest "what is Ambient actually doing right now" indicator: the
- * select alone can't say it, because "Auto-return" means "hold only when
- * confirmed quiet" — that diverges from what's actually held whenever
- * music is playing. Under "On during music" this normally reads "holding";
- * "partial" is the status-honesty fix (2026-08-15) — Ambient believes it
+/** The live mode (spectra/services/ambient_music_gate.py's status(), on the
+ * 3s poll AND the gate's own push — NOT the one-shot PUT outcome below).
+ * `phase` above answers "which way is the room going"; this answers the
+ * separate question "what are the BULBS actually doing", which can differ:
+ * "partial" is the status-honesty fix (2026-08-15) — something believes it
  * should be holding but the most recent check (a write's own read-back, or
  * the independent periodic GET-only recheck) found at least one light not
- * actually lit, or found nothing left to hold at all. */
+ * actually lit, or found nothing left to hold at all — and "yielding" is
+ * only reachable while the "When music pauses" switch is on. */
 const AMBIENT_MODE_NOTE: Record<string, string> = {
   holding: 'Ambient is actively holding the room at its colour — every light confirmed.',
   partial: "Ambient believes it should be holding, but the last check found at least one "
     + 'light not actually lit at the ambient colour (or nothing to hold at all) — see the '
     + 'lights named below.',
-  yielding: "Auto-return is standing aside for music (or its playback state is momentarily "
-    + 'unknown) — it resumes on its own the instant the room goes quiet.',
+  yielding: '"When music pauses" is standing aside for music (or its playback state is '
+    + 'momentarily unknown) — it resumes on its own the instant the room goes quiet.',
   transitioning: 'Ambient is mid hold/release right now.',
 };
 const AMBIENT_MODE_BADGE: Record<string, string> = {
@@ -156,6 +163,10 @@ export default function RoomControlsBar() {
   const save = useSaveRoomControls();
   const { data: scenes } = useScenes();
   const { data: engineStatus } = useEngineStatus();
+  // Ambient's phase must be visible within a second of a press, which the
+  // 3s poll above cannot promise — this folds the gate's own pushed
+  // ambient_status straight into that same cache entry.
+  useAmbientStatusPush();
   const { data: hueGroupsData } = useAmbientHueGroups();
   const ambientLive = engineStatus?.ambient;
   const hueGroups = hueGroupsData?.groups ?? [];
@@ -167,12 +178,8 @@ export default function RoomControlsBar() {
   const { data: colorCards } = useSpotColorSets();
   const [hueGroupsResetKey, setHueGroupsResetKey] = useState(0);
   const localRef = useRef<RoomControlState | null>(null);
-  const lastOnAmbientModeRef = useRef<AmbientMode>('auto');
 
   useEffect(() => { localRef.current = local; }, [local]);
-  useEffect(() => {
-    if (local && local.ambient_mode !== 'off') lastOnAmbientModeRef.current = local.ambient_mode;
-  }, [local?.ambient_mode]);
 
   const sceneOptions = useMemo(
     () => (scenes ?? []).map((s) => ({ value: s.id, label: s.disabled ? `⛔ ${s.name}` : s.name })),
@@ -260,15 +267,24 @@ export default function RoomControlsBar() {
     && ['default', 'dark', 'light'].includes(darkLightResult.status)
     && (darkLightResult.unconfirmed?.length ?? 0) > 0;
 
+  // BINARY, by his own ruling — and it always toggles against what the
+  // ROOM is currently doing (`phase`), not against the last value this tab
+  // happened to save: mid-transition, "off" means "stop turning on", which
+  // is exactly the interrupt he asked for.
+  const ambientPhase: AmbientPhase = ambientLive?.phase
+    ?? (local.ambient_enabled ? 'on' : 'off');
+  const ambientInFlight = ambientPhase === 'turning_on' || ambientPhase === 'turning_off';
+  const wantOn = ambientPhase === 'turning_on' ? false
+    : ambientPhase === 'turning_off' ? true
+      : !local.ambient_enabled;
   const toggleAmbient = () => {
-    commit({
-      ...local,
-      ambient_mode: local.ambient_mode === 'off' ? lastOnAmbientModeRef.current : 'off',
-    });
+    commit({ ...local, ambient_enabled: wantOn });
   };
-  const ambientDotClass = local.ambient_mode !== 'off' && ambientLive && ambientLive.mode !== 'off'
-    ? AMBIENT_MODE_DOT[ambientLive.mode]
-    : null;
+  const ambientDotClass = ambientPhase === 'unavailable' && local.ambient_enabled
+    ? 'top-bar-group-btn-dot-gray'
+    : (local.ambient_enabled || ambientInFlight) && ambientLive && ambientLive.mode !== 'off'
+      ? AMBIENT_MODE_DOT[ambientLive.mode]
+      : null;
 
   return (
     <div className="room-controls-bar">
@@ -346,30 +362,46 @@ export default function RoomControlsBar() {
       </TopBarGroupButton>
 
       <TopBarGroupButton
-        className={`ambient-group-btn${local.ambient_mode === 'off' ? ' ambient-group-btn-off' : ''}`}
-        title={local.ambient_mode === 'off' ? 'Ambient is off — tap to turn on, hold for options' : 'Ambient is on — tap to turn off, hold for options'}
+        className={`ambient-group-btn${!local.ambient_enabled && !ambientInFlight ? ' ambient-group-btn-off' : ''}`}
+        title={AMBIENT_PHASE_TITLE[ambientPhase]}
+        ariaLabel={`Ambient: ${AMBIENT_PHASE_LABEL[ambientPhase] ?? ambientPhase}. `
+          + 'Tap to toggle, hold for options.'}
         holdToExpand
         onShortPress={toggleAmbient}
-        panelTitle="Ambient"
+        panelTitle={<>Ambient <HelpLink topic="ambient" /></>}
         panel={(
           <>
             <div className="top-bar-group-field">
-              <label>Setting</label>
-              <select
-                value={local.ambient_mode}
-                onChange={(e) => commit({ ...local, ambient_mode: e.target.value as AmbientMode })}
+              <label>Ambient</label>
+              <button
+                type="button"
+                className="ambient-toggle-btn"
+                onClick={toggleAmbient}
+                title={AMBIENT_PHASE_TITLE[ambientPhase]}
               >
-                {AMBIENT_MODES.map((m) => (
-                  <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
-                ))}
-              </select>
+                {AMBIENT_PHASE_LABEL[ambientPhase]
+                  ?? (ambientPhase === 'on' ? 'On' : ambientPhase === 'unavailable' ? 'Off (room away)' : 'Off')}
+              </button>
+            </div>
+            <div className="top-bar-group-field">
+              <label>When music pauses</label>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={local.ambient_on_music_pause}
+                  onChange={(e) => commit({ ...local, ambient_on_music_pause: e.target.checked })}
+                />
+                <span style={{ fontSize: '0.85em', opacity: 0.75 }}>
+                  turn Ambient on by itself
+                </span>
+              </label>
             </div>
             <div className="top-bar-group-field">
               <label>Colour</label>
               <ColorGradientPicker
                 value={local.ambient_color ?? '#ffffff'}
                 onChange={(v) => commit({ ...local, ambient_color: v })}
-                disabled={local.ambient_mode === 'off'}
+                disabled={!local.ambient_enabled}
                 swatchWidth={40}
                 swatchHeight={28}
                 title="Ambient colour — a Hue entertainment stream only ever takes one solid colour"
@@ -381,7 +413,7 @@ export default function RoomControlsBar() {
               <ColorGradientPicker
                 value={local.ambient_color_dark ?? local.ambient_color ?? '#ffffff'}
                 onChange={(v) => commit({ ...local, ambient_color_dark: v })}
-                disabled={local.ambient_mode === 'off'}
+                disabled={!local.ambient_enabled}
                 swatchWidth={40}
                 swatchHeight={28}
                 title="Ambient colour for Dark mode — held instead of the normal ambient colour while Dark mode is on; starts the same until you pick one"
@@ -399,7 +431,7 @@ export default function RoomControlsBar() {
                 }}
               />
             </div>
-            {local.ambient_mode !== 'off' && ambientLive && ambientLive.mode !== 'off' && (
+            {ambientLive && ambientLive.mode !== 'off' && (
               <span
                 className={`badge ${AMBIENT_MODE_BADGE[ambientLive.mode]}`}
                 title={AMBIENT_MODE_NOTE[ambientLive.mode]
@@ -419,7 +451,9 @@ export default function RoomControlsBar() {
                 {ambientLive.verified_age_s != null && ` · ${formatVerifyAge(ambientLive.verified_age_s)}`}
               </span>
             )}
-            {ambientResult && !['on', 'off', 'yielding'].includes(ambientResult.status) && (
+            {ambientResult
+              && !['on', 'off', 'yielding', 'turning_on', 'turning_off', 'superseded']
+                .includes(ambientResult.status) && (
               <span
                 className={`badge ${ambientResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
                 title={AMBIENT_NOTE[ambientResult.status]}
@@ -442,6 +476,11 @@ export default function RoomControlsBar() {
         )}
       >
         💡
+        {AMBIENT_PHASE_LABEL[ambientPhase] && (
+          <span className="top-bar-group-btn-label ambient-group-btn-phase">
+            {AMBIENT_PHASE_LABEL[ambientPhase]}
+          </span>
+        )}
         {ambientDotClass && <span className={`top-bar-group-btn-dot ${ambientDotClass}`} title={ambientLive?.mode} />}
       </TopBarGroupButton>
 

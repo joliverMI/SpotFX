@@ -1,9 +1,10 @@
 """SPECTRA's own Ambient Mode — the behaviour behind the room bar's Ambient
-control (spectra.services.room_controls.RoomControlState.ambient_mode /
+control (spectra.services.room_controls.RoomControlState.ambient_enabled /
 ambient_color). This module is the single Hue write seam — it knows
-nothing about the three-setting mode surface or music precedence; that
-precedence lives one layer up, in spectra/services/ambient_music_gate.py,
-which is the only caller that decides WHEN to invoke reconcile() below.
+nothing about the toggle, the music-pause switch, or the intent/phase
+contract; all of that lives one layer up, in spectra/services/
+ambient_music_gate.py, which is the only caller that decides WHEN to
+invoke reconcile() below and owns the single cancellable transition.
 
 The legacy world (services/ambient_mode.py) is the spec for what "ambient"
 MEANS: a calm takeover of the Hue devices in the room — freeze each Hue
@@ -30,6 +31,12 @@ LedFX HTTP API:
     the whole time (fx/devices/hue.py's own docstring) — so unfreezing
     alone is enough for the stream to pick back up wherever the scene
     already is.
+
+Interruption (2026-08-30): a transition can be CANCELLED at a write
+boundary and the newer end state applied with every ramp dropped — see the
+"cancellation" block below `_light_cache` for the mechanics and the live
+numbers that forced it. ambient_music_gate.py owns when; this module owns
+where it is safe to.
 
 Release (ambient OFF) is a TWO-PHASE bridge-side ramp, matching legacy's
 own two-phase off-sequence (fade-toward-landing-colour, then ease toward
@@ -343,6 +350,106 @@ AMBIENT_RETRY_SPACING_MS = 1200
 _XY_TOLERANCE = 0.01
 _BRIGHTNESS_TOLERANCE_PCT = 3.0
 
+# ── cancellation: what makes an interrupted transition SNAP ────────────────
+#
+# The 2026-08-30 rework (his words: "let's also give spectra a clear ability
+# to handle what happens if the turn on or off sequence gets interrupted.
+# Interrupting should snap the state"). Measured live before the rework: a
+# turn-OFF takes 22.6s end to end (AMBIENT_TRANSITION_MS dim +
+# AMBIENT_CATCHUP_MS catch-up, plus 300ms-staggered confirmed writes) and a
+# turn-ON ~15s across his 17 bulbs. A press mid-transition QUEUED behind
+# `_lock` below and took 38s to win, because nothing could interrupt the
+# sequence already inside it.
+#
+# Two halves, both here rather than one layer up, because only this module
+# knows where a write boundary actually is:
+#   - CancelToken: cooperative, checked ONLY between whole-light writes and
+#     during the ramp sleeps, never mid-PUT to one bulb. A cancelled
+#     sequence raises AmbientCancelled out of reconcile(), which releases
+#     `_lock` on its way out so the newer intent acquires it within one
+#     write slot instead of one whole sequence.
+#   - snap=True: the newer intent's own run drops every RAMP — the ON hold
+#     writes with no `dynamics` duration, the OFF release skips both the dim
+#     fade and the catch-up ramp entirely and goes straight to unfreezing.
+#     The 300ms write STAGGER stays: that is zigbee physics, not
+#     choreography, and dropping it is how bulbs silently miss a write
+#     (module docstring, "Read-back confirmation"). So a snapped turn-on is
+#     bounded by bulb count (~5s at 17 bulbs), not by a fade nobody is
+#     watching any more.
+#
+# ambient_music_gate.py owns WHEN to cancel (its generation counter and the
+# single transition task); this module owns WHERE it is safe to.
+
+
+class AmbientCancelled(Exception):
+    """A newer ambient intent superseded this sequence at a write boundary.
+    Deliberately NOT swallowed by the best-effort `except Exception` guards
+    around individual device/light writes — every one of those re-raises it
+    first, or a cancel would be silently absorbed and the old sequence would
+    keep painting the room toward the state he just changed his mind
+    about."""
+
+
+class CancelToken:
+    """One transition's cancel signal. `check()` at a write boundary and
+    `sleep()` instead of `asyncio.sleep` inside a sequence, so a ramp can be
+    abandoned the instant a newer intent arrives rather than being waited
+    out."""
+
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def check(self) -> None:
+        if self._event.is_set():
+            raise AmbientCancelled()
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds <= 0:
+            self.check()
+            return
+        try:
+            await asyncio.wait_for(self._event.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            return
+        raise AmbientCancelled()
+
+
+def _check(token: Optional[CancelToken]) -> None:
+    if token is not None:
+        token.check()
+
+
+async def _sleep(token: Optional[CancelToken], seconds: float) -> None:
+    """Interruptible when a token is supplied, a plain sleep when not — so
+    every pre-rework caller (and every test that never passes one) keeps
+    exactly today's timing."""
+    if token is not None:
+        await token.sleep(seconds)
+    elif seconds > 0:
+        await asyncio.sleep(seconds)
+
+
+def room_available() -> bool:
+    """Can a press act on the room at all right now — i.e. is SPECTRA
+    driving the live stack. False is the phase contract's "unavailable"
+    (room released, or spot-effects owns): the intent is still stored and
+    still applies on the next take-back, but nothing physical can move on
+    this press. A room that IS ours but happens to have no live Hue device
+    reads available here on purpose — a press genuinely acts, there is just
+    nothing to drive, and reconcile()'s own "no-hue-devices" status plus
+    the gate's `held`/`mode` keys already say so honestly."""
+    from spectra.services.live_host import live
+
+    return bool(live.active and live.host is not None)
+
+
 _lock: Optional[asyncio.Lock] = None
 # {(ip_address, entertainment_id): [(light resource id, friendly name), ...]}
 _light_cache: dict[tuple[str, str], list[tuple[str, str]]] = {}
@@ -564,7 +671,8 @@ def _state_matches(state: dict, target_xy: tuple[float, float],
     return brightness is not None and abs(brightness - target_brightness_pct) <= _BRIGHTNESS_TOLERANCE_PCT
 
 
-async def _apply_hue(dev: Any, body: dict) -> int:
+async def _apply_hue(dev: Any, body: dict,
+                     token: Optional[CancelToken] = None) -> int:
     """PUT `body` to every light this device's entertainment stream covers,
     over ONE connection to its bridge (a device can carry ten-plus lights —
     a fresh TLS handshake per light would make every toggle noticeably
@@ -581,21 +689,25 @@ async def _apply_hue(dev: Any, body: dict) -> int:
     async with _bridge_client(cfg) as client:
         rids = await _resolve_lights(client, cfg)
         for i, rid in enumerate(rids):
+            # BETWEEN lights, never mid-PUT — a cancel must not leave one
+            # bulb half-written.
+            _check(token)
             try:
                 await _hue_put(client, f"/clip/v2/resource/light/{rid}", body)
                 count += 1
             except Exception:
                 logger.exception("Ambient: failed to set light %s on %s",
                                  rid, cfg.get("ip_address"))
-            if i < len(rids) - 1 and AMBIENT_WRITE_STAGGER_MS > 0:
-                await asyncio.sleep(AMBIENT_WRITE_STAGGER_MS / 1000)
+            if i < len(rids) - 1:
+                await _sleep(token, AMBIENT_WRITE_STAGGER_MS / 1000)
     return count
 
 
 async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
                              pending: list[tuple[str, str]], body: dict,
                              target_xy: tuple[float, float],
-                             target_brightness_pct: float) -> tuple[list[str], list[str]]:
+                             target_brightness_pct: float,
+                             token: Optional[CancelToken] = None) -> tuple[list[str], list[str]]:
     """The shared paced-write-then-read-back-confirm engine behind both the
     initial hold (_hold_and_confirm, every light in the entertainment set)
     and the standalone straggler repair (repair_stragglers, just the
@@ -632,16 +744,16 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
     for attempt in range(AMBIENT_HOLD_ATTEMPTS):
         write_body = body if attempt == 0 else snap_body
         for i, (rid, name) in enumerate(pending):
+            _check(token)   # between lights only — never mid-PUT
             try:
                 await _hue_put(client, f"/clip/v2/resource/light/{rid}", write_body)
             except Exception:
                 logger.exception("Ambient: failed to write %s (%s) on %s",
                                  name, rid, cfg.get("ip_address"))
-            if i < len(pending) - 1 and AMBIENT_WRITE_STAGGER_MS > 0:
-                await asyncio.sleep(AMBIENT_WRITE_STAGGER_MS / 1000)
+            if i < len(pending) - 1:
+                await _sleep(token, AMBIENT_WRITE_STAGGER_MS / 1000)
         settle_ms = (AMBIENT_TRANSITION_MS if "dynamics" in write_body else 0) + AMBIENT_CONFIRM_SETTLE_MS
-        if settle_ms > 0:
-            await asyncio.sleep(settle_ms / 1000)
+        await _sleep(token, settle_ms / 1000)
         still_pending: list[tuple[str, str]] = []
         for rid, name in pending:
             try:
@@ -663,12 +775,13 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
             logger.warning(
                 "Ambient: %d light(s) not yet confirmed at the ambient "
                 "colour, retrying: %s", len(pending), [n for _, n in pending])
-            await asyncio.sleep(AMBIENT_RETRY_SPACING_MS / 1000)
+            await _sleep(token, AMBIENT_RETRY_SPACING_MS / 1000)
     return sorted(confirmed.values()), sorted(name for _, name in pending)
 
 
 async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float],
-                            target_brightness_pct: float) -> tuple[list[str], list[str]]:
+                            target_brightness_pct: float,
+                            token: Optional[CancelToken] = None) -> tuple[list[str], list[str]]:
     """Resolve every light this device's entertainment stream covers, then
     run them through _write_and_confirm. See that function for the actual
     write/confirm/retry mechanics."""
@@ -677,7 +790,8 @@ async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float]
         pending = await _resolve_lights_named(client, cfg)
         if not pending:
             return [], []
-        return await _write_and_confirm(client, cfg, pending, body, target_xy, target_brightness_pct)
+        return await _write_and_confirm(client, cfg, pending, body, target_xy,
+                                        target_brightness_pct, token)
 
 
 async def repair_stragglers(names: list[str], color: Optional[str]) -> dict:
@@ -905,7 +1019,9 @@ def _live_look(dev: Any) -> Optional[tuple[str, int]]:
 # ── public entry point ──────────────────────────────────────────────────────
 
 async def reconcile(enabled: bool, color: Optional[str],
-                    group_ids: Optional[frozenset[str]] = None) -> dict:
+                    group_ids: Optional[frozenset[str]] = None,
+                    token: Optional[CancelToken] = None,
+                    snap: bool = False) -> dict:
     """Drive the room's live Hue devices toward `enabled` (held at `color`,
     default white, at the brightness `_hsv_value_pct(color)` derives from
     that same hex — see that function's docstring for why brightness is
@@ -920,12 +1036,24 @@ async def reconcile(enabled: bool, color: Optional[str],
     means every live Hue device, preserving today's behaviour exactly.
     When `enabled` and a non-empty selection excludes a device that's
     currently frozen (he deselected a group while Ambient stays engaged),
-    that device is released in the SAME call — see `_release_devices`."""
+    that device is released in the SAME call — see `_release_devices`.
+
+    `token`/`snap` are the 2026-08-30 interruption mechanics (see the
+    "cancellation" block above): a supplied token lets a newer intent
+    abandon this sequence at its next write boundary (raising
+    AmbientCancelled, which releases the lock on the way out so the newer
+    intent waits one write slot, not one whole sequence), and `snap` drops
+    every RAMP — no colour glide on the hold, no dim fade and no catch-up
+    on the release — so the newer end state lands as fast as the staggered
+    confirmed writes allow. Neither is used by the automatic paths; both
+    are set by ambient_music_gate when a transition supersedes another."""
     async with _get_lock():
-        return await _reconcile_impl(enabled, color, group_ids)
+        return await _reconcile_impl(enabled, color, group_ids, token, snap)
 
 
-async def _release_devices(devices: dict[str, Any]) -> list[str]:
+async def _release_devices(devices: dict[str, Any],
+                           token: Optional[CancelToken] = None,
+                           snap: bool = False) -> list[str]:
     """The OFF sequence — bridge-side fade, ease toward each device's live
     look, then unfreeze (module docstring's release two-phase ramp) —
     shared by the whole-room OFF path and the group-shrink-while-still-on
@@ -935,35 +1063,54 @@ async def _release_devices(devices: dict[str, Any]) -> list[str]:
     confirmed `set_frozen(False)`."""
     if not devices:
         return []
-    fade = _fade_dim_payload(AMBIENT_OFF_FADE_PCT, AMBIENT_TRANSITION_MS)
-    for did, dev in sorted(devices.items()):
-        try:
-            await _apply_hue(dev, fade)
-        except Exception:
-            logger.exception("Ambient: off-fade failed for %s", did)
-    if AMBIENT_TRANSITION_MS > 0:
-        await asyncio.sleep(AMBIENT_TRANSITION_MS / 1000)
-
-    # Catch-up: ease the still-frozen bulbs toward whatever the room's live
-    # effect is actually showing right now, over the SAME bridge-side ramp
-    # phase 1 used — before handing back to the stream, not after (module
-    # docstring). Best-effort per device; a device with nothing to read
-    # (not yet activated) just releases straight from the phase-1 fade.
     caught_up = False
-    for did, dev in sorted(devices.items()):
-        look = _live_look(dev)
-        if look is None:
-            continue
-        color_hex, brightness_pct = look
-        try:
-            await _apply_hue(dev, _light_payload(
-                color_hex, AMBIENT_CATCHUP_MS, brightness_pct=brightness_pct))
-            caught_up = True
-        except Exception:
-            logger.exception("Ambient: catch-up ramp failed for %s", did)
-    if caught_up and AMBIENT_CATCHUP_MS > 0:
-        await asyncio.sleep(AMBIENT_CATCHUP_MS / 1000)
+    if snap:
+        # A SNAPPED release skips BOTH ramps outright — this is the "if is
+        # gradually turning ambient off, and I turn it back on, it should
+        # just snap" case seen from the other side: he changed his mind, so
+        # the ~11s of choreography he is no longer watching is exactly what
+        # must not be waited out. Nothing is written to the bulbs at all;
+        # unfreezing hands each device straight back to the live stream,
+        # which is already rendering the room's real scene (fx/devices/
+        # hue.py — a frozen device's virtual never stopped).
+        logger.info("Ambient: snapping the release (interrupted) — no fade, "
+                    "no catch-up, straight back to the stream")
+    else:
+        fade = _fade_dim_payload(AMBIENT_OFF_FADE_PCT, AMBIENT_TRANSITION_MS)
+        for did, dev in sorted(devices.items()):
+            try:
+                await _apply_hue(dev, fade, token)
+            except AmbientCancelled:
+                raise
+            except Exception:
+                logger.exception("Ambient: off-fade failed for %s", did)
+        await _sleep(token, AMBIENT_TRANSITION_MS / 1000)
 
+        # Catch-up: ease the still-frozen bulbs toward whatever the room's
+        # live effect is actually showing right now, over the SAME
+        # bridge-side ramp phase 1 used — before handing back to the
+        # stream, not after (module docstring). Best-effort per device; a
+        # device with nothing to read (not yet activated) just releases
+        # straight from the phase-1 fade.
+        for did, dev in sorted(devices.items()):
+            look = _live_look(dev)
+            if look is None:
+                continue
+            color_hex, brightness_pct = look
+            try:
+                await _apply_hue(dev, _light_payload(
+                    color_hex, AMBIENT_CATCHUP_MS, brightness_pct=brightness_pct), token)
+                caught_up = True
+            except AmbientCancelled:
+                raise
+            except Exception:
+                logger.exception("Ambient: catch-up ramp failed for %s", did)
+        if caught_up:
+            await _sleep(token, AMBIENT_CATCHUP_MS / 1000)
+
+    # Deliberately NOT cancellable: once the ramps are done (or skipped),
+    # unfreezing must finish. Abandoning here would leave a device frozen
+    # with nothing holding it — the one state neither intent describes.
     released: list[str] = []
     for did, dev in sorted(devices.items()):
         try:
@@ -977,7 +1124,9 @@ async def _release_devices(devices: dict[str, Any]) -> list[str]:
 
 
 async def _reconcile_impl(enabled: bool, color: Optional[str],
-                          group_ids: Optional[frozenset[str]]) -> dict:
+                          group_ids: Optional[frozenset[str]],
+                          token: Optional[CancelToken] = None,
+                          snap: bool = False) -> dict:
     from spectra.services.live_host import live
 
     if not live.active or live.host is None:
@@ -1008,7 +1157,7 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
         hold_devices = {}
         shrink_devices = dict(hue_devices)
 
-    released = await _release_devices(shrink_devices)
+    released = await _release_devices(shrink_devices, token, snap)
 
     if not hold_devices:
         if enabled:
@@ -1028,7 +1177,12 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
 
     color_hex = color or "#ffffff"
     brightness_pct = _hsv_value_pct(color_hex)
-    body = _light_payload(color_hex, AMBIENT_TRANSITION_MS, brightness_pct=brightness_pct)
+    # snap: no `dynamics` ramp at all — the write lands the end state on the
+    # bulb as fast as it can be confirmed. _write_and_confirm already keys
+    # its settle wait off whether the body carries a ramp, so a snapped hold
+    # also stops waiting out a glide that was never sent.
+    body = _light_payload(color_hex, None if snap else AMBIENT_TRANSITION_MS,
+                          brightness_pct=brightness_pct)
     target_xy = _hex_to_xy(color_hex)
     touched: list[str] = []
     held: list[str] = []
@@ -1037,10 +1191,12 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
         try:
             await dev.set_frozen(True)   # must land before the REST write
             confirmed_names, straggler_names = await _hold_and_confirm(
-                dev, body, target_xy, brightness_pct)
+                dev, body, target_xy, brightness_pct, token)
             held.extend(confirmed_names)
             unconfirmed.extend(straggler_names)
             touched.append(did)
+        except AmbientCancelled:
+            raise
         except Exception:
             logger.exception("Ambient: failed to hold %s at the ambient colour", did)
     if not touched:

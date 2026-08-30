@@ -113,8 +113,9 @@ False and is excluded from the Light write, regardless of the room's mode —
 
 Orthogonal to Ambient, exactly like legacy (services/ambient_mode.py has
 zero display_mode references, confirmed by grep) — and, since 2026-08-15,
-composes with Ambient's OWN three settings (ambient_mode: "off"/"always"/
-"auto", spectra/services/ambient_music_gate.py) rather than a boolean.
+composes with Ambient's own binary toggle and its separate music-pause
+switch (ambient_enabled/ambient_on_music_pause, spectra/services/
+ambient_music_gate.py).
 Not a coincidence to preserve here: whenever a Hue device is ACTUALLY
 frozen right now — "always" unconditionally, or "auto" while playback
 reads confirmed-not-playing — that device's stream is driven by direct
@@ -122,7 +123,7 @@ bridge REST (spectra/services/ambient.py), bypassing LedFX/dark_lock
 entirely, so toggling dark mode has no visible effect on it. The moment
 that device ISN'T frozen ("off", or "auto" while confirmed playing), it's
 LedFX-rendered like any other virtual and responds to dark_lock normally.
-This module never reads ambient_mode to decide any of this — the
+This module never reads Ambient's own state to decide any of this — the
 orthogonality is a property of the write path (a frozen device never
 reaches LedFX's effect config at all), not a rule either feature encodes
 about the other, the same "compose for free by construction" shape
