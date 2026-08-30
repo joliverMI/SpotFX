@@ -2,8 +2,21 @@
 room-wide switches with a compact UI control on the room bar:
 
   GET /api/room-controls  — RoomControlState
-  PUT /api/room-controls  — replace it (the frontend round-trips the whole
-                            object, same shape as PUT /api/room-journey)
+  PUT /api/room-controls  — a TRUE PARTIAL UPDATE (2026-08-30): the body's
+                            keys are overlaid onto the CURRENT stored state
+                            and the merged result is validated through
+                            RoomControlState; every field the body does not
+                            name is byte-preserved. The frontend still
+                            round-trips the whole object, which overlays
+                            every key and is therefore unchanged. Before
+                            this, a partial body reset every unnamed field
+                            to its model default and saved that — two of the
+                            owner's real values were confirmed wiped that
+                            way. The merge and the retired-`ambient_mode`
+                            compatibility alias both live in services/
+                            room_controls.py (merge_room_controls /
+                            AMBIENT_MODE_ALIAS); read the block comment
+                            above them before touching this handler.
 
 See services/room_controls.py for what each field means and where it's
 applied (fx_executor + scene_compiler write seams for brightness_multiplier;
@@ -50,10 +63,11 @@ live Hue device (today's unmodified default).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Any
+
+from fastapi import APIRouter, Body, HTTPException
 
 from spectra.services import ambient, room_controls
-from spectra.services.room_controls import RoomControlState
 
 router = APIRouter(prefix="/api", tags=["spectra-room-controls"])
 
@@ -69,10 +83,35 @@ async def ambient_groups():
 
 
 @router.put("/room-controls")
-async def put_room_controls(state: RoomControlState):
+async def put_room_controls(body: Any = Body(...)):
+    """A TRUE PARTIAL UPDATE: only the keys the caller actually SENT are
+    overlaid onto the current stored state, the merged result is validated
+    through RoomControlState exactly as the old whole-object bind was, and
+    every unnamed field is byte-preserved.
+
+    This handler used to bind `body` straight to RoomControlState, so a
+    partial body silently reset every unnamed field to its model default
+    and persisted that — real losses landed in the owner's own file (his
+    av_sync_lead_ms calibration, his force_scene_scene_id pin). The merge
+    lives in services/room_controls.merge_room_controls; read the block
+    comment above it for why the merge is the fix and a per-key patch is
+    not (the caller list is structurally unknowable through the proxy hop).
+
+    A full-body PUT — the web UI's own shape — overlays every key and is
+    therefore byte-identical to the previous behaviour. The retired
+    `ambient_mode` key is accepted as a compatibility alias (see
+    services/room_controls.AMBIENT_MODE_ALIAS); when a body carries both it
+    and a new key, the NEW key wins and the response says so in
+    `ambient_mode_alias`."""
     previous = room_controls.load_room_controls()
+    try:
+        state, alias_note = room_controls.merge_room_controls(previous, body)
+    except room_controls.RoomControlsPatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     room_controls.save_room_controls(state)
     response: dict = {"status": "saved", **state.model_dump()}
+    if alias_note is not None:
+        response["ambient_mode_alias"] = alias_note
     ambient_result = await room_controls.reconcile_ambient_if_changed(previous, state)
     if ambient_result is not None:
         response["ambient_result"] = ambient_result

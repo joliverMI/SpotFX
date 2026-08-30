@@ -776,6 +776,116 @@ def save_room_controls(state: RoomControlState) -> None:
         raise
 
 
+# ═══ THE MERGE: PUT /api/room-controls is a TRUE PARTIAL UPDATE ═══════════
+#
+# THE DEFECT THIS EXISTS FOR (established live, 2026-08-30): the PUT handler
+# bound its request body straight to the full RoomControlState, so a body
+# naming ONE field silently reset every field it did not name to that
+# field's model default — and save_room_controls persisted the result. Two
+# of the owner's own values were confirmed wiped in his real
+# storage/spectra/room_controls.json this way: his av_sync_lead_ms
+# calibration and his force_scene_scene_id pin.
+#
+# WHY THE MERGE IS THE FIX AND A PER-KEY PATCH IS NOT: the runtime log
+# cannot attribute a PUT to a caller through the reverse-proxy hop
+# (services/spectra_proxy.py), so the set of partial callers is
+# structurally unknowable — Home Assistant scripts, curl operations,
+# anything unenumerated. A per-key patch protects only the callers someone
+# thought to enumerate; the merge protects every caller, including the ones
+# nobody has written yet. Merge first, always.
+#
+# THE CONTRACT: only the keys a caller actually SENT are overlaid onto the
+# CURRENT stored state; everything else is byte-preserved. The merged
+# result is validated through RoomControlState.model_validate exactly as
+# the whole-object bind used to be, so a bad value is still a 422 and
+# nothing partially-valid is ever stored. A full-body PUT (the web UI's
+# own shape, spectra/web/src/queries.ts useSaveRoomControls) overlays every
+# key and is therefore byte-identical to the old behaviour.
+#
+# An unknown key is ignored, the same as before (the model's default
+# extra="ignore"); the reconcilers still receive (previous, merged) exactly
+# as they did, so their "did this actually change" detection still compares
+# against the TRUE previous state.
+
+#: The retired three-value ambient_mode ("off"/"always"/"auto", live from
+#: 2026-08-15 to 2026-08-30) accepted as a COMPATIBILITY ALIAS on the PUT
+#: path only — mapped onto the binary pair before validation, never stored.
+#:
+#: Note where this deliberately differs from load_room_controls's own
+#: disk migration above: that migration forces ambient_on_music_pause False
+#: for "auto" too, a ONE-TIME owner ruling about his STORED state ("set it
+#: to false for now") — a statement about the file he already had, not
+#: about what a caller explicitly asks for now. Here, "auto" IS the
+#: music-pause behaviour: a caller sending it is asking for that behaviour
+#: by name, so it maps to it.
+#:
+#: Each value maps ONLY the fields it actually names, so an alias never
+#: writes a field the caller didn't ask about — the same discipline as the
+#: merge itself.
+AMBIENT_MODE_ALIAS: dict[str, dict[str, bool]] = {
+    "always": {"ambient_enabled": True},
+    "off": {"ambient_enabled": False},
+    "auto": {"ambient_enabled": False, "ambient_on_music_pause": True},
+}
+
+
+class RoomControlsPatchError(ValueError):
+    """A partial body that cannot be turned into a valid RoomControlState —
+    raised for a non-object body, an unusable ambient_mode alias value, or a
+    merged result the model rejects. The PUT handler turns this into a 422,
+    the same status the whole-object bind used to return for a bad body."""
+
+
+def resolve_ambient_mode_alias(patch: dict) -> tuple[dict, Optional[dict]]:
+    """Translate a legacy `ambient_mode` key in an incoming PUT body onto
+    the binary pair, returning (patch_without_alias, note_or_None).
+
+    NEW KEY WINS on a conflict: a body carrying both `ambient_mode` and one
+    of the new keys keeps the new key's value for that field and the note
+    names what was ignored — a caller speaking both dialects in one breath
+    is told which one was heard, never silently resolved.
+
+    The alias is a PUT-path translation only; `ambient_mode` itself is
+    never stored (RoomControlState has no such field)."""
+    if "ambient_mode" not in patch:
+        return patch, None
+    patch = dict(patch)
+    value = patch.pop("ambient_mode")
+    mapped = AMBIENT_MODE_ALIAS.get(value if isinstance(value, str) else "")
+    if mapped is None:
+        raise RoomControlsPatchError(
+            f"ambient_mode must be one of {sorted(AMBIENT_MODE_ALIAS)}, got {value!r}")
+    overridden = sorted(k for k in mapped if k in patch)
+    applied = {k: v for k, v in mapped.items() if k not in patch}
+    patch.update(applied)
+    note: dict = {"received": value, "applied": applied}
+    if overridden:
+        note["conflict"] = ("body carried both ambient_mode and "
+                            + ", ".join(overridden)
+                            + " — the new key wins")
+        note["ignored_from_alias"] = overridden
+    return patch, note
+
+
+def merge_room_controls(previous: RoomControlState, body: object
+                        ) -> tuple[RoomControlState, Optional[dict]]:
+    """Overlay ONLY the keys `body` actually carries onto `previous` and
+    validate the result — the whole partial-update contract, in one place
+    so the PUT handler and any future writer share it. Returns
+    (merged_state, ambient_mode_alias_note).
+
+    Raises RoomControlsPatchError for anything the model would reject."""
+    if not isinstance(body, dict):
+        raise RoomControlsPatchError("body must be a JSON object")
+    patch, alias_note = resolve_ambient_mode_alias(body)
+    merged = {**previous.model_dump(), **patch}
+    try:
+        state = RoomControlState.model_validate(merged)
+    except Exception as exc:
+        raise RoomControlsPatchError(str(exc)) from exc
+    return state, alias_note
+
+
 async def reconcile_ambient_if_changed(previous: RoomControlState,
                                        new_state: RoomControlState) -> Optional[dict]:
     """The ambient-takeover half of a room-controls save, factored out so

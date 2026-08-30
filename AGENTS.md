@@ -1489,6 +1489,22 @@ Owner decision `data/spectra-gap-inventory/decision-legacy-retirement-picks.md`
 KEPT four legacy capabilities needing SPECTRA equivalents (six others RETIRED,
 retire-not-delete). Built:
 
+**`PUT /api/room-controls` IS A TRUE PARTIAL UPDATE — only the keys a
+caller SENT are overlaid onto the current stored state; everything else is
+byte-preserved (2026-08-30, PR fm/room-controls-partial-merge).** Before
+that it bound the body to the full `RoomControlState`, so a partial body
+silently reset every unnamed field to its model default and saved it — his
+`av_sync_lead_ms` calibration and `force_scene_scene_id` pin were both
+confirmed wiped in his real file that way. The merge, not a per-key patch,
+is the fix: the reverse-proxy hop makes the caller list structurally
+unknowable, so only a merge protects callers nobody has enumerated. The
+contract and the retired-`ambient_mode` compatibility alias (PUT path only,
+never stored; `"auto"` maps to `ambient_on_music_pause=True`, unlike the
+one-time disk migration — and a body carrying both dialects lets the NEW key
+win) live in `room_controls.merge_room_controls`/`AMBIENT_MODE_ALIAS`.
+Reconcilers still receive `(previous, merged)`. Spec:
+`tests/test_room_controls_partial_put.py`.
+
 - **Override Blend** — `SceneV2.entry_ramp_ms` (a scene-fire blend-in ramp,
   threaded through `fx_seam.apply_writes(transition_ms=...)`, hue-arc, same
   tween shape as `fx_executor`'s glides) covers the thinner scene-entry
