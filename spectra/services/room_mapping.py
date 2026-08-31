@@ -35,9 +35,11 @@ already proven the expensive way (see that module's own docstring).
 WHY THE DARK STEP DARKENS EVERY LIVE VIRTUAL, not only the room's own
 devices: a footprint is what a CAMERA sees, so any other fixture still
 playing the show lands in the frame and in the difference. The room's
-`device_ids` decide which emitters get MAPPED; the dark step covers the
-whole live room because that is what "with the room dark" means to a
-camera. Everything it darkens is in the same snapshot and comes back with
+`device_ids` decide which emitters get MAPPED (minus anything DESELECTED —
+a member sitting out is skipped by the enumeration, so it is never lit and
+never re-measured, while every other member's capture is unchanged); the
+dark step covers the whole live room because that is what "with the room
+dark" means to a camera. Everything it darkens is in the same snapshot and comes back with
 it — the same scope av_sync_pattern.py's own default flash already takes.
 
 GRANULARITY IS A PER-CAPTURE CHOICE, and step 4 is the only thing that
@@ -324,7 +326,10 @@ async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
     live = await deps.get_virtuals() or {}
     by_device: dict[str, list[str]] = {}
     types: dict[str, str] = {}
-    for device_id in room.device_ids:
+    # Participation, not membership: a DESELECTED member is not enumerated,
+    # so a run never lights it and never overwrites what it already measured.
+    members = room.selected_device_ids()
+    for device_id in members:
         try:
             vids = list(await deps.virtuals_for_device(device_id) or [])
         except Exception:                              # noqa: BLE001
@@ -337,7 +342,7 @@ async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
             types[device_id] = str(await deps.device_type(device_id) or "")
         except Exception:                              # noqa: BLE001
             types[device_id] = ""
-    return emitters_mod.plan_run(room.device_ids, live, by_device, types,
+    return emitters_mod.plan_run(members, live, by_device, types,
                                  granularity=granularity,
                                  block_pixels=block_pixels)
 
@@ -370,6 +375,10 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
         return result
     if not room.device_ids:
         result.reason = "this room has no devices assigned yet"
+        return result
+    if not room.selected_device_ids():
+        result.reason = ("every device in this room is deselected — select at "
+                         "least one to map")
         return result
     sess.run_abort = None
 

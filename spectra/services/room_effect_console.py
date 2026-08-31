@@ -96,6 +96,11 @@ def _op_list_rooms() -> dict:
     rooms = light_field.load_rooms()
     return {"rooms": [{"id": r.id, "name": r.name,
                        "device_ids": r.device_ids,
+                       # Which members are sitting out, so a report of "that
+                       # sconce is not moving" is answered by looking rather
+                       # than by a mystery. Changing it is a press on the
+                       # Rooms page, not an operation here.
+                       "deselected": r.deselected_device_ids,
                        "mapped": r.mapped_devices(),
                        "not_mapped": r.unmapped_ids(),
                        "axis_calibrated": r.axis.calibrated,
