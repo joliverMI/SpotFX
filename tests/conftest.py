@@ -293,6 +293,27 @@ def _isolated_sonic_usage(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_room_light_field(tmp_path, monkeypatch):
+    """The room light-field map store, the room-effects spec store, AND the
+    room-effects layer's process-global running state.
+
+    Two no-DI-seam globals in one fixture, the _isolated_fire_history /
+    _isolated_param_watchdog pattern: light_field.put_room and
+    room_effects.put_effect write config paths directly, and
+    room_effects._state is module-global (its gains are read from
+    fx_seam.apply_writes and param_watchdog.sweep_once, so a run leaking
+    out of one test would silently scale another test's writes). Autouse so
+    no individual test needs to know either exists."""
+    from spectra import config as scfg
+    from spectra.services import room_effects
+    monkeypatch.setattr(scfg, "ROOM_MAPS_FILE", tmp_path / "room_maps.json")
+    monkeypatch.setattr(scfg, "ROOM_EFFECTS_FILE", tmp_path / "room_effects.json")
+    room_effects.reset()
+    yield
+    room_effects.reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_device_timing(tmp_path, monkeypatch):
     """Two no-DI-seam globals in one fixture, same class as
     _isolated_fire_history: the per-device settings STORE

@@ -36,7 +36,7 @@ from spectra.api import (av_sync, device_preview, devices as devices_api,
                          feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
                          ownership, preview, registry, room_controls,
-                         room_preview,
+                         room_effects as room_effects_api, room_preview, rooms,
                          scenes, sequencer, settings_console, show_review,
                          sonic_usage, spec, test_session, triggers)
 
@@ -97,6 +97,8 @@ def create_app() -> FastAPI:
     app.include_router(gradient2d.router)
     app.include_router(av_sync.router)
     app.include_router(test_session.router)
+    app.include_router(rooms.router)
+    app.include_router(room_effects_api.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):

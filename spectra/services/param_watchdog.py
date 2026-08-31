@@ -25,7 +25,7 @@ WHAT IT DOES
   found at WARNING, records it to fire_history's "watchdog" bucket (the
   Review page's show log), and counts it on the liveness endpoint.
 
-"NOTHING HOLDING IT" — precisely, the three legitimate holders, all
+"NOTHING HOLDING IT" — precisely, the four legitimate holders, all
 checked fresh each sweep, any one of them standing down the check:
   1. a pending momentary release for that (virtual, param) in
      ResponseEngine._pending_releases (pending_release_keys) — the spike
@@ -39,7 +39,21 @@ checked fresh each sweep, any one of them standing down the check:
   3. a param tween currently in flight on the live effect (Effect._tweens
      has the key) — a release glide, a permanent move's ease-in, a scene
      fire's entry ramp, a gain's landing are all mid-flight writes the
-     engine already issued.
+     engine already issued;
+  4. a running ROOM EFFECT owning that (virtual, "brightness") — the
+     room-effects layer (spectra/services/room_effects.py) drives a
+     travelling wave by moving brightness continuously and by design, so
+     those exact keys are held while it runs. Note honestly what this does
+     and does not add TODAY: a room effect holds the room through
+     flare_preview_hold, and _production_gate() already stands the WHOLE
+     sweep down while any hold is active, so in production this holder is
+     currently belt-and-braces. It is here because it is the honest
+     expression of ownership, because it is per-KEY where the gate is
+     global, and because the moment a room effect is allowed to run without
+     the hold (his own open question — "ride on top, like the dimmer") it
+     becomes the only thing standing between a wave and a watchdog that
+     would fight it. tests/test_room_effects.py proves it against a
+     deliberately-open gate, which is the shape a narrowed gate would take.
 
 THE DISCRIMINATOR THAT MAKES THIS SAFE — how a legitimate PERMANENT move is
 told apart from an ORPHANED MOMENTARY spike, established before the
@@ -187,6 +201,15 @@ class Deps:
     room_controls: Callable[[], Any]
     gate: Callable[[], Optional[str]]
     clock: Callable[[], float] = time.monotonic
+    #: HOLDER 4 — the room-effects layer (spectra/services/room_effects.py).
+    #: A running Dim Wave moves `brightness` on its mapped virtuals
+    #: continuously and by design, so those exact (virtual, param) keys are
+    #: legitimately held while it runs. Per KEY, never a global stand-down:
+    #: every other param on every other virtual stays watched throughout,
+    #: which is the difference between registering a holder and switching
+    #: the watchdog off. Returns an empty set when nothing is running, so
+    #: the sweep is unchanged by this feature's existence.
+    room_effect_holds: Callable[[], set] = lambda: set()
 
 
 # ── module state ───────────────────────────────────────────────────────────
@@ -281,11 +304,13 @@ def _load_room_controls():
 
 def production_deps() -> Deps:
     from spectra.services import engine
+    from spectra.services import room_effects
     return Deps(conductor=engine.conductor, responses=engine.responses,
                 executor=lambda: engine.executor,
                 live_effect=_production_live_effect,
                 room_controls=_load_room_controls,
-                gate=_production_gate)
+                gate=_production_gate,
+                room_effect_holds=room_effects.holds)
 
 
 # ── the comparison ─────────────────────────────────────────────────────────
@@ -371,6 +396,7 @@ async def sweep_once(deps: Optional[Deps] = None) -> dict:
     _note_multiplier(float(getattr(controls, "brightness_multiplier", 1.0)))
     pending = set(responses.pending_release_keys())
     owned = {(m.vid, m.param) for m in conductor.mechanisms}
+    room_effect = set(deps.room_effect_holds() or ())
     seen: set[tuple[str, str]] = set()
 
     for vid, state in list(conductor.virtuals.items()):
@@ -385,7 +411,8 @@ async def sweep_once(deps: Optional[Deps] = None) -> dict:
             if pname in EXCLUDED_PARAMS:
                 continue
             key = (vid, pname)
-            if key in pending or key in owned or pname in live.tweening:
+            if key in pending or key in owned or key in room_effect \
+                    or pname in live.tweening:
                 record["checked"] += 1
                 record["held"] += 1
                 _tracking.pop(key, None)

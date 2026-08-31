@@ -81,6 +81,16 @@ FLARE_PREVIEW_HOLD_FILE = SPECTRA_STORAGE / "flare_preview_hold.json"
 AV_SYNC_MEASUREMENTS_FILE = SPECTRA_STORAGE / "av_sync_measurements.json"
 AV_SYNC_PATTERN_FILE = SPECTRA_STORAGE / "av_sync_pattern.json"
 
+# THE ROOM LIGHT-FIELD MAP (spectra/services/light_field.py) — per-emitter
+# measured footprints: WHERE each emitter's light lands and how much, never
+# where its LEDs are (spectra/models/room_map.py's docstring is the binding
+# statement). Numbers only; no frames, no images, ever.
+ROOM_MAPS_FILE = SPECTRA_STORAGE / "room_maps.json"
+# The room-effects layer's authored effects (spectra/services/room_effects.py)
+# — kind + knobs + which devices they drive. The running gains themselves are
+# in-memory only; only the authored spec is durable.
+ROOM_EFFECTS_FILE = SPECTRA_STORAGE / "room_effects.json"
+
 # The TESTING IN PROGRESS record (spectra/services/test_session.py): the
 # DECLARED half of the room-visibility bar — {actor, reason, since_ms,
 # expires_ms}. Durable (not in-memory like preview_pause's own deadline)

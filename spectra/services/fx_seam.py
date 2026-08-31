@@ -143,7 +143,27 @@ async def set_virtual_config(virtual_id: str, patch: dict) -> None:
             resp.raise_for_status()
 
 
+def _compose_room_effect(w: dict) -> dict:
+    """Apply the room-effects layer's per-emitter gain to one write, on its
+    way out — the ONE place a running Dim Wave composes with whatever the
+    show is doing (spectra/services/room_effects.py's docstring is the
+    binding statement).
+
+    Identity by construction when nothing is running: room_effects.compose
+    returns the caller's own dict object back, so the seam's normal path is
+    byte-identical to before this feature existed. A write the layer issued
+    ITSELF carries `room_effect` and is left alone — it already has the gain
+    in it, and scaling it twice would square the wave."""
+    if w.get("room_effect"):
+        return w
+    from spectra.services import room_effects
+    cfg = room_effects.compose(w["virtual_id"], w.get("effect_type") or "",
+                               w["config"])
+    return w if cfg is w["config"] else {**w, "config": cfg}
+
+
 def _body(w: dict, transition_ms: int = 0) -> dict:
+    w = _compose_room_effect(w)
     body = {
         "type": w["effect_type"],
         "config": device_model.round_int_params(w["effect_type"], w["config"]),
