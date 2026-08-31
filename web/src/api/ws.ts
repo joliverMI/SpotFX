@@ -9,17 +9,17 @@ let ws: WebSocket | null = null;
 let started = false;
 let connected = false;
 
+// /app/ joined the https cutover on 2026-08-31, when the tailscale-serve https
+// listener began fronting the whole of :8000 — the premise of the old
+// "not served over https" note. Scheme-aware, matching the sibling
+// `spectra/web/src/api/ws.ts`.
+function wsUrl(): string {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${location.host}/ws`;
+}
+
 function connect() {
-  // DELIBERATELY NOT HTTPS-READY. The hardcoded `ws://` scheme below is blocked
-  // as mixed content on an https page. Ruled out of the https cutover
-  // (2026-08-31): the legacy /app/ SPA is not served over https, and widening
-  // the cutover to it was declined. The fixed sibling is
-  // `spectra/web/src/api/ws.ts`, which is protocol-aware
-  // (`location.protocol === 'https:' ? 'wss:' : 'ws:'`).
-  // If /app/ ever joins the cutover, THIS NOTE IS THE WHOLE BRIEF: copy the
-  // sibling's construction, and sweep this SPA for other scheme-dependent URLs
-  // the same way PR #218 did.
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws = new WebSocket(wsUrl());
   ws.onopen = () => {
     connected = true;
     stateListeners.forEach((fn) => fn(true));
