@@ -1613,7 +1613,20 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'devices chips pick select in use expansion sconce emitter granularity',
         body: [
           'Only the devices the room actually uses are listed, the same list and the same rule the Devices page uses; "Show all" reveals the rest. Tap a device to put it in the room.',
-          'One device is one emitter in this build. Two sconces on one wall are two emitters; the ceiling and floor between them need no fixtures of their own, because their light is already in the sconces\' footprints.',
+          'A device is not necessarily ONE emitter: a strip can be mapped in parts, so a wave can run along it. Two sconces on one wall are two emitters; a strip wrapped round the television can be a dozen. The ceiling and floor between them need no fixtures of their own, because their light is already in the fixtures\' own footprints.',
+        ],
+      },
+      {
+        id: 'room-mapping-granularity',
+        title: 'Mapping in parts: whole fixtures, segments or blocks',
+        keywords: 'granularity segment block pixels parts strip tv television wrap auto whole device split emitters resolution how many',
+        body: [
+          'A strip wrapped round a television spans the direction a wave travels. Mapped as ONE emitter it can only be dimmed all at once — so the "Map in" control chooses, for THIS run, how finely each fixture is measured. It is a choice per capture, not a setting the system carries around.',
+          '"Auto" is the default and decides per fixture: segments for a strip, the whole fixture for a bulb. "Whole device" is one measurement per fixture and the fastest run. "Segments" measures each configured run of a strip on its own — a television wrap is usually three or four. "Blocks" cuts every strip into equal pixel blocks regardless of how it happens to be configured, which is what gives a wrap a real up-and-down resolution; 30 pixels a block turns a 560-pixel wrap into about nineteen emitters.',
+          'Finer costs TIME, not brightness: each emitter is its own four-second dark-room capture, so nineteen emitters means the room is dark for about seventy-five seconds. The page tells you the emitter count and the seconds before you press, and a run past 120 emitters is refused rather than attempted.',
+          'What is stored for a part is the PIXEL RANGE it covers — "pixels 20 to 39 of this strip" — which comes straight out of the fixture\'s own configuration. It is still never a position in the room: where that range\'s light lands is measured with the camera, exactly like a whole fixture.',
+          'Re-mapping a fixture replaces everything previously measured for it, so a strip is always at one granularity and never driven twice.',
+          'Mapping in parts needs SPECTRA to be driving the lights. The lamp that lights one range lives inside SPECTRA; if the room has been handed to the other side, the run is refused with that reason rather than half-done. Whole-fixture mapping works either way.',
         ],
       },
       {
@@ -1674,6 +1687,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'While it runs the room is HELD by the same machinery every preview uses, and this page keeps a heartbeat alive. Close the tab or lose the connection and the room hands itself back on its own within about seventeen seconds. There is also a hard three-minute ceiling that no amount of heartbeating extends, so a wave left running by mistake is a brief nuisance rather than a lost evening. Leaving one on all night is not something this build does yet.',
           'The Run panel reports the measured write cost — how long one tick actually takes and how many writes a second it is making — because "a wave ticking every fixture is more traffic than any current room mode" was a named risk, not an assumption.',
           'The parameter watchdog is told exactly which fixtures\' brightness the wave owns while it runs, so a travelling wave is never "repaired" back to a fixed value underneath you.',
+        ],
+      },
+      {
+        id: 'room-effects-along-a-strip',
+        title: 'A wave ALONG one fixture',
+        keywords: 'per pixel mask strip tv television wrap along vertical segment granularity gradient single device spans',
+        body: [
+          'A fixture mapped in PARTS is driven per pixel: each measured range takes its own place in the wave, so a strip wrapped round a television dims from the bottom up rather than all at once. That is the difference the "Map in" control on the Rooms page makes — nothing here needs setting.',
+          'A fixture mapped as a WHOLE still takes one gain, exactly as before. Both can run in the same wave; the Run panel says which fixtures are per-pixel and over how many pixels.',
+          'Per-pixel costs less, not more. A fixture driven per pixel needs no write to the light at all — its gain rides the frame that was already being drawn — so a television split nineteen ways makes fewer writes a second than one sconce does. The Run panel reports the measured figures either way.',
+          'It needs SPECTRA to be driving the lights, because the gain is applied inside SPECTRA\'s own render loop. If the room has been handed over, a wave over a part-mapped fixture is refused with that reason rather than running invisibly.',
         ],
       },
       {

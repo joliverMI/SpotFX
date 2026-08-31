@@ -33,11 +33,27 @@ WHAT IS STORED, per emitter (spectra/services/light_field.py derives it):
                  pose id and a locked exposure; this is what lets a reader
                  tell.
 
-DEVICE GRANULARITY ONLY in this slice: one emitter == one device (his two
-sconces are two emitters). `EmitterFootprint.emitter_id` is the device id
-and `virtual_ids` records which virtuals were lit to produce it, so a
-later per-segment granularity is a NEW emitter id shape, not a rewrite of
-this one.
+GRANULARITY IS A PER-CAPTURE CHOICE (his own correction, 2026-08-31: "A
+single device that spans the direction of the wave should be able to show
+the effect. the tv mapper is wrapped around a tv. It should be able to run
+a dimness wave vertically"). An emitter is a whole DEVICE or a contiguous
+PIXEL RANGE of one of its virtuals; `spectra/services/emitters.py` owns the
+enumeration and the id shape, and is the binding statement for both.
+
+  whole device   emitter_id == the device id, `ranges` EMPTY. Byte-identical
+                 to the first slice, so every footprint captured before
+                 sub-device granularity existed keeps working untouched.
+  a pixel range  emitter_id == "tv-mapper:seg3[90-119]", `ranges` naming
+                 (virtual_id, start, end) — the NEW id shape this docstring
+                 always said a finer granularity would be.
+
+A RANGE IS AN ADDRESSING FACT, NOT A POSITION. It is indices into the
+virtual's own effect pixel buffer, read out of the segment configuration —
+the same kind of fact `virtual_ids` already was, and the same kind the
+render path uses to apply a per-pixel gain. It is never a coordinate, a
+metre, or a place in the room. WHERE that range's light lands is still
+measured with a camera and stored as a footprint, exactly as before: this
+file's one idea is unchanged, only the size of the thing being photographed.
 
 THE AXIS IS TWO TAPS, NOT A COORDINATE SYSTEM. AxisCalibration is two
 points a human tapped on the capture screen — "that's the floor", "that's
@@ -120,13 +136,36 @@ class CaptureContext(BaseModel):
     notes: str = ""
 
 
+class PixelRange(BaseModel):
+    """A contiguous, INCLUSIVE range of one virtual's EFFECT pixels — an
+    addressing fact from the device configuration, never a position. The
+    same index space `fx/effects/pixelRange.py` lights during capture and
+    `fx/virtual_gain_mask.py`'s gain mask is indexed by at render, so the
+    two address the identical pixels with nothing to convert between."""
+    virtual_id: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+
+    @property
+    def length(self) -> int:
+        return max(0, self.end - self.start + 1)
+
+
 class EmitterFootprint(BaseModel):
     """One emitter's measured light field. `grid` is row-major
     GRID_H x GRID_W (see module docstring); it is stored as a flat list so
     the JSON stays one line per emitter rather than 36 nested arrays."""
-    emitter_id: str                      # device id, this slice's granularity
+    emitter_id: str                      # opaque: a device id, or a range id
     label: str = ""
     virtual_ids: list[str] = Field(default_factory=list)
+    #: Which device this emitter belongs to. Empty on every footprint
+    #: captured before sub-device granularity existed, where the emitter id
+    #: WAS the device id — `device` below is the one place that is resolved,
+    #: so no stored file needed rewriting.
+    device_id: str = ""
+    #: EMPTY means the whole of every virtual in `virtual_ids` (the shipped
+    #: device-granularity shape). Otherwise the pixel ranges that were lit.
+    ranges: list[PixelRange] = Field(default_factory=list)
     grid: list[float] = Field(default_factory=list)
     axis_profile: list[float] = Field(default_factory=list)
     weight: float = 0.0
@@ -145,6 +184,17 @@ class EmitterFootprint(BaseModel):
     def mapped(self) -> bool:
         return bool(self.grid) and self.weight > 0.0
 
+    @property
+    def device(self) -> str:
+        """The device this footprint belongs to, for a reader that has only
+        the footprint. Old records carry no `device_id` because their
+        emitter id was the device id."""
+        return self.device_id or self.emitter_id
+
+    @property
+    def whole_device(self) -> bool:
+        return not self.ranges
+
 
 class RoomMap(BaseModel):
     """One room: a name, the devices it contains, its axis calibration, and
@@ -155,6 +205,12 @@ class RoomMap(BaseModel):
     name: str
     device_ids: list[str] = Field(default_factory=list)
     axis: AxisCalibration = Field(default_factory=AxisCalibration)
+    #: The granularity the page last ran a capture at, remembered so the
+    #: control comes back where he left it. NOT a global setting and NOT
+    #: what a run uses: every run takes its own granularity as an argument
+    #: (his "per-capture choice"), and this only seeds the control.
+    granularity: str = "auto"
+    block_pixels: int = 30
     footprints: list[EmitterFootprint] = Field(default_factory=list)
     updated_at: float = Field(default_factory=time.time)
 
@@ -167,9 +223,33 @@ class RoomMap(BaseModel):
     def mapped_ids(self) -> list[str]:
         return [f.emitter_id for f in self.footprints if f.mapped]
 
+    def mapped_devices(self) -> list[str]:
+        """The DEVICES with at least one mapped emitter. Distinct from
+        `mapped_ids` since a device mapped per segment contributes several
+        emitter ids and none of them is the device id."""
+        return sorted({f.device for f in self.footprints if f.mapped})
+
     def unmapped_ids(self) -> list[str]:
-        mapped = set(self.mapped_ids())
+        mapped = set(self.mapped_devices())
         return [d for d in self.device_ids if d not in mapped]
+
+    def emitters_for_device(self, device_id: str) -> list[EmitterFootprint]:
+        return [f for f in self.footprints if f.device == device_id]
+
+    def drop_device_footprints(self, device_id: str) -> int:
+        """Forget everything measured for one device.
+
+        A capture run calls this before mapping that device, so a device
+        always carries footprints from exactly ONE granularity: re-mapping a
+        TV per segment must not leave last week's whole-device footprint
+        beside the new ranges, where both would be driven and the fixture
+        would be dimmed twice."""
+        before = len(self.footprints)
+        self.footprints = [f for f in self.footprints if f.device != device_id]
+        dropped = before - len(self.footprints)
+        if dropped:
+            self.updated_at = time.time()
+        return dropped
 
     def put_footprint(self, fp: EmitterFootprint) -> None:
         self.footprints = [f for f in self.footprints

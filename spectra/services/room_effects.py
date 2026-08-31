@@ -36,13 +36,44 @@ forgotten wave is a 3-minute nuisance, not a lost show — but it does mean
 "leave the wave on all evening" is not yet a thing this build does. Lifting
 it needs its own lifetime story, not a bigger number.
 
+A GAIN CAN VARY ALONG A STRIP, since his own correction: "A single device
+that spans the direction of the wave should be able to show the effect. the
+tv mapper is wrapped around a tv. It should be able to run a dimness wave
+vertically." An emitter mapped as a PIXEL RANGE (spectra/services/
+emitters.py) drives its virtual through a per-pixel gain MASK
+(fx/virtual_gain_mask.py) applied at frame assembly, not through the
+per-virtual `brightness` write. Two consequences worth knowing before
+touching the tick:
+
+  * a masked virtual gets NO brightness write and NO compose() scaling at
+    all — the mask multiplies the assembled frame, which already carries
+    the show's own brightness, so it composes with the show for free and
+    scaling the write as well would square the gain;
+  * a masked virtual therefore costs the tick NO seam write. The mask is a
+    numpy array handed to a process-global map. That is why the measured
+    per-tick cost of a nineteen-emitter TV is lower than of two whole-device
+    sconces, not higher (scripts/check_room_effect_mask.py reports both).
+
+A virtual driven ONLY by whole-device emitters keeps the original
+single-scalar path, untouched and bit-identical: no mask is installed for
+it, and with no mask installed anywhere `fx/virtuals.py`'s multiply is not
+reached at all. Asserted, not claimed.
+
+MASKS NEED SPECTRA TO OWN THE LIGHTS. The mask is applied in THIS process's
+own frame assembly; when spot-effects owns the room the render happens in
+the external LedFX process, where a mask pushed here would do nothing. A
+run that would drive a ranged emitter under that ownership is refused by
+name rather than running a wave that cannot be seen.
+
 THE WATCHDOG KNOWS. spectra/services/param_watchdog.py restores a param
 that has drifted from its baseline with nothing holding it; a running wave
 moves `brightness` continuously and by design. The layer therefore
 registers as a genuine HOLDER for exactly the (virtual, "brightness") keys
 it is driving — the same shape as a pending release or a drift mechanism,
 checked per key, never a global stand-down of the watchdog while an effect
-runs.
+runs. A MASKED virtual is deliberately NOT registered: the mask never
+touches the effect config the watchdog compares against, so there is
+nothing there to be repaired and claiming a holder would be a false one.
 
 WRITE COST IS MEASURED, NOT ASSUMED (the plan's own named risk: "a wave
 ticking every emitter at 20 Hz is more write traffic than any current room
@@ -64,10 +95,13 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+import numpy as np
 from pydantic import BaseModel, Field
 
+from fx import virtual_gain_mask
 from spectra import config
-from spectra.models.room_map import RoomMap
+from spectra.models.room_map import PixelRange, RoomMap
+from spectra.services import emitters as emitters_mod
 from spectra.services import flare_preview_hold, light_field
 from spectra.services.light_field_fields import KINDS, DimWave
 
@@ -169,11 +203,18 @@ def delete_effect(effect_id: str, path: Optional[os.PathLike] = None) -> bool:
 
 @dataclass
 class _Driven:
-    """One emitter as the runner drives it: its measured samples and the
-    virtuals its light comes out of."""
+    """One emitter as the runner drives it: its measured samples, the
+    virtuals its light comes out of, and — for a sub-device emitter — the
+    pixel ranges it occupies in them. `ranges` EMPTY is the whole-device
+    case and the original single-scalar path."""
     emitter_id: str
     samples: Any
     virtual_ids: list[str]
+    ranges: list[PixelRange] = field(default_factory=list)
+
+    @property
+    def whole_device(self) -> bool:
+        return not self.ranges
 
 
 @dataclass
@@ -182,7 +223,10 @@ class _State:
     spec: Optional[RoomEffectSpec] = None
     room_id: str = ""
     driven: list[_Driven] = field(default_factory=list)
-    gains: dict[str, float] = field(default_factory=dict)        # virtual -> gain
+    gains: dict[str, float] = field(default_factory=dict)        # virtual -> SCALAR gain
+    masks: dict[str, Any] = field(default_factory=dict)          # virtual -> per-pixel gain
+    mask_len: dict[str, int] = field(default_factory=dict)       # virtual -> effect pixels
+    masked: set = field(default_factory=set)                     # virtuals a mask is installed for
     base: dict[str, float] = field(default_factory=dict)         # virtual -> show brightness
     effect_type: dict[str, str] = field(default_factory=dict)    # virtual -> live type
     started_at: float = 0.0
@@ -196,6 +240,18 @@ class _State:
 _state = _State()
 
 
+def _release_masks() -> None:
+    """Take every mask this layer installed back out of the render path.
+
+    Guarded on having installed one at all, so a room that never ran a
+    sub-device effect never touches fx's map — which is what keeps
+    `fx/virtuals.py`'s multiply unreached and the render byte-identical."""
+    if _state.masked:
+        virtual_gain_mask.apply_masks({})
+        _state.masked = set()
+    _state.masks = {}
+
+
 def reset() -> None:
     """Drop every trace of a run — module-global state, so the tests' own
     fixture calls this (the fire_history/param_watchdog precedent: no DI
@@ -203,6 +259,7 @@ def reset() -> None:
     global _state
     if _state.task is not None:
         _state.task.cancel()
+    _release_masks()
     _state = _State()
 
 
@@ -222,8 +279,10 @@ def _live() -> bool:
 
 
 def gain_for(virtual_id: str) -> float:
-    """The gain currently applied to this virtual — 1.0 when no effect is
-    running or this virtual is not driven."""
+    """The SCALAR gain currently applied to this virtual — 1.0 when no
+    effect is running, this virtual is not driven, or it is driven by a
+    per-pixel MASK instead (a masked virtual has no single gain, which is
+    the whole point of the mask)."""
     return _state.gains.get(virtual_id, 1.0) if _live() else 1.0
 
 
@@ -237,13 +296,21 @@ def compose(virtual_id: str, effect_type: str, cfg: dict) -> dict:
     Two things are learned here rather than polled: the show's own authored
     `brightness` (the base every gain multiplies) and the virtual's live
     effect type (what the tick loop must name so a brightness write merges
-    into the running effect instead of switching it)."""
+    into the running effect instead of switching it).
+
+    A MASKED virtual's write is returned UNTOUCHED (its `brightness` is
+    still learned): its gain is applied per pixel at frame assembly, on top
+    of whatever this write lands, so scaling here as well would square it."""
     if not _live():
         return cfg
     if effect_type:
         _state.effect_type[virtual_id] = effect_type
     gain = _state.gains.get(virtual_id)
     if gain is None:
+        value = cfg.get("brightness")
+        if virtual_id in _state.masks and isinstance(value, (int, float)) \
+                and not isinstance(value, bool):
+            _state.base[virtual_id] = float(value)
         return cfg
     value = cfg.get("brightness")
     if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -256,13 +323,28 @@ def holds() -> set[tuple[str, str]]:
     """The (virtual, param) keys a running effect legitimately owns — read
     by param_watchdog.sweep_once so a travelling wave is never "repaired"
     back to its baseline. Empty when nothing is running, so the watchdog's
-    behaviour is unchanged by this feature's existence."""
+    behaviour is unchanged by this feature's existence.
+
+    Only SCALAR-driven virtuals appear: a masked virtual's gain never enters
+    the effect config the watchdog compares against, so there is nothing
+    there to repair and a holder for it would be a claim about a param this
+    layer is not actually moving."""
     if not _live():
         return set()
     return {(vid, "brightness") for vid in _state.gains}
 
 
 # ── the runner ─────────────────────────────────────────────────────────────
+
+def _default_spectra_owns() -> bool:
+    """Resolved LAZILY, inside the call: `RunnerDeps` is constructed at
+    import time by production_deps()'s callers, and an eager module-level
+    import of a singleton-adjacent service is exactly the cold-start crash
+    this codebase has already shipped once (see AGENTS.md's Light-mode
+    entry)."""
+    from spectra.services.room_mapping import spectra_owns_lights
+    return spectra_owns_lights()
+
 
 @dataclass
 class RunnerDeps:
@@ -276,6 +358,9 @@ class RunnerDeps:
     touch_hold: Optional[Callable[[float], Any]] = None
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], Any] = asyncio.sleep
+    #: Whether the render loop the mask is applied in is the one driving the
+    #: lights. Only a masked (sub-device) run needs it.
+    spectra_owns: Callable[[], bool] = _default_spectra_owns
 
 
 def production_deps() -> RunnerDeps:
@@ -312,36 +397,86 @@ class RoomEffectProgram(flare_preview_hold.PreviewProgram):
 
 def resolve_driven(room: RoomMap, spec: RoomEffectSpec) -> list[_Driven]:
     """The emitters this effect drives: those the room has actually MAPPED,
-    narrowed by the spec's device selection. An unmapped device is silently
+    narrowed by the spec's DEVICE selection. An unmapped device is silently
     absent from the result — the API reports it by name so "why is that
-    sconce not moving" is answered by the page, not by a mystery."""
+    sconce not moving" is answered by the page, not by a mystery.
+
+    The selection is by device because that is what the page offers and what
+    he thinks in; a device mapped per segment contributes several emitters
+    and every one of them is driven or none is."""
     wanted = set(spec.device_ids) if spec.device_ids else None
     out: list[_Driven] = []
     for fp in room.footprints:
         if not fp.mapped:
             continue
-        if wanted is not None and fp.emitter_id not in wanted:
+        if wanted is not None and fp.device not in wanted:
             continue
         out.append(_Driven(emitter_id=fp.emitter_id,
                            samples=light_field.samples_for(fp, room.axis),
-                           virtual_ids=list(fp.virtual_ids)))
+                           virtual_ids=list(fp.virtual_ids),
+                           ranges=list(fp.ranges)))
     return out
 
 
-def compute_gains(driven: list[_Driven], field_fn, t: float) -> dict[str, float]:
-    """emitter gains -> per-virtual gains. An emitter's gain applies to every
-    virtual its light came out of, because that is what was measured: the
-    footprint was captured with all of them lit together."""
+def compute_gains(driven: list[_Driven], field_fn, t: float,
+                  mask_len: Optional[dict[str, int]] = None
+                  ) -> tuple[dict[str, float], dict[str, Any]]:
+    """emitter gains -> (per-virtual SCALAR gains, per-virtual MASKS).
+
+    An emitter's gain applies to every virtual its light came out of,
+    because that is what was measured: the footprint was captured with all
+    of them lit together. A RANGED emitter's gain applies only to the pixels
+    it was captured over, which is the same rule one step finer.
+
+    THE ONE COMPOSITION RULE, so a virtual reached both ways cannot be
+    ambiguous: a mask starts at 1.0 everywhere (pixels no emitter measured
+    are left exactly as the show wrote them); each covered pixel takes the
+    MEAN of the gains of the emitters covering it (ranges from one device's
+    own enumeration never overlap, so the mean only ever arbitrates between
+    devices); and any whole-virtual emitter on the same virtual multiplies
+    the finished mask uniformly. With no ranges at all the mask dict is
+    empty and this is exactly the previous function."""
+    lengths = mask_len or {}
     per_emitter = light_field.per_emitter_scalar(
         field_fn, t, samples=[d.samples for d in driven])
-    gains: dict[str, float] = {}
+    acc: dict[str, Any] = {}
+    cnt: dict[str, Any] = {}
+    whole: dict[str, float] = {}
     for d in driven:
         g = per_emitter.get(d.emitter_id)
         if g is None:
             continue
-        for vid in d.virtual_ids:
-            gains[vid] = max(0.0, min(1.0, float(g)))
-    return gains
+        g = max(0.0, min(1.0, float(g)))
+        if d.whole_device:
+            for vid in d.virtual_ids:
+                whole[vid] = whole.get(vid, 1.0) * g
+            continue
+        for rng in d.ranges:
+            n = int(lengths.get(rng.virtual_id, 0))
+            if n <= 0:
+                continue
+            lo = max(0, int(rng.start))
+            hi = min(n - 1, int(rng.end))
+            if lo > hi:
+                continue
+            a = acc.get(rng.virtual_id)
+            if a is None:
+                a = acc[rng.virtual_id] = np.zeros(n, dtype=np.float64)
+                cnt[rng.virtual_id] = np.zeros(n, dtype=np.float64)
+            a[lo:hi + 1] += g
+            cnt[rng.virtual_id][lo:hi + 1] += 1.0
+
+    masks: dict[str, Any] = {}
+    for vid, a in acc.items():
+        c = cnt[vid]
+        mask = np.ones_like(a)
+        covered = c > 0.0
+        mask[covered] = a[covered] / c[covered]
+        uniform = whole.pop(vid, 1.0)
+        if uniform != 1.0:
+            mask *= uniform
+        masks[vid] = mask
+    return whole, masks
 
 
 async def start(room: RoomMap, spec: RoomEffectSpec,
@@ -351,29 +486,50 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
     deps = deps or production_deps()
     await stop(deps)
     driven = resolve_driven(room, spec)
+    mapped_devices = set(room.mapped_devices())
     unmapped = [d for d in (spec.device_ids or room.device_ids)
-                if d not in {x.emitter_id for x in driven}]
+                if d not in mapped_devices]
     if not driven:
         return {"running": False,
                 "reason": ("none of the selected devices has a measured "
                            "footprint yet — map the room first"),
                 "unmapped": unmapped}
     virtual_ids = sorted({v for d in driven for v in d.virtual_ids})
+    ranged = [d for d in driven if not d.whole_device]
+    if ranged and not deps.spectra_owns():
+        return {"running": False,
+                "reason": ("this room is mapped below whole-device "
+                           "granularity, and a per-pixel gain is applied "
+                           "inside SPECTRA's own render loop — which is not "
+                           "the one driving the lights right now. Take the "
+                           "room back first."),
+                "unmapped": unmapped}
 
     live = await deps.get_virtuals() or {}
     base: dict[str, float] = {}
     types: dict[str, str] = {}
+    mask_len: dict[str, int] = {}
     for vid in virtual_ids:
-        eff = ((live.get(vid) or {}).get("effect") or {})
+        entry = live.get(vid) or {}
+        eff = (entry.get("effect") or {})
         if eff.get("type"):
             types[vid] = eff["type"]
             b = (eff.get("config") or {}).get("brightness")
             base[vid] = float(b) if isinstance(b, (int, float)) and not isinstance(b, bool) else 1.0
+            mask_len[vid] = emitters_mod.effective_pixel_count(entry)
     known = [v for v in virtual_ids if v in types]
     if not known:
         return {"running": False,
                 "reason": ("none of the mapped virtuals is rendering an "
                            "effect right now — is SPECTRA driving the room?"),
+                "unmapped": unmapped}
+    unsized = sorted({r.virtual_id for d in ranged for r in d.ranges
+                      if r.virtual_id in types and mask_len.get(r.virtual_id, 0) <= 0})
+    if unsized:
+        return {"running": False,
+                "reason": (f"cannot tell how many pixels these virtuals have, "
+                           f"so a per-pixel gain has nowhere to land: "
+                           f"{', '.join(unsized)}"),
                 "unmapped": unmapped}
 
     if deps.open_hold is not None:
@@ -389,11 +545,19 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
     _state.spec = spec
     _state.room_id = room.id
     _state.driven = [_Driven(d.emitter_id, d.samples,
-                             [v for v in d.virtual_ids if v in types])
+                             [v for v in d.virtual_ids if v in types],
+                             [r for r in d.ranges if r.virtual_id in types])
                      for d in driven]
     _state.base = base
     _state.effect_type = types
-    _state.gains = {v: 1.0 for v in known}
+    _state.mask_len = mask_len
+    _state.masks = {}
+    _state.masked = set()
+    masked_virtuals = sorted({r.virtual_id for d in _state.driven
+                              for r in d.ranges})
+    # Only SCALAR-driven virtuals get a starting gain: a masked one is
+    # driven per pixel and never carries a single number.
+    _state.gains = {v: 1.0 for v in known if v not in set(masked_virtuals)}
     _state.started_at = deps.clock()
     _state.ticks = 0
     _state.writes = 0
@@ -403,18 +567,31 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
     return {"running": True, "effect": spec.model_dump(),
             "emitters": [d.emitter_id for d in _state.driven],
             "virtuals": known, "unmapped": unmapped,
+            "masked_virtuals": masked_virtuals,
+            "mask_pixels": {v: mask_len.get(v, 0) for v in masked_virtuals},
+            "scalar_virtuals": sorted(_state.gains),
             "tick_hz": TICK_HZ}
 
 
 async def stop(deps: Optional[RunnerDeps] = None) -> dict:
     """Stop the wave and hand the room back.
 
-    ORDER IS LOAD-BEARING: `running` goes False FIRST, so the hold's revert
-    write passes through compose() unscaled and the room comes back at the
-    brightness it had, not at the brightness the wave happened to be on."""
+    ORDER IS LOAD-BEARING: `running` goes False FIRST and every MASK comes
+    out of the render path BEFORE the hold is closed, so the hold's revert
+    write passes through compose() unscaled AND is rendered unmasked. The
+    room comes back at the brightness it had, not at the brightness the wave
+    happened to be on — and a mask left installed for even one frame after
+    the revert would hand the room back dimmed in a way no write could
+    correct."""
     deps = deps or production_deps()
     was = _state.running
     _state.running = False
+    # Twice, deliberately. Here so the render thread stops seeing the mask
+    # immediately rather than for however long cancelling the runner takes;
+    # and again below because a tick already INSIDE _write_tick when the
+    # cancel arrives can reinstall one, and that is the copy the revert
+    # depends on. _release_masks() is idempotent.
+    _release_masks()
     task, _state.task = _state.task, None
     if task is not None and not task.done():
         task.cancel()
@@ -425,6 +602,7 @@ async def stop(deps: Optional[RunnerDeps] = None) -> dict:
         except Exception:                              # noqa: BLE001
             logger.exception("room_effects: runner raised on cancel")
     _state.gains = {}
+    _release_masks()          # see above: the runner is fully stopped now
     if deps.close_hold is not None:
         await deps.close_hold()
     return {"stopped": bool(was)}
@@ -450,6 +628,9 @@ async def _run(deps: RunnerDeps) -> None:
                 # keep writing over a room it no longer holds.
                 _state.running = False
                 _state.last_error = "the held room lapsed — the wave stopped with it"
+                # The sweep has already written the pre-effect config back;
+                # a mask still installed would keep dimming that.
+                _release_masks()
                 break
             now = deps.clock()
             if deps.touch_hold is not None:
@@ -457,7 +638,8 @@ async def _run(deps: RunnerDeps) -> None:
             if now - last_types >= TYPE_REFRESH_S:
                 last_types = now
                 await _refresh_types(deps)
-            _state.gains = compute_gains(_state.driven, field_fn, now - t0)
+            _state.gains, _state.masks = compute_gains(
+                _state.driven, field_fn, now - t0, _state.mask_len)
             await _write_tick(deps)
             _state.ticks += 1
         except asyncio.CancelledError:
@@ -480,9 +662,17 @@ async def _run(deps: RunnerDeps) -> None:
 async def _refresh_types(deps: RunnerDeps) -> None:
     live = await deps.get_virtuals() or {}
     for vid in list(_state.effect_type):
-        eff = ((live.get(vid) or {}).get("effect") or {})
+        entry = live.get(vid) or {}
+        eff = (entry.get("effect") or {})
         if eff.get("type"):
             _state.effect_type[vid] = eff["type"]
+        # A virtual's pixel count can change under a config edit, and a mask
+        # of the wrong length is SKIPPED at the render (never resampled) —
+        # so the length is re-read on the same GET rather than trusted from
+        # the moment the run started.
+        n = emitters_mod.effective_pixel_count(entry)
+        if n > 0 and vid in _state.mask_len:
+            _state.mask_len[vid] = n
 
 
 async def _write_tick(deps: RunnerDeps) -> None:
@@ -492,7 +682,18 @@ async def _write_tick(deps: RunnerDeps) -> None:
 
     `room_effect` marks the payload so compose() leaves it alone — this
     write already carries the gain, and scaling it a second time would
-    square the wave."""
+    square the wave.
+
+    A MASKED virtual is not written at all: its gain is a float array handed
+    to fx's per-virtual mask map and multiplied into the assembled frame,
+    which already carries the show's own brightness. Installing masks costs
+    no seam call, so the measured per-tick cost falls as granularity gets
+    finer rather than rising — the opposite of the plan's named risk, and
+    reported by the instrument either way (write_cost())."""
+    started = deps.clock()
+    if _state.masks or _state.masked:
+        virtual_gain_mask.apply_masks(_state.masks)
+        _state.masked = set(_state.masks)
     writes = []
     for vid, gain in _state.gains.items():
         etype = _state.effect_type.get(vid)
@@ -502,12 +703,10 @@ async def _write_tick(deps: RunnerDeps) -> None:
         writes.append({"virtual_id": vid, "effect_type": etype,
                        "config": {"brightness": max(0.0, min(1.0, base * gain))},
                        "room_effect": True})
-    if not writes:
-        return
-    started = deps.clock()
-    await deps.apply_writes(writes, transition_ms=WRITE_TRANSITION_MS)
+    if writes:
+        await deps.apply_writes(writes, transition_ms=WRITE_TRANSITION_MS)
+        _state.writes += len(writes)
     _state.cost_s.append(deps.clock() - started)
-    _state.writes += len(writes)
 
 
 # ── status / cost ──────────────────────────────────────────────────────────
@@ -529,7 +728,11 @@ def write_cost() -> dict:
     elapsed = max(1e-9, (time.monotonic() - _state.started_at)) if _state.started_at else 0.0
     return {
         "samples": len(costs),
-        "virtuals_per_tick": len(_state.gains),
+        "virtuals_per_tick": len(_state.gains) + len(_state.masks),
+        "written_per_tick": len(_state.gains),
+        "masked_per_tick": len(_state.masks),
+        "mask_pixels_per_tick": int(sum(_state.mask_len.get(v, 0)
+                                        for v in _state.masks)),
         "per_tick_ms": {"p50": round(_pct(costs, 0.5), 3),
                         "p95": round(_pct(costs, 0.95), 3),
                         "max": round(max(costs), 3) if costs else 0.0},
@@ -549,6 +752,11 @@ def status() -> dict:
         "effect": _state.spec.model_dump() if _state.spec else None,
         "emitters": [d.emitter_id for d in _state.driven],
         "gains": {k: round(v, 4) for k, v in _state.gains.items()},
+        "masks": {k: {"pixels": int(np.asarray(m).size),
+                      "min": round(float(np.min(m)), 4),
+                      "max": round(float(np.max(m)), 4)}
+                  for k, m in _state.masks.items()},
+        "mask_engine": virtual_gain_mask.stats(),
         "base": {k: round(v, 4) for k, v in _state.base.items()},
         "held_params": sorted(f"{v}:{p}" for v, p in holds()),
         "cost": write_cost(),

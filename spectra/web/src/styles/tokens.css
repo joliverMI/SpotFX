@@ -1291,6 +1291,20 @@ kbd {
 }
 
 .emitter-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+/* One device's emitters, grouped: a strip mapped per segment shows several
+ * cards under one heading, so "which fixture is this" stays answerable at a
+ * phone width where the range labels alone would not say. */
+.emitter-device { margin-top: 8px; min-width: 0; }
+.emitter-device-name { margin: 0; overflow-wrap: anywhere; }
+
+/* The per-capture granularity control. Wraps rather than shrinking its
+ * select: at a real phone width the row is the whole column. */
+.map-granularity {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 8px 0; font-size: 13px;
+}
+.map-granularity label { display: flex; align-items: center; gap: 6px; }
+.map-granularity input[type="number"] { width: 72px; }
 .emitter-card {
   display: flex; gap: 8px; align-items: center;
   border: 1px solid var(--border); border-radius: 6px; padding: 6px;

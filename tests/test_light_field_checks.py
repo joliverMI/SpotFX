@@ -1,4 +1,4 @@
-"""The three light-field executable specs, run as SUBPROCESSES from pytest.
+"""The light-field executable specs, run as SUBPROCESSES from pytest.
 
 WHY SUBPROCESSES and not an in-process import (the shape
 tests/test_av_sync_session.py uses for its own simulator): each of these
@@ -40,6 +40,14 @@ def _run(name: str, timeout: int) -> str:
     ("check_room_effect_wave.py", 300, "ALL ROOM-EFFECT WAVE CHECKS PASSED"),
     # the whole capture session over a real WebSocket and real HTTP routes
     ("check_mapping_capture_e2e.py", 300, "ALL END-TO-END CAPTURE CHECKS PASSED"),
+    # SUB-DEVICE granularity: the range lamp on the real render pipeline,
+    # three distinct footprints from one strip, and the device-granularity
+    # merge as the negative control
+    ("check_light_field_granularity.py", 300,
+     "ALL LIGHT-FIELD GRANULARITY CHECKS PASSED"),
+    # the per-pixel gain MASK: a wave running ALONG one wrapped device,
+    # measured on rendered pixels, with the no-mask bit-identity control
+    ("check_room_effect_mask.py", 300, "ALL ROOM-EFFECT MASK CHECKS PASSED"),
 ])
 def test_check_script_passes(name, timeout, tail):
     stdout = _run(name, timeout)

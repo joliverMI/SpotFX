@@ -8,6 +8,7 @@ from typing import Optional
 import numpy as np
 import voluptuous as vol
 
+from fx import virtual_gain_mask
 from fx.config import save_config
 from fx.effects import DummyEffect
 from fx.effects.math import CalibratorPatternCache, interpolate_pixels
@@ -1007,6 +1008,24 @@ class Virtual:
 
             np.multiply(frame, self._config["max_brightness"], frame)
             np.multiply(frame, self._ledfx.config["global_brightness"], frame)
+            # SpotFX deviation #25: THE PER-VIRTUAL GAIN MASK — the one
+            # application point (fx/virtual_gain_mask.py holds the map and
+            # the reasoning). One multiply per frame, in the same place and
+            # the same in-place form as the two brightness multiplies above,
+            # so a per-pixel gain reaches the device driver AND the preview
+            # tap for free. With no masks installed — the shipped default —
+            # mask_for() short-circuits on an empty dict and this branch is
+            # not taken: byte-identical to the fork.
+            mask = virtual_gain_mask.mask_for(self.id)
+            if mask is not None:
+                if mask.shape[0] == frame.shape[0]:
+                    np.multiply(frame, mask[:, np.newaxis], frame)
+                else:
+                    # Never resample: a stretched gain is a wave at the
+                    # wrong wavelength, which is worse than no wave.
+                    virtual_gain_mask.note_length_mismatch(
+                        self.id, int(mask.shape[0]), int(frame.shape[0])
+                    )
         return frame
 
     def activate(self):

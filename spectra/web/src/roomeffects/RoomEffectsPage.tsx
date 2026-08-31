@@ -20,7 +20,13 @@ import HelpLink from '../help/HelpLink';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import { useToast } from '../components/Toast';
 
-type Room = { id: string; name: string; device_ids: string[]; mapped_ids: string[] };
+type Room = {
+  id: string; name: string; device_ids: string[];
+  /** every EMITTER with a footprint — several per device once a strip is
+   * mapped per segment, so "is this device mapped" is `mapped_devices`. */
+  mapped_ids: string[];
+  mapped_devices: string[];
+};
 type Effect = {
   id: string; room_id: string; name: string; kind: string;
   wavelength: number; speed: number; depth: number; device_ids: string[];
@@ -28,9 +34,11 @@ type Effect = {
 type Status = {
   running: boolean; live: boolean; room_id: string; effect: Effect | null;
   emitters: string[]; gains: Record<string, number>; held_params: string[];
+  masks: Record<string, { pixels: number; min: number; max: number }>;
   last_error: string;
   cost: {
     samples: number; virtuals_per_tick: number; ticks: number; writes: number;
+    written_per_tick: number; masked_per_tick: number;
     per_tick_ms: { p50: number; p95: number; max: number };
     target_tick_hz: number; achieved_tick_hz: number; writes_per_s: number;
   };
@@ -115,10 +123,20 @@ export default function RoomEffectsPage() {
     if (!effect) return;
     setBusy(true);
     try {
-      const result = await apiPost<{ running: boolean; emitters: string[]; unmapped: string[] }>(
-        `/room-effects/${effect.id}/start`);
+      const result = await apiPost<{
+        running: boolean; reason?: string; emitters: string[]; unmapped: string[];
+        masked_virtuals?: string[];
+      }>(`/room-effects/${effect.id}/start`);
+      // A refusal is a stated outcome, not an exception — say WHY rather
+      // than reporting "running on 0 emitters", which reads as success.
+      if (!result.running) {
+        toast(result.reason || 'the wave did not start', 'error');
+        return;
+      }
       startBeat();
-      toast(`Running on ${result.emitters.length} emitter(s)`, 'success');
+      const perPixel = result.masked_virtuals?.length
+        ? `, ${result.masked_virtuals.length} driven per pixel` : '';
+      toast(`Running on ${result.emitters.length} emitter(s)${perPixel}`, 'success');
       if (result.unmapped?.length) {
         toast(`Not mapped, so not driven: ${result.unmapped.join(', ')}`, 'error');
       }
@@ -214,12 +232,13 @@ export default function RoomEffectsPage() {
               <h4>Fixtures</h4>
               <p className="muted small">
                 Empty means every mapped fixture in the room. A fixture with no measured footprint
-                cannot be driven — map it on the Rooms page first.
+                cannot be driven — map it on the Rooms page first. A fixture mapped in PARTS is
+                driven per pixel, so the wave runs ALONG it rather than dimming all of it at once.
               </p>
               <div className="device-chips">
                 {(room?.device_ids ?? []).map((d) => {
                   const on = !effect.device_ids.length || effect.device_ids.includes(d);
-                  const mapped = room?.mapped_ids.includes(d);
+                  const mapped = (room?.mapped_devices ?? room?.mapped_ids ?? []).includes(d);
                   return (
                     <button key={d} className={`chip ${on ? 'on' : ''} ${mapped ? '' : 'unmapped'}`}
                             title={mapped ? undefined : 'not mapped'}
@@ -261,6 +280,14 @@ export default function RoomEffectsPage() {
               <dd>{status.emitters.join(', ') || '—'}</dd>
               <dt>Gains</dt>
               <dd>{Object.entries(status.gains).map(([v, g]) => `${v} ${g.toFixed(2)}`).join(' · ') || '—'}</dd>
+              <dt>
+                Per-pixel <HelpLink topic="room-effects-along-a-strip" title="A wave along one fixture" />
+              </dt>
+              <dd className="small">
+                {Object.entries(status.masks ?? {})
+                  .map(([v, m]) => `${v}: ${m.pixels}px ${m.min.toFixed(2)}–${m.max.toFixed(2)}`)
+                  .join(' · ') || 'none — every driven fixture takes one gain'}
+              </dd>
               <dt>Held for the watchdog</dt>
               <dd className="small">{status.held_params.join(', ') || '—'}</dd>
               <dt>Write cost</dt>
@@ -268,7 +295,8 @@ export default function RoomEffectsPage() {
                 {status.cost.samples
                   ? `${status.cost.per_tick_ms.p50.toFixed(1)} ms p50 / ${status.cost.per_tick_ms.p95.toFixed(1)} ms p95 per tick
                      · ${status.cost.achieved_tick_hz} Hz of ${status.cost.target_tick_hz}
-                     · ${status.cost.writes_per_s} writes/s over ${status.cost.virtuals_per_tick} virtual(s)`
+                     · ${status.cost.writes_per_s} writes/s over ${status.cost.virtuals_per_tick} virtual(s)
+                     (${status.cost.written_per_tick} written, ${status.cost.masked_per_tick} per-pixel)`
                   : 'not measured yet'}
               </dd>
               {status.last_error && <><dt>Last error</dt><dd className="warn small">{status.last_error}</dd></>}
