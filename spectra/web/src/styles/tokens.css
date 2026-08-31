@@ -1295,7 +1295,22 @@ kbd {
  * cards under one heading, so "which fixture is this" stays answerable at a
  * phone width where the range labels alone would not say. */
 .emitter-device { margin-top: 8px; min-width: 0; }
-.emitter-device-name { margin: 0; overflow-wrap: anywhere; }
+.emitter-device-name { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+/* The member row: the device's name on the left, its two controls on the
+ * right. They are deliberately NOT two matching buttons side by side — the
+ * participation toggle is a chip, "Remove from room" is a spelled-out link,
+ * and they are separated by a gap, so the stronger act cannot be pressed
+ * for the weaker one at a glance. */
+.emitter-device-row {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 6px 14px; justify-content: space-between;
+}
+.emitter-device-actions { display: flex; align-items: center; gap: 14px; }
+.emitter-device-actions .chip { font-size: 12px; padding: 2px 8px; }
+.link-button.danger { color: var(--warning); }
+/* A member sitting out still shows everything it has measured — it is in
+ * the room, just not taking part — so it is dimmed, never hidden. */
+.emitter-device.sitting-out .emitter-grid { opacity: 0.45; }
 
 /* The per-capture granularity control. Wraps rather than shrinking its
  * select: at a real phone width the row is the whole column. */

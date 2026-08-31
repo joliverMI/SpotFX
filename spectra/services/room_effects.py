@@ -403,11 +403,21 @@ def resolve_driven(room: RoomMap, spec: RoomEffectSpec) -> list[_Driven]:
 
     The selection is by device because that is what the page offers and what
     he thinks in; a device mapped per segment contributes several emitters
-    and every one of them is driven or none is."""
+    and every one of them is driven or none is.
+
+    TWO LAYERS, AND WHICH ONE WINS. The room's own deselect is
+    PARTICIPATION — it decides what the room OFFERS — and it wins outright:
+    a device sitting out is not driven even by an effect that names it, so
+    "sitting out" means one thing everywhere rather than something a
+    forgotten effect can quietly override. The spec's own `device_ids` are
+    the per-effect chips and choose AMONG what the room offers."""
+    offered = set(room.selected_device_ids())
     wanted = set(spec.device_ids) if spec.device_ids else None
     out: list[_Driven] = []
     for fp in room.footprints:
         if not fp.mapped:
+            continue
+        if fp.device not in offered:
             continue
         if wanted is not None and fp.device not in wanted:
             continue
@@ -487,13 +497,16 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
     await stop(deps)
     driven = resolve_driven(room, spec)
     mapped_devices = set(room.mapped_devices())
-    unmapped = [d for d in (spec.device_ids or room.device_ids)
-                if d not in mapped_devices]
+    offered = room.selected_device_ids()
+    unmapped = [d for d in (spec.device_ids or offered)
+                if d in offered and d not in mapped_devices]
     if not driven:
-        return {"running": False,
-                "reason": ("none of the selected devices has a measured "
-                           "footprint yet — map the room first"),
-                "unmapped": unmapped}
+        reason = ("none of the selected devices has a measured footprint yet "
+                  "— map the room first")
+        if room.device_ids and not offered:
+            reason = ("every device in this room is deselected, so the room "
+                      "offers this effect nothing to drive")
+        return {"running": False, "reason": reason, "unmapped": unmapped}
     virtual_ids = sorted({v for d in driven for v in d.virtual_ids})
     ranged = [d for d in driven if not d.whole_device]
     if ranged and not deps.spectra_owns():

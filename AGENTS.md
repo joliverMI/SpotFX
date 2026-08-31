@@ -3362,6 +3362,32 @@ Modules, each with a job: `light_field.py` (derivation + store +
 run), `mapping_session.py` (the phone's server half), `room_mapping.py` (the
 protocol as a held-room program), `room_effects.py` (the bounded writer).
 
+**MEMBERSHIP AND PARTICIPATION ARE TWO DIFFERENT ACTS (2026-08-31, PR
+fm/room-member-removal, his ask: "just add a delete button next to the
+listed devices as well as the ability to deselect a device").** Removing a
+device from a room edits THAT ROOM's `device_ids` and takes its footprints
+with it (a footprint measures what a device does in THIS room) — it is
+never a device delete, and the Devices page still deliberately has none; the
+control is labelled "Remove from room" in full for exactly that reason.
+Deselecting keeps the device in the room with everything it has measured and
+sits it out: `RoomMap.deselected_device_ids` (additive, empty default, kept
+a strict SUBSET of `device_ids` by both `remove_device` and the room
+upsert), read through `RoomMap.selected_device_ids()` at the two automatic
+consumers — `room_mapping.resolve_plan`'s enumeration (so a run neither
+lights it nor overwrites its footprint) and `room_effects.resolve_driven`'s
+pool. **The two selection LAYERS compose in one direction, stated so they
+cannot disagree: the room decides what is OFFERED and wins outright — a
+deselected device is not driven even by an effect whose own `device_ids`
+name it — and Room Effects' per-effect chips choose among what the room
+offers.** An all-deselected room refuses a run and refuses an effect start
+BY NAME rather than reporting an empty success. Wire:
+`DELETE /api/rooms/{id}/devices/{device_id}` and
+`POST /api/rooms/{id}/devices/{device_id}/selected`; `RoomBody.
+deselected_device_ids` is OPTIONAL and omitting it leaves participation
+alone (the page saves a room for a dozen unrelated reasons and none may
+re-select a fixture he sat out). Help topic `room-members` (linked from the
+Rooms page's Emitters section). Spec: `tests/test_room_membership.py`.
+
 **AN EMITTER IS A DEVICE *OR* A PIXEL RANGE OF ONE (2026-08-31, PR
 fm/lightfield-segment-granularity), his own correction: "A single device
 that spans the direction of the wave should be able to show the effect. the
