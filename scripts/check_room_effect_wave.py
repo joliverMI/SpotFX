@@ -137,7 +137,7 @@ AXIS = AxisCalibration(kind="vertical", floor=Point(x=0.5, y=1.0),
 
 
 def _room() -> RoomMap:
-    room = RoomMap(name="Wave rig", device_ids=[LOW, HIGH], axis=AXIS)
+    room = RoomMap(name="Wave rig", carrier_ids=[LOW, HIGH], axis=AXIS)
     room.put_footprint(_footprint(LOW, LOW_BAND))
     room.put_footprint(_footprint(HIGH, HIGH_BAND))
     return room

@@ -1,5 +1,12 @@
-/** ROOM BUILDER (/rooms) — name a room, pick its devices, calibrate its
- * axis with two taps on the live camera, and run a mapping sync.
+/** ROOM BUILDER (/rooms) — name a room, pick its CARRIERS (the things he
+ * runs effects on), calibrate its axis with two taps on the live camera,
+ * and run a mapping sync.
+ *
+ * A CARRIER, not a fixture: his tv-mapper reaches a backlight and both
+ * sconces, so a fixture-keyed picker could not name what he calibrates.
+ * spectra/services/carriers.py is the criterion, and the /devices page —
+ * which answers a different question, "does this back something driven" —
+ * is untouched by it.
  *
  * FUNCTION FIRST, his standing order. There is no room visualisation here
  * and deliberately no placement sketch: the map is MEASURED, and a drawing
@@ -29,8 +36,8 @@ type PixelRange = { virtual_id: string; start: number; end: number };
 type Footprint = {
   emitter_id: string;
   label: string;
-  device_id: string;
-  whole_device: boolean;
+  carrier_id: string;
+  whole_carrier: boolean;
   ranges: PixelRange[];
   virtual_ids: string[];
   mapped: boolean;
@@ -42,35 +49,36 @@ type Footprint = {
 type Room = {
   id: string;
   name: string;
-  device_ids: string[];
+  carrier_ids: string[];
   axis: { kind: string; floor: { x: number; y: number } | null; ceiling: { x: number; y: number } | null };
   granularity: string;
   block_pixels: number;
   footprints: Footprint[];
   mapped_ids: string[];
-  mapped_devices: string[];
+  mapped_carriers: string[];
   unmapped_ids: string[];
 };
 type PlanEmitter = {
-  emitter_id: string; device_id: string; label: string;
-  virtual_ids: string[]; ranges: PixelRange[]; whole_device: boolean; note: string;
+  emitter_id: string; carrier_id: string; label: string;
+  virtual_ids: string[]; ranges: PixelRange[]; whole_carrier: boolean; note: string;
 };
 type RunPlan = {
   granularity: string; block_pixels: number; count: number;
   estimated_seconds: number; truncated: boolean; problems: string[];
-  per_device: Record<string, string>; emitters: PlanEmitter[];
+  per_carrier: Record<string, string>; emitters: PlanEmitter[];
   sub_device: boolean; spectra_owns: boolean;
 };
-type DeviceRow = { id: string; name: string; type: string; in_use: boolean; virtuals: string[] };
+type CarrierRow = { id: string; devices: string[]; device_names: string[]; device_types: string[] };
+type HiddenRow = { id: string; all_devices: string[]; reason: string };
 type EmitterResult = {
   emitter_id: string; mapped: boolean; reason: string; weight: number;
   dark_frames: number; lit_frames: number; saturated_fraction: number; seconds: number;
-  device_id: string; label: string; ranges: PixelRange[];
+  carrier_id: string; label: string; ranges: PixelRange[];
 };
 type RunResult = {
   ok: boolean; reason: string; seconds: number; emitters: EmitterResult[];
   granularity: string; block_pixels: number;
-  per_device: Record<string, string>; problems: string[]; room?: Room;
+  per_carrier: Record<string, string>; problems: string[]; room?: Room;
 };
 
 const EMPTY_AXIS = { kind: 'vertical', floor: null, ceiling: null };
@@ -78,12 +86,12 @@ const EMPTY_AXIS = { kind: 'vertical', floor: null, ceiling: null };
 /** What one capture run treats as an emitter. His own correction: a strip
  * wrapped round a television has to be mappable in PARTS, or a wave can
  * only ever dim the whole television at once. "Auto" is the shipped
- * default and resolves PER DEVICE — segments for a strip, the whole
- * fixture for a Hue bulb — so this is a choice for THIS run, never a
+ * default and resolves PER CARRIER — segments for a strip, the whole
+ * carrier for a Hue bulb — so this is a choice for THIS run, never a
  * setting the system carries around. */
 const GRANULARITIES: { value: string; label: string; hint: string }[] = [
   { value: 'auto', label: 'Auto', hint: 'segments for a strip, the whole fixture for a bulb' },
-  { value: 'device', label: 'Whole device', hint: 'one measurement per fixture — the fastest run' },
+  { value: 'whole', label: 'Whole carrier', hint: 'one measurement each — the fastest run' },
   { value: 'segment', label: 'Segments', hint: 'one per configured run of the strip' },
   { value: 'block', label: 'Blocks', hint: 'cut every strip into equal pixel blocks' },
 ];
@@ -91,8 +99,8 @@ const GRANULARITIES: { value: string; label: string; hint: string }[] = [
 export default function RoomsPage() {
   const toast = useToast();
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [devices, setDevices] = useState<DeviceRow[]>([]);
-  const [showAll, setShowAll] = useState(false);
+  const [carriers, setCarriers] = useState<CarrierRow[]>([]);
+  const [hidden, setHidden] = useState<HiddenRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -120,9 +128,9 @@ export default function RoomsPage() {
 
   useEffect(() => {
     void loadRooms();
-    void apiGet<{ devices: DeviceRow[] }>('/rooms/devices')
-      .then((b) => setDevices(b.devices))
-      .catch(() => setDevices([]));
+    void apiGet<{ carriers: CarrierRow[]; hidden: HiddenRow[] }>('/rooms/carriers')
+      .then((b) => { setCarriers(b.carriers); setHidden(b.hidden ?? []); })
+      .catch(() => { setCarriers([]); setHidden([]); });
   }, [loadRooms]);
 
   useEffect(() => () => {
@@ -195,7 +203,7 @@ export default function RoomsPage() {
       try {
         const saved = await apiPost<Room>('/rooms', {
           id: patch.id ?? roomId ?? null, name: patch.name,
-          device_ids: patch.device_ids ?? [], axis: patch.axis ?? EMPTY_AXIS,
+          carrier_ids: patch.carrier_ids ?? [], axis: patch.axis ?? EMPTY_AXIS,
           granularity: patch.granularity ?? null,
           block_pixels: patch.block_pixels ?? null,
         });
@@ -215,15 +223,15 @@ export default function RoomsPage() {
     return next as Promise<Room | null>;
   }, [toast]);
 
-  const toggleDevice = useCallback((deviceId: string) => {
+  const toggleCarrier = useCallback((carrierId: string) => {
     const id = selected;
     if (!id) return;
     void saveRoom((current) => {
       if (!current) return null;
-      const next = current.device_ids.includes(deviceId)
-        ? current.device_ids.filter((d) => d !== deviceId)
-        : [...current.device_ids, deviceId];
-      return { ...current, device_ids: next };
+      const next = current.carrier_ids.includes(carrierId)
+        ? current.carrier_ids.filter((c) => c !== carrierId)
+        : [...current.carrier_ids, carrierId];
+      return { ...current, carrier_ids: next };
     }, id);
   }, [selected, saveRoom]);
 
@@ -264,7 +272,7 @@ export default function RoomsPage() {
   useEffect(() => {
     if (!room) { setPlan(null); return; }
     void refreshPlan(room.id, granularity, blockPixels);
-  }, [room?.id, room?.device_ids.join(','), granularity, blockPixels, refreshPlan]);
+  }, [room?.id, room?.carrier_ids.join(','), granularity, blockPixels, refreshPlan]);
 
   const setGranularity = useCallback((value: string) => {
     const id = selected;
@@ -298,7 +306,6 @@ export default function RoomsPage() {
     }
   }, [room, granularity, blockPixels, toast]);
 
-  const visibleDevices = showAll ? devices : devices.filter((d) => d.in_use);
   const axisReady = !!(room?.axis.floor && room?.axis.ceiling);
 
   return (
@@ -307,9 +314,9 @@ export default function RoomsPage() {
         Rooms <HelpLink topic="room-builder" />
       </h2>
       <p className="muted rooms-lede">
-        A room is a set of fixtures and a MEASURED map of where each one&apos;s light lands.
-        Mapping takes the room dark, lights one fixture at a time for about two seconds, and
-        photographs the result — the show comes back between every fixture.
+        A room is the set of things you run effects on, and a MEASURED map of where each
+        one&apos;s light lands. Mapping takes the room dark, lights one at a time for about
+        two seconds, and photographs the result — the show comes back between every one.
       </p>
 
       <div className="rooms-layout">
@@ -326,8 +333,8 @@ export default function RoomsPage() {
               <span className="muted">
                 {/* DEVICES, not emitters: a strip mapped per segment carries
                   * several emitter ids, and "3/1 mapped" would read as a bug. */}
-                {(r.mapped_devices ?? r.mapped_ids).length}/{r.device_ids.length} mapped
-                {r.mapped_ids.length > (r.mapped_devices ?? r.mapped_ids).length
+                {(r.mapped_carriers ?? r.mapped_ids).length}/{r.carrier_ids.length} mapped
+                {r.mapped_ids.length > (r.mapped_carriers ?? r.mapped_ids).length
                   ? ` · ${r.mapped_ids.length} emitters` : ''}
               </span>
             </button>
@@ -342,7 +349,7 @@ export default function RoomsPage() {
               disabled={!draftName.trim() || busy}
               onClick={async () => {
                 const saved = await saveRoom(() => ({
-                  name: draftName.trim(), device_ids: [], axis: EMPTY_AXIS }));
+                  name: draftName.trim(), carrier_ids: [], axis: EMPTY_AXIS }));
                 if (saved) setDraftName('');
               }}
             >
@@ -376,60 +383,66 @@ export default function RoomsPage() {
               </div>
 
               <h4>
-                Devices <HelpLink topic="room-builder-devices" />
+                What you run effects on <HelpLink topic="room-builder-devices" />
               </h4>
               <p className="muted small">
-                Only the devices this room actually uses are listed. The two sconces on one wall
-                are two emitters; their spill onto the ceiling and floor is captured in their
-                footprints, so those need no fixtures of their own.
+                These are the things you address in SPECTRA — one of them can span several
+                fixtures (the TV mapper reaches the backlight and both sconces), and that is
+                what gets calibrated. Their spill onto the ceiling and floor is captured in
+                their footprints, so those need nothing of their own.
               </p>
               <div className="device-chips">
-                {visibleDevices.map((d) => (
+                {carriers.map((c) => (
                   <button
-                    key={d.id}
-                    className={`chip ${room.device_ids.includes(d.id) ? 'on' : ''}`}
-                    onClick={() => void toggleDevice(d.id)}
-                    title={`${d.type} · ${d.virtuals.length} virtual(s)`}
+                    key={c.id}
+                    className={`chip ${room.carrier_ids.includes(c.id) ? 'on' : ''}`}
+                    onClick={() => void toggleCarrier(c.id)}
+                    title={c.device_names.length
+                      ? `lights: ${c.device_names.join(', ')}`
+                      : 'no fixture'}
                   >
-                    {d.name}
+                    {c.id}
                   </button>
                 ))}
-                {!visibleDevices.length && <span className="muted">no devices</span>}
+                {!carriers.length && <span className="muted">nothing to map</span>}
               </div>
-              <button className="link-button" onClick={() => setShowAll((v) => !v)}>
-                {showAll ? 'Show only the devices in use' : `Show all ${devices.length} devices`}
-              </button>
+              {hidden.length > 0 && (
+                <p className="muted small">
+                  Not listed: {hidden.map((h) => h.id).join(', ')} — nothing in its chain emits
+                  light, so a camera has nothing to photograph. The Devices page still lists it.
+                </p>
+              )}
 
               <h4>
                 Emitters <HelpLink topic="room-builder-what" />
               </h4>
-              {/* One card per EMITTER, grouped under the device it belongs to.
-                * A device mapped whole has one; a strip mapped per segment has
+              {/* One card per EMITTER, grouped under the carrier it belongs to.
+                * A carrier mapped whole has one; a strip mapped per segment has
                 * one for each pixel range, and the range is shown because it
                 * is the addressing fact that distinguishes them — never a
                 * position in the room. */}
-              {room.device_ids.map((deviceId) => {
+              {room.carrier_ids.map((carrierId) => {
                 const fps = room.footprints.filter(
-                  (f) => (f.device_id || f.emitter_id) === deviceId);
+                  (f) => (f.carrier_id || f.emitter_id) === carrierId);
                 return (
-                  <div key={deviceId} className="emitter-device">
+                  <div key={carrierId} className="emitter-device">
                     {fps.length > 1 && (
                       <p className="muted small emitter-device-name">
-                        {deviceId} — {fps.length} emitters
+                        {carrierId} — {fps.length} emitters
                       </p>
                     )}
                     <div className="emitter-grid">
                       {(fps.length ? fps : [null]).map((fp, i) => {
                         const range = fp?.ranges?.[0];
                         return (
-                          <div key={fp?.emitter_id ?? `${deviceId}-${i}`} className="emitter-card">
+                          <div key={fp?.emitter_id ?? `${carrierId}-${i}`} className="emitter-card">
                             <HeatThumbnail
                               grid={fp?.thumbnail ?? []}
                               title={fp ? `weight ${fp.weight.toFixed(1)}` : 'not mapped'}
                             />
                             <div className="emitter-meta">
                               <strong>
-                                {range ? `px ${range.start}–${range.end}` : deviceId}
+                                {range ? `px ${range.start}–${range.end}` : carrierId}
                               </strong>
                               {fp?.mapped ? (
                                 <>
@@ -453,7 +466,7 @@ export default function RoomsPage() {
                 );
               })}
               <div className="emitter-grid">
-                {!room.device_ids.length && <span className="muted">pick some devices first</span>}
+                {!room.carrier_ids.length && <span className="muted">pick something first</span>}
               </div>
             </>
           )}
@@ -547,7 +560,7 @@ export default function RoomsPage() {
 
           <button
             className="primary"
-            disabled={!room || !cameraOn || busy || !!refusal || !room.device_ids.length}
+            disabled={!room || !cameraOn || busy || !!refusal || !room.carrier_ids.length}
             onClick={() => void mapRoom()}
           >
             {busy ? 'Mapping…' : 'Map this room'}
@@ -564,7 +577,7 @@ export default function RoomsPage() {
             </p>
           ) : (
             <p className="muted small">
-              The room goes dark for about {Math.max(1, (room?.device_ids.length ?? 1) * 4)} seconds.
+              The room goes dark for about {Math.max(1, (room?.carrier_ids.length ?? 1) * 4)} seconds.
               Hold the phone still: every footprint in a map is only comparable to the others taken
               from the same position.
             </p>

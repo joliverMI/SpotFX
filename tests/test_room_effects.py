@@ -38,7 +38,7 @@ def _fp(emitter_id: str, lo: float, hi: float, vids: list[str]) -> EmitterFootpr
 
 
 def _room() -> RoomMap:
-    room = RoomMap(name="R", device_ids=["low", "high"], axis=AXIS)
+    room = RoomMap(name="R", carrier_ids=["low", "high"], axis=AXIS)
     room.put_footprint(_fp("low", 0.0, 0.2, ["v-low"]))
     room.put_footprint(_fp("high", 0.8, 1.0, ["v-high"]))
     return room
@@ -187,7 +187,7 @@ def test_the_watchdog_does_not_repair_a_running_wave(held):
 
 def test_only_mapped_emitters_are_driven_and_the_rest_are_named():
     room = _room()
-    room.device_ids.append("never-mapped")
+    room.carrier_ids.append("never-mapped")
     driven = room_effects.resolve_driven(
         room, room_effects.RoomEffectSpec(room_id=room.id))
     assert sorted(d.emitter_id for d in driven) == ["high", "low"]
@@ -196,14 +196,14 @@ def test_only_mapped_emitters_are_driven_and_the_rest_are_named():
 def test_a_device_selection_narrows_the_driven_set():
     room = _room()
     driven = room_effects.resolve_driven(
-        room, room_effects.RoomEffectSpec(room_id=room.id, device_ids=["low"]))
+        room, room_effects.RoomEffectSpec(room_id=room.id, carrier_ids=["low"]))
     assert [d.emitter_id for d in driven] == ["low"]
 
 
 def test_an_emitters_gain_reaches_every_virtual_its_light_came_out_of():
     """The footprint was captured with all of that device's virtuals lit
     together, so that is what the measurement means."""
-    room = RoomMap(name="R", device_ids=["d"], axis=AXIS)
+    room = RoomMap(name="R", carrier_ids=["d"], axis=AXIS)
     room.put_footprint(_fp("d", 0.4, 0.6, ["v1", "v2"]))
     driven = room_effects.resolve_driven(
         room, room_effects.RoomEffectSpec(room_id=room.id))
@@ -224,7 +224,7 @@ def test_gains_are_clamped_into_zero_one():
 # ── 4. start refuses honestly ─────────────────────────────────────────────
 
 def test_start_refuses_by_name_when_nothing_is_mapped():
-    room = RoomMap(name="R", device_ids=["d"], axis=AXIS)
+    room = RoomMap(name="R", carrier_ids=["d"], axis=AXIS)
     spec = room_effects.RoomEffectSpec(room_id=room.id)
 
     async def main():

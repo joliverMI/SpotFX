@@ -22,7 +22,7 @@ AXIS = {"kind": "vertical", "floor": {"x": 0.5, "y": 1.0},
 
 def _room(client, devices=("sconce-left",)):
     r = client.post("/api/rooms", json={"name": "Kitchen wall",
-                                        "device_ids": list(devices),
+                                        "carrier_ids": list(devices),
                                         "axis": AXIS})
     assert r.status_code == 200, r.text
     return r.json()
@@ -57,12 +57,12 @@ def test_editing_a_room_keeps_its_footprints_but_a_removed_device_loses_its():
 
         renamed = client.post("/api/rooms", json={
             "id": room["id"], "name": "Kitchen wall 2",
-            "device_ids": ["a", "b"], "axis": AXIS}).json()
+            "carrier_ids": ["a", "b"], "axis": AXIS}).json()
         assert sorted(renamed["mapped_ids"]) == ["a", "b"]
 
         dropped = client.post("/api/rooms", json={
             "id": room["id"], "name": "Kitchen wall 2",
-            "device_ids": ["a"], "axis": AXIS}).json()
+            "carrier_ids": ["a"], "axis": AXIS}).json()
         assert dropped["mapped_ids"] == ["a"]
 
 
@@ -120,7 +120,7 @@ def test_an_effect_round_trips_and_clamps_its_knobs():
         made = client.post("/api/room-effects", json={
             "room_id": room["id"], "name": "Kitchen wave", "kind": "dim_wave",
             "wavelength": 0.6, "speed": -0.4, "depth": 0.5,
-            "device_ids": ["sconce-left"]}).json()
+            "carrier_ids": ["sconce-left"]}).json()
         assert made["id"] and made["speed"] == -0.4
         again = client.post("/api/room-effects", json={**made, "depth": 0.9}).json()
         assert again["id"] == made["id"] and again["depth"] == 0.9
@@ -139,7 +139,7 @@ def test_starting_an_effect_on_an_unmapped_room_refuses_and_names_the_devices():
     with _client() as client:
         room = _room(client)
         made = client.post("/api/room-effects", json={
-            "room_id": room["id"], "device_ids": ["sconce-left"]}).json()
+            "room_id": room["id"], "carrier_ids": ["sconce-left"]}).json()
         r = client.post(f"/api/room-effects/{made['id']}/start")
         assert r.status_code == 409
         body = r.json()

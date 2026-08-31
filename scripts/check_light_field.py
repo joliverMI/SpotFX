@@ -94,7 +94,7 @@ FW, FH = light_field.FRAME_W, light_field.FRAME_H
 
 @dataclass(frozen=True)
 class SimEmitter:
-    device_id: str
+    carrier_id: str
     virtual_ids: tuple[str, ...]
     region: tuple[int, int, int, int]      # y0, y1, x0, x1 in FRAME pixels
     amplitude: float                       # camera counts it adds where it lands
@@ -103,8 +103,8 @@ class SimEmitter:
 #: Two sconces on one wall, the slice's own fixtures: one lighting a patch
 #: high on the wall and the ceiling above it, one lighting low and the floor.
 GROUND_TRUTH = (
-    SimEmitter("sconce-kitchen-left", ("sconce-left-v",), (10, 70, 40, 150), 130.0),
-    SimEmitter("sconce-kitchen-right", ("sconce-right-v",), (110, 175, 180, 300), 95.0),
+    SimEmitter("sconce-left-v", ("sconce-left-v",), (10, 70, 40, 150), 130.0),
+    SimEmitter("sconce-right-v", ("sconce-right-v",), (110, 175, 180, 300), 95.0),
 )
 OTHER_VIRTUALS = ("crystal-mapper", "tv-backlight")     # the rest of his room
 
@@ -259,20 +259,21 @@ def shorten():
 
 def new_room() -> RoomMap:
     return RoomMap(name="Kitchen wall",
-                   device_ids=[e.device_id for e in GROUND_TRUTH],
+                   carrier_ids=[e.carrier_id for e in GROUND_TRUTH],
                    axis=AxisCalibration(kind="vertical",
                                         floor=Point(x=0.5, y=1.0),
                                         ceiling=Point(x=0.5, y=0.0)))
 
 
 def deps_for(sess, seam: SeamLog) -> room_mapping.RunDeps:
-    vmap = {e.device_id: list(e.virtual_ids) for e in GROUND_TRUTH}
+    chains = {e.carrier_id: [{"id": f"{e.carrier_id}-fixture", "type": "wled"}]
+              for e in GROUND_TRUTH}
 
-    async def virtuals_for_device(device_id):
-        return vmap.get(device_id, [])
+    async def carrier_devices():
+        return chains
 
     return room_mapping.RunDeps(session=sess, get_virtuals=seam.get_virtuals,
-                                virtuals_for_device=virtuals_for_device,
+                                carrier_devices=carrier_devices,
                                 save_room=light_field.put_room)
 
 
@@ -307,11 +308,11 @@ async def section_one():
 
     stored = light_field.get_room(room.id)
     check(stored is not None and sorted(stored.mapped_ids()) ==
-          sorted(e.device_id for e in GROUND_TRUTH),
+          sorted(e.carrier_id for e in GROUND_TRUTH),
           "both footprints stored under the room")
 
     for e in GROUND_TRUTH:
-        fp = stored.footprint(e.device_id)
+        fp = stored.footprint(e.carrier_id)
         grid = np.asarray(fp.grid).reshape(GRID_H, GRID_W)
         y0, y1, x0, x1 = e.region
         gy0, gy1, gx0, gx1 = y0 // 5, y1 // 5, x0 // 5, x1 // 5
@@ -319,17 +320,17 @@ async def section_one():
         outside = grid.copy()
         outside[gy0:gy1, gx0:gx1] = 0.0
         check(np.allclose(inside, e.amplitude / 255.0, atol=1e-9),
-              f"{e.device_id}: the lit region reads exactly its own amplitude "
+              f"{e.carrier_id}: the lit region reads exactly its own amplitude "
               f"({e.amplitude / 255.0:.4f})")
         check(outside.max() == 0.0,
-              f"{e.device_id}: every cell it does not light is exactly zero "
+              f"{e.carrier_id}: every cell it does not light is exactly zero "
               f"(the window and the standby LED cancelled)")
         check(fp.capture.exposure_locked and fp.capture.white_balance_locked,
-              f"{e.device_id}: the capture context records a LOCKED camera")
+              f"{e.carrier_id}: the capture context records a LOCKED camera")
         check(fp.capture.pose_id == sess.pose_id,
-              f"{e.device_id}: the footprint carries the pose it was taken in")
+              f"{e.carrier_id}: the footprint carries the pose it was taken in")
 
-    left, right = (stored.footprint(e.device_id) for e in GROUND_TRUTH)
+    left, right = (stored.footprint(e.carrier_id) for e in GROUND_TRUTH)
     check(int(np.argmax(left.axis_profile)) > int(np.argmax(right.axis_profile)),
           "the axis profile puts the high sconce above the low one")
     check(left.weight > right.weight,

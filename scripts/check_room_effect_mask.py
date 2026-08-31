@@ -144,7 +144,7 @@ def _footprint(emitter_id: str, band, ranges) -> EmitterFootprint:
     y0 = int(round((1.0 - hi) * GRID_H))
     y1 = max(y0 + 1, int(round((1.0 - lo) * GRID_H)))
     grid[y0:y1, :] = 1.0
-    return EmitterFootprint(emitter_id=emitter_id, device_id=DEVICE,
+    return EmitterFootprint(emitter_id=emitter_id, carrier_id=DEVICE,
                             virtual_ids=[VIRTUAL],
                             ranges=ranges,
                             grid=[float(v) for v in grid.reshape(-1)],
@@ -153,7 +153,7 @@ def _footprint(emitter_id: str, band, ranges) -> EmitterFootprint:
 
 def sub_device_room() -> RoomMap:
     """The television, mapped per run: three emitters, one device."""
-    room = RoomMap(name="TV wrap", device_ids=[DEVICE], axis=AXIS,
+    room = RoomMap(name="TV wrap", carrier_ids=[DEVICE], axis=AXIS,
                    granularity="segment")
     for name, (lo, hi), band in RUNS:
         room.put_footprint(_footprint(
@@ -175,9 +175,9 @@ def whole_device_room() -> RoomMap:
         y0 = int(round((1.0 - hi) * GRID_H))
         y1 = max(y0 + 1, int(round((1.0 - lo) * GRID_H)))
         grid[y0:y1, :] = 1.0
-    room = RoomMap(name="TV whole", device_ids=[DEVICE], axis=AXIS)
+    room = RoomMap(name="TV whole", carrier_ids=[DEVICE], axis=AXIS)
     room.put_footprint(EmitterFootprint(
-        emitter_id=DEVICE, device_id=DEVICE, virtual_ids=[VIRTUAL], ranges=[],
+        emitter_id=DEVICE, carrier_id=DEVICE, virtual_ids=[VIRTUAL], ranges=[],
         grid=[float(v) for v in grid.reshape(-1)], weight=float(grid.sum())))
     return room
 
@@ -190,7 +190,7 @@ def many_ranges_room(block: int = 3) -> RoomMap:
     dominates a tick is the per-emitter reduction over each footprint's
     2304 cells, not the length of the mask array — so this measures the
     same work on a smaller strip."""
-    room = RoomMap(name="TV blocks", device_ids=[DEVICE], axis=AXIS,
+    room = RoomMap(name="TV blocks", carrier_ids=[DEVICE], axis=AXIS,
                    granularity="block", block_pixels=block)
     for lo in range(0, PIXELS, block):
         hi = min(PIXELS - 1, lo + block - 1)

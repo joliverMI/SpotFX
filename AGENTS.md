@@ -3362,30 +3362,49 @@ Modules, each with a job: `light_field.py` (derivation + store +
 run), `mapping_session.py` (the phone's server half), `room_mapping.py` (the
 protocol as a held-room program), `room_effects.py` (the bounded writer).
 
-**AN EMITTER IS A DEVICE *OR* A PIXEL RANGE OF ONE (2026-08-31, PR
-fm/lightfield-segment-granularity), his own correction: "A single device
-that spans the direction of the wave should be able to show the effect. the
-tv mapper is wrapped around a tv. It should be able to run a dimness wave
-vertically."** The first slice fenced an emitter to a whole device, so a
-wave over a strip wrapped round a television could only dim the whole
-television at once. `spectra/services/emitters.py` is the binding statement
-for the enumeration and the id shape. Four things to know:
+**AN EMITTER IS A CARRIER *OR* A PIXEL RANGE OF ONE (2026-08-31, PRs
+fm/lightfield-segment-granularity then fm/rooms-picker-light-emitters),
+his own correction: "A single device that spans the direction of the wave
+should be able to show the effect. the tv mapper is wrapped around a tv. It
+should be able to run a dimness wave vertically."** The first slice fenced
+an emitter to a whole device, so a wave over a strip wrapped round a
+television could only dim the whole television at once.
+`spectra/services/emitters.py` is the binding statement for the enumeration
+and the id shape. Five things to know:
 
+- **A ROOM IS KEYED BY CARRIER, NOT BY DEVICE**, on his own clarification:
+  "i want to be able to work with the devices that i directly use in
+  spectra even if they have layers of virtuals before shining... spectra
+  can delayer it if easier." A CARRIER is a genuinely-driven virtual
+  (`room_topology.genuinely_driven_virtual_ids`) whose segment chain
+  reaches at least one light-emitting fixture; `spectra/services/
+  carriers.py` is the binding statement. Four of his seven fan out to
+  several fixtures (tv-mapper → backlight + both sconces), so a
+  device-keyed picker could not name what he calibrates. The chain was
+  ALREADY resolved everywhere it mattered — the capture lamp writes to
+  virtuals and the gain mask is per-virtual — so this re-key made the list
+  agree with the layer beneath it rather than adding a delayering step.
+  **The /devices page is untouched**: `device_usage.in_use` answers "does
+  this back something driven", a different question, and still lists every
+  fixture including the dummies. `emitters.emits_light` is the chain-level
+  sub-check and the ONE place a new non-physical type joins the decision.
 - **GRANULARITY IS A PER-CAPTURE CHOICE, never a global.** `auto` (default,
-  resolved PER DEVICE: `segment` for a strip, `device` for a Hue bulb — his
-  "grouped") / `device` / `segment` (the virtual's own configured segments)
-  / `block`-of-N pixels. The Rooms page passes it to
+  resolved PER CARRIER: `segment` for a strip, `whole` for an all-Hue
+  chain) / `whole` (`device` is accepted as the pre-carrier wire word) /
+  `segment` (the carrier's own configured segments) / `block`-of-N pixels,
+  all in the CARRIER's own effect-pixel space. The Rooms page passes it to
   `POST /rooms/{id}/map`; `GET /rooms/{id}/plan` is the read that says how
   many emitters and how many dark seconds BEFORE he presses.
-- **A sub-device emitter id is `tv-mapper:seg1[20-39]`** — the NEW ID SHAPE
-  `room_map.py`'s docstring always anticipated — plus a STRUCTURED
-  `EmitterFootprint.ranges` (and `device_id`). Both additive with empty
-  defaults, so every footprint on disk still means "the whole device" and
-  device granularity is byte-identical to the shipped slice. Use
-  `RoomMap.mapped_devices()` (not `mapped_ids()`) wherever a DEVICE is what
-  a caller selects — `mapped_ids()` returns EMITTER ids, and conflating the
-  two silently rejects every legitimate device selection (a real bug this
-  found in `room_effect_console`).
+- **A sub-carrier emitter id is `tv-mapper:blk3[90-119]`** (or `seg`) — the
+  NEW ID SHAPE `room_map.py`'s docstring always anticipated — plus a
+  STRUCTURED `EmitterFootprint.ranges` and `carrier_id`. Use
+  `RoomMap.mapped_carriers()` (not `mapped_ids()`) wherever a CARRIER is
+  what a caller selects — `mapped_ids()` returns EMITTER ids, and
+  conflating the two silently rejects every legitimate selection (a real
+  bug this found in `room_effect_console`). A pre-re-key room on disk
+  (`device_ids`) is RESET by `RoomMap`'s own before-validator with a stated
+  `migration_note`, never reinterpreted: a device id is not a carrier id
+  and a per-device footprint is not a carrier's.
 - **A RANGE IS AN ADDRESSING FACT, NOT A POSITION** — indices into the
   virtual's own EFFECT pixel space, read out of the segment configuration,
   the same kind of fact `virtual_ids` already was. That is the SAME space
@@ -3398,8 +3417,8 @@ for the enumeration and the id shape. Four things to know:
   lights** — the range lamp is a vendored effect in this process and the
   mask is applied in this process's own frame assembly, so neither reaches
   an external LedFX. Both refuse BY NAME with nothing written. Whole-device
-  work is unaffected either way. Re-mapping a device drops its previous
-  footprints first (`RoomMap.drop_device_footprints`), so a fixture carries
+  work is unaffected either way. Re-mapping a carrier drops its previous
+  footprints first (`RoomMap.drop_carrier_footprints`), so it carries
   exactly one granularity and is never driven twice.
 
 - **THE EXPOSURE LOCK IS A HARD REFUSAL, not a warning, and it is the whole
@@ -3484,6 +3503,7 @@ for the enumeration and the id shape. Four things to know:
   safety story is that seam; "leave the wave on all evening" needs its own
   lifetime story, not a bigger number.
 - Sonic parity is `room_effect_console.py` (4 ops, `domain="room"`).
+  Its `carrier_ids` name CARRIERS, not fixtures.
   Excluded BY NAME with reasons in its docstring: starting/stopping an
   effect (a light-driving call — `settings_agent.py`'s whole boundary
   argument is that none exists), running a mapping sync (needs a phone in

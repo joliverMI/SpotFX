@@ -1609,12 +1609,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'room-builder-devices',
-        title: 'Choosing the fixtures',
-        keywords: 'devices chips pick select in use expansion sconce emitter granularity',
+        title: 'Choosing what to map',
+        keywords: 'devices carriers chips pick select in use sconce emitter granularity tv mapper layers virtuals',
         body: [
-          'Only the devices the room actually uses are listed, the same rule the Devices page uses; "Show all" reveals the rest. Tap a device to put it in the room.',
-          'Fixtures that emit no light are never offered here, not even under "Show all" — a dummy device can be genuinely in use (it backs the crystal\'s mapper chain) and still be nothing a camera could see. The Devices page still lists them, because it answers the other question.',
-          'A device is not necessarily ONE emitter: a strip can be mapped in parts, so a wave can run along it. Two sconces on one wall are two emitters; a strip wrapped round the television can be a dozen. The ceiling and floor between them need no fixtures of their own, because their light is already in the fixtures\' own footprints.',
+          'The list is the things you run effects on — what you address in SPECTRA, not the fixtures underneath. One of them can span several fixtures: the TV mapper reaches the backlight and both kitchen sconces, and it is mapped and waved along as one continuous thing. Tap one to put it in the room.',
+          'Anything whose chain reaches no actual light is never offered — a dummy is genuinely in use (it sits in the crystal\'s mapper chain) and is still nothing a camera could photograph. The page names what it left out. The Devices page still lists every fixture, because it answers the other question: what backs something driven.',
+          'One of these is not necessarily ONE emitter: it can be mapped in parts, so a wave can run along it. A strip wrapped round the television can be a dozen. The ceiling and floor between them need nothing of their own, because their light is already in the footprints.',
         ],
       },
       {
@@ -1623,7 +1623,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'granularity segment block pixels parts strip tv television wrap auto whole device split emitters resolution how many',
         body: [
           'A strip wrapped round a television spans the direction a wave travels. Mapped as ONE emitter it can only be dimmed all at once — so the "Map in" control chooses, for THIS run, how finely each fixture is measured. It is a choice per capture, not a setting the system carries around.',
-          '"Auto" is the default and decides per fixture: segments for a strip, the whole fixture for a bulb. "Whole device" is one measurement per fixture and the fastest run. "Segments" measures each configured run of a strip on its own — a television wrap is usually three or four. "Blocks" cuts every strip into equal pixel blocks regardless of how it happens to be configured, which is what gives a wrap a real up-and-down resolution; 30 pixels a block turns a 560-pixel wrap into about nineteen emitters.',
+          '"Auto" is the default and decides per thing: segments for a strip, the whole of it for a bulb. "Whole carrier" is one measurement each and the fastest run. "Segments" measures each configured run of a strip on its own — a television wrap is usually three or four. "Blocks" cuts every strip into equal pixel blocks regardless of how it happens to be configured, which is what gives a wrap a real up-and-down resolution; 30 pixels a block turns a 560-pixel wrap into about nineteen emitters.',
           'Finer costs TIME, not brightness: each emitter is its own four-second dark-room capture, so nineteen emitters means the room is dark for about seventy-five seconds. The page tells you the emitter count and the seconds before you press, and a run past 120 emitters is refused rather than attempted.',
           'What is stored for a part is the PIXEL RANGE it covers — "pixels 20 to 39 of this strip" — which comes straight out of the fixture\'s own configuration. It is still never a position in the room: where that range\'s light lands is measured with the camera, exactly like a whole fixture.',
           'Re-mapping a fixture replaces everything previously measured for it, so a strip is always at one granularity and never driven twice.',

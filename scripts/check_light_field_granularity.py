@@ -274,19 +274,15 @@ AXIS = AxisCalibration(kind="vertical", floor=Point(x=0.5, y=1.0),
 
 
 def new_room() -> RoomMap:
-    return RoomMap(name="Living room", device_ids=[DEVICE], axis=AXIS)
+    return RoomMap(name="Living room", carrier_ids=[VIRTUAL], axis=AXIS)
 
 
 def deps_for(sess, seam: SeamLog, owns: bool = True) -> room_mapping.RunDeps:
-    async def virtuals_for_device(device_id):
-        return [VIRTUAL] if device_id == DEVICE else []
-
-    async def device_type(_device_id):
-        return "wled"
+    async def carrier_devices():
+        return {VIRTUAL: [{"id": DEVICE, "type": "wled"}]}
 
     return room_mapping.RunDeps(session=sess, get_virtuals=seam.get_virtuals,
-                                virtuals_for_device=virtuals_for_device,
-                                device_type=device_type,
+                                carrier_devices=carrier_devices,
                                 spectra_owns=lambda: owns,
                                 save_room=light_field.put_room)
 
@@ -401,14 +397,14 @@ async def section_two():
           "own segment's painted region ==")
     result, stored, seam = await run_at("segment")
     check(result.ok, f"the run reports ok ({result.reason})")
-    check(result.per_device.get(DEVICE) == "segment",
-          f"the device resolved to segment granularity "
-          f"({result.per_device.get(DEVICE)})")
+    check(result.per_carrier.get(VIRTUAL) == "segment",
+          f"the carrier resolved to segment granularity "
+          f"({result.per_carrier.get(VIRTUAL)})")
     check(len(result.emitters) == 3 and all(e.mapped for e in result.emitters),
           f"three emitters, all mapped ({len(result.emitters)})")
 
     ids = [e.emitter_id for e in result.emitters]
-    check(all(i.startswith(f"{DEVICE}:seg") and "[" in i for i in ids),
+    check(all(i.startswith(f"{VIRTUAL}:seg") and "[" in i for i in ids),
           f"the NEW id shape the schema anticipated: {ids}")
     check(len(set(ids)) == 3, "and every id is distinct")
 
@@ -438,7 +434,7 @@ async def section_two():
               f"light at all — the window and the standby LED cancelled "
               f"(max {float(grid[~truth].max() if (~truth).any() else 0.0):.2e}, "
               f"vs 3.9e-03 for one camera count)")
-        check(fp.device == DEVICE and fp.ranges
+        check(fp.carrier == VIRTUAL and fp.ranges
               and fp.ranges[0].virtual_id == VIRTUAL
               and (fp.ranges[0].start, fp.ranges[0].end)
               == (pixels[0], pixels[-1]),
@@ -452,7 +448,7 @@ async def section_two():
               "the three footprints are pairwise DISJOINT — three distinct "
               "measurements, not one smeared one")
 
-    check(stored.mapped_devices() == [DEVICE] and stored.unmapped_ids() == [],
+    check(stored.mapped_carriers() == [VIRTUAL] and stored.unmapped_ids() == [],
           "the DEVICE reads as mapped even though no emitter carries its id")
 
     lit_writes = [w for burst in seam.writes for w in burst["writes"]
@@ -472,11 +468,11 @@ async def section_three(segment_masks):
     result, stored, _seam = await run_at("device")
     check(result.ok and len(result.emitters) == 1,
           f"one emitter ({len(result.emitters)})")
-    check(result.emitters[0].emitter_id == DEVICE,
+    check(result.emitters[0].emitter_id == VIRTUAL,
           f"whose id is the DEVICE id, byte-identical to the shipped slice "
           f"({result.emitters[0].emitter_id})")
-    fp = stored.footprint(DEVICE)
-    check(fp is not None and fp.whole_device and not fp.ranges,
+    fp = stored.footprint(VIRTUAL)
+    check(fp is not None and fp.whole_carrier and not fp.ranges,
           "and it carries no ranges — the whole-device shape every already-"
           "stored footprint has")
     merged = np.asarray(fp.grid).reshape(GRID_H, GRID_W) > NOISE_FLOOR
@@ -507,28 +503,26 @@ def section_four():
                                   [DEVICE, SEG, 2 * SEG - 1, False],
                                   [DEVICE, 2 * SEG, PIXELS - 1, False]])}
 
-    auto = emitters_mod.enumerate_device(DEVICE, [VIRTUAL], strip,
-                                         granularity="auto", device_type="wled")
+    auto = emitters_mod.enumerate_carrier(VIRTUAL, strip[VIRTUAL],
+                                          granularity="auto")
     check(len(auto) == 3,
           f"'auto' gives a WLED strip SEGMENT granularity ({len(auto)} "
           f"emitters) — his 'default segment for strips'")
     bulb = {"hue-v": _v(1, [["hue-bulb", 0, 0, False]])}
-    auto_hue = emitters_mod.enumerate_device("hue-bulb", ["hue-v"], bulb,
-                                             granularity="auto",
-                                             device_type="hue")
-    check(len(auto_hue) == 1 and auto_hue[0].whole_device,
-          "'auto' gives a Hue bulb WHOLE-DEVICE granularity — his 'device "
-          "for Hue', resolved PER DEVICE, never a global")
-    forced = emitters_mod.enumerate_device("hue-bulb", ["hue-v"], bulb,
-                                           granularity="segment",
-                                           device_type="hue")
-    check(len(forced) == 1 and forced[0].whole_device and forced[0].note,
+    auto_hue = emitters_mod.enumerate_carrier("hue-v", bulb["hue-v"],
+                                              granularity="auto", point=True)
+    check(len(auto_hue) == 1 and auto_hue[0].whole_carrier,
+          "'auto' gives a Hue bulb WHOLE-CARRIER granularity — his 'device "
+          "for Hue', resolved PER CARRIER, never a global")
+    forced = emitters_mod.enumerate_carrier("hue-v", bulb["hue-v"],
+                                            granularity="segment", point=True)
+    check(len(forced) == 1 and forced[0].whole_carrier and forced[0].note,
           f"forcing a split on a single point of light is REPORTED, not "
           f"silently mis-mapped: {forced[0].note!r}")
 
-    blocks = emitters_mod.enumerate_device(DEVICE, [VIRTUAL], strip,
-                                           granularity="block",
-                                           block_pixels=10)
+    blocks = emitters_mod.enumerate_carrier(VIRTUAL, strip[VIRTUAL],
+                                            granularity="block",
+                                            block_pixels=10)
     spans = [(e.ranges[0].start, e.ranges[0].end) for e in blocks]
     check(len(blocks) == 6 and spans[0] == (0, 9) and spans[-1] == (50, 59),
           f"'block' subdivides regardless of how the config is segmented "
@@ -539,23 +533,23 @@ def section_four():
     check(covered == set(range(PIXELS)),
           "and the blocks cover every pixel exactly once, with the last "
           "absorbing the remainder rather than leaving a stub emitter")
-    odd = emitters_mod.enumerate_device(DEVICE, [VIRTUAL], strip,
-                                        granularity="block", block_pixels=25)
+    odd = emitters_mod.enumerate_carrier(VIRTUAL, strip[VIRTUAL],
+                                         granularity="block", block_pixels=25)
     check([(e.ranges[0].start, e.ranges[0].end) for e in odd] == [(0, 24), (25, 59)],
           "a block size that does not divide evenly puts the remainder in "
           "the LAST block — a two-pixel tail emitter would cost a full "
           "four-second capture to measure almost nothing")
 
     copied = {VIRTUAL: _v(PIXELS, strip[VIRTUAL]["segments"], mapping="copy")}
-    cp = emitters_mod.enumerate_device(DEVICE, [VIRTUAL], copied,
-                                       granularity="segment")
-    check(len(cp) == 1 and cp[0].whole_device and "copies" in cp[0].note,
+    cp = emitters_mod.enumerate_carrier(VIRTUAL, copied[VIRTUAL],
+                                        granularity="segment")
+    check(len(cp) == 1 and cp[0].whole_carrier and "copies" in cp[0].note,
           f"a COPY-mapping virtual cannot light one segment alone, and says "
           f"so: {cp[0].note!r}")
 
     grouped = {VIRTUAL: _v(PIXELS, strip[VIRTUAL]["segments"], grouping=2)}
-    g = emitters_mod.enumerate_device(DEVICE, [VIRTUAL], grouped,
-                                      granularity="segment")
+    g = emitters_mod.enumerate_carrier(VIRTUAL, grouped[VIRTUAL],
+                                       granularity="segment")
     check(emitters_mod.effective_pixel_count(grouped[VIRTUAL]) == 30
           and [(e.ranges[0].start, e.ranges[0].end) for e in g]
           == [(0, 9), (10, 19), (20, 29)],
@@ -563,16 +557,17 @@ def section_four():
           "pixel space, the same space the lamp lights and the mask indexes")
 
     big = {VIRTUAL: _v(4000, [[DEVICE, 0, 3999, False]])}
-    plan = emitters_mod.plan_run([DEVICE], big, {DEVICE: [VIRTUAL]},
-                                 {DEVICE: "wled"}, granularity="block",
-                                 block_pixels=1)
+    plan = emitters_mod.plan_run([VIRTUAL], big,
+                                 {VIRTUAL: [{"id": DEVICE, "type": "wled"}]},
+                                 granularity="block", block_pixels=1)
     check(plan.truncated and len(plan.emitters) == emitters_mod.MAX_EMITTERS_PER_RUN
           and plan.problems,
           f"a mis-set block size is capped and NAMED, never an eight-hour "
           f"dark room ({len(plan.emitters)} emitters, "
           f"{plan.problems[-1][:60]}...)")
-    ok_plan = emitters_mod.plan_run([DEVICE], strip, {DEVICE: [VIRTUAL]},
-                                    {DEVICE: "wled"}, granularity="segment")
+    ok_plan = emitters_mod.plan_run([VIRTUAL], strip,
+                                    {VIRTUAL: [{"id": DEVICE, "type": "wled"}]},
+                                    granularity="segment")
     check(ok_plan.seconds > 0 and ok_plan.as_dict()["count"] == 3,
           f"a plan says how long the room is dark before he presses "
           f"({ok_plan.seconds}s for 3 emitters)")
@@ -593,7 +588,7 @@ async def section_five():
     check(stored is None or not stored.footprints,
           "and nothing was stored")
 
-    result, _stored, seam = await run_at("device", owns=False)
+    result, _stored, seam = await run_at("whole", owns=False)
     check(result.ok,
           "a WHOLE-DEVICE run is unaffected — it uses the shipped lamp, "
           "which the external LedFX service does have")

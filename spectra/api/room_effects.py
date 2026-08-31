@@ -45,7 +45,7 @@ class EffectBody(BaseModel):
     wavelength: float = 1.0
     speed: float = 0.25
     depth: float = 0.6
-    device_ids: list[str] = []
+    carrier_ids: list[str] = []
 
 
 @router.get("/room-effects")

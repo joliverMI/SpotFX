@@ -124,8 +124,8 @@ fx_seam.apply_writes = fake_apply_writes        # type: ignore[assignment]
 fx_seam.get_virtuals = fake_get_virtuals        # type: ignore[assignment]
 
 
-async def fake_virtuals_for_device(device_id: str):
-    return [VIRTUAL] if device_id == DEVICE else []
+async def fake_carrier_devices():
+    return {VIRTUAL: [{"id": DEVICE, "type": "wled"}]}
 
 
 _real_production_deps = room_mapping.production_deps
@@ -134,7 +134,7 @@ _real_production_deps = room_mapping.production_deps
 def patched_production_deps(session):
     deps = _real_production_deps(session)
     deps.get_virtuals = fake_get_virtuals
-    deps.virtuals_for_device = fake_virtuals_for_device
+    deps.carrier_devices = fake_carrier_devices
     return deps
 
 
@@ -272,11 +272,11 @@ async def main():
         # ── 1. a run refuses with no phone connected ──────────────────────
         print("== 1. the route's own refusals ==")
         room = (await http.post("/api/rooms", json={
-            "name": "Kitchen wall", "device_ids": [DEVICE],
+            "name": "Kitchen wall", "carrier_ids": [VIRTUAL],
             "axis": {"kind": "vertical", "floor": {"x": 0.5, "y": 1.0},
                      "ceiling": {"x": 0.5, "y": 0.0}}})).json()
-        check(room["id"] and room["unmapped_ids"] == [DEVICE],
-              "a fresh room reports its device as NOT mapped")
+        check(room["id"] and room["unmapped_ids"] == [VIRTUAL],
+              "a fresh room reports its carrier as NOT mapped")
         r = await http.post(f"/api/rooms/{room['id']}/map")
         check(r.status_code == 409 and "no phone connected" in r.json()["detail"],
               "with no phone connected the run is refused by name, 409")
@@ -326,7 +326,7 @@ async def main():
               "the run records the pose it was captured in")
 
         fp = (await http.get(
-            f"/api/rooms/{room['id']}/footprint/{DEVICE}")).json()
+            f"/api/rooms/{room['id']}/footprint/{VIRTUAL}")).json()
         grid = np.asarray(fp["grid"]).reshape(fp["height"], fp["width"])
         y0, y1, x0, x1 = REGION
         inside = grid[y0 // 5:y1 // 5, x0 // 5:x1 // 5]
@@ -341,7 +341,7 @@ async def main():
               "the capture context travelled with it")
 
         listing = (await http.get("/api/rooms")).json()["rooms"][0]
-        check(listing["mapped_ids"] == [DEVICE] and listing["footprints"][0]["thumbnail"],
+        check(listing["mapped_ids"] == [VIRTUAL] and listing["footprints"][0]["thumbnail"],
               "the room listing shows it mapped, with a heat thumbnail")
         check(len(listing["footprints"][0]["thumbnail"]) == 9 and
               len(listing["footprints"][0]["thumbnail"][0]) == 16,
