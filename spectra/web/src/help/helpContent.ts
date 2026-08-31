@@ -1612,7 +1612,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Choosing the fixtures',
         keywords: 'devices chips pick select in use expansion sconce emitter granularity',
         body: [
-          'Only the devices the room actually uses are listed, the same list and the same rule the Devices page uses; "Show all" reveals the rest. Tap a device to put it in the room.',
+          'Only the devices the room actually uses are listed, the same rule the Devices page uses; "Show all" reveals the rest. Tap a device to put it in the room.',
+          'Fixtures that emit no light are never offered here, not even under "Show all" — a dummy device can be genuinely in use (it backs the crystal\'s mapper chain) and still be nothing a camera could see. The Devices page still lists them, because it answers the other question.',
           'A device is not necessarily ONE emitter: a strip can be mapped in parts, so a wave can run along it. Two sconces on one wall are two emitters; a strip wrapped round the television can be a dozen. The ceiling and floor between them need no fixtures of their own, because their light is already in the fixtures\' own footprints.',
         ],
       },

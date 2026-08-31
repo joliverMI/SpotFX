@@ -100,6 +100,31 @@ MAX_EMITTERS_PER_RUN = 120
 #: Device types whose "pixels" are a single lamp — "auto" never splits one.
 POINT_DEVICE_TYPES = frozenset({"hue"})
 
+#: Device types that put no light into the room. A dummy is a real,
+#: load-bearing entry in his config (the crystal's mapper chain, the radial
+#: dummy) — it just does not emit.
+NON_EMITTING_DEVICE_TYPES = frozenset({"dummy"})
+
+
+def emits_light(device) -> bool:
+    """Whether a camera could see this device — the question a MAPPING
+    picker asks, and the ONE place a new non-physical type joins it.
+
+    NOT the same question as `device_usage`'s `in_use`. That list answers
+    "does this back something driven", which is the right question for the
+    /devices page and the WRONG one here: a dummy backs real virtuals and
+    is genuinely in use, yet emits nothing. Offering it in a picker whose
+    whole act is photographing what a fixture lights is meaningless BY
+    CONSTRUCTION, not merely untidy. One list, two different questions —
+    so the /devices page keeps the other answer, unfiltered.
+
+    Accepts a device entry dict or a bare type string."""
+    if isinstance(device, str):
+        device_type = device
+    else:
+        device_type = (device or {}).get("type") or ""
+    return str(device_type).strip().lower() not in NON_EMITTING_DEVICE_TYPES
+
 
 # `PixelRange` is the STORED model's own type (spectra/models/room_map.py),
 # imported rather than redefined: a second definition of the same three
@@ -354,6 +379,14 @@ def plan_run(device_ids: Iterable[str], virtuals: dict[str, dict],
     plan = Plan(granularity=(granularity or DEFAULT_GRANULARITY),
                 block_pixels=int(block_pixels))
     for device_id in device_ids:
+        if not emits_light(types.get(device_id, "")):
+            # A room saved before the picker was filtered can still name a
+            # dummy. Skipped, and SAID — never silently dropped.
+            plan.problems.append(
+                f"{device_id}: this device emits no light (type "
+                f"{types.get(device_id, '') or 'unknown'}), so there is "
+                f"nothing for a camera to see — skipped")
+            continue
         vids = list(virtuals_by_device.get(device_id) or [])
         live = [v for v in vids if v in virtuals]
         if not live:

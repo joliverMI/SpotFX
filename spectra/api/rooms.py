@@ -157,15 +157,23 @@ async def remove_room(room_id: str):
 
 @router.get("/rooms/devices")
 async def room_devices():
-    """The device list the Room Builder picks from — the SAME listing the
-    devices page shows, including its `in_use` flag, so "the devices he
-    uses" means one thing in this app and is never re-derived here."""
-    from spectra.services import device_console
+    """The device list the Room Builder picks from — the same listing the
+    devices page shows, including its `in_use` flag (so "the devices he
+    uses" means one thing in this app and is never re-derived here),
+    MINUS everything that emits no light.
+
+    That subtraction is the one difference between the two pages, and it is
+    deliberate: `in_use` answers "does this back something driven" — right
+    for /devices, wrong here, where the act is photographing what a fixture
+    lights. `emitters.emits_light` carries the ruling and is the single
+    place a future non-physical type joins it."""
+    from spectra.services import device_console, emitters
     listing = await device_console.list_devices()
     devices = [{"id": d["id"], "name": (d.get("config") or {}).get("name") or d["id"],
                 "type": d.get("type"), "in_use": d.get("in_use"),
                 "virtuals": d.get("virtuals") or []}
-               for d in listing.get("devices") or []]
+               for d in listing.get("devices") or []
+               if emitters.emits_light(d)]
     return {"devices": devices, "usage": listing.get("usage"),
             "source": listing.get("source")}
 
