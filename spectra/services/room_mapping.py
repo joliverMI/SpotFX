@@ -230,6 +230,11 @@ class MappingResult:
     per_carrier: dict = field(default_factory=dict)
     #: everything the enumeration declined to do, named rather than hidden
     problems: list[str] = field(default_factory=list)
+    #: what this run DID that he may not have meant — today, a map that came
+    #: out as one piece and therefore cannot show a wave travelling. Carried
+    #: on the result as well as the plan, because a run started before the
+    #: plan was read (or from a phone that never showed it) must still say so.
+    warnings: list[str] = field(default_factory=list)
     #: WHICH named refusal ended this run, when one did ("ownership",
     #: "hold_ceiling", "aborted"). The page needs the sentence, not this —
     #: it exists so a caller can act on the KIND without matching prose.
@@ -245,6 +250,7 @@ class MappingResult:
                 "granularity": self.granularity,
                 "block_pixels": self.block_pixels,
                 "per_carrier": self.per_carrier, "problems": self.problems,
+                "warnings": self.warnings,
                 "refusal": self.refusal, "partial": self.partial,
                 "emitters": [e.__dict__ for e in self.emitters]}
 
@@ -405,6 +411,7 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
         return result
     result.per_carrier = dict(plan.per_carrier)
     result.problems = list(plan.problems)
+    result.warnings = list(plan.warnings)
     if not plan.emitters:
         result.reason = ("nothing to map: " + "; ".join(plan.problems)
                          if plan.problems else

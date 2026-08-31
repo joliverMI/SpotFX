@@ -65,6 +65,7 @@ type PlanEmitter = {
 type RunPlan = {
   granularity: string; block_pixels: number; count: number;
   estimated_seconds: number; truncated: boolean; problems: string[];
+  warnings?: string[];
   per_carrier: Record<string, string>; emitters: PlanEmitter[];
   sub_device: boolean; spectra_owns: boolean;
 };
@@ -79,7 +80,7 @@ type RunResult = {
   ok: boolean; reason: string; seconds: number; emitters: EmitterResult[];
   granularity: string; block_pixels: number;
   per_carrier: Record<string, string>; problems: string[]; room?: Room;
-  refusal?: string; partial?: boolean;
+  refusal?: string; partial?: boolean; warnings?: string[];
 };
 
 const EMPTY_AXIS = { kind: 'vertical', floor: null, ceiling: null };
@@ -597,6 +598,15 @@ export default function RoomsPage() {
               from the same position.
             </p>
           )}
+          {/* A WARNING is not a problem: the run will happen and its map is
+            * worth keeping — it just cannot show a wave travelling. Said
+            * BEFORE the room goes dark, in full size, because it changes
+            * which button he wants to press. */}
+          {plan?.warnings?.length ? (
+            <ul className="warn">
+              {plan.warnings.map((w) => <li key={w}>{w}</li>)}
+            </ul>
+          ) : null}
           {plan?.problems?.length ? (
             <ul className="warn small">
               {plan.problems.map((p) => <li key={p}>{p}</li>)}
@@ -622,6 +632,11 @@ export default function RoomsPage() {
                   </li>
                 ))}
               </ul>
+              {run.warnings?.length ? (
+                <ul className="warn">
+                  {run.warnings.map((w) => <li key={w}>{w}</li>)}
+                </ul>
+              ) : null}
               {run.problems?.length ? (
                 <ul className="warn small">
                   {run.problems.map((p) => <li key={p}>{p}</li>)}

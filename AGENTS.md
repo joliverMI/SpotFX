@@ -3405,6 +3405,20 @@ and the id shape. Five things to know:
   (`device_ids`) is RESET by `RoomMap`'s own before-validator with a stated
   `migration_note`, never reinterpreted: a device id is not a carrier id
   and a per-device footprint is not a carrier's.
+- **"AUTO" GIVES A SINGLE-SEGMENT STRIP *BLOCKS*, and a one-piece map
+  WARNS** (2026-08-31, third commit of PR fm/rooms-picker-light-emitters,
+  from his own first real run). "Segments for a strip" collapses to ONE
+  emitter whenever the strip is configured as a single segment — which his
+  TV wrap is — i.e. exactly the outcome this whole feature exists to avoid.
+  `emitters.resolve_granularity` now resolves a splittable, multi-pixel
+  carrier with `usable_segments(...) < 2` to `block`; an explicit choice is
+  still never overridden. Independently, any plan or run yielding one
+  emitter for a multi-pixel carrier carries `warnings` (Plan AND
+  MappingResult, both on the wire) saying the map cannot show a wave
+  travelling and how many pieces Blocks would give —
+  `mapping_refusals.one_piece_warning`. A WARNING is not a refusal: the run
+  happens and the map is worth keeping, which is why they are separate
+  lists.
 - **A RANGE IS AN ADDRESSING FACT, NOT A POSITION** — indices into the
   virtual's own EFFECT pixel space, read out of the segment configuration,
   the same kind of fact `virtual_ids` already was. That is the SAME space

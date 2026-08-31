@@ -348,3 +348,101 @@ def test_every_refusal_sentence_says_what_to_do_next():
 def test_a_non_ownership_exception_is_not_claimed_as_one():
     assert mapping_refusals.ownership_refusal(ValueError("x")) is None
     assert mapping_refusals.ownership_refusal(OSError("x")) is None
+
+
+# ── 5. the single-piece map (his TV wrap, first real run) ─────────────────
+
+def _strip(pixels=560, segments=None, mapping="span"):
+    return {"active": True, "pixel_count": pixels,
+            "config": {"grouping": 1, "mapping": mapping},
+            "segments": segments if segments is not None
+                        else [["tv-backlight", 0, pixels - 1, False]],
+            "effect": {"type": "singleColor", "config": {}}}
+
+
+def test_auto_resolves_a_single_segment_strip_to_blocks():
+    """His TV wrap is configured as ONE segment, so "segments for a strip"
+    collapsed to a single emitter — the exact outcome the whole granularity
+    feature exists to avoid."""
+    from spectra.services import emitters as em
+    one_segment = _strip()
+    assert em.usable_segments(one_segment) == 1
+    assert em.resolve_granularity("auto", one_segment) == "block"
+    out = em.enumerate_carrier(CARRIER, one_segment, granularity="auto",
+                               block_pixels=30)
+    assert len(out) > 1 and all(e.ranges for e in out)
+
+
+def test_auto_still_prefers_segments_when_there_are_real_ones():
+    from spectra.services import emitters as em
+    three = _strip(60, [["tv", 0, 19, False], ["tv", 20, 39, False],
+                        ["tv", 40, 59, False]])
+    assert em.resolve_granularity("auto", three) == "segment"
+    assert len(em.enumerate_carrier(CARRIER, three, granularity="auto")) == 3
+
+
+def test_auto_never_overrides_an_explicit_choice_or_splits_a_point():
+    from spectra.services import emitters as em
+    one_segment = _strip()
+    assert em.resolve_granularity("whole", one_segment) == "whole"
+    assert em.resolve_granularity("segment", one_segment) == "segment"
+    bulb = _strip(1, [["hue", 0, 0, False]])
+    assert em.resolve_granularity("auto", bulb) == "whole"
+    assert em.resolve_granularity("auto", one_segment, point=True) == "whole"
+
+
+def test_a_one_piece_map_warns_at_plan_time_in_his_words():
+    from spectra.services import emitters as em
+    plan = em.plan_run([CARRIER], {CARRIER: _strip()},
+                       {CARRIER: [{"id": "tv-backlight", "type": "wled"}]},
+                       granularity="whole", block_pixels=30)
+    assert len(plan.emitters) == 1
+    [warning] = plan.warnings
+    assert "cannot show a wave travelling" in warning
+    assert "ONE piece" in warning
+    assert "Choose Blocks" in warning and "18 pieces" in warning
+    # a warning is not a problem: the run still happens
+    assert plan.problems == []
+    assert plan.as_dict()["warnings"] == plan.warnings
+
+
+def test_a_copy_mapping_carrier_warns_with_the_reason_it_cannot_be_split():
+    from spectra.services import emitters as em
+    plan = em.plan_run([CARRIER], {CARRIER: _strip(mapping="copy")},
+                       {CARRIER: [{"id": "tv-backlight", "type": "wled"}]},
+                       granularity="segment")
+    [warning] = plan.warnings
+    assert "cannot show a wave travelling" in warning
+    assert "copies one effect onto every segment" in warning
+    assert "Choose Blocks" not in warning, (
+        "blocks would not help — it cannot be lit in parts at all")
+
+
+def test_a_multi_piece_map_and_a_single_pixel_carrier_never_warn():
+    from spectra.services import emitters as em
+    chain = {CARRIER: [{"id": "tv-backlight", "type": "wled"}]}
+    many = em.plan_run([CARRIER], {CARRIER: _strip()}, chain,
+                       granularity="block", block_pixels=30)
+    assert len(many.emitters) > 1 and many.warnings == []
+    bulb = em.plan_run([CARRIER], {CARRIER: _strip(1, [["hue", 0, 0, False]])},
+                       {CARRIER: [{"id": "hue-lights", "type": "hue"}]},
+                       granularity="auto")
+    assert len(bulb.emitters) == 1 and bulb.warnings == [], (
+        "a bulb IS one piece — warning about that would be noise")
+
+
+def test_the_run_result_carries_the_warning_too(tmp_path, monkeypatch):
+    """A run started without reading the plan (or from a phone that never
+    showed it) must still say what its map cannot do."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "ROOM_MAPS_FILE", tmp_path / "maps.json")
+
+    async def one_strip():
+        return {CARRIER: _strip()}
+
+    deps = _deps(get_virtuals=one_strip)
+    result = _run(_room(), deps, granularity="whole")
+    assert result.ok is True, "it is a warning, not a refusal"
+    assert len(result.emitters) == 1 and result.emitters[0].mapped
+    assert any("cannot show a wave travelling" in w for w in result.warnings)
+    assert result.as_dict()["warnings"] == result.warnings

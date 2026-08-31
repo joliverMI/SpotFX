@@ -16,7 +16,9 @@ next, in his words, never an exception class leaking through a 500.
 WHAT COUNTS AS EXPECTED HERE: an ownership state (released to Home
 Assistant, or a handover mid-flight), an ownership loss DURING a run, the
 hold's own 3-minute ceiling, a fixture that stops answering mid-run, an
-empty emitter set, a phone that goes away. Each has a sentence below or is
+empty emitter set, a phone that goes away — and one WARNING, which is a
+different thing from a refusal: a map that will come out as a single piece
+still runs and is still worth keeping, it just cannot show a wave. Each has a sentence below or is
 confirmed to have one at its own site. What is NOT expected — a genuine bug
 — still raises, and should: a sentence invented for it would be a lie.
 
@@ -87,3 +89,32 @@ def capture_refusal(emitter_label: str, exc: BaseException) -> str:
     return (f"{emitter_label} could not be measured ({type(exc).__name__}: "
             f"{exc}). The rest of the run carried on — check that fixture is "
             f"powered and reachable, then map it again on its own.")
+
+
+def one_piece_warning(carrier_id: str, pixels: int, block_pixels: int, *,
+                      splittable: bool = True) -> str:
+    """A map of ONE piece, said in his words, before the room goes dark.
+
+    Found on his own first real run (2026-08-31): his TV wrap is configured
+    as a SINGLE segment, so "segments for a strip" produced one emitter —
+    the exact outcome the granularity feature exists to avoid, and one that
+    looks like a successful map right up until a wave will not travel along
+    it. "auto" now resolves that case to blocks (`emitters.
+    resolve_granularity`); this sentence is for whenever a run still comes
+    out as one piece — an explicit "Whole carrier", a one-segment strip he
+    chose "Segments" for — because a warning about what a map CAN'T do
+    belongs before the dark room, not after it.
+
+    A WARNING, not a refusal: the map is real and worth keeping (a whole
+    strip's footprint is exactly what a room-level dimmer wants). It only
+    cannot show motion ALONG the strip."""
+    if not splittable:
+        return (f"{carrier_id} can only be measured as one piece, so this "
+                f"map cannot show a wave travelling along it — it copies one "
+                f"effect onto every segment, so a part of it cannot be lit "
+                f"on its own.")
+    pieces = max(1, int(pixels) // max(1, int(block_pixels)))
+    return (f"{carrier_id} is being mapped as ONE piece, so this map cannot "
+            f"show a wave travelling along it — every pixel of it dims "
+            f"together. Choose Blocks to measure it in {pieces} pieces "
+            f"instead ({pixels} pixels at {block_pixels} a block).")

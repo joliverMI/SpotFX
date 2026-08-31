@@ -250,6 +250,14 @@ def _splittable(virtual: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def usable_segments(virtual: dict) -> int:
+    """How many CONFIGURED segments this carrier actually has, by the same
+    walk `carrier_segment_ranges` uses — so "segments would give one piece"
+    is answered by the enumeration itself and never by a second count that
+    could disagree with it."""
+    return len(carrier_segment_ranges("_", virtual))
+
+
 def resolve_granularity(granularity: str, virtual: dict,
                         point: bool = False) -> str:
     """"auto" -> the granularity THIS carrier actually gets. Every other
@@ -257,7 +265,16 @@ def resolve_granularity(granularity: str, virtual: dict,
     rather than raising, because it arrives off a wire.
 
     `point` says every fixture in this carrier's chain is a single lamp (a
-    Hue bulb): "auto" never splits one."""
+    Hue bulb): "auto" never splits one.
+
+    THE SINGLE-SEGMENT STRIP (found on his own first real run, 2026-08-31):
+    "segments for a strip" collapses to ONE emitter whenever the strip is
+    configured as a single segment — which his TV wrap is. That is the exact
+    case the whole granularity feature exists to avoid: one emitter cannot
+    show a wave travelling along anything. So "auto" resolves a splittable,
+    multi-pixel carrier with fewer than two segments to BLOCK, which is the
+    granularity that subdivides regardless of how the config happens to be
+    segmented. An explicit choice is still never overridden."""
     granularity = (granularity or DEFAULT_GRANULARITY).strip().lower()
     granularity = GRANULARITY_ALIASES.get(granularity, granularity)
     if granularity not in GRANULARITIES:
@@ -268,6 +285,8 @@ def resolve_granularity(granularity: str, virtual: dict,
         return "whole"
     if not _splittable(virtual)[0]:
         return "whole"
+    if usable_segments(virtual) < 2:
+        return "block"
     return "segment"
 
 
@@ -329,6 +348,10 @@ class Plan:
     emitters: list[Emitter] = field(default_factory=list)
     per_carrier: dict[str, str] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
+    #: What this run WILL do that he may not have meant — distinct from a
+    #: problem, which is something it declined to do. Today's one member is
+    #: the single-piece map that cannot show a wave travelling.
+    warnings: list[str] = field(default_factory=list)
     truncated: bool = False
 
     @property
@@ -354,6 +377,7 @@ class Plan:
             "estimated_seconds": self.seconds,
             "truncated": self.truncated,
             "problems": self.problems,
+            "warnings": self.warnings,
             "emitters": [{"emitter_id": e.emitter_id, "carrier_id": e.carrier_id,
                           "label": e.label, "virtual_ids": e.virtual_ids,
                           "ranges": [r.model_dump() for r in e.ranges],
@@ -410,6 +434,13 @@ def plan_run(carrier_ids: Iterable[str], virtuals: dict[str, dict],
         for e in emitters:
             if e.note:
                 plan.problems.append(f"{carrier_id}: {e.note}")
+        # ONE PIECE IS NOT A MAP OF A STRIP. Said at plan time, before the
+        # room goes dark for a run whose result cannot drive a wave.
+        if len(emitters) == 1 and effective_pixel_count(virtual) > 1:
+            from spectra.services import mapping_refusals
+            plan.warnings.append(mapping_refusals.one_piece_warning(
+                carrier_id, effective_pixel_count(virtual), plan.block_pixels,
+                splittable=_splittable(virtual)[0]))
         plan.emitters.extend(emitters)
     if len(plan.emitters) > MAX_EMITTERS_PER_RUN:
         plan.truncated = True
