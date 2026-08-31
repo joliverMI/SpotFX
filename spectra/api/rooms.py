@@ -110,6 +110,10 @@ def _room_view(room: RoomMap) -> dict:
             "carrier_id": f.carrier, "whole_carrier": f.whole_carrier,
             "ranges": [r.model_dump() for r in f.ranges],
             "virtual_ids": f.virtual_ids, "mapped": f.mapped,
+            # An emitter that RAN and whose light this pose could not see.
+            # Sent so the page can render it AS THAT, beside the mapped
+            # thumbnails, rather than as a piece nobody has tried yet.
+            "unseen": f.unseen, "note": f.note,
             "weight": round(f.weight, 4),
             "axis_profile": [round(v, 5) for v in f.axis_profile],
             "thumbnail": light_field.thumbnail(f),
@@ -119,7 +123,8 @@ def _room_view(room: RoomMap) -> dict:
             "footprints": fps,
             "mapped_ids": room.mapped_ids(),
             "mapped_carriers": room.mapped_carriers(),
-            "unmapped_ids": room.unmapped_ids()}
+            "unmapped_ids": room.unmapped_ids(),
+            "unseen_ids": room.unseen_ids()}
 
 
 @router.get("/rooms")

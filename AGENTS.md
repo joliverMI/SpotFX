@@ -3435,6 +3435,22 @@ and the id shape. Five things to know:
   did not observe, so the flag is the run's own to restore
   (`tests/test_capture_activation.py` reads it back). `room_effects.start`
   does the same and `stop()` puts it back AFTER the hold's revert.
+- **AN EMITTER THE CAMERA NEVER SAW IS A RECORD, NOT AN ABSENCE** (2026-08-31,
+  PR fm/mapping-unseen-emitter-note). His first real map ran 22 emitters and
+  stored 14; the missing 8 (far-side TV blocks, sconce spill outside the
+  frame) produced ~zero lit-minus-dark and simply did not appear in
+  `room_maps.json` — correct physics, silent record, with nothing to
+  separate "never ran" from "ran, and not in shot". A capture landing under
+  `light_field.UNSEEN_WEIGHT` is now STORED footprint-less
+  (`EmitterFootprint.unseen`/`note`, empty `grid`/`axis_profile`, so every
+  reader already gating on `mapped` skips it exactly as it skipped the
+  absence), reported on `MappingResult` (`unseen`, `unseen_count`,
+  `summary` — "14 mapped, 8 unseen from this pose"), carried on the room's
+  API payload (`unseen`/`note` per footprint, `unseen_ids`) and rendered as
+  such by the Rooms page. **The wording is a FACT, not a warning**
+  (`mapping_refusals.unseen_note`): a second pose can see the piece later,
+  so nothing about it reads as an error and no retry machinery exists.
+  Spec: `tests/test_mapping_unseen_emitter.py`.
 - **A REASON THAT NEVER REACHES A HUMAN IS A SILENT FAILURE — worse, it
   lets us believe we handled the case** (the captain's ruling, same
   commit). `Emitter.note` was written correctly and died in the

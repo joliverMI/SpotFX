@@ -70,6 +70,17 @@ logger = logging.getLogger(__name__)
 #: no interpolation to explain.
 FRAME_W = GRID_W * 5      # 320
 FRAME_H = GRID_H * 5      # 180
+#: Below this total relative luminance an emitter's capture holds no usable
+#: light and the emitter is recorded UNSEEN FROM THIS POSE rather than as a
+#: footprint (spectra/services/room_mapping.py stores it; the model's
+#: `EmitterFootprint.unseen` is the record). Weight is the sum over all
+#: GRID_W*GRID_H = 2304 cells of a 0..1 relative luminance, so 1.0 is the
+#: light of a SINGLE fully-lit cell spread over the whole grid — comfortably
+#: above the residue that survives `footprint_grid`'s clip-at-zero on sensor
+#: noise, and far below anything a fixture actually in shot produces (his
+#: real mapped emitters measure in the tens to hundreds). A small named
+#: number, deliberately not a tuned one.
+UNSEEN_WEIGHT = 1.0
 #: A camera byte at or above this reads as clipped — the footprint's shape
 #: survives, its weight understates the fixture. Reported, never corrected.
 SATURATION_LEVEL = 254

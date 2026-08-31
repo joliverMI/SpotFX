@@ -206,6 +206,11 @@ class EmitterResult:
     emitter_id: str
     mapped: bool
     reason: str = ""
+    #: This emitter RAN and the camera saw nothing of its light from this
+    #: pose. Not mapped, and not a failure either — a stored fact, kept in
+    #: the room as a footprint-less record so "never ran" and "ran, not in
+    #: shot" stop looking identical. `reason` carries the sentence.
+    unseen: bool = False
     weight: float = 0.0
     dark_frames: int = 0
     lit_frames: int = 0
@@ -247,8 +252,31 @@ class MappingResult:
     #: the page says which.
     partial: bool = False
 
+    @property
+    def mapped_count(self) -> int:
+        return sum(1 for e in self.emitters if e.mapped)
+
+    @property
+    def unseen_count(self) -> int:
+        """Emitters that RAN and whose light this pose could not see. Counted
+        beside the mapped ones because "14 mapped, 8 unseen from this pose"
+        is a complete account of a run and "14 mapped" is not."""
+        return sum(1 for e in self.emitters if e.unseen)
+
+    @property
+    def summary(self) -> str:
+        parts = [f"{self.mapped_count} mapped"]
+        if self.unseen_count:
+            parts.append(f"{self.unseen_count} unseen from this pose")
+        failed = sum(1 for e in self.emitters if not e.mapped and not e.unseen)
+        if failed:
+            parts.append(f"{failed} could not be measured")
+        return ", ".join(parts)
+
     def as_dict(self) -> dict:
         return {"room_id": self.room_id, "ok": self.ok, "reason": self.reason,
+                "mapped_count": self.mapped_count,
+                "unseen_count": self.unseen_count, "summary": self.summary,
                 "pose_id": self.pose_id, "seconds": round(self.seconds, 2),
                 "granularity": self.granularity,
                 "block_pixels": self.block_pixels,
@@ -568,7 +596,12 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     if sess.run_abort and not result.refusal:
         result.refusal = "aborted"
     if not result.reason and not mapped:
-        result.reason = "no emitter produced a footprint — see each one's reason"
+        result.reason = (
+            "nothing in this room was visible from where the phone was "
+            "standing — every emitter lit, and none of its light landed in "
+            "the frame. Move to somewhere that can see them and map again."
+            if result.unseen_count and result.unseen_count == len(result.emitters)
+            else "no emitter produced a footprint — see each one's reason")
     return result
 
 
@@ -640,6 +673,16 @@ async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
             break
 
 
+async def _persist(room: RoomMap, deps: RunDeps) -> None:
+    """Land the room after an emitter — a MAPPED one or an UNSEEN one. Both
+    are results worth surviving a run that stops half-way."""
+    if deps.save_room is None:
+        return
+    maybe = deps.save_room(room)
+    if asyncio.iscoroutine(maybe):
+        await maybe
+
+
 async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
                    lit_vids: list[str], deps: RunDeps) -> EmitterResult:
     sess = deps.session
@@ -694,19 +737,30 @@ async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
     footprint.capture.saturated_fraction = round(
         hot / len(lit_max), 5) if lit_max else 0.0
 
-    if footprint.weight <= 0.0:
+    if footprint.weight < light_field.UNSEEN_WEIGHT:
+        # RAN, AND THE CAMERA SAW NOTHING. Keep the record: a footprint-less
+        # entry with the reason on it, so this emitter is visibly "unseen
+        # from this pose" instead of silently absent from the store (his
+        # first real map: 22 ran, 14 stored, 8 vanished). Not an error — a
+        # second pose can see it — so nothing here is worded as one.
+        note = mapping_refusals.unseen_note(
+            emitter.label or emitter.emitter_id, getattr(sess, "pose_id", ""))
+        footprint.grid = []
+        footprint.axis_profile = []
+        footprint.unseen = True
+        footprint.note = note
+        room.put_footprint(footprint)
+        await _persist(room, deps)
         return EmitterResult(
-            emitter.emitter_id, False,
-            "this emitter added no measurable light to the frame — is it in "
-            "shot, and is it actually the device you think it is?",
+            emitter.emitter_id, False, note, unseen=True,
+            weight=round(footprint.weight, 4),
             dark_frames=len(dark_grids), lit_frames=len(lit_grids),
-            carrier_id=emitter.carrier_id, label=emitter.label)
+            saturated_fraction=footprint.capture.saturated_fraction,
+            carrier_id=emitter.carrier_id, label=emitter.label,
+            ranges=[r.model_dump() for r in ranges])
 
     room.put_footprint(footprint)
-    if deps.save_room is not None:
-        maybe = deps.save_room(room)
-        if asyncio.iscoroutine(maybe):
-            await maybe
+    await _persist(room, deps)
     return EmitterResult(emitter.emitter_id, True, "",
                          weight=round(footprint.weight, 4),
                          dark_frames=len(dark_grids), lit_frames=len(lit_grids),

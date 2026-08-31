@@ -41,6 +41,9 @@ type Footprint = {
   ranges: PixelRange[];
   virtual_ids: string[];
   mapped: boolean;
+  /** Ran, and this pose's camera saw none of its light. Not an error. */
+  unseen: boolean;
+  note: string;
   weight: number;
   axis_profile: number[];
   thumbnail: number[][];
@@ -57,6 +60,7 @@ type Room = {
   mapped_ids: string[];
   mapped_carriers: string[];
   unmapped_ids: string[];
+  unseen_ids?: string[];
 };
 type PlanEmitter = {
   emitter_id: string; carrier_id: string; label: string;
@@ -72,12 +76,13 @@ type RunPlan = {
 type CarrierRow = { id: string; devices: string[]; device_names: string[]; device_types: string[] };
 type HiddenRow = { id: string; all_devices: string[]; reason: string };
 type EmitterResult = {
-  emitter_id: string; mapped: boolean; reason: string; weight: number;
+  emitter_id: string; mapped: boolean; unseen?: boolean; reason: string; weight: number;
   dark_frames: number; lit_frames: number; saturated_fraction: number; seconds: number;
   carrier_id: string; label: string; ranges: PixelRange[];
 };
 type RunResult = {
   ok: boolean; reason: string; seconds: number; emitters: EmitterResult[];
+  mapped_count?: number; unseen_count?: number; summary?: string;
   granularity: string; block_pixels: number;
   per_carrier: Record<string, string>; problems: string[]; room?: Room;
   refusal?: string; partial?: boolean; warnings?: string[]; notes?: string[];
@@ -307,7 +312,7 @@ export default function RoomsPage() {
       if (result.reason && !result.ok) setMapRefusal(result.reason);
       if (result.room) setRooms((rs) => rs.map((r) => (r.id === result.room!.id ? result.room! : r)));
       const mapped = result.emitters.filter((e) => e.mapped).length;
-      if (result.ok) toast(`Mapped ${mapped} emitter(s) in ${result.seconds}s`, 'success');
+      if (result.ok) toast(`${result.summary ?? `${mapped} mapped`} · ${result.seconds}s`, 'success');
       else if (result.partial) toast(`Stopped after ${mapped} emitter(s) — the reason is on the page`, 'error');
       else toast('Mapping was refused — the reason is on the page', 'error');
     } catch (err) {
@@ -454,13 +459,21 @@ export default function RoomsPage() {
                           <div key={fp?.emitter_id ?? `${carrierId}-${i}`} className="emitter-card">
                             <HeatThumbnail
                               grid={fp?.thumbnail ?? []}
-                              title={fp ? `weight ${fp.weight.toFixed(1)}` : 'not mapped'}
+                              title={fp?.unseen ? 'no light seen from this pose'
+                                : fp ? `weight ${fp.weight.toFixed(1)}` : 'not mapped'}
                             />
                             <div className="emitter-meta">
                               <strong>
                                 {range ? `px ${range.start}–${range.end}` : carrierId}
                               </strong>
-                              {fp?.mapped ? (
+                              {fp?.unseen ? (
+                                /* RAN, and this pose saw nothing of it. A
+                                 * fact, not a warning: a second pose can
+                                 * see it later. */
+                                <span className="muted small" title={fp.note}>
+                                  no light seen from this pose
+                                </span>
+                              ) : fp?.mapped ? (
                                 <>
                                   <span className="muted small">weight {fp.weight.toFixed(1)}</span>
                                   {Number(fp.capture.saturated_fraction) > 0.02 && (
@@ -646,10 +659,13 @@ export default function RoomsPage() {
           {run && (
             <div className="run-result">
               <strong>{run.ok ? 'Mapped' : run.partial ? 'Stopped part-way' : 'Refused'}</strong>
+              {/* The complete account of the run: mapped AND unseen. "14
+                * mapped" alone hides the 8 the camera could not see. */}
+              {run.summary && <p className="muted small">{run.summary}</p>}
               {run.reason && !run.ok && <p className="warn">{run.reason}</p>}
               <ul>
                 {run.emitters.map((e) => (
-                  <li key={e.emitter_id} className={e.mapped ? 'ok' : 'warn'}>
+                  <li key={e.emitter_id} className={e.mapped ? 'ok' : e.unseen ? 'muted' : 'warn'}>
                     {e.label || e.emitter_id}: {e.mapped
                       ? `weight ${e.weight} · ${e.dark_frames}+${e.lit_frames} frames · ${e.seconds}s`
                       : e.reason}

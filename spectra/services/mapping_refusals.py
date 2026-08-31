@@ -19,7 +19,9 @@ hold's own 3-minute ceiling, a fixture that stops answering mid-run, an
 empty emitter set, a phone that goes away — and one WARNING, which is a
 different thing from a refusal: a map that will come out as a single piece
 still runs and is still worth keeping, it just cannot show a wave. Each has a sentence below or is
-confirmed to have one at its own site. What is NOT expected — a genuine bug
+confirmed to have one at its own site — plus one FACT, `unseen_note`, which
+is neither: an emitter whose light this pose could not see ran perfectly
+well and is worth recording as such. What is NOT expected — a genuine bug
 — still raises, and should: a sentence invented for it would be a lie.
 
 ONE WORDING PER CONDITION, here, so the route, the run and the page cannot
@@ -89,6 +91,23 @@ def capture_refusal(emitter_label: str, exc: BaseException) -> str:
     return (f"{emitter_label} could not be measured ({type(exc).__name__}: "
             f"{exc}). The rest of the run carried on — check that fixture is "
             f"powered and reachable, then map it again on its own.")
+
+
+def unseen_note(emitter_label: str, pose_id: str = "") -> str:
+    """A FACT, not a refusal and not a warning: this emitter ran and the
+    camera saw none of its light from where the phone was standing.
+
+    Found on his first real map (2026-08-31): 22 emitters ran, 14 footprints
+    were stored, and the 8 that produced ~zero lit-minus-dark — far-side TV
+    blocks, sconce spill outside the frame — simply vanished from the store.
+    The physics was right; the record was silent. The wording is deliberately
+    neutral: a second pose can see this emitter later, so nothing here says
+    anything went wrong."""
+    where = f" (pose {pose_id})" if pose_id else ""
+    return (f"No light seen from this pose{where}: {emitter_label} was lit "
+            f"and the camera measured nothing from it. Its light is most "
+            f"likely outside the frame — photograph the room from somewhere "
+            f"that can see it, and this piece fills in.")
 
 
 def one_piece_warning(carrier_id: str, pixels: int, block_pixels: int, *,
