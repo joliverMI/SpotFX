@@ -9,8 +9,13 @@ let ws: WebSocket | null = null;
 let started = false;
 let connected = false;
 
+function wsUrl(): string {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${location.host}/ws`;
+}
+
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws = new WebSocket(wsUrl());
   ws.onopen = () => {
     connected = true;
     stateListeners.forEach((fn) => fn(true));
