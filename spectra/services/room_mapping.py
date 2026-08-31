@@ -40,10 +40,28 @@ whole live room because that is what "with the room dark" means to a
 camera. Everything it darkens is in the same snapshot and comes back with
 it — the same scope av_sync_pattern.py's own default flash already takes.
 
+GRANULARITY IS A PER-CAPTURE CHOICE, and step 4 is the only thing that
+changes with it. A whole-device emitter is lit exactly as before —
+`singleColor` full white on every one of its virtuals. A PIXEL-RANGE
+emitter is lit with `fx/effects/pixelRange.py`, the measuring instrument
+that renders white over a configured range and black elsewhere, on the same
+one write seam and inside the same held-room step. Everything else about
+the protocol — the dark reference, the settles, the frame counts, the
+derivation, the chain of holds — is identical, which is the point:
+photographing a smaller lamp is not a second protocol.
+
+SUB-DEVICE CAPTURE NEEDS SPECTRA TO OWN THE LIGHTS, and the run says so
+rather than failing at the seam. `pixelRange` is a vendored fx effect that
+lives in THIS process; when spot-effects owns the room, writes go out as
+HTTP PUTs to the external LedFX service, which has never heard of it. So a
+sub-device run is refused by name up front, with nothing written.
+
 WHAT THIS MODULE NEVER DOES: decide anything about fixture positions. It
 turns one emitter on, photographs the room, and hands the difference to
-light_field.py. If a future change here starts computing where a strip is,
-it has left the plan (spectra/models/room_map.py's docstring).
+light_field.py. A pixel RANGE is an addressing fact from the configuration,
+never a position — spectra/services/emitters.py is the binding statement.
+If a future change here starts computing where a strip is, it has left the
+plan (spectra/models/room_map.py's docstring).
 """
 from __future__ import annotations
 
@@ -53,10 +71,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from spectra.models.room_map import CaptureContext, EmitterFootprint, RoomMap
+from spectra.models.room_map import CaptureContext, PixelRange, RoomMap
 from spectra.models.scene import (SceneColorAssignment, SceneDeviceConfig,
                                   SceneV2)
+from spectra.services import emitters as emitters_mod
 from spectra.services import flare_preview_hold, light_field
+from spectra.services.emitters import Emitter
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +84,11 @@ logger = logging.getLogger(__name__)
 #: "full white through the one write seam" means the same thing in both
 #: (av_sync_pattern.PATTERN_EFFECT_TYPE / PATTERN_COLOR).
 MAP_EFFECT_TYPE = "singleColor"
+#: The range lamp: fx/effects/pixelRange.py, white over a configured range
+#: of one virtual's effect pixels and black elsewhere. Registry-exempt on
+#: purpose (it is an instrument, not something to author with) — see that
+#: module's docstring.
+RANGE_EFFECT_TYPE = "pixelRange"
 WHITE = "#ffffff"
 BLACK = "#000000"
 #: Full, not the flash pattern's 0.85: a footprint wants the fixture's real
@@ -111,28 +136,56 @@ def dark_scene(virtual_ids: list[str]) -> SceneV2:
 
 class MappingProgram(flare_preview_hold.PreviewProgram):
     """Two steps over the ONE hold: take the room dark, then light exactly
-    one emitter's virtuals.
+    one emitter — a whole virtual, or a range of one virtual's pixels.
 
     The "lit" step writes the dark set FIRST and the white set second in a
     single apply_scene payload, so a virtual can never be left lit from a
     previous emitter by an ordering accident — the payload is always the
-    complete state of every in-scope virtual, not a delta."""
+    complete state of every in-scope virtual, not a delta.
+
+    A RANGED emitter is the same step with a different lamp: the lit
+    virtual is written `pixelRange` (white over its range, black outside)
+    instead of `singleColor`. Every other virtual in scope is still written
+    black, so exactly the intended pixels are lit and everything else in
+    the room is off — which is what the dark reference is subtracted
+    against."""
 
     steps = ("dark", "lit")
 
-    def __init__(self, virtual_ids: list[str], lit_virtual_ids: list[str]) -> None:
+    def __init__(self, virtual_ids: list[str], lit_virtual_ids: list[str],
+                 ranges: Optional[list[PixelRange]] = None) -> None:
         self.virtual_ids = list(dict.fromkeys(virtual_ids))
         self.lit_virtual_ids = [v for v in dict.fromkeys(lit_virtual_ids)
                                 if v in set(self.virtual_ids)]
+        #: virtual -> the one range lit on it. Absent = the whole virtual.
+        self.ranges: dict[str, PixelRange] = {
+            r.virtual_id: r for r in (ranges or [])
+            if r.virtual_id in set(self.virtual_ids)}
         self.hold_scene = dark_scene(self.virtual_ids)
+
+    def _lit_write(self, vid: str) -> dict:
+        rng = self.ranges.get(vid)
+        if rng is None:
+            return {"virtual_id": vid, "effect_type": MAP_EFFECT_TYPE,
+                    "config": {"color": WHITE, "brightness": LIT_BRIGHTNESS,
+                               "background_brightness": 0.0}}
+        return {"virtual_id": vid, "effect_type": RANGE_EFFECT_TYPE,
+                "config": {"color": WHITE, "range_start": int(rng.start),
+                           "range_end": int(rng.end),
+                           "brightness": LIT_BRIGHTNESS,
+                           "background_brightness": 0.0}}
 
     def _writes(self, lit: bool) -> list[dict]:
         lit_set = set(self.lit_virtual_ids) if lit else set()
-        return [{"virtual_id": v, "effect_type": MAP_EFFECT_TYPE,
-                 "config": {"color": WHITE if v in lit_set else BLACK,
-                            "brightness": LIT_BRIGHTNESS if v in lit_set else 0.0,
-                            "background_brightness": 0.0}}
-                for v in self.virtual_ids]
+        out = []
+        for v in self.virtual_ids:
+            if v in lit_set:
+                out.append(self._lit_write(v))
+            else:
+                out.append({"virtual_id": v, "effect_type": MAP_EFFECT_TYPE,
+                            "config": {"color": BLACK, "brightness": 0.0,
+                                       "background_brightness": 0.0}})
+        return out
 
     async def execute(self, step: str, ctx) -> dict:
         if step not in self.steps:
@@ -141,7 +194,9 @@ class MappingProgram(flare_preview_hold.PreviewProgram):
         await ctx.apply_scene(writes=self._writes(lit),
                               transition_ms=WRITE_TRANSITION_MS)
         return {"result": step, "virtuals": len(self.virtual_ids),
-                "lit": list(self.lit_virtual_ids) if lit else []}
+                "lit": list(self.lit_virtual_ids) if lit else [],
+                "ranges": [r.model_dump() for r in self.ranges.values()]
+                          if lit else []}
 
 
 # ── the run ────────────────────────────────────────────────────────────────
@@ -156,6 +211,9 @@ class EmitterResult:
     lit_frames: int = 0
     saturated_fraction: float = 0.0
     seconds: float = 0.0
+    device_id: str = ""
+    label: str = ""
+    ranges: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -166,11 +224,33 @@ class MappingResult:
     pose_id: str = ""
     emitters: list[EmitterResult] = field(default_factory=list)
     seconds: float = 0.0
+    granularity: str = emitters_mod.DEFAULT_GRANULARITY
+    block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS
+    #: the granularity each device ACTUALLY got, after "auto" resolved
+    per_device: dict = field(default_factory=dict)
+    #: everything the enumeration declined to do, named rather than hidden
+    problems: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {"room_id": self.room_id, "ok": self.ok, "reason": self.reason,
                 "pose_id": self.pose_id, "seconds": round(self.seconds, 2),
+                "granularity": self.granularity,
+                "block_pixels": self.block_pixels,
+                "per_device": self.per_device, "problems": self.problems,
                 "emitters": [e.__dict__ for e in self.emitters]}
+
+
+async def _no_device_type(_device_id: str) -> str:
+    return ""
+
+
+def spectra_owns_lights() -> bool:
+    """Whether writes from this process reach the render pipeline IN this
+    process. Sub-device capture needs it (`pixelRange` is a vendored effect
+    the external LedFX service does not have) and so does a sub-device room
+    effect (the gain mask is applied in this process's own frame assembly)."""
+    from fx import light_ownership
+    return light_ownership.load().owner == light_ownership.SPECTRA
 
 
 @dataclass
@@ -186,13 +266,37 @@ class RunDeps:
     sleep: Callable[[float], Any] = asyncio.sleep
     clock: Callable[[], float] = time.monotonic
     save_room: Optional[Callable[[RoomMap], Any]] = None
+    #: A device's driver type, for "auto" granularity only (a Hue bulb is
+    #: one lamp and is never split). Defaults to "unknown", which resolves
+    #: auto by what the virtuals themselves can do — never by guessing.
+    device_type: Callable[[str], Any] = _no_device_type
+    #: Whether the in-process render path is the one being written. Only
+    #: sub-device capture needs it; a whole-device run works either way.
+    spectra_owns: Callable[[], bool] = spectra_owns_lights
 
 
 def production_deps(session) -> RunDeps:
     from spectra.services import av_sync_pattern, fx_seam
+
+    # ONE device listing per deps object, not one per device: `auto`
+    # granularity asks for a type for every device in the room, and
+    # device_console.list_devices() is a real read of the live stack.
+    cache: dict[str, str] = {}
+
+    async def device_type(device_id: str) -> str:
+        if not cache:
+            from spectra.services import device_console
+            listing = await device_console.list_devices()
+            for entry in listing.get("devices") or []:
+                if entry.get("id"):
+                    cache[entry["id"]] = str(entry.get("type") or "")
+            cache.setdefault("", "")     # never re-read on an empty listing
+        return cache.get(device_id, "")
+
     return RunDeps(session=session,
                    get_virtuals=fx_seam.get_virtuals,
                    virtuals_for_device=av_sync_pattern.virtuals_for_device,
+                   device_type=device_type,
                    save_room=light_field.put_room)
 
 
@@ -210,17 +314,56 @@ async def live_virtual_ids(get_virtuals: Callable[[], Any]) -> list[str]:
     return sorted(out)
 
 
-async def run_mapping(room: RoomMap, deps: RunDeps) -> MappingResult:
-    """Map every device in `room`, one short held-room hold each.
+async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
+                       granularity: str, block_pixels: int):
+    """The run's emitter list, resolved against what is LIVE right now.
+
+    Enumeration reads the same `GET /api/virtuals` map the scope came from,
+    so a virtual that is not rendering is simply not enumerated and the
+    device says so by name — the pre-existing behaviour, unchanged."""
+    live = await deps.get_virtuals() or {}
+    by_device: dict[str, list[str]] = {}
+    types: dict[str, str] = {}
+    for device_id in room.device_ids:
+        try:
+            vids = list(await deps.virtuals_for_device(device_id) or [])
+        except Exception:                              # noqa: BLE001
+            logger.exception("room mapping: device lookup failed for %s", device_id)
+            by_device[device_id] = []
+            types[device_id] = ""
+            continue
+        by_device[device_id] = [v for v in vids if v in set(scope)]
+        try:
+            types[device_id] = str(await deps.device_type(device_id) or "")
+        except Exception:                              # noqa: BLE001
+            types[device_id] = ""
+    return emitters_mod.plan_run(room.device_ids, live, by_device, types,
+                                 granularity=granularity,
+                                 block_pixels=block_pixels)
+
+
+async def run_mapping(room: RoomMap, deps: RunDeps, *,
+                      granularity: str = emitters_mod.DEFAULT_GRANULARITY,
+                      block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS
+                      ) -> MappingResult:
+    """Map every emitter in `room` at the chosen granularity, one short
+    held-room hold each.
 
     REFUSES BEFORE TOUCHING A LIGHT when the camera is not locked — the
     whole instrument's honesty (spectra/services/mapping_session.py's
     docstring). The refusal names the phone and the capability; nothing is
     written, nothing is stored, and the room never goes dark for a run that
-    could not have produced a comparable map anyway."""
+    could not have produced a comparable map anyway.
+
+    REFUSES THE SAME WAY when a sub-device granularity is asked for while
+    spot-effects owns the lights: the range lamp is a vendored effect in
+    THIS process and the external LedFX service has never heard of it, so
+    the write would fail at the seam half-way through a dark room."""
     started = deps.clock()
     sess = deps.session
-    result = MappingResult(room_id=room.id, ok=False, pose_id=getattr(sess, "pose_id", ""))
+    result = MappingResult(room_id=room.id, ok=False,
+                           pose_id=getattr(sess, "pose_id", ""),
+                           granularity=granularity, block_pixels=block_pixels)
     refusal = sess.refusal()
     if refusal:
         result.reason = refusal
@@ -236,30 +379,51 @@ async def run_mapping(room: RoomMap, deps: RunDeps) -> MappingResult:
                          "SPECTRA driving the room?")
         return result
 
-    for device_id in room.device_ids:
+    plan = await resolve_plan(room, deps, scope, granularity, block_pixels)
+    result.per_device = dict(plan.per_device)
+    result.problems = list(plan.problems)
+    if not plan.emitters:
+        result.reason = ("nothing to map: " + "; ".join(plan.problems)
+                         if plan.problems else
+                         "nothing to map — no virtual of this room's devices "
+                         "is rendering right now")
+        return result
+    if any(not e.whole_device for e in plan.emitters) and not deps.spectra_owns():
+        result.reason = (
+            "mapping below whole-device granularity needs SPECTRA to be "
+            "driving the lights: the range lamp is an effect inside this "
+            "process, and the external LedFX service does not have it. Take "
+            "the room back, or map at 'Whole device' granularity.")
+        return result
+
+    # A device carries footprints from exactly ONE granularity: re-mapping
+    # a TV per segment must not leave last week's whole-device footprint
+    # beside the new ranges, where the room effect would drive both and dim
+    # the fixture twice.
+    for device_id in {e.device_id for e in plan.emitters}:
+        room.drop_device_footprints(device_id)
+
+    for emitter in plan.emitters:
         if sess.run_abort:
             result.reason = sess.run_abort
             break
         t0 = deps.clock()
-        try:
-            lit_vids = list(await deps.virtuals_for_device(device_id) or [])
-        except Exception as exc:                       # noqa: BLE001
-            logger.exception("room mapping: device lookup failed for %s", device_id)
-            result.emitters.append(EmitterResult(device_id, False,
-                                                 f"device lookup failed: {exc}"))
-            continue
-        in_scope = [v for v in lit_vids if v in set(scope)]
+        in_scope = [v for v in emitter.virtual_ids if v in set(scope)]
         if not in_scope:
             result.emitters.append(EmitterResult(
-                device_id, False,
-                "no virtual of this device is rendering right now — nothing "
-                "to light, so nothing to photograph"))
+                emitter.emitter_id, False,
+                "no virtual of this emitter is rendering right now — nothing "
+                "to light, so nothing to photograph",
+                device_id=emitter.device_id, label=emitter.label))
             continue
         try:
-            outcome = await _map_one(room, device_id, scope, in_scope, deps)
+            outcome = await _map_one(room, emitter, scope, in_scope, deps)
         except Exception as exc:                       # noqa: BLE001
-            logger.exception("room mapping: emitter %s failed", device_id)
-            outcome = EmitterResult(device_id, False, f"capture failed: {exc}")
+            logger.exception("room mapping: emitter %s failed", emitter.emitter_id)
+            outcome = EmitterResult(emitter.emitter_id, False,
+                                    f"capture failed: {exc}",
+                                    device_id=emitter.device_id,
+                                    label=emitter.label)
         finally:
             # The chain: every emitter's hold is released before the next
             # one opens, whatever happened inside it.
@@ -275,17 +439,19 @@ async def run_mapping(room: RoomMap, deps: RunDeps) -> MappingResult:
     return result
 
 
-async def _map_one(room: RoomMap, device_id: str, scope: list[str],
+async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
                    lit_vids: list[str], deps: RunDeps) -> EmitterResult:
     sess = deps.session
-    program = MappingProgram(scope, lit_vids)
+    ranges = [r for r in emitter.ranges if r.virtual_id in set(lit_vids)]
+    program = MappingProgram(scope, lit_vids, ranges)
 
     held = await deps.open_hold(program, 1.0, step="dark",
                                 heartbeat_timeout_s=HOLD_HEARTBEAT_S)
     if not (held or {}).get("held"):
-        return EmitterResult(device_id, False,
+        return EmitterResult(emitter.emitter_id, False,
                              f"the room could not be held: "
-                             f"{(held or {}).get('reason') or 'no writes'}")
+                             f"{(held or {}).get('reason') or 'no writes'}",
+                             device_id=emitter.device_id, label=emitter.label)
     await deps.sleep(DARK_SETTLE_S)
     dark_grids, _dark_max = await sess.gather(DARK_CAPTURE_S, min_frames=MIN_FRAMES)
 
@@ -295,15 +461,17 @@ async def _map_one(room: RoomMap, device_id: str, scope: list[str],
     lit_grids, lit_max = await sess.gather(LIT_CAPTURE_S, min_frames=MIN_FRAMES)
 
     if sess.run_abort:
-        return EmitterResult(device_id, False, sess.run_abort,
-                             dark_frames=len(dark_grids), lit_frames=len(lit_grids))
+        return EmitterResult(emitter.emitter_id, False, sess.run_abort,
+                             dark_frames=len(dark_grids), lit_frames=len(lit_grids),
+                             device_id=emitter.device_id, label=emitter.label)
     if len(dark_grids) < MIN_FRAMES or len(lit_grids) < MIN_FRAMES:
         return EmitterResult(
-            device_id, False,
+            emitter.emitter_id, False,
             f"not enough frames arrived ({len(dark_grids)} dark, "
             f"{len(lit_grids)} lit; each needs {MIN_FRAMES}) — is the camera "
             f"running and the phone still connected?",
-            dark_frames=len(dark_grids), lit_frames=len(lit_grids))
+            dark_frames=len(dark_grids), lit_frames=len(lit_grids),
+            device_id=emitter.device_id, label=emitter.label)
 
     capture = CaptureContext(
         pose_id=getattr(sess, "pose_id", ""),
@@ -312,9 +480,11 @@ async def _map_one(room: RoomMap, device_id: str, scope: list[str],
         exposure_mode=sess.lock.exposure_mode,
         white_balance_mode=sess.lock.white_balance_mode)
     footprint = light_field.footprint_from_frames(
-        emitter_id=device_id, virtual_ids=lit_vids,
+        emitter_id=emitter.emitter_id, virtual_ids=lit_vids,
         dark_frames=dark_grids, lit_frames=lit_grids,
-        axis=room.axis, capture=capture, label=device_id)
+        axis=room.axis, capture=capture, label=emitter.label or emitter.emitter_id)
+    footprint.device_id = emitter.device_id
+    footprint.ranges = ranges
     # The saturation figure belongs to the RAW frames, which the session
     # already reduced — recompute it from the maxima it handed back rather
     # than keeping frames alive just to measure clipping.
@@ -324,16 +494,20 @@ async def _map_one(room: RoomMap, device_id: str, scope: list[str],
 
     if footprint.weight <= 0.0:
         return EmitterResult(
-            device_id, False,
+            emitter.emitter_id, False,
             "this emitter added no measurable light to the frame — is it in "
             "shot, and is it actually the device you think it is?",
-            dark_frames=len(dark_grids), lit_frames=len(lit_grids))
+            dark_frames=len(dark_grids), lit_frames=len(lit_grids),
+            device_id=emitter.device_id, label=emitter.label)
 
     room.put_footprint(footprint)
     if deps.save_room is not None:
         maybe = deps.save_room(room)
         if asyncio.iscoroutine(maybe):
             await maybe
-    return EmitterResult(device_id, True, "", weight=round(footprint.weight, 4),
+    return EmitterResult(emitter.emitter_id, True, "",
+                         weight=round(footprint.weight, 4),
                          dark_frames=len(dark_grids), lit_frames=len(lit_grids),
-                         saturated_fraction=footprint.capture.saturated_fraction)
+                         saturated_fraction=footprint.capture.saturated_fraction,
+                         device_id=emitter.device_id, label=emitter.label,
+                         ranges=[r.model_dump() for r in ranges])

@@ -16,9 +16,13 @@ act rather than a setting:
     room. settings_agent.py's whole boundary argument is that no
     light-driving call exists in the code the model's tool_use can reach;
     adding one here would be the first.
-  * RUNNING A MAPPING SYNC. It takes the room dark and needs a phone in
-    someone's hand pointing at the fixtures. There is nothing an agent can
-    usefully do about the second half.
+  * RUNNING A MAPPING SYNC, and with it the GRANULARITY that run uses. It
+    takes the room dark and needs a phone in someone's hand pointing at the
+    fixtures; there is nothing an agent can usefully do about the second
+    half, and the granularity is an argument to that same act rather than a
+    setting anything reads later. How finely each device HAS been mapped is
+    reported by list_rooms, because a caller has to be able to say why a
+    wave runs along one fixture and not another.
   * THE AXIS CALIBRATION. It is two taps on a live camera picture — a pair
     of normalized coordinates whose meaning is entirely visual, the same
     reason force_scene_* is excluded from the settings registry (an opaque
@@ -69,13 +73,35 @@ def knob_catalogue() -> dict[str, dict]:
 
 # ── handlers ───────────────────────────────────────────────────────────────
 
+def _room_emitters(room) -> dict:
+    """Per DEVICE: how many emitters it was mapped as, and their ranges.
+
+    A device mapped in parts contributes several emitter ids and none of
+    them is the device id — so `mapped` (what a caller may put in
+    `device_ids`) has to be the DEVICE list, and the emitter detail is
+    reported separately rather than conflated with it."""
+    out: dict[str, dict] = {}
+    for f in room.footprints:
+        if not f.mapped:
+            continue
+        entry = out.setdefault(f.device, {"emitters": 0, "parts": []})
+        entry["emitters"] += 1
+        if f.ranges:
+            entry["parts"].append(
+                f"{f.ranges[0].virtual_id} px {f.ranges[0].start}-{f.ranges[0].end}")
+    return out
+
+
 def _op_list_rooms() -> dict:
     rooms = light_field.load_rooms()
     return {"rooms": [{"id": r.id, "name": r.name,
                        "device_ids": r.device_ids,
-                       "mapped": r.mapped_ids(),
+                       "mapped": r.mapped_devices(),
                        "not_mapped": r.unmapped_ids(),
                        "axis_calibrated": r.axis.calibrated,
+                       "granularity": r.granularity,
+                       "block_pixels": r.block_pixels,
+                       "emitters": _room_emitters(r),
                        "weights": {f.emitter_id: round(f.weight, 3)
                                    for f in r.footprints if f.mapped}}
                       for r in rooms]}
@@ -120,8 +146,11 @@ def _op_set_room_effect(effect_id: str, key: str, value: Any) -> dict:
     except Exception as exc:                           # noqa: BLE001
         return {"status": "rejected", "reason": str(exc)}
     if key == "device_ids":
+        # DEVICES, not emitter ids: a device mapped per segment carries
+        # several emitters and none of them is the device id, so validating
+        # against mapped_ids() would reject every legitimate selection.
         room = light_field.get_room(spec.room_id)
-        mapped = set(room.mapped_ids()) if room else set()
+        mapped = set(room.mapped_devices()) if room else set()
         unknown = [d for d in updated.device_ids if d not in mapped]
         if unknown:
             return {"status": "rejected",
@@ -149,7 +178,13 @@ OPERATIONS: dict[str, SonicOperation] = {
             "WHERE each fixture's light lands, never where its LEDs are. A "
             "device in `not_mapped` has no footprint yet and cannot be driven "
             "by a room effect; mapping one needs a phone camera and is not "
-            "something you can do — say so and point at the Rooms page."),
+            "something you can do — say so and point at the Rooms page. "
+            "`emitters` says how finely each device was mapped: more than "
+            "one emitter means the wave runs ALONG that fixture rather than "
+            "dimming all of it at once. Changing that granularity is part "
+            "of running a capture, so it is his press, not yours. "
+            "`mapped` and `not_mapped` are DEVICE ids — the only thing a "
+            "room effect's `device_ids` accepts."),
         input_schema={"type": "object", "properties": {},
                       "additionalProperties": False},
         handler=_op_list_rooms),

@@ -3356,10 +3356,51 @@ exactly that away. If a change here starts solving for where a strip
 physically is, it has left the plan (`/home/javi/fleet-spotfx/.lavish/
 room-light-field-plan.html`, §1's own exclusion fence).
 
-Four modules, each with a job: `light_field.py` (derivation + store +
+Modules, each with a job: `light_field.py` (derivation + store +
 `per_emitter_scalar`), `light_field_fields.py` (the four field kinds),
-`mapping_session.py` (the phone's server half), `room_mapping.py` (the
+`emitters.py` (WHAT counts as an emitter, at the granularity chosen for one
+run), `mapping_session.py` (the phone's server half), `room_mapping.py` (the
 protocol as a held-room program), `room_effects.py` (the bounded writer).
+
+**AN EMITTER IS A DEVICE *OR* A PIXEL RANGE OF ONE (2026-08-31, PR
+fm/lightfield-segment-granularity), his own correction: "A single device
+that spans the direction of the wave should be able to show the effect. the
+tv mapper is wrapped around a tv. It should be able to run a dimness wave
+vertically."** The first slice fenced an emitter to a whole device, so a
+wave over a strip wrapped round a television could only dim the whole
+television at once. `spectra/services/emitters.py` is the binding statement
+for the enumeration and the id shape. Four things to know:
+
+- **GRANULARITY IS A PER-CAPTURE CHOICE, never a global.** `auto` (default,
+  resolved PER DEVICE: `segment` for a strip, `device` for a Hue bulb — his
+  "grouped") / `device` / `segment` (the virtual's own configured segments)
+  / `block`-of-N pixels. The Rooms page passes it to
+  `POST /rooms/{id}/map`; `GET /rooms/{id}/plan` is the read that says how
+  many emitters and how many dark seconds BEFORE he presses.
+- **A sub-device emitter id is `tv-mapper:seg1[20-39]`** — the NEW ID SHAPE
+  `room_map.py`'s docstring always anticipated — plus a STRUCTURED
+  `EmitterFootprint.ranges` (and `device_id`). Both additive with empty
+  defaults, so every footprint on disk still means "the whole device" and
+  device granularity is byte-identical to the shipped slice. Use
+  `RoomMap.mapped_devices()` (not `mapped_ids()`) wherever a DEVICE is what
+  a caller selects — `mapped_ids()` returns EMITTER ids, and conflating the
+  two silently rejects every legitimate device selection (a real bug this
+  found in `room_effect_console`).
+- **A RANGE IS AN ADDRESSING FACT, NOT A POSITION** — indices into the
+  virtual's own EFFECT pixel space, read out of the segment configuration,
+  the same kind of fact `virtual_ids` already was. That is the SAME space
+  `fx/effects/pixelRange.py` lights during capture and
+  `fx/virtual_gain_mask.py`'s mask indexes at render, so the two address the
+  identical pixels with nothing to convert. The map still records where
+  light LANDS and nothing else; if a change here starts storing where a
+  segment IS, stop.
+- **Sub-device capture AND a sub-device wave both need SPECTRA to own the
+  lights** — the range lamp is a vendored effect in this process and the
+  mask is applied in this process's own frame assembly, so neither reaches
+  an external LedFX. Both refuse BY NAME with nothing written. Whole-device
+  work is unaffected either way. Re-mapping a device drops its previous
+  footprints first (`RoomMap.drop_device_footprints`), so a fixture carries
+  exactly one granularity and is never driven twice.
 
 - **THE EXPOSURE LOCK IS A HARD REFUSAL, not a warning, and it is the whole
   instrument's honesty.** A footprint is `lit − dark` in the camera's own
@@ -3391,6 +3432,22 @@ protocol as a held-room program), `room_effects.py` (the bounded writer).
   room is genuinely restored between emitters, not merely restorable; the
   dark step covers EVERY live virtual, because that is what "the room is
   dark" means to a camera.
+- **THE PER-PIXEL GAIN MASK is `fx/virtual_gain_mask.py` + ONE multiply in
+  `Virtual.assemble_frame`** (`fx/VENDOR.md` deviation #25), right after the
+  two the fork already does — the layer the driver reads AND the layer the
+  device preview taps. Pushed, never pulled (`fx/` may not import
+  `spectra/`), and general by construction: a float array per virtual, which
+  is what implode/explode will need too, not a wave-shaped thing. With no
+  mask installed anywhere — a room with no sub-device emitters driven, and
+  every room before this feature — `mask_for()` short-circuits on an empty
+  dict and the branch is never reached: byte-identical, asserted in
+  `scripts/check_room_effect_mask.py`. A wrong-length mask is SKIPPED and
+  counted, never resampled. `room_effects.compute_gains` returns
+  `(scalar_gains, masks)`: a masked virtual gets NO brightness write and NO
+  `compose()` scaling (the mask multiplies a frame that already carries the
+  show's brightness — scaling the write too would square it) and NO watchdog
+  holder (nothing it moves is in the effect config). `_release_masks()` runs
+  BEFORE the hold closes, same load-bearing ordering as `running = False`.
 - **`per_emitter_scalar(field_fn)` is the effect interface, and it serves
   FOUR kinds from day one** (his instruction) — `gain = Σ w·field / Σ w`
   over the emitter's own footprint cells. Only Dim Wave drives lights;
@@ -3416,7 +3473,12 @@ protocol as a held-room program), `room_effects.py` (the bounded writer).
 - **Measured, not assumed** (the plan's own named risk): one tick's whole
   seam call for two virtuals costs p50 ~11.6 ms / p95 ~15.5 ms in-process,
   at an achieved 14.99 Hz of a 15 Hz target — `scripts/check_room_effect_wave.py`
-  reports it from the instrument.
+  reports it from the instrument. **Finer granularity is CHEAPER, not
+  dearer**: a masked virtual needs no seam write at all, so a twenty-range
+  TV wrap measures p50 ~0.01 ms / p95 ~0.02 ms and 0 writes/s against the
+  same 66.7 ms tick (`scripts/check_room_effect_mask.py` §5). Twenty
+  emitters also resolve into ONE mask, so the render sees one multiply
+  however fine it gets.
 - **The honest bound, stated rather than hidden**: a running room effect
   cannot outlive the hold's 3-minute ceiling. Right for a slice whose whole
   safety story is that seam; "leave the wave on all evening" needs its own
@@ -3425,8 +3487,11 @@ protocol as a held-room program), `room_effects.py` (the bounded writer).
   Excluded BY NAME with reasons in its docstring: starting/stopping an
   effect (a light-driving call — `settings_agent.py`'s whole boundary
   argument is that none exists), running a mapping sync (needs a phone in
-  someone's hand), the axis calibration (two taps, a visual act —
-  `force_scene_*`'s own precedent), creating/deleting a ROOM.
+  someone's hand) and with it the GRANULARITY that run uses (an argument to
+  that same act, not a setting anything reads later — how finely each device
+  HAS been mapped IS reported by `list_rooms`), the axis calibration (two
+  taps, a visual act — `force_scene_*`'s own precedent), creating/deleting a
+  ROOM.
 - Proofs: `scripts/check_light_field.py` (a fake emitter painting a known
   region must yield that region's grid, cell by cell, on top of a
   deliberately non-black dark room; the held-room chain dark-and-back; five
@@ -3435,7 +3500,15 @@ protocol as a held-room program), `room_effects.py` (the bounded writer).
   two emitters at different axis positions matched the wave's own travel to
   0.0°, with depth-0 and speed-0 negative controls), `scripts/
   check_mapping_capture_e2e.py` (the whole session over a real uvicorn
-  server and a real WebSocket). All three run as subprocesses from
+  server and a real WebSocket), `scripts/check_light_field_granularity.py`
+  (the range lamp on the real pipeline; a synthetic three-segment TV wrap
+  captured at segment granularity yielding three footprints, each equal
+  cell-for-cell to its own segment's painted region and pairwise DISJOINT,
+  with device granularity's single merged footprint as the negative
+  control), `scripts/check_room_effect_mask.py` (a vertical wave along ONE
+  wrapped device, phase lag between its bottom and top pixel ranges measured
+  off `assemble_frame()`, plus the depth-0/speed-0 and no-mask
+  bit-identity controls). All five run as subprocesses from
   `tests/test_light_field_checks.py` — **never import one into pytest**: each
   repoints `spectra.config`'s store paths, `device_model.CATEGORIES_FILE`,
   `fx.light_ownership.OWNERSHIP_FILE` (to "spectra owns") and the `fx_seam`

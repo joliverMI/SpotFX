@@ -207,16 +207,18 @@ def test_an_emitters_gain_reaches_every_virtual_its_light_came_out_of():
     room.put_footprint(_fp("d", 0.4, 0.6, ["v1", "v2"]))
     driven = room_effects.resolve_driven(
         room, room_effects.RoomEffectSpec(room_id=room.id))
-    gains = room_effects.compute_gains(driven, DimWave(depth=0.5), 0.0)
+    gains, masks = room_effects.compute_gains(driven, DimWave(depth=0.5), 0.0)
     assert set(gains) == {"v1", "v2"} and gains["v1"] == gains["v2"]
+    assert masks == {}, "a whole-device emitter never installs a per-pixel mask"
 
 
 def test_gains_are_clamped_into_zero_one():
     room = _room()
     driven = room_effects.resolve_driven(
         room, room_effects.RoomEffectSpec(room_id=room.id))
-    gains = room_effects.compute_gains(driven, lambda s, t: np.full(s.axis.shape, 4.2), 0.0)
-    assert set(gains.values()) == {1.0}
+    gains, masks = room_effects.compute_gains(
+        driven, lambda s, t: np.full(s.axis.shape, 4.2), 0.0)
+    assert set(gains.values()) == {1.0} and masks == {}
 
 
 # ── 4. start refuses honestly ─────────────────────────────────────────────

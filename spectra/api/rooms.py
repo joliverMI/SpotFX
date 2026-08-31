@@ -15,7 +15,12 @@
   GET    /api/rooms/map/status            live session status + refusal
   GET    /api/rooms/map/frame/latest      newest tapped frame, as an 8-bit
                                           greyscale PGM, for checking aim
-  POST   /api/rooms/{room_id}/map         RUN the mapping protocol
+  GET    /api/rooms/{room_id}/plan        what a run at a given granularity
+                                          WOULD light, and for how long —
+                                          read-only, so a nineteen-emitter
+                                          run is never a surprise
+  POST   /api/rooms/{room_id}/map         RUN the mapping protocol at the
+                                          granularity chosen for THIS run
   GET    /api/rooms/{room_id}/footprint/{emitter_id}
                                           one footprint's full grid
 
@@ -25,8 +30,17 @@ phone and the capability rather than saying "mapping failed"
 (spectra/services/mapping_session.py's docstring is the binding statement).
 Everything else is a read or a store write.
 
+GRANULARITY IS PER RUN, never a stored global: `granularity` and
+`block_pixels` are arguments to the map/plan routes. The room remembers the
+last values only so the page's control comes back where he left it, which
+is a different thing from a setting the runs read
+(spectra/services/emitters.py is the binding statement for what each
+granularity means).
+
 Nothing here decides where a fixture is. The map records where each
-emitter's light LANDS (spectra/models/room_map.py).
+emitter's light LANDS (spectra/models/room_map.py); a sub-device emitter's
+id names a PIXEL RANGE, which is an addressing fact from the device
+configuration and never a position in the room.
 """
 from __future__ import annotations
 
@@ -39,6 +53,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from spectra.models.room_map import AxisCalibration, RoomMap
+from spectra.services import emitters as emitters_mod
 from spectra.services import light_field, mapping_session, room_mapping
 
 logger = logging.getLogger(__name__)
@@ -55,6 +70,32 @@ class RoomBody(BaseModel):
     name: str
     device_ids: list[str] = []
     axis: Optional[AxisCalibration] = None
+    granularity: Optional[str] = None
+    block_pixels: Optional[int] = None
+
+
+class MapBody(BaseModel):
+    """The granularity THIS run uses. Both optional: omitted means the
+    room's own remembered choice, which is itself only a seed for the
+    page's control."""
+    granularity: Optional[str] = None
+    block_pixels: Optional[int] = None
+
+
+def _run_granularity(room: RoomMap, granularity: Optional[str],
+                     block_pixels: Optional[int]) -> tuple[str, int]:
+    g = (granularity or room.granularity or emitters_mod.DEFAULT_GRANULARITY)
+    g = g.strip().lower()
+    if g not in emitters_mod.GRANULARITIES:
+        g = emitters_mod.DEFAULT_GRANULARITY
+    try:
+        block = int(block_pixels if block_pixels is not None
+                    else (room.block_pixels or emitters_mod.DEFAULT_BLOCK_PIXELS))
+    except (TypeError, ValueError):
+        block = emitters_mod.DEFAULT_BLOCK_PIXELS
+    block = max(emitters_mod.MIN_BLOCK_PIXELS,
+                min(emitters_mod.MAX_BLOCK_PIXELS, block))
+    return g, block
 
 
 def _room_view(room: RoomMap) -> dict:
@@ -62,6 +103,8 @@ def _room_view(room: RoomMap) -> dict:
     for f in room.footprints:
         fps.append({
             "emitter_id": f.emitter_id, "label": f.label,
+            "device_id": f.device, "whole_device": f.whole_device,
+            "ranges": [r.model_dump() for r in f.ranges],
             "virtual_ids": f.virtual_ids, "mapped": f.mapped,
             "weight": round(f.weight, 4),
             "axis_profile": [round(v, 5) for v in f.axis_profile],
@@ -71,6 +114,7 @@ def _room_view(room: RoomMap) -> dict:
     return {**room.model_dump(exclude={"footprints"}),
             "footprints": fps,
             "mapped_ids": room.mapped_ids(),
+            "mapped_devices": room.mapped_devices(),
             "unmapped_ids": room.unmapped_ids()}
 
 
@@ -91,8 +135,16 @@ async def upsert_room(body: RoomBody):
     room.device_ids = list(dict.fromkeys(body.device_ids))
     if body.axis is not None:
         room.axis = body.axis
+    if body.granularity is not None:
+        room.granularity = _run_granularity(room, body.granularity, None)[0]
+    if body.block_pixels is not None:
+        room.block_pixels = _run_granularity(room, None, body.block_pixels)[1]
     keep = set(room.device_ids)
-    room.footprints = [f for f in room.footprints if f.emitter_id in keep]
+    # Matched on the footprint's DEVICE, not its emitter id: a device mapped
+    # per segment carries several emitter ids and none of them is the device
+    # id, so an emitter-id match would silently discard every measurement
+    # taken at a sub-device granularity on the next room edit.
+    room.footprints = [f for f in room.footprints if f.device in keep]
     return _room_view(light_field.put_room(room))
 
 
@@ -122,6 +174,9 @@ async def room_devices():
 async def map_status():
     return {**mapping_session.status(),
             "running_room": _running,
+            "granularities": list(emitters_mod.GRANULARITIES),
+            "block_pixels_default": emitters_mod.DEFAULT_BLOCK_PIXELS,
+            "max_emitters_per_run": emitters_mod.MAX_EMITTERS_PER_RUN,
             "protocol": {
                 "dark_settle_s": room_mapping.DARK_SETTLE_S,
                 "dark_capture_s": room_mapping.DARK_CAPTURE_S,
@@ -148,9 +203,42 @@ async def map_frame_latest():
                     headers={"Cache-Control": "no-store"})
 
 
+@router.get("/rooms/{room_id}/plan")
+async def plan_map(room_id: str, granularity: Optional[str] = None,
+                   block_pixels: Optional[int] = None):
+    """What a run at this granularity WOULD light, without lighting it.
+
+    Read-only and camera-free, deliberately: a nineteen-emitter run takes
+    the room dark for over a minute, which is a different act from a
+    two-emitter one, and he should see which he is about to press rather
+    than learn it from a progress bar. It reports the granularity each
+    device actually resolves to (his "auto" default is per device) and
+    everything the enumeration declined to split, by name."""
+    room = light_field.get_room(room_id)
+    if room is None:
+        return JSONResponse(status_code=404, content={"detail": "no such room"})
+    g, block = _run_granularity(room, granularity, block_pixels)
+    deps = room_mapping.production_deps(None)
+    try:
+        scope = await room_mapping.live_virtual_ids(deps.get_virtuals)
+    except Exception as exc:                           # noqa: BLE001
+        return JSONResponse(status_code=503, content={
+            "detail": f"cannot read the live virtuals: {exc}"})
+    plan = await room_mapping.resolve_plan(room, deps, scope, g, block)
+    body = plan.as_dict()
+    body["sub_device"] = any(not e.whole_device for e in plan.emitters)
+    body["spectra_owns"] = room_mapping.spectra_owns_lights()
+    if body["sub_device"] and not body["spectra_owns"]:
+        body["problems"] = list(body["problems"]) + [
+            "SPECTRA is not driving the lights, so a sub-device run would be "
+            "refused: the range lamp lives in this process."]
+    return body
+
+
 @router.post("/rooms/{room_id}/map")
-async def run_map(room_id: str):
-    """Run the mapping protocol for every device in this room.
+async def run_map(room_id: str, body: Optional[MapBody] = None):
+    """Run the mapping protocol for every emitter in this room, at the
+    granularity chosen for THIS run.
 
     One run at a time; a second request while one is live is refused by
     name rather than queued — two runs would fight over the same held room
@@ -167,16 +255,25 @@ async def run_map(room_id: str):
     if _run_lock.locked():
         return JSONResponse(status_code=409, content={
             "detail": f"a mapping run is already in progress ({_running})"})
+    g, block = _run_granularity(room, body.granularity if body else None,
+                                body.block_pixels if body else None)
     async with _run_lock:
         _running = room_id
         try:
             result = await room_mapping.run_mapping(
-                room, room_mapping.production_deps(sess))
+                room, room_mapping.production_deps(sess),
+                granularity=g, block_pixels=block)
         finally:
             _running = None
-    body = result.as_dict()
-    body["room"] = _room_view(light_field.get_room(room_id) or room)
-    return body
+    # Remember the choice for the page's control only — a run always takes
+    # its own granularity as an argument, so this is never what one reads.
+    stored = light_field.get_room(room_id) or room
+    if (stored.granularity, stored.block_pixels) != (g, block):
+        stored.granularity, stored.block_pixels = g, block
+        light_field.put_room(stored)
+    out = result.as_dict()
+    out["room"] = _room_view(light_field.get_room(room_id) or stored)
+    return out
 
 
 @router.get("/rooms/{room_id}/footprint/{emitter_id}")

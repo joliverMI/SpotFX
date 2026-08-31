@@ -25,9 +25,13 @@ import { useToast } from '../components/Toast';
 import HeatThumbnail from './HeatThumbnail';
 import { MappingCapture, MappingClient, type LockState, secureContextProblem } from './mappingCapture';
 
+type PixelRange = { virtual_id: string; start: number; end: number };
 type Footprint = {
   emitter_id: string;
   label: string;
+  device_id: string;
+  whole_device: boolean;
+  ranges: PixelRange[];
   virtual_ids: string[];
   mapped: boolean;
   weight: number;
@@ -40,18 +44,49 @@ type Room = {
   name: string;
   device_ids: string[];
   axis: { kind: string; floor: { x: number; y: number } | null; ceiling: { x: number; y: number } | null };
+  granularity: string;
+  block_pixels: number;
   footprints: Footprint[];
   mapped_ids: string[];
+  mapped_devices: string[];
   unmapped_ids: string[];
+};
+type PlanEmitter = {
+  emitter_id: string; device_id: string; label: string;
+  virtual_ids: string[]; ranges: PixelRange[]; whole_device: boolean; note: string;
+};
+type RunPlan = {
+  granularity: string; block_pixels: number; count: number;
+  estimated_seconds: number; truncated: boolean; problems: string[];
+  per_device: Record<string, string>; emitters: PlanEmitter[];
+  sub_device: boolean; spectra_owns: boolean;
 };
 type DeviceRow = { id: string; name: string; type: string; in_use: boolean; virtuals: string[] };
 type EmitterResult = {
   emitter_id: string; mapped: boolean; reason: string; weight: number;
   dark_frames: number; lit_frames: number; saturated_fraction: number; seconds: number;
+  device_id: string; label: string; ranges: PixelRange[];
 };
-type RunResult = { ok: boolean; reason: string; seconds: number; emitters: EmitterResult[]; room?: Room };
+type RunResult = {
+  ok: boolean; reason: string; seconds: number; emitters: EmitterResult[];
+  granularity: string; block_pixels: number;
+  per_device: Record<string, string>; problems: string[]; room?: Room;
+};
 
 const EMPTY_AXIS = { kind: 'vertical', floor: null, ceiling: null };
+
+/** What one capture run treats as an emitter. His own correction: a strip
+ * wrapped round a television has to be mappable in PARTS, or a wave can
+ * only ever dim the whole television at once. "Auto" is the shipped
+ * default and resolves PER DEVICE — segments for a strip, the whole
+ * fixture for a Hue bulb — so this is a choice for THIS run, never a
+ * setting the system carries around. */
+const GRANULARITIES: { value: string; label: string; hint: string }[] = [
+  { value: 'auto', label: 'Auto', hint: 'segments for a strip, the whole fixture for a bulb' },
+  { value: 'device', label: 'Whole device', hint: 'one measurement per fixture — the fastest run' },
+  { value: 'segment', label: 'Segments', hint: 'one per configured run of the strip' },
+  { value: 'block', label: 'Blocks', hint: 'cut every strip into equal pixel blocks' },
+];
 
 export default function RoomsPage() {
   const toast = useToast();
@@ -62,6 +97,7 @@ export default function RoomsPage() {
   const [draftName, setDraftName] = useState('');
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<RunResult | null>(null);
+  const [plan, setPlan] = useState<RunPlan | null>(null);
 
   // capture
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -160,6 +196,8 @@ export default function RoomsPage() {
         const saved = await apiPost<Room>('/rooms', {
           id: patch.id ?? roomId ?? null, name: patch.name,
           device_ids: patch.device_ids ?? [], axis: patch.axis ?? EMPTY_AXIS,
+          granularity: patch.granularity ?? null,
+          block_pixels: patch.block_pixels ?? null,
         });
         const body = await apiGet<{ rooms: Room[] }>('/rooms');
         roomsRef.current = body.rooms;
@@ -207,12 +245,48 @@ export default function RoomsPage() {
       : null), id);
   }, [tapping, selected, saveRoom]);
 
+  const granularity = room?.granularity ?? 'auto';
+  const blockPixels = room?.block_pixels ?? 30;
+
+  /** The plan is a READ: it says how many emitters the current granularity
+   * produces and how long the room will be dark, before he presses. A
+   * nineteen-emitter run is a different act from a two-emitter one and he
+   * should not learn that from a progress bar. */
+  const refreshPlan = useCallback(async (id: string, g: string, block: number) => {
+    try {
+      setPlan(await apiGet<RunPlan>(
+        `/rooms/${id}/plan?granularity=${encodeURIComponent(g)}&block_pixels=${block}`));
+    } catch {
+      setPlan(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!room) { setPlan(null); return; }
+    void refreshPlan(room.id, granularity, blockPixels);
+  }, [room?.id, room?.device_ids.join(','), granularity, blockPixels, refreshPlan]);
+
+  const setGranularity = useCallback((value: string) => {
+    const id = selected;
+    if (!id) return;
+    void saveRoom((current) => (current ? { ...current, granularity: value } : null), id);
+  }, [selected, saveRoom]);
+
+  const setBlockPixels = useCallback((value: number) => {
+    const id = selected;
+    if (!id || !Number.isFinite(value)) return;
+    void saveRoom((current) => (
+      current ? { ...current, block_pixels: Math.max(1, Math.round(value)) } : null), id);
+  }, [selected, saveRoom]);
+
   const mapRoom = useCallback(async () => {
     if (!room) return;
     setBusy(true);
     setRun(null);
     try {
-      const result = await apiPost<RunResult>(`/rooms/${room.id}/map`);
+      const result = await apiPost<RunResult>(`/rooms/${room.id}/map`, {
+        granularity, block_pixels: blockPixels,
+      });
       setRun(result);
       if (result.room) setRooms((rs) => rs.map((r) => (r.id === result.room!.id ? result.room! : r)));
       toast(result.ok ? `Mapped ${result.emitters.filter((e) => e.mapped).length} emitter(s) in ${result.seconds}s`
@@ -222,7 +296,7 @@ export default function RoomsPage() {
     } finally {
       setBusy(false);
     }
-  }, [room, toast]);
+  }, [room, granularity, blockPixels, toast]);
 
   const visibleDevices = showAll ? devices : devices.filter((d) => d.in_use);
   const axisReady = !!(room?.axis.floor && room?.axis.ceiling);
@@ -325,34 +399,56 @@ export default function RoomsPage() {
               <h4>
                 Emitters <HelpLink topic="room-builder-what" />
               </h4>
-              <div className="emitter-grid">
-                {room.device_ids.map((id) => {
-                  const fp = room.footprints.find((f) => f.emitter_id === id);
-                  return (
-                    <div key={id} className="emitter-card">
-                      <HeatThumbnail
-                        grid={fp?.thumbnail ?? []}
-                        title={fp ? `weight ${fp.weight.toFixed(1)}` : 'not mapped'}
-                      />
-                      <div className="emitter-meta">
-                        <strong>{id}</strong>
-                        {fp?.mapped ? (
-                          <>
-                            <span className="muted small">weight {fp.weight.toFixed(1)}</span>
-                            {Number(fp.capture.saturated_fraction) > 0.02 && (
-                              <span className="warn small">
-                                ⚠ {(Number(fp.capture.saturated_fraction) * 100).toFixed(0)}% of frames clipped —
-                                shape is fine, weight understates this fixture
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span className="muted small">not mapped</span>
-                        )}
-                      </div>
+              {/* One card per EMITTER, grouped under the device it belongs to.
+                * A device mapped whole has one; a strip mapped per segment has
+                * one for each pixel range, and the range is shown because it
+                * is the addressing fact that distinguishes them — never a
+                * position in the room. */}
+              {room.device_ids.map((deviceId) => {
+                const fps = room.footprints.filter(
+                  (f) => (f.device_id || f.emitter_id) === deviceId);
+                return (
+                  <div key={deviceId} className="emitter-device">
+                    {fps.length > 1 && (
+                      <p className="muted small emitter-device-name">
+                        {deviceId} — {fps.length} emitters
+                      </p>
+                    )}
+                    <div className="emitter-grid">
+                      {(fps.length ? fps : [null]).map((fp, i) => {
+                        const range = fp?.ranges?.[0];
+                        return (
+                          <div key={fp?.emitter_id ?? `${deviceId}-${i}`} className="emitter-card">
+                            <HeatThumbnail
+                              grid={fp?.thumbnail ?? []}
+                              title={fp ? `weight ${fp.weight.toFixed(1)}` : 'not mapped'}
+                            />
+                            <div className="emitter-meta">
+                              <strong>
+                                {range ? `px ${range.start}–${range.end}` : deviceId}
+                              </strong>
+                              {fp?.mapped ? (
+                                <>
+                                  <span className="muted small">weight {fp.weight.toFixed(1)}</span>
+                                  {Number(fp.capture.saturated_fraction) > 0.02 && (
+                                    <span className="warn small">
+                                      ⚠ {(Number(fp.capture.saturated_fraction) * 100).toFixed(0)}% of frames clipped —
+                                      shape is fine, weight understates this fixture
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="muted small">not mapped</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })}
+              <div className="emitter-grid">
                 {!room.device_ids.length && <span className="muted">pick some devices first</span>}
               </div>
             </>
@@ -415,6 +511,36 @@ export default function RoomsPage() {
 
           {refusal && <p className="warn refusal">{refusal}</p>}
 
+          <div className="map-granularity">
+            <label>
+              Map in
+              <select
+                value={granularity}
+                disabled={!room || busy}
+                onChange={(e) => setGranularity(e.target.value)}
+              >
+                {GRANULARITIES.map((g) => (
+                  <option key={g.value} value={g.value}>{g.label}</option>
+                ))}
+              </select>
+            </label>
+            <HelpLink topic="room-mapping-granularity" title="What each granularity maps" />
+            {granularity === 'block' && (
+              <label>
+                every
+                <input
+                  type="number" min={1} max={4096} step={1} value={blockPixels}
+                  disabled={!room || busy}
+                  onChange={(e) => setBlockPixels(Number(e.target.value))}
+                />
+                pixels
+              </label>
+            )}
+            <span className="muted small">
+              {GRANULARITIES.find((g) => g.value === granularity)?.hint}
+            </span>
+          </div>
+
           <button
             className="primary"
             disabled={!room || !cameraOn || busy || !!refusal || !room.device_ids.length}
@@ -422,11 +548,28 @@ export default function RoomsPage() {
           >
             {busy ? 'Mapping…' : 'Map this room'}
           </button>
-          <p className="muted small">
-            The room goes dark for about {Math.max(1, (room?.device_ids.length ?? 1) * 4)} seconds.
-            Hold the phone still: every footprint in a map is only comparable to the others taken
-            from the same position.
-          </p>
+          {plan ? (
+            <p className="muted small">
+              {plan.count} emitter{plan.count === 1 ? '' : 's'} — the room goes dark for about{' '}
+              {Math.round(plan.estimated_seconds)} seconds.
+              {plan.sub_device && !plan.spectra_owns
+                ? ' SPECTRA is not driving the lights, so this run would be refused.'
+                : ''}
+              {' '}Hold the phone still: every footprint in a map is only comparable to the others
+              taken from the same position.
+            </p>
+          ) : (
+            <p className="muted small">
+              The room goes dark for about {Math.max(1, (room?.device_ids.length ?? 1) * 4)} seconds.
+              Hold the phone still: every footprint in a map is only comparable to the others taken
+              from the same position.
+            </p>
+          )}
+          {plan?.problems?.length ? (
+            <ul className="warn small">
+              {plan.problems.map((p) => <li key={p}>{p}</li>)}
+            </ul>
+          ) : null}
 
           {run && (
             <div className="run-result">
@@ -435,12 +578,17 @@ export default function RoomsPage() {
               <ul>
                 {run.emitters.map((e) => (
                   <li key={e.emitter_id} className={e.mapped ? 'ok' : 'warn'}>
-                    {e.emitter_id}: {e.mapped
+                    {e.label || e.emitter_id}: {e.mapped
                       ? `weight ${e.weight} · ${e.dark_frames}+${e.lit_frames} frames · ${e.seconds}s`
                       : e.reason}
                   </li>
                 ))}
               </ul>
+              {run.problems?.length ? (
+                <ul className="warn small">
+                  {run.problems.map((p) => <li key={p}>{p}</li>)}
+                </ul>
+              ) : null}
             </div>
           )}
         </section>

@@ -692,6 +692,51 @@ variables named `ledfx` (the core object handle) are untouched.
     seam is bypassed) and `tests/test_device_settings_store.py`. Not in the
     fork source at `/home/javi/ledfx-src`.
 
+25. `virtuals.py`: THE PER-VIRTUAL GAIN MASK (NEW MECHANISM,
+    SpotFX-authored — the owner's own correction to the room light-field
+    slice, 2026-08-31: "A single device that spans the direction of the
+    wave should be able to show the effect. the tv mapper is wrapped around
+    a tv. It should be able to run a dimness wave vertically"). One
+    multiply added to `Virtual.assemble_frame`, immediately after the two
+    the fork already does (`max_brightness`, then `global_brightness`): a
+    float array from `fx/virtual_gain_mask.py` (a new SpotFX-authored
+    module, not fork code) multiplied into the frame, one value per effect
+    pixel. That is the layer the device driver reads AND the layer the
+    device preview taps (`VirtualUpdateEvent` carries the same assembled
+    frame), so a per-pixel gain is visible in exactly the places the light
+    is.
+
+    With no masks installed — the shipped default for every installation —
+    `mask_for()` short-circuits on an empty dict and the branch is not
+    taken: byte-identical to the fork. A mask whose length does not match
+    the frame is SKIPPED and counted, never resampled (a stretched gain is
+    a wave at the wrong wavelength, which is worse than no wave). Like
+    `fx/device_timing.py`, the module is dependency-free and PUSHED to:
+    `fx/` may not import `spectra/`, so SPECTRA owns what the numbers mean
+    (`spectra/services/room_effects.py` derives them from measured
+    footprints) and fx never pulls.
+
+    Evidence: `scripts/check_room_effect_mask.py` (a wave measured running
+    ALONG one wrapped device on the real pipeline, with the no-mask
+    byte-identity control, an all-ones-mask identity check, and the
+    wrong-length skip) and `tests/test_light_field_granularity.py`. Not in
+    the fork source at `/home/javi/ledfx-src`.
+
+26. `effects/pixelRange.py`: THE RANGE LAMP (NEW EFFECT, SpotFX-authored) —
+    white over a configured inclusive pixel range of a virtual's own effect
+    buffer, black elsewhere. It exists for ONE job: the room light-field
+    mapping run has to light one SEGMENT of a device on its own so a camera
+    can see where that segment's light lands (`spectra/services/
+    room_mapping.py`). REGISTRY-EXEMPT, the same discipline as the phase
+    keys, `burst_rockets` and `blob_rush` (`fx/device_model.py`'s own
+    notes): it is absent from `config/effect_params.json`, so it never
+    reaches the Initial Set tab, a band patch, Sonic's parameter catalogue
+    or a colour set's accept list — it rides only the dedicated mapping
+    write. An inverted or out-of-bounds range lights NOTHING rather than
+    guessing. Evidence:
+    `scripts/check_light_field_granularity.py` section one, on the real
+    render pipeline. Not in the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
