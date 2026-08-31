@@ -235,6 +235,9 @@ class MappingResult:
     #: on the result as well as the plan, because a run started before the
     #: plan was read (or from a phone that never showed it) must still say so.
     warnings: list[str] = field(default_factory=list)
+    #: how the run was carried out, when it was not the obvious way — today,
+    #: that a carrier was mapped through its fixture's own strip.
+    notes: list[str] = field(default_factory=list)
     #: WHICH named refusal ended this run, when one did ("ownership",
     #: "hold_ceiling", "aborted"). The page needs the sentence, not this —
     #: it exists so a caller can act on the KIND without matching prose.
@@ -250,7 +253,7 @@ class MappingResult:
                 "granularity": self.granularity,
                 "block_pixels": self.block_pixels,
                 "per_carrier": self.per_carrier, "problems": self.problems,
-                "warnings": self.warnings,
+                "warnings": self.warnings, "notes": self.notes,
                 "refusal": self.refusal, "partial": self.partial,
                 "emitters": [e.__dict__ for e in self.emitters]}
 
@@ -289,6 +292,10 @@ class RunDeps:
     #: Whether the in-process render path is the one being written. Only
     #: sub-device capture needs it; a whole-device run works either way.
     spectra_owns: Callable[[], bool] = spectra_owns_lights
+    #: Bring a virtual up for the capture / put it back afterwards. Only a
+    #: run that has to light a fixture's own idle strip uses these.
+    activate: Callable[[str], Any] = None              # type: ignore[assignment]
+    deactivate: Callable[[str], Any] = None            # type: ignore[assignment]
 
 
 def production_deps(session) -> RunDeps:
@@ -307,9 +314,22 @@ def production_deps(session) -> RunDeps:
                 listing.get("devices") or []))
         return cache
 
+    async def activate(virtual_id: str) -> None:
+        # An idle virtual may have no effect at all, and the effects PUT
+        # refuses that — so give it the run's own black singleColor first
+        # (the same lamp the dark step writes), THEN raise the flag.
+        await fx_seam.set_virtual_effect(
+            virtual_id, MAP_EFFECT_TYPE,
+            {"color": BLACK, "brightness": 0.0, "background_brightness": 0.0})
+        await fx_seam.set_virtual_active(virtual_id, True)
+
+    async def deactivate(virtual_id: str) -> None:
+        await fx_seam.set_virtual_active(virtual_id, False)
+
     return RunDeps(session=session,
                    get_virtuals=fx_seam.get_virtuals,
                    carrier_devices=carrier_devices,
+                   activate=activate, deactivate=deactivate,
                    save_room=light_field.put_room)
 
 
@@ -331,25 +351,112 @@ async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
                        granularity: str, block_pixels: int):
     """The run's emitter list, resolved against what is LIVE right now.
 
-    Enumeration reads the same `GET /api/virtuals` map the scope came from,
-    so a carrier that is not rendering is simply not enumerated and says so
-    by name. The carrier->devices chain comes from the device listing (the
-    one definition of that mapping), and is what the run's own
-    emits-light backstop is checked against."""
+    A carrier that is not rendering is not enumerated and says so by name.
+    The carrier->devices chain comes from the device listing (the one
+    definition of that mapping) and is what the emits-light backstop checks.
+
+    SUBSTITUTES ARE RESOLVED AGAINST *ALL* VIRTUALS, not the live ones. His
+    `tv-mapper` is copy-mapped and cannot be lit in parts; the fixture's own
+    560-pixel span virtual `tv-backlight` can, and is INACTIVE — so looking
+    only at what is currently rendering would find nothing and refuse the
+    one route that works. The run brings it up for the capture and puts it
+    back (ACTIVATION, in run_mapping)."""
     live = await deps.get_virtuals() or {}
     in_scope = set(scope)
     virtuals = {c: live[c] for c in room.carrier_ids
                 if c in live and c in in_scope}
+    chain_failure = ""
     try:
         chains = await deps.carrier_devices()
-    except Exception:                                  # noqa: BLE001
+    except Exception as exc:                           # noqa: BLE001
         logger.exception("room mapping: carrier chain lookup failed")
         chains = {}
-    return emitters_mod.plan_run(room.carrier_ids, virtuals,
+        # SURFACED, not just logged: with no chain the emits-light backstop
+        # cannot run, so this run is proceeding with one of its own checks
+        # switched off. A human has to be told that, not the journal.
+        chain_failure = (f"the device list could not be read ({exc}), so this "
+                         f"run cannot check that each carrier's chain reaches "
+                         f"a real light — it will map whatever is rendering")
+    substitutes = {}
+    for carrier_id, carrier in virtuals.items():
+        found = emitters_mod.substitutes_for(carrier_id, carrier,
+                                             chains.get(carrier_id) or [], live)
+        if found:
+            substitutes[carrier_id] = found
+    plan = emitters_mod.plan_run(room.carrier_ids, virtuals,
                                  {c: chains.get(c, []) for c in room.carrier_ids
                                   if c in chains},
+                                 substitutes=substitutes,
                                  granularity=granularity,
                                  block_pixels=block_pixels)
+    if chain_failure:
+        plan.problems.insert(0, chain_failure)
+    return plan
+
+
+async def activate_for_capture(plan, scope: list[str], deps: RunDeps
+                               ) -> tuple[list[str], list[str]]:
+    """Bring up any virtual this run must light that is not rendering, and
+    say which ones were brought up so the run can put them back.
+
+    ACTIVATION, and why the run owns it: a substitute strip
+    (`resolve_plan`) is typically INACTIVE — that is why the carrier was
+    standing in front of it in the first place. The run already holds the
+    room and writes effects, so lighting one more virtual is the same act
+    it is already performing; what it must not do is leave the room
+    changed. The hold's snapshot covers the EFFECT on a virtual it can see,
+    but it cannot restore an `active` flag it never observed as false — so
+    the flag is this function's to remember and `deactivate_after_capture`
+    below is what puts it back. Verified, not assumed:
+    tests/test_capture_activation.py drives a real headless host and reads
+    the flag after the run.
+
+    Returns (scope with the activated ids added, ids to put back, and the
+    ones that could NOT be brought up — named, because a fixture that never
+    came up is about to be reported as "not rendering" and the reason it is
+    not rendering would otherwise die in the journal)."""
+    needed = {v for e in plan.emitters for v in e.virtual_ids}
+    missing = sorted(needed - set(scope))
+    if not missing:
+        return list(scope), [], []
+    activated: list[str] = []
+    failed: list[str] = []
+    for vid in missing:
+        if deps.activate is None:
+            failed.append(f"{vid}: this run has no way to bring a virtual up")
+            continue
+        try:
+            await deps.activate(vid)
+        except Exception as exc:                       # noqa: BLE001
+            logger.exception("room mapping: could not activate %s for the "
+                             "capture", vid)
+            failed.append(f"{vid}: could not be brought up for the capture "
+                          f"({type(exc).__name__}: {exc})")
+            continue
+        activated.append(vid)
+    return sorted(set(scope) | set(activated)), activated, failed
+
+
+async def deactivate_after_capture(activated: list[str],
+                                   deps: RunDeps) -> list[str]:
+    """Put back exactly what `activate_for_capture` brought up. Never
+    raises: this runs in a `finally`, and a room already handed back must
+    not turn a finished map into a 500. Returns what could not be put back
+    — a fixture left rendering is a REAL change to his room, and the one
+    thing that must never be only a log line."""
+    left_on: list[str] = []
+    for vid in activated:
+        if deps.deactivate is None:
+            left_on.append(vid)
+            continue
+        try:
+            await deps.deactivate(vid)
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("room mapping: could not deactivate %s after the "
+                           "capture — it is left rendering", vid,
+                           exc_info=True)
+            left_on.append(f"{vid} ({type(exc).__name__}: {exc})")
+    return left_on
 
 
 async def run_mapping(room: RoomMap, deps: RunDeps, *,
@@ -412,6 +519,7 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     result.per_carrier = dict(plan.per_carrier)
     result.problems = list(plan.problems)
     result.warnings = list(plan.warnings)
+    result.notes = list(plan.notes)
     if not plan.emitters:
         result.reason = ("nothing to map: " + "; ".join(plan.problems)
                          if plan.problems else
@@ -433,6 +541,41 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     for carrier_id in {e.carrier_id for e in plan.emitters}:
         room.drop_carrier_footprints(carrier_id)
 
+    scope, activated, not_brought_up = await activate_for_capture(
+        plan, scope, deps)
+    for problem in not_brought_up:
+        result.problems.append(problem)
+    if activated:
+        result.notes.append(
+            f"Brought up {', '.join(activated)} for the capture and put "
+            f"{'it' if len(activated) == 1 else 'them'} back afterwards.")
+    try:
+        await _capture_all(room, plan, scope, deps, result)
+    finally:
+        left_on = await deactivate_after_capture(activated, deps)
+        if left_on:
+            result.problems.append(
+                f"left rendering after the capture (they were idle before "
+                f"it): {', '.join(left_on)} — turn them off on the devices "
+                f"page, or run the map again")
+
+    result.seconds = deps.clock() - started
+    mapped = [e for e in result.emitters if e.mapped]
+    result.partial = bool(mapped) and bool(result.refusal or sess.run_abort)
+    # A run that STOPPED is never "ok", however much it managed first — but
+    # what it managed is kept, and `partial` is how the page says both.
+    result.ok = bool(mapped) and not sess.run_abort and not result.refusal
+    if sess.run_abort and not result.refusal:
+        result.refusal = "aborted"
+    if not result.reason and not mapped:
+        result.reason = "no emitter produced a footprint — see each one's reason"
+    return result
+
+
+async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
+                       result: "MappingResult") -> None:
+    """The emitter chain itself — one short hold each, in plan order."""
+    sess = deps.session
     for emitter in plan.emitters:
         if sess.run_abort:
             result.reason = sess.run_abort
@@ -495,18 +638,6 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
             result.reason = outcome.reason
             result.refusal = "hold_ceiling"
             break
-
-    result.seconds = deps.clock() - started
-    mapped = [e for e in result.emitters if e.mapped]
-    result.partial = bool(mapped) and bool(result.refusal or sess.run_abort)
-    # A run that STOPPED is never "ok", however much it managed first — but
-    # what it managed is kept, and `partial` is how the page says both.
-    result.ok = bool(mapped) and not sess.run_abort and not result.refusal
-    if sess.run_abort and not result.refusal:
-        result.refusal = "aborted"
-    if not result.reason and not mapped:
-        result.reason = "no emitter produced a footprint — see each one's reason"
-    return result
 
 
 async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],

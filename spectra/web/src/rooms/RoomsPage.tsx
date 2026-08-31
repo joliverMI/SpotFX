@@ -65,7 +65,7 @@ type PlanEmitter = {
 type RunPlan = {
   granularity: string; block_pixels: number; count: number;
   estimated_seconds: number; truncated: boolean; problems: string[];
-  warnings?: string[];
+  warnings?: string[]; notes?: string[];
   per_carrier: Record<string, string>; emitters: PlanEmitter[];
   sub_device: boolean; spectra_owns: boolean;
 };
@@ -80,7 +80,7 @@ type RunResult = {
   ok: boolean; reason: string; seconds: number; emitters: EmitterResult[];
   granularity: string; block_pixels: number;
   per_carrier: Record<string, string>; problems: string[]; room?: Room;
-  refusal?: string; partial?: boolean; warnings?: string[];
+  refusal?: string; partial?: boolean; warnings?: string[]; notes?: string[];
 };
 
 const EMPTY_AXIS = { kind: 'vertical', floor: null, ceiling: null };
@@ -622,6 +622,15 @@ export default function RoomsPage() {
           >
             {busy ? 'Mapping…' : 'Map this room'}
           </button>
+          {/* NOTES say how the run will be carried out when it is not the
+            * obvious way — mapping a copy-mapped carrier through the
+            * fixture's own strip, for one. Plain text, not a warning: it is
+            * not a problem, but it is not something to leave unsaid either. */}
+          {plan?.notes?.length ? (
+            <ul className="muted small">
+              {plan.notes.map((n) => <li key={n}>{n}</li>)}
+            </ul>
+          ) : null}
           {plan?.problems?.length ? (
             <ul className="warn small">
               {plan.problems.map((p) => <li key={p}>{p}</li>)}
@@ -650,6 +659,11 @@ export default function RoomsPage() {
               {run.warnings?.length ? (
                 <ul className="warn">
                   {run.warnings.map((w) => <li key={w}>{w}</li>)}
+                </ul>
+              ) : null}
+              {run.notes?.length ? (
+                <ul className="muted small">
+                  {run.notes.map((n) => <li key={n}>{n}</li>)}
                 </ul>
               ) : null}
               {run.problems?.length ? (

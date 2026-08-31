@@ -235,6 +235,9 @@ class _State:
     cost_s: deque = field(default_factory=lambda: deque(maxlen=COST_SAMPLES))
     last_error: str = ""
     task: Optional[asyncio.Task] = None
+    #: virtuals start() brought up because they were idle — stop() puts back
+    #: exactly these and nothing else.
+    activated: list = field(default_factory=list)
 
 
 _state = _State()
@@ -361,15 +364,36 @@ class RunnerDeps:
     #: Whether the render loop the mask is applied in is the one driving the
     #: lights. Only a masked (sub-device) run needs it.
     spectra_owns: Callable[[], bool] = _default_spectra_owns
+    #: Bring a driven virtual up / put it back. Needed for the same reason
+    #: the capture needs it: a copy-mapped carrier's ranges live on the
+    #: FIXTURE'S OWN strip, which is typically idle — and the mask
+    #: multiplies before a copy expands it, so that strip is the only
+    #: surface a wave can actually travel along
+    #: (scripts/check_copy_carrier_wave.py measured which side).
+    activate: Optional[Callable[[str], Any]] = None
+    deactivate: Optional[Callable[[str], Any]] = None
 
 
 def production_deps() -> RunnerDeps:
     from spectra.services import fx_seam
+    from spectra.services import room_mapping
+
+    async def activate(virtual_id: str) -> None:
+        await fx_seam.set_virtual_effect(
+            virtual_id, room_mapping.MAP_EFFECT_TYPE,
+            {"color": room_mapping.BLACK, "brightness": 0.0,
+             "background_brightness": 0.0})
+        await fx_seam.set_virtual_active(virtual_id, True)
+
+    async def deactivate(virtual_id: str) -> None:
+        await fx_seam.set_virtual_active(virtual_id, False)
+
     return RunnerDeps(apply_writes=fx_seam.apply_writes,
                       get_virtuals=fx_seam.get_virtuals,
                       open_hold=flare_preview_hold.open_program_hold,
                       close_hold=flare_preview_hold.close_hold,
-                      touch_hold=flare_preview_hold.touch)
+                      touch_hold=flare_preview_hold.touch,
+                      activate=activate, deactivate=deactivate)
 
 
 class RoomEffectProgram(flare_preview_hold.PreviewProgram):
@@ -507,6 +531,23 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
                 "unmapped": unmapped}
 
     live = await deps.get_virtuals() or {}
+    # A driven virtual that is not rendering is brought up the same way the
+    # CAPTURE brings it up, and for the same reason: a copy-mapped carrier's
+    # measured ranges live on the fixture's own strip, and that strip is the
+    # only surface a wave can travel along at all. Recorded so stop() puts
+    # back exactly what start() raised.
+    idle = [v for v in virtual_ids if not (live.get(v) or {}).get("active", True)
+            or not ((live.get(v) or {}).get("effect") or {}).get("type")]
+    _state.activated = []
+    if idle and deps.activate is not None:
+        for vid in idle:
+            try:
+                await deps.activate(vid)
+                _state.activated.append(vid)
+            except Exception:                          # noqa: BLE001
+                logger.exception("room effects: could not bring up %s", vid)
+        if _state.activated:
+            live = await deps.get_virtuals() or {}
     base: dict[str, float] = {}
     types: dict[str, str] = {}
     mask_len: dict[str, int] = {}
@@ -587,6 +628,7 @@ async def stop(deps: Optional[RunnerDeps] = None) -> dict:
     deps = deps or production_deps()
     was = _state.running
     _state.running = False
+    activated, _state.activated = list(_state.activated), []
     # Twice, deliberately. Here so the render thread stops seeing the mask
     # immediately rather than for however long cancelling the runner takes;
     # and again below because a tick already INSIDE _write_tick when the
@@ -606,7 +648,18 @@ async def stop(deps: Optional[RunnerDeps] = None) -> dict:
     _release_masks()          # see above: the runner is fully stopped now
     if deps.close_hold is not None:
         await deps.close_hold()
-    return {"stopped": bool(was)}
+    # AFTER the hold's revert, never before: the revert write goes to the
+    # virtual, so putting it back to sleep first would leave the strip
+    # holding the wave's last frame instead of the show's own state.
+    for vid in activated:
+        if deps.deactivate is None:
+            break
+        try:
+            await deps.deactivate(vid)
+        except Exception:                              # noqa: BLE001
+            logger.warning("room effects: could not put %s back to sleep",
+                           vid, exc_info=True)
+    return {"stopped": bool(was), "deactivated": activated}
 
 
 async def _run(deps: RunnerDeps) -> None:

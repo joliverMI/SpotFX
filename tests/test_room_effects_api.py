@@ -157,4 +157,5 @@ def test_status_reports_nothing_running_and_a_zeroed_cost():
 
 def test_stop_is_idempotent():
     with _client() as client:
-        assert client.post("/api/room-effects/stop").json() == {"stopped": False}
+        assert client.post("/api/room-effects/stop").json() == {
+            "stopped": False, "deactivated": []}

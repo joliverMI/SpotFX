@@ -143,6 +143,56 @@ async def set_virtual_config(virtual_id: str, patch: dict) -> None:
             resp.raise_for_status()
 
 
+async def set_virtual_active(virtual_id: str, active: bool) -> None:
+    """PUT a virtual's ACTIVE flag over the transport the ownership record
+    grants — the flag itself, distinct from `apply_writes`' effect PUT and
+    from `set_virtual_config`'s device-config merge.
+
+    Added for the room mapping run, which has to bring a fixture's own
+    strip up for the capture when the room's carrier stands in front of it
+    inactive (spectra/services/room_mapping.py's ACTIVATION section is the
+    binding statement, including that the run restores what it found).
+    Raises on failure, same contract as apply_writes: a capture that
+    believes it activated something it did not would photograph a dark
+    fixture and store the result."""
+    owner = _require_owner()
+    payload = {"active": bool(active)}
+    if owner == light_ownership.SPECTRA:
+        from fx import facade
+        resp = await facade.handle("PUT", f"/api/virtuals/{virtual_id}",
+                                   json=payload)
+        resp.raise_for_status()
+    else:
+        async with httpx.AsyncClient(base_url=config.ledfx_url(),
+                                     timeout=REQUEST_DEADLINE_S) as client:
+            async with _slots:
+                resp = await client.put(f"/api/virtuals/{virtual_id}",
+                                        json=payload)
+            resp.raise_for_status()
+
+
+async def set_virtual_effect(virtual_id: str, effect_type: str,
+                             effect_config: dict) -> None:
+    """POST an effect onto a virtual — the CREATE, which `apply_writes`'
+    PUT cannot do (the facade's own effects PUT refuses a virtual with no
+    active effect). Same routing and the same raise-on-failure contract;
+    also for the mapping run's activation of an idle strip."""
+    owner = _require_owner()
+    payload = {"type": effect_type, "config": dict(effect_config or {})}
+    if owner == light_ownership.SPECTRA:
+        from fx import facade
+        resp = await facade.handle(
+            "POST", f"/api/virtuals/{virtual_id}/effects", json=payload)
+        resp.raise_for_status()
+    else:
+        async with httpx.AsyncClient(base_url=config.ledfx_url(),
+                                     timeout=REQUEST_DEADLINE_S) as client:
+            async with _slots:
+                resp = await client.post(
+                    f"/api/virtuals/{virtual_id}/effects", json=payload)
+            resp.raise_for_status()
+
+
 def _compose_room_effect(w: dict) -> dict:
     """Apply the room-effects layer's per-emitter gain to one write, on its
     way out — the ONE place a running Dim Wave composes with whatever the

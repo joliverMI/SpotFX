@@ -36,6 +36,12 @@ type Status = {
   emitters: string[]; gains: Record<string, number>; held_params: string[];
   masks: Record<string, { pixels: number; min: number; max: number }>;
   last_error: string;
+  /** The render-side mask engine's own counter. A mask whose length does not
+   * match the frame is SKIPPED (never resampled — a stretched gain is a wave
+   * at the wrong wavelength), which means that virtual is silently not being
+   * driven. It was counted here and shown nowhere until the reason sweep. */
+  mask_engine?: { skipped_length_mismatch?: number;
+                  last_mismatch?: { virtual_id: string; mask: number; frame: number } | null };
   cost: {
     samples: number; virtuals_per_tick: number; ticks: number; writes: number;
     written_per_tick: number; masked_per_tick: number;
@@ -299,6 +305,22 @@ export default function RoomEffectsPage() {
                      (${status.cost.written_per_tick} written, ${status.cost.masked_per_tick} per-pixel)`
                   : 'not measured yet'}
               </dd>
+              {status.mask_engine?.skipped_length_mismatch
+                ? (
+                  <>
+                    <dt>Masks skipped</dt>
+                    <dd className="warn small">
+                      {status.mask_engine.skipped_length_mismatch} frame(s) — a gain was the
+                      wrong length for the strip it was built for and was dropped rather than
+                      stretched, so that fixture is not being driven
+                      {status.mask_engine.last_mismatch
+                        ? ` (last: ${status.mask_engine.last_mismatch.virtual_id}, mask
+                            ${status.mask_engine.last_mismatch.mask} vs frame
+                            ${status.mask_engine.last_mismatch.frame}) — re-map it`
+                        : ''}
+                    </dd>
+                  </>
+                ) : null}
               {status.last_error && <><dt>Last error</dt><dd className="warn small">{status.last_error}</dd></>}
             </dl>
           )}

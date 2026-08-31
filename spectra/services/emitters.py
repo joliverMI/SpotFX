@@ -79,7 +79,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional
 
 from spectra.models.room_map import PixelRange
@@ -309,11 +309,17 @@ def enumerate_carrier(carrier_id: str, virtual: dict, *,
     if not virtual:
         return []
     resolved = resolve_granularity(granularity, virtual, point)
-    if resolved == "whole":
-        return [Emitter(emitter_id=carrier_id, carrier_id=carrier_id,
-                        label=carrier_id, virtual_ids=[carrier_id], ranges=[])]
-
     ok, why = _splittable(virtual)
+    if resolved == "whole":
+        # THE NOTE TRAVELS WITH THE WHOLE EMITTER. His second failed run
+        # came out as one whole emitter with the reason attached nowhere a
+        # human could see it: "auto" resolved to whole BECAUSE the carrier
+        # is unsplittable, and this branch used to return before `why` was
+        # even computed. A reason that exists and never reaches the page is
+        # the same as no reason at all.
+        return [Emitter(emitter_id=carrier_id, carrier_id=carrier_id,
+                        label=carrier_id, virtual_ids=[carrier_id], ranges=[],
+                        note=("" if ok or point else why))]
     if not ok:
         return [Emitter(emitter_id=carrier_id, carrier_id=carrier_id,
                         label=carrier_id, virtual_ids=[carrier_id], ranges=[],
@@ -352,6 +358,10 @@ class Plan:
     #: problem, which is something it declined to do. Today's one member is
     #: the single-piece map that cannot show a wave travelling.
     warnings: list[str] = field(default_factory=list)
+    #: Plain statements about how this run will be carried out that are
+    #: neither a problem nor a warning — today, that a carrier is being
+    #: mapped through its fixture's own strip instead of itself.
+    notes: list[str] = field(default_factory=list)
     truncated: bool = False
 
     @property
@@ -378,6 +388,7 @@ class Plan:
             "truncated": self.truncated,
             "problems": self.problems,
             "warnings": self.warnings,
+            "notes": self.notes,
             "emitters": [{"emitter_id": e.emitter_id, "carrier_id": e.carrier_id,
                           "label": e.label, "virtual_ids": e.virtual_ids,
                           "ranges": [r.model_dump() for r in e.ranges],
@@ -386,8 +397,55 @@ class Plan:
         }
 
 
+def substitutes_for(carrier_id: str, carrier: dict, chain: list[dict],
+                    all_virtuals: dict[str, dict]) -> list[tuple[str, dict]]:
+    """The device's OWN splittable virtuals to map through when the carrier
+    itself cannot be lit in parts — his `tv-mapper` (copy-mapped) standing
+    in front of `tv-backlight` (a 560-pixel span virtual, inactive).
+
+    Ordered and deduplicated by device, at most one substitute per device,
+    preferring a virtual that covers ONLY that device — a substitute is
+    meant to address one fixture's pixels, not to be a second carrier.
+
+    WHY THIS EXISTS AT ALL, and it is not only about capture: the per-pixel
+    gain mask multiplies the effect buffer BEFORE a copy-mapped virtual
+    expands it into each segment, so a wave's phase is identical in every
+    segment at every instant — measured, not assumed
+    (scripts/check_copy_carrier_wave.py). A copy carrier is not a wave
+    surface however finely it is mapped, so the SAME substitution has to
+    happen at both ends: light the direct virtual to measure it, drive the
+    direct virtual to wave along it."""
+    if _splittable(carrier)[0]:
+        return []
+    wanted = {str(d.get("id")) for d in chain or [] if d.get("id")}
+    if not wanted:
+        return []
+    out: list[tuple[str, dict]] = []
+    claimed: set[str] = set()
+    def _devices_of(virtual: dict) -> set[str]:
+        return {str(seg[0]) for seg in (virtual or {}).get("segments") or []
+                if isinstance(seg, (list, tuple)) and seg}
+    candidates = []
+    for vid, virtual in (all_virtuals or {}).items():
+        if vid == carrier_id or not _splittable(virtual)[0]:
+            continue
+        devices = _devices_of(virtual) & wanted
+        if not devices:
+            continue
+        # a single-device virtual first, then by id, so the pick is stable
+        candidates.append((len(_devices_of(virtual)), str(vid), vid, virtual,
+                           devices))
+    for _width, _key, vid, virtual, devices in sorted(candidates):
+        if devices & claimed:
+            continue
+        claimed |= devices
+        out.append((vid, virtual))
+    return out
+
+
 def plan_run(carrier_ids: Iterable[str], virtuals: dict[str, dict],
              carrier_devices: Optional[dict[str, list[dict]]] = None, *,
+             substitutes: Optional[dict[str, list[tuple[str, dict]]]] = None,
              granularity: str = DEFAULT_GRANULARITY,
              block_pixels: int = DEFAULT_BLOCK_PIXELS) -> Plan:
     """The whole run's emitter list, in the order it will be captured.
@@ -425,6 +483,38 @@ def plan_run(carrier_ids: Iterable[str], virtuals: dict[str, dict],
         point = bool(chain) and all(
             str(d.get("type") or "").lower() in POINT_DEVICE_TYPES
             for d in chain if emits_light(d))
+        stand_ins = (substitutes or {}).get(carrier_id) or []
+        if stand_ins and not point and plan.granularity != "whole":
+            # THE DIRECT VIRTUAL WINS over an unsplittable carrier. Mapping
+            # through it is the only route that produces parts at all, and
+            # (the measured half) the only one a wave can travel along —
+            # so the carrier's own name stays on the footprints while its
+            # device's strip is what is actually lit.
+            emitters = []
+            resolved = ""
+            for vid, stand_in in stand_ins:
+                got = enumerate_carrier(vid, stand_in,
+                                        granularity=plan.granularity,
+                                        block_pixels=plan.block_pixels)
+                resolved = resolve_granularity(plan.granularity, stand_in)
+                for e in got:
+                    emitters.append(replace(e, carrier_id=carrier_id))
+            plan.per_carrier[carrier_id] = resolved or "whole"
+            plan.notes.append(
+                f"{carrier_id}: mapped through "
+                f"{', '.join(vid for vid, _v in stand_ins)} — the fixture's "
+                f"own strip — because {carrier_id} itself "
+                f"{_splittable(virtual)[1]}.")
+            for e in emitters:
+                if e.note:
+                    plan.problems.append(f"{carrier_id}: {e.note}")
+            plan.emitters.extend(emitters)
+            if len(emitters) == 1 and effective_pixel_count(virtual) > 1:
+                from spectra.services import mapping_refusals
+                plan.warnings.append(mapping_refusals.one_piece_warning(
+                    carrier_id, effective_pixel_count(virtual),
+                    plan.block_pixels, splittable=True))
+            continue
         resolved = resolve_granularity(plan.granularity, virtual, point)
         plan.per_carrier[carrier_id] = resolved
         emitters = enumerate_carrier(carrier_id, virtual,
@@ -433,6 +523,14 @@ def plan_run(carrier_ids: Iterable[str], virtuals: dict[str, dict],
                                      point=point)
         for e in emitters:
             if e.note:
+                # A REFUSAL WITH A REASON ATTACHED THAT NEVER REACHES A HUMAN
+                # IS INDISTINGUISHABLE FROM A SILENT FAILURE — worse, it lets
+                # us believe we handled the case. `Emitter.note` was written
+                # correctly all along and died here on his second failed run,
+                # because the whole-granularity branch returned before the
+                # reason was even computed. Every note this enumeration
+                # produces now leaves as a `problem`, which the plan response
+                # and the run result both carry to the page.
                 plan.problems.append(f"{carrier_id}: {e.note}")
         # ONE PIECE IS NOT A MAP OF A STRIP. Said at plan time, before the
         # room goes dark for a run whose result cannot drive a wave.

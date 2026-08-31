@@ -3419,6 +3419,32 @@ and the id shape. Five things to know:
   `mapping_refusals.one_piece_warning`. A WARNING is not a refusal: the run
   happens and the map is worth keeping, which is why they are separate
   lists.
+- **A COPY-MAPPED CARRIER IS NOT A WAVE SURFACE, and the run maps THROUGH
+  the fixture's own strip** (2026-08-31, fourth commit of PR
+  fm/rooms-picker-light-emitters, from his second failed run). MEASURED
+  FIRST, on rendered device pixels: the per-pixel gain mask multiplies the
+  effect buffer BEFORE a copy-mapped virtual expands it into each segment,
+  so a wave's phase is identical in every segment at every instant —
+  `scripts/check_copy_carrier_wave.py`, and do not re-reason this from the
+  source. His `tv-mapper` is copy-mapped in front of `tv-backlight` (560 px,
+  span, INACTIVE), so `emitters.substitutes_for` prefers the splittable
+  DIRECT virtual, footprints keep the carrier's own name, and the SAME
+  substitution happens at both ends (capture and wave) for the same reason.
+  `room_mapping.activate_for_capture` brings an idle substitute up and puts
+  it back; the hold snapshot covers the EFFECT but never an `active` flag it
+  did not observe, so the flag is the run's own to restore
+  (`tests/test_capture_activation.py` reads it back). `room_effects.start`
+  does the same and `stop()` puts it back AFTER the hold's revert.
+- **A REASON THAT NEVER REACHES A HUMAN IS A SILENT FAILURE — worse, it
+  lets us believe we handled the case** (the captain's ruling, same
+  commit). `Emitter.note` was written correctly and died in the
+  whole-granularity branch. Everything on this path that WRITES a reason now
+  leaves for the page: notes → `problems`, a failed activation, a virtual
+  left rendering, an unreadable device list (which silently disables the
+  emits-light backstop), the substitution itself → `notes`, and the mask
+  engine's `skipped_length_mismatch` (a virtual silently not driven) is
+  rendered on the room-effects page. Before adding a `reason=`/`note=`
+  anywhere here, name the surface it reaches, or do not write it.
 - **A RANGE IS AN ADDRESSING FACT, NOT A POSITION** — indices into the
   virtual's own EFFECT pixel space, read out of the segment configuration,
   the same kind of fact `virtual_ids` already was. That is the SAME space
