@@ -9,8 +9,8 @@ settings_console.py's single POST /message endpoint serves both UIs).
 
 THE AUTHORITY BOUNDARY LIVES IN THE MECHANISM, NOT HERE, same as before —
 this module got wider, not looser. ALL_OPERATIONS below is built by
-merging settings_console.OPERATIONS, scene_console.OPERATIONS and
-device_console.OPERATIONS, each a
+merging settings_console.OPERATIONS, scene_console.OPERATIONS,
+device_console.OPERATIONS and room_effect_console.OPERATIONS, each a
 dict of sonic_ops.SonicOperation — declared data, not code branches. TOOLS
 (the schema handed to the Anthropic API) and _dispatch() (the tool-name ->
 handler lookup) are BOTH derived from that same merged dict, so a name not
@@ -62,7 +62,8 @@ import uuid
 from typing import Any, Optional
 
 from spectra import config
-from spectra.services import device_console, scene_console, settings_console, sonic_usage
+from spectra.services import (device_console, room_effect_console, scene_console,
+                              settings_console, sonic_usage)
 from spectra.services.sonic_ops import SonicOperation
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,7 @@ ALL_OPERATIONS: dict[str, SonicOperation] = {
     **settings_console.OPERATIONS,
     **scene_console.OPERATIONS,
     **device_console.OPERATIONS,
+    **room_effect_console.OPERATIONS,
 }
 
 TOOLS = [op.tool_schema() for op in ALL_OPERATIONS.values()]

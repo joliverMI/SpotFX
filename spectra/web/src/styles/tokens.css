@@ -1217,3 +1217,155 @@ kbd {
   .testing-bar-headline { font-size: 14px; }
   .testing-bar-sub { font-size: 12px; }
 }
+
+/* ── Rooms (light-field map) + Room effects ──────────────────────────────
+ * Phone-first: the mapping capture happens with a phone in hand, so the
+ * three panes stack on a narrow viewport rather than living in a fixed
+ * grid the way ColorSetsPage's still does. */
+.rooms-page,
+.room-effects-page { padding: 0 4px; }
+
+.rooms-lede {
+  max-width: 70ch;
+  margin: 4px 0 14px;
+}
+
+.rooms-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr) minmax(0, 340px);
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .rooms-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.rooms-layout .card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  min-width: 0;
+}
+
+.room-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: var(--text);
+  cursor: pointer;
+}
+.room-row:hover { background: var(--surface2); }
+.room-row.active { border-color: var(--accent); background: var(--surface2); }
+.room-row-name { font-weight: 600; overflow-wrap: anywhere; }
+
+.room-new { display: flex; gap: 6px; margin-top: 10px; }
+.room-new input, .room-new select { flex: 1 1 auto; min-width: 0; }
+
+.room-detail-head { display: flex; gap: 8px; align-items: center; }
+.room-name-input { flex: 1 1 auto; min-width: 0; font-size: 16px; font-weight: 700; }
+
+.device-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+.chip {
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.chip.on { border-color: var(--accent); color: var(--text); background: #2a1a42; }
+.chip.unmapped { opacity: 0.6; }
+
+.link-button {
+  background: none; border: none; color: var(--accent2);
+  cursor: pointer; padding: 0; font-size: 13px;
+}
+
+.emitter-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.emitter-card {
+  display: flex; gap: 8px; align-items: center;
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px;
+  min-width: 0;
+}
+.emitter-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+
+.heat-thumb {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: block;
+  flex: 0 0 auto;
+  background: #000;
+}
+.heat-thumb-empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); font-size: 11px; background: var(--surface2);
+}
+
+.capture-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.capture-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.axis-mark {
+  position: absolute; transform: translate(-50%, -50%);
+  background: var(--accent); color: #10061c; font-size: 10px; font-weight: 800;
+  padding: 1px 5px; border-radius: 999px; pointer-events: none;
+}
+.axis-mark.ceiling { background: var(--accent2); }
+.tap-hint {
+  position: absolute; inset: auto 0 8px 0; text-align: center;
+  color: var(--text); font-weight: 700; text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
+
+.capture-controls { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+
+.capture-status {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px; margin: 8px 0; font-size: 13px;
+}
+.capture-status dt { color: var(--text-muted); }
+.capture-status dd { margin: 0; overflow-wrap: anywhere; }
+.capture-status dd.ok, .run-result li.ok { color: var(--ok); }
+.capture-status dd.warn, .warn { color: var(--warning); }
+.refusal { overflow-wrap: anywhere; }
+
+.run-result { margin-top: 10px; font-size: 13px; }
+.run-result ul { margin: 4px 0 0; padding-left: 18px; }
+.run-result li.warn { color: var(--warning); }
+
+.knob { display: block; margin: 10px 0; }
+.knob > span { display: flex; justify-content: space-between; font-weight: 600; }
+.knob > span em { font-style: normal; color: var(--accent2); }
+.knob input[type="range"] { width: 100%; }
+.knob small { display: block; }
+
+.small { font-size: 12px; }
+
+/* A disabled action must LOOK unavailable. button.primary sets its own
+ * background, which wins over the browser's default greying — so a
+ * "Map this room" that cannot run (camera off, camera refused, no
+ * fixtures) rendered as a live purple button on a phone. Scoped to these
+ * two pages so nothing else in the app changes appearance. */
+.rooms-page button:disabled,
+.room-effects-page button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+.rooms-page button:disabled:hover,
+.room-effects-page button:disabled:hover { border-color: var(--border); }

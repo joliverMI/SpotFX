@@ -3343,6 +3343,112 @@ observation must reset it the way a song change would — otherwise the
 second fire in one process is legitimately deferred by the first one's
 dwell floor and renders nothing at all.**
 
+## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
+
+**THE ONE IDEA, his own sentence, and the thing this whole area exists to
+protect: the map records WHERE EACH EMITTER'S LIGHT LANDS AND HOW MUCH — a
+measured light field — NEVER where the LEDs are.** `spectra/models/
+room_map.py`'s docstring is the binding statement. There are no coordinates,
+no metres and no room drawing anywhere in this feature, deliberately: a
+sconce's spill onto the ceiling and the floor is captured for free by
+photographing what it lights, and a fixture-position model would throw
+exactly that away. If a change here starts solving for where a strip
+physically is, it has left the plan (`/home/javi/fleet-spotfx/.lavish/
+room-light-field-plan.html`, §1's own exclusion fence).
+
+Four modules, each with a job: `light_field.py` (derivation + store +
+`per_emitter_scalar`), `light_field_fields.py` (the four field kinds),
+`mapping_session.py` (the phone's server half), `room_mapping.py` (the
+protocol as a held-room program), `room_effects.py` (the bounded writer).
+
+- **THE EXPOSURE LOCK IS A HARD REFUSAL, not a warning, and it is the whole
+  instrument's honesty.** A footprint is `lit − dark` in the camera's own
+  byte scale and every footprint in a room is compared against every other
+  one; if auto-exposure re-scales between the dark reference and the lit
+  capture, every comparison is wrong by an unknown factor and NOTHING
+  downstream can detect it — the grids still look like plausible
+  footprints. So a run cannot start unless the browser CONFIRMED both
+  exposure and white balance locked (what `getSettings()` returned, never
+  what the page asked for), a lock lost mid-run aborts by name, and the
+  refusal names the phone and the capability. `mapping_session.lock_refusal`
+  is the ONE wording, so the run gate, the mid-run abort and the status
+  surface can never disagree.
+- **NO AUDIO BY CONSTRUCTION, not by a flag** (his own requirement). This is
+  a SECOND session type rather than a mode on `av_sync_session.Session` —
+  that class opens an `AudioReference` in its own `open()`. There is no
+  audio code here to switch off; `tests/test_mapping_session.py` asserts the
+  module body contains none. It DOES reuse `av_sync_session.FrameRing` and
+  `ClockMap` by import (the vision seam built naming this stage as its
+  consumer), and speaks the same WS message shapes.
+- **Pixels are `image/grey8`, never JPEG** — a lossy codec's quantisation
+  lands in the difference this instrument measures, and decoding one would
+  put an image library in a path that needs none. 320x180 divides the stored
+  64x36 grid exactly (5x5 box mean, no interpolation to explain).
+- **A long mapping run is a CHAIN of short per-emitter holds** on
+  `flare_preview_hold.open_program_hold` — snapshot, deadline, sweep,
+  3-minute ceiling and restart recovery all INHERITED, never a second hold
+  system. Each emitter opens its own hold (dark -> lit -> revert) so the
+  room is genuinely restored between emitters, not merely restorable; the
+  dark step covers EVERY live virtual, because that is what "the room is
+  dark" means to a camera.
+- **`per_emitter_scalar(field_fn)` is the effect interface, and it serves
+  FOUR kinds from day one** (his instruction) — `gain = Σ w·field / Σ w`
+  over the emitter's own footprint cells. Only Dim Wave drives lights;
+  hue rotation / implode / explode exist as pure fields with tests and
+  nothing that writes. **That is WHY the full 64x36 grid is stored and not
+  just the axis profile**: the two radial kinds read x/y, and
+  `tests/test_light_field.py` has a test that cannot pass against a 1-D map.
+  A broad emitter AVERAGES the field over everything it lights — the
+  softness is physics falling out of the measurement, not a smoothing hack.
+- **A room effect COMPOSES, it never replaces.** `room_effects.compose()` is
+  called from inside `fx_seam.apply_writes` (the one write seam) and returns
+  the caller's own dict object when nothing is running, so the seam's normal
+  path is byte-identical to before the feature existed. The ticker's own
+  writes carry `room_effect: True` so they are never scaled twice.
+  `stop()` clears `running` BEFORE closing the hold — order is load-bearing,
+  or the hold's revert write would be scaled by the gain and hand the room
+  back dimmed.
+- **Holder 4 on the param watchdog** (`Deps.room_effect_holds`): per (virtual,
+  "brightness") KEY, never a global stand-down. Today `_production_gate()`
+  already skips the whole sweep while any hold is active, so this is
+  belt-and-braces in production — it is proven against a deliberately-open
+  gate, which is the shape a narrowed gate would take.
+- **Measured, not assumed** (the plan's own named risk): one tick's whole
+  seam call for two virtuals costs p50 ~11.6 ms / p95 ~15.5 ms in-process,
+  at an achieved 14.99 Hz of a 15 Hz target — `scripts/check_room_effect_wave.py`
+  reports it from the instrument.
+- **The honest bound, stated rather than hidden**: a running room effect
+  cannot outlive the hold's 3-minute ceiling. Right for a slice whose whole
+  safety story is that seam; "leave the wave on all evening" needs its own
+  lifetime story, not a bigger number.
+- Sonic parity is `room_effect_console.py` (4 ops, `domain="room"`).
+  Excluded BY NAME with reasons in its docstring: starting/stopping an
+  effect (a light-driving call — `settings_agent.py`'s whole boundary
+  argument is that none exists), running a mapping sync (needs a phone in
+  someone's hand), the axis calibration (two taps, a visual act —
+  `force_scene_*`'s own precedent), creating/deleting a ROOM.
+- Proofs: `scripts/check_light_field.py` (a fake emitter painting a known
+  region must yield that region's grid, cell by cell, on top of a
+  deliberately non-black dark room; the held-room chain dark-and-back; five
+  negative controls), `scripts/check_room_effect_wave.py` (the wave on the
+  REAL render pipeline through `fx.headless` — measured phase lag between
+  two emitters at different axis positions matched the wave's own travel to
+  0.0°, with depth-0 and speed-0 negative controls), `scripts/
+  check_mapping_capture_e2e.py` (the whole session over a real uvicorn
+  server and a real WebSocket). All three run as subprocesses from
+  `tests/test_light_field_checks.py` — **never import one into pytest**: each
+  repoints `spectra.config`'s store paths, `device_model.CATEGORIES_FILE`,
+  `fx.light_ownership.OWNERSHIP_FILE` (to "spectra owns") and the `fx_seam`
+  primitives, and leaking that into a shared interpreter is exactly how
+  another test starts passing or failing for a reason nobody can find.
+
+**A check script that renders through `fx.headless` must `os._exit()`.**
+`fx`'s `TemporalEffect` spawns non-daemon threads the frame-stepped harness
+never joins, and `FxHost.stop()` refuses ("refusing to stop the SpotFX
+process"), so a plain return leaves the interpreter alive forever — which
+reads as a hang, not a failure, and cost a real debugging cycle here. Wrap
+`asyncio.run(main())` in try/except and `os._exit(status)`.
+
 ## Per-device timing equalization + the device page (`/devices`)
 
 His ask (2026-08-28): "Different devices seem to have different network and

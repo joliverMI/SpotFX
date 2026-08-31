@@ -1590,4 +1590,100 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  {
+    id: 'room-builder',
+    title: 'Rooms — the measured light-field map',
+    keywords: 'room builder map mapping light field footprint emitter sconce axis floor ceiling calibrate camera phone photograph exposure lock where it shines',
+    intro:
+      'A room is a set of fixtures plus a MEASURED map of where each one\'s light actually lands. The map never records where the LEDs are — it records where they SHINE, photographed with everything else dark. That is why a sconce\'s spill onto the ceiling and the floor costs nothing extra: it is simply part of what that sconce lights.',
+    entries: [
+      {
+        id: 'room-builder-what',
+        title: 'What a footprint is, and what it is not',
+        keywords: 'footprint grid relative luminance weight axis profile pose meaning units lux',
+        body: [
+          'For each fixture the map stores a small picture of where its light landed — a 64×36 grid of relative brightness, as your phone camera saw it — plus that picture collapsed onto the room\'s floor-to-ceiling axis, plus one number for the total light it contributed. The thumbnails on this page are that picture, normalized to its own peak, so you can tell at a glance which fixtures are mapped and roughly what each one covers.',
+          'The numbers are RELATIVE, not lux. A phone cannot give absolute units, and effects only ever need ratios. What makes them comparable is that they were all taken from the same phone position with the exposure locked — which is why the page refuses to map at all if the camera will not lock, and why moving the phone means re-mapping.',
+          'Nothing here estimates where a strip physically is. There are no coordinates, no metres, and no room drawing — deliberately. The effects read the measurement.',
+        ],
+      },
+      {
+        id: 'room-builder-devices',
+        title: 'Choosing the fixtures',
+        keywords: 'devices chips pick select in use expansion sconce emitter granularity',
+        body: [
+          'Only the devices the room actually uses are listed, the same list and the same rule the Devices page uses; "Show all" reveals the rest. Tap a device to put it in the room.',
+          'One device is one emitter in this build. Two sconces on one wall are two emitters; the ceiling and floor between them need no fixtures of their own, because their light is already in the sconces\' footprints.',
+        ],
+      },
+      {
+        id: 'room-mapping-axis',
+        title: 'Calibrating the axis: two taps',
+        keywords: 'axis calibration floor ceiling tap vertical direction wave direction',
+        body: [
+          'Start the camera, press "Calibrate axis", then tap the picture twice: once on the floor, once on the ceiling. That is the whole calibration. It defines the direction a wave travels — position 0 at your first tap, 1 at your second — as a direction in the picture, not a height in metres.',
+          'Without it a wave still runs, using plain image height as its axis, and the page says the axis is not calibrated. Two taps are better: they let you point the axis at the wall you actually care about.',
+        ],
+      },
+      {
+        id: 'room-mapping-run',
+        title: 'Running a mapping sync — what happens to the room',
+        keywords: 'map run sync dark black white settle capture seconds held restore revert abandon refuse exposure',
+        body: [
+          'Press "Map this room" and, for each fixture in turn: the whole room goes dark for about half a second, that one fixture comes up full white for about two seconds while the camera watches, and then THE SHOW COMES BACK before the next fixture starts. About four seconds per fixture. Hold the phone still for the whole run — every footprint in a map is only comparable to the others taken from the same position.',
+          'It runs on the same held-room machinery every preview in this app uses, so the room is snapshotted before the first fixture goes dark and handed back afterwards. A dropped phone, a closed tab or a SPECTRA restart mid-run all land in that same recovery — your show comes back on its own, without anything having to be pressed.',
+          'If the camera will not lock its exposure and white balance, the run is REFUSED before a single light changes, and the message names which capability the phone is missing. That is deliberate: with auto-exposure live, every footprint would be scaled by an unknown, silently changing factor and the whole map would quietly lie. If a lock is lost part-way through, the run stops rather than finishing on a changed scale.',
+          'A fixture reported "clipped" was too bright for the camera at that exposure — its SHAPE is still good, its weight understates it. A fixture reported as adding no measurable light is either out of shot or not the fixture you thought it was.',
+        ],
+      },
+      {
+        id: 'room-mapping-privacy',
+        title: 'Privacy — the camera stays on this phone',
+        keywords: 'privacy camera video frames stored disk retention network recording microphone audio',
+        body: [
+          'No microphone is opened by this page at all — mapping needs no sound, and there is no audio code in it to switch on.',
+          'Each camera frame is reduced IN THE BROWSER to a 320×180 greyscale image and only those bytes cross the same-origin connection to SPECTRA, where they live in memory and are dropped the moment you disconnect. Nothing is sent anywhere else.',
+          'The only thing written to disk is the derived map: the footprint grids, the axis profiles, the weights and the capture context (which pose, whether the exposure was locked, when). Never a frame, never an image, never audio.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'room-effects',
+    title: 'Room effects — the Dim Wave',
+    keywords: 'room effect dim wave wavelength speed depth travelling sine brightness gain compose dimmer fixtures chips',
+    intro:
+      'A Dim Wave is a sine travelling along the room\'s floor-to-ceiling axis. Each fixture\'s brightness is that wave AVERAGED over everything the fixture actually lights, read from its measured footprint — so a wide wall sconce swells softly and a narrow one snaps, and neither needs a smoothing knob. Only fixtures that have been mapped can be driven.',
+    entries: [
+      {
+        id: 'room-effects-knobs',
+        title: 'The three knobs',
+        keywords: 'wavelength speed depth units cycles axis direction ceiling standing wave no-op',
+        body: [
+          'Wavelength is in axis units: 1.00 is one full cycle from floor to ceiling, 0.5 puts two waves in the room at once.',
+          'Speed is cycles per second, and positive travels toward the ceiling. 0 is a standing wave — each fixture simply sits at its own fixed point of the pattern, which is a good way to see what the map thinks each fixture covers.',
+          'Depth is how far the trough dips. 0 changes nothing at all — exactly nothing, not almost nothing — and 1 takes the trough to black. The crest is always the room\'s own brightness: a dim wave only ever takes light away.',
+        ],
+      },
+      {
+        id: 'room-effects-run',
+        title: 'Running one — what it does to the room',
+        keywords: 'run start stop held hold heartbeat ceiling three minutes compose dimmer show underneath watchdog write cost',
+        body: [
+          'The wave rides ON TOP of whatever the show is already doing: each fixture\'s gain multiplies onto the show\'s own brightness at the one write seam, exactly the way the room brightness dimmer does. It never fires a scene, never picks a colour, and never pauses your triggers — a Dim Wave over the fish is one button, not a scene rebuild.',
+          'While it runs the room is HELD by the same machinery every preview uses, and this page keeps a heartbeat alive. Close the tab or lose the connection and the room hands itself back on its own within about seventeen seconds. There is also a hard three-minute ceiling that no amount of heartbeating extends, so a wave left running by mistake is a brief nuisance rather than a lost evening. Leaving one on all night is not something this build does yet.',
+          'The Run panel reports the measured write cost — how long one tick actually takes and how many writes a second it is making — because "a wave ticking every fixture is more traffic than any current room mode" was a named risk, not an assumption.',
+          'The parameter watchdog is told exactly which fixtures\' brightness the wave owns while it runs, so a travelling wave is never "repaired" back to a fixed value underneath you.',
+        ],
+      },
+      {
+        id: 'room-effects-kinds',
+        title: 'Why there is only one effect here',
+        keywords: 'kinds four colour rotation implode explode not built interface future',
+        body: [
+          'The map serves four kinds of spatial effect through one calculation: this Dim Wave, a travelling colour rotation, an implosion and an explosion. Only the Dim Wave drives lights in this build — the other three exist as the interface and nothing else, which is why the map stores the whole two-dimensional footprint rather than only the up-down profile the wave needs. Building them is a separate decision, not a switch on this page.',
+        ],
+      },
+    ],
+  },
 ];

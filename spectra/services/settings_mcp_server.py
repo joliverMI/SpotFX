@@ -91,6 +91,7 @@ from mcp.server import MCPServer  # noqa: E402
 
 from spectra.services import (  # noqa: E402
     device_console,
+    room_effect_console,
     scene_console,
     settings_agent,
     settings_console,
@@ -102,6 +103,8 @@ _SceneKeyEnum = Literal[tuple(sorted(scene_console.SCENE_SETTINGS_REGISTRY))]
 _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent"]
 _JumpEnum = Literal["color_set", "dice"]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
+_RoomEffectKeyEnum = Literal[tuple(list(room_effect_console.KNOBS)
+                                   + ["name", "device_ids"])]
 
 mcp = MCPServer("settings-console")
 
@@ -321,6 +324,45 @@ async def set_device_categories(virtual_id: str, categories: list[str]) -> dict:
     list; anything omitted is removed. Every name must already exist."""
     return await _call("set_device_categories", virtual_id=virtual_id,
                        categories=categories)
+
+
+# ── room light-field effects ──────────────────────────────────────────────
+# The settable fields of the Room Effects page and nothing else: starting or
+# stopping an effect drives his fixtures and holds the room, and running a
+# mapping sync needs a phone camera — both excluded by name, see
+# spectra/services/room_effect_console.py's docstring.
+
+
+@mcp.tool()
+async def list_rooms() -> dict:
+    """Every mapped room -- its fixtures, which of them have a MEASURED light
+    footprint, and how much light each one lands. A device in `not_mapped`
+    cannot be driven by a room effect until it is mapped, which needs a phone
+    camera on the Rooms page."""
+    return await _call("list_rooms")
+
+
+@mcp.tool()
+async def list_room_effects() -> dict:
+    """Every authored room effect with its knobs' real bounds and units.
+    Only 'dim_wave' is built; the other field kinds cannot be created."""
+    return await _call("list_room_effects")
+
+
+@mcp.tool()
+async def create_room_effect(room_id: str, name: Optional[str] = None) -> dict:
+    """Create a Dim Wave on a room. Always a NEW effect with a fresh id, so
+    it can never overwrite an existing one. Does not start it."""
+    return await _call("create_room_effect", room_id=room_id, name=name)
+
+
+@mcp.tool()
+async def set_room_effect(effect_id: str, key: _RoomEffectKeyEnum, value: Any) -> dict:
+    """Set one field of a room effect: wavelength (axis units, 1.0 = one full
+    cycle floor to ceiling), speed (cycles/second, positive travels toward the
+    ceiling), depth (how far the trough dips, 0 is an exact no-op), name, or
+    device_ids (only fixtures that room has MAPPED; empty means all of them)."""
+    return await _call("set_room_effect", effect_id=effect_id, key=key, value=value)
 
 
 if __name__ == "__main__":
