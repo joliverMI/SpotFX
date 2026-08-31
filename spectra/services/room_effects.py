@@ -137,8 +137,8 @@ class RoomEffectSpec(BaseModel):
     speed: float = Field(default=0.25, ge=-4.0, le=4.0)
     #: how far the trough dips; 0.0 is an exact no-op
     depth: float = Field(default=0.6, ge=0.0, le=1.0)
-    #: which of the room's mapped emitters this effect drives; empty = all
-    device_ids: list[str] = Field(default_factory=list)
+    #: which of the room's mapped CARRIERS this effect drives; empty = all
+    carrier_ids: list[str] = Field(default_factory=list)
 
     def field(self):
         if self.kind != "dim_wave":
@@ -205,7 +205,7 @@ def delete_effect(effect_id: str, path: Optional[os.PathLike] = None) -> bool:
 class _Driven:
     """One emitter as the runner drives it: its measured samples, the
     virtuals its light comes out of, and — for a sub-device emitter — the
-    pixel ranges it occupies in them. `ranges` EMPTY is the whole-device
+    pixel ranges it occupies in them. `ranges` EMPTY is the whole-carrier
     case and the original single-scalar path."""
     emitter_id: str
     samples: Any
@@ -213,7 +213,7 @@ class _Driven:
     ranges: list[PixelRange] = field(default_factory=list)
 
     @property
-    def whole_device(self) -> bool:
+    def whole_carrier(self) -> bool:
         return not self.ranges
 
 
@@ -235,6 +235,9 @@ class _State:
     cost_s: deque = field(default_factory=lambda: deque(maxlen=COST_SAMPLES))
     last_error: str = ""
     task: Optional[asyncio.Task] = None
+    #: virtuals start() brought up because they were idle — stop() puts back
+    #: exactly these and nothing else.
+    activated: list = field(default_factory=list)
 
 
 _state = _State()
@@ -361,15 +364,36 @@ class RunnerDeps:
     #: Whether the render loop the mask is applied in is the one driving the
     #: lights. Only a masked (sub-device) run needs it.
     spectra_owns: Callable[[], bool] = _default_spectra_owns
+    #: Bring a driven virtual up / put it back. Needed for the same reason
+    #: the capture needs it: a copy-mapped carrier's ranges live on the
+    #: FIXTURE'S OWN strip, which is typically idle — and the mask
+    #: multiplies before a copy expands it, so that strip is the only
+    #: surface a wave can actually travel along
+    #: (scripts/check_copy_carrier_wave.py measured which side).
+    activate: Optional[Callable[[str], Any]] = None
+    deactivate: Optional[Callable[[str], Any]] = None
 
 
 def production_deps() -> RunnerDeps:
     from spectra.services import fx_seam
+    from spectra.services import room_mapping
+
+    async def activate(virtual_id: str) -> None:
+        await fx_seam.set_virtual_effect(
+            virtual_id, room_mapping.MAP_EFFECT_TYPE,
+            {"color": room_mapping.BLACK, "brightness": 0.0,
+             "background_brightness": 0.0})
+        await fx_seam.set_virtual_active(virtual_id, True)
+
+    async def deactivate(virtual_id: str) -> None:
+        await fx_seam.set_virtual_active(virtual_id, False)
+
     return RunnerDeps(apply_writes=fx_seam.apply_writes,
                       get_virtuals=fx_seam.get_virtuals,
                       open_hold=flare_preview_hold.open_program_hold,
                       close_hold=flare_preview_hold.close_hold,
-                      touch_hold=flare_preview_hold.touch)
+                      touch_hold=flare_preview_hold.touch,
+                      activate=activate, deactivate=deactivate)
 
 
 class RoomEffectProgram(flare_preview_hold.PreviewProgram):
@@ -397,19 +421,19 @@ class RoomEffectProgram(flare_preview_hold.PreviewProgram):
 
 def resolve_driven(room: RoomMap, spec: RoomEffectSpec) -> list[_Driven]:
     """The emitters this effect drives: those the room has actually MAPPED,
-    narrowed by the spec's DEVICE selection. An unmapped device is silently
-    absent from the result — the API reports it by name so "why is that
-    sconce not moving" is answered by the page, not by a mystery.
+    narrowed by the spec's CARRIER selection. An unmapped carrier is
+    silently absent from the result — the API reports it by name so "why is
+    that sconce not moving" is answered by the page, not by a mystery.
 
-    The selection is by device because that is what the page offers and what
-    he thinks in; a device mapped per segment contributes several emitters
-    and every one of them is driven or none is."""
-    wanted = set(spec.device_ids) if spec.device_ids else None
+    The selection is by carrier because that is what the page offers and
+    what he addresses; a carrier mapped per segment contributes several
+    emitters and every one of them is driven or none is."""
+    wanted = set(spec.carrier_ids) if spec.carrier_ids else None
     out: list[_Driven] = []
     for fp in room.footprints:
         if not fp.mapped:
             continue
-        if wanted is not None and fp.device not in wanted:
+        if wanted is not None and fp.carrier not in wanted:
             continue
         out.append(_Driven(emitter_id=fp.emitter_id,
                            samples=light_field.samples_for(fp, room.axis),
@@ -447,7 +471,7 @@ def compute_gains(driven: list[_Driven], field_fn, t: float,
         if g is None:
             continue
         g = max(0.0, min(1.0, float(g)))
-        if d.whole_device:
+        if d.whole_carrier:
             for vid in d.virtual_ids:
                 whole[vid] = whole.get(vid, 1.0) * g
             continue
@@ -482,20 +506,21 @@ def compute_gains(driven: list[_Driven], field_fn, t: float,
 async def start(room: RoomMap, spec: RoomEffectSpec,
                 deps: Optional[RunnerDeps] = None) -> dict:
     """Hold the room and start the wave. Returns a stated outcome — never a
-    silent no-op — including which of the spec's devices are not mapped."""
+    silent no-op — including which of the spec's carriers are not
+    mapped."""
     deps = deps or production_deps()
     await stop(deps)
     driven = resolve_driven(room, spec)
-    mapped_devices = set(room.mapped_devices())
-    unmapped = [d for d in (spec.device_ids or room.device_ids)
-                if d not in mapped_devices]
+    mapped_carriers = set(room.mapped_carriers())
+    unmapped = [c for c in (spec.carrier_ids or room.carrier_ids)
+                if c not in mapped_carriers]
     if not driven:
         return {"running": False,
-                "reason": ("none of the selected devices has a measured "
+                "reason": ("none of the selected carriers has a measured "
                            "footprint yet — map the room first"),
                 "unmapped": unmapped}
     virtual_ids = sorted({v for d in driven for v in d.virtual_ids})
-    ranged = [d for d in driven if not d.whole_device]
+    ranged = [d for d in driven if not d.whole_carrier]
     if ranged and not deps.spectra_owns():
         return {"running": False,
                 "reason": ("this room is mapped below whole-device "
@@ -506,6 +531,23 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
                 "unmapped": unmapped}
 
     live = await deps.get_virtuals() or {}
+    # A driven virtual that is not rendering is brought up the same way the
+    # CAPTURE brings it up, and for the same reason: a copy-mapped carrier's
+    # measured ranges live on the fixture's own strip, and that strip is the
+    # only surface a wave can travel along at all. Recorded so stop() puts
+    # back exactly what start() raised.
+    idle = [v for v in virtual_ids if not (live.get(v) or {}).get("active", True)
+            or not ((live.get(v) or {}).get("effect") or {}).get("type")]
+    _state.activated = []
+    if idle and deps.activate is not None:
+        for vid in idle:
+            try:
+                await deps.activate(vid)
+                _state.activated.append(vid)
+            except Exception:                          # noqa: BLE001
+                logger.exception("room effects: could not bring up %s", vid)
+        if _state.activated:
+            live = await deps.get_virtuals() or {}
     base: dict[str, float] = {}
     types: dict[str, str] = {}
     mask_len: dict[str, int] = {}
@@ -586,6 +628,7 @@ async def stop(deps: Optional[RunnerDeps] = None) -> dict:
     deps = deps or production_deps()
     was = _state.running
     _state.running = False
+    activated, _state.activated = list(_state.activated), []
     # Twice, deliberately. Here so the render thread stops seeing the mask
     # immediately rather than for however long cancelling the runner takes;
     # and again below because a tick already INSIDE _write_tick when the
@@ -605,7 +648,18 @@ async def stop(deps: Optional[RunnerDeps] = None) -> dict:
     _release_masks()          # see above: the runner is fully stopped now
     if deps.close_hold is not None:
         await deps.close_hold()
-    return {"stopped": bool(was)}
+    # AFTER the hold's revert, never before: the revert write goes to the
+    # virtual, so putting it back to sleep first would leave the strip
+    # holding the wave's last frame instead of the show's own state.
+    for vid in activated:
+        if deps.deactivate is None:
+            break
+        try:
+            await deps.deactivate(vid)
+        except Exception:                              # noqa: BLE001
+            logger.warning("room effects: could not put %s back to sleep",
+                           vid, exc_info=True)
+    return {"stopped": bool(was), "deactivated": activated}
 
 
 async def _run(deps: RunnerDeps) -> None:

@@ -36,13 +36,12 @@ WHAT IS STORED, per emitter (spectra/services/light_field.py derives it):
 GRANULARITY IS A PER-CAPTURE CHOICE (his own correction, 2026-08-31: "A
 single device that spans the direction of the wave should be able to show
 the effect. the tv mapper is wrapped around a tv. It should be able to run
-a dimness wave vertically"). An emitter is a whole DEVICE or a contiguous
-PIXEL RANGE of one of its virtuals; `spectra/services/emitters.py` owns the
-enumeration and the id shape, and is the binding statement for both.
+a dimness wave vertically"). An emitter is a whole CARRIER (one
+genuinely-driven virtual) or a contiguous PIXEL RANGE of it;
+`spectra/services/emitters.py` owns the enumeration and the id shape, and is
+the binding statement for both.
 
-  whole device   emitter_id == the device id, `ranges` EMPTY. Byte-identical
-                 to the first slice, so every footprint captured before
-                 sub-device granularity existed keeps working untouched.
+  whole carrier  emitter_id == the carrier id, `ranges` EMPTY.
   a pixel range  emitter_id == "tv-mapper:seg3[90-119]", `ranges` naming
                  (virtual_id, start, end) — the NEW id shape this docstring
                  always said a finer granularity would be.
@@ -69,7 +68,7 @@ import time
 import uuid
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # The stored grid. 64x36 is 16:9, matching the ~320x180 greyscale frames the
 # phone uploads: one grid cell is a 5x5 block of frame pixels, so the
@@ -155,16 +154,15 @@ class EmitterFootprint(BaseModel):
     """One emitter's measured light field. `grid` is row-major
     GRID_H x GRID_W (see module docstring); it is stored as a flat list so
     the JSON stays one line per emitter rather than 36 nested arrays."""
-    emitter_id: str                      # opaque: a device id, or a range id
+    emitter_id: str                      # opaque: a carrier id, or a range id
     label: str = ""
     virtual_ids: list[str] = Field(default_factory=list)
-    #: Which device this emitter belongs to. Empty on every footprint
-    #: captured before sub-device granularity existed, where the emitter id
-    #: WAS the device id — `device` below is the one place that is resolved,
-    #: so no stored file needed rewriting.
-    device_id: str = ""
-    #: EMPTY means the whole of every virtual in `virtual_ids` (the shipped
-    #: device-granularity shape). Otherwise the pixel ranges that were lit.
+    #: Which CARRIER (the virtual he runs effects on) this emitter belongs
+    #: to. Empty when the emitter id IS the carrier id (whole-carrier
+    #: granularity) — `carrier` below is the one place that is resolved.
+    carrier_id: str = ""
+    #: EMPTY means the whole of every virtual in `virtual_ids` (the
+    #: whole-carrier shape). Otherwise the pixel ranges that were lit.
     ranges: list[PixelRange] = Field(default_factory=list)
     grid: list[float] = Field(default_factory=list)
     axis_profile: list[float] = Field(default_factory=list)
@@ -185,25 +183,41 @@ class EmitterFootprint(BaseModel):
         return bool(self.grid) and self.weight > 0.0
 
     @property
-    def device(self) -> str:
-        """The device this footprint belongs to, for a reader that has only
-        the footprint. Old records carry no `device_id` because their
-        emitter id was the device id."""
-        return self.device_id or self.emitter_id
+    def carrier(self) -> str:
+        """The carrier this footprint belongs to, for a reader that has only
+        the footprint. A whole-carrier record carries no `carrier_id`
+        because its emitter id IS the carrier id."""
+        return self.carrier_id or self.emitter_id
 
     @property
-    def whole_device(self) -> bool:
+    def whole_carrier(self) -> bool:
         return not self.ranges
 
 
 class RoomMap(BaseModel):
-    """One room: a name, the devices it contains, its axis calibration, and
-    whatever footprints have been captured so far. A device listed in
-    `device_ids` with no footprint is simply NOT MAPPED YET — the Room
-    Builder shows that state rather than hiding it."""
+    """One room: a name, the CARRIERS it contains, its axis calibration, and
+    whatever footprints have been captured so far. A carrier listed in
+    `carrier_ids` with no footprint is simply NOT MAPPED YET — the Room
+    Builder shows that state rather than hiding it.
+
+    A CARRIER is a genuinely-driven virtual — the thing he addresses when he
+    runs an effect — not a fixture. Four of his seven fan out to several
+    fixtures (tv-mapper reaches the backlight and both sconces), so a
+    device-keyed room could not name the things he actually calibrates.
+    spectra/services/carriers.py is the binding statement for what counts as
+    one and why the picker asks that question rather than the /devices
+    page's.
+
+    MIGRATION FROM THE DEVICE-KEYED SHAPE: a stored room written before this
+    re-key carries `device_ids`, and a device id is not a carrier id — there
+    is no faithful conversion, and a footprint measured per device is not a
+    carrier's footprint either. Such a room is RESET (its membership and its
+    footprints dropped) with `migration_note` saying so, rather than
+    silently reinterpreted. His only room was minutes old when this landed;
+    a stated reset is honest where a guess would not be."""
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     name: str
-    device_ids: list[str] = Field(default_factory=list)
+    carrier_ids: list[str] = Field(default_factory=list)
     axis: AxisCalibration = Field(default_factory=AxisCalibration)
     #: The granularity the page last ran a capture at, remembered so the
     #: control comes back where he left it. NOT a global setting and NOT
@@ -213,6 +227,32 @@ class RoomMap(BaseModel):
     block_pixels: int = 30
     footprints: list[EmitterFootprint] = Field(default_factory=list)
     updated_at: float = Field(default_factory=time.time)
+    #: Set by the device->carrier migration, and read by the Rooms page so
+    #: the reset is something he is TOLD about rather than something he
+    #: discovers by finding his room empty.
+    migration_note: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_device_keyed(cls, data):
+        """A pre-re-key room arrives keyed by device. Reset it, and say so."""
+        if not isinstance(data, dict):
+            return data
+        if "device_ids" not in data or data.get("carrier_ids"):
+            data.pop("device_ids", None)
+            return data
+        legacy = list(data.pop("device_ids") or [])
+        if not legacy and not data.get("footprints"):
+            return data
+        data["carrier_ids"] = []
+        data["footprints"] = []
+        data["migration_note"] = (
+            "This room was mapped by DEVICE before rooms were keyed by the "
+            "things you actually run effects on. A device is not a carrier "
+            "and its footprints are not a carrier's, so the room was reset "
+            "rather than guessed at — pick its carriers and map it again "
+            f"(it previously held: {', '.join(legacy) or 'no devices'}).")
+        return data
 
     def footprint(self, emitter_id: str) -> Optional[EmitterFootprint]:
         for f in self.footprints:
@@ -223,29 +263,29 @@ class RoomMap(BaseModel):
     def mapped_ids(self) -> list[str]:
         return [f.emitter_id for f in self.footprints if f.mapped]
 
-    def mapped_devices(self) -> list[str]:
-        """The DEVICES with at least one mapped emitter. Distinct from
-        `mapped_ids` since a device mapped per segment contributes several
-        emitter ids and none of them is the device id."""
-        return sorted({f.device for f in self.footprints if f.mapped})
+    def mapped_carriers(self) -> list[str]:
+        """The CARRIERS with at least one mapped emitter. Distinct from
+        `mapped_ids` since a carrier mapped per segment contributes several
+        emitter ids and none of them is the carrier id."""
+        return sorted({f.carrier for f in self.footprints if f.mapped})
 
     def unmapped_ids(self) -> list[str]:
-        mapped = set(self.mapped_devices())
-        return [d for d in self.device_ids if d not in mapped]
+        mapped = set(self.mapped_carriers())
+        return [c for c in self.carrier_ids if c not in mapped]
 
-    def emitters_for_device(self, device_id: str) -> list[EmitterFootprint]:
-        return [f for f in self.footprints if f.device == device_id]
+    def emitters_for_carrier(self, carrier_id: str) -> list[EmitterFootprint]:
+        return [f for f in self.footprints if f.carrier == carrier_id]
 
-    def drop_device_footprints(self, device_id: str) -> int:
-        """Forget everything measured for one device.
+    def drop_carrier_footprints(self, carrier_id: str) -> int:
+        """Forget everything measured for one carrier.
 
-        A capture run calls this before mapping that device, so a device
+        A capture run calls this before mapping that carrier, so a carrier
         always carries footprints from exactly ONE granularity: re-mapping a
-        TV per segment must not leave last week's whole-device footprint
+        TV per segment must not leave last week's whole-carrier footprint
         beside the new ranges, where both would be driven and the fixture
         would be dimmed twice."""
         before = len(self.footprints)
-        self.footprints = [f for f in self.footprints if f.device != device_id]
+        self.footprints = [f for f in self.footprints if f.carrier != carrier_id]
         dropped = before - len(self.footprints)
         if dropped:
             self.updated_at = time.time()

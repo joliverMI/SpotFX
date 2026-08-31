@@ -104,7 +104,7 @@ _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent"]
 _JumpEnum = Literal["color_set", "dice"]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
 _RoomEffectKeyEnum = Literal[tuple(list(room_effect_console.KNOBS)
-                                   + ["name", "device_ids"])]
+                                   + ["name", "carrier_ids"])]
 
 mcp = MCPServer("settings-console")
 
@@ -361,7 +361,8 @@ async def set_room_effect(effect_id: str, key: _RoomEffectKeyEnum, value: Any) -
     """Set one field of a room effect: wavelength (axis units, 1.0 = one full
     cycle floor to ceiling), speed (cycles/second, positive travels toward the
     ceiling), depth (how far the trough dips, 0 is an exact no-op), name, or
-    device_ids (only fixtures that room has MAPPED; empty means all of them)."""
+    carrier_ids (only carriers that room has MAPPED; empty means all of
+    them)."""
     return await _call("set_room_effect", effect_id=effect_id, key=key, value=value)
 
 

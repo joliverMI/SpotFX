@@ -48,6 +48,11 @@ def _run(name: str, timeout: int) -> str:
     # the per-pixel gain MASK: a wave running ALONG one wrapped device,
     # measured on rendered pixels, with the no-mask bit-identity control
     ("check_room_effect_mask.py", 300, "ALL ROOM-EFFECT MASK CHECKS PASSED"),
+    # WHICH SIDE of a copy-mapped virtual's copy step the gain mask lands
+    # on — the question his second failed run turned on, answered on
+    # rendered device pixels rather than reasoned about
+    ("check_copy_carrier_wave.py", 180,
+     "COPY-CARRIER WAVE QUESTION ANSWERED: BEFORE THE COPY (no travel)"),
 ])
 def test_check_script_passes(name, timeout, tail):
     stdout = _run(name, timeout)

@@ -4,13 +4,15 @@
                                           mapped/not state and a small heat
                                           thumbnail (numbers, not an image)
   POST   /api/rooms                       create / update a room (name,
-                                          devices, axis calibration)
+                                          carriers, axis calibration)
   DELETE /api/rooms/{room_id}             remove a room (its footprints go
                                           with it — a map belongs to a pose,
                                           and a deleted room has no pose)
-  GET    /api/rooms/devices               the used-by-default device list,
-                                          the SAME ground truth /devices
-                                          shows (device_console + device_usage)
+  GET    /api/rooms/carriers              what the Room Builder picks from:
+                                          the genuinely-driven carriers whose
+                                          chain reaches a light-emitting
+                                          fixture (spectra/services/
+                                          carriers.py is the criterion)
   WS     /api/rooms/map/ws                the phone's capture session
   GET    /api/rooms/map/status            live session status + refusal
   GET    /api/rooms/map/frame/latest      newest tapped frame, as an 8-bit
@@ -54,7 +56,8 @@ from pydantic import BaseModel
 
 from spectra.models.room_map import AxisCalibration, RoomMap
 from spectra.services import emitters as emitters_mod
-from spectra.services import light_field, mapping_session, room_mapping
+from spectra.services import (light_field, mapping_refusals,
+                              mapping_session, room_mapping)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["spectra-rooms"])
@@ -68,7 +71,7 @@ _running: Optional[str] = None
 class RoomBody(BaseModel):
     id: Optional[str] = None
     name: str
-    device_ids: list[str] = []
+    carrier_ids: list[str] = []
     axis: Optional[AxisCalibration] = None
     granularity: Optional[str] = None
     block_pixels: Optional[int] = None
@@ -86,6 +89,7 @@ def _run_granularity(room: RoomMap, granularity: Optional[str],
                      block_pixels: Optional[int]) -> tuple[str, int]:
     g = (granularity or room.granularity or emitters_mod.DEFAULT_GRANULARITY)
     g = g.strip().lower()
+    g = emitters_mod.GRANULARITY_ALIASES.get(g, g)
     if g not in emitters_mod.GRANULARITIES:
         g = emitters_mod.DEFAULT_GRANULARITY
     try:
@@ -103,7 +107,7 @@ def _room_view(room: RoomMap) -> dict:
     for f in room.footprints:
         fps.append({
             "emitter_id": f.emitter_id, "label": f.label,
-            "device_id": f.device, "whole_device": f.whole_device,
+            "carrier_id": f.carrier, "whole_carrier": f.whole_carrier,
             "ranges": [r.model_dump() for r in f.ranges],
             "virtual_ids": f.virtual_ids, "mapped": f.mapped,
             "weight": round(f.weight, 4),
@@ -114,7 +118,7 @@ def _room_view(room: RoomMap) -> dict:
     return {**room.model_dump(exclude={"footprints"}),
             "footprints": fps,
             "mapped_ids": room.mapped_ids(),
-            "mapped_devices": room.mapped_devices(),
+            "mapped_carriers": room.mapped_carriers(),
             "unmapped_ids": room.unmapped_ids()}
 
 
@@ -126,25 +130,25 @@ async def list_rooms():
 @router.post("/rooms")
 async def upsert_room(body: RoomBody):
     """Create or update. An existing room keeps its FOOTPRINTS across an
-    edit — renaming a room or adding a device must not silently discard
-    measurements that took a dark room to collect. Removing a device DOES
+    edit — renaming a room or adding a carrier must not silently discard
+    measurements that took a dark room to collect. Removing a carrier DOES
     drop its footprint: it is no longer part of this room."""
     existing = light_field.get_room(body.id) if body.id else None
     room = existing or RoomMap(name=body.name)
     room.name = body.name
-    room.device_ids = list(dict.fromkeys(body.device_ids))
+    room.carrier_ids = list(dict.fromkeys(body.carrier_ids))
     if body.axis is not None:
         room.axis = body.axis
     if body.granularity is not None:
         room.granularity = _run_granularity(room, body.granularity, None)[0]
     if body.block_pixels is not None:
         room.block_pixels = _run_granularity(room, None, body.block_pixels)[1]
-    keep = set(room.device_ids)
-    # Matched on the footprint's DEVICE, not its emitter id: a device mapped
-    # per segment carries several emitter ids and none of them is the device
-    # id, so an emitter-id match would silently discard every measurement
-    # taken at a sub-device granularity on the next room edit.
-    room.footprints = [f for f in room.footprints if f.device in keep]
+    keep = set(room.carrier_ids)
+    # Matched on the footprint's CARRIER, not its emitter id: a carrier
+    # mapped per segment carries several emitter ids and none of them is the
+    # carrier id, so an emitter-id match would silently discard every
+    # measurement taken at a sub-device granularity on the next room edit.
+    room.footprints = [f for f in room.footprints if f.carrier in keep]
     return _room_view(light_field.put_room(room))
 
 
@@ -155,18 +159,28 @@ async def remove_room(room_id: str):
     return {"deleted": room_id}
 
 
-@router.get("/rooms/devices")
-async def room_devices():
-    """The device list the Room Builder picks from — the SAME listing the
-    devices page shows, including its `in_use` flag, so "the devices he
-    uses" means one thing in this app and is never re-derived here."""
-    from spectra.services import device_console
+@router.get("/rooms/carriers")
+async def room_carriers():
+    """What the Room Builder picks from — the CARRIERS, not the fixtures.
+
+    His words: "i want to be able to work with the devices that i directly
+    use in spectra even if they have layers of virtuals before shining."
+    A carrier is a genuinely-driven virtual whose chain reaches at least one
+    light-emitting fixture; `spectra/services/carriers.py` owns that
+    criterion and the reasoning, including why it is a different question
+    from the /devices page's `in_use` (which is unchanged and still lists
+    every fixture, dummies included).
+
+    `hidden` names the driven carriers a camera could not see, so "where is
+    radial-dummy" has an answer rather than a shrug."""
+    from spectra.services import carriers, device_console
     listing = await device_console.list_devices()
-    devices = [{"id": d["id"], "name": (d.get("config") or {}).get("name") or d["id"],
-                "type": d.get("type"), "in_use": d.get("in_use"),
-                "virtuals": d.get("virtuals") or []}
-               for d in listing.get("devices") or []]
-    return {"devices": devices, "usage": listing.get("usage"),
+    entries = listing.get("devices") or []
+    names = {d.get("id"): (d.get("config") or {}).get("name") or d.get("id")
+             for d in entries}
+    rows = [{**row, "device_names": [names.get(d, d) for d in row["devices"]]}
+            for row in carriers.carrier_rows(entries)]
+    return {"carriers": rows, "hidden": carriers.hidden_rows(entries),
             "source": listing.get("source")}
 
 
@@ -212,7 +226,7 @@ async def plan_map(room_id: str, granularity: Optional[str] = None,
     the room dark for over a minute, which is a different act from a
     two-emitter one, and he should see which he is about to press rather
     than learn it from a progress bar. It reports the granularity each
-    device actually resolves to (his "auto" default is per device) and
+    carrier actually resolves to (his "auto" default is per carrier) and
     everything the enumeration declined to split, by name."""
     room = light_field.get_room(room_id)
     if room is None:
@@ -221,12 +235,21 @@ async def plan_map(room_id: str, granularity: Optional[str] = None,
     deps = room_mapping.production_deps(None)
     try:
         scope = await room_mapping.live_virtual_ids(deps.get_virtuals)
+        plan = await room_mapping.resolve_plan(room, deps, scope, g, block)
     except Exception as exc:                           # noqa: BLE001
+        # An ownership state is an ANTICIPATED condition on this path, not a
+        # server fault: it gets its own sentence and a 409, the same one the
+        # run itself gives, so the plan and the run never describe his room
+        # differently. Anything else is still a 503 with what went wrong.
+        named = mapping_refusals.ownership_refusal(exc)
+        if named is not None:
+            return JSONResponse(status_code=409, content={
+                "detail": named, "refusal": "ownership"})
+        logger.exception("rooms: the plan read failed for %s", room_id)
         return JSONResponse(status_code=503, content={
             "detail": f"cannot read the live virtuals: {exc}"})
-    plan = await room_mapping.resolve_plan(room, deps, scope, g, block)
     body = plan.as_dict()
-    body["sub_device"] = any(not e.whole_device for e in plan.emitters)
+    body["sub_device"] = any(not e.whole_carrier for e in plan.emitters)
     body["spectra_owns"] = room_mapping.spectra_owns_lights()
     if body["sub_device"] and not body["spectra_owns"]:
         body["problems"] = list(body["problems"]) + [
@@ -263,6 +286,18 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
             result = await room_mapping.run_mapping(
                 room, room_mapping.production_deps(sess),
                 granularity=g, block_pixels=block)
+        except Exception as exc:                       # noqa: BLE001
+            # The backstop for the thing that started this: an ownership
+            # refusal reached him as a bare 500 and a stack trace, for a
+            # condition one press of the ownership bar fixes. run_mapping
+            # states these itself now; this catches any that reach the route
+            # from a seam it does not wrap, so the SENTENCE is what he sees
+            # either way. A genuine bug still 500s — it should.
+            named = mapping_refusals.ownership_refusal(exc)
+            if named is None:
+                raise
+            return JSONResponse(status_code=409, content={
+                "detail": named, "refusal": "ownership"})
         finally:
             _running = None
     # Remember the choice for the page's control only — a run always takes

@@ -287,7 +287,7 @@ def test_faint_spill_is_kept_not_floored_away():
 # ── 4. the store ──────────────────────────────────────────────────────────
 
 def test_the_store_round_trips_a_room_and_its_footprints(tmp_path):
-    room = RoomMap(name="Kitchen wall", device_ids=["sconce-l", "sconce-r"],
+    room = RoomMap(name="Kitchen wall", carrier_ids=["sconce-l", "sconce-r"],
                    axis=_axis())
     room.put_footprint(_footprint_at(0.2, 0.5, "sconce-l"))
     light_field_path = tmp_path / "maps.json"

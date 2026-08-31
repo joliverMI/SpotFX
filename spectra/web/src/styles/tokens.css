@@ -1358,6 +1358,28 @@ kbd {
 .capture-status dd.warn, .warn { color: var(--warning); }
 .refusal { overflow-wrap: anywhere; }
 
+/* THE PLAN READOUT — what this press will cost, sized to be read by
+   someone already reaching for the button. A check before the cost beats a
+   message after it: the room is about to go dark for a minute, and the two
+   facts that change which button he wants (how many pieces, how long) must
+   not be small grey text under it. The warning state colours the WHOLE
+   panel, because a one-piece map is not a smaller number — it is a
+   different outcome. */
+.plan-readout {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 10px 0 8px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface2);
+}
+.plan-readout-count { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.plan-readout-cost { font-size: 14px; color: var(--text-muted); }
+.plan-readout-note { flex-basis: 100%; font-size: 13px; }
+.plan-readout.warn-state {
+  border-color: var(--warning); background: #3a2c0e;
+}
+.plan-readout.warn-state .plan-readout-count,
+.plan-readout.warn-state .plan-readout-note { color: var(--warning); }
+.plan-readout.warn-state .plan-readout-cost { color: var(--warning); opacity: 0.85; }
+
 .run-result { margin-top: 10px; font-size: 13px; }
 .run-result ul { margin: 4px 0 0; padding-left: 18px; }
 .run-result li.warn { color: var(--warning); }

@@ -21,21 +21,27 @@ import { apiDel, apiGet, apiPost } from '../api/client';
 import { useToast } from '../components/Toast';
 
 type Room = {
-  id: string; name: string; device_ids: string[];
-  /** every EMITTER with a footprint — several per device once a strip is
-   * mapped per segment, so "is this device mapped" is `mapped_devices`. */
+  id: string; name: string; carrier_ids: string[];
+  /** every EMITTER with a footprint — several per carrier once a strip is
+   * mapped per segment, so "is this carrier mapped" is `mapped_carriers`. */
   mapped_ids: string[];
-  mapped_devices: string[];
+  mapped_carriers: string[];
 };
 type Effect = {
   id: string; room_id: string; name: string; kind: string;
-  wavelength: number; speed: number; depth: number; device_ids: string[];
+  wavelength: number; speed: number; depth: number; carrier_ids: string[];
 };
 type Status = {
   running: boolean; live: boolean; room_id: string; effect: Effect | null;
   emitters: string[]; gains: Record<string, number>; held_params: string[];
   masks: Record<string, { pixels: number; min: number; max: number }>;
   last_error: string;
+  /** The render-side mask engine's own counter. A mask whose length does not
+   * match the frame is SKIPPED (never resampled — a stretched gain is a wave
+   * at the wrong wavelength), which means that virtual is silently not being
+   * driven. It was counted here and shown nowhere until the reason sweep. */
+  mask_engine?: { skipped_length_mismatch?: number;
+                  last_mismatch?: { virtual_id: string; mask: number; frame: number } | null };
   cost: {
     samples: number; virtuals_per_tick: number; ticks: number; writes: number;
     written_per_tick: number; masked_per_tick: number;
@@ -236,17 +242,17 @@ export default function RoomEffectsPage() {
                 driven per pixel, so the wave runs ALONG it rather than dimming all of it at once.
               </p>
               <div className="device-chips">
-                {(room?.device_ids ?? []).map((d) => {
-                  const on = !effect.device_ids.length || effect.device_ids.includes(d);
-                  const mapped = (room?.mapped_devices ?? room?.mapped_ids ?? []).includes(d);
+                {(room?.carrier_ids ?? []).map((d) => {
+                  const on = !effect.carrier_ids.length || effect.carrier_ids.includes(d);
+                  const mapped = (room?.mapped_carriers ?? room?.mapped_ids ?? []).includes(d);
                   return (
                     <button key={d} className={`chip ${on ? 'on' : ''} ${mapped ? '' : 'unmapped'}`}
                             title={mapped ? undefined : 'not mapped'}
                             onClick={() => {
-                              const cur = effect.device_ids.length ? effect.device_ids : (room?.device_ids ?? []);
+                              const cur = effect.carrier_ids.length ? effect.carrier_ids : (room?.carrier_ids ?? []);
                               const next = cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d];
-                              void save({ ...effect, device_ids: next });
-                              setEffects((es) => es.map((x) => (x.id === effect.id ? { ...x, device_ids: next } : x)));
+                              void save({ ...effect, carrier_ids: next });
+                              setEffects((es) => es.map((x) => (x.id === effect.id ? { ...x, carrier_ids: next } : x)));
                             }}>
                       {d}{mapped ? '' : ' ⛔'}
                     </button>
@@ -299,6 +305,22 @@ export default function RoomEffectsPage() {
                      (${status.cost.written_per_tick} written, ${status.cost.masked_per_tick} per-pixel)`
                   : 'not measured yet'}
               </dd>
+              {status.mask_engine?.skipped_length_mismatch
+                ? (
+                  <>
+                    <dt>Masks skipped</dt>
+                    <dd className="warn small">
+                      {status.mask_engine.skipped_length_mismatch} frame(s) — a gain was the
+                      wrong length for the strip it was built for and was dropped rather than
+                      stretched, so that fixture is not being driven
+                      {status.mask_engine.last_mismatch
+                        ? ` (last: ${status.mask_engine.last_mismatch.virtual_id}, mask
+                            ${status.mask_engine.last_mismatch.mask} vs frame
+                            ${status.mask_engine.last_mismatch.frame}) — re-map it`
+                        : ''}
+                    </dd>
+                  </>
+                ) : null}
               {status.last_error && <><dt>Last error</dt><dd className="warn small">{status.last_error}</dd></>}
             </dl>
           )}

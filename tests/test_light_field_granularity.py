@@ -55,24 +55,53 @@ def _clean_masks():
 
 # ── 1. the id shape the schema always anticipated ─────────────────────────
 
-def test_device_granularity_is_byte_identical_to_the_shipped_slice():
-    """The whole point of the compatibility story: an existing map keeps
-    working because device granularity produces the SAME id it always did,
-    and no ranges."""
-    [e] = em.enumerate_device(DEVICE, [VIRTUAL], STRIP, granularity="device")
-    assert e.emitter_id == DEVICE
-    assert e.whole_device and e.ranges == []
+def test_whole_carrier_granularity_is_the_carrier_id_and_no_ranges():
+    """The coarse case: one emitter, the carrier's own id, no ranges — the
+    shape a stored footprint has when a room was mapped whole."""
+    [e] = em.enumerate_carrier(VIRTUAL, STRIP[VIRTUAL], granularity="whole")
+    assert e.emitter_id == VIRTUAL
+    assert e.whole_carrier and e.ranges == []
     assert e.virtual_ids == [VIRTUAL]
+    # "device" is the pre-carrier wire word for it, accepted from a saved
+    # room or an already-open page
+    [alias] = em.enumerate_carrier(VIRTUAL, STRIP[VIRTUAL], granularity="device")
+    assert alias.emitter_id == VIRTUAL and alias.whole_carrier
 
 
-def test_a_sub_device_emitter_id_names_its_pixel_range():
-    out = em.enumerate_device(DEVICE, [VIRTUAL], STRIP, granularity="segment")
+def test_a_sub_carrier_emitter_id_names_its_pixel_range():
+    out = em.enumerate_carrier(VIRTUAL, STRIP[VIRTUAL], granularity="segment")
     assert [e.emitter_id for e in out] == [
-        f"{DEVICE}:seg0[0-19]", f"{DEVICE}:seg1[20-39]", f"{DEVICE}:seg2[40-59]"]
+        f"{VIRTUAL}:seg0[0-19]", f"{VIRTUAL}:seg1[20-39]",
+        f"{VIRTUAL}:seg2[40-59]"]
     assert all(len(e.ranges) == 1 and e.ranges[0].virtual_id == VIRTUAL
                for e in out)
     assert [(e.ranges[0].start, e.ranges[0].end) for e in out] == [
         (0, 19), (20, 39), (40, 59)]
+    blocks = em.enumerate_carrier(VIRTUAL, STRIP[VIRTUAL], granularity="block",
+                                  block_pixels=30)
+    assert [e.emitter_id for e in blocks] == [
+        f"{VIRTUAL}:blk0[0-29]", f"{VIRTUAL}:blk1[30-59]"]
+
+
+def test_a_carrier_spans_every_fixture_it_fans_out_to():
+    """The reason the carrier is the right key: his tv-mapper reaches a
+    backlight and two sconces, and a wave along it has to run across all
+    three as ONE continuous run of pixels. A device-keyed enumeration could
+    only ever have seen the third of it one fixture backs."""
+    segments = [["tv-backlight", 0, 19, False],
+                ["sconce-kitchen-left", 0, 19, False],
+                ["sconce-kitchen-right", 0, 19, False]]
+    virtual = _virtual(pixel_count=60, segments=segments)
+    out = em.enumerate_carrier("tv-mapper", virtual, granularity="segment")
+    assert [(e.ranges[0].start, e.ranges[0].end) for e in out] == [
+        (0, 19), (20, 39), (40, 59)]
+    covered = {i for e in out for i in range(e.ranges[0].start,
+                                             e.ranges[0].end + 1)}
+    assert covered == set(range(60))
+    blocks = em.enumerate_carrier("tv-mapper", virtual, granularity="block",
+                                  block_pixels=15)
+    assert {i for e in blocks
+            for i in range(e.ranges[0].start, e.ranges[0].end + 1)} == set(range(60))
 
 
 def test_ranges_are_read_from_the_config_walk_including_gap_segments():
@@ -81,40 +110,42 @@ def test_ranges_are_read_from_the_config_walk_including_gap_segments():
     that compacted them out would address the wrong pixels."""
     segments = [[DEVICE, 0, 9, False], ["gap-x", 0, 4, False],
                 [DEVICE, 0, 9, False]]
-    virtuals = {VIRTUAL: _virtual(pixel_count=25, segments=segments)}
-    out = em.enumerate_device(DEVICE, [VIRTUAL], virtuals, granularity="segment")
-    assert [(e.ranges[0].start, e.ranges[0].end) for e in out] == [(0, 9), (15, 24)]
+    virtual = _virtual(pixel_count=25, segments=segments)
+    out = em.enumerate_carrier(VIRTUAL, virtual, granularity="segment")
+    assert [(e.ranges[0].start, e.ranges[0].end) for e in out] == [
+        (0, 9), (10, 14), (15, 24)]
 
 
 def test_an_unsplittable_virtual_is_reported_not_silently_mismapped():
-    copied = {VIRTUAL: _virtual(mapping="copy")}
-    [e] = em.enumerate_device(DEVICE, [VIRTUAL], copied, granularity="segment")
-    assert e.whole_device and "copies" in e.note
+    copied = _virtual(mapping="copy")
+    [e] = em.enumerate_carrier(VIRTUAL, copied, granularity="segment")
+    assert e.whole_carrier and "copies" in e.note
 
 
-def test_auto_is_per_device_never_a_global():
+def test_auto_is_per_carrier_never_a_global():
     """His 'default segment for strips, device for Hue' — resolved at
-    enumeration time, per device, from what that device can actually do."""
-    assert em.resolve_granularity("auto", "wled", STRIP) == "segment"
-    bulb = {"h": _virtual(pixel_count=1, segments=[["hue-bulb", 0, 0, False]])}
-    assert em.resolve_granularity("auto", "hue", bulb) == "device"
-    assert em.resolve_granularity("auto", "", bulb) == "device"
+    enumeration time, per carrier, from what that carrier can actually do
+    and whether its whole chain is single lamps."""
+    assert em.resolve_granularity("auto", STRIP[VIRTUAL]) == "segment"
+    bulb = _virtual(pixel_count=1, segments=[["hue-bulb", 0, 0, False]])
+    assert em.resolve_granularity("auto", bulb, point=True) == "whole"
+    assert em.resolve_granularity("auto", bulb) == "whole"
     # an explicit choice is never overridden by auto's own reasoning
-    assert em.resolve_granularity("block", "hue", bulb) == "block"
+    assert em.resolve_granularity("block", bulb, point=True) == "block"
     # and an unknown value off the wire falls back rather than raising
-    assert em.resolve_granularity("nonsense", "wled", STRIP) == "segment"
+    assert em.resolve_granularity("nonsense", STRIP[VIRTUAL]) == "segment"
 
 
 def test_block_granularity_puts_the_remainder_in_the_last_block():
-    out = em.enumerate_device(DEVICE, [VIRTUAL], STRIP, granularity="block",
-                              block_pixels=25)
+    out = em.enumerate_carrier(VIRTUAL, STRIP[VIRTUAL], granularity="block",
+                               block_pixels=25)
     assert [(e.ranges[0].start, e.ranges[0].end) for e in out] == [(0, 24), (25, 59)]
 
 
 def test_ranges_are_in_effect_pixel_space_when_grouping_is_on():
-    grouped = {VIRTUAL: _virtual(grouping=2)}
-    assert em.effective_pixel_count(grouped[VIRTUAL]) == 30
-    out = em.enumerate_device(DEVICE, [VIRTUAL], grouped, granularity="segment")
+    grouped = _virtual(grouping=2)
+    assert em.effective_pixel_count(grouped) == 30
+    out = em.enumerate_carrier(VIRTUAL, grouped, granularity="segment")
     assert [(e.ranges[0].start, e.ranges[0].end) for e in out] == [
         (0, 9), (10, 19), (20, 29)]
 
@@ -122,52 +153,63 @@ def test_ranges_are_in_effect_pixel_space_when_grouping_is_on():
 def test_a_run_is_capped_and_says_so():
     big = {VIRTUAL: _virtual(pixel_count=4000,
                              segments=[[DEVICE, 0, 3999, False]])}
-    plan = em.plan_run([DEVICE], big, {DEVICE: [VIRTUAL]}, {DEVICE: "wled"},
+    plan = em.plan_run([VIRTUAL], big, {VIRTUAL: [{"id": DEVICE, "type": "wled"}]},
                        granularity="block", block_pixels=1)
     assert plan.truncated
     assert len(plan.emitters) == em.MAX_EMITTERS_PER_RUN
     assert any("past the" in p for p in plan.problems)
 
 
-def test_a_device_with_no_live_virtual_is_named_not_dropped_silently():
-    plan = em.plan_run([DEVICE], {}, {DEVICE: [VIRTUAL]}, {DEVICE: "wled"})
+def test_a_carrier_with_no_live_virtual_is_named_not_dropped_silently():
+    plan = em.plan_run([VIRTUAL], {}, {VIRTUAL: [{"id": DEVICE, "type": "wled"}]})
     assert plan.emitters == []
-    assert any(DEVICE in p and "rendering" in p for p in plan.problems)
+    assert any(VIRTUAL in p and "rendering" in p for p in plan.problems)
+
+
+def test_a_carrier_whose_chain_emits_nothing_is_skipped_and_named():
+    """The run's backstop for a room saved before the picker filtered, or a
+    chain re-wired since. Skipped, and SAID."""
+    plan = em.plan_run([VIRTUAL], STRIP,
+                       {VIRTUAL: [{"id": "radial-dummy", "type": "dummy"}]})
+    assert plan.emitters == []
+    said = [p for p in plan.problems if p.startswith(f"{VIRTUAL}:")]
+    assert len(said) == 1
+    assert "emits light" in said[0] and "skipped" in said[0]
 
 
 # ── 2. the map schema, forwards and backwards ─────────────────────────────
 
-def _fp(emitter_id, device_id="", ranges=()):
-    return EmitterFootprint(emitter_id=emitter_id, device_id=device_id,
+def _fp(emitter_id, carrier_id="", ranges=()):
+    return EmitterFootprint(emitter_id=emitter_id, carrier_id=carrier_id,
                             ranges=list(ranges), grid=[0.0] * (GRID_W * GRID_H),
                             weight=1.0)
 
 
-def test_an_old_footprint_still_names_its_device():
-    """Nothing on disk was rewritten: a footprint captured before
-    sub-device granularity existed carries no `device_id`, and its emitter
-    id WAS the device id."""
-    fp = _fp(DEVICE)
-    assert fp.device == DEVICE and fp.whole_device
+def test_a_whole_carrier_footprint_names_itself():
+    """A whole-carrier footprint carries no `carrier_id` because its emitter
+    id IS the carrier id — `carrier` is the one place that resolves."""
+    fp = _fp(VIRTUAL)
+    assert fp.carrier == VIRTUAL and fp.whole_carrier
 
 
-def test_a_device_mapped_per_segment_reads_as_mapped():
-    room = RoomMap(name="R", device_ids=[DEVICE], axis=AXIS)
+def test_a_carrier_mapped_per_segment_reads_as_mapped():
+    room = RoomMap(name="R", carrier_ids=[VIRTUAL], axis=AXIS)
     for i in range(3):
-        room.put_footprint(_fp(f"{DEVICE}:seg{i}[0-9]", DEVICE,
+        room.put_footprint(_fp(f"{VIRTUAL}:seg{i}[0-9]", VIRTUAL,
                                [PixelRange(virtual_id=VIRTUAL, start=0, end=9)]))
-    assert room.mapped_devices() == [DEVICE]
+    assert room.mapped_carriers() == [VIRTUAL]
     assert room.unmapped_ids() == []
     assert len(room.mapped_ids()) == 3
 
 
-def test_remapping_a_device_drops_its_old_granularity_first():
-    """A device carries footprints from exactly ONE granularity, or the room
-    effect would drive the whole fixture AND its parts and dim it twice."""
-    room = RoomMap(name="R", device_ids=[DEVICE, "other"], axis=AXIS)
-    room.put_footprint(_fp(DEVICE))
+def test_remapping_a_carrier_drops_its_old_granularity_first():
+    """A carrier carries footprints from exactly ONE granularity, or the
+    room effect would drive the whole fixture AND its parts and dim it
+    twice."""
+    room = RoomMap(name="R", carrier_ids=[VIRTUAL, "other"], axis=AXIS)
+    room.put_footprint(_fp(VIRTUAL))
     room.put_footprint(_fp("other"))
-    assert room.drop_device_footprints(DEVICE) == 1
+    assert room.drop_carrier_footprints(VIRTUAL) == 1
     assert [f.emitter_id for f in room.footprints] == ["other"]
 
 
@@ -203,7 +245,7 @@ def _driven(emitter_id, lo, hi, ranges):
     y0 = int(round((1.0 - hi) * GRID_H))
     y1 = max(y0 + 1, int(round((1.0 - lo) * GRID_H)))
     grid[y0:y1, :] = 1.0
-    fp = EmitterFootprint(emitter_id=emitter_id, device_id=DEVICE,
+    fp = EmitterFootprint(emitter_id=emitter_id, carrier_id=DEVICE,
                           virtual_ids=[VIRTUAL], ranges=list(ranges),
                           grid=[float(v) for v in grid.reshape(-1)],
                           weight=float(grid.sum()))
@@ -304,43 +346,43 @@ def test_a_room_remembers_the_granularity_control_without_it_becoming_a_setting(
     that is what "per capture, never a global" means here."""
     with _client() as client:
         room = client.post("/api/rooms", json={
-            "name": "Living room", "device_ids": [DEVICE], "axis": AXIS_BODY,
+            "name": "Living room", "carrier_ids": [VIRTUAL], "axis": AXIS_BODY,
         }).json()
         assert room["granularity"] == "auto" and room["block_pixels"] == 30
         saved = client.post("/api/rooms", json={
-            "id": room["id"], "name": "Living room", "device_ids": [DEVICE],
+            "id": room["id"], "name": "Living room", "carrier_ids": [VIRTUAL],
             "granularity": "block", "block_pixels": 12,
         }).json()
         assert saved["granularity"] == "block" and saved["block_pixels"] == 12
         # an unknown value off the wire falls back rather than 500ing
         bad = client.post("/api/rooms", json={
-            "id": room["id"], "name": "Living room", "device_ids": [DEVICE],
+            "id": room["id"], "name": "Living room", "carrier_ids": [VIRTUAL],
             "granularity": "nonsense",
         }).json()
         assert bad["granularity"] == "auto"
 
 
-def test_editing_a_room_keeps_a_sub_device_mapped_devices_footprints():
-    """The room edit prunes footprints by DEVICE. Matching on emitter id
+def test_editing_a_room_keeps_a_sub_carrier_mapped_footprints():
+    """The room edit prunes footprints by CARRIER. Matching on emitter id
     would silently discard every measurement taken at a sub-device
     granularity the next time he renamed the room."""
     from spectra.services import light_field
     with _client() as client:
         room = client.post("/api/rooms", json={
-            "name": "Living room", "device_ids": [DEVICE], "axis": AXIS_BODY,
+            "name": "Living room", "carrier_ids": [VIRTUAL], "axis": AXIS_BODY,
         }).json()
         stored = light_field.get_room(room["id"])
         stored.put_footprint(EmitterFootprint(
-            emitter_id=f"{DEVICE}:seg0[0-19]", device_id=DEVICE,
+            emitter_id=f"{VIRTUAL}:seg0[0-19]", carrier_id=VIRTUAL,
             ranges=[PixelRange(virtual_id=VIRTUAL, start=0, end=19)],
             grid=[1.0] * (GRID_W * GRID_H), weight=1.0))
         light_field.put_room(stored)
         renamed = client.post("/api/rooms", json={
-            "id": room["id"], "name": "The lounge", "device_ids": [DEVICE],
+            "id": room["id"], "name": "The lounge", "carrier_ids": [VIRTUAL],
         }).json()
         assert [f["emitter_id"] for f in renamed["footprints"]] == [
-            f"{DEVICE}:seg0[0-19]"]
-        assert renamed["mapped_devices"] == [DEVICE]
+            f"{VIRTUAL}:seg0[0-19]"]
+        assert renamed["mapped_carriers"] == [VIRTUAL]
         assert renamed["unmapped_ids"] == []
         assert renamed["footprints"][0]["ranges"] == [
             {"virtual_id": VIRTUAL, "start": 0, "end": 19}]
@@ -352,32 +394,28 @@ def test_the_plan_route_is_a_read_and_touches_no_light(monkeypatch):
     async def fake_get_virtuals():
         return {VIRTUAL: _virtual()}
 
-    async def fake_virtuals_for_device(device_id):
-        return [VIRTUAL] if device_id == DEVICE else []
-
-    async def fake_device_type(_device_id):
-        return "wled"
+    async def fake_carrier_devices():
+        return {VIRTUAL: [{"id": DEVICE, "type": "wled"}]}
 
     def fake_deps(session):
         return room_mapping.RunDeps(
             session=session, get_virtuals=fake_get_virtuals,
-            virtuals_for_device=fake_virtuals_for_device,
-            device_type=fake_device_type)
+            carrier_devices=fake_carrier_devices)
 
     monkeypatch.setattr(room_mapping, "production_deps", fake_deps)
     monkeypatch.setattr(room_mapping, "spectra_owns_lights", lambda: True)
     with _client() as client:
         room = client.post("/api/rooms", json={
-            "name": "Living room", "device_ids": [DEVICE], "axis": AXIS_BODY,
+            "name": "Living room", "carrier_ids": [VIRTUAL], "axis": AXIS_BODY,
         }).json()
         plan = client.get(f"/api/rooms/{room['id']}/plan"
                           "?granularity=segment&block_pixels=30").json()
         assert plan["count"] == 3 and plan["sub_device"] is True
-        assert plan["per_device"] == {DEVICE: "segment"}
+        assert plan["per_carrier"] == {VIRTUAL: "segment"}
         assert plan["estimated_seconds"] > 0
         assert [e["emitter_id"] for e in plan["emitters"]] == [
-            f"{DEVICE}:seg0[0-19]", f"{DEVICE}:seg1[20-39]",
-            f"{DEVICE}:seg2[40-59]"]
+            f"{VIRTUAL}:seg0[0-19]", f"{VIRTUAL}:seg1[20-39]",
+            f"{VIRTUAL}:seg2[40-59]"]
         whole = client.get(f"/api/rooms/{room['id']}/plan"
                            "?granularity=device").json()
         assert whole["count"] == 1 and whole["sub_device"] is False
@@ -391,19 +429,19 @@ def test_the_plan_names_the_ownership_problem_rather_than_hiding_it(monkeypatch)
     async def fake_get_virtuals():
         return {VIRTUAL: _virtual()}
 
-    async def fake_virtuals_for_device(device_id):
-        return [VIRTUAL] if device_id == DEVICE else []
+    async def fake_carrier_devices():
+        return {VIRTUAL: [{"id": DEVICE, "type": "wled"}]}
 
     def fake_deps(session):
         return room_mapping.RunDeps(
             session=session, get_virtuals=fake_get_virtuals,
-            virtuals_for_device=fake_virtuals_for_device)
+            carrier_devices=fake_carrier_devices)
 
     monkeypatch.setattr(room_mapping, "production_deps", fake_deps)
     monkeypatch.setattr(room_mapping, "spectra_owns_lights", lambda: False)
     with _client() as client:
         room = client.post("/api/rooms", json={
-            "name": "Living room", "device_ids": [DEVICE], "axis": AXIS_BODY,
+            "name": "Living room", "carrier_ids": [VIRTUAL], "axis": AXIS_BODY,
         }).json()
         plan = client.get(f"/api/rooms/{room['id']}/plan"
                           "?granularity=block&block_pixels=10").json()
