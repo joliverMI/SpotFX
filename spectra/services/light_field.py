@@ -81,6 +81,24 @@ FRAME_H = GRID_H * 5      # 180
 #: real mapped emitters measure in the tens to hundreds). A small named
 #: number, deliberately not a tuned one.
 UNSEEN_WEIGHT = 1.0
+#: A footprint whose weight is under this FRACTION of the strongest
+#: footprint in the same room is WHISPER SIGNAL: real, but so far under its
+#: neighbours that its shape is mostly noise magnified by normalization.
+#:
+#: THE LESSON THIS ENCODES (2026-08-31): `thumbnail()` normalizes each
+#: footprint to ITS OWN peak, so a footprint carrying almost no light wears
+#: a perfectly convincing heat picture — the view is blind to the very
+#: magnitude it normalized away. His whole first map read like that, because
+#: the fixture was at 10% firmware brightness. A normalized view must
+#: therefore never be shown without its weight beside it, and a footprint
+#: this far under its peers has to SAY it is faint.
+#:
+#: A FRACTION, deliberately not an absolute number: a footprint is relative
+#: luminance in one camera's own scale (spectra/models/room_map.py), and the
+#: ONLY comparison the model permits is against other footprints from the
+#: same pose and the same locked exposure. An absolute threshold would be a
+#: number tuned to one phone.
+FAINT_FRACTION = 0.05
 #: A camera byte at or above this reads as clipped — the footprint's shape
 #: survives, its weight understates the fixture. Reported, never corrected.
 SATURATION_LEVEL = 254
@@ -354,11 +372,36 @@ def delete_room(room_id: str, path: Optional[os.PathLike] = None) -> bool:
     return True
 
 
+def faint_ids(room: RoomMap) -> list[str]:
+    """The mapped emitters whose weight is whisper signal against the
+    strongest footprint in the SAME room — the only comparison a relative
+    measurement allows. Never a bare number: see FAINT_FRACTION.
+
+    Reported so a normalized thumbnail can never pass as a good measurement
+    on its own. Not an error and not unseen: the light IS there, and a room
+    whose fixture was turned down is still a real map — it is just measuring
+    the dimmer more than the room, which is a thing to be told."""
+    weights = [f.weight for f in room.footprints if f.mapped]
+    if not weights:
+        return []
+    peak = max(weights)
+    if peak <= 0.0:
+        return []
+    return [f.emitter_id for f in room.footprints
+            if f.mapped and f.weight < peak * FAINT_FRACTION]
+
+
 def thumbnail(footprint: EmitterFootprint, w: int = 16, h: int = 9) -> list[list[float]]:
     """A tiny normalized heat grid for the Room Builder's "mapped vs not"
     thumbnails — normalized to its OWN peak, because a thumbnail answers
     "what shape is this footprint", never "how bright is this fixture"
-    (that is `weight`, shown as its own number)."""
+    (that is `weight`, shown as its own number).
+
+    THAT SPLIT IS LOAD-BEARING AND WAS ALMOST A TRAP: normalizing to its own
+    peak means a footprint carrying a hundredth of the light of its
+    neighbour renders just as confidently. A thumbnail must therefore NEVER
+    be shown without its weight beside it, and `faint_ids` above is what
+    names the ones whose shape should not be trusted alone."""
     grid = np.asarray(footprint.grid, dtype=np.float64)
     if grid.size != GRID_W * GRID_H:
         return []

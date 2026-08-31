@@ -75,7 +75,8 @@ from spectra.models.room_map import CaptureContext, PixelRange, RoomMap
 from spectra.models.scene import (SceneColorAssignment, SceneDeviceConfig,
                                   SceneV2)
 from spectra.services import emitters as emitters_mod
-from spectra.services import flare_preview_hold, light_field, mapping_refusals
+from spectra.services import (fixture_brightness, flare_preview_hold,
+                              light_field, mapping_refusals)
 from spectra.services.emitters import Emitter
 
 logger = logging.getLogger(__name__)
@@ -105,12 +106,45 @@ DARK_SETTLE_S = 0.7
 DARK_CAPTURE_S = 0.5
 LIT_SETTLE_S = 0.7
 LIT_CAPTURE_S = 1.5
+#: The settles are the two numbers a quality level would move (a slower run
+#: buys a cleaner reference), so they are per-run arguments with bounds
+#: rather than constants a caller edits. The defaults above are unchanged,
+#: so an omitted override runs exactly the protocol that shipped.
+MIN_SETTLE_S = 0.1
+MAX_SETTLE_S = 10.0
+#: THE WEIGHT-ZERO RETRY (his own design, 2026-08-31). An emitter measured
+#: at ~zero gets ONE more capture later in the same run with a dark settle
+#: this many times longer, before it is recorded unseen.
+#:
+#: THE DATA BEHIND IT: the zero blocks in his first real map are SCATTERED
+#: (blocks 2, 3, 5, 8 and 11, with SEEN neighbours either side) — not the
+#: contiguous far side of a wrap, which is what "outside the frame" would
+#: look like. A scattered zero next to a seen neighbour is far better
+#: explained by the PREVIOUS emitter's WLED fade still dying away into this
+#: emitter's dark reference: the reference comes out too bright, the
+#: difference clips to nothing, and the emitter reads as invisible. A longer
+#: dark settle is exactly the discriminating measurement — it removes that
+#: one explanation and nothing else. Whichever way the retry lands, the
+#: answer is now measured rather than assumed.
+RETRY_DARK_SETTLE_X = 3.0
 #: The hold's heartbeat window for a run. A run drives its own holds
 #: synchronously and closes each one itself, so this only has to outlast a
 #: single emitter's ~3.5 s; if the run dies mid-emitter the sweep reverts
 #: within this + flare_preview_hold.SWEEP_INTERVAL_S with nothing else
 #: needing to have run.
 HOLD_HEARTBEAT_S = 20.0
+def clamp_settle(value, default: float) -> float:
+    """A caller's settle override, bounded. Anything unusable falls back to
+    the shipped default rather than refusing a run over a stray number."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if v != v:                                          # NaN
+        return default
+    return max(MIN_SETTLE_S, min(MAX_SETTLE_S, v))
+
+
 #: Frames the average must actually have. Below this the emitter is reported
 #: unmapped WITH ITS REASON — never a footprint built from one frame.
 MIN_FRAMES = 2
@@ -211,6 +245,11 @@ class EmitterResult:
     #: the room as a footprint-less record so "never ran" and "ran, not in
     #: shot" stop looking identical. `reason` carries the sentence.
     unseen: bool = False
+    #: This emitter was measured TWICE — once in plan order, once again with
+    #: an extended dark settle after its first capture came out at ~zero.
+    #: True on the retry's own result whichever way it landed, so "it was
+    #: given a second chance" is visible rather than inferred.
+    retried: bool = False
     weight: float = 0.0
     dark_frames: int = 0
     lit_frames: int = 0
@@ -231,6 +270,11 @@ class MappingResult:
     seconds: float = 0.0
     granularity: str = emitters_mod.DEFAULT_GRANULARITY
     block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS
+    #: The settles this run actually used, after bounding — reported, so a
+    #: map taken at a slower quality level says so rather than looking like
+    #: every other one.
+    dark_settle_s: float = DARK_SETTLE_S
+    lit_settle_s: float = LIT_SETTLE_S
     #: the granularity each carrier ACTUALLY got, after "auto" resolved
     per_carrier: dict = field(default_factory=dict)
     #: everything the enumeration declined to do, named rather than hidden
@@ -264,8 +308,23 @@ class MappingResult:
         return sum(1 for e in self.emitters if e.unseen)
 
     @property
+    def retried_count(self) -> int:
+        return sum(1 for e in self.emitters if e.retried)
+
+    @property
+    def recovered_count(self) -> int:
+        """Emitters that measured ~zero first time and MAPPED on the retry —
+        the count that says whether the extended dark settle is doing real
+        work, which is the whole reason the retry is a measurement and not a
+        guess."""
+        return sum(1 for e in self.emitters if e.retried and e.mapped)
+
+    @property
     def summary(self) -> str:
         parts = [f"{self.mapped_count} mapped"]
+        if self.recovered_count:
+            parts.append(f"{self.recovered_count} of them on a second, "
+                         f"slower look")
         if self.unseen_count:
             parts.append(f"{self.unseen_count} unseen from this pose")
         failed = sum(1 for e in self.emitters if not e.mapped and not e.unseen)
@@ -277,6 +336,10 @@ class MappingResult:
         return {"room_id": self.room_id, "ok": self.ok, "reason": self.reason,
                 "mapped_count": self.mapped_count,
                 "unseen_count": self.unseen_count, "summary": self.summary,
+                "retried_count": self.retried_count,
+                "recovered_count": self.recovered_count,
+                "dark_settle_s": self.dark_settle_s,
+                "lit_settle_s": self.lit_settle_s,
                 "pose_id": self.pose_id, "seconds": round(self.seconds, 2),
                 "granularity": self.granularity,
                 "block_pixels": self.block_pixels,
@@ -288,6 +351,10 @@ class MappingResult:
 
 async def _no_carrier_devices() -> dict:
     return {}
+
+
+async def _no_fixture_devices() -> list:
+    return []
 
 
 def spectra_owns_lights() -> bool:
@@ -324,6 +391,12 @@ class RunDeps:
     #: run that has to light a fixture's own idle strip uses these.
     activate: Callable[[str], Any] = None              # type: ignore[assignment]
     deactivate: Callable[[str], Any] = None            # type: ignore[assignment]
+    #: The LIVE driver objects for this room's fixtures, which is the only
+    #: thing that can be asked its firmware brightness (a config entry
+    #: cannot — see spectra/services/fixture_brightness.py). Defaults to
+    #: none, which makes the whole brightness guard a stated no-op rather
+    #: than a crash on a rig that has no driver layer.
+    fixture_devices: Callable[[], Any] = _no_fixture_devices
 
 
 def production_deps(session) -> RunDeps:
@@ -354,10 +427,21 @@ def production_deps(session) -> RunDeps:
     async def deactivate(virtual_id: str) -> None:
         await fx_seam.set_virtual_active(virtual_id, False)
 
+    async def fixture_devices() -> list:
+        # The live driver objects, not the config: only a driver that has
+        # resolved its destination carries the WLED helper this reads
+        # through (fx/devices/wled.py builds `.wled` at activation).
+        from spectra.services.live_host import live
+        host = getattr(live, "host", None)
+        if host is None:
+            return []
+        return list(host.devices.values())
+
     return RunDeps(session=session,
                    get_virtuals=fx_seam.get_virtuals,
                    carrier_devices=carrier_devices,
                    activate=activate, deactivate=deactivate,
+                   fixture_devices=fixture_devices,
                    save_room=light_field.put_room)
 
 
@@ -419,7 +503,50 @@ async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
                                  block_pixels=block_pixels)
     if chain_failure:
         plan.problems.insert(0, chain_failure)
+    # BEFORE THE COST: each fixture's own firmware brightness, read while
+    # the room is still lit and nothing has been spent. A turned-down
+    # fixture scales everything it emits, so a map taken like that measures
+    # the dimmer — his first map's weights came out about ten times too
+    # small for exactly this reason, and nothing told him.
+    readings, devices = await fixture_readings(plan, chains, deps)
+    plan.brightness = [r.as_dict() for r in readings]
+    warning = fixture_brightness.warning_for(readings)
+    if warning:
+        plan.warnings.insert(0, warning)
+    for r in readings:
+        if r.state == "unreadable":
+            plan.problems.append(r.reason)
     return plan
+
+
+async def _chains(deps: RunDeps) -> dict:
+    try:
+        return await deps.carrier_devices() or {}
+    except Exception:                                  # noqa: BLE001
+        return {}
+
+
+async def fixture_readings(plan, chains: dict, deps: RunDeps):
+    """(readings, live driver objects) for the fixtures THIS plan will
+    light — never the whole house, so a lamp in another room is neither
+    read nor turned up.
+
+    Resolved through the carrier->devices chain the plan already uses, so
+    there is no second idea anywhere of which fixtures a run touches."""
+    wanted = set()
+    for e in plan.emitters:
+        for d in chains.get(e.carrier_id, []) or []:
+            if d.get("id"):
+                wanted.add(str(d["id"]))
+    if not wanted:
+        return [], []
+    try:
+        devices = [d for d in (await deps.fixture_devices() or [])
+                   if str(getattr(d, "id", "") or "") in wanted]
+    except Exception as exc:                           # noqa: BLE001
+        logger.info("room mapping: no driver layer to read brightness: %s", exc)
+        return [], []
+    return await fixture_brightness.read_all(devices), devices
 
 
 async def activate_for_capture(plan, scope: list[str], deps: RunDeps
@@ -489,7 +616,9 @@ async def deactivate_after_capture(activated: list[str],
 
 async def run_mapping(room: RoomMap, deps: RunDeps, *,
                       granularity: str = emitters_mod.DEFAULT_GRANULARITY,
-                      block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS
+                      block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS,
+                      dark_settle_s: Optional[float] = None,
+                      lit_settle_s: Optional[float] = None,
                       ) -> MappingResult:
     """Map every emitter in `room` at the chosen granularity, one short
     held-room hold each.
@@ -506,9 +635,12 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     the write would fail at the seam half-way through a dark room."""
     started = deps.clock()
     sess = deps.session
+    dark_settle = clamp_settle(dark_settle_s, DARK_SETTLE_S)
+    lit_settle = clamp_settle(lit_settle_s, LIT_SETTLE_S)
     result = MappingResult(room_id=room.id, ok=False,
                            pose_id=getattr(sess, "pose_id", ""),
-                           granularity=granularity, block_pixels=block_pixels)
+                           granularity=granularity, block_pixels=block_pixels,
+                           dark_settle_s=dark_settle, lit_settle_s=lit_settle)
     refusal = sess.refusal()
     if refusal:
         result.reason = refusal
@@ -578,7 +710,21 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
             f"Brought up {', '.join(activated)} for the capture and put "
             f"{'it' if len(activated) == 1 else 'them'} back afterwards.")
     try:
-        await _capture_all(room, plan, scope, deps, result)
+        # OWN THE FIXTURE'S OWN BRIGHTNESS for the capture and give his level
+        # back — including if the chain below raises. The plan already read
+        # it (and warned); this is the acting half. A fixture already at
+        # full, or one that could not be read, is never touched.
+        readings = [fixture_brightness.FixtureBrightness(**{
+            "device_id": b["device_id"], "state": b["state"],
+            "value": b["value"], "reason": b["reason"]})
+            for b in (getattr(plan, "brightness", None) or [])]
+        _, fixtures = await fixture_readings(plan, await _chains(deps), deps)
+        async with fixture_brightness.owned(fixtures, readings) as owned:
+            await _capture_all(room, plan, scope, deps, result,
+                               dark_settle, lit_settle)
+        if owned.note:
+            result.notes.append(owned.note)
+        result.problems.extend(owned.problems)
     finally:
         left_on = await deactivate_after_capture(activated, deps)
         if left_on:
@@ -606,25 +752,78 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
 
 
 async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
-                       result: "MappingResult") -> None:
-    """The emitter chain itself — one short hold each, in plan order."""
+                       result: "MappingResult", dark_settle: float,
+                       lit_settle: float) -> None:
+    """The emitter chain — one short hold each, in plan order — followed by
+    ONE retry pass over whatever measured ~zero, with an extended dark
+    settle.
+
+    WHY THE RETRY IS A SECOND PASS AND NOT AN IMMEDIATE RE-TAKE: the
+    suspected cause is the PREVIOUS emitter's fade bleeding into this
+    emitter's dark reference, so retrying on the spot would re-measure with
+    the same contamination still arriving. Coming back later, after other
+    emitters have been through, puts real time between the two attempts —
+    and the extended settle removes the remaining bleed on top of that.
+
+    ONE retry, never a loop: a second failure is an answer ("this pose
+    cannot see it"), not a reason to keep the room dark longer."""
+    stopped = await _capture_pass(room, plan.emitters, scope, deps, result,
+                                  dark_settle, lit_settle)
+    if stopped:
+        return
+    retry = [e for e in plan.emitters
+             if any(r.emitter_id == e.emitter_id and r.unseen
+                    for r in result.emitters)]
+    if not retry:
+        return
+    logger.info("room mapping: %d emitter(s) measured ~zero; one retry with "
+                "a %.1fx dark settle", len(retry), RETRY_DARK_SETTLE_X)
+    # SAID, not silent: the run is now longer than the plan's estimate, and
+    # a piece that ends up mapped was mapped on a second look. Both are
+    # things he would otherwise have to infer from a clock.
+    result.notes.append(
+        f"{len(retry)} piece{'' if len(retry) == 1 else 's'} measured no "
+        f"light first time, so {'it was' if len(retry) == 1 else 'they were'} "
+        f"looked at once more with the room left dark "
+        f"{RETRY_DARK_SETTLE_X:g}x as long — that adds about "
+        f"{len(retry) * (DARK_CAPTURE_S + LIT_CAPTURE_S + lit_settle + dark_settle * RETRY_DARK_SETTLE_X):.0f}s "
+        f"to this run.")
+    await _capture_pass(room, retry, scope, deps, result,
+                        dark_settle * RETRY_DARK_SETTLE_X, lit_settle,
+                        retry_pass=True)
+
+
+async def _capture_pass(room: RoomMap, emitters, scope: list[str],
+                        deps: RunDeps, result: "MappingResult",
+                        dark_settle: float, lit_settle: float, *,
+                        retry_pass: bool = False) -> bool:
+    """One sweep over `emitters`, one short hold each. Returns True when the
+    run STOPPED (abort, ownership loss, hold ceiling) — a stopped run never
+    goes on to a retry pass, since every retry would be refused identically.
+
+    On the retry pass an emitter's result REPLACES its first one rather than
+    being appended: an emitter measured twice is still one emitter, and a
+    duplicate row would double it in every count."""
     sess = deps.session
-    for emitter in plan.emitters:
+    for emitter in emitters:
         if sess.run_abort:
             result.reason = sess.run_abort
-            break
+            return True
         t0 = deps.clock()
         in_scope = [v for v in emitter.virtual_ids if v in set(scope)]
         if not in_scope:
-            result.emitters.append(EmitterResult(
+            _record(result, EmitterResult(
                 emitter.emitter_id, False,
                 "no virtual of this emitter is rendering right now — nothing "
                 "to light, so nothing to photograph",
+                retried=retry_pass,
                 carrier_id=emitter.carrier_id, label=emitter.label))
             continue
         lost = ""
         try:
-            outcome = await _map_one(room, emitter, scope, in_scope, deps)
+            outcome = await _map_one(room, emitter, scope, in_scope, deps,
+                                     dark_settle, lit_settle,
+                                     retry_pass=retry_pass)
         except Exception as exc:                       # noqa: BLE001
             if mapping_refusals.ownership_refusal(exc) is not None:
                 # He released the room (or a handover started) mid-run. That
@@ -636,6 +835,7 @@ async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
                             emitter.emitter_id)
                 lost = mapping_refusals.MID_RUN_LOSS
                 outcome = EmitterResult(emitter.emitter_id, False, lost,
+                                        retried=retry_pass,
                                         carrier_id=emitter.carrier_id,
                                         label=emitter.label)
             else:
@@ -645,6 +845,7 @@ async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
                     emitter.emitter_id, False,
                     mapping_refusals.capture_refusal(
                         emitter.label or emitter.emitter_id, exc),
+                    retried=retry_pass,
                     carrier_id=emitter.carrier_id, label=emitter.label)
         finally:
             # The chain: every emitter's hold is released before the next
@@ -659,18 +860,30 @@ async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
                                "failed; the hold sweep owns it from here",
                                emitter.emitter_id, exc_info=True)
         outcome.seconds = round(deps.clock() - t0, 2)
-        result.emitters.append(outcome)
+        _record(result, outcome)
         if lost:
             result.reason = lost
             result.refusal = "ownership"
-            break
+            return True
         if outcome.reason == mapping_refusals.HOLD_CEILING:
             # The ceiling is not this emitter's problem, it is the run's:
             # every remaining emitter would be refused identically, and a
             # column of the same sentence reads as a broken instrument.
             result.reason = outcome.reason
             result.refusal = "hold_ceiling"
-            break
+            return True
+    return False
+
+
+def _record(result: "MappingResult", outcome: EmitterResult) -> None:
+    """One row per emitter, however many times it was measured. The retry
+    pass overwrites IN PLACE (keeping plan order), so every count on the
+    result reads emitters, not attempts."""
+    for i, existing in enumerate(result.emitters):
+        if existing.emitter_id == outcome.emitter_id:
+            result.emitters[i] = outcome
+            return
+    result.emitters.append(outcome)
 
 
 async def _persist(room: RoomMap, deps: RunDeps) -> None:
@@ -684,7 +897,9 @@ async def _persist(room: RoomMap, deps: RunDeps) -> None:
 
 
 async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
-                   lit_vids: list[str], deps: RunDeps) -> EmitterResult:
+                   lit_vids: list[str], deps: RunDeps, dark_settle: float,
+                   lit_settle: float, *,
+                   retry_pass: bool = False) -> EmitterResult:
     sess = deps.session
     ranges = [r for r in emitter.ranges if r.virtual_id in set(lit_vids)]
     program = MappingProgram(scope, lit_vids, ranges)
@@ -696,17 +911,19 @@ async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
             emitter.emitter_id, False,
             mapping_refusals.hold_refusal(
                 str((held or {}).get("reason") or "no writes")),
+            retried=retry_pass,
             carrier_id=emitter.carrier_id, label=emitter.label)
-    await deps.sleep(DARK_SETTLE_S)
+    await deps.sleep(dark_settle)
     dark_grids, _dark_max = await sess.gather(DARK_CAPTURE_S, min_frames=MIN_FRAMES)
 
     await deps.open_hold(program, 1.0, step="lit",
                          heartbeat_timeout_s=HOLD_HEARTBEAT_S)
-    await deps.sleep(LIT_SETTLE_S)
+    await deps.sleep(lit_settle)
     lit_grids, lit_max = await sess.gather(LIT_CAPTURE_S, min_frames=MIN_FRAMES)
 
     if sess.run_abort:
         return EmitterResult(emitter.emitter_id, False, sess.run_abort,
+                             retried=retry_pass,
                              dark_frames=len(dark_grids), lit_frames=len(lit_grids),
                              carrier_id=emitter.carrier_id, label=emitter.label)
     if len(dark_grids) < MIN_FRAMES or len(lit_grids) < MIN_FRAMES:
@@ -715,6 +932,7 @@ async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
             f"not enough frames arrived ({len(dark_grids)} dark, "
             f"{len(lit_grids)} lit; each needs {MIN_FRAMES}) — is the camera "
             f"running and the phone still connected?",
+            retried=retry_pass,
             dark_frames=len(dark_grids), lit_frames=len(lit_grids),
             carrier_id=emitter.carrier_id, label=emitter.label)
 
@@ -744,24 +962,29 @@ async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
         # first real map: 22 ran, 14 stored, 8 vanished). Not an error — a
         # second pose can see it — so nothing here is worded as one.
         note = mapping_refusals.unseen_note(
-            emitter.label or emitter.emitter_id, getattr(sess, "pose_id", ""))
+            emitter.label or emitter.emitter_id, getattr(sess, "pose_id", ""),
+            retried=retry_pass)
         footprint.grid = []
         footprint.axis_profile = []
         footprint.unseen = True
+        footprint.retried = retry_pass
         footprint.note = note
         room.put_footprint(footprint)
         await _persist(room, deps)
         return EmitterResult(
-            emitter.emitter_id, False, note, unseen=True,
+            emitter.emitter_id, False, note, unseen=True, retried=retry_pass,
             weight=round(footprint.weight, 4),
             dark_frames=len(dark_grids), lit_frames=len(lit_grids),
             saturated_fraction=footprint.capture.saturated_fraction,
             carrier_id=emitter.carrier_id, label=emitter.label,
             ranges=[r.model_dump() for r in ranges])
 
+    footprint.retried = retry_pass
+    # A retry that FOUND light replaces this emitter's unseen record — the
+    # store never keeps both readings of one emitter.
     room.put_footprint(footprint)
     await _persist(room, deps)
-    return EmitterResult(emitter.emitter_id, True, "",
+    return EmitterResult(emitter.emitter_id, True, "", retried=retry_pass,
                          weight=round(footprint.weight, 4),
                          dark_frames=len(dark_grids), lit_frames=len(lit_grids),
                          saturated_fraction=footprint.capture.saturated_fraction,

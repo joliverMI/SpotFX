@@ -186,6 +186,11 @@ class EmitterFootprint(BaseModel):
     #: `axis_profile` are empty here, so every reader that already gates on
     #: `mapped` skips it exactly as it skipped the absence.
     unseen: bool = False
+    #: This emitter was measured TWICE in one run — the second time with an
+    #: extended dark settle, after the first came out at ~zero. True on a
+    #: MAPPED record too (the retry recovered it), which is what makes the
+    #: retry a measurement rather than a guess.
+    retried: bool = False
     #: The sentence for whatever this record's state needs saying — today
     #: only the unseen one (spectra/services/mapping_refusals.unseen_note).
     note: str = ""

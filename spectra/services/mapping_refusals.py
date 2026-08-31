@@ -93,7 +93,8 @@ def capture_refusal(emitter_label: str, exc: BaseException) -> str:
             f"powered and reachable, then map it again on its own.")
 
 
-def unseen_note(emitter_label: str, pose_id: str = "") -> str:
+def unseen_note(emitter_label: str, pose_id: str = "", *,
+                retried: bool = False) -> str:
     """A FACT, not a refusal and not a warning: this emitter ran and the
     camera saw none of its light from where the phone was standing.
 
@@ -102,8 +103,25 @@ def unseen_note(emitter_label: str, pose_id: str = "") -> str:
     blocks, sconce spill outside the frame — simply vanished from the store.
     The physics was right; the record was silent. The wording is deliberately
     neutral: a second pose can see this emitter later, so nothing here says
-    anything went wrong."""
+    anything went wrong.
+
+    `retried` distinguishes the two findings, and they are genuinely
+    different: a plain unseen is one measurement, while a retried one has
+    also had the leading alternative explanation — the previous emitter's
+    fade bleeding into this one's dark reference — removed by a second
+    capture with a much longer dark settle. Saying so is the difference
+    between "we did not see it" and "we looked twice, properly"."""
     where = f" (pose {pose_id})" if pose_id else ""
+    if retried:
+        # The retry ALREADY ruled out the leading alternative explanation (a
+        # neighbour's fade contaminating the dark reference), so this
+        # sentence can say what the plain one only guessed at.
+        return (f"No light seen from this pose{where}, retried with an "
+                f"extended settle: {emitter_label} was measured twice, the "
+                f"second time with the room left dark three times as long, "
+                f"and landed at nothing both times. Its light really is "
+                f"outside this shot — photograph the room from somewhere "
+                f"that can see it, and this piece fills in.")
     return (f"No light seen from this pose{where}: {emitter_label} was lit "
             f"and the camera measured nothing from it. Its light is most "
             f"likely outside the frame — photograph the room from somewhere "

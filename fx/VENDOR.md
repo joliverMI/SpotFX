@@ -737,6 +737,27 @@ variables named `ledfx` (the core object handle) are untouched.
     `scripts/check_light_field_granularity.py` section one, on the real
     render pipeline. Not in the fork source at `/home/javi/ledfx-src`.
 
+27. `utils.py`: `WLED.set_brightness` FIXED and `WLED.get_brightness` ADDED
+    — the fixture's MASTER (firmware) brightness, json/state's `bri`, which
+    scales everything the fixture emits INCLUDING a realtime stream.
+    THE LIVE FINDING THAT NEEDED IT (2026-08-31): his fixture sat at ~10%
+    firmware brightness through a whole mapping run, so every footprint in
+    the stored map came out ~10x dim — the map was measuring his dimmer, not
+    his room, and nothing said so. A mapping run now reads this at plan time
+    (warns before the room ever goes dark), takes it to full for the
+    capture, and puts his own level back afterwards
+    (`spectra/services/fixture_brightness.py`).
+    Upstream's `set_brightness` had NO caller anywhere in the fork and was
+    broken three ways — a double `max` that forced every input to 255 (so a
+    "restore" would silently set full), a form-encoded body where the JSON
+    API needs JSON, and a leading slash producing `http://ip//json/state`.
+    Fixed in place rather than reimplemented in `spectra/`, because this is
+    the device transport and a second WLED call living in spectra/ is the
+    drift `release_realtime` (deviation above) already avoided. The reader
+    is new: a run that turns a fixture up has to know what to put back.
+    Evidence: `scripts/check_fixture_brightness.py`,
+    `tests/test_fixture_brightness.py`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

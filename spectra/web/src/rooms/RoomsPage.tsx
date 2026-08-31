@@ -45,6 +45,10 @@ type Footprint = {
   unseen: boolean;
   note: string;
   weight: number;
+  /** Whisper signal against the strongest footprint in the SAME room. A
+   * thumbnail is normalised to its own peak, so it cannot show this. */
+  faint?: boolean;
+  weight_share?: number;
   axis_profile: number[];
   thumbnail: number[][];
   capture: Record<string, unknown>;
@@ -61,6 +65,8 @@ type Room = {
   mapped_carriers: string[];
   unmapped_ids: string[];
   unseen_ids?: string[];
+  faint_ids?: string[];
+  peak_weight?: number;
 };
 type PlanEmitter = {
   emitter_id: string; carrier_id: string; label: string;
@@ -71,6 +77,7 @@ type RunPlan = {
   estimated_seconds: number; truncated: boolean; problems: string[];
   warnings?: string[]; notes?: string[];
   per_carrier: Record<string, string>; emitters: PlanEmitter[];
+  brightness?: { device_id: string; state: string; value: number | null; percent: number | null; low: boolean; reason: string }[];
   sub_device: boolean; spectra_owns: boolean;
 };
 type CarrierRow = { id: string; devices: string[]; device_names: string[]; device_types: string[] };
@@ -460,7 +467,8 @@ export default function RoomsPage() {
                             <HeatThumbnail
                               grid={fp?.thumbnail ?? []}
                               title={fp?.unseen ? 'no light seen from this pose'
-                                : fp ? `weight ${fp.weight.toFixed(1)}` : 'not mapped'}
+                                : fp ? `weight ${fp.weight.toFixed(2)}${fp.faint ? ' — faint' : ''}`
+                                : 'not mapped'}
                             />
                             <div className="emitter-meta">
                               <strong>
@@ -475,7 +483,23 @@ export default function RoomsPage() {
                                 </span>
                               ) : fp?.mapped ? (
                                 <>
-                                  <span className="muted small">weight {fp.weight.toFixed(1)}</span>
+                                  {/* The thumbnail above is normalised to its
+                                    * OWN peak, so it looks equally convincing
+                                    * however little light it holds. The weight
+                                    * is the magnitude it normalised away, and
+                                    * it is never shown without it. */}
+                                  <span className="muted small">
+                                    weight {fp.weight < 10 ? fp.weight.toFixed(2) : fp.weight.toFixed(1)}
+                                    {typeof fp.weight_share === 'number' && room.peak_weight
+                                      ? ` · ${Math.round(fp.weight_share * 100)}% of this room's brightest`
+                                      : ''}
+                                  </span>
+                                  {fp.faint && (
+                                    <span className="warn small">
+                                      ⚠ faint — this shape is mostly noise magnified by the
+                                      thumbnail. Check the fixture is not turned down, and map again.
+                                    </span>
+                                  )}
                                   {Number(fp.capture.saturated_fraction) > 0.02 && (
                                     <span className="warn small">
                                       ⚠ {(Number(fp.capture.saturated_fraction) * 100).toFixed(0)}% of frames clipped —

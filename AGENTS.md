@@ -3450,7 +3450,58 @@ and the id shape. Five things to know:
   such by the Rooms page. **The wording is a FACT, not a warning**
   (`mapping_refusals.unseen_note`): a second pose can see the piece later,
   so nothing about it reads as an error and no retry machinery exists.
+  SECONDARY HARDENING, never the fix: an emitter measuring ~zero gets ONE
+  automatic re-capture later in the same run with a `RETRY_DARK_SETTLE_X`
+  (3x) dark settle, and the note then distinguishes the two findings. It was
+  built when a neighbour's fade contaminating the next dark reference was
+  the leading hypothesis; that was RETIRED in favour of the firmware
+  brightness above, and the retry ships as cheap insurance against a
+  genuinely contaminated reference, not as an explanation of anything.
+  `dark_settle_s`/`lit_settle_s` are per-run, bounded body params
+  (`clamp_settle`) — groundwork for quality levels, defaults unchanged.
   Spec: `tests/test_mapping_unseen_emitter.py`.
+- **A MAP TAKEN AT 10% FIRMWARE BRIGHTNESS MEASURES THE DIMMER, NOT THE ROOM**
+  (2026-08-31, PR fm/mapping-unseen-emitter-note; the captain's verdict on
+  his first real map). Every footprint in it came out ~10x dim — five blocks
+  at 0.1 or less, i.e. the unseen threshold's own tail — because his fixture
+  sat at ten percent FIRMWARE brightness (WLED's `bri`, which scales
+  everything the fixture emits including a realtime stream) for the whole
+  run, and nothing said so. **`spectra/services/fixture_brightness.py` is
+  the binding statement.** Two acts, deliberately separate: the PLAN reads
+  it and warns loudly BEFORE the cost (a warning after a four-minute dark
+  run has arrived too late to act on — `mapping_refusals.one_piece_warning`'s
+  own discipline), and the CAPTURE takes each fixture to full and puts HIS
+  level back, restore in a `finally` so it survives the failure path — the
+  own-the-flag pattern `activate_for_capture` already uses. A non-WLED
+  fixture is `not_applicable` and a fixture that would not answer is
+  `unreadable`; NEITHER is ever given a fabricated 255, because a made-up
+  full reading makes an unguarded fixture look guarded. **The vendored
+  `WLED.set_brightness` had to be fixed first** (`fx/VENDOR.md` #27): it had
+  no caller anywhere in the fork and forced every input to 255 via a double
+  `max`, so a RESTORE would have silently set full. Spec:
+  `tests/test_fixture_brightness.py`.
+- **A NORMALISED THUMBNAIL IS BLIND TO THE MAGNITUDE IT NORMALISED AWAY.**
+  `light_field.thumbnail` scales each footprint to its OWN peak, so one
+  holding a hundredth of its neighbour's light draws an equally convincing
+  shape — which is how a whole 10%-brightness map looked fine. A thumbnail
+  is therefore NEVER shown without its weight beside it, and
+  `light_field.faint_ids` names the footprints under `FAINT_FRACTION` (5%)
+  of the strongest in the SAME room. A FRACTION, not an absolute number:
+  a footprint is relative luminance in one camera's scale, and the only
+  comparison the model permits is within one pose.
+- **THE DEVICE LAYER OVERWRITES, IT NEVER BLENDS** — established
+  2026-08-31 when a second active virtual on one fixture was suspected of
+  attenuating a substituted capture. `fx/devices/__init__.py`'s
+  `Device.update_pixels` scatters every active virtual's segments into ONE
+  shared `self._pixels` with no alpha or priority, and `assemble_frame`
+  returns it unchanged (its own docstring says merging "will eventually" be
+  handled). So overlapping writes are LAST WRITE WINS between the
+  per-virtual render threads (`fx/virtuals.py::Virtual.activate`) —
+  order-dependent, full-or-nothing, and therefore incapable of producing a
+  steady fractional dimming. That ruled it out as the dim-map cause; it is
+  still a real property worth knowing before lighting one virtual while a
+  neighbour covers the same pixels. Proof:
+  `tests/test_device_output_composition.py`.
 - **A REASON THAT NEVER REACHES A HUMAN IS A SILENT FAILURE — worse, it
   lets us believe we handled the case** (the captain's ruling, same
   commit). `Emitter.note` was written correctly and died in the
