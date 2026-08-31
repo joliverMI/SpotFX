@@ -574,23 +574,39 @@ export default function RoomsPage() {
             </span>
           </div>
 
-          <button
-            className="primary"
-            disabled={!room || !cameraOn || busy || !!refusal || !room.carrier_ids.length}
-            onClick={() => void mapRoom()}
-          >
-            {busy ? 'Mapping…' : 'Map this room'}
-          </button>
+          {/* THE PLAN READOUT, ABOVE the button and sized to be read by
+            * someone already reaching for it. A CHECK BEFORE THE COST BEATS
+            * A MESSAGE AFTER IT: pressing this takes his room dark for up to
+            * a minute, and the two facts that decide which button he wants —
+            * how many pieces, how long — cannot be small grey text he passes
+            * on the way past. A one-piece map for a multi-pixel strip is not
+            * a smaller number but a DIFFERENT OUTCOME (no wave can travel
+            * along it), so the whole panel goes to the warning state, colour
+            * and sentence together, rather than reporting "1" quietly. */}
           {plan ? (
-            <p className="muted small">
-              {plan.count} emitter{plan.count === 1 ? '' : 's'} — the room goes dark for about{' '}
-              {Math.round(plan.estimated_seconds)} seconds.
-              {plan.sub_device && !plan.spectra_owns
-                ? ' SPECTRA is not driving the lights, so this run would be refused.'
-                : ''}
-              {' '}Hold the phone still: every footprint in a map is only comparable to the others
-              taken from the same position.
-            </p>
+            <div className={`plan-readout${plan.warnings?.length ? ' warn-state' : ''}`}>
+              <span className="plan-readout-count">
+                {plan.count} piece{plan.count === 1 ? '' : 's'}
+              </span>
+              <span className="plan-readout-cost">
+                dark for about {Math.round(plan.estimated_seconds)}s
+              </span>
+              {plan.warnings?.length ? (
+                plan.warnings.map((w) => (
+                  <span key={w} className="plan-readout-note">⚠ {w}</span>
+                ))
+              ) : (
+                <span className="plan-readout-note muted">
+                  Hold the phone still: every footprint in a map is only comparable to the
+                  others taken from the same position.
+                </span>
+              )}
+              {plan.sub_device && !plan.spectra_owns && (
+                <span className="plan-readout-note warn">
+                  SPECTRA is not driving the lights, so this run would be refused.
+                </span>
+              )}
+            </div>
           ) : (
             <p className="muted small">
               The room goes dark for about {Math.max(1, (room?.carrier_ids.length ?? 1) * 4)} seconds.
@@ -598,15 +614,14 @@ export default function RoomsPage() {
               from the same position.
             </p>
           )}
-          {/* A WARNING is not a problem: the run will happen and its map is
-            * worth keeping — it just cannot show a wave travelling. Said
-            * BEFORE the room goes dark, in full size, because it changes
-            * which button he wants to press. */}
-          {plan?.warnings?.length ? (
-            <ul className="warn">
-              {plan.warnings.map((w) => <li key={w}>{w}</li>)}
-            </ul>
-          ) : null}
+
+          <button
+            className="primary"
+            disabled={!room || !cameraOn || busy || !!refusal || !room.carrier_ids.length}
+            onClick={() => void mapRoom()}
+          >
+            {busy ? 'Mapping…' : 'Map this room'}
+          </button>
           {plan?.problems?.length ? (
             <ul className="warn small">
               {plan.problems.map((p) => <li key={p}>{p}</li>)}
