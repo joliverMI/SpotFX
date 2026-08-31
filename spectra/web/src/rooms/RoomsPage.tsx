@@ -324,7 +324,11 @@ export default function RoomsPage() {
             >
               <span className="room-row-name">{r.name}</span>
               <span className="muted">
-                {r.mapped_ids.length}/{r.device_ids.length} mapped
+                {/* DEVICES, not emitters: a strip mapped per segment carries
+                  * several emitter ids, and "3/1 mapped" would read as a bug. */}
+                {(r.mapped_devices ?? r.mapped_ids).length}/{r.device_ids.length} mapped
+                {r.mapped_ids.length > (r.mapped_devices ?? r.mapped_ids).length
+                  ? ` · ${r.mapped_ids.length} emitters` : ''}
               </span>
             </button>
           ))}
