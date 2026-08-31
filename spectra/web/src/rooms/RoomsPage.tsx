@@ -79,6 +79,7 @@ type RunResult = {
   ok: boolean; reason: string; seconds: number; emitters: EmitterResult[];
   granularity: string; block_pixels: number;
   per_carrier: Record<string, string>; problems: string[]; room?: Room;
+  refusal?: string; partial?: boolean;
 };
 
 const EMPTY_AXIS = { kind: 'vertical', floor: null, ceiling: null };
@@ -113,6 +114,11 @@ export default function RoomsPage() {
   const clientRef = useRef<MappingClient | null>(null);
   const [lock, setLock] = useState<LockState | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /** A REFUSAL SENTENCE from the mapping route, shown where the run's own
+   * result lands rather than as a toast: "the lights are released, take the
+   * room back" is an instruction, and an instruction that scrolls away in
+   * three seconds is not one. */
+  const [mapRefusal, setMapRefusal] = useState<string | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [frames, setFrames] = useState(0);
   const [tapping, setTapping] = useState<'floor' | 'ceiling' | null>(null);
@@ -291,16 +297,25 @@ export default function RoomsPage() {
     if (!room) return;
     setBusy(true);
     setRun(null);
+    setMapRefusal(null);
     try {
       const result = await apiPost<RunResult>(`/rooms/${room.id}/map`, {
         granularity, block_pixels: blockPixels,
       });
       setRun(result);
+      if (result.reason && !result.ok) setMapRefusal(result.reason);
       if (result.room) setRooms((rs) => rs.map((r) => (r.id === result.room!.id ? result.room! : r)));
-      toast(result.ok ? `Mapped ${result.emitters.filter((e) => e.mapped).length} emitter(s) in ${result.seconds}s`
-                      : result.reason, result.ok ? 'success' : 'error');
+      const mapped = result.emitters.filter((e) => e.mapped).length;
+      if (result.ok) toast(`Mapped ${mapped} emitter(s) in ${result.seconds}s`, 'success');
+      else if (result.partial) toast(`Stopped after ${mapped} emitter(s) — the reason is on the page`, 'error');
+      else toast('Mapping was refused — the reason is on the page', 'error');
     } catch (err) {
-      toast(String(err), 'error');
+      // A named refusal arrives as `detail` on a 409 and client.ts folds it
+      // into the Error message; show the sentence itself, never the code.
+      const text = String(err);
+      const named = text.includes(': ') ? text.slice(text.indexOf(': ') + 2) : text;
+      setMapRefusal(named);
+      toast('Mapping was refused — the reason is on the page', 'error');
     } finally {
       setBusy(false);
     }
@@ -588,10 +603,16 @@ export default function RoomsPage() {
             </ul>
           ) : null}
 
+          {mapRefusal && !run && (
+            <div className="run-result">
+              <strong>Refused</strong>
+              <p className="warn">{mapRefusal}</p>
+            </div>
+          )}
           {run && (
             <div className="run-result">
-              <strong>{run.ok ? 'Mapped' : 'Refused'}</strong>
-              {run.reason && <p className="warn small">{run.reason}</p>}
+              <strong>{run.ok ? 'Mapped' : run.partial ? 'Stopped part-way' : 'Refused'}</strong>
+              {run.reason && !run.ok && <p className="warn">{run.reason}</p>}
               <ul>
                 {run.emitters.map((e) => (
                   <li key={e.emitter_id} className={e.mapped ? 'ok' : 'warn'}>

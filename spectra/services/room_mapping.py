@@ -75,7 +75,7 @@ from spectra.models.room_map import CaptureContext, PixelRange, RoomMap
 from spectra.models.scene import (SceneColorAssignment, SceneDeviceConfig,
                                   SceneV2)
 from spectra.services import emitters as emitters_mod
-from spectra.services import flare_preview_hold, light_field
+from spectra.services import flare_preview_hold, light_field, mapping_refusals
 from spectra.services.emitters import Emitter
 
 logger = logging.getLogger(__name__)
@@ -230,6 +230,14 @@ class MappingResult:
     per_carrier: dict = field(default_factory=dict)
     #: everything the enumeration declined to do, named rather than hidden
     problems: list[str] = field(default_factory=list)
+    #: WHICH named refusal ended this run, when one did ("ownership",
+    #: "hold_ceiling", "aborted"). The page needs the sentence, not this —
+    #: it exists so a caller can act on the KIND without matching prose.
+    refusal: str = ""
+    #: True when a refusal ended the run but footprints were kept — "some of
+    #: it landed" is a different thing from both success and failure, and
+    #: the page says which.
+    partial: bool = False
 
     def as_dict(self) -> dict:
         return {"room_id": self.room_id, "ok": self.ok, "reason": self.reason,
@@ -237,6 +245,7 @@ class MappingResult:
                 "granularity": self.granularity,
                 "block_pixels": self.block_pixels,
                 "per_carrier": self.per_carrier, "problems": self.problems,
+                "refusal": self.refusal, "partial": self.partial,
                 "emitters": [e.__dict__ for e in self.emitters]}
 
 
@@ -368,13 +377,32 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
         return result
     sess.run_abort = None
 
-    scope = await live_virtual_ids(deps.get_virtuals)
+    try:
+        scope = await live_virtual_ids(deps.get_virtuals)
+    except Exception as exc:                           # noqa: BLE001
+        # An ownership state is EXPECTED here (his room is one press from
+        # released) and gets its own sentence; anything else is a real bug
+        # and still raises, because inventing a sentence for it would lie.
+        named = mapping_refusals.ownership_refusal(exc)
+        if named is None:
+            raise
+        result.reason = named
+        result.refusal = "ownership"
+        return result
     if not scope:
         result.reason = ("no virtual is rendering anything right now — is "
                          "SPECTRA driving the room?")
         return result
 
-    plan = await resolve_plan(room, deps, scope, granularity, block_pixels)
+    try:
+        plan = await resolve_plan(room, deps, scope, granularity, block_pixels)
+    except Exception as exc:                           # noqa: BLE001
+        named = mapping_refusals.ownership_refusal(exc)
+        if named is None:
+            raise
+        result.reason = named
+        result.refusal = "ownership"
+        return result
     result.per_carrier = dict(plan.per_carrier)
     result.problems = list(plan.problems)
     if not plan.emitters:
@@ -411,24 +439,64 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
                 "to light, so nothing to photograph",
                 carrier_id=emitter.carrier_id, label=emitter.label))
             continue
+        lost = ""
         try:
             outcome = await _map_one(room, emitter, scope, in_scope, deps)
         except Exception as exc:                       # noqa: BLE001
-            logger.exception("room mapping: emitter %s failed", emitter.emitter_id)
-            outcome = EmitterResult(emitter.emitter_id, False,
-                                    f"capture failed: {exc}",
-                                    carrier_id=emitter.carrier_id,
-                                    label=emitter.label)
+            if mapping_refusals.ownership_refusal(exc) is not None:
+                # He released the room (or a handover started) mid-run. That
+                # ends the run with a STATED partial — every later emitter
+                # would fail identically, and a stack of identical failures
+                # reads as a broken instrument rather than a room that
+                # changed hands.
+                logger.info("room mapping: ownership lost mid-run at %s",
+                            emitter.emitter_id)
+                lost = mapping_refusals.MID_RUN_LOSS
+                outcome = EmitterResult(emitter.emitter_id, False, lost,
+                                        carrier_id=emitter.carrier_id,
+                                        label=emitter.label)
+            else:
+                logger.exception("room mapping: emitter %s failed",
+                                 emitter.emitter_id)
+                outcome = EmitterResult(
+                    emitter.emitter_id, False,
+                    mapping_refusals.capture_refusal(
+                        emitter.label or emitter.emitter_id, exc),
+                    carrier_id=emitter.carrier_id, label=emitter.label)
         finally:
             # The chain: every emitter's hold is released before the next
-            # one opens, whatever happened inside it.
-            await deps.close_hold()
+            # one opens, whatever happened inside it — INCLUDING a room that
+            # just changed hands, where the revert write itself is refused.
+            # The hold's own sweep reverts what it can; letting this raise
+            # would turn a stated partial back into a 500.
+            try:
+                await deps.close_hold()
+            except Exception:                          # noqa: BLE001
+                logger.warning("room mapping: releasing the hold after %s "
+                               "failed; the hold sweep owns it from here",
+                               emitter.emitter_id, exc_info=True)
         outcome.seconds = round(deps.clock() - t0, 2)
         result.emitters.append(outcome)
+        if lost:
+            result.reason = lost
+            result.refusal = "ownership"
+            break
+        if outcome.reason == mapping_refusals.HOLD_CEILING:
+            # The ceiling is not this emitter's problem, it is the run's:
+            # every remaining emitter would be refused identically, and a
+            # column of the same sentence reads as a broken instrument.
+            result.reason = outcome.reason
+            result.refusal = "hold_ceiling"
+            break
 
     result.seconds = deps.clock() - started
     mapped = [e for e in result.emitters if e.mapped]
-    result.ok = bool(mapped) and not sess.run_abort
+    result.partial = bool(mapped) and bool(result.refusal or sess.run_abort)
+    # A run that STOPPED is never "ok", however much it managed first — but
+    # what it managed is kept, and `partial` is how the page says both.
+    result.ok = bool(mapped) and not sess.run_abort and not result.refusal
+    if sess.run_abort and not result.refusal:
+        result.refusal = "aborted"
     if not result.reason and not mapped:
         result.reason = "no emitter produced a footprint — see each one's reason"
     return result
@@ -443,10 +511,11 @@ async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
     held = await deps.open_hold(program, 1.0, step="dark",
                                 heartbeat_timeout_s=HOLD_HEARTBEAT_S)
     if not (held or {}).get("held"):
-        return EmitterResult(emitter.emitter_id, False,
-                             f"the room could not be held: "
-                             f"{(held or {}).get('reason') or 'no writes'}",
-                             carrier_id=emitter.carrier_id, label=emitter.label)
+        return EmitterResult(
+            emitter.emitter_id, False,
+            mapping_refusals.hold_refusal(
+                str((held or {}).get("reason") or "no writes")),
+            carrier_id=emitter.carrier_id, label=emitter.label)
     await deps.sleep(DARK_SETTLE_S)
     dark_grids, _dark_max = await sess.gather(DARK_CAPTURE_S, min_frames=MIN_FRAMES)
 

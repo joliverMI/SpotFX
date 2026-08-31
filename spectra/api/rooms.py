@@ -56,7 +56,8 @@ from pydantic import BaseModel
 
 from spectra.models.room_map import AxisCalibration, RoomMap
 from spectra.services import emitters as emitters_mod
-from spectra.services import light_field, mapping_session, room_mapping
+from spectra.services import (light_field, mapping_refusals,
+                              mapping_session, room_mapping)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["spectra-rooms"])
@@ -234,10 +235,19 @@ async def plan_map(room_id: str, granularity: Optional[str] = None,
     deps = room_mapping.production_deps(None)
     try:
         scope = await room_mapping.live_virtual_ids(deps.get_virtuals)
+        plan = await room_mapping.resolve_plan(room, deps, scope, g, block)
     except Exception as exc:                           # noqa: BLE001
+        # An ownership state is an ANTICIPATED condition on this path, not a
+        # server fault: it gets its own sentence and a 409, the same one the
+        # run itself gives, so the plan and the run never describe his room
+        # differently. Anything else is still a 503 with what went wrong.
+        named = mapping_refusals.ownership_refusal(exc)
+        if named is not None:
+            return JSONResponse(status_code=409, content={
+                "detail": named, "refusal": "ownership"})
+        logger.exception("rooms: the plan read failed for %s", room_id)
         return JSONResponse(status_code=503, content={
             "detail": f"cannot read the live virtuals: {exc}"})
-    plan = await room_mapping.resolve_plan(room, deps, scope, g, block)
     body = plan.as_dict()
     body["sub_device"] = any(not e.whole_carrier for e in plan.emitters)
     body["spectra_owns"] = room_mapping.spectra_owns_lights()
@@ -276,6 +286,18 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
             result = await room_mapping.run_mapping(
                 room, room_mapping.production_deps(sess),
                 granularity=g, block_pixels=block)
+        except Exception as exc:                       # noqa: BLE001
+            # The backstop for the thing that started this: an ownership
+            # refusal reached him as a bare 500 and a stack trace, for a
+            # condition one press of the ownership bar fixes. run_mapping
+            # states these itself now; this catches any that reach the route
+            # from a seam it does not wrap, so the SENTENCE is what he sees
+            # either way. A genuine bug still 500s — it should.
+            named = mapping_refusals.ownership_refusal(exc)
+            if named is None:
+                raise
+            return JSONResponse(status_code=409, content={
+                "detail": named, "refusal": "ownership"})
         finally:
             _running = None
     # Remember the choice for the page's control only — a run always takes

@@ -3421,6 +3421,22 @@ and the id shape. Five things to know:
   footprints first (`RoomMap.drop_carrier_footprints`), so it carries
   exactly one granularity and is never driven twice.
 
+- **EVERY EXPECTED CONDITION ON THIS PATH IS A SENTENCE, NOT A 500**
+  (2026-08-31, second commit of PR fm/rooms-picker-light-emitters). His
+  first real run raised `fx_seam.RoomReleased` out of
+  `room_mapping.live_virtual_ids` and reached him as a bare 500 with a
+  stack trace — for a state the ownership bar fixes in one press.
+  `spectra/services/mapping_refusals.py` is the one wording per condition
+  (released / handover / mid-run loss / hold ceiling / a dead fixture), so
+  the route, the run and the page cannot describe his room differently.
+  Matched on the exception CLASS, never message text. **A genuine bug still
+  raises** — a sentence invented for one would be a lie. A mid-run
+  ownership loss ends the run as a stated PARTIAL (`refusal`/`partial` on
+  the result) that KEEPS what it measured, and the refused revert write in
+  the `finally` is swallowed so the partial cannot turn back into a 500.
+  Spec: `tests/test_mapping_refusals.py`. If you add a seam to this path,
+  give its expected conditions a sentence there or confirm one exists —
+  the exposure lock's own named refusal is the bar.
 - **THE EXPOSURE LOCK IS A HARD REFUSAL, not a warning, and it is the whole
   instrument's honesty.** A footprint is `lit − dark` in the camera's own
   byte scale and every footprint in a room is compared against every other

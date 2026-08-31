@@ -1648,6 +1648,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'It runs on the same held-room machinery every preview in this app uses, so the room is snapshotted before the first fixture goes dark and handed back afterwards. A dropped phone, a closed tab or a SPECTRA restart mid-run all land in that same recovery — your show comes back on its own, without anything having to be pressed.',
           'If the camera will not lock its exposure and white balance, the run is REFUSED before a single light changes, and the message names which capability the phone is missing. That is deliberate: with auto-exposure live, every footprint would be scaled by an unknown, silently changing factor and the whole map would quietly lie. If a lock is lost part-way through, the run stops rather than finishing on a changed scale.',
           'A fixture reported "clipped" was too bright for the camera at that exposure — its SHAPE is still good, its weight understates it. A fixture reported as adding no measurable light is either out of shot or not the fixture you thought it was.',
+          'If the lights are released to Home Assistant, or a handover is in flight, mapping says so and tells you to take the room back on the ownership bar — it never turns that into an error code. Lose the room part-way through and the run stops there as a stated partial: everything already measured is KEPT, so taking the room back and pressing again only does the rest. The same is true of the three-minute hold limit a long run can reach.',
         ],
       },
       {
