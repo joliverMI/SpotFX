@@ -363,6 +363,12 @@ class Plan:
     #: mapped through its fixture's own strip instead of itself.
     notes: list[str] = field(default_factory=list)
     truncated: bool = False
+    #: Each fixture's own FIRMWARE brightness, read before the room ever
+    #: goes dark (spectra/services/fixture_brightness.py). A turned-down
+    #: fixture scales everything it emits, so a map taken like that measures
+    #: the dimmer — which is exactly what happened to his first map. Read at
+    #: plan time so the warning arrives BEFORE the cost, never after it.
+    brightness: list[dict] = field(default_factory=list)
 
     @property
     def seconds(self) -> float:
@@ -389,6 +395,7 @@ class Plan:
             "problems": self.problems,
             "warnings": self.warnings,
             "notes": self.notes,
+            "brightness": self.brightness,
             "emitters": [{"emitter_id": e.emitter_id, "carrier_id": e.carrier_id,
                           "label": e.label, "virtual_ids": e.virtual_ids,
                           "ranges": [r.model_dump() for r in e.ranges],

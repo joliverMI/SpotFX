@@ -98,6 +98,10 @@ def _op_list_rooms() -> dict:
                        "carrier_ids": r.carrier_ids,
                        "mapped": r.mapped_carriers(),
                        "not_mapped": r.unmapped_ids(),
+                       # RAN, and the camera saw nothing of them from the
+                       # pose they ran at — a different answer from
+                       # "not_mapped" (never tried), and worth saying so.
+                       "unseen": r.unseen_ids(),
                        "axis_calibrated": r.axis.calibrated,
                        "granularity": r.granularity,
                        "block_pixels": r.block_pixels,

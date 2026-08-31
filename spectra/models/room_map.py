@@ -54,6 +54,15 @@ metre, or a place in the room. WHERE that range's light lands is still
 measured with a camera and stored as a footprint, exactly as before: this
 file's one idea is unchanged, only the size of the thing being photographed.
 
+AN EMITTER THE CAMERA NEVER SAW IS STILL A RECORD (2026-08-31). His first
+real map ran 22 emitters and stored 14: the far-side TV blocks and the
+sconce spill outside the frame produced ~zero lit-minus-dark and simply did
+not appear. Correct physics, silent record — nothing distinguished "never
+ran" from "ran, and its light is not in this shot". Such an emitter is now
+stored FOOTPRINT-LESS with `unseen=True` and a sentence, counted in the run
+summary ("14 mapped, 8 unseen from this pose"). It is a FACT, not an error:
+a second pose can see it later.
+
 THE AXIS IS TWO TAPS, NOT A COORDINATE SYSTEM. AxisCalibration is two
 points a human tapped on the capture screen — "that's the floor", "that's
 the ceiling" — in normalized frame coordinates. Projection onto the
@@ -168,6 +177,23 @@ class EmitterFootprint(BaseModel):
     axis_profile: list[float] = Field(default_factory=list)
     weight: float = 0.0
     capture: CaptureContext = Field(default_factory=CaptureContext)
+    #: TRUE when this emitter RAN and the camera saw nothing from that pose
+    #: — a footprint-less record, kept deliberately. Before it existed such
+    #: an emitter simply did not appear in the store, so nothing
+    #: distinguished "never ran" from "ran, and its light is outside the
+    #: frame" (his own first real map: 22 ran, 14 stored, 8 vanished). NOT an
+    #: error and NOT a warning: a second pose can see it later. `grid` and
+    #: `axis_profile` are empty here, so every reader that already gates on
+    #: `mapped` skips it exactly as it skipped the absence.
+    unseen: bool = False
+    #: This emitter was measured TWICE in one run — the second time with an
+    #: extended dark settle, after the first came out at ~zero. True on a
+    #: MAPPED record too (the retry recovered it), which is what makes the
+    #: retry a measurement rather than a guess.
+    retried: bool = False
+    #: The sentence for whatever this record's state needs saying — today
+    #: only the unseen one (spectra/services/mapping_refusals.unseen_note).
+    note: str = ""
 
     @field_validator("grid")
     @classmethod
@@ -259,6 +285,12 @@ class RoomMap(BaseModel):
             if f.emitter_id == emitter_id:
                 return f
         return None
+
+    def unseen_ids(self) -> list[str]:
+        """The emitters that RAN and produced no usable light from the pose
+        they ran at. Distinct from `unmapped_ids` (carriers nothing has been
+        tried on yet) — this is the measured half of the same question."""
+        return [f.emitter_id for f in self.footprints if f.unseen]
 
     def mapped_ids(self) -> list[str]:
         return [f.emitter_id for f in self.footprints if f.mapped]

@@ -78,11 +78,19 @@ class RoomBody(BaseModel):
 
 
 class MapBody(BaseModel):
-    """The granularity THIS run uses. Both optional: omitted means the
-    room's own remembered choice, which is itself only a seed for the
-    page's control."""
+    """What THIS run does, all optional: an omitted granularity means the
+    room's own remembered choice (itself only a seed for the page's
+    control), and an omitted settle means the shipped protocol exactly.
+
+    The settles are groundwork for quality levels — a slower run buys a
+    cleaner dark reference. They are BOUNDED server-side
+    (`room_mapping.clamp_settle`), so a stray number falls back to the
+    default rather than refusing a run or holding the room dark for a
+    minute."""
     granularity: Optional[str] = None
     block_pixels: Optional[int] = None
+    dark_settle_s: Optional[float] = None
+    lit_settle_s: Optional[float] = None
 
 
 def _run_granularity(room: RoomMap, granularity: Optional[str],
@@ -103,6 +111,12 @@ def _run_granularity(room: RoomMap, granularity: Optional[str],
 
 
 def _room_view(room: RoomMap) -> dict:
+    # A thumbnail is normalized to its OWN peak, so it is blind to the
+    # magnitude it normalized away: every row carries its WEIGHT, and one
+    # that is whisper signal against the rest of this room says so.
+    faint = set(light_field.faint_ids(room))
+    weights = [f.weight for f in room.footprints if f.mapped]
+    peak = max(weights) if weights else 0.0
     fps = []
     for f in room.footprints:
         fps.append({
@@ -110,7 +124,15 @@ def _room_view(room: RoomMap) -> dict:
             "carrier_id": f.carrier, "whole_carrier": f.whole_carrier,
             "ranges": [r.model_dump() for r in f.ranges],
             "virtual_ids": f.virtual_ids, "mapped": f.mapped,
+            # An emitter that RAN and whose light this pose could not see.
+            # Sent so the page can render it AS THAT, beside the mapped
+            # thumbnails, rather than as a piece nobody has tried yet.
+            "unseen": f.unseen, "note": f.note, "retried": f.retried,
             "weight": round(f.weight, 4),
+            "faint": f.emitter_id in faint,
+            #: this footprint's weight as a fraction of the strongest in the
+            #: SAME room — the only comparison a relative measurement allows
+            "weight_share": round(f.weight / peak, 4) if peak > 0 else 0.0,
             "axis_profile": [round(v, 5) for v in f.axis_profile],
             "thumbnail": light_field.thumbnail(f),
             "capture": f.capture.model_dump(),
@@ -119,7 +141,10 @@ def _room_view(room: RoomMap) -> dict:
             "footprints": fps,
             "mapped_ids": room.mapped_ids(),
             "mapped_carriers": room.mapped_carriers(),
-            "unmapped_ids": room.unmapped_ids()}
+            "unmapped_ids": room.unmapped_ids(),
+            "unseen_ids": room.unseen_ids(),
+            "faint_ids": sorted(faint),
+            "peak_weight": round(peak, 4)}
 
 
 @router.get("/rooms")
@@ -285,7 +310,9 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
         try:
             result = await room_mapping.run_mapping(
                 room, room_mapping.production_deps(sess),
-                granularity=g, block_pixels=block)
+                granularity=g, block_pixels=block,
+                dark_settle_s=body.dark_settle_s if body else None,
+                lit_settle_s=body.lit_settle_s if body else None)
         except Exception as exc:                       # noqa: BLE001
             # The backstop for the thing that started this: an ownership
             # refusal reached him as a bare 500 and a stack trace, for a

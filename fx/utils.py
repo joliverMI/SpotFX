@@ -509,22 +509,51 @@ class WLED:
     async def set_brightness(self, brightness):
         """
             Uses a JSON API post call to adjust a WLED compatible device's
-            brightness
+            MASTER (firmware) brightness — the `bri` field of json/state,
+            which scales everything the fixture emits including a realtime
+            stream. Distinct from any effect's own brightness.
 
         Args:
             brightness (int): The brightness value between 0-255
+
+        SPOT-FX DEVIATION (fx/VENDOR.md #26). Upstream this function had
+        never been called by anything — `grep` finds no caller in the fork —
+        and it was broken three ways, each of which this fixes:
+
+          * `max(0, max(int(brightness), 255))` is a double `max`, so EVERY
+            input came out >= 255. Setting full worked by accident;
+            RESTORING someone's own level would silently set it to full and
+            call that a restore. That one mattered most: this is used to put
+            his fixture BACK.
+          * `data=bri` form-encodes the body (`bri=255`), where WLED's JSON
+            API needs a JSON one. `release_realtime` above — SpotFX's own
+            addition — already shows the working shape (`json=`).
+          * the endpoint's leading slash makes the URL `http://ip//json/state`.
+
+        Fixed rather than reimplemented in spectra/: this is the device
+        transport, which is fx/'s job, and a second copy of a WLED call
+        living in spectra/ is exactly the drift `release_realtime` avoided.
         """
-        # cast to int and clamp to range
-        brightness = max(0, max(int(brightness), 255))
-        bri = {"bri": brightness}
+        # cast to int and clamp to range (upstream's own stated intent)
+        brightness = max(0, min(int(brightness), 255))
 
         await WLED._wled_request(
-            requests.post, self.ip_address, "/json/state", data=bri
+            requests.post, self.ip_address, "json/state",
+            json={"bri": brightness}
         )
 
         _LOGGER.info(
             "WLED %s: Set brightness to %s.", self.ip_address, brightness
         )
+
+    async def get_brightness(self):
+        """The fixture's current MASTER (firmware) brightness, 0-255, off
+        json/state's `bri`. SPOT-FX addition (fx/VENDOR.md #26): a run that
+        turns this up for a capture has to know what to put back, and a plan
+        that warns about a dim fixture has to read it before the room ever
+        goes dark."""
+        state = await self.get_state()
+        return int(state.get("bri", 0))
 
     def enable_realtime_gamma(self):
         """
