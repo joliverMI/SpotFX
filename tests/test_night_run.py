@@ -21,7 +21,8 @@ import time
 import pytest
 
 from fx import light_ownership as lo
-from spectra.services import capture_queue, mapping_refusals, night_run
+from spectra.services import (capture_queue, capture_settings,
+                              mapping_refusals, night_run)
 
 _ORIGINAL_OWNERSHIP_FILE = lo.OWNERSHIP_FILE
 
@@ -318,7 +319,11 @@ def test_the_shield_list_tracks_a_config_change_with_nothing_to_remember(
 
 # ── ABORT ──────────────────────────────────────────────────────────────────
 
-class _Session:
+class _Session(capture_settings.SessionCameraDouble):
+    """Same rule: the abort test drives the REAL `run_mapping`, which asks
+    its session for a frame size, so the double inherits the real
+    negotiation rather than growing a stub of it."""
+
     def __init__(self):
         self.closed = False
         self.run_abort = None

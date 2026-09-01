@@ -28,7 +28,7 @@ already pointed at the room:
 | Choosing per-run parameters | re-set the controls between runs | each item carries its own granularity, block size and four protocol waits |
 | Getting the right FRAME SIZE for the run | (there was one size, and it could not read a composition) | the server asks (320x180 for a map, 1920x1080 for a commissioning read) and the client adopts the largest rung its camera can honestly fill |
 | Setting a manual integration time / gain | not possible at all | per-run request, applied by the driver and **read back**; a lever the camera did not take refuses by name |
-| Widening a capture window for a long exposure | (nothing knew the exposure) | `capture_windows` widens both so `MIN_FRAMES` is still averaged, and the estimate prices the widened run |
+| Widening a capture window for a long exposure | (nothing knew the exposure) | `capture_windows` widens both so `MIN_FRAMES` is still averaged, and BOTH estimates — the run's own hold ceiling and the night's planned-end bound — price the widened run |
 | Keeping a run that was cut short | judge it, decide, re-run by hand | recorded `partial`, footprints kept, declared retry re-runs it |
 | Knowing what happened | watch the page | one machine-readable outcome per item, written after **every** item |
 | Explaining a refusal | read a status word, guess | `mapping_refusals`' own sentence, on the page and in the record |

@@ -3902,6 +3902,18 @@ anything that sends, sizes or exposes a capture frame. Six things:
   other footprint in the room**; the summary says so. A default regime that
   saw NOTHING is a RESULT, not a failure.
 
+- **THE LEVERS TRAVEL THROUGH THE QUEUE, AND THE NIGHT PRICES THEM.**
+  `QueueItem` carries `exposure_time`/`gain` because its own contract is
+  "the SAME arguments the route takes" and both run routes take them — an
+  unattended run must not be the one place his camera cannot be told what to
+  do. And `night_run.price_items` prices a map item at the windows
+  `capture_windows` will WIDEN it to, not the ones it declared: a long
+  integration genuinely takes longer, and pricing the declared windows would
+  price short against the 05:30 planned-end bound, which is the one bound
+  that must not be over-run. Both were found composing #230 and #231 at the
+  same choke points; `tests/test_camera_levers_and_night.py` is the proof
+  that neither build swallowed the other.
+
 **KNOWN, OPEN, NOT FIXED BY THE RAISE:** `gray_code.resolution_report`
 counts lit **AREA**, so a strip thick enough for its LEDs' images to
 overlap sideways reports more camera pixels per index than it linearly
@@ -3918,7 +3930,9 @@ Proofs: `scripts/check_commissioning.py` §3d (his own composition at a
 asserted), `tests/test_capture_settings.py`, `tests/test_camera_levers_in_runs.py`
 (the runs actually negotiate and actually restore), `tests/test_exposure_test.py`,
 `scripts/check_capture_queue_e2e.py` §5 (the negotiation over the REAL
-client, WebSocket and server). Help: `camera-settings`, `exposure-comparison`.
+client, WebSocket and server), `tests/test_camera_levers_and_night.py` (this
+build and the night run composing). Help: `camera-settings`,
+`exposure-comparison`.
 
 ## THE NIGHT RUN — HA pushes, we answer; and it never takes his room
 
