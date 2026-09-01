@@ -554,6 +554,55 @@ def test_a_fixture_already_on_is_left_alone_and_named_as_still_emitting(
         "a run fixture still lit at exit was not named"
 
 
+def test_the_abort_sentence_reaches_the_real_run_and_keeps_its_partials():
+    """The abort is only as good as what the run in flight does with it, so
+    this drives the REAL `room_mapping.run_mapping` with the sentence
+    `night_run.abort` actually sets and measures the outcome: the run stops
+    at the next capture boundary, reports PARTIAL rather than failed, KEEPS
+    what it already measured, hands the room back exactly once, and carries
+    the sentence a person reads at breakfast."""
+    from tests.test_witness_retake import (CARRIERS, AXIS, _Session, _Wall,
+                                           _deps)
+    from spectra.models.room_map import RoomMap
+    from spectra.services import room_mapping
+
+    session = _Session()
+    reverts = []
+
+    async def close_hold():
+        reverts.append(1)
+        return None
+
+    deps = _deps(session, _Wall())
+    deps.close_hold = close_hold
+
+    detail = mapping_refusals.night_aborted("light-touched")
+    lit = {"n": 0}
+    inner = deps.open_hold
+
+    async def open_hold(program, intensity, **kw):
+        out = await inner(program, intensity, **kw)
+        if kw.get("step") == "lit":
+            lit["n"] += 1
+            if lit["n"] == 2:
+                # He reached for a light: exactly what `abort()` writes.
+                session.run_abort = detail
+        return out
+
+    deps.open_hold = open_hold
+    room = RoomMap(name="Living room", carrier_ids=list(CARRIERS), axis=AXIS)
+    result = _run(room_mapping.run_mapping(room, deps, granularity="whole"))
+
+    assert result.ok is False
+    assert result.refusal == "aborted"
+    assert result.partial is True, "the night's abort threw away real work"
+    assert 0 < result.mapped_count < len(CARRIERS)
+    assert result.reason == detail, \
+        "the run reported something other than the sentence the abort set"
+    assert "everything measured up to that point is kept" in result.reason
+    assert len(reverts) == 1, "the room was handed back exactly once"
+
+
 # ── ENGINE STATUS: the house's restore trigger ─────────────────────────────
 
 def test_engine_status_carries_the_night_state_unambiguously():
