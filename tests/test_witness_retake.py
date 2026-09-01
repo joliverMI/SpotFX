@@ -285,3 +285,57 @@ def test_the_result_carries_the_counts_for_the_exit_report():
 
     body = _map(witness_fn=ask).as_dict()
     assert body["witness"] == {"clean": 3, "contaminated": 0, "unclaimed": 0}
+
+
+# ── COMMISSIONING: one measurement, so one question ────────────────────────
+
+def test_a_commissioning_pass_is_judged_over_its_whole_span_and_never_retaken():
+    """A gray-code pass is ONE measurement — a house light landing anywhere
+    in it corrupts the decode rather than one row of it, so there is nothing
+    smaller to indict and nothing smaller to re-take. It RECORDS and NAMES,
+    which is the half that matters: a judged ground-truth table that had
+    silently absorbed a house light would be exactly the confident wrong
+    answer the frozen table exists to refuse."""
+    from spectra.services import commissioning
+
+    result = commissioning.RunResult(mapper_id="tv-mapper", ok=True)
+    rows = [_row("light.hallway", 150.0)]
+
+    async def sweep(start, end):
+        assert (start, end) == (100.0, 200.0), "not the pass's whole span"
+        return rows, set()
+
+    deps = _deps(_Session(), _Wall(), sweep_fn=sweep)
+    asyncio.run(commissioning._judge_contamination(deps, result, 100.0, 200.0))
+
+    assert result.witness["status"] == witness.VERDICT_CONTAMINATED
+    assert result.problems and "cannot be claimed clean" in result.problems[0]
+    assert "one measurement, not a row that can be retaken" in \
+        result.problems[0]
+    # The five pre-registered tolerances are untouched: contamination is a
+    # fact about the instrument's conditions, like the exposure lock.
+    assert result.ok is True
+
+
+def test_a_clean_commissioning_pass_records_the_clean_verdict():
+    from spectra.services import commissioning
+
+    result = commissioning.RunResult(mapper_id="tv-mapper", ok=True)
+
+    async def sweep(start, end):
+        return [], set()
+
+    deps = _deps(_Session(), _Wall(), sweep_fn=sweep)
+    asyncio.run(commissioning._judge_contamination(deps, result, 100.0, 200.0))
+    assert result.witness["status"] == witness.VERDICT_CLEAN
+    assert result.problems == []
+
+
+def test_no_witness_leaves_a_commissioning_pass_exactly_as_it_was():
+    from spectra.services import commissioning
+
+    result = commissioning.RunResult(mapper_id="tv-mapper", ok=True)
+    deps = _deps(_Session(), _Wall())
+    asyncio.run(commissioning._judge_contamination(deps, result, 100.0, 200.0))
+    assert result.witness == {}, "an unasked witness must not read as clean"
+    assert result.problems == []

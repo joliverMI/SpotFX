@@ -3943,6 +3943,14 @@ Its docstring is the binding statement; the short list:
   was fine" are different facts — the same distinction `night_exit` draws
   between DARK and UNKNOWN. With no witness configured every capture is
   `unclaimed`, never `clean`.
+- **A COMMISSIONING PASS IS ONE MEASUREMENT, so it gets ONE question over
+  its whole span and NO re-take** (`commissioning._judge_contamination`): a
+  gray-code stack is read against one dark and one full reference, so a
+  house light landing anywhere in it corrupts the decode rather than one row
+  of it, and re-taking one IS a whole new pass — which is what `repeat`
+  already is. It RECORDS and NAMES, and never touches `ok` or the five
+  pre-registered tolerances: contamination is a fact about the instrument's
+  conditions, like the exposure lock, not a table row.
 - **Our own fixtures are subtracted** from the rows, by slugified id/name
   against the entity's object id (`own_entities`/`is_ours`) — exact, never a
   substring. The match is BIASED TO OVER-INDICT on purpose: a fixture of
