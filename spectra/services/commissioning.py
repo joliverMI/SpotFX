@@ -17,10 +17,14 @@ THE FROZEN COMPARISON IS NOT HERE. It is
 verbatim and judges every row by rules fixed in advance. This module's job
 ends at handing that one a decode; it never decides whether a run passed.
 
-WHAT IS GENUINELY NEW HERE, and it is only two things:
+WHAT IS GENUINELY NEW HERE, and it is only three things:
 
-  1. the composition -> global pixel index resolution (below), and
-  2. the capture LOOP: ~22 patterns over ONE continuous hold.
+  1. the composition -> global pixel index resolution (below),
+  2. the capture LOOP: ~22 patterns over ONE continuous hold, and
+  3. WHICH SLICE of that composition a run addresses — see "WHAT IS BEING
+     COMMISSIONED" below. Per the captain's ruling of 2026-09-01 the
+     useful run is per FIXTURE, because the stitched whole cannot be
+     resolved from any pose at the frame size the wire carries.
 
 Everything else is machinery that already exists and is reused rather than
 rebuilt — which is the standing rule on this path:
@@ -78,6 +82,22 @@ spending the room's dark time to reach a verdict about the wrong thing
 decode now carries its own per-bit contrast (`Decode.bit_contrast`), so a
 future failure says WHERE it died in its own response instead of needing
 frames nobody kept.
+
+AND WHAT THE CAPTAIN RULED ONCE THAT WAS UNDERSTOOD: ask a smaller
+question. 736 pixels need ~1,472 camera pixels of imaged strip and the
+whole border of the 320x180 frame the phone sends is ~1,000, so the
+stitched composition is out of reach FROM ANY POSE — while one sconce is
+88 pixels needing ~176, which a phone can frame easily. So a run takes
+TARGETS (`slice_composition`, `expand_targets`), each judged by the same
+frozen table against the stored composition's own slice of ground truth
+and folded back into one table of the same five rows
+(`commission_compare.aggregate`). The wire's frame contract was NOT
+widened to make the whole one fit; that decision is his. And because a
+smaller question is easier to answer WRONGLY, the resolution boundary is
+now conservative on his own instruction — a target inside
+`gray_code.RESOLUTION_SAFETY_FACTOR` of the Nyquist bar refuses as
+MARGINAL rather than returning the plausible neighbour a flipped low bit
+decodes to.
 """
 from __future__ import annotations
 
@@ -148,6 +168,23 @@ class Composition:
     segments: list[compare.Segment] = field(default_factory=list)
     pixel_map: dict[str, np.ndarray] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    #: WHICH SLICE OF THE STORED COMPOSITION THIS IS. Empty for the whole
+    #: thing (the original behaviour, byte for byte). Otherwise the target
+    #: spec that selected it — see `parse_target`.
+    target: str = ""
+    target_label: str = ""
+    #: local index -> the index the same pixel carries in the FULL stored
+    #: composition. Identity for a whole-composition run. This is what keeps
+    #: a per-target run judged against the stored composition's OWN slice of
+    #: ground truth rather than against a re-numbered invention: the gray
+    #: code addresses 0..N-1 (which is the entire point — 88 pixels need
+    #: ~176 camera pixels where 736 need ~1,472), while every lookup into
+    #: the stored layout goes through here.
+    global_indices: list[int] = field(default_factory=list)
+    #: the FULL composition's pixel count, kept so a slice can say what it
+    #: is a slice OF and so the stored layout is always derived at the size
+    #: the mapper actually stores.
+    source_total: int = 0
 
     @property
     def total(self) -> int:
@@ -169,7 +206,11 @@ class Composition:
         return {"mapper_id": self.mapper_id, "total": self.total,
                 "segments": [s.as_dict() for s in self.segments],
                 "virtual_ids": self.virtual_ids, "devices": self.devices,
-                "notes": self.notes}
+                "notes": self.notes, "target": self.target,
+                "target_label": self.target_label,
+                "source_total": self.source_total or self.total,
+                "global_start": (self.global_indices[0]
+                                 if self.global_indices else 0)}
 
 
 class CompositionRefused(Exception):
@@ -305,7 +346,172 @@ def resolve_composition(mapper_id: str, virtuals: dict[str, dict],
         for effect_pixel, index in mapping.items():
             arr[effect_pixel] = index
         comp.pixel_map[vid] = arr
+    comp.source_total = comp.total
+    comp.global_indices = list(range(comp.total))
     return comp
+
+
+# ── WHAT IS BEING COMMISSIONED: a target, not always the whole thing ──────
+#
+# THE CAPTAIN'S RULING (2026-09-01, after PR #226 proved his whole
+# composition unreadable from any pose at the frame size the wire carries):
+# commission PER FIXTURE, or per segment, never the stitched whole. The
+# arithmetic is the reason and it is not a preference — 736 pixels need
+# ~1,472 camera pixels of imaged strip and the entire border of the
+# 320x180 frame the phone sends is ~1,000, so no pose exists. One sconce is
+# 88 pixels and needs ~176; a segment is smaller still. The wire's frame
+# contract is NOT touched to make the whole one fit: that change goes back
+# to him or it does not happen.
+#
+# A target NEVER invents a composition. It selects a subset of the STORED
+# mapper's own segments, keeps their identity and their stored order, and
+# the frozen table judges it against that slice of the same ground truth.
+
+TARGET_ALL = ""
+TARGET_FIXTURES = "fixtures"
+#: The two expansions a caller can ask for instead of naming targets one by
+#: one. `fixtures` is the captain's default shape; `segments` goes finer
+#: still, for a fixture whose own strip is more than a camera can hold.
+TARGET_SEGMENTS = "segments"
+
+
+def parse_target(spec: str) -> tuple[str, str]:
+    """`"device:tv-backlight"` / `"segment:3"` / a bare device id -> (kind,
+    key). Deliberately tiny and deliberately explicit: an unrecognised
+    prefix is a device id, never a silent whole-composition run."""
+    text = str(spec or "").strip()
+    if not text:
+        return "all", ""
+    lowered = text.lower()
+    for prefix, kind in (("device:", "device"), ("fixture:", "device"),
+                         ("segment:", "segment"), ("seg:", "segment")):
+        if lowered.startswith(prefix):
+            return kind, text[len(prefix):].strip()
+    return "device", text
+
+
+def target_label(kind: str, key: str, comp: "Composition") -> str:
+    if kind == "device":
+        return key
+    if kind == "segment":
+        seg = next((s for s in comp.segments if str(s.index) == str(key)), None)
+        return (f"segment {key} ({seg.device_id} "
+                f"{seg.start}-{seg.end})") if seg else f"segment {key}"
+    return comp.mapper_id
+
+
+def expand_targets(comp: "Composition", specs: Optional[list[str]]
+                   ) -> list[str]:
+    """The target list this run will walk, in a deterministic order.
+
+    An EMPTY list is the whole composition — today's behaviour, unchanged,
+    so nothing that already calls this module moves. `fixtures` /
+    `segments` expand against the stored composition itself, which is why
+    a room that gains a fixture gains a target with nothing to migrate."""
+    specs = [str(x).strip() for x in (specs or []) if str(x).strip()]
+    if not specs:
+        return [TARGET_ALL]
+    out: list[str] = []
+    for spec in specs:
+        low = spec.lower()
+        if low == TARGET_FIXTURES:
+            out.extend(f"device:{d}" for d in comp.devices)
+        elif low == TARGET_SEGMENTS:
+            out.extend(f"segment:{s.index}" for s in comp.segments)
+        elif low in ("all", "whole", "composition"):
+            out.append(TARGET_ALL)
+        else:
+            out.append(spec)
+    # deterministic, de-duplicated, stored order preserved
+    seen, ordered = set(), []
+    for spec in out:
+        if spec not in seen:
+            seen.add(spec)
+            ordered.append(spec)
+    return ordered or [TARGET_ALL]
+
+
+def slice_composition(comp: "Composition", spec: str) -> "Composition":
+    """One target's own composition: the SAME resolved pixels, re-addressed
+    0..N-1 for the gray code, with `global_indices` remembering where each
+    of them sits in the stored whole.
+
+    THE RE-ADDRESSING IS THE POINT, and it is not cosmetic. The gray code's
+    resolution demand is set by the count it has to address — 88 pixels
+    need `bits_needed(88)` = 7 patterns over a two-index finest period,
+    where 736 need 10 over the same period spread ~8x thinner. Addressing a
+    fixture's 88 pixels as global indices 560..647 would keep the 10-bit
+    stack and buy nothing.
+
+    WHAT IS NOT RE-INVENTED: the segments keep their own stored `index`,
+    device and virtual, and `global_indices` maps every local index back,
+    so the frozen table is judged against the stored composition's own
+    slice of ground truth and never against a renumbering.
+
+    REFUSES BY NAME when a target names nothing — an empty target would
+    otherwise commission zero pixels and pass row 1 vacuously."""
+    kind, key = parse_target(spec)
+    if kind == "all":
+        return comp
+    if kind == "device":
+        wanted = [s for s in comp.segments if s.device_id == key]
+        if not wanted:
+            raise CompositionRefused(
+                f"{comp.mapper_id} has no segment backed by {key!r}, so "
+                f"there is nothing to commission for it. Its fixtures are: "
+                f"{', '.join(comp.devices) or 'none'}.")
+    elif kind == "segment":
+        wanted = [s for s in comp.segments if str(s.index) == str(key)]
+        if not wanted:
+            raise CompositionRefused(
+                f"{comp.mapper_id} has no segment {key!r}. It stores "
+                f"{len(comp.segments)} segments, numbered 0 to "
+                f"{len(comp.segments) - 1}.")
+    else:                                       # unreachable via parse_target
+        raise CompositionRefused(f"unknown commissioning target {spec!r}")
+
+    out = Composition(mapper_id=comp.mapper_id, notes=list(comp.notes),
+                      target=spec,
+                      target_label=target_label(kind, key, comp),
+                      source_total=comp.source_total or comp.total)
+    cursor = 0
+    globals_: list[int] = []
+    for seg in wanted:
+        out.segments.append(compare.Segment(
+            index=seg.index, device_id=seg.device_id,
+            virtual_id=seg.virtual_id,
+            start=cursor, end=cursor + seg.length - 1))
+        globals_.extend(range(seg.start, seg.end + 1))
+        cursor += seg.length
+    out.global_indices = globals_
+    remap = {g: i for i, g in enumerate(globals_)}
+    for vid, arr in comp.pixel_map.items():
+        local = np.full(arr.shape, -1, dtype=np.int64)
+        for pixel, index in enumerate(arr.tolist()):
+            if index >= 0 and index in remap:
+                local[pixel] = remap[index]
+        if int((local >= 0).sum()):
+            out.pixel_map[vid] = local
+    out.notes.append(
+        f"Commissioning {out.target_label} on its own: {out.total} of "
+        f"{out.source_total} stored pixels, addressed 0-{out.total - 1} for "
+        f"this run and judged against the stored composition's own slice.")
+    return out
+
+
+def slice_layout(layout: Optional[dict], comp: "Composition"
+                 ) -> Optional[dict]:
+    """The stored layout, re-keyed to a slice's local indices. `None` in,
+    or a stored layout that does not carry one of this slice's pixels, is
+    `None` out — an unmeasured row, never a guessed one."""
+    if layout is None or not comp.global_indices:
+        return layout
+    out = {}
+    for local, g in enumerate(comp.global_indices):
+        if g not in layout:
+            return None
+        out[local] = layout[g]
+    return out
 
 
 def _driver_for(device_id: str, substitutes: dict[str, dict],
@@ -413,9 +619,17 @@ class CommissionProgram(flare_preview_hold.PreviewProgram):
 
     steps = ("dark", "full", "pattern")
 
-    def __init__(self, virtual_ids: list[str], composition: Composition) -> None:
+    def __init__(self, virtual_ids: list[str], composition: Composition,
+                 snapshot_virtuals: Optional[list[str]] = None) -> None:
         self.virtual_ids = list(dict.fromkeys(virtual_ids))
         self.composition = composition
+        # EVERY virtual this RUN can touch, not only this target's — a
+        # per-target run walks several compositions under one activation,
+        # and a virtual left out of the snapshot is one `close()` hands
+        # back while silently keeping the rest.
+        self.snapshot_virtuals = list(dict.fromkeys(
+            snapshot_virtuals if snapshot_virtuals is not None
+            else composition.virtual_ids))
         self.patterns: dict[str, str] = {}
         self.hold_scene = SceneV2(
             name="· commissioning (dark) ·",
@@ -431,7 +645,7 @@ class CommissionProgram(flare_preview_hold.PreviewProgram):
     def extra_snapshot_writes(self, intensity: float) -> list[dict]:
         # Every virtual this program can touch has to enter the snapshot, or
         # close() hands some of them back and silently keeps the rest.
-        return [{"virtual_id": vid} for vid in self.composition.pixel_map
+        return [{"virtual_id": vid} for vid in self.snapshot_virtuals
                 if vid not in set(self.virtual_ids)]
 
     def _writes(self, patterns: dict[str, str]) -> list[dict]:
@@ -494,6 +708,14 @@ class RunResult:
     #: refused, because "how much margin did the pose have" is worth as
     #: much on a green run as on a refused one.
     resolution: dict = field(default_factory=dict)
+    #: WHAT THIS RUN COMMISSIONED, one entry per target, each with its own
+    #: composition slice, its own resolution report, its own decodes and its
+    #: OWN judged copy of the frozen table. Empty for a whole-composition
+    #: run, whose single result is the top-level one — so nothing that
+    #: already reads this shape moves.
+    targets: list[dict] = field(default_factory=list)
+    #: the target specs this run walked, in order, before any of them ran.
+    target_specs: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     at: float = field(default_factory=time.time)
@@ -511,7 +733,8 @@ class RunResult:
                 "layout_note": self.layout_note,
                 "decodes": self.decodes, "agreement": self.agreement,
                 "table": self.table, "captures": self.captures,
-                "resolution": self.resolution,
+                "resolution": self.resolution, "targets": self.targets,
+                "target_specs": self.target_specs,
                 "problems": self.problems, "notes": self.notes,
                 "at": self.at}
 
@@ -587,8 +810,13 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
     report = gray_code.resolution_report(dark, full, total=total)
     result.resolution = report
     if not report["resolvable"]:
+        # TWO STATES REFUSE HERE, and the sentence says which: IMPOSSIBLE
+        # (below the Nyquist bar — nothing can be decoded) and MARGINAL
+        # (above it, inside the safety margin — a decode would succeed and
+        # be WRONG). See `gray_code.RESOLUTION_SAFETY_FACTOR`.
         raise CameraCannotResolve(mapping_refusals.unresolvable_composition(
-            report, int(full.shape[1]), int(full.shape[0])))
+            report, int(full.shape[1]), int(full.shape[0]),
+            target_label=composition.target_label))
 
     pairs = []
     for bit in range(bits):
@@ -721,13 +949,136 @@ def instrument_latencies() -> dict[str, float]:
             for m in device_equalization.per_device_measurements(records, offsets)}
 
 
+async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
+                      full: Composition, spec: str, layout: Optional[dict],
+                      layout_note: str, result: RunResult, repeats: int,
+                      instrument: dict[str, float]) -> dict:
+    """ONE TARGET: its own composition slice, its own gray-code stack (or
+    two), its own resolution report, and its own judged copy of the frozen
+    table.
+
+    Raises only what ends the WHOLE run — an aborted session, a refused
+    hold, an ownership loss. A target that cannot be READ (the camera
+    cannot resolve it; a capture arrived short of frames) comes back as an
+    entry saying so, and the run carries on to the next one: that is the
+    whole point of splitting the run, and the aggregate makes the
+    unmeasured piece loud rather than dropping it."""
+    try:
+        comp = slice_composition(full, spec)
+    except CompositionRefused as exc:
+        return {"target": spec, "label": spec, "ok": False,
+                "reason": str(exc), "refusal": "composition",
+                "composition": {}, "resolution": {}, "decodes": [],
+                "agreement": {}, "table": None}
+
+    label = comp.target_label or comp.mapper_id
+    entry = {"target": spec, "label": label, "ok": False, "reason": "",
+             "refusal": "", "composition": comp.as_dict(),
+             "resolution": {}, "decodes": [], "agreement": {}, "table": None,
+             "layout_note": layout_note, "notes": []}
+
+    program = CommissionProgram(scope, comp,
+                                snapshot_virtuals=full.virtual_ids)
+    sub = RunResult(mapper_id=full.mapper_id, ok=False)   # this target's own
+    decodes: list[gray_code.Decode] = []
+    reports: list[dict] = []
+    latency_by_device: dict[str, float] = {}
+    resolution_ms = 1e9
+    try:
+        for pass_no in range(repeats):
+            # A whole-composition run keeps its original capture labels
+            # exactly ("run1/dark"), so nothing already reading them moves;
+            # a target prefixes its own name, which is what makes a
+            # multi-target capture list readable.
+            prefix = f"{comp.target_label}/" if comp.target_label else ""
+            pass_label = f"{prefix}run{pass_no + 1}"
+            sub.resolution = {}
+            try:
+                decode, latency = await _one_pass(deps, program, comp, sub,
+                                                  pass_label)
+            finally:
+                # ONE CONTINUOUS HOLD PER PASS, released before the next one
+                # opens — and released whatever happened inside it.
+                try:
+                    await deps.close_hold()
+                except Exception:                      # noqa: BLE001
+                    logger.warning("commissioning: releasing the hold after "
+                                   "%s failed; the hold sweep owns it from "
+                                   "here", pass_label, exc_info=True)
+                if sub.resolution:
+                    reports.append(sub.resolution)
+                    # THE POSE'S MARGIN TRAVELS EVEN WHEN THE RUN DIES ABOVE
+                    # US. `_run_target` does not return on an abort or a
+                    # refused hold, so publishing it here is the only way
+                    # "carried whether the run went on or refused" stays
+                    # true of `RunResult.resolution`.
+                    result.resolution = sub.resolution
+            if decode is not None:
+                decodes.append(decode)
+                if not latency_by_device:
+                    latency_by_device = _device_latencies(latency, decode,
+                                                          comp)
+                    resolution_ms = float(latency.get("resolution_ms", 1e9))
+    except (CameraCannotResolve, NotEnoughFrames) as exc:
+        entry["reason"] = str(exc)
+        entry["refusal"] = ("resolution"
+                            if isinstance(exc, CameraCannotResolve)
+                            else "frames")
+    finally:
+        result.captures.extend(sub.captures)
+        # THE REPORT THAT BELONGS TO THE ACCEPTED DECODE is the FIRST pass's,
+        # never a later repeat's: publishing a second pass's margin beside a
+        # table judged from the first would describe the wrong pose.
+        entry["resolution"] = reports[0] if reports else {}
+
+    if not decodes:
+        if not entry["reason"]:
+            entry["reason"] = ("no capture stack was decoded — see the "
+                               "problems for why")
+        return entry
+
+    if entry["refusal"]:
+        # AN EARLIER PASS DECODED AND A LATER REPEAT DID NOT. The judged
+        # table belongs to the pass that worked, so this is a NOTE about a
+        # missing repeat — never a refusal sitting next to an accepted
+        # answer, which is the exact shape the marginal boundary exists to
+        # keep out of the record.
+        entry["notes"].append(
+            f"a later repeat of this target did not complete: "
+            f"{entry['reason']}")
+        entry["reason"], entry["refusal"] = "", ""
+
+    entry["decodes"] = [d.as_dict() for d in decodes]
+    if len(decodes) > 1:
+        entry["agreement"] = gray_code.agreement(decodes[0], decodes[1])
+    entry["table"] = compare.judge(
+        decodes[0], comp.segments, slice_layout(layout, comp), layout_note,
+        latency_measured=latency_by_device, latency_instrument=instrument,
+        latency_resolution_ms=resolution_ms)
+    entry["ok"] = True
+    return entry
+
+
 async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                          repeat: int = 1,
                          layout: Optional[dict] = None,
-                         instrument: Optional[dict[str, float]] = None
+                         instrument: Optional[dict[str, float]] = None,
+                         targets: Optional[list[str]] = None
                          ) -> RunResult:
     """The whole test: resolve the composition, gray-code it (once, or
     twice back to back), and judge the frozen table.
+
+    PER TARGET SINCE 2026-09-01, on the captain's ruling — `targets` names
+    what to commission: nothing (the whole stitched composition, this
+    module's original behaviour), `["fixtures"]` (one run per fixture,
+    which is his default shape), `["segments"]`, or explicit
+    `"device:<id>"` / `"segment:<n>"` specs. Every target is judged by the
+    SAME frozen table against the stored composition's own slice of ground
+    truth, and `commission_compare.aggregate` folds the set back into one
+    table of the same five rows. See `slice_composition` for why the
+    re-addressing is the whole point and `gray_code.
+    RESOLUTION_SAFETY_FACTOR` for why a marginal target refuses rather than
+    producing a plausible wrong answer.
 
     REFUSES BEFORE TOUCHING A LIGHT when the camera is not locked, when
     SPECTRA is not driving the lights (the pattern lamp is an effect inside
@@ -735,10 +1086,17 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     when the composition cannot be addressed as stored. Nothing is written
     and nothing is stored on any of those paths.
 
-    AND REFUSES TWO CAPTURES IN — the one refusal that cannot be made
-    beforehand, because it is a fact about the pose and only the camera
-    knows it — when the composition images into too few camera pixels to
-    be read back at all (see the module docstring).
+    NOTE that the last of those is checked against the WHOLE stored
+    composition even for a per-target run, deliberately: `resolve_composition`
+    refuses when any segment cannot be driven, and keeping that check whole
+    is what stops a partial configuration quietly shrinking the denominator
+    row 1 is judged on. A target then slices what resolved.
+
+    AND REFUSES TWO CAPTURES INTO EACH TARGET — the one refusal that cannot
+    be made beforehand, because it is a fact about the pose and only the
+    camera knows it — when that target images into too few camera pixels to
+    be read back safely. On a per-target run that refusal ends the TARGET,
+    not the run: the next fixture is a different question and gets asked.
 
     RESTORES IN A `finally`, three separate things, in the order they were
     taken: the hold (the lights), any virtual this run brought up, and the
@@ -789,6 +1147,10 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     result.composition = composition.as_dict()
     result.notes.extend(composition.notes)
 
+    # THE STORED LAYOUT IS ALWAYS DERIVED AT THE COMPOSITION'S OWN SIZE and
+    # sliced per target afterwards (`slice_layout`) — deriving it at a
+    # slice's size would fold the mapper's rows against the wrong pixel
+    # count and invent an arrangement out of arithmetic.
     if layout is None:
         layout, layout_note = stored_layout(
             mapper_id, virtuals.get(mapper_id) or {}, composition.total,
@@ -796,6 +1158,16 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     else:
         layout_note = "supplied by the caller"
     result.layout_note = layout_note
+
+    specs = expand_targets(composition, targets)
+    result.target_specs = list(specs)
+    whole_only = specs == [TARGET_ALL]
+    if not whole_only:
+        result.notes.append(
+            f"Commissioning {len(specs)} targets one at a time "
+            f"({', '.join(specs)}) rather than the stitched composition — "
+            f"each is gray-coded and judged on its own, against its own "
+            f"slice of the same stored ground truth.")
 
     plan = _ActivationPlan(composition)
     scope, activated, not_up = await room_mapping.activate_for_capture(
@@ -806,10 +1178,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
             f"Brought up {', '.join(activated)} for the capture and put "
             f"{'it' if len(activated) == 1 else 'them'} back afterwards.")
 
-    program = CommissionProgram(scope, composition)
-    decodes: list[gray_code.Decode] = []
-    latency_by_device: dict[str, float] = {}
-    resolution_ms = 1e9
+    entries: list[dict] = []
     sess.keep_full_frames = True
     sess.run_abort = None
     try:
@@ -818,38 +1187,19 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         warning = fixture_brightness.warning_for(readings)
         if warning:
             result.problems.append(warning)
+        resolved_instrument = (instrument if instrument is not None
+                               else _safe_instrument(result))
         async with fixture_brightness.owned(fixtures, readings) as owned:
-            for pass_no in range(result.repeats):
-                label = f"run{pass_no + 1}"
-                try:
-                    decode, latency = await _one_pass(
-                        deps, program, composition, result, label)
-                finally:
-                    # ONE CONTINUOUS HOLD PER PASS, released before the next
-                    # one opens — and released whatever happened inside it.
-                    try:
-                        await deps.close_hold()
-                    except Exception:                  # noqa: BLE001
-                        logger.warning("commissioning: releasing the hold "
-                                       "after %s failed; the hold sweep owns "
-                                       "it from here", label, exc_info=True)
-                if decode is not None:
-                    decodes.append(decode)
-                    if not latency_by_device:
-                        latency_by_device = _device_latencies(
-                            latency, decode, composition)
-                        resolution_ms = float(latency.get("resolution_ms", 1e9))
+            for spec in specs:
+                entries.append(await _run_target(
+                    deps, scope, composition, spec, layout, layout_note,
+                    result, result.repeats, resolved_instrument))
         if owned.note:
             result.notes.append(owned.note)
         result.problems.extend(owned.problems)
-    except (RunAborted, NotEnoughFrames, HoldRefused,
-            CameraCannotResolve) as exc:
+    except (RunAborted, HoldRefused) as exc:
         result.reason = str(exc)
-        result.refusal = ("aborted" if isinstance(exc, RunAborted)
-                          else "hold" if isinstance(exc, HoldRefused)
-                          else "resolution"
-                          if isinstance(exc, CameraCannotResolve)
-                          else "frames")
+        result.refusal = ("aborted" if isinstance(exc, RunAborted) else "hold")
     except Exception as exc:                           # noqa: BLE001
         named = mapping_refusals.ownership_refusal(exc)
         if named is None:
@@ -866,21 +1216,61 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                 f"page, or run this again")
 
     result.seconds = deps.clock() - started
-    if not decodes:
-        if not result.reason:
-            result.reason = ("no capture stack was decoded — see the "
-                             "problems for why")
+
+    if whole_only:
+        # ONE TARGET, AND IT IS THE WHOLE COMPOSITION: the result keeps its
+        # original shape exactly — no `targets` list, no aggregate — so
+        # every existing caller and every existing proof reads what it
+        # always read.
+        entry = entries[0] if entries else {}
+        result.resolution = entry.get("resolution") or result.resolution
+        result.decodes = entry.get("decodes") or []
+        result.agreement = entry.get("agreement") or {}
+        if entry.get("table"):
+            result.table = entry["table"]
+            result.ok = True
+        else:
+            if not result.reason:
+                result.reason = (entry.get("reason") or
+                                 "no capture stack was decoded — see the "
+                                 "problems for why")
+            if not result.refusal:
+                result.refusal = str(entry.get("refusal") or "")
         return result
-    result.decodes = [d.as_dict() for d in decodes]
-    if len(decodes) > 1:
-        result.agreement = gray_code.agreement(decodes[0], decodes[1])
-    result.table = compare.judge(
-        decodes[0], composition.segments, layout, layout_note,
-        latency_measured=latency_by_device,
-        latency_instrument=(instrument if instrument is not None
-                            else _safe_instrument(result)),
-        latency_resolution_ms=resolution_ms)
-    result.ok = True
+
+    # A TARGET THE RUN NEVER REACHED IS STILL A TARGET. An abort, a refused
+    # hold or an ownership loss ends the whole run mid-set, so the targets
+    # after it were never appended — and an aggregate over only the ones
+    # that happened to finish is precisely the silently-shrinking
+    # denominator `compare.aggregate` exists to refuse. They are filled in
+    # here, in the order they were going to run, so the table reports the
+    # set that was ASKED FOR rather than the subset that answered.
+    done = {e.get("target") for e in entries}
+    entries = [next(e for e in entries if e.get("target") == spec)
+               if spec in done else
+               {"target": spec, "label": spec, "ok": False,
+                # "not_attempted" ALWAYS, whatever ended the run: at the
+                # target's own level the fact is that nobody looked, and
+                # the run's own sentence says why.
+                "reason": ("the run ended before this target was reached"
+                           + (f": {result.reason}" if result.reason else "")),
+                "refusal": "not_attempted",
+                "composition": {}, "resolution": {}, "decodes": [],
+                "agreement": {}, "table": None, "notes": []}
+               for spec in specs]
+    result.targets = entries
+    result.resolution = next((e.get("resolution") for e in entries
+                              if e.get("resolution")), result.resolution)
+    result.table = compare.aggregate(entries)
+    # A RUN-LEVEL REFUSAL IS A REFUSAL even when some targets were judged
+    # before it: the judged tables are kept and stored, but the run did not
+    # complete, and `ok` is what the route turns into a 200.
+    result.ok = any(e.get("table") for e in entries) and not result.refusal
+    if not result.ok and not result.reason:
+        result.reason = "; ".join(
+            f"{e.get('label')}: {e.get('reason')}" for e in entries
+            if e.get("reason")) or "no target produced a decode"
+        result.refusal = str(entries[0].get("refusal") or "")
     return result
 
 

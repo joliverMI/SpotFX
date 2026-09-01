@@ -601,7 +601,8 @@ def test_a_composition_the_camera_cannot_resolve_is_refused_by_name():
     assert not result.ok
     assert result.refusal == "resolution"
     # the sentence names the measurement, the bar and what to do
-    assert "cannot tell these pixels apart" in result.reason
+    assert "cannot tell the composition's pixels apart" in result.reason
+    assert result.resolution["verdict"] == gray_code.RESOLUTION_IMPOSSIBLE
     assert "camera pixels" in result.reason and "closer" in result.reason
     # TWO captures, not twenty-two: the dark and full references answer it
     assert len(result.captures) == 2

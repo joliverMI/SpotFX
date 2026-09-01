@@ -3702,7 +3702,7 @@ and the id shape. Five things to know:
 The plan's §8 (`/home/javi/fleet-spotfx/.lavish/room-light-field-plan.html`),
 built 2026-08-31. Gray-code his stored `tv-mapper` composition, decode where
 every pixel is, and judge a comparison **frozen in the plan before any run**.
-Four things to know before touching any of it:
+Six things to know before touching any of it:
 
 - **ITS FIRST TWO FIELD RUNS FAILED TOTALLY, AND THE CAUSE IS RESOLUTION,
   NOT TIMING AND NOT HIS ROOM (2026-09-01, PR fm/commissioning-decode-
@@ -3731,6 +3731,44 @@ Four things to know before touching any of it:
   `mapping_refusals.unresolvable_composition`) rather than spending the
   room's dark time, and `scripts/check_commissioning.py` §3c reproduces the
   whole field failure on demand.
+- **SO IT RUNS PER FIXTURE (or per segment), NEVER THE STITCHED WHOLE
+  (2026-09-01, PR fm/per-fixture-commissioning, the captain's ruling).**
+  `POST /api/rooms/{id}/commission` takes `targets` — `["fixtures"]` (or
+  `per_fixture: true`), `["segments"]`, or explicit `"device:<id>"` /
+  `"segment:<n>"`; omitting it still commissions the whole composition, and
+  on his tv-mapper that still refuses in four seconds with the arithmetic.
+  `commissioning.slice_composition` is the binding statement. The
+  re-addressing IS the point: a slice keeps the mapper's own segments,
+  their stored numbers and their stored order, and remembers where each
+  pixel sits in the whole (`global_indices`), but the gray code addresses
+  0..N-1 — so one sconce is 88 pixels, 7 patterns and ~176 camera pixels
+  where the stitched whole is 736, 10 patterns and ~1,472. The stored
+  layout is always derived at the COMPOSITION's own size and sliced after
+  (`slice_layout`); deriving it at a slice's size would fold the mapper's
+  rows against the wrong pixel count and invent an arrangement. Every
+  target is judged by the SAME frozen table and the set folds back into
+  one table of the same five rows (`commission_compare.aggregate`): a
+  field is as bad as its worst target, and a target that produced no
+  decode contributes UNMEASURED to every row rather than shrinking the
+  denominator to the pieces that happened to work. A target the camera
+  cannot read ends that TARGET, not the run.
+- **MARGINAL REFUSES, and the refusal says WHICH — the captain's words,
+  "marginal is the state that produces a confident wrong answer".**
+  `gray_code.RESOLUTION_SAFETY_FACTOR` (1.25) sits on top of
+  MIN_CAMERA_PX_PER_INDEX, and `resolution_report` reports three states:
+  `ok`, `marginal` (above Nyquist, inside the margin) and `impossible`
+  (below it). BOTH refusing states refuse; `resolvable` follows
+  `verdict == ok`, so every caller inherits the conservative boundary
+  rather than opting in. The reason a margin is needed at all is gray
+  code's own guarantee working against you: a low bit flipped by a
+  fraction of a camera pixel decodes to a NEIGHBOUR, so a marginal pose
+  produces a confident, plausible, WRONG arrangement rather than a visible
+  failure. His ring alone (560 px, ~1,120 needed and ~1,400 to be trusted,
+  against the ~1,000 the whole border of a 320x180 frame holds) is the
+  case it exists to refuse. **It is not a knob for getting a run to pass**
+  — lowering it does not make a marginal pose readable, only silent. The
+  wire's 320x180 frame contract is deliberately UNTOUCHED; changing it
+  goes back to the captain.
 - **THE FIVE TOLERANCES ARE PRE-REGISTERED, NOT TUNING KNOBS.**
   `spectra/services/commission_compare.py` quotes the plan's table verbatim
   in its docstring and owns 0.98 / 2% / 5% / 5% / +/-15 ms. Moving one has
@@ -3782,8 +3820,12 @@ gray-code arithmetic is `spectra/services/gray_code.py`, pure, so the lamp
 and the decoder cannot drift into two ideas of which pixel is which.
 Proofs: `scripts/check_commissioning.py` (real render pipeline for the
 lamp, then a declared arrangement recovered end to end, then SABOTAGE —
-each corrupted stack failing its own row with the table's own attribution),
-`tests/test_commissioning.py`, `tests/test_gray_code.py`.
+each corrupted stack failing its own row with the table's own attribution;
+§7 is the per-target half, including the marginal boundary proven on both
+sides against a box-integrating camera whose reported
+`camera_px_per_index` IS the number under test),
+`tests/test_commissioning.py`, `tests/test_commissioning_per_fixture.py`,
+`tests/test_gray_code.py`.
 
 **A check script that renders through `fx.headless` must `os._exit()`.**
 `fx`'s `TemporalEffect` spawns non-daemon threads the frame-stepped harness

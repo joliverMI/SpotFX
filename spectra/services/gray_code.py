@@ -43,6 +43,13 @@ nothing at all. That is a fact about the pose and the frame size, not about
 his fixtures, and it is measurable from the reference pair alone. See
 MIN_CAMERA_PX_PER_INDEX and `docs/commissioning-field-decode-failure.md`.
 
+AND THE STATE BETWEEN THE TWO, which is the dangerous one: a target imaged
+just ABOVE that bar decodes, and decodes WRONG — gray code's own guarantee
+that a flipped low bit lands on a NEIGHBOUR means a marginal pose produces
+a confident, plausible, wrong arrangement rather than a visible failure. So
+`resolution_report` has three states and refuses two of them, saying which.
+See RESOLUTION_SAFETY_FACTOR.
+
 WHAT "SEEN" MEANS HERE, precisely, because a row of the frozen comparison
 is judged on it: an index is SEEN when at least `MIN_SUPPORT` camera pixels
 decoded to it with every bit confident. One camera pixel agreeing is not a
@@ -108,6 +115,42 @@ MIN_SUPPORT = 1
 #: A run at or above this bar can still fail for other reasons; a run below
 #: it cannot succeed for any.
 MIN_CAMERA_PX_PER_INDEX = 2.0
+#: THE MARGIN, and it is the whole reason a per-target run does not erode
+#: the honesty the whole-composition run bought.
+#:
+#: MIN_CAMERA_PX_PER_INDEX is the Nyquist limit — the point below which the
+#: low bits carry no information AT ALL. A run sitting exactly ON that limit
+#: is not a run that works: its lowest bit is sampled at one sample per
+#: half-period, where a fraction of a pixel of registration error, one LED's
+#: worth of vignette, or the grey8 rounding on the wire flips it. And a
+#: flipped LOW bit does not look like a failure — gray code guarantees it
+#: decodes to a NEIGHBOUR, which is a confident, plausible, WRONG answer.
+#: That is the one outcome an instrument judged against pre-registered
+#: ground truth must never produce.
+#:
+#: So the boundary is deliberately conservative: a target that images at
+#: less than this multiple of the Nyquist bar REFUSES as MARGINAL, in those
+#: words, rather than attempting a decode that would look like it worked.
+#: 1.25x buys a quarter of a camera pixel of headroom on the finest
+#: structure in the stack (gray bit 0's two-index period).
+#:
+#: The captain's ruling that fixed the number (2026-09-01, on splitting the
+#: run per fixture): "marginal is the state that produces a confident wrong
+#: answer". His own ring — 560 pixels, needing ~1120 camera pixels of a
+#: frame whose entire border is ~1000 — is the case this exists to refuse.
+#:
+#: It is NOT a knob for getting a run to pass. Lowering it does not make a
+#: marginal pose readable; it only stops the instrument saying so.
+RESOLUTION_SAFETY_FACTOR = 1.25
+
+#: The three states `resolution_report` reports, and only the first one
+#: runs. MARGINAL and IMPOSSIBLE both refuse, and the refusal says WHICH —
+#: they are different findings and a different act clears each: a marginal
+#: target wants a closer pose or a smaller target, an impossible one cannot
+#: be read at this frame size however the phone is held.
+RESOLUTION_OK = "ok"
+RESOLUTION_MARGINAL = "marginal"
+RESOLUTION_IMPOSSIBLE = "impossible"
 
 
 def bits_needed(total: int) -> int:
@@ -261,20 +304,47 @@ def resolution_report(dark: np.ndarray, full: np.ndarray, *, total: int,
 
     Reported on every run, refused on only the ones below the bar — the
     number is worth carrying even when it passes, because it says how much
-    margin the pose had."""
+    margin the pose had.
+
+    THREE STATES, NOT TWO (`verdict`), and only the first one runs:
+
+      ok          at or above RESOLUTION_SAFETY_FACTOR x the Nyquist bar.
+      marginal    above the Nyquist bar but inside the margin. REFUSES.
+                  This is the state that produces a CONFIDENT WRONG ANSWER
+                  — a low bit flipped by a fraction of a pixel decodes, by
+                  gray code's own guarantee, to a plausible NEIGHBOUR — so
+                  the conservative act is to say no. See
+                  RESOLUTION_SAFETY_FACTOR.
+      impossible  below the Nyquist bar. Cannot succeed for any reason.
+
+    `resolvable` follows `verdict == RESOLUTION_OK`, so every existing
+    caller inherits the conservative boundary rather than opting into it."""
     bright, lit, peak, floor = bright_and_lit(dark, full,
                                               lit_fraction=lit_fraction)
     total = int(max(0, total))
     lit_pixels = int(lit.sum())
     per_index = (lit_pixels / total) if total else 0.0
     needed = int(np.ceil(total * MIN_CAMERA_PX_PER_INDEX))
+    safe = int(np.ceil(total * MIN_CAMERA_PX_PER_INDEX
+                       * RESOLUTION_SAFETY_FACTOR))
+    if lit_pixels >= safe:
+        verdict = RESOLUTION_OK
+    elif lit_pixels >= needed:
+        verdict = RESOLUTION_MARGINAL
+    else:
+        verdict = RESOLUTION_IMPOSSIBLE
     return {"total": total, "lit_pixels": lit_pixels,
             "camera_px_per_index": round(per_index, 4),
             "needed_camera_px": needed,
+            "safe_camera_px": safe,
             "min_camera_px_per_index": MIN_CAMERA_PX_PER_INDEX,
+            "safety_factor": RESOLUTION_SAFETY_FACTOR,
+            "safe_camera_px_per_index": round(
+                MIN_CAMERA_PX_PER_INDEX * RESOLUTION_SAFETY_FACTOR, 4),
             "frame_pixels": int(bright.size),
             "peak": round(peak, 3), "floor": round(floor, 3),
-            "resolvable": bool(lit_pixels >= needed),
+            "verdict": verdict,
+            "resolvable": bool(verdict == RESOLUTION_OK),
             "any_light": bool(lit_pixels > 0)}
 
 

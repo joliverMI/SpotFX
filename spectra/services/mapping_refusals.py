@@ -103,9 +103,10 @@ def hold_refusal(reason: str) -> str:
     return f"The room could not be held for this measurement: {reason}"
 
 
-def unresolvable_composition(report: dict, width: int, height: int) -> str:
-    """THE CAMERA CANNOT SEE THIS COMPOSITION IN PIECES — refused two
-    captures in, before the room is held dark for the other twenty.
+def unresolvable_composition(report: dict, width: int, height: int, *,
+                             target_label: str = "") -> str:
+    """THE CAMERA CANNOT READ THIS TARGET — refused two captures in, before
+    the room is held dark for the other twenty.
 
     THE LIVE FAILURE THIS EXISTS FOR (2026-09-01, both runs of the
     commissioning test on his tv-mapper): the whole 736-pixel composition
@@ -116,35 +117,74 @@ def unresolvable_composition(report: dict, width: int, height: int) -> str:
     what was an instrument pointed at something it cannot resolve.
     `gray_code.MIN_CAMERA_PX_PER_INDEX` carries the arithmetic.
 
+    IT SAYS WHICH OF TWO THINGS IT IS, because a different act clears each
+    and because they indict different things:
+
+      IMPOSSIBLE  below the Nyquist bar. Nothing can be decoded however
+                  bright the room is. His whole 736-pixel composition,
+                  through the 320x180 frame the phone sends, is this.
+      MARGINAL    above that bar but inside RESOLUTION_SAFETY_FACTOR of it.
+                  A decode here would SUCCEED and be WRONG — a low bit
+                  flipped by a fraction of a pixel lands, by gray code's own
+                  guarantee, on a plausible NEIGHBOUR. The captain's ruling
+                  on splitting the run per fixture: "marginal is the state
+                  that produces a confident wrong answer". His ring alone,
+                  560 pixels needing ~1120 camera pixels of a frame whose
+                  whole border is ~1000, is this one.
+
     THE SHAPE OF THE ANSWER, the same discipline `too_long_refusal` keeps:
     name the measurement, name the bar, and hand back the choice. It never
-    proposes commissioning a coarser version of his composition — what is
-    being commissioned is his decision, and the frozen table judges 736
-    pixels because that is what the stored mapper says."""
+    quietly commissions a coarser version of what was asked for — WHAT is
+    being commissioned is his decision, and the frozen table judges the
+    target's own pixel count because that is what the stored mapper says.
+    """
+    from spectra.services import gray_code
+
     lit = int(report.get("lit_pixels") or 0)
     total = int(report.get("total") or 0)
     needed = int(report.get("needed_camera_px") or 0)
+    safe = int(report.get("safe_camera_px") or 0)
     per = float(report.get("camera_px_per_index") or 0.0)
+    verdict = str(report.get("verdict")
+                  or gray_code.RESOLUTION_IMPOSSIBLE)
+    what = f"{target_label} " if target_label else ""
+    subject = target_label or "the composition"
     if lit <= 0:
-        return (f"The camera saw no light from the composition at all: with "
-                f"every one of its {total} pixels turned on, not one camera "
-                f"pixel came out brighter than the dark reference. Nothing "
-                f"was measured and nothing was written. Check the phone is "
+        return (f"The camera saw no light from {subject} at all: with every "
+                f"one of its {total} pixels turned on, not one camera pixel "
+                f"came out brighter than the dark reference. Nothing was "
+                f"measured and nothing was written. Check the phone is "
                 f"pointed at the television, that the fixtures actually lit, "
                 f"and that the frame is not so dark the difference rounds "
                 f"away — then press Commission again.")
+    if verdict == gray_code.RESOLUTION_MARGINAL:
+        return (f"MARGINAL, so this run refused rather than guessing. From "
+                f"where the phone is standing, {what}images {lit} camera "
+                f"pixels for its {total} — about {per:.2f} each, which "
+                f"clears the {report.get('min_camera_px_per_index')} "
+                f"absolute minimum but not the "
+                f"{report.get('safe_camera_px_per_index')} this instrument "
+                f"insists on ({safe} camera pixels, of the {width}x{height} "
+                f"frame the phone sends). In that band a decode SUCCEEDS "
+                f"and is WRONG: one bit flipped by a fraction of a pixel "
+                f"lands on a neighbouring LED, so the answer comes back "
+                f"confident and plausible and untrue — which is the one "
+                f"outcome a ground-truth test must never produce. Nothing "
+                f"was written. Move the phone closer, or commission a "
+                f"smaller piece — one fixture, or one segment — then press "
+                f"Commission again.")
     return (f"From where the phone is standing, this camera cannot tell "
-            f"these pixels apart. With all {total} pixels on, the "
-            f"composition lights {lit} camera pixels — about {per:.2f} per "
-            f"pixel, where reading them back needs about "
-            f"{report.get('min_camera_px_per_index')} each "
+            f"{subject}'s pixels apart. With all {total} of them on, "
+            f"{'it' if target_label else 'the composition'} lights {lit} "
+            f"camera pixels — about {per:.2f} per pixel, where reading them "
+            f"back needs about {report.get('min_camera_px_per_index')} each "
             f"({needed} in total, of the {width}x{height} frame the phone "
             f"sends). Below that, a pattern and its opposite land on the "
             f"same camera pixels and cancel, so nothing can be decoded "
             f"however bright the room is. Nothing was written. Move the "
-            f"phone closer, or frame just the television, so the strip "
-            f"fills much more of the picture — then press Commission "
-            f"again.")
+            f"phone closer, frame just the television, or commission a "
+            f"smaller piece — one fixture, or one segment — then press "
+            f"Commission again.")
 
 
 def capture_refusal(emitter_label: str, exc: BaseException) -> str:
