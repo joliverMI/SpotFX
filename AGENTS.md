@@ -3890,8 +3890,14 @@ is the one way this build can become a lie.
   held across the drop and named across a reopen, the gate refusing an
   automated client, and a blind machine saying so), run from
   `tests/test_light_field_checks.py`; `tests/test_capture_queue.py`;
-  `tests/test_capture_client.py`. **No live-room proof exists** — that is
-  a separate step the captain schedules.
+  `tests/test_capture_client.py`. **No live-room proof exists, and the
+  V4L2 backend has never met real hardware** (the build machine has no
+  `/dev/video*` and no `v4l2-ctl`) — both stated in the doc's own "What is
+  proven, and what is not". Every way that backend can be wrong fails
+  SAFE by the read-back rule: a missing tool, a missing control or an
+  ignored write all report NOT LOCKED and refuse the run by name, so a
+  wrong V4L2 detail costs a refused run, never a map that looks fine and
+  is not.
 
 **A check script that renders through `fx.headless` must `os._exit()`.**
 `fx`'s `TemporalEffect` spawns non-daemon threads the frame-stepped harness

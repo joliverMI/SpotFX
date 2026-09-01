@@ -88,6 +88,36 @@ ends.
 
 ---
 
+## What is proven, and what is not
+
+Proven offline, against a synthetic camera and an isolated local SPECTRA
+instance: the whole wire, the queue, the seam, the reconnect, the pose
+assertion, the kept partial, the declared retry, and every refusal on this
+path (`scripts/check_capture_queue_e2e.py`, 42 checks, run from pytest).
+
+**Not proven, and stated rather than implied:**
+
+- **The V4L2 backend has never met real hardware.** The machine this was
+  built on has no `/dev/video*` and no `v4l2-ctl`. The control names, the
+  menu parsing and the ffmpeg pipeline are written against V4L2's
+  documented shapes and unit-tested against a fake `v4l2-ctl` speaking a
+  real `--list-ctrls-menus` transcript — that is not the same as a webcam.
+  The first run on his laptop is the measurement.
+- **Nothing has run against his room.** By instruction.
+
+The two ways the real backend can be wrong both fail SAFE, which is the
+point of the read-back rule:
+
+| | What happens |
+|---|---|
+| `ffmpeg` missing, device missing, device busy, device unreadable | the client still CONNECTS, reports `camera_error`, and every run refuses with that sentence naming the machine |
+| `v4l2-ctl` missing, or a control this camera does not have | the camera opens and reports **NOT LOCKED**, with "v4l2-ctl is not installed" (or the missing control) in its capabilities — the run refuses by name |
+| the control exists, the write is accepted, and the camera ignores it | the read-back says auto, so it reports **NOT LOCKED** — the run refuses by name |
+
+None of those produce a map. A wrong V4L2 detail costs a refused run and a
+sentence saying which control was missing; it cannot produce a map that
+looks fine and is not.
+
 ## Running it
 
 On the capture machine (his Linux laptop reaches SPECTRA over the
