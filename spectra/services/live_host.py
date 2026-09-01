@@ -276,7 +276,25 @@ class LiveLights:
                              "or effect restore failed silently at config load")
                 continue
             if not virtual.active:
-                gaps[vid] = "not active — effect restore failed silently at config load"
+                # Say WHY, from what fx itself recorded at config load
+                # (fx/virtuals.py's restore audit, VENDOR.md #29), rather
+                # than guessing "restore failed" — the load-order eviction
+                # this reason used to misdescribe is a restore that
+                # SUCCEEDED and was undone afterwards by a virtual further
+                # down the config.
+                recorded = getattr(
+                    self.host.virtuals, "restore_failures", {}
+                ).get(vid)
+                if recorded:
+                    gaps[vid] = f"not active — {recorded}"
+                elif virtual.active_effect is None:
+                    gaps[vid] = "not active — no effect instance on the virtual"
+                else:
+                    gaps[vid] = (
+                        f"not active — holds effect "
+                        f"'{virtual.active_effect.type}' but runs no render "
+                        f"thread, so writes to it land on nothing"
+                    )
                 continue
             age = ages.get(vid)
             if age is None or age > stale_after_s:

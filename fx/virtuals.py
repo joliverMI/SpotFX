@@ -654,7 +654,12 @@ class Virtual:
             _LOGGER.info("%s fallback_fire_set", self.name)
             self.fallback_fire = True
 
-    def set_effect(self, effect, fallback: Optional[float] = None):
+    def set_effect(
+        self,
+        effect,
+        fallback: Optional[float] = None,
+        activate: bool = True,
+    ):
         """
         Sets the active effect for the virtual device.
 
@@ -663,6 +668,25 @@ class Virtual:
             fallback: If not None, the current active effect is set as the fallback effect
                       and a fallback timer triggered for fallback seconds
                       If None, the new effect is set and any existing fallback timer is cleared
+            activate: If True (the default, every interactive caller), the
+                      virtual is activated once the effect is attached. If
+                      False, the effect is attached and the virtual is left
+                      exactly as inactive as it was.
+
+                      SpotFX deviation, and it is load-bearing at CONFIG
+                      LOAD. Activating a virtual is not a private act: it
+                      registers segments on each backing device, and
+                      `Device.add_segments_batch` deactivates every EXTERNAL
+                      virtual streaming to a device whose OWN device-virtual
+                      is activating. Restoring a stored effect onto a
+                      virtual whose stored `active` is false used to
+                      activate it anyway and then immediately deactivate it
+                      again — a state round-trip with no net effect on
+                      ITSELF but a permanent one on its neighbours: any
+                      earlier-loaded external virtual sharing that device
+                      was evicted and nothing ever brought it back. See
+                      fx/VENDOR.md deviation #29 and
+                      tests/test_cold_load_effect_restore.py.
 
         Raises:
             ValueError: If no configured device segments are available.
@@ -736,6 +760,8 @@ class Virtual:
                     self._streaming,
                 )
             )
+        if not activate:
+            return
         try:
             self.active = True
         except RuntimeError:
@@ -1821,6 +1847,12 @@ class Virtuals:
             )
 
     def create_from_config(self, config, pause_all=False):
+        # Named record of every virtual whose stored effect did not end up
+        # driving it, keyed by virtual id.  Read by the liveness surface
+        # (spectra/services/live_host.py) so "not active" can say WHY
+        # instead of guessing.  Reset per load, like the registry itself.
+        self.restore_failures = {}
+
         for virtual_cfg in config:
             _LOGGER.debug("Loading virtual from config: %s", virtual_cfg)
             new_virtual = self._ledfx.virtuals.create(
@@ -1841,17 +1873,20 @@ class Virtuals:
             if "segments" in virtual_cfg:
                 try:
                     new_virtual.update_segments(virtual_cfg["segments"])
-                except vol.MultipleInvalid:
-                    _LOGGER.warning(
-                        "Virtual %s: segment schema changed, not restoring segment",
+                except vol.MultipleInvalid as e:
+                    self._record_restore_failure(
                         virtual_cfg["id"],
+                        (virtual_cfg.get("effect") or {}).get("type"),
+                        f"segment schema rejected the stored segments "
+                        f"({type(e).__name__}: {e}) — effect not restored",
                     )
                     continue
                 except (RuntimeError, ValueError) as e:
-                    _LOGGER.warning(
-                        "Virtual %s: failed to restore segments: %s",
+                    self._record_restore_failure(
                         virtual_cfg["id"],
-                        e,
+                        (virtual_cfg.get("effect") or {}).get("type"),
+                        f"failed to restore segments ({type(e).__name__}: "
+                        f"{e}) — effect not restored",
                     )
                     continue
 
@@ -1859,11 +1894,19 @@ class Virtuals:
             # device segments.  This prevents a ValueError crash when a
             # poisoned config (e.g. virtual whose device was deleted) is
             # loaded at startup.
+            stored_effect_type = (virtual_cfg.get("effect") or {}).get("type")
+            # Stored `active` is authoritative over whether the RESTORE may
+            # activate.  Absent means "no opinion recorded" — keep the
+            # historical behaviour (activate), which is what every
+            # pre-`active`-key config relied on.
+            stored_active = bool(virtual_cfg.get("active", True))
+
             if "effect" in virtual_cfg and not new_virtual._devices:
-                _LOGGER.warning(
-                    "Virtual %s has no device segments; skipping "
-                    "effect restore to avoid startup crash",
+                self._record_restore_failure(
                     virtual_cfg["id"],
+                    stored_effect_type,
+                    "no device segments — skipped effect restore to avoid "
+                    "a startup crash",
                 )
             elif "effect" in virtual_cfg:
                 try:
@@ -1872,11 +1915,13 @@ class Virtuals:
                         type=virtual_cfg["effect"]["type"],
                         config=virtual_cfg["effect"]["config"],
                     )
-                    new_virtual.set_effect(effect)
-                except vol.MultipleInvalid:
-                    _LOGGER.warning(
-                        "Virtual %s: effect schema changed, not restoring effect",
+                    new_virtual.set_effect(effect, activate=stored_active)
+                except vol.MultipleInvalid as e:
+                    self._record_restore_failure(
                         virtual_cfg["id"],
+                        stored_effect_type,
+                        f"effect schema rejected the stored config "
+                        f"({type(e).__name__}: {e})",
                     )
                 except Exception as e:
                     # Any device-layer failure (a Hue handshake exception, a
@@ -1887,10 +1932,10 @@ class Virtuals:
                     # device stranded unrelated virtuals later in config
                     # order. One virtual's failure must never strand the
                     # rest — log it and keep going.
-                    _LOGGER.warning(
-                        "Virtual %s: failed to restore effect: %s",
+                    self._record_restore_failure(
                         virtual_cfg["id"],
-                        e,
+                        stored_effect_type,
+                        f"{type(e).__name__}: {e}",
                     )
 
             # This adds support for configs that are configured as paused
@@ -1907,6 +1952,66 @@ class Virtuals:
                     virtual_cfg["id"], virtual_cfg["config"]
                 )
             )
+
+        self._audit_restored_effects(config)
+
+    # ── SpotFX deviation #29: a config load must never fail quietly ────────
+    #
+    # The whole point of this pair is that a stored effect which did not end
+    # up driving its virtual is an ERROR someone can read, naming the
+    # virtual, the stored effect type and the actual reason — not an INFO
+    # table of False/False/False and a liveness line that guesses.
+
+    def _record_restore_failure(self, virtual_id, effect_type, reason):
+        """Record and SHOUT one virtual's failed effect restore."""
+        if not hasattr(self, "restore_failures"):
+            self.restore_failures = {}
+        self.restore_failures[virtual_id] = reason
+        _LOGGER.error(
+            "EFFECT RESTORE FAILED at config load — virtual '%s', stored "
+            "effect '%s': %s",
+            virtual_id,
+            effect_type or "<none stored>",
+            reason,
+        )
+
+    def _audit_restored_effects(self, config):
+        """After the whole config is loaded, VERIFY every virtual that the
+        stored config says should be driving actually is.
+
+        This is the catch-all the per-virtual handlers above cannot be: a
+        restore can succeed on its own turn and still be undone LATER in the
+        same load by a virtual further down the config — a device virtual
+        activating evicts every external virtual streaming to that device
+        (`Device.add_segments_batch`).  That is precisely how a copy-mapped
+        virtual sitting in front of a device whose own device-virtual loads
+        after it went dark on every cold start with nothing above INFO to
+        show for it.  Reading the end state back is the only check that
+        cannot be fooled by a step that looked fine when it ran.
+        """
+        for virtual_cfg in config:
+            if not virtual_cfg.get("active"):
+                continue
+            virtual_id = virtual_cfg["id"]
+            if virtual_id in getattr(self, "restore_failures", {}):
+                continue  # already named, loudly, above
+            effect_type = (virtual_cfg.get("effect") or {}).get("type")
+            virtual = self._virtuals.get(virtual_id)
+            if virtual is None:
+                reason = "virtual missing from the registry after load"
+            elif virtual.active_effect is None:
+                reason = "no effect instance on the virtual after load"
+            elif not virtual.active:
+                reason = (
+                    "restored but NOT ACTIVE after load — something later in "
+                    "the config load deactivated it (a device virtual "
+                    "activating evicts external virtuals on its device); it "
+                    "holds an effect object but runs no render thread, so "
+                    "writes to it land on nothing"
+                )
+            else:
+                continue
+            self._record_restore_failure(virtual_id, effect_type, reason)
 
     def schema(self):
         return Virtual.CONFIG_SCHEMA
