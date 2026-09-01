@@ -3777,6 +3777,43 @@ Six things to know before touching any of it:
   — lowering it does not make a marginal pose readable, only silent. The
   wire's 320x180 frame contract is deliberately UNTOUCHED; changing it
   goes back to the captain.
+- **THE ROOM'S OWN LIGHT IS NOW MEASURED, AND A MOVING WINDOW REFUSES BY
+  NAME (2026-09-01, PR fm/ambient-stability-gate).** His first per-fixture
+  run had a WINDOW IN VIEW in daylight with cloud moving: the resolution
+  gate passed honestly (5.375 camera px/index, peak 49.3), and the decode
+  still came back 34 of 88 with `out_of_range_pixels=30` — §98's
+  CONFIDENT-WRONG signature, which only happens when the stack compared two
+  different scenes. `spectra/services/ambient_stability.py` is the binding
+  statement; four things it settles:
+  - **The gate never looks at the composition.** It fixes a background set
+    ONCE — the dimmer half of `full - dark`, a QUANTILE not a threshold, so
+    an ambient step between the two references cannot collapse it — and
+    measures the SAME camera pixels in every later capture.
+  - **ONLY LAMP-FREE COMPARISONS ARE GATED**, and this took a redesign:
+    the PAIR delta (a pattern against its own inverse — complementary
+    halves, so the fixture's spill cancels exactly, and it is also the
+    quantity that lands in the bit's arithmetic) and DARK-AGAINST-DARK (a
+    CLOSING dark capture, now the 23rd capture of every pass). A lamp-ON
+    capture's distance from the opening dark carries the fixture's own
+    spill and is reported but NEVER gated — gating it refuses a room whose
+    fixture lights the walls, which is a wall, not a gate.
+  - **The bound is `max(2.0 grey levels, 0.10 x peak)`** — half
+    `gray_code.BIT_CONFIDENCE`, so drift alone reaches half the bar a bit
+    must clear and cannot manufacture a confident wrong bit. Proven on BOTH
+    sides (0.7x passes through to a judged table, 1.6x refuses), the same
+    bar the marginal resolution boundary is held to.
+  - **A moving change refuses EARLY (the first bad pair); a change that
+    arrives and STAYS is invisible to every pair — correctly, it cancels in
+    the bit too — and is caught by the closing dark.** That asymmetry is
+    the design, not a gap. `gray_code.confident_wrong_signature` is the
+    cheap cross-check: it CONFIRMS an ambient refusal that already stands
+    on its own measurement, and when the ambient is measured STEADY and the
+    signature appears anyway the frozen table's own fail stands unchanged
+    with a note saying ambient is ruled out. Deferred, stated: mapping runs
+    do not use it (their per-emitter pairs are a different shape).
+  Spec: `tests/test_ambient_stability.py` (today's cloud reproduced through
+  the real decoder, the gate red on it, and a monkeypatched no-gate run
+  proving the harness fails on the defect it was written for).
 - **THE FIVE TOLERANCES ARE PRE-REGISTERED, NOT TUNING KNOBS.**
   `spectra/services/commission_compare.py` quotes the plan's table verbatim
   in its docstring and owns 0.98 / 2% / 5% / 5% / +/-15 ms. Moving one has
