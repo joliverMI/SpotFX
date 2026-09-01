@@ -135,6 +135,21 @@ WRITE_TRANSITION_MS = room_mapping.WRITE_TRANSITION_MS
 #: (the write has to actually land, through the same per-device delay every
 #: other write goes through) plus a window of frames to average.
 SETTLE_S = 0.6
+#: WHAT ONE PASS ROUGHLY COSTS, for the night run's planned-end bound and
+#: for nothing else (spectra/services/night_run.price_items).
+#:
+#: A pass is a dark reference, a full reference and 2xbits_needed(pixels)
+#: gray-code patterns over ONE hold — about 22 captures and ~35 seconds for
+#: his whole tv-mapper composition (this module's own docstring). The real
+#: number depends on a pixel count that cannot be resolved without the
+#: stored composition and a live virtual read, so the night run prices a
+#: commissioning item at this NOMINAL and SAYS SO in the record rather than
+#: presenting a precision it does not have. It is deliberately generous.
+#:
+#: IT IS NEVER USED FOR THE HOLD CEILING. Each run still derives its own
+#: ceiling from its own real plan; this is only ever compared against how
+#: much of the night is left.
+NOMINAL_PASS_S = 60.0
 CAPTURE_S = 0.9
 #: Frames a capture must actually have. Below this the run refuses rather
 #: than decoding a stack built from single frames.

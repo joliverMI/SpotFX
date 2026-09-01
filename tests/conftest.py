@@ -208,6 +208,27 @@ def _isolated_fire_history(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_night_run(tmp_path, monkeypatch):
+    """The NIGHT RUN's declaration and its per-night records
+    (spectra/services/night_run.py) are plain module-level file reads and
+    writes with no DI seam — same class as _isolated_fire_history above,
+    and reached from a production surface: `engine.status()` now reads both
+    on every call, and any test that drives `night_run.start()`/`abort()`
+    would otherwise write his real `storage/spectra/`. The module also
+    keeps ONE live night in a module global, which has to be cleared or a
+    started night leaks into the next test's `last_night()`."""
+    from spectra import config as scfg
+    from spectra.services import night_run
+    monkeypatch.setattr(scfg, "NIGHT_QUEUE_FILE", tmp_path / "night_queue.json")
+    monkeypatch.setattr(scfg, "NIGHT_RUNS_FILE", tmp_path / "night_runs.json")
+    night_run.current = None
+    night_run._task = None
+    yield
+    night_run.current = None
+    night_run._task = None
+
+
+@pytest.fixture(autouse=True)
 def _isolated_dwell():
     """spectra/services/dwell.py (minimum dwell, 2026-08-20) tracks the
     active scene's own latched entry time/seconds as bare module globals —
