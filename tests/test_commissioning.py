@@ -357,9 +357,11 @@ def test_a_known_arrangement_comes_back_and_the_frozen_table_is_green(tmp_path):
     # silent pass
     assert rows["Device latency"]["verdict"] == cc.UNMEASURED
     assert result.table["verdict"] == "incomplete"
-    # ~22 captures: dark + full + 2 per bit
+    # ~23 captures: dark + full + 2 per bit + the CLOSING dark the ambient
+    # gate ends every stack on (spectra/services/ambient_stability.py)
     bits = gray_code.bits_needed(h.total)
-    assert len(result.captures) == 2 + 2 * bits
+    assert len(result.captures) == 3 + 2 * bits
+    assert [c["label"] for c in result.captures][-1] == "run1/dark-end"
 
 
 def test_the_run_restores_in_a_finally_even_though_it_succeeded():

@@ -455,6 +455,61 @@ def decode_stack(dark: np.ndarray, full: np.ndarray,
     return out
 
 
+#: A bit counts as WEAK below this fraction of lit pixels reading it
+#: confidently. It separates the two halves of §98's dichotomy and nothing
+#: else — it is not a decode threshold and no bit is judged by it.
+SIGNATURE_WEAK_BIT = 0.5
+
+
+def confident_wrong_signature(decode: "Decode") -> dict:
+    """DID THIS STACK COMPARE TWO DIFFERENT SCENES? — the cheap read of
+    `docs/SPECTRA_SPEC.md` §98's dichotomy, from a decode that already
+    exists.
+
+    The two failure signatures are opposites and must never read the same:
+
+      UNRESOLVABLE   no bit is confident anywhere, with the HIGH bits near
+                     1.0 and nothing out of range. The camera cannot see
+                     the finest structure in the stack. `resolution_report`
+                     refuses this one before the stack is ever taken.
+      CONFIDENT-WRONG  real contrast on some bits and not others, AND
+                     `out_of_range_pixels > 0` — pixels that decoded
+                     confidently to an index the composition does not have,
+                     which cannot happen when the two frames of a pair
+                     describe the same scene. Something moved between them:
+                     the room's own light, or the timing.
+
+    This REPORTS, it never judges. The frozen table is untouched by it and
+    the five tolerances do not know it exists. Its only jobs are to confirm
+    an ambient refusal that already stands on its own measurement, and — the
+    other direction — to say that a fail with a STEADY ambient behind it is
+    not explained by the ambient."""
+    fracs = [(b.get("bit"), b.get("confident_fraction"))
+             for b in decode.bit_contrast
+             if b.get("confident_fraction") is not None]
+    weak = [bit for bit, f in fracs if f < SIGNATURE_WEAK_BIT]
+    strong = [bit for bit, f in fracs if f >= SIGNATURE_WEAK_BIT]
+    # THE LOW BIT IS WHAT SEPARATES THE TWO FAILURES. Gray bit 0 alternates
+    # in runs of two indices — the finest structure in the stack — so an
+    # unresolvable pose kills it first and completely (`median_strength`
+    # ~0), while a stack that compared two different SCENES still carries
+    # real contrast on it. Paired with an out-of-range pixel, which cannot
+    # happen at all when both frames of a pair describe the same scene,
+    # that is the confident-wrong signature and nothing else is.
+    low = next((b.get("median_strength") for b in decode.bit_contrast
+                if b.get("bit") == 0), None)
+    low_contrast = bool(low is not None and low >= BIT_CONFIDENCE)
+    present = bool(decode.out_of_range_pixels > 0 and low_contrast)
+    return {"present": present, "low_bit_strength": low,
+            "low_bit_has_contrast": low_contrast,
+            "out_of_range_pixels": int(decode.out_of_range_pixels),
+            "undecodable_pixels": int(decode.undecodable_pixels),
+            "lit_pixels": int(decode.lit_pixels),
+            "seen": len(decode.seen), "total": int(decode.total),
+            "weak_bits": weak, "strong_bits": strong,
+            "weak_bit_threshold": SIGNATURE_WEAK_BIT}
+
+
 def agreement(a: Decode, b: Decode) -> dict:
     """TWO INDEPENDENT DECODES, COMPARED — the plan's own "run it twice
     back-to-back" (the brief's point 4). Not one of the frozen rows: this

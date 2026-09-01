@@ -26,7 +26,8 @@ either side. A pass means:
      render pipeline, and exactly nothing else;
   2. the composition resolves to his stored segment order, driven through
      the fixtures' own strips, every index addressed exactly once;
-  3. ~22 captures (dark + full + one per bit and its inverse) recover the
+  3. ~23 captures (dark + full + one per bit and its inverse + a closing
+     dark, the ambient gate's one lamp-free reading) recover the
      declared arrangement, and the frozen table's rows 1-4 come out green;
   4. SABOTAGE, each failing ITS OWN row with the attribution the table's
      own right-hand column names: dead pixels (a FINDING about his
@@ -425,8 +426,8 @@ def section_two():
           "and every composition index is addressed exactly once")
     bits = gray_code.bits_needed(comp.total)
     print(f"     his real 736-pixel composition: {gray_code.bits_needed(736)} "
-          f"patterns -> {2 + 2 * gray_code.bits_needed(736)} captures "
-          f"(this synthetic one: {bits} -> {2 + 2 * bits})")
+          f"patterns -> {3 + 2 * gray_code.bits_needed(736)} captures "
+          f"(this synthetic one: {bits} -> {3 + 2 * bits})")
 
 
 # ── THREE — the whole run, against the declared arrangement ───────────────
@@ -438,9 +439,15 @@ def section_three():
     result = run(room, layout=room.layout, instrument={})
     check(result.ok, f"the run reports ok ({result.reason})")
     bits = gray_code.bits_needed(TOTAL)
-    check(len(result.captures) == 2 + 2 * bits,
+    check(len(result.captures) == 3 + 2 * bits,
           f"{len(result.captures)} captures: dark + full + one per bit and "
-          f"its inverse")
+          f"its inverse + the CLOSING dark the ambient gate ends on")
+    ambient = result.ambient
+    check(bool(ambient.get("measurable")) and not ambient.get("exceeded"),
+          f"and the room's own light held still across it: "
+          f"{ambient.get('max_drift')} grey levels against a "
+          f"{ambient.get('bound')} bound "
+          f"(spectra/services/ambient_stability.py)")
     seen = result.decodes[0]["seen"]
     check(seen == TOTAL, f"every one of the {TOTAL} pixels was identified "
                          f"({seen})")

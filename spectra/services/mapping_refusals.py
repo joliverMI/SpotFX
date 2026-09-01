@@ -17,7 +17,8 @@ WHAT COUNTS AS EXPECTED HERE: an ownership state (released to Home
 Assistant, or a handover mid-flight), an ownership loss DURING a run, the
 hold's own 3-minute ceiling, a fixture that stops answering mid-run, an
 empty emitter set, a phone that goes away, a camera that cannot resolve the
-composition it is being asked to read back, and — since the unattended
+composition it is being asked to read back, a room whose own light moved
+while a gray-code stack was being read (`ambient_drift` — the window), and — since the unattended
 capture client — a capture MACHINE with no usable camera, a session that
 never arrives or does not come back, and a queue somebody stopped — and,
 since the night-run seam, a sleep-window start arriving while SPECTRA does
@@ -327,6 +328,80 @@ def exposure_too_long(exposure_s: float, fps: float, min_frames: int,
             f"{max_capture_s:g}s a single capture window is allowed. Nothing "
             f"was written. Ask for a shorter integration time, or raise the "
             f"gain instead — it costs noise rather than frames.")
+
+
+def ambient_drift(track: dict, *, target_label: str = "",
+                  stage: str = "", signature: Optional[dict] = None) -> str:
+    """THE LIGHT IN THE ROOM CHANGED WHILE THE READING WAS BEING TAKEN.
+
+    THE LIVE FAILURE THIS EXISTS FOR (2026-09-01, his first per-fixture
+    run): the phone was pointed at the right sconce with A WINDOW IN VIEW,
+    in daylight, with cloud moving. The pose was fine — the resolution gate
+    passed honestly at 5.375 camera pixels per index. The decode still came
+    back 34 of 88, 22 of those in the wrong order, and 30 camera pixels
+    decoded confidently to indices that do not exist. Cloud changed the
+    daylight BETWEEN a pattern and its inverse, and lit-minus-dark cannot
+    subtract a reference that moved underneath it. The frozen table read
+    that as an instrument-indicted fail, which is true and useless: it
+    needs somebody to remember today to know it meant the window.
+
+    SO IT IS SAID IN HIS OWN NOUNS. Not "ambient instability" — the window,
+    the shots, and the three things he can actually do about it: shade it,
+    frame it out of view, or wait until dark. The measured drift and the
+    bound travel with the sentence so the boundary is inspectable rather
+    than a number buried in a module.
+
+    IT SAYS WHERE IT STOPPED, because that is the difference between a run
+    that spent his room's dark time and one that did not: the gate refuses
+    on the first capture that breaks the bound, not at the end.
+
+    `signature` is the cheap cross-check
+    (`gray_code.confident_wrong_signature`) when a whole stack happens to
+    exist at the moment of refusal — the decode's own out-of-range pixels
+    CONFIRMING that two different scenes were compared. It is a
+    confirmation of a refusal that already stands on its own measurement,
+    never the thing the refusal rests on, and it is simply absent when the
+    gate refused early — which is the normal, cheaper case."""
+    worst = (track or {}).get("worst") or {}
+    bound = float((track or {}).get("bound") or 0.0)
+    drift = float((track or {}).get("max_drift") or 0.0)
+    peak = float((track or {}).get("peak") or 0.0)
+    what = f"{target_label} " if target_label else ""
+    where = stage or str(worst.get("label") or "")
+    kind = str(worst.get("kind") or "")
+    tile = str(worst.get("worst_tile") or "")
+
+    if kind.startswith("pair"):
+        between = (f"between one pattern and its opposite "
+                   f"({worst.get('pair_label') or 'the pair before it'} and "
+                   f"{where})")
+    else:
+        between = f"between the first shot of the stack and {where or 'a later shot'}"
+    corner = (f", strongest in one corner of the frame (tile {tile})"
+              if kind.endswith("regional") and tile else "")
+
+    lines = [
+        f"THE LIGHT IN THE ROOM CHANGED WHILE {('THE ' + target_label.upper()) if target_label else 'THIS'} "
+        f"WAS BEING READ, so this run stopped rather than measuring the "
+        f"weather. Something in frame that is not {what or 'the fixture'}"
+        f" — a window is the usual one — moved by {drift:.1f} grey levels "
+        f"{between}{corner}, where this reading can only survive {bound:.1f} "
+        f"(a tenth of the {peak:.1f} the fixture itself is worth in this "
+        f"frame). Every pixel is read as the difference between a shot and "
+        f"its opposite, so light that changes between the two shots is "
+        f"counted as the fixture and the answer comes back confident and "
+        f"wrong.",
+        "Shade the window, point the phone so the window is out of frame, "
+        "or wait until it is dark outside — then press Commission again. "
+        "Nothing was written and no result was judged.",
+    ]
+    if signature and signature.get("present"):
+        lines.append(
+            f"The shots already taken say the same thing on their own: "
+            f"{signature.get('out_of_range_pixels')} camera pixels decoded "
+            f"confidently to positions this fixture does not have, which "
+            f"only happens when two shots were of different scenes.")
+    return " ".join(lines)
 
 
 def capture_refusal(emitter_label: str, exc: BaseException) -> str:

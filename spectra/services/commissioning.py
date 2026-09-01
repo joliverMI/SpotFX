@@ -117,9 +117,10 @@ from spectra.models.scene import (SceneColorAssignment, SceneDeviceConfig,
                                   SceneV2)
 from spectra.services import commission_compare as compare
 from spectra.services import emitters as emitters_mod
-from spectra.services import (capture_settings, fixture_brightness,
-                              flare_preview_hold, gray_code, mapping_refusals,
-                              mapping_session, room_mapping)
+from spectra.services import (ambient_stability, capture_settings,
+                              fixture_brightness, flare_preview_hold,
+                              gray_code, mapping_refusals, mapping_session,
+                              room_mapping)
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +140,9 @@ SETTLE_S = 0.6
 #: WHAT ONE PASS ROUGHLY COSTS, for the night run's planned-end bound and
 #: for nothing else (spectra/services/night_run.price_items).
 #:
-#: A pass is a dark reference, a full reference and 2xbits_needed(pixels)
-#: gray-code patterns over ONE hold — about 22 captures and ~35 seconds for
+#: A pass is a dark reference, a full reference, 2xbits_needed(pixels)
+#: gray-code patterns and a CLOSING dark reference (the ambient gate's one
+#: lamp-free reading) over ONE hold — about 23 captures and ~37 seconds for
 #: his whole tv-mapper composition (this module's own docstring). The real
 #: number depends on a pixel count that cannot be resolved without the
 #: stored composition and a live virtual read, so the night run prices a
@@ -768,6 +770,12 @@ class RunResult:
     #: refused, because "how much margin did the pose have" is worth as
     #: much on a green run as on a refused one.
     resolution: dict = field(default_factory=dict)
+    #: WHETHER THE ROOM'S OWN LIGHT HELD STILL across the stack
+    #: (`ambient_stability.AmbientTrack`) — carried on a green run as well
+    #: as a refused one, for the same reason the resolution report is: "how
+    #: much did the light move while you were reading" is worth as much
+    #: when the answer is "almost nothing".
+    ambient: dict = field(default_factory=dict)
     #: WHAT THIS RUN COMMISSIONED, one entry per target, each with its own
     #: composition slice, its own resolution report, its own decodes and its
     #: OWN judged copy of the frozen table. Empty for a whole-composition
@@ -800,7 +808,8 @@ class RunResult:
                 "layout_note": self.layout_note,
                 "decodes": self.decodes, "agreement": self.agreement,
                 "table": self.table, "captures": self.captures,
-                "resolution": self.resolution, "witness": self.witness,
+                "resolution": self.resolution, "ambient": self.ambient,
+                "witness": self.witness,
                 "targets": self.targets,
                 "target_specs": self.target_specs, "camera": self.camera,
                 "problems": self.problems, "notes": self.notes,
@@ -860,10 +869,27 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
                     composition: Composition, result: RunResult,
                     label: str, capture_s: float = CAPTURE_S
                     ) -> tuple[Optional[gray_code.Decode], dict]:
-    """ONE full gray-code stack in ONE continuous hold: dark, full, then
-    every bit and its inverse. The hold is closed by the caller's `finally`
-    — never here, because a pass that raises must not leave the room dark
-    for the next one."""
+    """ONE full gray-code stack in ONE continuous hold: dark, full, every
+    bit and its inverse, and a CLOSING DARK. The hold is closed by the
+    caller's `finally` — never here, because a pass that raises must not
+    leave the room dark for the next one.
+
+    TWO GATES SIT INSIDE THIS LOOP, both refusing rather than judging, and
+    both placed as early as their own measurement allows:
+
+      RESOLUTION  two captures in, from the reference pair alone — can this
+                  camera tell this target's pixels apart at all
+                  (`gray_code.resolution_report`).
+      AMBIENT     from that same pair onward, on every capture — did the
+                  room's own light hold still while the stack was being
+                  read (`ambient_stability`). It refuses on the FIRST
+                  capture that breaks the bound rather than spending the
+                  rest of the room's dark time to reach a verdict about the
+                  weather, and the closing dark is the one reading in the
+                  stack with no lamp in it to argue about.
+
+    A stack either gate refuses is never judged: no decode is handed to the
+    frozen table and no row of it is computed."""
     sess = deps.session
     total = composition.total
     bits = gray_code.bits_needed(total)
@@ -898,16 +924,57 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
             report, int(full.shape[1]), int(full.shape[0]),
             target_label=composition.target_label))
 
+    # THE AMBIENT GATE, opened on the same reference pair the resolution
+    # report was taken from. EVERY capture from here on is measured; only
+    # the two lamp-free comparisons are GATED — each inverse against its
+    # own pattern (complementary halves, so the fixture cancels) and the
+    # closing dark against this opening one. See `ambient_stability` for
+    # why a lamp-on capture's distance from the dark cannot be judged.
+    track = ambient_stability.AmbientTrack.open(dark, full)
+    result.ambient = track.as_dict()
+    if track.note:
+        result.problems.append(
+            f"the ambient could not be checked on {label}: {track.note}")
+
+    def _gate(reading, stage: str, stack=None) -> None:
+        """REFUSE ON THE FIRST CAPTURE THAT BREAKS THE BOUND — the whole
+        check-before-the-cost point. A stack refused here is never judged:
+        the caller turns this into a target-level refusal, and no row of
+        the frozen table is computed from it."""
+        result.ambient = track.as_dict()
+        if not reading.exceeded:
+            return
+        signature = None
+        if stack:
+            # A WHOLE STACK HAPPENS TO EXIST (the gate broke at the closing
+            # dark), so the decode's own out-of-range pixels can CONFIRM
+            # what the frames already measured. Computed for the sentence
+            # only — nothing is judged from it.
+            try:
+                signature = gray_code.confident_wrong_signature(
+                    gray_code.decode_stack(dark, full, stack, total=total))
+            except Exception:                          # noqa: BLE001
+                signature = None
+        raise AmbientDrifted(mapping_refusals.ambient_drift(
+            track.as_dict(), target_label=composition.target_label,
+            stage=stage, signature=signature))
+
+    # The full reference is MEASURED and reported, never gated: it carries
+    # the fixture's own spill as well as the room. See `ambient_stability`.
+    track.observe(f"{label}/full", full)
+    result.ambient = track.as_dict()
+
     pairs = []
     for bit in range(bits):
+        pattern_reading = None
         for invert in (False, True):
             patterns = {
                 vid: gray_code.pattern_string(arr, bit, invert=invert)
                 for vid, arr in composition.pixel_map.items()}
             program.set_patterns(patterns)
+            step_label = f"{label}/bit{bit}{'-inv' if invert else ''}"
             frame, _, _ = await _capture(
-                deps, program, "pattern",
-                f"{label}/bit{bit}{'-inv' if invert else ''}", result,
+                deps, program, "pattern", step_label, result,
                 capture_s=capture_s)
             if sess.run_abort:
                 raise RunAborted(sess.run_abort)
@@ -916,12 +983,45 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
                     f"not enough frames arrived for {label} bit {bit}"
                     f"{' (inverse)' if invert else ''} — the stack cannot be "
                     f"decoded with a capture missing.")
+            reading = track.observe(step_label, frame,
+                                    pair_with=pattern_reading)
+            _gate(reading, step_label)
             if invert:
                 pairs[-1] = (pairs[-1][0], frame)
             else:
+                pattern_reading = reading
                 pairs.append((frame, None))
+
+    # THE CLOSING DARK: one more capture with the composition off, so the
+    # stack ends on a measurement of the room ALONE — the same question the
+    # opening dark answered, with no lamp in it to argue about. It costs
+    # about a second and a half of a thirty-five second pass, and it is the
+    # only reading in the stack that cannot be explained away as spill.
+    # `capture_s` MATTERS HERE: the two dark references are compared against
+    # each other, so they must be averaged over the same window or the
+    # comparison measures the run's own settings instead of the room.
+    end_dark, _, _ = await _capture(deps, program, "dark",
+                                    f"{label}/dark-end", result,
+                                    capture_s=capture_s)
+    if sess.run_abort:
+        raise RunAborted(sess.run_abort)
+    if end_dark is not None:
+        _gate(track.observe(f"{label}/dark-end", end_dark, lamp_free=True),
+              f"{label}/dark-end", stack=pairs)
+    else:
+        result.problems.append(
+            f"the closing dark reference of {label} arrived short of frames, "
+            f"so the stack ends without a lamp-free ambient reading — the "
+            f"per-capture readings still stand.")
+
     decode = gray_code.decode_stack(dark, full, pairs, total=total)
     return decode, latency
+
+
+class AmbientDrifted(Exception):
+    """The room's own light moved while this stack was being read — already
+    worded (`mapping_refusals.ambient_drift`). A refusal, never a verdict:
+    nothing from this stack is judged."""
 
 
 class CameraCannotResolve(Exception):
@@ -1050,20 +1150,21 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
     except CompositionRefused as exc:
         return {"target": spec, "label": spec, "ok": False,
                 "reason": str(exc), "refusal": "composition",
-                "composition": {}, "resolution": {}, "decodes": [],
-                "agreement": {}, "table": None}
+                "composition": {}, "resolution": {}, "ambient": {},
+                "decodes": [], "agreement": {}, "table": None}
 
     label = comp.target_label or comp.mapper_id
     entry = {"target": spec, "label": label, "ok": False, "reason": "",
              "refusal": "", "composition": comp.as_dict(),
-             "resolution": {}, "decodes": [], "agreement": {}, "table": None,
-             "layout_note": layout_note, "notes": []}
+             "resolution": {}, "ambient": {}, "decodes": [], "agreement": {},
+             "table": None, "layout_note": layout_note, "notes": []}
 
     program = CommissionProgram(scope, comp,
                                 snapshot_virtuals=full.virtual_ids)
     sub = RunResult(mapper_id=full.mapper_id, ok=False)   # this target's own
     decodes: list[gray_code.Decode] = []
     reports: list[dict] = []
+    ambients: list[dict] = []
     latency_by_device: dict[str, float] = {}
     resolution_ms = 1e9
     try:
@@ -1075,6 +1176,7 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
             prefix = f"{comp.target_label}/" if comp.target_label else ""
             pass_label = f"{prefix}run{pass_no + 1}"
             sub.resolution = {}
+            sub.ambient = {}
             try:
                 decode, latency = await _one_pass(deps, program, comp, sub,
                                                   pass_label, capture_s)
@@ -1087,6 +1189,9 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
                     logger.warning("commissioning: releasing the hold after "
                                    "%s failed; the hold sweep owns it from "
                                    "here", pass_label, exc_info=True)
+                if sub.ambient:
+                    ambients.append(sub.ambient)
+                    result.ambient = sub.ambient
                 if sub.resolution:
                     reports.append(sub.resolution)
                     # THE POSE'S MARGIN TRAVELS EVEN WHEN THE RUN DIES ABOVE
@@ -1101,13 +1206,18 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
                     latency_by_device = _device_latencies(latency, decode,
                                                           comp)
                     resolution_ms = float(latency.get("resolution_ms", 1e9))
-    except (CameraCannotResolve, NotEnoughFrames) as exc:
+    except (CameraCannotResolve, NotEnoughFrames, AmbientDrifted) as exc:
         entry["reason"] = str(exc)
         entry["refusal"] = ("resolution"
                             if isinstance(exc, CameraCannotResolve)
+                            else "ambient" if isinstance(exc, AmbientDrifted)
                             else "frames")
     finally:
         result.captures.extend(sub.captures)
+        # THE AMBIENT READING TRAVELS LIKE THE POSE'S MARGIN DOES, and for
+        # the same reason: it belongs to the pass that produced the accepted
+        # decode, and it is worth carrying on a green run too.
+        entry["ambient"] = ambients[0] if ambients else {}
         # THE REPORT THAT BELONGS TO THE ACCEPTED DECODE is the FIRST pass's,
         # never a later repeat's: publishing a second pass's margin beside a
         # table judged from the first would describe the wrong pose.
@@ -1137,6 +1247,24 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
         decodes[0], comp.segments, slice_layout(layout, comp), layout_note,
         latency_measured=latency_by_device, latency_instrument=instrument,
         latency_resolution_ms=resolution_ms)
+    # THE GATE MUST NOT ABSORB A FAILURE IT DID NOT MEASURE. When the
+    # ambient held still and the confident-wrong signature is here anyway,
+    # the frozen table's own verdict stands exactly as it did before this
+    # gate existed — and the note says the ambient has been RULED OUT
+    # rather than leaving the reader to wonder whether it was checked.
+    signature = gray_code.confident_wrong_signature(decodes[0])
+    entry["signature"] = signature
+    ambient = entry.get("ambient") or {}
+    if signature.get("present") and ambient.get("measurable") \
+            and not ambient.get("exceeded"):
+        entry["notes"].append(
+            f"{signature['out_of_range_pixels']} camera pixels decoded "
+            f"confidently to positions this target does not have, which "
+            f"means two shots of the stack were of different scenes — and "
+            f"it was NOT the room's light, which was measured steady to "
+            f"{ambient.get('max_drift')} grey levels against a "
+            f"{ambient.get('bound')} bound across every shot. This is the "
+            f"instrument's own fail, unchanged.")
     entry["ok"] = True
     return entry
 
@@ -1391,7 +1519,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                 f"deliver, so each capture window was widened from "
                 f"{CAPTURE_S:g}s to {capture_s:g}s to still average "
                 f"{MIN_FRAMES} frames — this run is about "
-                f"{(capture_s - CAPTURE_S) * len(result.target_specs) * (2 + 2 * gray_code.bits_needed(composition.total)):.0f}s "
+                f"{(capture_s - CAPTURE_S) * len(result.target_specs) * (3 + 2 * gray_code.bits_needed(composition.total)):.0f}s "
                 f"longer than the shipped protocol.")
         fixtures = await _fixtures_for(composition, chains, deps)
         readings = await fixture_brightness.read_all(fixtures)
@@ -1449,6 +1577,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         # always read.
         entry = entries[0] if entries else {}
         result.resolution = entry.get("resolution") or result.resolution
+        result.ambient = entry.get("ambient") or result.ambient
         result.decodes = entry.get("decodes") or []
         result.agreement = entry.get("agreement") or {}
         if entry.get("table"):
@@ -1480,12 +1609,14 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                 "reason": ("the run ended before this target was reached"
                            + (f": {result.reason}" if result.reason else "")),
                 "refusal": "not_attempted",
-                "composition": {}, "resolution": {}, "decodes": [],
-                "agreement": {}, "table": None, "notes": []}
+                "composition": {}, "resolution": {}, "ambient": {},
+                "decodes": [], "agreement": {}, "table": None, "notes": []}
                for spec in specs]
     result.targets = entries
     result.resolution = next((e.get("resolution") for e in entries
                               if e.get("resolution")), result.resolution)
+    result.ambient = next((e.get("ambient") for e in entries
+                           if e.get("ambient")), result.ambient)
     result.table = compare.aggregate(entries)
     # A RUN-LEVEL REFUSAL IS A REFUSAL even when some targets were judged
     # before it: the judged tables are kept and stored, but the run did not
