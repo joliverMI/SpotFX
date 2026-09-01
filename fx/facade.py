@@ -417,6 +417,58 @@ async def _virtual_put_active(host, virtual_id: str, body: dict) -> FacadeRespon
     return _ok({"status": "success", "active": virtual.active})
 
 
+# ── SpotFX deviation #29: a write that did not take must never report success ─
+
+def _verify_effect_took(host, virtual, effect_type):
+    """Read the live instance BACK and say whether this virtual is actually
+    driving `effect_type` now.  Returns (took, reason_if_not).
+
+    A returning write call is not evidence.  The defect this exists for:
+    a same-type effects PUT takes the in-place `active_effect.update_config`
+    branch, which never touches `virtual.active` — so against a virtual that
+    was evicted at config load (it still holds an effect object but runs no
+    render thread) the write lands on a dead object, the executor log fills
+    with glide writes, the response says success, and the fixture stays
+    dark.  One honest repair is attempted first — activating the virtual is
+    exactly what the type-switch branch one `elif` over already does
+    unconditionally, and that asymmetry WAS the bug — and only a verified
+    read-back is allowed to report success.
+    """
+    if virtual.active_effect is None:
+        return False, "no effect instance on the virtual"
+    if isinstance(virtual.active_effect, DummyEffect):
+        return False, "virtual is holding a DummyEffect, not the written one"
+    if virtual.active_effect.type != effect_type:
+        return False, (
+            f"virtual is driving '{virtual.active_effect.type}', "
+            f"not the written '{effect_type}'"
+        )
+    if not virtual.active:
+        logger.error(
+            "fx facade: %s holds effect '%s' but is NOT ACTIVE — a write to "
+            "it would land on nothing; attempting to activate",
+            virtual.id, effect_type,
+        )
+        try:
+            virtual.active = True
+        except (ValueError, RuntimeError) as exc:
+            return False, (
+                f"virtual is not active and could not be activated "
+                f"({type(exc).__name__}: {exc})"
+            )
+        if not virtual.active:
+            return False, "virtual is not active and did not activate"
+        if virtual.active_effect is None or isinstance(
+            virtual.active_effect, DummyEffect
+        ):
+            return False, "activation cleared the effect instance"
+        logger.warning(
+            "fx facade: reactivated %s to make the '%s' write real",
+            virtual.id, effect_type,
+        )
+    return True, ""
+
+
 # ── /api/virtuals/{id}/effects (port of api/virtual_effects.py) ─────────────
 
 async def _effects_put(host, virtual_id: str, body: dict) -> FacadeResponse:
@@ -513,6 +565,12 @@ async def _effects_put(host, virtual_id: str, body: dict) -> FacadeResponse:
             virtual.set_effect(effect, fallback=fallback)
     except (ValueError, RuntimeError) as msg:
         return _internal(f"Unable to set effect: {msg}")
+
+    took, why = _verify_effect_took(host, virtual, effect_type)
+    if not took:
+        return _internal(
+            f"Effect write to {virtual_id} did not take ({effect_type}): {why}"
+        )
 
     virtual.update_effect_config(effect, config_override=config_override)
     save_config(config=host.config, config_dir=host.config_dir)

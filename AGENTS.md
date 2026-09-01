@@ -4470,6 +4470,76 @@ a later wiring stage. The Hue-DTLS / DDP single-sender exclusivity with the
 running LedFX service is resolved by the S3 ownership gate: the facade
 reaches live hardware only through the handover (see the S3 section above).
 
+## A CONFIG LOAD IS AN ORDERED PROGRAM — a virtual's restore can undo its neighbour's
+
+Found live 2026-09-01 (`fx/VENDOR.md` #29, PR fm/tvmapper-cold-load-fix): his
+`tv-mapper` came up DARK after every SPECTRA restart, deterministically, and
+nothing above INFO said so. Three things generalize past this one virtual:
+
+- **Activating a virtual is not a private act.** It registers segments on
+  each backing device, and `fx/devices/__init__.py::Device.add_segments_batch`
+  deactivates every EXTERNAL virtual streaming to a device whose OWN
+  device-virtual is activating (and vice versa). So a virtual's restore can
+  silently undo one that already came up. `Virtuals.create_from_config` used
+  to restore a stored effect through `set_effect()`, which unconditionally
+  activated — even for a virtual stored `active: false`, which the loop then
+  set back two statements later. A no-op on itself; permanent on its
+  neighbours. `set_effect(..., activate=False)` is the fix, and the STORED
+  `active` FLAG now decides. **Before adding anything to a config-load loop,
+  ask what it does to virtuals ALREADY loaded — config order is the program,
+  and his real ordering (tv-mapper idx 14, both sconces idx 22/27) is what
+  made this deterministic rather than a race.**
+- **Read the end state back; a step that looked fine when it ran proves
+  nothing.** `Virtuals._audit_restored_effects` runs after the whole config
+  is loaded and names every virtual the stored config says should be driving
+  and isn't — it does not need to know HOW one was stopped, which is exactly
+  why it catches this class. `_record_restore_failure` logs at ERROR with the
+  virtual, the STORED EFFECT TYPE and the real reason, and
+  `Virtuals.restore_failures` carries it to `live_host.activation_gaps` —
+  which previously GUESSED "effect restore failed silently at config load"
+  and was wrong about this very defect. **A status surface that invents a
+  cause is worse than one that says "unknown".**
+- **A repair that lies is worse than a failure that is loud** (the captain's
+  own ruling). An evicted virtual still HOLDS its effect object; it just runs
+  no render thread. So a same-type effects PUT took `facade._effects_put`'s
+  `use_tween` / in-place `update_config` branch, which never touches
+  `virtual.active`, and returned success: real glide writes in
+  `executor.recent_writes`, operator satisfied, fixture dark. Only a
+  TYPE-SWITCH write appeared to fix it, because that branch calls
+  `set_effect()` — and that asymmetry was the best diagnostic clue.
+  `facade._verify_effect_took` now reads the LIVE INSTANCE back on every
+  effects PUT (object exists, not a `DummyEffect`, right type, virtual
+  actually active), attempts one honest repair, and 500s by name otherwise.
+  **A write call returning is never evidence that the write took.**
+
+**How a latent ordering bug became live, and the mapping feature's part in
+it:** a device virtual with NO stored `effect` key never enters the restore
+branch, so it never activated and never evicted anything. His three
+(`tv-backlight`, `sconce-kitchen-left`, `sconce-kitchen-right`) each now hold
+`singleColor` at `#000000` brightness 0.0 — `room_mapping.MAP_EFFECT_TYPE` +
+`BLACK` verbatim — with `pixelRange`/`pixelPattern` in their stored `effects`
+history, lamps that exist nowhere else. `activate_for_capture` writes an
+effect and raises the active flag through `fx_seam`, i.e. the facade's
+`_effects_put` + `_virtual_put_active`, and BOTH call `save_config()`: a
+capture run PERSISTS a stored effect onto a device virtual that had none.
+Those values are his own runs' genuine residue, not corruption — the load
+path was what was wrong to act on them — so nothing in his config was
+rewritten. **Anything that borrows a virtual and puts it back should know it
+is writing his stored config, not just the live host.**
+
+Proofs: `tests/test_cold_load_effect_restore.py` (cold start in a FRESH
+INTERPRETER per the light-mode cold-start precedent — a warm pytest process
+cannot speak honestly about config load order; 5 of its 7 tests verified RED
+against the unfixed code, the lying repair reproducing as literal
+`200`/`success` with the virtual still dark) and
+`scripts/check_cold_load_effect_restore.py`, which cold-loads HIS OWN
+`storage/spectra/fx-live/config.json` READ-ONLY with every device swapped for
+a dummy of the same pixel count: unfixed, exactly one virtual comes up dark
+and it is `tv-mapper`; fixed, all five declared-active virtuals drive. **That
+dummy-swap is the general recipe for proving anything about his real config
+offline** — it is the only change made, so ordering, segments and pixel
+counts are all his.
+
 ## Black Hole (`fx/effects/blackhole.py`) — three things that bite
 
 Everything below is recorded in `fx/VENDOR.md` (#12, #14, #18, #19, #20)

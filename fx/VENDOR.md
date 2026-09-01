@@ -780,6 +780,95 @@ variables named `ledfx` (the core object handle) are untouched.
     `scripts/check_commissioning.py` section one, on the real render
     pipeline. Not in the fork source at `/home/javi/ledfx-src`.
 
+29. `virtuals.py` + `facade.py`: A CONFIG LOAD MUST NEVER FAIL QUIETLY, AND A
+    WRITE THAT DID NOT TAKE MUST NEVER REPORT SUCCESS. His `tv-mapper` came
+    up dark after every SPECTRA restart, deterministically, with nothing
+    above INFO to show for it (2026-09-01; see
+    `tests/test_cold_load_effect_restore.py` for the full trace).
+
+    THE CAUSE IS LOAD ORDER, not any effect's schema.
+    `Virtuals.create_from_config` restored a stored effect through
+    `set_effect()`, which unconditionally ran `self.active = True` — even
+    for a virtual whose stored `active` is FALSE, which the loop then set
+    back two statements later. On its own that round-trip is a no-op; on a
+    DEVICE virtual it is not, because activating registers segments and
+    `Device.add_segments_batch` deactivates every EXTERNAL virtual streaming
+    to a device whose own device-virtual is activating. `tv-mapper` (config
+    idx 14) is an external copy-mapped virtual over `tv-backlight` + both
+    sconces; `sconce-kitchen-left` (idx 22) and `sconce-kitchen-right`
+    (idx 27) are device virtuals stored `active: false` WITH a stored
+    effect, so each flickered active for the length of one restore, evicted
+    tv-mapper, and went back down. Nothing brought it back. His journal
+    names it outright: `Device sconce-kitchen-left: Device virtual
+    'sconce-kitchen-left' activating - deactivating external virtuals:
+    {'tv-mapper'}`.
+
+    HOW A LATENT ORDERING BUG BECAME LIVE, which is worth knowing before
+    touching the mapping feature: a device virtual with NO stored `effect`
+    key never enters the restore branch at all, so it never activated and
+    never evicted anything. His three — `tv-backlight`,
+    `sconce-kitchen-left`, `sconce-kitchen-right` — now each hold
+    `singleColor` at `#000000`, brightness 0.0, background_brightness 0.0,
+    which is `room_mapping.MAP_EFFECT_TYPE` + `BLACK` + that module's own
+    dark-lamp config verbatim, and their stored `effects` history contains
+    `pixelRange`/`pixelPattern`, the map and commissioning lamps that exist
+    nowhere else. `room_mapping`'s `activate_for_capture` writes an effect
+    and raises the active flag through `fx_seam`, i.e. the facade's
+    `_effects_put` + `_virtual_put_active`, and BOTH `save_config()` — so a
+    capture run persists a stored effect onto a device virtual that had
+    none, arming the eviction on every cold start after it. Those values
+    are genuine residue of his own runs, not corruption; the load path was
+    what was wrong to act on them this way, so NOTHING in his config was
+    rewritten. (Deleting the `effect` key from those three entries would
+    also stop the eviction, and is strictly weaker: the next mapping run
+    re-arms it.)
+
+    THE FIX IS THE `activate=` KEYWORD on `set_effect` — the restore honours
+    the stored `active` flag instead of round-tripping through activation.
+    The end state of the virtual itself is byte-identical to before; only
+    the transient, and its effect on its NEIGHBOURS, is gone. An absent
+    `active` key still activates (every pre-`active`-key config relied on
+    that).
+
+    LOUDNESS, the more important half by the captain's own ruling: every
+    restore refusal now goes through `Virtuals._record_restore_failure` —
+    ERROR, naming the virtual, the STORED EFFECT TYPE and the real
+    exception/validation reason — and `_audit_restored_effects` READS THE
+    END STATE BACK after the whole config is loaded, so a restore that
+    succeeded on its own turn and was undone later by a virtual further
+    down the config is named too. That audit is the catch-all: it does not
+    need to know HOW a virtual was stopped. `Virtuals.restore_failures`
+    carries the reason to SPECTRA's liveness surface
+    (`spectra/services/live_host.activation_gaps`), which used to guess
+    "effect restore failed silently at config load" — a guess that was
+    wrong about this very defect.
+
+    THE LYING REPAIR, and it is the reason `facade.py` is in this entry: an
+    evicted virtual still HOLDS its effect object, it just runs no render
+    thread. A same-type effects PUT therefore took `_effects_put`'s
+    `use_tween` / in-place `update_config` branch, which never touches
+    `virtual.active`, and returned success — the executor log filled with
+    glide writes, the operator watched the repair "work", the fixture stayed
+    dark. A TYPE-SWITCH write took the `set_effect()` branch instead, which
+    activates, which is why only a type switch ever appeared to fix it; that
+    asymmetry was the bug's own best clue. `_verify_effect_took` now READS
+    THE LIVE INSTANCE BACK on every effects PUT (an effect object exists, is
+    not a DummyEffect, is the written type, and the virtual is actually
+    active), attempts ONE honest repair if the virtual is not active —
+    exactly what the branch one `elif` over already did unconditionally —
+    and reports 500 by name if it still did not take. A returning write call
+    is never evidence.
+
+    Evidence: `tests/test_cold_load_effect_restore.py` (cold start in a
+    FRESH INTERPRETER — config load order is not something a warm pytest
+    process can speak to honestly; 5 of its 7 tests proven RED against the
+    unfixed code, including the lying repair coming out as literal
+    `200/success` with the virtual still dark), plus
+    `scripts/check_cold_load_effect_restore.py`, which cold-loads HIS OWN
+    `fx-live/config.json` read-only with every device swapped for a dummy of
+    the same pixel count: unfixed, exactly one virtual comes up dark and it
+    is `tv-mapper`; fixed, all five declared-active virtuals drive.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
