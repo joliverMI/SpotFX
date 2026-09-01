@@ -26,6 +26,7 @@ import math
 import numpy as np
 import pytest
 
+from spectra.services import capture_settings
 from spectra.services import commission_compare as cc
 from spectra.services import commissioning, gray_code
 
@@ -101,7 +102,7 @@ def _truth_layout(total: int, tv: int, sconce: int):
 
 # ── the fakes ──────────────────────────────────────────────────────────────
 
-class FakeSession:
+class FakeSession(capture_settings.SessionCameraDouble):
     """A phone that is connected, locked, and renders whatever the run last
     wrote — including WHEN each fixture's light arrives, so the latency row
     is measuring something real rather than a stub. `render(elapsed_ms)` is

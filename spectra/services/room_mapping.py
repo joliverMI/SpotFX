@@ -117,8 +117,9 @@ from spectra.models.room_map import CaptureContext, PixelRange, RoomMap
 from spectra.models.scene import (SceneColorAssignment, SceneDeviceConfig,
                                   SceneV2)
 from spectra.services import emitters as emitters_mod
-from spectra.services import (fixture_brightness, flare_preview_hold,
-                              light_field, mapping_refusals)
+from spectra.services import (capture_settings, fixture_brightness,
+                              flare_preview_hold, light_field,
+                              mapping_refusals, mapping_session)
 from spectra.services.emitters import Emitter
 
 logger = logging.getLogger(__name__)
@@ -165,6 +166,23 @@ LIT_CAPTURE_S = 1.5
 #: "averaging fewer frames" are the SAME change described two ways —
 #: there is no second knob that keeps the dwell and drops the frames, and
 #: anyone reading a sweep must not count them as independent variables.
+#:
+#: AND SINCE 2026-09-01 THAT CAMERA RATE IS ITSELF A RUN PARAMETER. A run
+#: may ask for a MANUAL INTEGRATION TIME (`capture_settings.CameraRequest`,
+#: the second lever beside the wire-frame size), and a sensor integrating
+#: for E seconds delivers at most 1/E frames a second whatever the tap asks
+#: for. So a 1/5 s integration halves what a 0.6 s window buys and a 1 s one
+#: leaves it with a single frame and no average at all.
+#:
+#: THAT IS NOT ALLOWED TO BE SILENT, and `capture_windows` below is how:
+#: the two CAPTURE windows are widened to whatever still buys MIN_FRAMES at
+#: the requested exposure, `run_estimate_s` prices the WIDENED windows (so
+#: the minutes he is shown before he presses are the minutes the room is
+#: actually dark), and an integration time so long that no legal window can
+#: average MIN_FRAMES refuses BY NAME
+#: (`mapping_refusals.exposure_too_long`) rather than producing a run of
+#: unmapped emitters. The two settles are untouched: a settle waits for
+#: light to land, which the exposure does not change.
 MIN_SETTLE_S = 0.1
 MAX_SETTLE_S = 10.0
 #: The capture window's own bounds. The floor is deliberately above one
@@ -195,6 +213,11 @@ RETRY_DARK_SETTLE_X = 3.0
 #: nothing else needing to have run. It is deliberately NOT the run's
 #: ceiling: the ceiling bounds a HEALTHY run, this bounds an abandoned one.
 HOLD_HEARTBEAT_S = 20.0
+#: How long to wait for the client to start sending at the size this run
+#: needs before refusing by name. A map asks for the size the session is
+#: already on, so this is normally instant; it costs something only after a
+#: commissioning pass has borrowed 1080p in the same session.
+FRAME_SWITCH_WAIT_S = 4.0
 
 # ── THE RUN-SCOPED HOLD CEILING ────────────────────────────────────────────
 #
@@ -275,6 +298,43 @@ def clamp_capture(value, default: float) -> float:
     """A caller's CAPTURE-WINDOW override, bounded. See the note above
     MIN_CAPTURE_S: this is the frame count, expressed in seconds."""
     return clamp_seconds(value, default, MIN_CAPTURE_S, MAX_CAPTURE_S)
+
+
+def capture_windows(dark_capture: float, lit_capture: float,
+                    exposure_time: Optional[int], tap_fps: float
+                    ) -> tuple[float, float, Optional[str], str]:
+    """This run's two CAPTURE windows, widened if the requested integration
+    time cannot deliver MIN_FRAMES inside them — plus the refusal when no
+    legal window can, and a note when they were widened.
+
+    Returns (dark_capture, lit_capture, refusal, note). WITH NO MANUAL
+    EXPOSURE ASKED FOR THIS IS AN EXACT PASS-THROUGH — both windows come
+    back as handed in, the note is empty, and no refusal is possible. That
+    is not an optimisation, it is the contract: every run before the levers
+    existed, and every ordinary one after them, must be byte-for-byte the
+    protocol that shipped. The widening exists for one thing only, which is
+    a REQUESTED integration time silently halving the frame count.
+
+    See the coupling note above MIN_CAPTURE_S — this is its acting half."""
+    if not exposure_time:
+        return dark_capture, lit_capture, None, ""
+    fps = capture_settings.achievable_fps(tap_fps, exposure_time)
+    need = capture_settings.min_capture_s(MIN_FRAMES, fps)
+    if need > MAX_CAPTURE_S:
+        return dark_capture, lit_capture, mapping_refusals.exposure_too_long(
+            (exposure_time or 0) * capture_settings.EXPOSURE_UNIT_S, fps,
+            MIN_FRAMES, MAX_CAPTURE_S), ""
+    dark, lit = max(dark_capture, need), max(lit_capture, need)
+    note = ""
+    if (dark, lit) != (dark_capture, lit_capture):
+        note = (f"The requested integration time "
+                f"({(exposure_time or 0) * capture_settings.EXPOSURE_UNIT_S:.3g}s) "
+                f"holds this camera to about {fps:.2f} frames a second, so "
+                f"the capture windows were widened to {dark:g}s dark / "
+                f"{lit:g}s lit to still average {MIN_FRAMES} frames each. "
+                f"The estimate below prices the widened run, not the shipped "
+                f"one.")
+    return dark, lit, None, note
 
 
 def run_estimate_s(emitter_count: int, dark_settle: float,
@@ -455,6 +515,11 @@ class MappingResult:
     #: the settles: a map taken at a different quality level says so.
     dark_capture_s: float = DARK_CAPTURE_S
     lit_capture_s: float = LIT_CAPTURE_S
+    #: What the camera was asked for and what it answered — the frame size
+    #: this map read at, the manual levers if any, and the rate frames were
+    #: actually arriving. A footprint is `lit - dark` in a camera's own byte
+    #: scale, so the camera's settings belong in the record of the map.
+    camera: dict = field(default_factory=dict)
     #: the granularity each carrier ACTUALLY got, after "auto" resolved
     per_carrier: dict = field(default_factory=dict)
     #: everything the enumeration declined to do, named rather than hidden
@@ -553,6 +618,7 @@ class MappingResult:
                 "lit_settle_s": self.lit_settle_s,
                 "dark_capture_s": self.dark_capture_s,
                 "lit_capture_s": self.lit_capture_s,
+                "camera": self.camera,
                 "hold_ceiling_s": self.hold_ceiling_s,
                 "pose_id": self.pose_id, "seconds": round(self.seconds, 2),
                 "granularity": self.granularity,
@@ -928,6 +994,7 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
                       lit_settle_s: Optional[float] = None,
                       dark_capture_s: Optional[float] = None,
                       lit_capture_s: Optional[float] = None,
+                      camera: Optional["capture_settings.CameraRequest"] = None,
                       ) -> MappingResult:
     """Map every emitter in `room` at the chosen granularity, one short
     held-room hold each.
@@ -941,27 +1008,82 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     REFUSES THE SAME WAY when a sub-device granularity is asked for while
     spot-effects owns the lights: the range lamp is a vendored effect in
     THIS process and the external LedFX service has never heard of it, so
-    the write would fail at the seam half-way through a dark room."""
+    the write would fail at the seam half-way through a dark room.
+
+    THE CAMERA STAYS AT THE MAP'S OWN 320x180 (2026-09-01). A footprint is
+    a 64x36 grid and more pixels buy it nothing, so the wire-frame raise is
+    the COMMISSIONING read's alone and night runs cost exactly what they
+    always did — this run ASSERTS that size rather than assuming it, since
+    a commissioning pass earlier in the same session borrowed 1080p.
+
+    `camera` is this run's optional levers (`capture_settings.CameraRequest`
+    — manual integration time and gain). None means the shipped behaviour
+    exactly: converge-then-freeze, nothing asked for, nothing changed. A
+    lever the camera did not TAKE refuses by name on the read-back, and a
+    long integration widens the capture windows so MIN_FRAMES is still
+    averaged (`capture_windows`)."""
     started = deps.clock()
     sess = deps.session
     dark_settle = clamp_settle(dark_settle_s, DARK_SETTLE_S)
     lit_settle = clamp_settle(lit_settle_s, LIT_SETTLE_S)
     dark_capture = clamp_capture(dark_capture_s, DARK_CAPTURE_S)
     lit_capture = clamp_capture(lit_capture_s, LIT_CAPTURE_S)
+    # THE MAP READS AT ITS OWN FRAME SIZE, asserted rather than assumed: a
+    # commissioning pass earlier in this session borrowed 1080p, and a
+    # footprint gains nothing from it while costing 36x the bandwidth.
+    req = capture_settings.CameraRequest(
+        frame_size=(camera.frame_size if camera and camera.frame_size
+                    else capture_settings.MAP_PROFILE),
+        exposure_time=camera.exposure_time if camera else None,
+        gain=camera.gain if camera else None,
+        notes=list(camera.notes) if camera else [])
+    dark_capture, lit_capture, exposure_refusal, window_note = capture_windows(
+        dark_capture, lit_capture, req.exposure_time,
+        sess.observed_fps() or mapping_session.FRAME_FPS)
     result = MappingResult(room_id=room.id, ok=False,
                            pose_id=getattr(sess, "pose_id", ""),
                            granularity=granularity, block_pixels=block_pixels,
                            dark_settle_s=dark_settle, lit_settle_s=lit_settle,
                            dark_capture_s=dark_capture,
                            lit_capture_s=lit_capture)
+    result.notes.extend(req.notes)
+    if window_note:
+        result.notes.append(window_note)
     refusal = sess.refusal()
     if refusal:
         result.reason = refusal
+        return result
+    if exposure_refusal:
+        result.reason, result.refusal = exposure_refusal, "exposure"
         return result
     if not room.carrier_ids:
         result.reason = "this room has no carriers assigned yet"
         return result
     sess.run_abort = None
+
+    # ASK THE CAMERA, THEN READ IT BACK, BEFORE THE ROOM GOES DARK. The
+    # request is a request; `sess.lock` is what the device said, and the two
+    # gates below read only the second. A run that asked for nothing (every
+    # run before 2026-09-01, and every ordinary one after it) passes both
+    # trivially — `camera_refusal` returns None when nothing manual was
+    # asked for, and the frame size is the one the session already runs at.
+    await sess.apply_camera(req)
+    got = await sess.await_frame_size(req.frame_size, FRAME_SWITCH_WAIT_S)
+    # AND WAIT FOR THE CAMERA TO ANSWER, not just for a frame: a size that
+    # was already right returns from the line above instantly, and the
+    # manual gate would then read the PREVIOUS request's read-back. See
+    # `capture_settings.CameraNegotiation.await_camera`.
+    await sess.await_camera(FRAME_SWITCH_WAIT_S)
+    result.camera = {"requested": req.as_wire(),
+                     "frame_size": {"width": got[0], "height": got[1]},
+                     "source_size": {"width": sess.source_size[0],
+                                     "height": sess.source_size[1]},
+                     "lock": sess.camera_lock_view(),
+                     "observed_fps": sess.observed_fps()}
+    problem = sess.frame_refusal(req.frame_size) or sess.camera_refusal()
+    if problem:
+        result.reason, result.refusal = problem, "camera"
+        return result
 
     try:
         scope = await live_virtual_ids(deps.get_virtuals)
@@ -992,7 +1114,11 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     result.per_carrier = dict(plan.per_carrier)
     result.problems = list(plan.problems)
     result.warnings = list(plan.warnings)
-    result.notes = list(plan.notes)
+    # EXTEND, never assign: the camera request's own clamp notes and the
+    # capture-window widening note are already on the result by here, and
+    # an assignment would silently drop the one thing that explains why
+    # this run is longer than the plan quoted.
+    result.notes.extend(plan.notes)
     if not plan.emitters:
         result.reason = ("nothing to map: " + "; ".join(plan.problems)
                          if plan.problems else

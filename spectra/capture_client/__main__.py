@@ -117,9 +117,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--fps", type=float, default=5.0,
                    help="frames per second on the wire (the server's own tap "
                         "rate is 5)")
-    p.add_argument("--capture-size", default="1280x720",
+    p.add_argument("--capture-size", default="1920x1080",
                    help="what to ask the camera for, before it is scaled to "
-                        "the wire's 320x180")
+                        "whatever wire frame size a run asks for (320x180 "
+                        "for a map, up to 1920x1080 for the commissioning "
+                        "read). The client steps down to 1280x720 then "
+                        "640x480 if the camera will not open here, and says "
+                        "so; the wire size is never larger than this, "
+                        "because a bigger picture of a smaller image is not "
+                        "more detail")
     p.add_argument("--input-format", default="",
                    help="ffmpeg -input_format, e.g. mjpeg, when the camera "
                         "will not give raw at this size")
@@ -155,7 +161,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         # synthetic camera that claimed a lock would be exactly the forgery
         # this client is built not to commit.
         camera = SyntheticCamera(lambda: bytes(320 * 180),
-                                 lock=CameraLock(source="synthetic:declared"))
+                                 lock=CameraLock(source="synthetic:declared"),
+                                 capture_size=size)
     else:
         camera = V4L2Camera(args.device, fps=args.fps, capture_size=size,
                             input_format=args.input_format)

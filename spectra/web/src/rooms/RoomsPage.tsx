@@ -73,6 +73,23 @@ type PlanEmitter = {
   emitter_id: string; carrier_id: string; label: string;
   virtual_ids: string[]; ranges: PixelRange[]; whole_carrier: boolean; note: string;
 };
+/** THE EXPOSURE COMPARISON'S answer. `better` is computed from the two
+ * weights, never chosen; `summary` is the sentence, including what the
+ * comparison does NOT license. */
+type ExposureRun = {
+  ok: boolean;
+  reason?: string;
+  emitter_label?: string;
+  better?: string;
+  ratio?: number | null;
+  summary?: string;
+  seconds?: number;
+  regimes?: { label: string; ok: boolean; weight: number; unseen?: boolean;
+              reason?: string; capture_s?: number; observed_fps?: number }[];
+  notes?: string[];
+  problems?: string[];
+};
+
 type RunPlan = {
   granularity: string; block_pixels: number; count: number;
   estimated_seconds: number; truncated: boolean; problems: string[];
@@ -129,6 +146,14 @@ export default function RoomsPage() {
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<RunResult | null>(null);
   const [plan, setPlan] = useState<RunPlan | null>(null);
+  // THE TWO LEVERS, as a per-run choice with the shipped behaviour as the
+  // default: an empty box asks for nothing, which is converge-then-freeze
+  // exactly as it always was. 2000 is a fifth of a second in the 100-us
+  // units both the browser and V4L2 already speak.
+  const [exposureTime, setExposureTime] = useState<string>('2000');
+  const [gain, setGain] = useState<string>('');
+  const [expRun, setExpRun] = useState<ExposureRun | null>(null);
+  const [expBusy, setExpBusy] = useState(false);
 
   // capture
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -180,6 +205,10 @@ export default function RoomsPage() {
           setFrames((n) => n + 1);
           client.send({
             type: 'frame', mime: 'image/grey8', width: f.width, height: f.height,
+            // WHAT THE CANVAS WAS DRAWN FROM, so the server can drop any
+            // frame bigger than its own camera image rather than counting
+            // interpolated pixels as resolution (see mappingCapture.ts).
+            source_width: f.sourceWidth, source_height: f.sourceHeight,
             captured_at_ms: f.capturedAtMs, data: f.b64, lock: capture.lock,
           });
         },
@@ -187,6 +216,24 @@ export default function RoomsPage() {
         onError: (msg) => toast(msg, 'error'),
       });
       captureRef.current = capture;
+      // A RUN ASKS THE CAMERA FOR ITS FRAME SIZE AND LEVERS. The
+      // commissioning read needs 1920x1080 to tell individual LEDs apart;
+      // a map stays at 320x180. The page answers the `config` message and
+      // reports what the camera actually did — it never decides to proceed
+      // anyway, which stays the server's call.
+      client.onMessage((m) => {
+        if (m.type !== 'config') return;
+        void capture
+          .applyConfig({
+            frame_size: (m.frame_size as { width: number; height: number } | null) ?? null,
+            exposure_time: (m.exposure_time as number | null) ?? null,
+            gain: (m.gain as number | null) ?? null,
+          })
+          .then((l) => {
+            setLock(l);
+            client.send({ type: 'lock', ...l });
+          });
+      });
       await capture.start(5);
       client.send({
         type: 'hello', user_agent: navigator.userAgent,
@@ -342,6 +389,27 @@ export default function RoomsPage() {
       setBusy(false);
     }
   }, [room, granularity, blockPixels, toast]);
+
+  const runExposureTest = useCallback(async () => {
+    if (!room) return;
+    setExpBusy(true);
+    setExpRun(null);
+    const body = {
+      exposure_time: exposureTime.trim() ? Number(exposureTime) : null,
+      gain: gain.trim() ? Number(gain) : null,
+    };
+    try {
+      setExpRun(await apiPost<ExposureRun>(`/rooms/${room.id}/exposure-test`, body));
+    } catch (err) {
+      const text = String(err);
+      setExpRun({
+        ok: false,
+        reason: text.includes(': ') ? text.slice(text.indexOf(': ') + 2) : text,
+      });
+    } finally {
+      setExpBusy(false);
+    }
+  }, [room, exposureTime, gain]);
 
   const axisReady = !!(room?.axis.floor && room?.axis.ceiling);
 
@@ -576,7 +644,9 @@ export default function RoomsPage() {
               Camera <HelpLink topic="room-mapping-privacy" title="Where the camera goes" />
             </dt>
             <dd>{cameraOn ? `${frames} frames sent` : 'off'}</dd>
-            <dt>Exposure</dt>
+            <dt>
+              Exposure <HelpLink topic="camera-settings" title="Frame size and the manual levers" />
+            </dt>
             <dd className={lock?.exposure_locked ? 'ok' : 'warn'}>
               {lock ? (lock.exposure_locked ? 'locked' : `${lock.exposure_mode || 'unknown'} — NOT locked`) : '—'}
             </dd>
@@ -730,6 +800,79 @@ export default function RoomsPage() {
               ) : null}
             </div>
           )}
+          {/* THE TWO-MINUTE QUESTION, next to the run whose answer it
+            * explains: is a disappointing map the ROOM, or the camera's own
+            * settings? One emitter, one pose, two regimes back to back.
+            * It stores nothing, so it is safe to press as often as he
+            * likes — which is exactly why it belongs here rather than
+            * behind a warning. */}
+          <div className="exposure-test">
+            <h4>
+              Exposure comparison <HelpLink topic="exposure-comparison" />
+            </h4>
+            <p className="muted small">
+              Lights ONE piece twice — once at whatever the camera settled on, once at
+              these settings — and says which measured more light. Stores nothing.
+            </p>
+            <div className="map-granularity">
+              <label>
+                Integration time
+                <input
+                  type="number" min={1} max={100000} step={100} value={exposureTime}
+                  disabled={!room || expBusy || busy}
+                  onChange={(e) => setExposureTime(e.target.value)}
+                />
+              </label>
+              <span className="muted small">
+                ×100µs{exposureTime.trim() ? ` — ${(Number(exposureTime) / 10000).toFixed(3)}s` : ''}
+              </span>
+              <label>
+                Gain
+                <input
+                  type="number" min={0} max={100000} step={1} value={gain}
+                  placeholder="—"
+                  disabled={!room || expBusy || busy}
+                  onChange={(e) => setGain(e.target.value)}
+                />
+              </label>
+              <HelpLink topic="camera-settings" title="What these levers do, and what a long one costs" />
+            </div>
+            <button
+              disabled={!room || !cameraOn || busy || expBusy || !!refusal
+                        || (!exposureTime.trim() && !gain.trim())}
+              onClick={() => void runExposureTest()}
+            >
+              {expBusy ? 'Comparing…' : 'Compare exposures'}
+            </button>
+            {expRun && (
+              <div className="run-result">
+                <strong>
+                  {expRun.ok
+                    ? (expRun.better === 'manual' ? 'These settings measured MORE'
+                       : expRun.better === 'default' ? 'The camera\'s own settings measured more'
+                       : 'Too close to call')
+                    : 'Refused'}
+                </strong>
+                {expRun.summary && <p className="muted small">{expRun.summary}</p>}
+                {expRun.reason && !expRun.ok && <p className="warn">{expRun.reason}</p>}
+                {expRun.regimes?.length ? (
+                  <ul>
+                    {expRun.regimes.map((r) => (
+                      <li key={r.label} className={r.ok ? (r.unseen ? 'muted' : 'ok') : 'warn'}>
+                        {r.label === 'manual' ? 'These settings' : 'Camera\'s own'}:{' '}
+                        {r.ok ? `weight ${r.weight}${r.unseen ? ' — saw nothing' : ''}` : r.reason}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {expRun.notes?.length ? (
+                  <ul className="muted small">
+                    {expRun.notes.map((n) => <li key={n}>{n}</li>)}
+                  </ul>
+                ) : null}
+              </div>
+            )}
+          </div>
         </section>
       </div>
 

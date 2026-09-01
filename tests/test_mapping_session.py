@@ -136,11 +136,16 @@ def test_a_grey8_frame_becomes_the_stored_grid():
 
 
 def test_a_frame_of_the_wrong_size_is_rejected_with_a_reason_not_resampled():
+    """An UNDECLARED shape means the client and the server disagree, and
+    quietly stretching it would hide that. "Declared" is the LADDER since
+    the commissioning read moved to 1080p (`capture_settings.PROFILES`), so
+    the reason names every size this wire speaks rather than one."""
     sess, _ = _session()
     sess.frames.configure(enabled=True)
     sess._ingest_frame(_frame_msg(np.zeros((100, 100))))
     assert not sess.grids and sess.counts["rejected"] == 1
-    assert "does not divide into" in (sess.last_error or "")
+    assert "not one of the sizes this wire declares" in (sess.last_error or "")
+    assert "1920x1080" in (sess.last_error or "")
 
 
 def test_a_jpeg_is_refused_because_a_lossy_codec_lands_in_the_difference():

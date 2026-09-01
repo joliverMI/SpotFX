@@ -98,10 +98,22 @@ camera pixels per composition index** along the imaged strip
 * and the entire border of the **320×180** frame the phone sends is
   **~1,000**.
 
-**No pose fixes this at the current frame size.** The phone captures at
-1280×720 and the page downsamples to 320×180 before sending; the run's
+**No pose fixed this at the frame size the wire carried when this was
+written.** The page downsampled to 320×180 before sending; the run's
 "full-resolution ring" is full relative to the 64×36 *map grid*, not to the
 camera.
+
+> **RESOLVED, 2026-09-01, by the owner's own instruction** ("raise video
+> frame size and tweak whatever settings help"). The commissioning read now
+> asks for **1920×1080**, where the same television framed normally images
+> a ~4,600-pixel perimeter against the ~1,840 his composition needs with
+> margin — chosen by this arithmetic and not by picking the maximum
+> (`spectra/services/capture_settings.py` carries the derivation, the
+> never-upscale rule and the two manual exposure levers). Ordinary
+> footprint mapping stays at 320×180: a footprint is a 64×36 grid and more
+> pixels buy it nothing. Everything above this note is the state of the
+> world before that raise, and is kept because it is what the raise was
+> chosen against.
 
 ## What changed
 

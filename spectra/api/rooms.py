@@ -23,6 +23,12 @@
                                           run is never a surprise
   POST   /api/rooms/{room_id}/map         RUN the mapping protocol at the
                                           granularity chosen for THIS run
+  POST   /api/rooms/{room_id}/exposure-test
+                                          ONE emitter, one pose, two camera
+                                          regimes — does a manual
+                                          integration time and gain measure
+                                          more than converge-then-freeze?
+                                          Stores nothing.
   POST   /api/rooms/{room_id}/commission
   POST   /api/rooms/commission/{mapper_id} RUN the commissioning
                                           ground-truth test: gray-code one
@@ -68,8 +74,9 @@ from pydantic import BaseModel
 from spectra.models.room_map import AxisCalibration, RoomMap
 from spectra.services import emitters as emitters_mod
 from spectra.services import commission_compare
-from spectra.services import (capture_runs, commissioning, light_field,
-                              mapping_refusals, mapping_session, room_mapping)
+from spectra.services import (capture_runs, capture_settings, commissioning,
+                              light_field, mapping_refusals, mapping_session,
+                              room_mapping)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["spectra-rooms"])
@@ -110,6 +117,45 @@ class MapBody(BaseModel):
     lit_settle_s: Optional[float] = None
     dark_capture_s: Optional[float] = None
     lit_capture_s: Optional[float] = None
+    #: THE CAMERA'S TWO MANUAL LEVERS, both optional and both defaulting to
+    #: today's behaviour exactly (converge on the scene, then freeze).
+    #: `exposure_time` is in 100-MICROSECOND units — V4L2's own unit for it
+    #: and the browser's, so nothing anywhere converts; `gain` is the
+    #: device's own scale, passed through verbatim. A lever the camera does
+    #: not take REFUSES BY NAME on the read-back rather than being measured
+    #: under whatever the camera chose instead
+    #: (`spectra/services/capture_settings.py` is the binding statement).
+    #:
+    #: A MAP'S FRAME SIZE IS NOT A KNOB and is deliberately absent: a
+    #: footprint is a 64x36 grid, so 320x180 is what it needs and more
+    #: pixels would cost bandwidth for nothing. Only the commissioning read
+    #: raises it.
+    exposure_time: Optional[int] = None
+    gain: Optional[int] = None
+
+
+class ExposureTestBody(BaseModel):
+    """THE TWO-MINUTE QUESTION: at this pose, does a manual integration time
+    and gain put more measurable light in the frame than the camera's own
+    converged exposure?
+
+    `emitter_id` picks which piece to light (omitted: the first the plan
+    resolves, which at the default whole-carrier granularity is the room's
+    first carrier). At least one of `exposure_time` / `gain` is required —
+    with neither, both halves would be the same regime.
+
+    Stores nothing: `spectra/services/exposure_test.py` runs against a
+    throwaway copy of the room, so this can be run as often as he likes
+    without a single stored footprint moving."""
+    emitter_id: Optional[str] = None
+    exposure_time: Optional[int] = None
+    gain: Optional[int] = None
+    granularity: Optional[str] = None
+    block_pixels: Optional[int] = None
+    dark_settle_s: Optional[float] = None
+    lit_settle_s: Optional[float] = None
+    dark_capture_s: Optional[float] = None
+    lit_capture_s: Optional[float] = None
 
 
 class CommissionBody(BaseModel):
@@ -139,6 +185,14 @@ class CommissionBody(BaseModel):
     repeat: int = 1
     targets: Optional[list[str]] = None
     per_fixture: bool = False
+    #: The camera's two manual levers for THIS read, same units and same
+    #: read-back discipline as `MapBody`'s. The FRAME SIZE is not here: a
+    #: commissioning read always asks for
+    #: `capture_settings.COMMISSION_PROFILE` and negotiates DOWN to what the
+    #: camera has — it is derived from the composition's own arithmetic, not
+    #: a preference.
+    exposure_time: Optional[int] = None
+    gain: Optional[int] = None
 
 
 def _run_granularity(room: RoomMap, granularity: Optional[str],
@@ -258,6 +312,26 @@ async def map_status():
                 "lit_settle_s": room_mapping.LIT_SETTLE_S,
                 "lit_capture_s": room_mapping.LIT_CAPTURE_S,
                 "min_frames": room_mapping.MIN_FRAMES,
+            },
+            # THE WIRE'S OWN CONTRACT, published so a page never hard-codes
+            # a size: the ladder, which rung each run asks for, and what the
+            # two manual levers mean. `spectra/services/capture_settings.py`
+            # carries the arithmetic that chose them.
+            "frame_sizes": [{"width": w, "height": h}
+                            for w, h in capture_settings.PROFILES],
+            "map_frame_size": {"width": capture_settings.MAP_PROFILE[0],
+                               "height": capture_settings.MAP_PROFILE[1]},
+            "commission_frame_size": {
+                "width": capture_settings.COMMISSION_PROFILE[0],
+                "height": capture_settings.COMMISSION_PROFILE[1]},
+            "levers": {
+                "exposure_time_unit": "100 microseconds (V4L2 "
+                                      "exposure_time_absolute / W3C "
+                                      "exposureTime — nothing converts)",
+                "exposure_time_range": [capture_settings.MIN_EXPOSURE_TIME,
+                                        capture_settings.MAX_EXPOSURE_TIME],
+                "gain": "the device's own scale (V4L2 gain / the browser's "
+                        "iso), passed through verbatim",
             }}
 
 
@@ -344,7 +418,9 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
         dark_settle_s=body.dark_settle_s if body else None,
         lit_settle_s=body.lit_settle_s if body else None,
         dark_capture_s=body.dark_capture_s if body else None,
-        lit_capture_s=body.lit_capture_s if body else None)
+        lit_capture_s=body.lit_capture_s if body else None,
+        exposure_time=body.exposure_time if body else None,
+        gain=body.gain if body else None)
     if outcome.status == capture_runs.STATUS_NOT_FOUND:
         return JSONResponse(status_code=404, content={"detail": outcome.detail})
     if outcome.refusal in ("no_session", "busy") or outcome.escaped:
@@ -359,6 +435,49 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
     if stored is not None:
         out["room"] = _room_view(stored)
     return out
+
+
+@router.post("/rooms/{room_id}/exposure-test")
+async def run_exposure_test(room_id: str, body: ExposureTestBody):
+    """TONIGHT'S TWO-MINUTE QUESTION, runnable: one emitter, one pose, two
+    camera regimes back to back, and a machine-readable answer saying which
+    put more measurable light in the frame and by how much.
+
+    WHAT IT IS FOR. After 2026-09-01 the honest statement about his room was
+    "these emitters could not be resolved", and nobody could say whether
+    that was the CAMERA'S DEFAULT SETTINGS or the room. This measures it:
+    converge-then-freeze against a named integration time and gain, same
+    pose, same emitter, seconds apart. `better` is a computed word, `ratio`
+    is the number, and `summary` is the sentence — including what the
+    comparison does NOT license (the two weights are on deliberately
+    different byte scales and must never be compared with any other
+    footprint in the room).
+
+    STORES NOTHING. It runs against a throwaway copy of the room and puts
+    the camera back in a `finally`, so it can be run as often as he likes
+    without a stored footprint moving or a later run inheriting a long
+    integration time.
+
+    Same lock, same session gate, same refusals as the other two runs — see
+    `spectra/services/capture_runs.py`."""
+    outcome = await capture_runs.run_exposure_test(
+        room_id, emitter_id=body.emitter_id,
+        exposure_time=body.exposure_time, gain=body.gain,
+        granularity=body.granularity or "whole",
+        block_pixels=body.block_pixels,
+        dark_settle_s=body.dark_settle_s, lit_settle_s=body.lit_settle_s,
+        dark_capture_s=body.dark_capture_s, lit_capture_s=body.lit_capture_s)
+    if outcome.status == capture_runs.STATUS_NOT_FOUND:
+        return JSONResponse(status_code=404, content={"detail": outcome.detail})
+    if outcome.refusal in ("no_session", "busy") or outcome.escaped:
+        return JSONResponse(status_code=409, content={
+            "detail": outcome.detail, "refusal": outcome.refusal})
+    if outcome.status != capture_runs.STATUS_OK:
+        # A REFUSAL IS NOT A SERVER FAULT: 409 with the record, so a caller
+        # can tell "we could not run" from "we ran and the default regime
+        # measured nothing" — which is a RESULT, and the interesting one.
+        return JSONResponse(status_code=409, content=outcome.result)
+    return outcome.result
 
 
 @router.get("/rooms/commission/results")
@@ -403,7 +522,9 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
     outcome = await capture_runs.run_commission(
         room_id, mapper_id=(body.mapper_id if body else None),
         repeat=(body.repeat if body else 1),
-        targets=_commission_targets(body))
+        targets=_commission_targets(body),
+        exposure_time=body.exposure_time if body else None,
+        gain=body.gain if body else None)
     if outcome.status == capture_runs.STATUS_NOT_FOUND:
         return JSONResponse(status_code=404, content={"detail": outcome.detail})
     if outcome.refusal == "no_mapper":

@@ -1671,12 +1671,33 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'camera-settings',
+        title: 'The camera: how big a frame, and the exposure levers',
+        keywords: 'camera frame size resolution 1920 1080 320 180 exposure integration time gain iso manual levers upscale commissioning read fps frames per second slow shutter dark room dim',
+        body: [
+          'A MAP and the COMMISSIONING TEST ask the camera for different things, and the difference is arithmetic rather than taste. A footprint is a 64×36 picture of where a fixture\'s light landed, so 320×180 is everything it needs and more pixels would only cost bandwidth: night runs stay cheap. The commissioning test asks a different question — WHICH of 736 individual LEDs is this? — and reading a pattern back needs about two camera pixels on each LED. 736 of them therefore need about 1,472 pixels of imaged strip, and the whole perimeter of a 320×180 frame, with the television filling it edge to edge, is 1,000. No pose could ever have worked. At 1920×1080 the same television framed normally gives about 4,600, which clears it with margin — so that is what a commissioning read asks for, and only a commissioning read.',
+          'THE CAMERA IS NEVER ASKED FOR MORE THAN IT HAS. If your camera tops out at 1280×720, the page sends 1280×720 and says so, and the run goes ahead at that size — a bigger picture drawn from a smaller image is not more detail, and counting invented pixels as resolution is exactly how a test comes back confident and wrong. What it will not do is guess: a target it cannot read safely from where you are standing is refused by name, with the numbers, rather than decoded into a plausible neighbour.',
+          'TWO MANUAL LEVERS are available per run, both off by default. INTEGRATION TIME is how long the sensor collects light for each frame — a longer one makes a dim room measurable. GAIN amplifies what it collected — instant, but noisier. Left alone, the camera does what it has always done: let the exposure settle on the scene, then freeze it. Ask for either and the run applies it, READS IT BACK OUT OF THE CAMERA, and refuses by name if the camera did not actually take it — a run that reported the numbers it asked for while measuring under whatever the camera chose instead would be worse than no run at all.',
+          'A LONG INTEGRATION TIME IS NOT FREE, and the run says so rather than quietly costing you frames. A sensor collecting for a fifth of a second cannot deliver more than five frames a second, whatever anything else asks for — and every capture averages whatever ARRIVED in its window, so a long exposure with the window left alone would silently average one frame instead of four. The capture windows are widened to keep the frames, the time estimate you are shown prices the WIDENED run, and an integration time so long that no legal window could average enough frames is refused before the room goes dark.',
+        ],
+      },
+      {
+        id: 'exposure-comparison',
+        title: 'The exposure comparison: is it the room, or the camera settings?',
+        keywords: 'exposure test comparison compare regime default manual integration gain which better ratio two minute question dark room cannot see faint camera settings',
+        body: [
+          'After a run that could not see enough, there are two very different explanations — the room is genuinely too dim for this camera, or the camera was simply left on settings that were never going to work — and until you measure it there is no way to tell them apart. The exposure comparison is that measurement, and it takes about two minutes: one emitter, one pose, lit twice in a row, once at whatever the camera converged to and once at a named integration time and gain. It reports both weights, which regime measured more light, and by how much.',
+          'It STORES NOTHING. Two regimes are two brightness scales, and one map holding both would be exactly the silent lie the pose rules exist to prevent — so it runs against a throwaway copy of the room, and puts the camera back afterwards on every path out. Run it as often as you like; nothing you have measured moves.',
+          'Read the answer as what it is: each weight is honest about how much signal ITS OWN regime produced, and neither is comparable with any other footprint in the room. Two results within about ten percent are reported as a TIE, because a footprint weight is a sum over two thousand noisy cells and calling a small gap a win would be reporting the instrument\'s own wobble as a finding. "The default regime measured nothing and the manual one measured something" is the most useful answer it can give.',
+        ],
+      },
+      {
         id: 'room-mapping-privacy',
         title: 'Privacy — the camera stays on this phone',
         keywords: 'privacy camera video frames stored disk retention network recording microphone audio',
         body: [
           'No microphone is opened by this page at all — mapping needs no sound, and there is no audio code in it to switch on.',
-          'Each camera frame is reduced IN THE BROWSER to a 320×180 greyscale image and only those bytes cross the same-origin connection to SPECTRA, where they live in memory and are dropped the moment you disconnect. Nothing is sent anywhere else.',
+          'Each camera frame is reduced IN THE BROWSER to a greyscale image and only those bytes cross the same-origin connection to SPECTRA, where they live in memory and are dropped the moment you disconnect. Nothing is sent anywhere else. A mapping run sends 320×180, which is all a footprint needs; the commissioning test asks for up to 1920×1080, because it has to tell individual LEDs apart. Nothing is ever compressed — a lossy codec\'s own noise would land inside the very difference these measurements are made of.',
           'The only thing written to disk is the derived map: the footprint grids, the axis profiles, the weights and the capture context (which pose, whether the exposure was locked, when). Never a frame, never an image, never audio.',
         ],
       },

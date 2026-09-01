@@ -40,8 +40,9 @@ from typing import Any, Optional
 
 from spectra.models.room_map import RoomMap
 from spectra.services import emitters as emitters_mod
-from spectra.services import (commissioning, light_field, mapping_refusals,
-                              mapping_session, room_mapping)
+from spectra.services import (capture_settings, commissioning, exposure_test,
+                              light_field, mapping_refusals, mapping_session,
+                              room_mapping)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,11 @@ _running: Optional[str] = None
 
 KIND_MAP = "map"
 KIND_COMMISSION = "commission"
+#: THE EXPOSURE COMPARISON. It holds the room and consumes the same camera
+#: session's frames, so it takes the SAME lock as the other two — two of
+#: these at once would fight over both scarce things exactly as a map and a
+#: commissioning pass would.
+KIND_EXPOSURE = "exposure"
 
 STATUS_OK = "ok"
 STATUS_PARTIAL = "partial"
@@ -108,7 +114,13 @@ class RunOutcome:
                 "target": self.target, "room_id": self.room_id,
                 "pose_id": self.pose_id, "session_id": self.session_id,
                 "seconds": round(self.seconds, 2)}
-        if self.kind == KIND_MAP:
+        if self.kind == KIND_EXPOSURE:
+            base.update({"better": r.get("better"), "ratio": r.get("ratio"),
+                         "emitter_id": r.get("emitter_id"),
+                         "run_summary": r.get("summary"),
+                         "problems": list(r.get("problems") or []),
+                         "notes": list(r.get("notes") or [])})
+        elif self.kind == KIND_MAP:
             base.update({
                 "mapped_count": r.get("mapped_count"),
                 "unseen_count": r.get("unseen_count"),
@@ -190,6 +202,8 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
                   lit_settle_s: Optional[float] = None,
                   dark_capture_s: Optional[float] = None,
                   lit_capture_s: Optional[float] = None,
+                  exposure_time: Optional[int] = None,
+                  gain: Optional[int] = None,
                   remember: bool = True) -> RunOutcome:
     """THE mapping run. Every caller — the button, the queue — comes here.
 
@@ -217,7 +231,9 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
                 room, room_mapping.production_deps(sess),
                 granularity=g, block_pixels=block,
                 dark_settle_s=dark_settle_s, lit_settle_s=lit_settle_s,
-                dark_capture_s=dark_capture_s, lit_capture_s=lit_capture_s)
+                dark_capture_s=dark_capture_s, lit_capture_s=lit_capture_s,
+                camera=capture_settings.request(exposure_time=exposure_time,
+                                                gain=gain))
         except Exception as exc:                       # noqa: BLE001
             # An ownership state is EXPECTED on this path and gets its own
             # sentence; anything else is a real bug and still raises, because
@@ -252,7 +268,9 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
 
 async def run_commission(room_id: str, *, mapper_id: Optional[str] = None,
                          repeat: int = 1,
-                         targets: Optional[list[str]] = None) -> RunOutcome:
+                         targets: Optional[list[str]] = None,
+                         exposure_time: Optional[int] = None,
+                         gain: Optional[int] = None) -> RunOutcome:
     """THE commissioning pass. Same lock, same session gate, same shape.
 
     The result is STORED either way (`commissioning.save_result`) — a
@@ -283,7 +301,9 @@ async def run_commission(room_id: str, *, mapper_id: Optional[str] = None,
         try:
             result = await commissioning.run_commission(
                 target_id, room_mapping.production_deps(sess),
-                repeat=repeat, targets=list(targets) if targets else None)
+                repeat=repeat, targets=list(targets) if targets else None,
+                camera=capture_settings.request(exposure_time=exposure_time,
+                                                gain=gain))
         except Exception as exc:                       # noqa: BLE001
             named = mapping_refusals.ownership_refusal(exc)
             if named is None:
@@ -302,6 +322,68 @@ async def run_commission(room_id: str, *, mapper_id: Optional[str] = None,
                       session_id=getattr(sess, "id", ""),
                       pose_id=result.pose_id, seconds=result.seconds,
                       result=stored)
+
+
+async def run_exposure_test(room_id: str, *,
+                            emitter_id: Optional[str] = None,
+                            exposure_time: Optional[int] = None,
+                            gain: Optional[int] = None,
+                            granularity: str = "whole",
+                            block_pixels: Optional[int] = None,
+                            dark_settle_s: Optional[float] = None,
+                            lit_settle_s: Optional[float] = None,
+                            dark_capture_s: Optional[float] = None,
+                            lit_capture_s: Optional[float] = None
+                            ) -> RunOutcome:
+    """THE EXPOSURE COMPARISON, through the same seam as the other two.
+
+    It holds the room and consumes the same camera session's frames, so it
+    takes the same lock, passes the same session gate, and gets its
+    ownership refusals worded by the same module. Nothing about it is a
+    second definition of "a capture run" — that was the whole reason this
+    module exists.
+
+    It stores NOTHING (`exposure_test` runs against a throwaway room), so
+    unlike the other two there is no record to save here: the answer is the
+    response."""
+    room = light_field.get_room(room_id)
+    if room is None:
+        return RunOutcome(kind=KIND_EXPOSURE, status=STATUS_NOT_FOUND,
+                          detail="no such room", refusal="not_found",
+                          target=room_id, room_id=room_id)
+    gate = _gate(KIND_EXPOSURE, room.name or room_id, room_id)
+    if gate is not None:
+        return gate
+    sess = live_session()
+    _, block = run_granularity(room, None, block_pixels)
+
+    global _running
+    async with _run_lock:
+        _running = f"{room_id}/exposure"
+        try:
+            result = await exposure_test.compare_regimes(
+                room, room_mapping.production_deps(sess),
+                emitter_id=emitter_id, exposure_time=exposure_time,
+                gain=gain, granularity=granularity, block_pixels=block,
+                dark_settle_s=dark_settle_s, lit_settle_s=lit_settle_s,
+                dark_capture_s=dark_capture_s, lit_capture_s=lit_capture_s)
+        except Exception as exc:                       # noqa: BLE001
+            named = mapping_refusals.ownership_refusal(exc)
+            if named is None:
+                raise
+            return RunOutcome(kind=KIND_EXPOSURE, status=STATUS_REFUSED,
+                              detail=named, refusal="ownership", escaped=True,
+                              target=room.name or room_id, room_id=room_id)
+        finally:
+            _running = None
+
+    return RunOutcome(kind=KIND_EXPOSURE,
+                      status=STATUS_OK if result.ok else STATUS_REFUSED,
+                      detail=result.reason, refusal=result.refusal,
+                      target=room.name or room_id, room_id=room_id,
+                      session_id=getattr(sess, "id", ""),
+                      pose_id=result.pose_id, seconds=result.seconds,
+                      result=result.as_dict())
 
 
 def session_view() -> dict:

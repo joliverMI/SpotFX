@@ -27,6 +27,7 @@ import asyncio
 import pytest
 
 from spectra.models.room_map import AxisCalibration, Point, RoomMap
+from spectra.services import capture_settings
 from spectra.services import fx_seam, mapping_refusals, room_mapping
 
 AXIS = AxisCalibration(kind="vertical", floor=Point(x=0.5, y=1.0),
@@ -41,7 +42,7 @@ def _virtual():
             "effect": {"type": "singleColor", "config": {}}}
 
 
-class _Session:
+class _Session(capture_settings.SessionCameraDouble):
     """The phone, reduced to what a run touches."""
     pose_id = "pose-1"
     run_abort = None

@@ -24,7 +24,12 @@ since the night-run seam, a sleep-window start arriving while SPECTRA does
 not hold the room, or with no night queue declared. Plus one
 WARNING, which is a different thing from a refusal: a map that will come out as a single piece
 still runs and is still worth keeping, it just cannot show a wave. Each has a sentence below or is
-confirmed to have one at its own site — plus one FACT, `unseen_note`, which
+confirmed to have one at its own site. Since the wire-frame raise of
+2026-09-01 that list also carries the camera's own PER-RUN SETTINGS: a
+client that sends a frame bigger than its camera, a client that never
+adopts the frame size a run needs, a manual integration time or gain the
+camera would not take, and an integration time so long the protocol cannot
+average its frames. Plus one FACT, `unseen_note`, which
 is neither: an emitter whose light this pose could not see ran perfectly
 well and is worth recording as such (`pose_changed_note` is the second
 one). What is NOT expected — a genuine bug
@@ -126,16 +131,27 @@ def unresolvable_composition(report: dict, width: int, height: int, *,
     and because they indict different things:
 
       IMPOSSIBLE  below the Nyquist bar. Nothing can be decoded however
-                  bright the room is. His whole 736-pixel composition,
-                  through the 320x180 frame the phone sends, is this.
+                  bright the room is. At the 320x180 the wire carried until
+                  2026-09-01 his whole 736-pixel composition was ALWAYS
+                  this, from any pose: the frame's entire perimeter is
+                  1,000 camera pixels and the composition needs ~1,472.
       MARGINAL    above that bar but inside RESOLUTION_SAFETY_FACTOR of it.
                   A decode here would SUCCEED and be WRONG — a low bit
                   flipped by a fraction of a pixel lands, by gray code's own
                   guarantee, on a plausible NEIGHBOUR. The captain's ruling
                   on splitting the run per fixture: "marginal is the state
-                  that produces a confident wrong answer". His ring alone,
-                  560 pixels needing ~1120 camera pixels of a frame whose
-                  whole border is ~1000, is this one.
+                  that produces a confident wrong answer". At 320x180 his
+                  ring alone — 560 pixels needing ~1,120 camera pixels of a
+                  frame whose whole border is ~1,000 — was this one.
+
+    BOTH SENTENCES QUOTE THE FRAME SIZE THEY WERE MEASURED AT, from the
+    caller's own `width`/`height`, which is why the wire-frame raise moved
+    the numbers without touching this function: the commissioning read now
+    asks for 1920x1080 (`capture_settings`), where the same wrap carries
+    ~4,600 camera pixels and the same composition clears the margin with
+    2.5x to spare. A refusal here after the raise is a REAL pose problem —
+    too far away, or too much of the frame spent on the rest of the room —
+    and no longer an arithmetic impossibility.
 
     THE SHAPE OF THE ANSWER, the same discipline `too_long_refusal` keeps:
     name the measurement, name the bar, and hand back the choice. It never
@@ -190,6 +206,127 @@ def unresolvable_composition(report: dict, width: int, height: int, *,
             f"phone closer, frame just the television, or commission a "
             f"smaller piece — one fixture, or one segment — then press "
             f"Commission again.")
+
+
+# ── THE CAMERA'S PER-RUN SETTINGS ──────────────────────────────────────────
+#
+# Since 2026-09-01 a run may ask the camera for a bigger wire frame (the
+# commissioning read needs 1920x1080 to tell 736 LEDs apart) and for a
+# manual integration time and gain. `spectra/services/capture_settings.py`
+# is the binding statement for all three. Each has a way of not happening,
+# and each of those ways is an EXPECTED condition with a sentence here.
+
+
+def upscaled_frame(width: int, height: int, source_w: int,
+                   source_h: int) -> str:
+    """A CLIENT SENT A FRAME BIGGER THAN THE CAMERA IT CAME FROM. Named and
+    dropped, never counted.
+
+    WHY THIS IS A REFUSAL AND NOT A SHRUG: `gray_code.resolution_report`
+    counts CAMERA PIXELS, so pixels invented by interpolation would inflate
+    the count and a target that cannot be resolved would report that it can
+    — which is exactly the confident-wrong-answer the MARGINAL verdict
+    exists to refuse, arriving through a side door. A bigger picture of the
+    same 720p image is not more detail.
+
+    Both shipped clients pick their own rung with
+    `capture_settings.choose`, which cannot produce this; a client that
+    reaches it is a client that ignored its own camera."""
+    return (f"the camera sent a {width}x{height} frame from a "
+            f"{source_w}x{source_h} image, so most of it is interpolation "
+            f"rather than detail. Frames like that are dropped, not counted: "
+            f"a decode measures how many CAMERA pixels see each LED, and "
+            f"invented pixels would make an unreadable target look readable. "
+            f"Set the capture client's --capture-size to what this camera "
+            f"really produces, or use a camera that reaches the size the run "
+            f"asked for.")
+
+
+def frame_size_not_adopted(want: tuple, got: tuple, source: tuple,
+                           pending: int) -> str:
+    """The run asked for a bigger frame and the client never sent one.
+
+    A client that CAN'T reach the size is not this: it downgrades honestly
+    to the largest rung its camera has and the run carries on at that size,
+    saying which it got. This is the client that never answered at all — an
+    old page still running from a cached bundle, a capture client from
+    before the ladder existed — and the honest act is to refuse rather than
+    read a 1080p question out of 320x180 frames."""
+    src = (f" (its camera reports {source[0]}x{source[1]})"
+           if source and source[0] else "")
+    return (f"this run needs {want[0]}x{want[1]} frames and the camera is "
+            f"still sending {got[0]}x{got[1]}{src}. Nothing was measured and "
+            f"nothing was written. Reload the Rooms page (an old tab keeps "
+            f"its cached copy of the capture code), or restart the capture "
+            f"client, then press again — {pending} frame"
+            f"{'' if pending == 1 else 's'} arrived at the old size while "
+            f"this run waited.")
+
+
+def manual_camera_unavailable(refused: list, request: dict,
+                              lock: dict) -> str:
+    """A run asked for a manual integration time or gain and the camera did
+    not take it.
+
+    THE SAME RULE THE EXPOSURE LOCK LIVES BY, one lever further: a returning
+    write call is never evidence, so this fires on the READ-BACK. Measuring
+    under whatever the camera decided instead, while reporting the numbers
+    that were asked for, is the one thing this path must never do — a
+    comparison between two exposure regimes is worthless if one of them
+    quietly did not happen.
+
+    A run that asked for NEITHER lever never reaches this: converge-then-
+    freeze is still the default and a camera with no manual controls maps
+    exactly as it always has."""
+    asked = []
+    if request.get("exposure_time") is not None:
+        asked.append(f"integration time {request['exposure_time']} "
+                     f"(x100 us, i.e. {request['exposure_time'] * 1e-4:.4g}s)")
+    if request.get("gain") is not None:
+        asked.append(f"gain {request['gain']}")
+    got = []
+    if lock.get("exposure_time") is not None:
+        got.append(f"integration time {lock['exposure_time']}")
+    if lock.get("gain") is not None:
+        got.append(f"gain {lock['gain']}")
+    ranges = []
+    if lock.get("exposure_time_range"):
+        ranges.append(f"integration time {lock['exposure_time_range'][0]:g}"
+                      f"..{lock['exposure_time_range'][1]:g}")
+    if lock.get("gain_range"):
+        ranges.append(f"gain {lock['gain_range'][0]:g}"
+                      f"..{lock['gain_range'][1]:g}")
+    return ("this run asked the camera for " + (" and ".join(asked) or "manual settings")
+            + ", and the camera did not take "
+            + ("them" if len(asked) > 1 else "it") + ": "
+            + ("; ".join(str(r) for r in refused) or "no control answered")
+            + ". " + (f"It reports {', '.join(got)}. " if got else "")
+            + (f"This camera offers {', '.join(ranges)}. " if ranges else "")
+            + "Nothing was measured and nothing was written — a run that "
+              "reported the numbers it asked for while measuring under "
+              "whatever the camera chose instead would be worse than no run. "
+              "Ask for a value inside this camera's own range, or run without "
+              "the manual levers (the default is still: let the exposure "
+              "settle on the scene, then freeze it).")
+
+
+def exposure_too_long(exposure_s: float, fps: float, min_frames: int,
+                      max_capture_s: float) -> str:
+    """The requested integration time is so long that even the longest
+    capture window cannot average `min_frames`.
+
+    A sensor integrating for E seconds delivers at most 1/E frames a
+    second — no tap rate or window length changes that — so past a point
+    the honest answer is that this exposure and this protocol cannot both
+    happen. Refused BEFORE the room goes dark, in the shape
+    `too_long_refusal` already keeps: name the measurement, name the bound,
+    hand the choice back."""
+    return (f"an integration time of {exposure_s:.3g}s gives at most "
+            f"{fps:.2f} frames a second, so averaging the {min_frames} "
+            f"frames a capture needs would take longer than the "
+            f"{max_capture_s:g}s a single capture window is allowed. Nothing "
+            f"was written. Ask for a shorter integration time, or raise the "
+            f"gain instead — it costs noise rather than frames.")
 
 
 def capture_refusal(emitter_label: str, exc: BaseException) -> str:

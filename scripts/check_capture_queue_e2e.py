@@ -98,6 +98,7 @@ import httpx                                                   # noqa: E402
 import uvicorn                                                 # noqa: E402
 
 from spectra.capture_client.camera import CameraLock, SyntheticCamera  # noqa: E402
+from spectra.services import capture_settings                    # noqa: E402
 from spectra.capture_client.session import CaptureClient       # noqa: E402
 from spectra.services import (capture_queue, commissioning, fx_seam,  # noqa: E402
                               gray_code, light_field, room_mapping)
@@ -489,6 +490,29 @@ async def main():
               ("pass", "findings", "incomplete", "fail"),
               f"the per-fixture commissioning pass ran unattended and was "
               f"judged by the frozen table ({items[2]['run'].get('verdict')})")
+        # THE FRAME-SIZE NEGOTIATION, OVER THE REAL WIRE. The read asks the
+        # camera for 1920x1080 (`capture_settings.COMMISSION_PROFILE`); this
+        # synthetic camera can only produce the wire's smallest rung, so it
+        # DOWNGRADES honestly and the run goes ahead at what it got and says
+        # which. That is the behaviour a 720p phone gets tonight, proven
+        # here through the real client, the real WebSocket and the real
+        # server rather than against a stub that agreed with itself.
+        results = (await http.get("/api/rooms/commission/results?limit=5")).json()
+        record = next((row for row in results["results"]
+                       if row.get("mapper_id") == CARRIER), {})
+        read_camera = record.get("camera") or {}
+        check(read_camera.get("requested", {}).get("frame_size", {}).get("width")
+              == capture_settings.COMMISSION_PROFILE[0],
+              f"the read ASKED the camera for "
+              f"{capture_settings.COMMISSION_PROFILE[0]}x"
+              f"{capture_settings.COMMISSION_PROFILE[1]} over the real wire")
+        check((read_camera.get("frame_size") or {}).get("width") == FW,
+              f"and got {read_camera.get('frame_size')} — this camera's honest "
+              f"maximum, negotiated DOWN rather than upscaled")
+        check(any("could not reach" in n or "reads at" in n
+                  for n in (record.get("notes") or [])),
+              "and the run SAYS it read at a smaller frame than it asked "
+              "for, rather than leaving that to be inferred from a verdict")
         check(items[3]["status"] == "refused" and
               "not rendering right now" in items[3]["detail"],
               f"a mid-queue refusal is recorded BY NAME: "

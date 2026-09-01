@@ -32,6 +32,7 @@ import asyncio
 import pytest
 
 from spectra.models.room_map import AxisCalibration, Point, RoomMap
+from spectra.services import capture_settings
 from spectra.services import emitters as em
 from spectra.services import room_mapping
 
@@ -133,7 +134,7 @@ def test_a_bulb_is_not_reported_as_a_refusal_it_is_simply_one_piece():
 
 # ── 3. the run brings the strip up, and puts it back ───────────────────────
 
-class _Session:
+class _Session(capture_settings.SessionCameraDouble):
     pose_id = "pose-1"
     run_abort = None
     closed = False
