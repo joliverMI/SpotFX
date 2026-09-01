@@ -1519,7 +1519,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                 f"deliver, so each capture window was widened from "
                 f"{CAPTURE_S:g}s to {capture_s:g}s to still average "
                 f"{MIN_FRAMES} frames — this run is about "
-                f"{(capture_s - CAPTURE_S) * len(result.target_specs) * (2 + 2 * gray_code.bits_needed(composition.total)):.0f}s "
+                f"{(capture_s - CAPTURE_S) * len(result.target_specs) * (3 + 2 * gray_code.bits_needed(composition.total)):.0f}s "
                 f"longer than the shipped protocol.")
         fixtures = await _fixtures_for(composition, chains, deps)
         readings = await fixture_brightness.read_all(fixtures)

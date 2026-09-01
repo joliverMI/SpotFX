@@ -3811,9 +3811,25 @@ Six things to know before touching any of it:
     signature appears anyway the frozen table's own fail stands unchanged
     with a note saying ambient is ruled out. Deferred, stated: mapping runs
     do not use it (their per-emitter pairs are a different shape).
+  - **IT IS THE SAME GATE AT EVERY WIRE RUNG AND UNDER EITHER LEVER**
+    (`capture_settings`, the same day): nothing is expressed in the camera
+    pixels of one frame — the background set is a quantile (half the frame
+    at any rung), the tile minimum is a FRACTION of a tile, and the bound is
+    a fraction of a measured `peak`. What IS bounded is how many pixels a
+    level is taken over (`SAMPLE_PX`, the same pixels every capture so the
+    sampling error is common-mode and cancels): measured, a full-set median
+    costs 1.9 ms a capture at 320x180 and 45 ms at 1920x1080 — a second of
+    the event loop across a pass, in 45 ms blocks — against ~1.6 ms at every
+    rung bounded. A long integration time widens every capture window, so
+    **both dark references must be averaged over the SAME widened window**
+    or the comparison measures the run's own settings instead of the room.
   Spec: `tests/test_ambient_stability.py` (today's cloud reproduced through
   the real decoder, the gate red on it, and a monkeypatched no-gate run
-  proving the harness fails on the defect it was written for).
+  proving the harness fails on the defect it was written for) and
+  `tests/test_ambient_stability_rungs.py` (the composition with #231: every
+  rung, a raised and an honestly-downgraded read through the real run, the
+  widened window, and the precedence — a refused lever stops the run before
+  the ambient gate has any frames to have an opinion about).
 - **THE FIVE TOLERANCES ARE PRE-REGISTERED, NOT TUNING KNOBS.**
   `spectra/services/commission_compare.py` quotes the plan's table verbatim
   in its docstring and owns 0.98 / 2% / 5% / 5% / +/-15 ms. Moving one has

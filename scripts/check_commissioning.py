@@ -426,8 +426,8 @@ def section_two():
           "and every composition index is addressed exactly once")
     bits = gray_code.bits_needed(comp.total)
     print(f"     his real 736-pixel composition: {gray_code.bits_needed(736)} "
-          f"patterns -> {2 + 2 * gray_code.bits_needed(736)} captures "
-          f"(this synthetic one: {bits} -> {2 + 2 * bits})")
+          f"patterns -> {3 + 2 * gray_code.bits_needed(736)} captures "
+          f"(this synthetic one: {bits} -> {3 + 2 * bits})")
 
 
 # ── THREE — the whole run, against the declared arrangement ───────────────

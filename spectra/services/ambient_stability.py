@@ -95,6 +95,34 @@ refuses everything is a wall — the same two-sided bar the marginal
 resolution boundary is held to. Two grey levels is twice
 `gray_code.MIN_BRIGHT_LEVELS`, the sensor's own quantisation.
 
+IT IS THE SAME GATE AT EVERY WIRE RUNG AND UNDER EITHER MANUAL LEVER
+(`spectra/services/capture_settings.py`, 2026-09-01). None of it is
+free — each piece is a property of the design rather than a coincidence,
+so it is written down:
+
+  FRAME SIZE. A commissioning read now asks for 1920x1080 and settles for
+  whatever rung the camera actually has. Nothing here is expressed in
+  camera pixels of a particular frame: the background set is a QUANTILE
+  (half the frame at every rung), the tile minimum is a FRACTION of a tile,
+  and the bound is a fraction of `peak`, which is measured from the frames
+  in hand. What IS bounded, deliberately, is how many pixels a level is
+  taken over (`SAMPLE_PX`) — otherwise the gate would cost thirty-six times
+  more at 1080p than at 320x180 for an answer that does not improve.
+
+  GAIN. A manual gain scales the signal and the room together, so
+  `drift / peak` is unchanged and the bound moves with it. Nothing to do.
+
+  INTEGRATION TIME. This one genuinely changes the physics and the gate
+  gets it right by measuring rather than assuming. A long exposure both
+  averages the room's movement WITHIN a capture and — because the run
+  widens its capture windows to keep averaging `MIN_FRAMES`
+  (`commissioning.capture_window`) — puts MORE time between a pattern and
+  its own inverse, which is more room for cloud to move in. The pair delta
+  is measured on the frames that were actually taken, so a widened window
+  that let more weather in is seen as more weather. The bound does not move
+  because the bound is about what corrupts a bit, not about how long the
+  shot took.
+
 WHAT IT WILL NOT DO. It never refuses because it could not measure: a frame
 whose background set is too small (`MIN_BACKGROUND_PX`) reports
 `measurable=False` with a note, and the run carries on. "We could not check"
@@ -117,12 +145,42 @@ from spectra.services import gray_code
 #: The dimmer fraction of `full - dark` that is taken as background. See the
 #: module docstring for why this is a quantile and not a threshold.
 BACKGROUND_QUANTILE = 0.5
-#: Camera pixels the background set must hold before a level means anything.
+#: Camera pixels the background set must hold before a level means
+#: anything. RUNG-INDEPENDENT on purpose: `BACKGROUND_QUANTILE` makes the
+#: set half the frame at every wire rung, so this is a guard against a
+#: degenerate frame, never a knob that behaves differently at 1080p.
 MIN_BACKGROUND_PX = 256
 #: The regional grid. A window is a region, not a whole frame.
 TILE_GRID = 4
-#: A tile is only reported when it holds this many background pixels.
+#: A tile is reported only when this FRACTION of it is background — a
+#: fraction rather than a count precisely so the rule means the same thing
+#: at 320x180 and at 1920x1080 (`capture_settings.PROFILES`), where a tile
+#: is 3,600 and 129,600 camera pixels respectively. What is being asked is
+#: "is enough of this tile actually room", and that is a proportion.
+MIN_TILE_BACKGROUND_FRACTION = 0.02
+#: ...with an absolute floor under it for the smallest rung.
 MIN_TILE_BACKGROUND_PX = 64
+
+#: HOW MANY CAMERA PIXELS THE LEVELS ARE ACTUALLY TAKEN OVER, whole-frame
+#: and per tile — the reason this gate costs the same at every rung.
+#:
+#: MEASURED before it was added: a median over the full background set costs
+#: ~1.9 ms a capture at 320x180 and ~45 ms at 1920x1080, i.e. about a second
+#: of the SPECTRA process's own event loop across a 23-capture pass, in
+#: 45 ms blocks — the shape this codebase already knows to keep out of a
+#: live loop. Bounded, it is a few milliseconds at every rung.
+#:
+#: IT COSTS NOTHING IN ACCURACY, and the reason is not the sample size but
+#: that the SAME pixels are used for every capture in the pass: the two
+#: levels being subtracted carry the identical sampling error, so it is
+#: common-mode and cancels in the difference. (The size is generous anyway
+#: — the standard error of a median over 20,000 samples is ~0.009 sigma,
+#: three orders below `DRIFT_FLOOR_LEVELS`.)
+SAMPLE_PX = 20_000
+TILE_SAMPLE_PX = 4_000
+#: Fixed, so two runs of the same pose measure the same pixels and a
+#: reported drift is reproducible.
+SAMPLE_SEED = 20260901
 
 #: HALF of `gray_code.BIT_CONFIDENCE`, and the module docstring carries the
 #: derivation: at this much drift, ambient alone reaches half the bar a bit
@@ -169,19 +227,48 @@ def _tile_slices(shape: tuple[int, int], grid: int):
                 yield f"{tx},{ty}", (slice(y0, y1), slice(x0, x1))
 
 
-def _levels(frame: np.ndarray, mask: np.ndarray, *, grid: int = TILE_GRID
-            ) -> tuple[float, dict[str, float]]:
-    """The background level of one capture: the median over the background
-    set, whole-frame and per tile. A MEDIAN, not a mean — one hot pixel, or
-    a fixture's spill leaking into a corner of the set, must not move it."""
-    frame = np.asarray(frame, dtype=np.float64)
-    whole = float(np.median(frame[mask])) if mask.any() else float("nan")
-    tiles: dict[str, float] = {}
-    for name, sl in _tile_slices(frame.shape, grid):
-        sub = mask[sl]
-        if int(sub.sum()) >= MIN_TILE_BACKGROUND_PX:
-            tiles[name] = float(np.median(frame[sl][sub]))
+def _draw(flat_indices: np.ndarray, limit: int, rng) -> np.ndarray:
+    """A bounded, FIXED sample of a background set. Sorted, so the picked
+    pixels are the same regardless of how numpy orders a choice."""
+    if flat_indices.size <= limit:
+        return flat_indices
+    return np.sort(rng.choice(flat_indices, size=limit, replace=False))
+
+
+def _sample_plan(mask: np.ndarray, *, grid: int = TILE_GRID
+                 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """WHICH camera pixels every level in this pass is taken over — chosen
+    ONCE, bounded, and then never changed. See `SAMPLE_PX`."""
+    rng = np.random.default_rng(SAMPLE_SEED)
+    height, width = mask.shape
+    rows, cols = np.nonzero(mask)
+    whole = _draw((rows * width + cols).astype(np.int64), SAMPLE_PX, rng)
+    tiles: dict[str, np.ndarray] = {}
+    for name, (ys, xs) in _tile_slices(mask.shape, grid):
+        sub = mask[ys, xs]
+        tile_px = int(sub.size)
+        floor = max(MIN_TILE_BACKGROUND_PX,
+                    int(tile_px * MIN_TILE_BACKGROUND_FRACTION))
+        if int(sub.sum()) < floor:
+            continue
+        ty, tx = np.nonzero(sub)
+        flat = ((ty + ys.start) * width + (tx + xs.start)).astype(np.int64)
+        tiles[name] = _draw(flat, TILE_SAMPLE_PX, rng)
     return whole, tiles
+
+
+def _levels(frame: np.ndarray, whole_idx: np.ndarray,
+            tile_idx: dict[str, np.ndarray]
+            ) -> tuple[float, dict[str, float]]:
+    """The background level of one capture: the median over the sampled
+    background set, whole-frame and per tile. A MEDIAN, not a mean — one
+    hot pixel, or a fixture's spill leaking into a corner of the set, must
+    not move it."""
+    flat = np.asarray(frame, dtype=np.float64).reshape(-1)
+    whole = (float(np.median(flat[whole_idx])) if whole_idx.size
+             else float("nan"))
+    return whole, {name: float(np.median(flat[idx]))
+                   for name, idx in tile_idx.items() if idx.size}
 
 
 @dataclass
@@ -253,7 +340,12 @@ class AmbientTrack:
     #: Reported only — see the module docstring for why it is never gated.
     spill: float = 0.0
     readings: list[Reading] = field(default_factory=list)
-    _mask: Optional[np.ndarray] = None
+    #: how many camera pixels each level is actually taken over — bounded,
+    #: so this gate costs the same at 320x180 and at 1920x1080.
+    sampled_px: int = 0
+    tiles_tracked: int = 0
+    _whole_idx: Optional[np.ndarray] = None
+    _tile_idx: dict = field(default_factory=dict)
 
     @classmethod
     def open(cls, dark: np.ndarray, full: np.ndarray, *,
@@ -278,9 +370,12 @@ class AmbientTrack:
         # refusing on it would refuse a room whose fixture lights the walls.
         bright = np.clip(np.asarray(full, dtype=np.float64) - dark, 0.0, None)
         track.spill = float(np.median(bright[mask]))
-        track._mask = mask
+        track._whole_idx, track._tile_idx = _sample_plan(mask)
+        track.sampled_px = int(track._whole_idx.size)
+        track.tiles_tracked = len(track._tile_idx)
         track.measurable = True
-        track.baseline, track.baseline_tiles = _levels(dark, mask)
+        track.baseline, track.baseline_tiles = _levels(
+            dark, track._whole_idx, track._tile_idx)
         # THE OPENING DARK IS THE BASELINE AND IS ALSO A READING, so a run
         # that never drifts still carries a row saying what was measured
         # rather than an empty list that reads as "not checked".
@@ -297,10 +392,10 @@ class AmbientTrack:
         `lamp_free` says the composition was OFF for this capture (the
         opening and closing dark references). Only then is the comparison
         against the opening dark gated — see the module docstring."""
-        if not self.measurable or self._mask is None:
+        if not self.measurable or self._whole_idx is None:
             return Reading(label=label, level=float("nan"),
                            lamp_free=lamp_free)
-        level, tiles = _levels(frame, self._mask)
+        level, tiles = _levels(frame, self._whole_idx, self._tile_idx)
         reading = Reading(label=label, level=level, tiles=tiles,
                           lamp_free=lamp_free)
         reading.whole = abs(level - self.baseline)
@@ -327,8 +422,14 @@ class AmbientTrack:
         checks = [(reading.pair, "pair"),
                   (reading.pair_regional, "pair_regional")]
         if lamp_free:
-            checks += [(reading.regional, "regional"),
-                       (reading.whole, "whole")]
+            # WHOLE BEFORE REGIONAL, so a room-wide change reads as
+            # room-wide. A uniform shift makes both true and equal, and
+            # "strongest in one corner (tile 0,0)" would then be a
+            # misleading sentence about a change that was everywhere. A
+            # genuine corner never breaks the whole-frame median, so it
+            # still falls through to `regional`.
+            checks += [(reading.whole, "whole"),
+                       (reading.regional, "regional")]
         for value, kind in checks:
             if value > self.bound:
                 reading.exceeded, reading.kind = True, kind
@@ -353,6 +454,8 @@ class AmbientTrack:
                 "floor_levels": DRIFT_FLOOR_LEVELS,
                 "background_px": self.background_px,
                 "frame_px": self.frame_px, "spill": round(self.spill, 3),
+                "sampled_px": self.sampled_px,
+                "tiles_tracked": self.tiles_tracked,
                 "baseline": round(self.baseline, 3),
                 "captures": len(self.readings),
                 "max_drift": round(worst.gated_drift, 3) if worst else 0.0,
