@@ -92,7 +92,7 @@ def _deps(session):
                 UNSEEN: [{"id": "far-block", "type": "wled"}]}
 
     async def open_hold(program, intensity, *, step="fire",
-                        heartbeat_timeout_s=0.0):
+                        heartbeat_timeout_s=0.0, max_duration_s=None):
         # Both steps name whose turn it is — the DARK step matters too,
         # because a contaminated dark reference belongs to the emitter about
         # to be measured, not the one before it.

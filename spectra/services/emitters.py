@@ -98,10 +98,17 @@ DEFAULT_GRANULARITY = "auto"
 DEFAULT_BLOCK_PIXELS = 30
 MIN_BLOCK_PIXELS = 1
 MAX_BLOCK_PIXELS = 4096
-#: Per emitter, on top of the four protocol waits: opening this emitter's
-#: own hold (a snapshot read) and reverting it afterwards. Measured against
-#: the shipped copy's "about four seconds per fixture", not tuned.
+#: ONCE PER RUN, on top of the four protocol waits: opening the run's ONE
+#: hold (a snapshot read of the live room) and reverting it at the end.
+#: This used to be charged PER EMITTER, because the capture used to be a
+#: chain of short per-emitter holds — it is one continuous hold now
+#: (spectra/services/room_mapping.py's own docstring says why), so the room
+#: is neither snapshotted nor restored between two emitters and charging it
+#: per emitter would over-price every run by seconds an emitter.
 HOLD_OVERHEAD_S = 0.6
+#: Per emitter, what remains of that: the two writes (dark, then lit) that
+#: this emitter's own steps land through the seam.
+STEP_OVERHEAD_S = 0.2
 #: A hard ceiling on emitters per RUN. Not a tuning knob: at ~4 s each,
 #: 120 emitters is already eight minutes of a dark room, and anything past
 #: that is a mis-set block size rather than an intention.
@@ -372,17 +379,37 @@ class Plan:
 
     @property
     def seconds(self) -> float:
-        """Roughly how long the room is dark. The four protocol waits are
-        read from `room_mapping` itself rather than copied, plus a flat
-        HOLD_OVERHEAD_S per emitter for opening and reverting that emitter's
-        own hold — which is real (the chain restores the room between every
-        emitter) and is what makes the shipped copy say "about four
-        seconds per fixture" rather than 3.4."""
+        """Roughly how long the room is dark, at the SHIPPED protocol — the
+        four waits are read from `room_mapping` itself rather than copied,
+        plus STEP_OVERHEAD_S per emitter for its two writes and one flat
+        HOLD_OVERHEAD_S for the run's single snapshot and revert.
+
+        A run given its own settle/capture overrides re-prices itself with
+        the same function (`room_mapping.run_estimate_s`); this property is
+        what the PAGE shows before he has chosen anything."""
         from spectra.services import room_mapping
-        per = (room_mapping.DARK_SETTLE_S + room_mapping.DARK_CAPTURE_S +
-               room_mapping.LIT_SETTLE_S + room_mapping.LIT_CAPTURE_S +
-               HOLD_OVERHEAD_S)
-        return round(len(self.emitters) * per, 1)
+        return room_mapping.run_estimate_s(
+            len(self.emitters), room_mapping.DARK_SETTLE_S,
+            room_mapping.DARK_CAPTURE_S, room_mapping.LIT_SETTLE_S,
+            room_mapping.LIT_CAPTURE_S)
+
+    @property
+    def hold_ceiling_seconds(self) -> float:
+        """How long one continuous hold would be allowed for this run —
+        shown BESIDE the emitter count, because the run is now one dark
+        room from first emitter to last and that bound is part of what he
+        is agreeing to when he presses."""
+        from spectra.services import room_mapping
+        return room_mapping.run_ceiling_s(self.seconds)
+
+    @property
+    def too_long(self) -> str:
+        """The sentence for a plan past the hard cap on one hold, or "".
+        Present on the PLAN so the cost is refused before it is paid — and
+        it refuses rather than truncating, and never touches his chosen
+        granularity or block size to make itself fit."""
+        from spectra.services import room_mapping
+        return room_mapping.too_long_refusal(self.seconds)
 
     def as_dict(self) -> dict:
         return {
@@ -391,6 +418,8 @@ class Plan:
             "per_carrier": self.per_carrier,
             "count": len(self.emitters),
             "estimated_seconds": self.seconds,
+            "hold_ceiling_seconds": self.hold_ceiling_seconds,
+            "too_long": self.too_long,
             "truncated": self.truncated,
             "problems": self.problems,
             "warnings": self.warnings,

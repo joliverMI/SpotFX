@@ -1,36 +1,78 @@
-"""THE MAPPING RUN — lights off, one emitter at a time, on the ONE held-room
-seam. Never a second hold system.
+"""THE MAPPING RUN — ONE CONTINUOUS DARK HOLD, one emitter at a time, on
+the ONE held-room seam. Never a second hold system.
 
-WHAT A RUN DOES, per emitter, and why each number is what the plan says:
+WHAT A RUN DOES. The room goes dark ONCE, at the start, and stays dark
+until the run ends; then, per emitter:
 
-  1. take the room dark        every live virtual to black, under the hold's
-                               own snapshot
-  2. settle DARK_SETTLE_S      the write has to actually land (WLED transport
-                               plus whatever per-device timing delay is
-                               applied) before the reference means anything
-  3. dark reference            DARK_CAPTURE_S of frames, averaged
-  4. light ONE emitter         full white through the one write seam
-  5. settle LIT_SETTLE_S       same reason as 2
-  6. lit capture               LIT_CAPTURE_S of frames, averaged
-  7. derive + store            footprint = lit - dark, clipped, downsampled
-                               (spectra/services/light_field.py)
-  8. RELEASE THE HOLD          the room comes back before the next emitter
+  1. dark write               every live virtual to black (the room is
+                              already dark — this re-asserts it, so a lit
+                              neighbour can never survive into the next
+                              reference by an ordering accident)
+  2. settle DARK_SETTLE_S     the write has to actually land (WLED transport
+                              plus whatever per-device timing delay is
+                              applied) before the reference means anything,
+                              and the PREVIOUS emitter's own fade is now the
+                              only thing this has to outlast
+  3. dark reference           DARK_CAPTURE_S of frames, averaged
+  4. light ONE emitter        full white through the one write seam
+  5. settle LIT_SETTLE_S      same reason as 2
+  6. lit capture              LIT_CAPTURE_S of frames, averaged
+  7. derive + store           footprint = lit - dark, clipped, downsampled
+                              (spectra/services/light_field.py)
 
-Step 8 is the design decision his plan states explicitly: the hold carries a
-3-minute absolute ceiling that no client can push out, so a long mapping run
-is A CHAIN OF SHORT PER-EMITTER HOLDS rather than one long one. Between two
-emitters the room is genuinely restored — not "restorable in principle" —
-which is the property he asked for, and it means a run of any length is
-bounded by one emitter's worth of held room (~4 s), never by its total.
+and the hold is released ONCE, when the run ends — however it ends.
+
+WHY IT IS ONE HOLD NOW, AND WAS A CHAIN OF SHORT ONES BEFORE (2026-08-31,
+fm/mapping-one-dark-hold). The chain was a real design answer to a real
+constraint: `flare_preview_hold.MAX_HOLD_DURATION_S` caps ONE hold at three
+minutes, so releasing between emitters kept a run of any length inside it
+and made the room genuinely restored — not merely restorable — at every
+link. Then the owner watched a twenty-two-emitter run and said it: "it seems
+like it keeps releasing the lights to the music frequently... just stay dark
+between tests." He was watching the mechanism work as designed, and it was
+wrong twice over:
+
+  * his show floods back through the fixtures between every capture, which
+    is not what "mapping the room" should look like from the sofa; and,
+    worse,
+  * EVERY DARK REFERENCE AFTER THE FIRST WAS TAKEN MOMENTS AFTER A RESTORE.
+    The show fading back out of the fixtures lands IN the dark frame, so the
+    reference comes out too bright and subtracts the next emitter's own
+    light away. The chain was contaminating the instrument it existed to
+    protect — a plausible contributor to the depressed TV-ring weights in
+    his real runs, on top of the firmware-brightness deficit.
+
+THAT CONTAMINATION PATH IS NOW CLOSED BY CONSTRUCTION, not tuned away:
+between two captures the room has been dark all along, so the only residual
+a dark reference has to outlast is the PREVIOUS EMITTER's own fade — which
+is exactly what DARK_SETTLE_S was always for and why it is unchanged.
+
+RESTORABLE AT ANY INSTANT SURVIVES AS THE PROPERTY IT ALWAYS WAS. It was
+never the chain that made it true — it is the hold: his Stop, a lapsed
+heartbeat, the independent sweep, and restart recovery all still land the
+snapshot within seconds. What changed is that STOPPING IS HIS ACT, never
+something the run does to itself between emitters.
+
+THE CEILING IS RUN-SCOPED (`run_ceiling_s` below). MAX_HOLD_DURATION_S is
+untouched and still governs every preview; a mapping run declares its own on
+the hold's first open, derived from the plan's own estimate with a stated
+margin, floored and hard-capped. It is computed AT PLAN TIME and shown in
+the plan response beside the emitter count — the check-before-the-cost
+surface that already exists — and a run whose estimate is past the hard cap
+REFUSES there, by name, with nothing written. It never quietly maps fewer
+emitters, and it never adjusts his granularity or block size on his behalf:
+those are his decisions, and the plan line's job is to price them, not to
+correct them.
 
 EVERYTHING HARD IS INHERITED, NOT REBUILT. flare_preview_hold.
 open_program_hold owns the snapshot taken once per hold, the deadline that
 lapses on its own, the independent sweep that reverts a hold nobody closed,
-the absolute ceiling, the persisted snapshot a service restart lands back,
-and the 1 ms tween-safe revert. This module supplies only what is new: which
-virtuals are in scope, and what each named step writes. A dropped phone, a
-closed tab or a mid-run service restart therefore land in machinery that was
-already proven the expensive way (see that module's own docstring).
+the ceiling, the persisted snapshot a service restart lands back, and the
+1 ms tween-safe revert. This module supplies only what is new: which
+virtuals are in scope, what each named step writes, and how long this
+particular run is allowed to hold the room. A dropped phone, a closed tab
+or a mid-run service restart therefore land in machinery that was already
+proven the expensive way (see that module's own docstring).
 
 WHY THE DARK STEP DARKENS EVERY LIVE VIRTUAL, not only the room's own
 carriers: a footprint is what a CAMERA sees, so any other fixture still
@@ -45,10 +87,10 @@ changes with it. A whole-device emitter is lit exactly as before —
 `singleColor` full white on every one of its virtuals. A PIXEL-RANGE
 emitter is lit with `fx/effects/pixelRange.py`, the measuring instrument
 that renders white over a configured range and black elsewhere, on the same
-one write seam and inside the same held-room step. Everything else about
-the protocol — the dark reference, the settles, the frame counts, the
-derivation, the chain of holds — is identical, which is the point:
-photographing a smaller lamp is not a second protocol.
+one write seam and inside the same held room. Everything else about the
+protocol — the dark reference, the settles, the frame counts, the
+derivation — is identical, which is the point: photographing a smaller lamp
+is not a second protocol.
 
 SUB-DEVICE CAPTURE NEEDS SPECTRA TO OWN THE LIGHTS, and the run says so
 rather than failing at the seam. `pixelRange` is a vendored fx effect that
@@ -106,12 +148,30 @@ DARK_SETTLE_S = 0.7
 DARK_CAPTURE_S = 0.5
 LIT_SETTLE_S = 0.7
 LIT_CAPTURE_S = 1.5
-#: The settles are the two numbers a quality level would move (a slower run
-#: buys a cleaner reference), so they are per-run arguments with bounds
-#: rather than constants a caller edits. The defaults above are unchanged,
-#: so an omitted override runs exactly the protocol that shipped.
+#: ALL FOUR PROTOCOL WAITS ARE PER-RUN ARGUMENTS WITH BOUNDS, not constants
+#: a caller edits — the settles first (a slower run buys a cleaner
+#: reference), and the two CAPTURE durations since 2026-08-31, for the
+#: overnight speed sweep: a sweep that varies one knob at a time needs all
+#: four as honest inputs, or "which of these actually costs the time" is not
+#: answerable. The defaults above are unchanged, so an omitted override runs
+#: exactly the protocol that shipped.
+#:
+#: AT A FIXED CAMERA RATE, LIT DWELL AND FRAMES-AVERAGED ARE ONE KNOB, NOT
+#: TWO. The phone streams at roughly 5 fps and `mapping_session` averages
+#: whatever ARRIVED in the window, so `lit_capture_s` buys frames at about
+#: five a second and nothing else: 1.5 s is ~7 frames, 0.6 s is ~3, and
+#: MIN_FRAMES (2) is the floor below which an emitter is reported unmapped
+#: rather than averaged from one frame. So shortening the capture and
+#: "averaging fewer frames" are the SAME change described two ways —
+#: there is no second knob that keeps the dwell and drops the frames, and
+#: anyone reading a sweep must not count them as independent variables.
 MIN_SETTLE_S = 0.1
 MAX_SETTLE_S = 10.0
+#: The capture window's own bounds. The floor is deliberately above one
+#: frame interval at ~5 fps: below it MIN_FRAMES can never be met and every
+#: emitter would come back unmapped, which is a broken run, not a fast one.
+MIN_CAPTURE_S = 0.25
+MAX_CAPTURE_S = 10.0
 #: THE WEIGHT-ZERO RETRY (his own design, 2026-08-31). An emitter measured
 #: at ~zero gets ONE more capture later in the same run with a dark settle
 #: this many times longer, before it is recorded unseen.
@@ -127,14 +187,75 @@ MAX_SETTLE_S = 10.0
 #: one explanation and nothing else. Whichever way the retry lands, the
 #: answer is now measured rather than assumed.
 RETRY_DARK_SETTLE_X = 3.0
-#: The hold's heartbeat window for a run. A run drives its own holds
-#: synchronously and closes each one itself, so this only has to outlast a
-#: single emitter's ~3.5 s; if the run dies mid-emitter the sweep reverts
-#: within this + flare_preview_hold.SWEEP_INTERVAL_S with nothing else
-#: needing to have run.
+#: The hold's heartbeat window for a run. The run re-arms it on every step
+#: it opens, and a single emitter's dark->lit->capture is ~3.5 s, so this
+#: only ever has to outlast one emitter. If the run dies mid-emitter — a
+#: crashed task, a killed process's successor, a phone that vanished — the
+#: sweep reverts within this + flare_preview_hold.SWEEP_INTERVAL_S with
+#: nothing else needing to have run. It is deliberately NOT the run's
+#: ceiling: the ceiling bounds a HEALTHY run, this bounds an abandoned one.
 HOLD_HEARTBEAT_S = 20.0
-def clamp_settle(value, default: float) -> float:
-    """A caller's settle override, bounded. Anything unusable falls back to
+
+# ── THE RUN-SCOPED HOLD CEILING ────────────────────────────────────────────
+#
+# flare_preview_hold.MAX_HOLD_DURATION_S (three minutes) is right for a
+# preview — a person judging one flare — and wrong for a capture run, which
+# is now ONE continuous hold and must not release his room half-way through
+# a twenty-two-emitter sweep. So a run declares its own ceiling on the
+# hold's first open. Three numbers, each doing a different job:
+#
+#: The margin over the plan's own estimate. A run is never exactly its
+#: estimate: a WLED write can be slow, a frame can be late, and the
+#: weight-zero retry pass (RETRY_DARK_SETTLE_X above) re-measures whatever
+#: read as nothing, which the estimate does not include. 1.5x covers a
+#: normal run with a handful of retries; a run in which nearly everything
+#: retries can still reach the ceiling, and that is a NAMED, footprint-
+#: keeping stop (mapping_refusals.HOLD_CEILING), never a silent one.
+RUN_CEILING_MARGIN = 1.5
+#: The floor. A two-emitter run estimates ~8 s, and holding it to 12 s would
+#: make an ordinary hiccup fatal. Below this the ceiling is not the binding
+#: constraint on anything, so it is simply the preview's own three minutes.
+RUN_CEILING_FLOOR_S = 180.0
+#: The hard cap on ONE continuous hold, whatever the estimate says. Fifteen
+#: minutes is already a long time to stand still holding a phone, and a run
+#: asking for more is a room to map in two passes, not a bigger number. A
+#: plan past this REFUSES (`too_long_refusal`) rather than being truncated:
+#: a run that quietly maps fewer emitters than it listed is worse than one
+#: that will not start.
+RUN_CEILING_HARD_CAP_S = 900.0
+
+
+def run_ceiling_s(estimate_s: float) -> float:
+    """How long ONE mapping run may hold the room, from its plan estimate.
+
+    Computed at PLAN time (spectra/services/emitters.Plan) so it is shown
+    beside the emitter count before he presses, and handed to the hold on
+    its first open so the number he was shown is the number enforced."""
+    try:
+        est = float(estimate_s)
+    except (TypeError, ValueError):
+        est = 0.0
+    if est != est or est < 0:                                      # NaN/junk
+        est = 0.0
+    return round(max(RUN_CEILING_FLOOR_S,
+                     min(RUN_CEILING_HARD_CAP_S, est * RUN_CEILING_MARGIN)), 1)
+
+
+def too_long_refusal(estimate_s: float) -> str:
+    """The sentence for a plan past the hard cap, or "" when it fits.
+
+    Checked at plan time AND at the top of a run, because a plan can be
+    read on one device and a run started on another — and because a run
+    that started must never be the first place he learns the cost."""
+    try:
+        est = float(estimate_s)
+    except (TypeError, ValueError):
+        return ""
+    if est != est or est * RUN_CEILING_MARGIN <= RUN_CEILING_HARD_CAP_S:
+        return ""
+    return mapping_refusals.too_long_refusal(est, RUN_CEILING_HARD_CAP_S)
+def clamp_seconds(value, default: float, lo: float, hi: float) -> float:
+    """A caller's timing override, bounded. Anything unusable falls back to
     the shipped default rather than refusing a run over a stray number."""
     try:
         v = float(value)
@@ -142,7 +263,34 @@ def clamp_settle(value, default: float) -> float:
         return default
     if v != v:                                          # NaN
         return default
-    return max(MIN_SETTLE_S, min(MAX_SETTLE_S, v))
+    return max(lo, min(hi, v))
+
+
+def clamp_settle(value, default: float) -> float:
+    """A caller's SETTLE override, bounded."""
+    return clamp_seconds(value, default, MIN_SETTLE_S, MAX_SETTLE_S)
+
+
+def clamp_capture(value, default: float) -> float:
+    """A caller's CAPTURE-WINDOW override, bounded. See the note above
+    MIN_CAPTURE_S: this is the frame count, expressed in seconds."""
+    return clamp_seconds(value, default, MIN_CAPTURE_S, MAX_CAPTURE_S)
+
+
+def run_estimate_s(emitter_count: int, dark_settle: float,
+                   dark_capture: float, lit_settle: float,
+                   lit_capture: float) -> float:
+    """Roughly how long the room is dark for a run of this shape.
+
+    ONE definition, called from both places that need it: the plan's own
+    `seconds` (with the shipped defaults, which is what the page prices)
+    and `run_mapping`, with the four values THIS run was actually given, so
+    a sweep at half the dwell is bounded by a ceiling derived from the run
+    it is about to do rather than the one it isn't."""
+    per = (dark_settle + dark_capture + lit_settle + lit_capture
+           + emitters_mod.STEP_OVERHEAD_S)
+    return round(max(0, int(emitter_count)) * per
+                 + emitters_mod.HOLD_OVERHEAD_S, 1)
 
 
 #: Frames the average must actually have. Below this the emitter is reported
@@ -186,16 +334,31 @@ class MappingProgram(flare_preview_hold.PreviewProgram):
 
     steps = ("dark", "lit")
 
-    def __init__(self, virtual_ids: list[str], lit_virtual_ids: list[str],
+    def __init__(self, virtual_ids: list[str],
+                 lit_virtual_ids: Optional[list[str]] = None,
                  ranges: Optional[list[PixelRange]] = None) -> None:
         self.virtual_ids = list(dict.fromkeys(virtual_ids))
-        self.lit_virtual_ids = [v for v in dict.fromkeys(lit_virtual_ids)
-                                if v in set(self.virtual_ids)]
-        #: virtual -> the one range lit on it. Absent = the whole virtual.
-        self.ranges: dict[str, PixelRange] = {
-            r.virtual_id: r for r in (ranges or [])
-            if r.virtual_id in set(self.virtual_ids)}
+        #: The scene the ONE hold is built on, and therefore what its
+        #: snapshot covers: every in-scope virtual, for the whole run. It
+        #: does not change as emitters go by — which is what lets one
+        #: snapshot, taken once, give back everything the run ever touched.
         self.hold_scene = dark_scene(self.virtual_ids)
+        self.lit_virtual_ids: list[str] = []
+        #: virtual -> the one range lit on it. Absent = the whole virtual.
+        self.ranges: dict[str, PixelRange] = {}
+        self.select(lit_virtual_ids or [], ranges)
+
+    def select(self, lit_virtual_ids: list[str],
+               ranges: Optional[list[PixelRange]] = None) -> None:
+        """Point the "lit" step at THIS emitter. One program serves the whole
+        run — the room's scope is fixed, only which piece of it is lit
+        changes — so selecting is the only thing that happens between two
+        captures, and the hold is never disturbed."""
+        in_scope = set(self.virtual_ids)
+        self.lit_virtual_ids = [v for v in dict.fromkeys(lit_virtual_ids)
+                                if v in in_scope]
+        self.ranges = {r.virtual_id: r for r in (ranges or [])
+                       if r.virtual_id in in_scope}
 
     def _lit_write(self, vid: str) -> dict:
         rng = self.ranges.get(vid)
@@ -275,6 +438,12 @@ class MappingResult:
     #: every other one.
     dark_settle_s: float = DARK_SETTLE_S
     lit_settle_s: float = LIT_SETTLE_S
+    #: The capture WINDOWS this run used — at a fixed camera rate these are
+    #: how many frames each average was built from, expressed in seconds
+    #: (see the note above MIN_CAPTURE_S). Reported for the same reason as
+    #: the settles: a map taken at a different quality level says so.
+    dark_capture_s: float = DARK_CAPTURE_S
+    lit_capture_s: float = LIT_CAPTURE_S
     #: the granularity each carrier ACTUALLY got, after "auto" resolved
     per_carrier: dict = field(default_factory=dict)
     #: everything the enumeration declined to do, named rather than hidden
@@ -287,6 +456,11 @@ class MappingResult:
     #: how the run was carried out, when it was not the obvious way — today,
     #: that a carrier was mapped through its fixture's own strip.
     notes: list[str] = field(default_factory=list)
+    #: How long this run was allowed to hold the room, in seconds — the
+    #: SAME number the plan showed him before he pressed (run_ceiling_s of
+    #: the plan's own estimate). Reported so a run that stopped at the
+    #: ceiling can be read against the bound it was actually held to.
+    hold_ceiling_s: float = 0.0
     #: WHICH named refusal ended this run, when one did ("ownership",
     #: "hold_ceiling", "aborted"). The page needs the sentence, not this —
     #: it exists so a caller can act on the KIND without matching prose.
@@ -340,6 +514,9 @@ class MappingResult:
                 "recovered_count": self.recovered_count,
                 "dark_settle_s": self.dark_settle_s,
                 "lit_settle_s": self.lit_settle_s,
+                "dark_capture_s": self.dark_capture_s,
+                "lit_capture_s": self.lit_capture_s,
+                "hold_ceiling_s": self.hold_ceiling_s,
                 "pose_id": self.pose_id, "seconds": round(self.seconds, 2),
                 "granularity": self.granularity,
                 "block_pixels": self.block_pixels,
@@ -619,6 +796,8 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
                       block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS,
                       dark_settle_s: Optional[float] = None,
                       lit_settle_s: Optional[float] = None,
+                      dark_capture_s: Optional[float] = None,
+                      lit_capture_s: Optional[float] = None,
                       ) -> MappingResult:
     """Map every emitter in `room` at the chosen granularity, one short
     held-room hold each.
@@ -637,10 +816,14 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     sess = deps.session
     dark_settle = clamp_settle(dark_settle_s, DARK_SETTLE_S)
     lit_settle = clamp_settle(lit_settle_s, LIT_SETTLE_S)
+    dark_capture = clamp_capture(dark_capture_s, DARK_CAPTURE_S)
+    lit_capture = clamp_capture(lit_capture_s, LIT_CAPTURE_S)
     result = MappingResult(room_id=room.id, ok=False,
                            pose_id=getattr(sess, "pose_id", ""),
                            granularity=granularity, block_pixels=block_pixels,
-                           dark_settle_s=dark_settle, lit_settle_s=lit_settle)
+                           dark_settle_s=dark_settle, lit_settle_s=lit_settle,
+                           dark_capture_s=dark_capture,
+                           lit_capture_s=lit_capture)
     refusal = sess.refusal()
     if refusal:
         result.reason = refusal
@@ -686,6 +869,22 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
                          "nothing to map — no carrier of this room is "
                          "rendering right now")
         return result
+    # BEFORE THE COST, AND BEFORE THE ROOM GOES DARK: one continuous hold has
+    # a hard cap, and a plan past it refuses BY NAME rather than being
+    # quietly truncated to whatever fits. Nothing here touches his
+    # granularity or block size — the plan prices his decision, it never
+    # corrects it.
+    # Priced with THIS run's own four waits, not the shipped defaults the
+    # plan page quotes — a sweep at half the dwell must be bounded by the
+    # run it is about to do.
+    estimate_s = run_estimate_s(len(plan.emitters), dark_settle, dark_capture,
+                                lit_settle, lit_capture)
+    result.hold_ceiling_s = run_ceiling_s(estimate_s)
+    too_long = too_long_refusal(estimate_s)
+    if too_long:
+        result.reason = too_long
+        result.refusal = "too_long"
+        return result
     if any(not e.whole_carrier for e in plan.emitters) and not deps.spectra_owns():
         result.reason = (
             "mapping below whole-device granularity needs SPECTRA to be "
@@ -721,11 +920,23 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
         _, fixtures = await fixture_readings(plan, await _chains(deps), deps)
         async with fixture_brightness.owned(fixtures, readings) as owned:
             await _capture_all(room, plan, scope, deps, result,
-                               dark_settle, lit_settle)
+                               dark_settle, lit_settle,
+                               dark_capture, lit_capture)
         if owned.note:
             result.notes.append(owned.note)
         result.problems.extend(owned.problems)
     finally:
+        # THE ONE RELEASE. The room was taken dark once and comes back once,
+        # here, whatever ended the run — a finished sweep, his Stop, an
+        # ownership loss, the ceiling, or a bug. Letting this raise would
+        # turn a stated partial back into a 500, and the hold's own sweep
+        # owns the room from here if it does fail.
+        try:
+            await deps.close_hold()
+        except Exception:                              # noqa: BLE001
+            logger.warning("room mapping: releasing the hold at the end of "
+                           "the run failed; the hold sweep owns it from here",
+                           exc_info=True)
         left_on = await deactivate_after_capture(activated, deps)
         if left_on:
             result.problems.append(
@@ -753,22 +964,34 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
 
 async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
                        result: "MappingResult", dark_settle: float,
-                       lit_settle: float) -> None:
-    """The emitter chain — one short hold each, in plan order — followed by
-    ONE retry pass over whatever measured ~zero, with an extended dark
-    settle.
+                       lit_settle: float, dark_capture: float,
+                       lit_capture: float) -> None:
+    """Every emitter in plan order, under ONE continuous dark hold, followed
+    by ONE retry pass over whatever measured ~zero, with an extended dark
+    settle. The hold is opened by the first emitter's own dark step and is
+    released by `run_mapping`'s finally — never here, and never between two
+    emitters.
 
-    WHY THE RETRY IS A SECOND PASS AND NOT AN IMMEDIATE RE-TAKE: the
-    suspected cause is the PREVIOUS emitter's fade bleeding into this
-    emitter's dark reference, so retrying on the spot would re-measure with
-    the same contamination still arriving. Coming back later, after other
-    emitters have been through, puts real time between the two attempts —
-    and the extended settle removes the remaining bleed on top of that.
+    ONE PROGRAM FOR THE WHOLE RUN: the scope is the room, which does not
+    change as emitters go by, so only which piece is lit is re-selected.
+    That is what keeps the hold's snapshot a single read of the show, taken
+    before anything was written.
+
+    WHY THE RETRY IS A SECOND PASS AND NOT AN IMMEDIATE RE-TAKE: it is a
+    DISCRIMINATING measurement, and it re-measures with real time and other
+    emitters in between rather than on the spot. Its original leading
+    hypothesis — the previous emitter's fade bleeding into this emitter's
+    dark reference — is now largely closed by construction (the room no
+    longer comes back between captures at all; see the module docstring), so
+    the retry stands as cheap insurance against a genuinely contaminated
+    reference rather than as an explanation of anything.
 
     ONE retry, never a loop: a second failure is an answer ("this pose
     cannot see it"), not a reason to keep the room dark longer."""
-    stopped = await _capture_pass(room, plan.emitters, scope, deps, result,
-                                  dark_settle, lit_settle)
+    program = MappingProgram(scope)
+    stopped = await _capture_pass(room, program, plan.emitters, scope, deps,
+                                  result, dark_settle, lit_settle,
+                                  dark_capture, lit_capture)
     if stopped:
         return
     retry = [e for e in plan.emitters
@@ -786,20 +1009,23 @@ async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
         f"light first time, so {'it was' if len(retry) == 1 else 'they were'} "
         f"looked at once more with the room left dark "
         f"{RETRY_DARK_SETTLE_X:g}x as long — that adds about "
-        f"{len(retry) * (DARK_CAPTURE_S + LIT_CAPTURE_S + lit_settle + dark_settle * RETRY_DARK_SETTLE_X):.0f}s "
+        f"{len(retry) * (dark_capture + lit_capture + lit_settle + dark_settle * RETRY_DARK_SETTLE_X):.0f}s "
         f"to this run.")
-    await _capture_pass(room, retry, scope, deps, result,
+    await _capture_pass(room, program, retry, scope, deps, result,
                         dark_settle * RETRY_DARK_SETTLE_X, lit_settle,
-                        retry_pass=True)
+                        dark_capture, lit_capture, retry_pass=True)
 
 
-async def _capture_pass(room: RoomMap, emitters, scope: list[str],
-                        deps: RunDeps, result: "MappingResult",
-                        dark_settle: float, lit_settle: float, *,
+async def _capture_pass(room: RoomMap, program: "MappingProgram", emitters,
+                        scope: list[str], deps: RunDeps,
+                        result: "MappingResult",
+                        dark_settle: float, lit_settle: float,
+                        dark_capture: float, lit_capture: float, *,
                         retry_pass: bool = False) -> bool:
-    """One sweep over `emitters`, one short hold each. Returns True when the
-    run STOPPED (abort, ownership loss, hold ceiling) — a stopped run never
-    goes on to a retry pass, since every retry would be refused identically.
+    """One sweep over `emitters`, inside the run's ONE hold. Returns True
+    when the run STOPPED (abort, ownership loss, hold ceiling) — a stopped
+    run never goes on to a retry pass, since every retry would be refused
+    identically.
 
     On the retry pass an emitter's result REPLACES its first one rather than
     being appended: an emitter measured twice is still one emitter, and a
@@ -821,8 +1047,9 @@ async def _capture_pass(room: RoomMap, emitters, scope: list[str],
             continue
         lost = ""
         try:
-            outcome = await _map_one(room, emitter, scope, in_scope, deps,
-                                     dark_settle, lit_settle,
+            outcome = await _map_one(room, program, emitter, in_scope, deps,
+                                     dark_settle, lit_settle, dark_capture,
+                                     lit_capture, result.hold_ceiling_s,
                                      retry_pass=retry_pass)
         except Exception as exc:                       # noqa: BLE001
             if mapping_refusals.ownership_refusal(exc) is not None:
@@ -847,18 +1074,11 @@ async def _capture_pass(room: RoomMap, emitters, scope: list[str],
                         emitter.label or emitter.emitter_id, exc),
                     retried=retry_pass,
                     carrier_id=emitter.carrier_id, label=emitter.label)
-        finally:
-            # The chain: every emitter's hold is released before the next
-            # one opens, whatever happened inside it — INCLUDING a room that
-            # just changed hands, where the revert write itself is refused.
-            # The hold's own sweep reverts what it can; letting this raise
-            # would turn a stated partial back into a 500.
-            try:
-                await deps.close_hold()
-            except Exception:                          # noqa: BLE001
-                logger.warning("room mapping: releasing the hold after %s "
-                               "failed; the hold sweep owns it from here",
-                               emitter.emitter_id, exc_info=True)
+        # NOTHING IS RELEASED HERE. The room stays dark between two captures
+        # — that is the whole point of this rework — and `run_mapping`'s own
+        # finally is the ONE place the hold is closed, on every path out of
+        # the run. See the module docstring for what the old per-emitter
+        # release was doing to the dark references.
         outcome.seconds = round(deps.clock() - t0, 2)
         _record(result, outcome)
         if lost:
@@ -896,16 +1116,31 @@ async def _persist(room: RoomMap, deps: RunDeps) -> None:
         await maybe
 
 
-async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
-                   lit_vids: list[str], deps: RunDeps, dark_settle: float,
-                   lit_settle: float, *,
+async def _map_one(room: RoomMap, program: "MappingProgram",
+                   emitter: Emitter, lit_vids: list[str], deps: RunDeps,
+                   dark_settle: float, lit_settle: float,
+                   dark_capture: float, lit_capture: float,
+                   hold_ceiling_s: float, *,
                    retry_pass: bool = False) -> EmitterResult:
+    """One emitter, inside the run's ONE hold.
+
+    The FIRST call of a run is what opens that hold (and takes its single
+    snapshot of the show); every call after it re-arms the same hold's
+    deadline and re-asserts the same dark room. `hold_ceiling_s` is read
+    only on that first open — it is the run-scoped ceiling the plan already
+    showed him — and is ignored, by the hold, on every call after it.
+
+    The DARK step still runs per emitter even though the room is already
+    dark: it costs one write, and it is what guarantees the previous
+    emitter's white is off before this one's reference is taken, rather
+    than trusting an ordering."""
     sess = deps.session
     ranges = [r for r in emitter.ranges if r.virtual_id in set(lit_vids)]
-    program = MappingProgram(scope, lit_vids, ranges)
+    program.select(lit_vids, ranges)
 
     held = await deps.open_hold(program, 1.0, step="dark",
-                                heartbeat_timeout_s=HOLD_HEARTBEAT_S)
+                                heartbeat_timeout_s=HOLD_HEARTBEAT_S,
+                                max_duration_s=hold_ceiling_s)
     if not (held or {}).get("held"):
         return EmitterResult(
             emitter.emitter_id, False,
@@ -914,12 +1149,13 @@ async def _map_one(room: RoomMap, emitter: Emitter, scope: list[str],
             retried=retry_pass,
             carrier_id=emitter.carrier_id, label=emitter.label)
     await deps.sleep(dark_settle)
-    dark_grids, _dark_max = await sess.gather(DARK_CAPTURE_S, min_frames=MIN_FRAMES)
+    dark_grids, _dark_max = await sess.gather(dark_capture, min_frames=MIN_FRAMES)
 
     await deps.open_hold(program, 1.0, step="lit",
-                         heartbeat_timeout_s=HOLD_HEARTBEAT_S)
+                         heartbeat_timeout_s=HOLD_HEARTBEAT_S,
+                         max_duration_s=hold_ceiling_s)
     await deps.sleep(lit_settle)
-    lit_grids, lit_max = await sess.gather(LIT_CAPTURE_S, min_frames=MIN_FRAMES)
+    lit_grids, lit_max = await sess.gather(lit_capture, min_frames=MIN_FRAMES)
 
     if sess.run_abort:
         return EmitterResult(emitter.emitter_id, False, sess.run_abort,

@@ -184,7 +184,7 @@ def _deps(activated, *, activate_raises=False, deactivate_raises=False,
         activated.remove(vid)
 
     async def default_open(program, intensity, *, step="fire",
-                           heartbeat_timeout_s=0.0):
+                           heartbeat_timeout_s=0.0, max_duration_s=None):
         return {"held": True}
 
     async def close_hold():
@@ -237,7 +237,7 @@ def test_the_strip_is_put_back_even_when_the_run_fails(tmp_path, monkeypatch):
     activated: list[str] = []
 
     async def refuse_hold(program, intensity, *, step="fire",
-                          heartbeat_timeout_s=0.0):
+                          heartbeat_timeout_s=0.0, max_duration_s=None):
         return {"held": False, "reason": "no writes"}
 
     deps = _deps(activated, open_hold=refuse_hold)

@@ -77,7 +77,7 @@ def _deps(*, get_virtuals=None, open_hold=None, close_hold=None):
         return {CARRIER: _virtual()}
 
     async def default_open(program, intensity, *, step="fire",
-                           heartbeat_timeout_s=0.0):
+                           heartbeat_timeout_s=0.0, max_duration_s=None):
         return {"held": True}
 
     async def default_close():
@@ -231,7 +231,7 @@ def test_a_mid_run_release_is_a_stated_partial_that_keeps_what_it_measured(
     calls = {"n": 0}
 
     async def open_hold(program, intensity, *, step="fire",
-                        heartbeat_timeout_s=0.0):
+                        heartbeat_timeout_s=0.0, max_duration_s=None):
         calls["n"] += 1
         if calls["n"] > 2:          # the first emitter's dark+lit succeed
             raise fx_seam.RoomReleased("released mid-run")
@@ -272,7 +272,7 @@ def test_a_mid_run_release_is_a_stated_partial_that_keeps_what_it_measured(
 
 def test_the_hold_ceiling_ends_the_run_with_its_own_sentence():
     async def at_the_ceiling(program, intensity, *, step="fire",
-                             heartbeat_timeout_s=0.0):
+                             heartbeat_timeout_s=0.0, max_duration_s=None):
         return {"held": False, "expired": True, "reason": "max_duration"}
 
     async def two_virtuals():
@@ -288,7 +288,12 @@ def test_the_hold_ceiling_ends_the_run_with_its_own_sentence():
 
     assert result.refusal == "hold_ceiling"
     assert result.reason == mapping_refusals.HOLD_CEILING
-    assert "three minutes" in result.reason
+    # The sentence deliberately no longer names "three minutes": since
+    # fm/mapping-one-dark-hold a run is ONE hold with its OWN run-scoped
+    # ceiling (room_mapping.run_ceiling_s), so a fixed number in the copy
+    # would be wrong for most runs. It still says what was kept and what to
+    # do, and points at the plan for the cost.
+    assert "held time" in result.reason and "is kept" in result.reason
     assert "max_duration" not in result.reason
     assert len(result.emitters) == 1, (
         "the run stops rather than repeating one sentence per emitter")
@@ -301,7 +306,7 @@ def test_a_fixture_that_dies_mid_run_is_named_and_the_run_carries_on(tmp_path,
     calls = {"n": 0}
 
     async def open_hold(program, intensity, *, step="fire",
-                        heartbeat_timeout_s=0.0):
+                        heartbeat_timeout_s=0.0, max_duration_s=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise OSError("no route to host")

@@ -3567,13 +3567,48 @@ and the id shape. Five things to know:
   lands in the difference this instrument measures, and decoding one would
   put an image library in a path that needs none. 320x180 divides the stored
   64x36 grid exactly (5x5 box mean, no interpolation to explain).
-- **A long mapping run is a CHAIN of short per-emitter holds** on
-  `flare_preview_hold.open_program_hold` — snapshot, deadline, sweep,
-  3-minute ceiling and restart recovery all INHERITED, never a second hold
-  system. Each emitter opens its own hold (dark -> lit -> revert) so the
-  room is genuinely restored between emitters, not merely restorable; the
-  dark step covers EVERY live virtual, because that is what "the room is
-  dark" means to a camera.
+- **A mapping run is ONE CONTINUOUS DARK HOLD for the whole capture
+  sequence** on `flare_preview_hold.open_program_hold` — snapshot,
+  deadline, sweep, ceiling and restart recovery all INHERITED, never a
+  second hold system. The dark step covers EVERY live virtual, because
+  that is what "the room is dark" means to a camera.
+  **It was a CHAIN of short per-emitter holds until 2026-08-31 (PR
+  fm/mapping-one-dark-hold) — do not restore that out of loyalty to its
+  reasoning.** The chain existed to stay inside `MAX_HOLD_DURATION_S`
+  (3 min) and did give a genuinely-restored room between emitters, but the
+  owner watched a 22-emitter run and said "just stay dark between tests":
+  his show flooded back through the fixtures 22 times, and every dark
+  reference after the first was taken moments after a restore, so the show
+  fading back out landed IN the dark frame and subtracted the next
+  emitter's own light away. **That contamination path is now closed by
+  construction** — between two captures the room has been dark all along,
+  so `DARK_SETTLE_S` only has to outlast the PREVIOUS EMITTER's own fade,
+  which is what it was always for. Restorable-at-any-instant was never the
+  chain's property, it is the HOLD's (his Stop, heartbeat lapse, sweep,
+  restart recovery all unchanged); what changed is that STOPPING IS HIS
+  ACT. `room_mapping.py`'s module docstring is the binding statement.
+  Two things ride with it:
+  - **THE CEILING IS PER SESSION NOW.** `MAX_HOLD_DURATION_S` is untouched
+    and still governs every preview; a session may declare its own on the
+    hold's FIRST open (`open_program_hold(max_duration_s=...)`, read once,
+    never raisable later), and `flare_preview_hold.session_ceiling_at()` is
+    the ONE place anything reads which number a session is held to. A run's
+    is `room_mapping.run_ceiling_s(estimate)` — margin ×1.5, floor 180 s
+    (= the preview's own), hard cap 900 s — computed at PLAN time, carried
+    on the plan response (`hold_ceiling_seconds`) beside the emitter count,
+    and handed to the hold so the number he was shown is the one enforced.
+    A plan past the hard cap REFUSES by name (`too_long`), never truncates,
+    and **never adjusts his granularity/block_pixels to make itself fit** —
+    those are his decisions and the plan line's job is to price them.
+  - **ALL FOUR protocol waits are bounded per-run params** on
+    `POST /rooms/{id}/map` (`dark_settle_s`/`lit_settle_s` plus
+    `dark_capture_s`/`lit_capture_s`, added for the overnight speed sweep).
+    At the phone's fixed ~5 fps, **lit dwell and frames-averaged are ONE
+    knob, not two** — `lit_capture_s` buys frames at ~5/s and nothing else,
+    with `MIN_FRAMES=2` the floor — so a sweep must not count them as
+    independent variables. `run_estimate_s` is the ONE pricing function
+    (the plan quotes it at the shipped defaults; the run re-prices with its
+    own four values before deriving the ceiling).
 - **THE PER-PIXEL GAIN MASK is `fx/virtual_gain_mask.py` + ONE multiply in
   `Virtual.assemble_frame`** (`fx/VENDOR.md` deviation #25), right after the
   two the fork already does — the layer the driver reads AND the layer the
@@ -3637,8 +3672,12 @@ and the id shape. Five things to know:
   ROOM.
 - Proofs: `scripts/check_light_field.py` (a fake emitter painting a known
   region must yield that region's grid, cell by cell, on top of a
-  deliberately non-black dark room; the held-room chain dark-and-back; five
-  negative controls), `scripts/check_room_effect_wave.py` (the wave on the
+  deliberately non-black dark room; ONE snapshot and ONE restore for N
+  emitters, with nothing handed back mid-run — §2 was rewritten to go RED
+  against the per-emitter chain it replaced; five negative controls),
+  `tests/test_mapping_one_dark_hold.py` (the same bar in pytest, plus the
+  run-scoped ceiling, the plan-time too-long refusal, and the stop/abandon
+  paths), `scripts/check_room_effect_wave.py` (the wave on the
   REAL render pipeline through `fx.headless` — measured phase lag between
   two emitters at different axis positions matched the wave's own travel to
   0.0°, with depth-0 and speed-0 negative controls), `scripts/

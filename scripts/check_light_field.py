@@ -6,7 +6,7 @@ before the run.
 WHAT IS REAL HERE, and it is nearly everything: spectra/services/
 mapping_session.py's own WebSocket message handling (hello / lock / frame,
 base64 grey8, the downsample, the ring), spectra/services/room_mapping.py's
-own protocol and its CHAIN of per-emitter holds through the real
+own protocol and its ONE continuous dark hold through the real
 flare_preview_hold.open_program_hold, and spectra/services/light_field.py's
 own derivation and store. What is fake is the camera (a room model that
 paints a known region per emitter) and the two fx_seam primitives — because
@@ -16,8 +16,10 @@ THE GROUND TRUTH IS DECLARED FIRST, not read off the result: each emitter
 lights one named rectangle at a named amplitude, on top of a dark room that
 is deliberately NOT black (a window, a standby LED, sensor offset). A pass
 means the derived footprint IS that rectangle — everything else exactly
-zero — for every emitter, and that the room came back dark-and-back at every
-link of the hold chain.
+zero — for every emitter, and that the room went dark ONCE and came back
+ONCE for the whole run (fm/mapping-one-dark-hold: it used to be a chain of
+short per-emitter holds, and those restores were landing in the next
+emitter's own dark reference).
 
 NEGATIVE CONTROLS, because a check that cannot fail proves nothing:
   * the exposure gate REFUSES a phone that will not lock, by name, with no
@@ -25,7 +27,8 @@ NEGATIVE CONTROLS, because a check that cannot fail proves nothing:
   * a lock LOST mid-run aborts the run rather than finishing it;
   * the room-was-dark claim is checked at the seam (what the writes
     actually said), and the "restored between emitters" claim is checked
-    against a deliberately-broken chain that leaves the room held;
+    against the seam's own write order — one revert, at the end, and none
+    between two emitters;
   * the same lit frames derived WITHOUT the dark reference put the room's
     own window into the footprint — the failure the reference prevents.
 
@@ -144,8 +147,19 @@ class SeamLog:
     camera: SimCamera
     virtuals: dict = field(default_factory=dict)
     writes: list = field(default_factory=list)
+    #: How many times the HOLD read the live room through fx_seam. The hold
+    #: reads exactly once per session, on its first open, so this IS the
+    #: snapshot count — and it is what section two holds the one-continuous-
+    #: hold rework to. Counted in _patched's own wrapper, not here, so the
+    #: run's own plan/scope reads (which go straight to this object) can
+    #: never be mistaken for snapshots.
+    hold_reads: int = 0
 
     async def get_virtuals(self):
+        return self.virtuals
+
+    async def hold_get_virtuals(self):
+        self.hold_reads += 1
         return self.virtuals
 
     async def apply_writes(self, writes, *, transition_ms=0):
@@ -283,7 +297,7 @@ async def _patched(seam: SeamLog):
     hold's own snapshot/deadline/sweep/ceiling code is untouched."""
     from spectra.services import fx_seam
     fx_seam.apply_writes = seam.apply_writes          # type: ignore[assignment]
-    fx_seam.get_virtuals = seam.get_virtuals          # type: ignore[assignment]
+    fx_seam.get_virtuals = seam.hold_get_virtuals     # type: ignore[assignment]
 
 
 # ── ONE — the happy path, cell by cell ────────────────────────────────────
@@ -342,7 +356,7 @@ async def section_one():
 # ── TWO — the room went dark, and came back, at every link ────────────────
 
 async def section_two(seam: SeamLog):
-    print("\n== 2. the held-room chain: dark, one emitter, and back ==")
+    print("\n== 2. one continuous dark hold: dark once, each emitter, back once ==")
     dark_payloads = [b for b in seam.writes
                      if all(w["config"].get("color") == "#000000"
                             for w in b["writes"])]
@@ -381,10 +395,15 @@ async def section_two(seam: SeamLog):
     check(not scfg.FLARE_PREVIEW_HOLD_FILE.exists(),
           "no stale hold snapshot is left on disk")
 
-    # THE CHAIN, and the reason it matters: the room is genuinely RESTORED
-    # between emitters, not merely restorable. A revert is unambiguous —
-    # it puts a non-mapping effect type back on a virtual the mapping
-    # program only ever writes singleColor to.
+    # ONE CONTINUOUS DARK HOLD (2026-08-31, fm/mapping-one-dark-hold). This
+    # block is written to go RED against the per-emitter chain it replaced:
+    # under that design the counts below were N, not 1, and "revert" appeared
+    # between every pair of emitters. The owner watched exactly that and said
+    # "just stay dark between tests" — and the restores were landing in the
+    # next emitter's own dark reference.
+    #
+    # A revert is unambiguous at the seam: it puts a non-mapping effect type
+    # back on a virtual the mapping program only ever writes singleColor to.
     def is_revert(batch) -> bool:
         return any(w["effect_type"] != room_mapping.MAP_EFFECT_TYPE
                    for w in batch["writes"])
@@ -394,18 +413,41 @@ async def section_two(seam: SeamLog):
 
     order = ["revert" if is_revert(b) else ("lit" if is_lit(b) else "dark")
              for b in seam.writes]
-    check(order.count("revert") == len(GROUND_TRUTH),
-          f"one revert per emitter — a CHAIN of short holds, not one long "
-          f"hold ({order.count('revert')} reverts for {len(GROUND_TRUTH)} "
-          f"emitters)")
-    check(order == ["dark", "lit", "revert"] * len(GROUND_TRUTH),
-          f"the chain runs dark -> lit -> revert, once per emitter: {order}")
-    first_revert = order.index("revert")
-    second_lit = len(order) - 1 - order[::-1].index("lit")
-    check(first_revert < second_lit,
-          "the room was handed back BEFORE the second emitter was lit — "
-          "restorable at any instant between emitters, which is the property "
-          "the 3-minute ceiling makes necessary")
+    check(order.count("revert") == 1,
+          f"ONE revert for {len(GROUND_TRUTH)} emitters — one continuous "
+          f"hold, not a chain of short ones ({order.count('revert')} "
+          f"reverts)")
+    check(seam.hold_reads == 1,
+          f"ONE snapshot for the whole run — the show is read once, before "
+          f"anything is written ({seam.hold_reads} reads of the live room)")
+    check(order == ["dark", "lit"] * len(GROUND_TRUTH) + ["revert"],
+          f"dark -> lit per emitter, and the room comes back exactly once, "
+          f"at the end: {order}")
+    check(order.index("revert") == len(order) - 1,
+          "nothing was handed back mid-run: the room the camera photographs "
+          "is dark from the first emitter to the last, so no restore can "
+          "fade into the next emitter's dark reference")
+    check("revert" not in order[:order.index("lit", order.index("lit") + 1)],
+          "the room was NOT handed back before the second emitter was lit — "
+          "the contamination path the chain had is closed by construction")
+
+    # AND THE PROPERTY THE CHAIN WAS PROTECTING SURVIVES: restorable at any
+    # instant is the HOLD's guarantee, not the chain's. Section three (b)
+    # proves the abort path lands it; here we prove the run declared its own
+    # RUN-SCOPED ceiling rather than sitting under a preview's three minutes.
+    est = room_mapping.run_estimate_s(
+        len(GROUND_TRUTH), room_mapping.DARK_SETTLE_S,
+        room_mapping.DARK_CAPTURE_S, room_mapping.LIT_SETTLE_S,
+        room_mapping.LIT_CAPTURE_S)
+    check(room_mapping.run_ceiling_s(est) >= room_mapping.RUN_CEILING_FLOOR_S,
+          "a run's ceiling never falls below its floor")
+    check(room_mapping.run_ceiling_s(10_000.0)
+          == room_mapping.RUN_CEILING_HARD_CAP_S,
+          "and never exceeds the hard cap on one continuous hold")
+    check(bool(room_mapping.too_long_refusal(10_000.0)),
+          "a plan past the hard cap REFUSES by name rather than truncating")
+    check(not room_mapping.too_long_refusal(est),
+          "and an ordinary run is not refused")
 
 
 # ── THREE — the negative controls ─────────────────────────────────────────
