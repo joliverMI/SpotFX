@@ -110,6 +110,23 @@ def test_a_declaration_is_validated_when_it_is_declared():
     assert night_run.load_declaration() is None
 
 
+def test_the_status_read_follows_a_new_night_on_disk():
+    """`engine.status()` is polled every few seconds by his page AND by
+    River's HA sensors, so the disk read behind it is mtime-keyed — which
+    is only safe if a genuinely new night is still picked up."""
+    _owner(lo.RELEASED)
+    night_run.save_declaration("nightly", ITEMS)
+
+    first = _run(night_run.start(EVENT))
+    night_run.current = None
+    assert night_run.status_brief()["run_id"] == first.id
+
+    second = _run(night_run.start(EVENT))
+    night_run.current = None
+    assert night_run.status_brief()["run_id"] == second.id
+    assert second.id != first.id
+
+
 # ── THE HARD PLANNED END ───────────────────────────────────────────────────
 
 def test_the_planned_end_is_the_next_0530_house_time():

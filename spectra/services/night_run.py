@@ -188,6 +188,17 @@ def _atomic_write(path, body: dict) -> None:
 
 # ── the declaration ────────────────────────────────────────────────────────
 
+def declared(path=None) -> bool:
+    """Whether a night queue is declared, WITHOUT parsing it. On the
+    `engine.status()` poll path, which answers every few seconds — the
+    presence of a file is the whole question there."""
+    p = _queue_path(path)
+    try:
+        return os.stat(p).st_size > 0
+    except OSError:
+        return False
+
+
 def load_declaration(path=None) -> Optional[dict]:
     """The night queue he declared in advance, or None.
 
@@ -310,13 +321,33 @@ def running() -> bool:
     return current is not None and current.state == STATE_RUNNING
 
 
+#: A tiny mtime-keyed cache for the DISK path of `last_night`, and only for
+#: it. `engine.status()` is polled every few seconds by his own page AND by
+#: River's HA sensors, and this store holds up to `MAX_STORED_NIGHTS`
+#: records each carrying an exit report per fixture — re-parsing all of that
+#: on every poll is real work for an answer that only changes when a night
+#: transitions. The live in-memory record always wins over this, so the
+#: cache can never serve a stale answer for a night this process is running.
+_disk_cache: dict = {"key": None, "night": None}
+
+
 def last_night() -> Optional[dict]:
     """The current night, or the most recent one on disk. The export reads
     this: "the CURRENT/most-recent run" is one question, not two."""
     if current is not None:
         return current.as_dict()
-    nights = load_nights()
-    return nights[-1] if nights else None
+    p = _runs_path()
+    try:
+        stat = os.stat(p)
+        key = (str(p), stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        _disk_cache["key"], _disk_cache["night"] = None, None
+        return None
+    if _disk_cache["key"] != key:
+        nights = load_nights(p)
+        _disk_cache["key"] = key
+        _disk_cache["night"] = nights[-1] if nights else None
+    return _disk_cache["night"]
 
 
 # ── resolving what a night will touch ──────────────────────────────────────
@@ -456,7 +487,7 @@ def status_brief() -> dict:
     if not night:
         return {"state": "idle", "active": False, "run_id": None,
                 "started": None, "ended": None, "ended_by_morning": False,
-                "declared": bool(load_declaration()),
+                "declared": declared(),
                 "planned_end": planned_end_at(),
                 "planned_end_label": PLANNED_END_LABEL}
     state = night.get("state")
@@ -465,7 +496,7 @@ def status_brief() -> dict:
             "started": night.get("started"), "ended": night.get("ended"),
             "ended_by_morning": state == STATE_ENDED_BY_MORNING,
             "detail": night.get("detail") or "",
-            "declared": bool(load_declaration()),
+            "declared": declared(),
             "planned_end": night.get("planned_end") or planned_end_at(),
             "planned_end_label": PLANNED_END_LABEL}
 

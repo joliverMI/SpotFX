@@ -223,9 +223,11 @@ def _isolated_night_run(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "NIGHT_RUNS_FILE", tmp_path / "night_runs.json")
     night_run.current = None
     night_run._task = None
+    night_run._disk_cache.update({"key": None, "night": None})
     yield
     night_run.current = None
     night_run._task = None
+    night_run._disk_cache.update({"key": None, "night": None})
 
 
 @pytest.fixture(autouse=True)
