@@ -23,6 +23,12 @@
                                           run is never a surprise
   POST   /api/rooms/{room_id}/map         RUN the mapping protocol at the
                                           granularity chosen for THIS run
+  POST   /api/rooms/{room_id}/commission
+  POST   /api/rooms/commission/{mapper_id} RUN the commissioning
+                                          ground-truth test: gray-code one
+                                          stored composition and judge the
+                                          comparison frozen in the plan
+  GET    /api/rooms/commission/results    the judged tables of recent runs
   GET    /api/rooms/{room_id}/footprint/{emitter_id}
                                           one footprint's full grid
 
@@ -56,7 +62,8 @@ from pydantic import BaseModel
 
 from spectra.models.room_map import AxisCalibration, RoomMap
 from spectra.services import emitters as emitters_mod
-from spectra.services import (light_field, mapping_refusals,
+from spectra.services import commission_compare
+from spectra.services import (commissioning, light_field, mapping_refusals,
                               mapping_session, room_mapping)
 
 logger = logging.getLogger(__name__)
@@ -91,6 +98,16 @@ class MapBody(BaseModel):
     block_pixels: Optional[int] = None
     dark_settle_s: Optional[float] = None
     lit_settle_s: Optional[float] = None
+
+
+class CommissionBody(BaseModel):
+    """What THIS commissioning run does. `mapper_id` names the stored
+    composition to check (defaulting to the room's only carrier when it has
+    exactly one, so the common case needs no body at all); `repeat` runs the
+    whole stack twice back to back, so two independent decodes bound the
+    instrument's own noise."""
+    mapper_id: Optional[str] = None
+    repeat: int = 1
 
 
 def _run_granularity(room: RoomMap, granularity: Optional[str],
@@ -336,6 +353,84 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
     out = result.as_dict()
     out["room"] = _room_view(light_field.get_room(room_id) or stored)
     return out
+
+
+@router.get("/rooms/commission/results")
+async def commission_results(limit: int = 5):
+    """The judged tables of recent runs, newest first — including refused
+    ones, which are a fact about the evening too."""
+    rows = commissioning.load_results()[-max(1, min(50, limit)):]
+    return {"results": list(reversed(rows)),
+            "tolerances": {
+                "seen_min_fraction": commission_compare.SEEN_MIN_FRACTION,
+                "order_max_outlier_fraction":
+                    commission_compare.ORDER_MAX_OUTLIER_FRACTION,
+                "arrangement_max_error": commission_compare.ARRANGEMENT_MAX_ERROR,
+                "stitch_max_error": commission_compare.STITCH_MAX_ERROR,
+                "latency_tolerance_ms": commission_compare.LATENCY_TOLERANCE_MS}}
+
+
+@router.post("/rooms/{room_id}/commission")
+async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
+    """THE COMMISSIONING GROUND-TRUTH TEST (the plan's §8), runnable with
+    nothing live but the camera session: gray-code the stored composition,
+    decode where every pixel is, and judge the comparison FROZEN in the plan
+    before any run — `spectra/services/commission_compare.py` quotes that
+    table verbatim and owns every tolerance.
+
+    UNATTENDED-SAFE, deliberately: it takes no judgment call at runtime.
+    Either the frozen table is judged and returned (verdict pass / findings
+    / incomplete / fail, each red row attributed to the side the table's own
+    right-hand column names), or the run refuses BY NAME with nothing
+    written. Every result is stored either way.
+
+    One run at a time, sharing the mapping run's own lock — both hold the
+    room and both consume the same phone's frames, so a second one would
+    fight the first for both."""
+    global _running
+    room = light_field.get_room(room_id)
+    if room is None:
+        return JSONResponse(status_code=404, content={"detail": "no such room"})
+    mapper_id = (body.mapper_id if body else None) or _only_carrier(room)
+    if not mapper_id:
+        return JSONResponse(status_code=400, content={
+            "detail": f"name the composition to commission — this room has "
+                      f"{len(room.carrier_ids)} carriers "
+                      f"({', '.join(room.carrier_ids) or 'none'})"})
+    sess = mapping_session.current
+    if sess is None or sess.closed:
+        return JSONResponse(status_code=409, content={
+            "detail": "no phone connected — open this page on the phone that "
+                      "will do the capture and start its camera"})
+    if _run_lock.locked():
+        return JSONResponse(status_code=409, content={
+            "detail": f"a run is already in progress ({_running})"})
+    async with _run_lock:
+        _running = f"{room_id}/commission"
+        try:
+            result = await commissioning.run_commission(
+                mapper_id, room_mapping.production_deps(sess),
+                repeat=(body.repeat if body else 1))
+        except Exception as exc:                       # noqa: BLE001
+            named = mapping_refusals.ownership_refusal(exc)
+            if named is None:
+                raise
+            return JSONResponse(status_code=409, content={
+                "detail": named, "refusal": "ownership"})
+        finally:
+            _running = None
+    stored = commissioning.save_result(result)
+    if not result.ok:
+        # A REFUSAL IS NOT A SERVER FAULT and is not a failed comparison
+        # either: 409 with the sentence, and the stored record, so an
+        # unattended caller can tell "we could not run" from "we ran and a
+        # row is red" without parsing prose.
+        return JSONResponse(status_code=409, content=stored)
+    return stored
+
+
+def _only_carrier(room: RoomMap) -> str:
+    return room.carrier_ids[0] if len(room.carrier_ids) == 1 else ""
 
 
 @router.get("/rooms/{room_id}/footprint/{emitter_id}")

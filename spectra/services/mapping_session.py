@@ -82,6 +82,22 @@ FRAME_RING_MAX = 4
 #: Bounded grid history: 5 fps x this = ~24 s, comfortably more than the
 #: longest single capture window and bounded regardless of run length.
 GRID_RING = 120
+#: FULL-RESOLUTION frames, kept ONLY while a caller asks for them
+#: (`keep_full_frames`) and bounded the same way the grids are.
+#:
+#: WHY A SECOND RING AT ALL, and why it is off by default: the light-field
+#: map is derived from the 64x36 grid, which is plenty for "where does this
+#: fixture's light land". The COMMISSIONING test
+#: (spectra/services/commissioning.py) asks a different question — WHICH of
+#: 736 individual pixels is this? — and 2304 grid cells cannot resolve 736
+#: pixels. So it turns this ring on for the length of its run and off
+#: again. Nothing else in this codebase reads it.
+#:
+#: The cost is bounded and small: 320x180 bytes is ~58 KB, so the whole
+#: ring is ~11 MB, in memory only, dropped on disconnect exactly like every
+#: other ring here. Still never written to disk — the privacy statement
+#: above is unchanged, and remains true.
+FULL_RING = 200
 
 GREY_MIME = "image/grey8"
 
@@ -166,6 +182,14 @@ class TimedGrid:
     raw_max: int
 
 
+@dataclass
+class TimedFrame:
+    """One full-resolution greyscale frame with the server-clock time it was
+    captured. Only kept while `keep_full_frames` is on — see FULL_RING."""
+    at_s: float
+    frame: np.ndarray           # uint8, height x width
+
+
 class MappingSession:
     """One phone connection for light-field capture. `send` is the coroutine
     the API layer hands in (ws.send_json)."""
@@ -181,6 +205,10 @@ class MappingSession:
         self.lock = LockState()
         self.frames = FrameRing(maxlen=FRAME_RING_MAX)
         self.grids: deque[TimedGrid] = deque(maxlen=GRID_RING)
+        #: OFF by default: only the commissioning run needs full-resolution
+        #: frames, and only for the length of its own run (see FULL_RING).
+        self.keep_full_frames = False
+        self.full: deque[TimedFrame] = deque(maxlen=FULL_RING)
         self.closed = False
         self.counts = {"frames": 0, "pongs": 0, "rejected": 0}
         self.last_error: Optional[str] = None
@@ -221,6 +249,7 @@ class MappingSession:
                 pass
         self.frames.clear()
         self.grids.clear()
+        self.full.clear()
 
     async def _loop(self) -> None:
         last_ping = 0.0
@@ -323,6 +352,10 @@ class MappingSession:
             return
         raw_max = int(np.frombuffer(data, dtype=np.uint8).max()) if data else 0
         self.grids.append(TimedGrid(at_s=t_server, grid=grid, raw_max=raw_max))
+        if self.keep_full_frames:
+            self.full.append(TimedFrame(
+                at_s=t_server,
+                frame=np.frombuffer(data, dtype=np.uint8).reshape(h, w).copy()))
 
     def _to_grid(self, data: bytes, w: int, h: int, mime: str) -> Optional[np.ndarray]:
         """grey8 bytes -> the stored 64x36 grid. Rejects anything that is
@@ -367,6 +400,27 @@ class MappingSession:
             picked = [g for g in list(self.grids) if g.at_s >= start]
         return [g.grid for g in picked], [g.raw_max for g in picked]
 
+    async def gather_full(self, seconds: float, *, min_frames: int = 1
+                          ) -> list["TimedFrame"]:
+        """Full-resolution frames captured over the NEXT `seconds`, with
+        their server-clock times — the commissioning run's own consumer
+        (`gather` above is the map's, and is unchanged).
+
+        Same arrival-windowed rule and same fall-back as `gather`: a caller
+        that asked for more than arrived gets fewer and decides for itself,
+        rather than this function silently pretending."""
+        if not self.keep_full_frames:
+            raise RuntimeError(
+                "full-resolution frames are not being kept — set "
+                "keep_full_frames before a run that needs them")
+        start = self._clock()
+        await asyncio.sleep(max(0.0, seconds))
+        end = self._clock()
+        picked = [f for f in list(self.full) if start <= f.at_s <= end]
+        if len(picked) < min_frames:
+            picked = [f for f in list(self.full) if f.at_s >= start]
+        return picked
+
     def refusal(self) -> Optional[str]:
         return lock_refusal(self.lock, self.hello)
 
@@ -381,6 +435,8 @@ class MappingSession:
                 "frame_tap": self.frames.config(),
                 "frames_held": len(self.frames._frames),  # noqa: SLF001 (status only)
                 "grids_held": len(self.grids),
+                "full_frames_held": len(self.full),
+                "keep_full_frames": self.keep_full_frames,
                 "latest_frame": latest.meta() if latest else None,
                 "last_error": self.last_error,
                 "phone": self.hello,

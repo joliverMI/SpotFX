@@ -3658,6 +3658,56 @@ and the id shape. Five things to know:
   primitives, and leaking that into a shared interpreter is exactly how
   another test starts passing or failing for a reason nobody can find.
 
+## The COMMISSIONING ground-truth test (`POST /api/rooms/{id}/commission`)
+
+The plan's §8 (`/home/javi/fleet-spotfx/.lavish/room-light-field-plan.html`),
+built 2026-08-31. Gray-code his stored `tv-mapper` composition, decode where
+every pixel is, and judge a comparison **frozen in the plan before any run**.
+Three things to know before touching any of it:
+
+- **THE FIVE TOLERANCES ARE PRE-REGISTERED, NOT TUNING KNOBS.**
+  `spectra/services/commission_compare.py` quotes the plan's table verbatim
+  in its docstring and owns 0.98 / 2% / 5% / 5% / +/-15 ms. Moving one has
+  left the pre-registration; the honest act is a NEW pre-registration
+  published before the next run, not an edit. Four verdicts, not two:
+  `pass`, `findings` (the table's own his-data outcomes — dead pixels, the
+  hand-built mapper off — reported as findings, NEVER as a commissioning
+  failure), `incomplete` (a row that could not be measured never passes
+  silently), `fail`. Precedence fail > incomplete > findings > pass. Every
+  attribution is a rule computed from the numbers, decided in advance —
+  there is no judgment call at runtime, which is what makes the route
+  unattended-safe.
+- **TWO ROWS ARE UNMEASURABLE ON HIS ROOM TODAY, and they say so.** His
+  `tv-mapper` is `mapping: copy` with `rows: 1` and no device profile: it
+  stores a pixel ORDER and no geometry, so rows 3 and 4 (2-D arrangement,
+  cross-device stitch) have no stored layout to fit against and report
+  UNMEASURED with what would make them judgeable (a device profile with
+  real rows/cols, the shape `storage/device_profiles/crystal-mapper.json`
+  already uses). Deriving a rectangle from "it is wrapped around a
+  television" would be precisely the plausible-looking answer this test
+  exists to refuse. Row 5 is unmeasured for a different stated reason: the
+  mapping tap runs at 5 fps and a 15 ms tolerance needs ~67.
+- **ONE CONTINUOUS HOLD per pass, where the MAP's run is a chain of short
+  ones** — different acts, not a change of mind: a map's emitters are
+  independent measurements; a gray-code STACK is ONE measurement against
+  one dark and one full reference, so the room coming back to life halfway
+  through would put the show's own light into the middle of it. ~35 s,
+  inside the hold's own 3-minute ceiling.
+
+Everything else is reused rather than rebuilt: the mapping session (frames,
+exposure lock, refusals — plus a full-resolution ring it turns on for the
+run and off in a `finally`, because 736 pixels cannot be resolved by 2304
+map-grid cells), `flare_preview_hold.open_program_hold`, the copy-carrier
+substitution, `activate_for_capture`/`deactivate_after_capture`,
+`fixture_brightness.owned`, and `mapping_refusals`. The lamp is
+`fx/effects/pixelPattern.py` (`fx/VENDOR.md` #28, registry-exempt); all the
+gray-code arithmetic is `spectra/services/gray_code.py`, pure, so the lamp
+and the decoder cannot drift into two ideas of which pixel is which.
+Proofs: `scripts/check_commissioning.py` (real render pipeline for the
+lamp, then a declared arrangement recovered end to end, then SABOTAGE —
+each corrupted stack failing its own row with the table's own attribution),
+`tests/test_commissioning.py`, `tests/test_gray_code.py`.
+
 **A check script that renders through `fx.headless` must `os._exit()`.**
 `fx`'s `TemporalEffect` spawns non-daemon threads the frame-stepped harness
 never joins, and `FxHost.stop()` refuses ("refusing to stop the SpotFX

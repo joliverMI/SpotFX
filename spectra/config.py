@@ -90,6 +90,9 @@ ROOM_MAPS_FILE = SPECTRA_STORAGE / "room_maps.json"
 # — kind + knobs + which devices they drive. The running gains themselves are
 # in-memory only; only the authored spec is durable.
 ROOM_EFFECTS_FILE = SPECTRA_STORAGE / "room_effects.json"
+#: The commissioning ground-truth test's judged results (the frozen table,
+#: bounded) — spectra/services/commissioning.py.
+COMMISSIONING_FILE = SPECTRA_STORAGE / "commissioning.json"
 
 # The TESTING IN PROGRESS record (spectra/services/test_session.py): the
 # DECLARED half of the room-visibility bar — {actor, reason, since_ms,
